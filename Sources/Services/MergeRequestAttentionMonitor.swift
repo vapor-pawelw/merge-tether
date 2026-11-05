@@ -28,8 +28,10 @@ final class MergeRequestAttentionMonitor {
         /// Automatic approval applies and every discussion is resolved.
         var autoApproveReady = false
         var needsDiscussion = false
+        var hasOtherUnresolvedDiscussions = false
         var hasConflict = false
         var needsChanges = false
+        var needsMerge = false
         var failedPipeline = false
         var needsPipelineHandoff = false
         var reReviewUnconfirmed = false
@@ -40,6 +42,17 @@ final class MergeRequestAttentionMonitor {
         var feedback: [GitLabMergeRequestDiscussion.Note] = []
 
         var authoredRequest: GitLabMergeRequest? { isAuthored ? mergeRequest : nil }
+
+        func canOfferMerge(using status: AuthoredMergeRequestStatus) -> Bool {
+            status.blockers.isEmpty && status.request.isReadyForMergeChecks
+                && status.request.projectID == id.projectID && status.request.iid == id.iid
+                && status.request.webURL == mergeRequest?.webURL && status.request.sha == mergeRequest?.sha
+                && draftCount == 0 && !needsDiscussion && feedback.isEmpty && !needsChanges && !hasConflict
+                && !failedPipeline && !needsPipelineHandoff && mergeRequest?.state == "opened"
+                && mergeRequest?.draft == false && mergeRequest?.detailedMergeStatus == "mergeable"
+                && mergeRequest?.hasMergeConflict == false && mergeRequest?.blockingDiscussionsResolved != false
+                && (mergeRequest?.headPipeline == nil || mergeRequest?.headPipeline?.status == "success")
+        }
 
         func requiringUserAttention(
             automation: AutomationSettings, target: MRAutomationScope.Target,
@@ -66,7 +79,7 @@ final class MergeRequestAttentionMonitor {
                 (canPrepareFeedback && (feedbackRule.isEnabled || handles(.newDiscussion)))
                     || (handles(.newDiscussion) && feedbackOwnedAutomatically))
             if handlesFeedback && !feedback.isEmpty {
-                visible.needsDiscussion = false
+                visible.needsDiscussion = hasOtherUnresolvedDiscussions
                 visible.feedback = []
             }
             if handles(.newDiscussion) && feedbackOwnedAutomatically { visible.needsChanges = false }
@@ -76,7 +89,7 @@ final class MergeRequestAttentionMonitor {
         }
 
         private var hasOpenAction: Bool {
-            needsDiscussion || hasConflict || needsChanges || failedPipeline || needsPipelineHandoff
+            needsDiscussion || hasConflict || needsChanges || needsMerge || failedPipeline || needsPipelineHandoff
                 || reReviewUnconfirmed || !feedback.isEmpty
         }
 
@@ -134,8 +147,12 @@ final class MergeRequestAttentionMonitor {
     /// Heads approved here, until GitLab's reviewer state catches up.
     private var approvedHeads: [Item.ID: String] = [:]
     private var openItems: [Item] = []
+    /// Historical chats remain recorded after their MR closes. Recheck them only
+    /// after an open listing makes them current again, or after an account change.
+    private var terminalCatalogRequests: Set<Item.ID> = []
     private(set) var isLoading = false
     private(set) var hasError = false
+    private(set) var hasCurrentOwnListing = false
     private let glab: GlabService
     private let settings: SettingsManager?
     private let reportDirectory: URL?
@@ -188,8 +205,10 @@ final class MergeRequestAttentionMonitor {
             accountGeneration += 1
             items = []
             openItems = []
+            terminalCatalogRequests = []
             recentTodos = []
             hasError = false
+            hasCurrentOwnListing = false
             confirmationStates = [:]
             previousDrafts = [:]
             publishedDrafts = [:]
@@ -226,23 +245,71 @@ final class MergeRequestAttentionMonitor {
         guard isCurrent(account) else { return }
         let listed = (owned ?? []) + (assigned ?? [])
         let listedIDs = Set(listed.map { Item.ID(projectID: $0.projectID, iid: $0.iid) })
+        for request in listed where request.state == "opened" {
+            terminalCatalogRequests.remove(.init(projectID: request.projectID, iid: request.iid))
+        }
+        let previousCatalog = Dictionary(uniqueKeysWithValues: openItems.map { ($0.id, $0) })
+        // Catalog rows have independent sources. A failed source must not make its
+        // last good rows disappear merely because the other source succeeded.
+        var retainedCatalog = previousCatalog.filter { _, item in
+            item.mergeRequest?.author.id == user.id ? owned == nil : assigned == nil
+        }
+        for request in listed where request.state == "closed" || request.state == "merged" {
+            retainedCatalog.removeValue(forKey: .init(projectID: request.projectID, iid: request.iid))
+        }
         var explicit: [GitLabMergeRequest] = []
+        var explicitFetchFailed = false
+        var lookedUpIDs = listedIDs
         var removedMergedOverride = false
         for target in settings?.automation.scope.individualOverrides(host: host, username: user.username) ?? [] {
             guard let iid = target.iid, !listedIDs.contains(.init(projectID: target.projectID, iid: iid)) else { continue }
-            if let request = try? await glab.fetchMergeRequest(projectID: target.projectID, iid: iid, host: host) {
-                guard isCurrent(account) else { return }
-                if request.state == "merged" {
-                    settings?.automation.scope[target] = .inherit
-                    settings?.reReviewDraftBaselines.removeValue(forKey: target)
-                    removedMergedOverride = true
-                } else if request.state == "opened" {
-                    explicit.append(request)
-                }
+            let id = Item.ID(projectID: target.projectID, iid: iid)
+            lookedUpIDs.insert(id)
+            guard let request = try? await glab.fetchMergeRequest(projectID: target.projectID, iid: iid, host: host) else {
+                explicitFetchFailed = true
+                if let previous = previousCatalog[id] { retainedCatalog[id] = previous }
+                continue
+            }
+            guard isCurrent(account) else { return }
+            if request.state == "merged" {
+                retainedCatalog.removeValue(forKey: id)
+                settings?.automation.scope[target] = .inherit
+                settings?.reReviewDraftBaselines.removeValue(forKey: target)
+                removedMergedOverride = true
+            } else if request.state == "closed" {
+                retainedCatalog.removeValue(forKey: id)
+            } else if request.state == "opened" {
+                terminalCatalogRequests.remove(id)
+                explicit.append(request)
             }
         }
         guard isCurrent(account) else { return }
         if removedMergedOverride { settings?.save() }
+
+        // A completed review may no longer be assigned to this user. Its recorded
+        // chat still identifies a managed MR, without turning catalog discovery
+        // into another automation trigger or draft-publication candidate.
+        var recordedReviews: [GitLabMergeRequest] = []
+        for work in agentWorks.sorted(by: { ($0.projectID, $0.iid) < ($1.projectID, $1.iid) }) {
+            let id = Item.ID(projectID: work.projectID, iid: work.iid)
+            let target = MRAutomationScope.Target(host: host, username: user.username,
+                                                  projectID: work.projectID, iid: work.iid)
+            guard work.host == host, !lookedUpIDs.contains(id), !terminalCatalogRequests.contains(id),
+                  settings?.automation.scope.resolve(target).active == true else { continue }
+            guard let request = try? await glab.fetchMergeRequest(projectID: work.projectID, iid: work.iid, host: host) else {
+                explicitFetchFailed = true
+                if let previous = previousCatalog[id] { retainedCatalog[id] = previous }
+                continue
+            }
+            guard isCurrent(account) else { return }
+            if request.state == "merged" || request.state == "closed" {
+                terminalCatalogRequests.insert(id)
+                retainedCatalog.removeValue(forKey: id)
+            } else if request.state == "opened", request.author.id != user.id,
+                      request.webURL.isGitLabMergeRequest(host: host, iid: work.iid) {
+                recordedReviews.append(request)
+            }
+        }
 
         let todoItems: [Item] = todos.compactMap { todo in
             guard todo.targetType == .mergeRequest, let iid = todo.target.iid,
@@ -337,6 +404,11 @@ final class MergeRequestAttentionMonitor {
                                 projectID: item.id.projectID, iid: item.id.iid, host: host
                             )
                         } else { nil as [GitLabMergeRequestDiscussion]? }
+                        if item.isAuthored {
+                            // Without discussion evidence, the list endpoint's aggregate
+                            // blocker cannot safely be attributed to automated feedback.
+                            updated.hasOtherUnresolvedDiscussions = item.needsDiscussion
+                        }
                         if let draftCount { updated.draftCount = draftCount }
                         updated.replyRecipients = [:]
                         if let discussions {
@@ -347,6 +419,17 @@ final class MergeRequestAttentionMonitor {
                             }
                             if item.isAuthored {
                                 updated.feedback = GitLabMergeRequestDiscussion.unresolvedFeedback(in: discussions, excluding: user.id)
+                                let feedbackIDs = Set(updated.feedback.compactMap(\.id))
+                                let unresolved = discussions.filter { discussion in
+                                    discussion.notes.contains { $0.system != true && $0.resolvable == true && $0.resolved == false }
+                                }
+                                let uncertain = discussions.contains { discussion in
+                                    discussion.notes.contains { $0.system != true && $0.resolvable == true && $0.resolved == nil }
+                                }
+                                updated.hasOtherUnresolvedDiscussions = unresolved.contains { discussion in
+                                    !discussion.notes.contains { $0.id.map(feedbackIDs.contains) == true }
+                                } || ((uncertain || unresolved.isEmpty) && item.needsDiscussion)
+                                updated.needsDiscussion = !unresolved.isEmpty || item.needsDiscussion
                             }
                         }
                         let feedback = discussions.map { ReReviewFeedback(discussions: $0, authorID: user.id) }
@@ -390,11 +473,21 @@ final class MergeRequestAttentionMonitor {
             results[index].draftCount = results[index].drafts.count
         }
         items = Item.ordered(results.filter(\.needsAttention))
-        hasError = failed
-        if owned != nil || assigned != nil || !explicit.isEmpty {
-            let openIDs = listedIDs.union(explicit.map { Item.ID(projectID: $0.projectID, iid: $0.iid) })
-            openItems = Item.ordered(results.filter { openIDs.contains($0.id) && $0.mergeRequest?.state == "opened" })
+        hasError = failed || explicitFetchFailed
+        hasCurrentOwnListing = owned != nil
+        let openIDs = Set((listed + explicit).filter { $0.state == "opened" }.map {
+            Item.ID(projectID: $0.projectID, iid: $0.iid)
+        })
+        for item in results where openIDs.contains(item.id) && item.mergeRequest?.state == "opened" {
+            retainedCatalog[item.id] = item
         }
+        for request in recordedReviews {
+            let id = Item.ID(projectID: request.projectID, iid: request.iid)
+            retainedCatalog[id] = Item(id: id, title: request.title, url: request.webURL, mergeRequest: request)
+        }
+        // Retention belongs only to the read-only catalog. Stale rows do not become
+        // new publication, approval or re-review action candidates.
+        openItems = Item.ordered(Array(retainedCatalog.values))
         await publishSettledDrafts(agentWorks: agentWorks, account: account)
         for item in results where item.autoApproveReady {
             guard let request = item.mergeRequest, let head = request.sha else { continue }
@@ -404,7 +497,7 @@ final class MergeRequestAttentionMonitor {
         }
         if let reportDirectory, owned != nil || assigned != nil {
             CodexDesktopRelay.publishMergeRequestStatus(requests: openItems.filter { listedIDs.contains($0.id) },
-                                                      complete: owned != nil && assigned != nil && !failed,
+                                                      complete: owned != nil && assigned != nil && !failed && !explicitFetchFailed,
                                                       in: reportDirectory)
         }
     }

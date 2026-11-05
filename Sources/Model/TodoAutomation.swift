@@ -301,6 +301,12 @@ struct AutomationSettings: Codable, Equatable, Sendable {
             || workflowRules.enabled.contains { workflowRules[$0].mode == .assistant }
     }
 
+    func preservingScope(from current: Self) -> Self {
+        var updated = self
+        updated.scope = current.scope
+        return updated
+    }
+
     func permitsAutoMerge(project: String) -> Bool {
         autoMergeEnabled && MergeWorkflowRule.projectPaths(autoMergeProjects).contains(project)
     }

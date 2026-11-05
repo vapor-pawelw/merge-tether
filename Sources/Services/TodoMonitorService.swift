@@ -107,6 +107,95 @@ final class TodoMonitorService {
         authoredMergeRequests.workflow.pendingPipelineHandoffs
     }
 
+    var assistantGroups: [AssistantTaskGroup] {
+        guard let host = glab.resolvedHost, let username = glab.currentUsername else { return [] }
+        return AssistantTaskGroup.groups(from: settings.assistantHandoffs, host: host, username: username)
+    }
+
+    private var mergeRequestBrowser: MergeRequestBrowserSnapshot? {
+        guard let host = glab.resolvedHost, let username = glab.currentUsername else { return nil }
+        return MergeRequestBrowserSnapshot(openItems: attention.currentOpenItems,
+            authored: authoredMergeRequests.requests, host: host, username: username, scope: settings.automation.scope,
+            ownCatalogIsAuthoritative: attention.hasCurrentOwnListing)
+    }
+
+    var ownMergeRequestItems: [MergeRequestAttentionMonitor.Item] { mergeRequestBrowser?.own ?? [] }
+    var reviewedMergeRequestItems: [MergeRequestAttentionMonitor.Item] { mergeRequestBrowser?.reviewed ?? [] }
+
+    func assistantChatLinks(for item: MergeRequestAttentionMonitor.Item) -> [AssistantChatLink] {
+        guard let target = scopeTarget(projectID: item.id.projectID, iid: item.id.iid, url: item.url) else { return [] }
+        let work = AssistantAutomationRunner.MergeRequestWork(host: target.host, projectID: target.projectID, iid: item.id.iid)
+        let group = assistantGroups.first { $0.id == work }
+        let preferred = settings.automation.assistant
+        return ([preferred] + AutomationAssistant.allCases.filter { $0 != preferred }).compactMap { assistant in
+            let key = AssistantAutomationRunner.ChatKey(assistant: assistant, work: work, username: target.username,
+                                                        workspace: "", access: .gitLabRead)
+            let recorded = key.reusableChat(in: settings.assistantChats) ?? settings.assistantChats.first {
+                $0.key.assistant == assistant && $0.key.work == work && $0.key.username == target.username
+            }?.value
+            let candidates = [recorded] + (group?.handoffs.filter {
+                $0.key.assistant == assistant && $0.relayComplete == true
+            }.map(\.chatID) ?? [])
+            let url = candidates.compactMap { chatID in
+                chatID.flatMap(assistant == .codex
+                    ? AssistantAutomationRunner.codexChatURL : AssistantAutomationRunner.claudeSessionURL)
+            }.first
+            return url.map { AssistantChatLink(assistant: assistant, url: $0) }
+        }
+    }
+
+    var inbox: InboxSnapshot {
+        InboxSnapshot(todos: visibleTodos, attention: attentionItems, host: glab.resolvedHost, username: glab.currentUsername)
+    }
+
+    var manualAssistantGroups: [AssistantTaskGroup] {
+        assistantGroups.filter { group in
+            group.handoffs.contains { $0.relayComplete != true && !AssistantAutomationRunner.usesRelay($0, settings: settings)
+                && !CodexDesktopRelay.hasClaim($0.id) }
+        }
+    }
+
+    func manualHandoff(in group: AssistantTaskGroup) -> AssistantAutomationRunner.Handoff? {
+        group.handoffs.first { $0.relayComplete != true && !AssistantAutomationRunner.usesRelay($0, settings: settings)
+            && !CodexDesktopRelay.hasClaim($0.id) }
+    }
+
+    private func matches(_ todo: Todo, work: AssistantAutomationRunner.MergeRequestWork) -> Bool {
+        todo.targetType == .mergeRequest && todo.project.id == work.projectID && todo.target.iid == work.iid
+            && todo.targetURL.isGitLabMergeRequest(host: work.host, iid: work.iid)
+    }
+
+    func manualAssistantGroup(for todo: Todo) -> AssistantTaskGroup? {
+        manualAssistantGroups.first { group in
+            matches(todo, work: group.id) && visibleTodos.first(where: { matches($0, work: group.id) })?.id == todo.id
+        }
+    }
+
+    func manualAssistantGroup(for item: MergeRequestAttentionMonitor.Item) -> AssistantTaskGroup? {
+        manualAssistantGroups.first { group in
+            group.id.projectID == item.id.projectID && group.id.iid == item.id.iid
+                && !visibleTodos.contains(where: { matches($0, work: group.id) })
+        }
+    }
+
+    var standaloneManualAssistantGroups: [AssistantTaskGroup] {
+        let attention = inbox.attention
+        return manualAssistantGroups.filter { group in
+            !visibleTodos.contains(where: { matches($0, work: group.id) })
+                && !attention.contains(where: { $0.id.projectID == group.id.projectID && $0.id.iid == group.id.iid })
+        }
+    }
+
+    var hasAssistantAction: Bool {
+        unavailableAssistant != nil || codexListenerWarning != nil || desktopHandoffError
+    }
+
+    func confirmPipelineHandoff(for id: MergeRequestAttentionMonitor.Item.ID) {
+        guard let entry = pipelineHandoffs.first(where: { $0.event.mergeRequest.projectID == id.projectID
+            && $0.event.mergeRequest.iid == id.iid }) else { return }
+        authoredMergeRequests.workflow.confirmPipelineHandoff(entry.id)
+    }
+
     func scopeTarget(projectID: Int, iid: Int, url: URL) -> MRAutomationScope.Target? {
         guard let host = glab.resolvedHost, let username = glab.currentUsername,
               url.isGitLabMergeRequest(host: host, iid: iid) else { return nil }
@@ -130,6 +219,41 @@ final class TodoMonitorService {
     }
 
     func addAutomationTarget(from address: String) async throws {
+        let result = try await resolveAutomationTarget(from: address)
+        enableAutomationTarget(result.target, projectPath: result.projectPath)
+        await refreshNow()
+    }
+
+    func addManagedMergeRequest(from address: String, projectID: Int?) async throws -> GitLabMergeRequest {
+        let raw = address.trimmingCharacters(in: .whitespacesAndNewlines)
+        let number = raw.hasPrefix("!") ? String(raw.dropFirst()) : raw
+        let target: MRAutomationScope.Target
+        let request: GitLabMergeRequest
+        if let iid = Int(number), iid > 0, let projectID,
+           let host = glab.resolvedHost, let username = glab.currentUsername {
+            request = try await glab.fetchMergeRequest(projectID: projectID, iid: iid, host: host)
+            guard request.projectID == projectID, request.iid == iid, request.state == "opened",
+                  request.webURL.isGitLabMergeRequest(host: host, iid: iid),
+                  glab.resolvedHost == host, glab.currentUsername == username else { throw CancellationError() }
+            target = .init(host: host, username: username, projectID: projectID, iid: iid)
+        } else {
+            let result = try await resolveAutomationTarget(from: raw)
+            guard let resolved = result.request else { throw GlabError.decoding("Enter a merge request URL, or a number and repository") }
+            request = resolved
+            target = result.target
+        }
+        enableAutomationTarget(target, projectPath: request.webURL.gitLabProjectPath)
+        await refreshNow()
+        return request
+    }
+
+    private func enableAutomationTarget(_ target: MRAutomationScope.Target, projectPath: String) {
+        settings.automation.scope[target] = .active
+        settings.automation.scope.rememberRepository(projectPath, for: target)
+        settings.save()
+    }
+
+    private func resolveAutomationTarget(from address: String) async throws -> (target: MRAutomationScope.Target, projectPath: String, request: GitLabMergeRequest?) {
         guard let host = glab.resolvedHost, let username = glab.currentUsername,
               let url = URL(string: address.trimmingCharacters(in: .whitespacesAndNewlines)),
               let expected = URLComponents(string: "https://\(host)"),
@@ -147,22 +271,21 @@ final class TodoMonitorService {
         }
         let projectID = try await glab.resolveAutomationProject(path: projectPath, host: host)
         var iid: Int? = nil
+        var verified: GitLabMergeRequest?
         if components.count == 2 {
             guard let number = Int(components[1]), number > 0 else {
                 throw GlabError.decoding("Invalid merge request URL")
             }
             let request = try await glab.fetchMergeRequest(projectID: projectID, iid: number, host: host)
-            guard request.state == "opened", request.webURL.isGitLabMergeRequest(host: host, iid: number) else {
+            guard request.projectID == projectID, request.iid == number, request.state == "opened", request.webURL.isGitLabMergeRequest(host: host, iid: number) else {
                 throw GlabError.decoding("The merge request is no longer open")
             }
             iid = number
+            verified = request
         }
         guard glab.resolvedHost == host, glab.currentUsername == username else { throw CancellationError() }
         let target = MRAutomationScope.Target(host: host, username: username, projectID: projectID, iid: iid)
-        settings.automation.scope[target] = .active
-        settings.automation.scope.rememberRepository(projectPath, for: target)
-        settings.save()
-        await refreshNow()
+        return (target, projectPath, verified)
     }
 
     var attentionItems: [MergeRequestAttentionMonitor.Item] {
@@ -174,7 +297,7 @@ final class TodoMonitorService {
             ))
             var item = item
             item.feedback.removeAll { $0.id.map { !remaining.contains($0) } ?? false }
-            if item.feedback.isEmpty { item.needsDiscussion = false }
+            if item.feedback.isEmpty { item.needsDiscussion = item.hasOtherUnresolvedDiscussions }
             return item.needsAttention ? item : nil
         }
         let handoffs = pipelineHandoffs
@@ -186,6 +309,25 @@ final class TodoMonitorService {
                 if items[index].mergeRequest == nil { items[index].mergeRequest = mr }
             } else {
                 items.append(.init(id: id, title: mr.title, url: mr.webURL, needsPipelineHandoff: true, mergeRequest: mr))
+            }
+        }
+        if !attention.hasError, !authoredMergeRequests.hasError, let host = glab.resolvedHost, let username = glab.currentUsername {
+            for status in authoredMergeRequests.requests where status.blockers.isEmpty && status.request.isReadyForMergeChecks {
+                let request = status.request
+                guard request.author.username == username,
+                      request.webURL.isGitLabMergeRequest(host: host, iid: request.iid),
+                      let current = attention.currentOpenItems.first(where: {
+                          $0.id.projectID == request.projectID && $0.id.iid == request.iid
+                      }), current.mergeRequest?.author.username == username, current.canOfferMerge(using: status)
+                else { continue }
+                let id = MergeRequestAttentionMonitor.Item.ID(projectID: request.projectID, iid: request.iid)
+                guard (items.first(where: { $0.id == id })?.draftCount ?? 0) == 0 else { continue }
+                let automatic = status.mayAutoMerge && settings.automation.permitsAutoMerge(project: request.webURL.gitLabProjectPath)
+                    && settings.automation.scope.permits(request, host: host, username: username)
+                    && !assistantHandoffs.contains { $0.key.work.projectID == id.projectID && $0.key.work.iid == id.iid }
+                guard !automatic else { continue }
+                if let index = items.firstIndex(where: { $0.id == id }) { items[index].needsMerge = true }
+                else { items.append(.init(id: id, title: request.title, url: request.webURL, needsMerge: true, mergeRequest: request, isAuthored: true)) }
             }
         }
         let visible = items.compactMap { item -> MergeRequestAttentionMonitor.Item? in
@@ -296,8 +438,8 @@ final class TodoMonitorService {
         }
     }
 
-    var attentionCount: Int { attentionItems.count + assistantHandoffs.filter { $0.relayComplete != true }.count }
-    var badgeCount: Int { visibleTodos.count + attentionCount }
+    var attentionCount: Int { inbox.attention.count + standaloneManualAssistantGroups.count + (hasAssistantAction ? 1 : 0) }
+    var badgeCount: Int { inbox.count + standaloneManualAssistantGroups.count + (hasAssistantAction ? 1 : 0) }
 
     var hasUnseenTodos: Bool {
         guard !visibleTodos.isEmpty else { return false }

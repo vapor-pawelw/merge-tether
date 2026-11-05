@@ -126,7 +126,9 @@ struct AuthoredMergeRequestStatusTests {
             try await Task.sleep(for: .milliseconds(20))
         }
         try #require(!monitor.isLoading && !monitor.hasError)
-        #expect(monitor.currentItems.map(\.id.iid) == [5, 4, 2, 3, 1])
+        // MR 5's fetched discussion is unresolved despite its optimistic list status.
+        // Verified discussion evidence keeps it in the same blocker tier as MR 4.
+        #expect(monitor.currentItems.map(\.id.iid) == [4, 5, 2, 3, 1])
         #expect(monitor.currentItems.map(\.section) == [.open, .open, .open, .unpublishedComments, .draftMergeRequests])
     }
 
