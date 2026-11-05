@@ -1,13 +1,14 @@
 import SwiftUI
 
 /// One merge request waiting in Ready for your OK: drafts to publish or an approval to give.
-struct ConfirmationQueueRow: View {
+struct ConfirmationQueueRow<AdditionalActions: View>: View {
     let item: MergeRequestAttentionMonitor.Item
     let state: MergeRequestAttentionMonitor.ConfirmationState?
     let onPublish: () -> Void
     let onApprove: () -> Void
     let onOpen: () -> Void
     var onManage: (() -> Void)? = nil
+    let additionalActions: AdditionalActions
 
     @State private var showsComments = false
 
@@ -74,6 +75,7 @@ struct ConfirmationQueueRow: View {
             }
             .controlSize(.small)
             .disabled(isBusy)
+            additionalActions
             if let onManage {
                 Button(action: onManage) { Label { Text(.Menu.menuScopeAddManaged) } icon: { Image(systemName: "bolt.badge.plus") } }
                     .buttonStyle(.bordered)

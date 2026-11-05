@@ -71,7 +71,7 @@ struct AuthoredMergeRequestsView: View {
     }
 }
 
-private struct AuthoredMergeRequestRow: View {
+struct AuthoredMergeRequestRow: View {
     let status: AuthoredMergeRequestStatus
 
     var body: some View {

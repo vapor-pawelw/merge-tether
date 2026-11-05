@@ -2,7 +2,7 @@ import SwiftUI
 
 struct MergeWorkflowActivityView: View {
     let entries: [MergeWorkflowActivityEntry]
-    let onHandoff: (String) -> Void
+    var onHandoff: ((String) -> Void)? = nil
 
     var body: some View {
         if entries.isEmpty {
@@ -31,7 +31,7 @@ struct MergeWorkflowActivityView: View {
 
 private struct MergeWorkflowActivityRow: View {
     let entry: MergeWorkflowActivityEntry
-    let onHandoff: (String) -> Void
+    var onHandoff: ((String) -> Void)? = nil
     @State private var confirmHandoff = false
 
     var body: some View {
@@ -72,7 +72,7 @@ private struct MergeWorkflowActivityRow: View {
                 }
             }
 
-            if entry.state == .awaitingPipelineHandoff {
+            if entry.state == .awaitingPipelineHandoff, let onHandoff {
                 Button {
                     confirmHandoff = true
                 } label: {

@@ -8,6 +8,9 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 
 ### Changed
 
+- Combine to-dos and actionable MR blockers in one deduplicated Inbox. Count only items requiring user attention, keeping draft MRs last and retaining distinct publication and ownership decisions.
+- Replace separate MR, managed and assistant tabs with Merge Requests → Own / Reviewed, read-only status and existing Codex/Claude chat links. Add specific reviewed MRs by URL or by repository and number.
+- Move scope controls and grouped delivery/workflow history into Automation settings; save scope changes immediately without overwriting them when applying assistant settings.
 - Preserve MR catalogs when an individual GitLab source fails and distinguish confirmed delivery from assistant completion.
 
 - Deliver complete assistant instructions through a hash-bound local snapshot instead of relying on the listener to copy long prompts. Clarify that native Codex chat creation does not expose an execution-permission override.

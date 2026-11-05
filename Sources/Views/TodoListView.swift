@@ -6,14 +6,13 @@ struct TodoListView: View {
     let updates: UpdateService
     @State private var section: Section
     @State private var setupOpenFailed = false
-    @State private var showingAutomationActivity = false
     @Environment(\.openWindow) private var openWindow
     @Environment(\.openSettings) private var openSettings
 
     init(monitor: TodoMonitorService, updates: UpdateService) {
         self.monitor = monitor
         self.updates = updates
-        _section = State(initialValue: Section(rawValue: monitor.settings.lastMenuSection ?? "") ?? .todos)
+        _section = State(initialValue: Section.restored(from: monitor.settings.lastMenuSection))
     }
 
     var body: some View {
@@ -35,57 +34,12 @@ struct TodoListView: View {
             Divider()
 
             switch section {
-            case .todos:
-                if let error = monitor.lastError {
-                    ErrorBannerView(error: error) {
-                        openWindow(id: "onboarding")
-                    }
-                } else if let id = monitor.failedAutomationTodoID {
-                    Text(.Menu.menuErrorAutomation(id))
-                        .font(.caption)
-                        .frame(maxWidth: .infinity, alignment: .leading)
-                        .padding(10)
-                        .background(.red.opacity(0.12))
-                }
-                todoContent
-                if let todo = monitor.undoableTodo {
-                    undoBanner(todo)
-                }
-            case .attention:
-                if let assistant = monitor.unavailableAssistant {
-                    assistantWarning(.Menu.menuAssistantUnavailable(String(localized: assistant.displayName)),
-                                     button: .Menu.menuActionSettings, action: showSettings)
-                } else if let warning = monitor.codexListenerWarning {
-                    if monitor.codexPluginInstallation == .missing {
-                        assistantWarning(warning, button: .Menu.menuActionSettings, action: showSettings)
-                    } else if monitor.codexPluginInstallation != .disabled,
-                              monitor.codexListenerHealth == .desktopClosed || monitor.codexListenerHealth == .dispatchBlocked {
-                        assistantWarning(warning, button: .Menu.menuAssistantOpenCodex) {
-                            Task { await monitor.openCodexForListener() }
-                        }
-                    } else {
-                        assistantWarning(warning, button: monitor.codexPluginInstallation == .disabled
-                                         ? .Menu.menuAssistantPluginEnable : .Menu.menuAssistantPluginSetup) {
-                            Task { await openCodexPlugin() }
-                        }
-                    }
-                }
-                if setupOpenFailed, monitor.codexListenerWarning != nil {
-                    Text(.Menu.menuAssistantSetupOpenFailed)
-                        .font(.caption)
-                        .foregroundStyle(.secondary)
-                        .padding(.horizontal, 14)
-                }
-                attentionContent
-            case .authored:
-                AuthoredMergeRequestsView(
-                    requests: monitor.authoredMergeRequests.requests,
-                    isLoading: monitor.authoredMergeRequests.isLoading,
-                    hasError: monitor.authoredMergeRequests.hasError,
-                    scopeMenu: { scopeMenu(projectID: $0.projectID, iid: $0.iid, url: $0.webURL) }
-                )
-            case .activity:
-                automationContent
+            case .inbox:
+                inboxWarnings
+                inboxContent
+                if let todo = monitor.undoableTodo { undoBanner(todo) }
+            case .mergeRequests:
+                MergeRequestsView(monitor: monitor)
             }
 
             Divider()
@@ -98,7 +52,7 @@ struct TodoListView: View {
         }
         .onAppear { showSection() }
         .task(id: section) {
-            guard section == .attention else { return }
+            guard section == .inbox else { return }
             while !Task.isCancelled {
                 do { try await Task.sleep(for: .seconds(5)) } catch { return }
                 await monitor.attention.refreshPendingDrafts()
@@ -112,40 +66,12 @@ struct TodoListView: View {
         .onDisappear { monitor.authoredMergeRequests.setVisible(false) }
     }
 
-    private enum Section: String, CaseIterable {
-        case todos
-        case attention
-        case authored
-        case activity
-
-        /// Short label for the segmented control; `title` is used in the header.
-        var segmentTitle: LocalizedStringResource {
-            switch self {
-            case .todos: .Menu.menuAuthoredTodosTab
-            case .attention: .Menu.menuAttentionTab
-            case .authored: .Menu.menuAuthoredTabShort
-            case .activity: .Menu.menuScopeTitle
-            }
-        }
-
-        var usesInboxRefresh: Bool { self != .authored }
-
-        var title: LocalizedStringResource {
-            switch self {
-            case .todos: .Menu.menuHeaderTitle
-            case .attention: .Menu.menuAttentionTab
-            case .authored: .Menu.menuAuthoredTab
-            case .activity: .Menu.menuScopeTitle
-            }
-        }
-    }
+    private typealias Section = MainMenuSection
 
     private func count(for section: Section) -> Int {
         switch section {
-        case .todos: monitor.visibleTodos.count
-        case .attention: monitor.attentionCount
-        case .authored: monitor.authoredMergeRequests.requests.count
-        case .activity: monitor.pipelineHandoffs.count
+        case .inbox: monitor.badgeCount
+        case .mergeRequests: monitor.ownMergeRequestItems.count + monitor.reviewedMergeRequestItems.count
         }
     }
 
@@ -156,11 +82,9 @@ struct TodoListView: View {
     }
 
     private func showSection() {
-        monitor.authoredMergeRequests.setVisible(section == .authored || section == .activity)
-        if section == .todos { monitor.markMenuOpened() }
-        if section.usesInboxRefresh {
-            Task { await monitor.refreshNow() }
-        }
+        monitor.authoredMergeRequests.setVisible(section == .mergeRequests)
+        if section == .inbox { monitor.markMenuOpened() }
+        Task { await monitor.refreshNow() }
     }
 
     private func performFirstLaunchIfNeeded() async {
@@ -191,7 +115,7 @@ struct TodoListView: View {
             }
             Spacer()
             HStack(spacing: 6) {
-                if section == .todos {
+                if section == .inbox {
                     Button {
                         NSWorkspace.shared.open(monitor.dashboardURL)
                     } label: {
@@ -203,11 +127,7 @@ struct TodoListView: View {
                 }
 
                 Button {
-                    if section.usesInboxRefresh {
-                        Task { await monitor.refreshNow() }
-                    } else {
-                        monitor.authoredMergeRequests.refreshIfNeeded()
-                    }
+                    Task { await monitor.refreshNow() }
                 } label: {
                     ZStack {
                         if isRefreshing {
@@ -228,56 +148,56 @@ struct TodoListView: View {
     }
 
     private var isRefreshing: Bool {
-        section.usesInboxRefresh ? monitor.isLoading : monitor.authoredMergeRequests.isLoading
+        monitor.isLoading || monitor.attention.isLoading || monitor.authoredMergeRequests.isLoading
     }
 
     @ViewBuilder
     private var headerSubtitle: some View {
-        if let lastRefresh = section.usesInboxRefresh ? monitor.lastRefresh : monitor.authoredMergeRequests.lastRefresh {
+        if let lastRefresh = monitor.lastRefresh {
             Text(.Menu.menuHeaderUpdated(RelativeTime.string(from: lastRefresh)))
         } else {
             Text(.Menu.menuHeaderNeverUpdated)
         }
     }
 
-    @ViewBuilder
-    private var todoContent: some View {
-        if monitor.visibleTodos.isEmpty {
-            VStack(spacing: 6) {
-                Image(systemName: "checkmark.seal")
-                    .font(.system(size: 40))
-                    .foregroundStyle(.secondary)
-                Text(.Menu.menuEmptyTitle)
-                    .font(.headline)
-                Text(.Menu.menuEmptySubtitle)
-                    .font(.caption)
-                    .foregroundStyle(.secondary)
-            }
-            .frame(maxWidth: .infinity, maxHeight: .infinity)
-            .padding()
-        } else {
-            ScrollView {
-                LazyVStack(spacing: 0) {
-                    ForEach(monitor.visibleTodos) { todo in
-                        TodoRowView(
-                            todo: todo,
-                            currentUsername: monitor.glab.currentUsername,
-                            automationState: monitor.automationAction(for: todo),
-                            scopeMenu: todo.targetType == .mergeRequest ? todo.target.iid.flatMap {
-                                scopeMenu(projectID: todo.project.id, iid: $0, url: todo.targetURL)
-                            } : nil,
-                            onAutomation: { Task { await monitor.runAutomationManually(for: todo) } },
-                            onMarkDone: { withAnimation { monitor.markDoneWithUndo(todo) } },
-                            onOpen: {
-                                NSWorkspace.shared.open(todo.targetURL)
-                                dismissMenuBarExtra()
-                            }
-                        )
-                        Divider()
-                    }
+    private func todoRow(_ todo: Todo, inbox: InboxSnapshot) -> some View {
+        VStack(alignment: .leading, spacing: 5) {
+            TodoRowView(
+                todo: todo, currentUsername: monitor.glab.currentUsername,
+                automationState: monitor.automationAction(for: todo),
+                scopeMenu: todo.targetType == .mergeRequest ? todo.target.iid.flatMap {
+                    scopeMenu(projectID: todo.project.id, iid: $0, url: todo.targetURL)
+                } : nil,
+                onAutomation: { Task { await monitor.runAutomationManually(for: todo) } },
+                onMarkDone: { withAnimation { monitor.markDoneWithUndo(todo) } },
+                onOpen: {
+                    NSWorkspace.shared.open(todo.targetURL)
+                    dismissMenuBarExtra()
                 }
+            )
+            if let id = inbox.todoApprovals[todo.id] {
+                todoApproval(id)
+            }
+            if let group = monitor.manualAssistantGroup(for: todo),
+               let handoff = monitor.manualHandoff(in: group) {
+                assistantHandoffRow(handoff)
             }
         }
+    }
+
+    private func todoApproval(_ id: MergeRequestAttentionMonitor.Item.ID) -> some View {
+        let state = monitor.attention.confirmationStates[id]
+        return VStack(alignment: .leading, spacing: 4) {
+            HStack {
+                Button { Task { await monitor.attention.approve(id) } } label: { Text(.Menu.menuConfirmApprove) }
+                    .buttonStyle(.borderedProminent)
+                    .disabled(state == .approving || state == .publishing)
+                if state == .approving { ProgressView().controlSize(.small) }
+            }
+            if state == .failed { Text(.Menu.menuConfirmFailed).foregroundStyle(.orange) }
+            if state == .changed { Text(.Menu.menuConfirmChanged).foregroundStyle(.orange) }
+        }
+        .font(.caption).controlSize(.small).padding(.horizontal, 12)
     }
 
     private func scopeMenu(projectID: Int, iid: Int, url: URL) -> MRAutomationScopeMenu? {
@@ -286,107 +206,112 @@ struct TodoListView: View {
         }
     }
 
-    private var automationContent: some View {
-        VStack(spacing: 8) {
-            Picker(selection: $showingAutomationActivity) {
-                Text(.Menu.menuScopeManaged).tag(false)
-                Text(.Menu.menuWorkflowActivityTabShort).tag(true)
-            } label: { Text(.Menu.menuScopeTitle) }
-            .labelsHidden()
-            .pickerStyle(.segmented)
-            .padding(.top, 8)
-            .padding(.horizontal, 14)
-
-            if showingAutomationActivity {
-                MergeWorkflowActivityView(entries: monitor.authoredMergeRequests.workflow.entries,
-                                          onHandoff: monitor.authoredMergeRequests.workflow.confirmPipelineHandoff)
+    @ViewBuilder
+    private var inboxWarnings: some View {
+        if let error = monitor.lastError {
+            ErrorBannerView(error: error) { openWindow(id: "onboarding") }
+        } else if let id = monitor.failedAutomationTodoID {
+            Text(.Menu.menuErrorAutomation(id)).font(.caption).padding(10).background(.red.opacity(0.12))
+        }
+        if let assistant = monitor.unavailableAssistant {
+            assistantWarning(.Menu.menuAssistantUnavailable(String(localized: assistant.displayName)),
+                             button: .Menu.menuActionSettings, action: showSettings)
+        } else if let warning = monitor.codexListenerWarning {
+            if monitor.codexPluginInstallation == .missing {
+                assistantWarning(warning, button: .Menu.menuActionSettings, action: showSettings)
+            } else if monitor.codexPluginInstallation != .disabled,
+                      monitor.codexListenerHealth == .desktopClosed || monitor.codexListenerHealth == .dispatchBlocked {
+                assistantWarning(warning, button: .Menu.menuAssistantOpenCodex) {
+                    Task { await monitor.openCodexForListener() }
+                }
             } else {
-                ManagedMergeRequestsView(monitor: monitor)
+                assistantWarning(warning, button: monitor.codexPluginInstallation == .disabled
+                                 ? .Menu.menuAssistantPluginEnable : .Menu.menuAssistantPluginSetup) {
+                    Task { await openCodexPlugin() }
+                }
             }
+        } else if monitor.desktopHandoffError {
+            assistantWarning(.Menu.menuAssistantOpenError, button: .Menu.menuActionSettings, action: showSettings)
+        }
+        if setupOpenFailed {
+            Text(.Menu.menuAssistantSetupOpenFailed).font(.caption).foregroundStyle(.orange).padding(.horizontal, 14)
         }
     }
 
     @ViewBuilder
-    private var attentionContent: some View {
-        let items = monitor.attentionItems
-        let handoffs = monitor.assistantHandoffs
-        if items.isEmpty && handoffs.isEmpty && !monitor.attention.hasError {
+    private var inboxContent: some View {
+        let inbox = monitor.inbox
+        let items = inbox.attention
+        if monitor.badgeCount == 0 && monitor.isLoading && monitor.lastRefresh == nil {
+            ProgressView().frame(maxWidth: .infinity, maxHeight: .infinity)
+        } else if monitor.badgeCount == 0 && !monitor.attention.hasError && monitor.lastError == nil
+                    && monitor.failedAutomationTodoID == nil {
             ContentUnavailableView {
-                Label {
-                    Text(.Menu.menuAttentionEmpty)
-                } icon: {
-                    Image(systemName: "checkmark.circle")
-                }
+                Label { Text(.Menu.menuInboxEmpty) } icon: { Image(systemName: "checkmark.circle") }
             }
         } else {
             ScrollView {
                 LazyVStack(alignment: .leading, spacing: 8) {
-                    let open = items.filter { $0.section == .open }
-                    let confirmations = items.filter(\.needsConfirmation)
-                    let drafts = items.filter { $0.section == .draftMergeRequests && !$0.needsConfirmation }
-                    if !confirmations.isEmpty {
-                        groupHeader(.Menu.menuConfirmSection, symbol: "hand.raised.fill", tint: .accentColor)
-                        ForEach(confirmations) { item in
-                            ConfirmationQueueRow(
-                                item: item,
-                                state: monitor.attention.confirmationStates[item.id],
-                                onPublish: { Task { await monitor.attention.publishDrafts(of: item.id) } },
-                                onApprove: { Task { await monitor.attention.approve(item.id) } },
-                                onOpen: {
-                                    NSWorkspace.shared.open(item.url)
-                                    dismissMenuBarExtra()
-                                },
-                                onManage: manageAction(for: item)
-                            )
+                    if monitor.attention.hasError {
+                        Text(.Menu.menuAttentionPartial).font(.caption).foregroundStyle(.secondary)
+                    }
+                    let open = items.filter { $0.section != .draftMergeRequests }
+                    let drafts = items.filter { $0.section == .draftMergeRequests }
+                    if !open.isEmpty { attentionCards(open) }
+                    if !inbox.todos.isEmpty {
+                        groupHeader(.Menu.menuInboxGitLabTodos, symbol: "tray", tint: .accentColor)
+                        ForEach(inbox.todos) { todo in
+                            todoRow(todo, inbox: inbox)
+                            Divider()
                         }
                     }
-                    if !open.isEmpty || monitor.attention.hasError {
-                        attentionRows(open)
-                    }
-                    if !monitor.pipelineHandoffs.isEmpty {
-                        Button {
-                            section = .activity
-                        } label: {
-                            Text(.Menu.menuAttentionHandoffs(monitor.pipelineHandoffs.count))
-                                .font(.subheadline)
+                    if !monitor.standaloneManualAssistantGroups.isEmpty {
+                        groupHeader(.Menu.menuInboxAssistantAction, symbol: "hand.raised", tint: .orange)
+                        ForEach(monitor.standaloneManualAssistantGroups) { group in
+                            if let handoff = monitor.manualHandoff(in: group) { assistantHandoffRow(handoff) }
                         }
-                        .buttonStyle(.link)
                     }
-                    if !handoffs.isEmpty { assistantRows(handoffs) }
                     if !drafts.isEmpty {
                         groupHeader(.Menu.menuAttentionDraftSection, symbol: "pencil.line", tint: .secondary)
                         attentionCards(drafts)
                     }
                 }
                 .frame(maxWidth: .infinity, alignment: .leading)
-                .padding(.horizontal, 14)
-                .padding(.vertical, 10)
+                .padding(.horizontal, 14).padding(.vertical, 10)
             }
-        }
-    }
-
-    @ViewBuilder
-    private func attentionRows(_ items: [MergeRequestAttentionMonitor.Item]) -> some View {
-        Group {
-            groupHeader(.Menu.menuAttentionTitle(items.count), symbol: "exclamationmark.circle.fill", tint: .orange)
-
-            if monitor.attention.hasError {
-                Text(.Menu.menuAttentionPartial)
-                    .font(.caption)
-                    .foregroundStyle(.secondary)
-            }
-
-            attentionCards(items)
         }
     }
 
     private func attentionCards(_ items: [MergeRequestAttentionMonitor.Item]) -> some View {
         ForEach(items) { item in
-            AttentionRow(item: item, feedbackAction: monitor.attentionFeedbackAction(for: item), onFeedback: {
-                Task { await monitor.runAttentionFeedback(for: item) }
-            }, onManage: manageAction(for: item)) {
-                NSWorkspace.shared.open(item.url)
-                dismissMenuBarExtra()
+            if item.needsConfirmation {
+                ConfirmationQueueRow(
+                    item: item, state: monitor.attention.confirmationStates[item.id],
+                    onPublish: { Task { await monitor.attention.publishDrafts(of: item.id) } },
+                    onApprove: { Task { await monitor.attention.approve(item.id) } },
+                    onOpen: { NSWorkspace.shared.open(item.url); dismissMenuBarExtra() },
+                    onManage: manageAction(for: item), additionalActions: attentionActions(item)
+                )
+            } else {
+                VStack(alignment: .leading, spacing: 5) {
+                    AttentionRow(item: item, onManage: manageAction(for: item)) {
+                        NSWorkspace.shared.open(item.url)
+                        dismissMenuBarExtra()
+                    }
+                    attentionActions(item)
+                }
+            }
+        }
+    }
+
+    private func attentionActions(_ item: MergeRequestAttentionMonitor.Item) -> some View {
+        VStack(alignment: .leading, spacing: 5) {
+            InboxAttentionActions(item: item, feedbackAction: monitor.attentionFeedbackAction(for: item),
+                                  onFeedback: { Task { await monitor.runAttentionFeedback(for: item) } },
+                                  onPipeline: { monitor.confirmPipelineHandoff(for: item.id) },
+                                  onMerge: { NSWorkspace.shared.open(item.url); dismissMenuBarExtra() })
+            if let group = monitor.manualAssistantGroup(for: item), let handoff = monitor.manualHandoff(in: group) {
+                assistantHandoffRow(handoff)
             }
         }
     }
@@ -424,21 +349,6 @@ struct TodoListView: View {
         .padding(10)
         .frame(maxWidth: .infinity, alignment: .leading)
         .background(.orange.opacity(0.12))
-    }
-
-    @ViewBuilder
-    private func assistantRows(_ handoffs: [AssistantAutomationRunner.Handoff]) -> some View {
-        Group {
-            groupHeader(.Menu.menuAssistantQueue, symbol: "sparkles", tint: .accentColor)
-
-            if monitor.desktopHandoffError {
-                Text(.Menu.menuAssistantOpenError).font(.caption).foregroundStyle(.orange)
-            }
-
-            ForEach(handoffs) { handoff in
-                assistantHandoffRow(handoff).font(.caption)
-            }
-        }
     }
 
     private func assistantHandoffRow(_ handoff: AssistantAutomationRunner.Handoff) -> some View {
@@ -601,20 +511,8 @@ struct TodoListView: View {
     @ViewBuilder
     private var footerSummary: some View {
         switch section {
-        case .todos:
-            Text(.Menu.menuFooterPendingCount(monitor.visibleTodos.count))
-        case .attention:
-            Text(.Menu.menuFooterAttentionCount(monitor.attentionCount))
-        case .authored:
-            let requests = monitor.authoredMergeRequests.requests
-            if !requests.isEmpty {
-                let ready = requests.filter(\.blockers.isEmpty).count
-                Text(.Menu.menuFooterAuthoredSummary(ready, requests.count - ready))
-            }
-        case .activity:
-            if !monitor.pipelineHandoffs.isEmpty {
-                Text(.Menu.menuFooterHandoffCount(monitor.pipelineHandoffs.count))
-            }
+        case .inbox: Text(.Menu.menuInboxCount(monitor.badgeCount))
+        case .mergeRequests: Text(.Menu.menuMrCount(monitor.ownMergeRequestItems.count, monitor.reviewedMergeRequestItems.count))
         }
     }
 
@@ -631,8 +529,6 @@ struct TodoListView: View {
 
 private struct AttentionRow: View {
     let item: MergeRequestAttentionMonitor.Item
-    let feedbackAction: TodoAutomationService.ActionState?
-    let onFeedback: () -> Void
     let onManage: (() -> Void)?
     let onOpen: () -> Void
     @State private var isHovered = false
@@ -646,22 +542,7 @@ private struct AttentionRow: View {
                     .controlSize(.small)
                     .padding(.leading, 12)
             }
-            if feedbackAction == .running {
-                HStack(spacing: 5) {
-                    ProgressView().controlSize(.small)
-                    Text(.Menu.menuTodoAutomationRunning).font(.caption)
-                }
-                .padding(.leading, 12)
-            } else if feedbackAction == .ready(.assistant) || feedbackAction == .failed {
-                if feedbackAction == .failed {
-                    Text(.Menu.menuTodoAutomationFailed).font(.caption).foregroundStyle(.orange)
-                        .padding(.leading, 12)
-                }
-                Button(action: onFeedback) { Text(.Menu.menuTodoAutomationPrepareFollowUp) }
-                    .buttonStyle(.bordered)
-                    .controlSize(.small)
-                    .padding(.leading, 12)
-            }
+
         }
     }
 
@@ -706,4 +587,9 @@ private struct AttentionRow: View {
         .help(Text(.Menu.menuActionOpenInBrowser))
         .onHover { isHovered = $0 }
     }
+}
+
+private extension MainMenuSection {
+    var segmentTitle: LocalizedStringResource { self == .inbox ? .Menu.menuInboxTab : .Menu.menuMrTab }
+    var title: LocalizedStringResource { segmentTitle }
 }

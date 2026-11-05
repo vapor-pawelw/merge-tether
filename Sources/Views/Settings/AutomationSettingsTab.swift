@@ -32,58 +32,62 @@ struct AutomationSettingsTab: View {
             .fixedSize()
             .padding(.top, 12)
 
-            Form {
-                switch page {
-                case .assistant:
-                    assistantFields
-                    checkpointFields
-                case .presets:
-                    packageFields
-                case .workflow:
-                    MergeWorkflowSettingsSection(rules: $draft.workflowRules)
-                case .authored:
-                    authoredMergeRequestFields
-                case .todos:
-                    todoFields
-                    runnerFields
-                case .advanced:
-                    advancedFields
+            if page == .scope {
+                AutomationScopeSettingsView(monitor: monitor)
+            } else {
+                Form {
+                    switch page {
+                    case .assistant:
+                        assistantFields
+                        checkpointFields
+                    case .presets:
+                        packageFields
+                    case .workflow:
+                        MergeWorkflowSettingsSection(rules: $draft.workflowRules)
+                    case .authored:
+                        authoredMergeRequestFields
+                    case .todos:
+                        todoFields
+                        runnerFields
+                    case .advanced:
+                        advancedFields
+                    case .scope:
+                        EmptyView()
+                    }
                 }
+                .formStyle(.grouped)
+
+                Divider()
+
+                HStack(alignment: .center, spacing: 16) {
+                    if hasIncompleteRule {
+                        Text(.Settings.settingsAutomationIncomplete)
+                            .foregroundStyle(.red)
+                            .font(.caption)
+                    } else {
+                        Text(.Settings.settingsAutomationApplyHelp)
+                            .foregroundStyle(.secondary)
+                            .font(.caption)
+                    }
+
+                    Spacer(minLength: 0)
+
+                    Button {
+                        settings.automation = draft.preservingScope(from: settings.automation)
+                        settings.save()
+                        monitor.refreshAssistantRelay()
+                    } label: {
+                        Text(.Settings.settingsAutomationApply)
+                    }
+                    .disabled(draft == settings.automation || hasIncompleteRule)
+                }
+                .padding(.horizontal, 20)
+                .padding(.vertical, 12)
+                .background(.bar)
             }
-            .formStyle(.grouped)
-
-            Divider()
-
-            HStack(alignment: .center, spacing: 16) {
-                if hasIncompleteRule {
-                    Text(.Settings.settingsAutomationIncomplete)
-                        .foregroundStyle(.red)
-                        .font(.caption)
-                } else {
-                    Text(.Settings.settingsAutomationApplyHelp)
-                        .foregroundStyle(.secondary)
-                        .font(.caption)
-                }
-
-                Spacer(minLength: 0)
-
-                Button {
-                    settings.automation = draft
-                    settings.save()
-                    monitor.refreshAssistantRelay()
-                } label: {
-                    Text(.Settings.settingsAutomationApply)
-                }
-                .disabled(draft == settings.automation || hasIncompleteRule)
-            }
-            .padding(.horizontal, 20)
-            .padding(.vertical, 12)
-            .background(.bar)
         }
-        .onChange(of: settings.automation.scope) { previous, current in
-            let mode = draft.scope.mode == previous.mode ? current.mode : draft.scope.mode
+        .onChange(of: settings.automation.scope) { _, current in
             draft.scope = current
-            draft.scope.mode = mode
         }
     }
 
@@ -141,17 +145,6 @@ struct AutomationSettingsTab: View {
 
     @ViewBuilder
     private var packageFields: some View {
-        Section {
-            Picker(selection: $draft.scope.mode) {
-                Text(.Settings.settingsAutomationScopeAll).tag(MRAutomationScope.Mode.all)
-                Text(.Settings.settingsAutomationScopeSelected).tag(MRAutomationScope.Mode.selected)
-            } label: {
-                Text(.Settings.settingsAutomationScopeTitle)
-            }
-        } footer: {
-            Text(.Settings.settingsAutomationScopeHelp).font(.caption).foregroundStyle(.secondary)
-        }
-
         Section {
             AutomationPackagePicker(
                 selection: $packageChoice, canUseRecommended: monitor.availableAssistants.contains(draft.assistant)
@@ -501,12 +494,13 @@ struct AutomationSettingsTab: View {
     }
 
     private enum Page: CaseIterable {
-        case assistant, presets, todos, workflow, authored, advanced
+        case assistant, presets, scope, todos, workflow, authored, advanced
 
         var title: LocalizedStringResource {
             switch self {
             case .assistant: .Settings.settingsAutomationPageAssistant
             case .presets: .Settings.settingsAutomationPagePresets
+            case .scope: .Settings.settingsAutomationPageScope
             case .workflow: .Settings.settingsAutomationPageWorkflow
             case .authored: .Settings.settingsAutomationPageAuthored
             case .todos: .Settings.settingsAutomationPageTodos

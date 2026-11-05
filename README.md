@@ -15,11 +15,12 @@ Triage reviews, see what blocks a merge, and hand routine follow-ups to Codex or
 
 ## A desk for your merge requests
 
-- **To-dos:** review requests, mentions and GitLab notifications. Open the MR or mark an item read, with a short undo window.
-- **Attention:** feedback, failed pipelines, conflicts, unpublished replies and actions waiting for you. Preview drafts with their thread participants.
-- **My MRs:** merge readiness, pipeline status and blockers, with drafts at the bottom.
-- **Managed MRs:** automate everything, selected repositories, individual MRs, or a mixture. Pause items without losing their assistant chats.
-- **Assistant activity:** one persistent chat per MR, with Codex chats grouped by repository. Moving a chat yourself keeps your chosen location.
+- **Inbox:** GitLab to-dos and additional actions requiring your attention, without repeating the same reason. Preview and publish drafts, confirm handoffs, or open the MR. Draft MRs stay at the bottom.
+- **Merge Requests → Own:** all your open MRs, their merge readiness and blockers, and existing Codex or Claude chat links.
+- **Merge Requests → Reviewed:** managed open MRs by other authors, with status and chat links. Add an MR by URL, or by its number and repository, to include it in automation.
+- **Settings → Automation → Scope:** automate all relevant discovered MRs, selected repositories, individual MRs, or a mixture. Pause items without losing their assistant chats. Delivery and workflow history live here too.
+
+The menu-bar count includes to-dos and additional actions requiring you, including assistant setup or manual delivery. Routine queued and delivered events do not increase it. A delivery receipt confirms that the chat received work; it does not mean the assistant finished it.
 
 Polling, notifications, reminders and launch at login are configurable. A failed GitLab request keeps the previous inbox usable.
 
@@ -54,7 +55,7 @@ Choose your assistant, scope and rules in **Settings → Automation**. Installed
 
 **Local fixes are not delivered fixes.** With follow-up push off, pending or failed, that run stays in chat and does not create completion drafts. Automatic publication on your own MRs requires a fresh, sealed verification tied to the account, run, source branch, remote file hashes and exact draft bodies. Old local-only drafts are retained privately rather than silently trusted.
 
-**AI-feedback publication is selective.** Verified GitLab Duo comments qualify; comments posted by people require a very-high-confidence AI-origin assessment bound to their current content. This is a heuristic. Uncertain cases remain private, and neither discussion resolution nor slash quick actions are automatically published. You can explicitly publish pending drafts from Attention.
+**AI-feedback publication is selective.** Verified GitLab Duo comments qualify; comments posted by people require a very-high-confidence AI-origin assessment bound to their current content. This is a heuristic. Uncertain cases remain private, and neither discussion resolution nor slash quick actions are automatically published. You can explicitly publish pending drafts from Inbox.
 
 | Integration | Codex Desktop | Claude Desktop |
 | --- | --- | --- |
@@ -62,7 +63,7 @@ Choose your assistant, scope and rules in **Settings → Automation**. Installed
 | Reuse | Same MR chat, grouped by repository | Linked session, with follow-up prompt copied for pasting |
 | Local tools | Bundled plugin and read-only verification helper | Bundled Claude Code plugin and the same helper |
 
-The listener's health and missing setup appear in Attention. Closing an assistant keeps queued work on your Mac. Assistant tool permissions still apply. See [all permissions, defaults and limits](docs/automation.md).
+The listener's health and missing setup appear in Inbox. Closing an assistant keeps queued work on your Mac. Assistant tool permissions still apply. See [all permissions, defaults and limits](docs/automation.md).
 
 ## Privacy
 

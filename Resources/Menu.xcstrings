@@ -2035,6 +2035,292 @@
           }
         }
       }
+    },
+    "menu.inbox.assistantAction": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Assistant needs you"
+          }
+        }
+      }
+    },
+    "menu.inbox.count": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Needs attention: %lld"
+          }
+        }
+      }
+    },
+    "menu.inbox.empty": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Nothing needs your attention"
+          }
+        }
+      }
+    },
+    "menu.inbox.gitLabTodos": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "GitLab to-dos"
+          }
+        }
+      }
+    },
+    "menu.inbox.openToMerge": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Open in GitLab to merge"
+          }
+        }
+      }
+    },
+    "menu.inbox.tab": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Inbox"
+          }
+        }
+      }
+    },
+    "menu.mr.add": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Add MR"
+          }
+        }
+      }
+    },
+    "menu.mr.addFailed": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Couldn’t add this open merge request. Check its URL or repository and number."
+          }
+        }
+      }
+    },
+    "menu.mr.addHelp": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Paste a GitLab MR URL, or enter its number and choose a repository. Adding it enables automation under your current settings."
+          }
+        }
+      }
+    },
+    "menu.mr.address": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "MR URL or !number"
+          }
+        }
+      }
+    },
+    "menu.mr.chatClaude": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Open Claude chat"
+          }
+        }
+      }
+    },
+    "menu.mr.chatCodex": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Open Codex chat"
+          }
+        }
+      }
+    },
+    "menu.mr.count": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "%lld own · %lld reviewed"
+          }
+        }
+      }
+    },
+    "menu.mr.delivered": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Delivered to assistant"
+          }
+        }
+      }
+    },
+    "menu.mr.history": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Assistant history"
+          }
+        }
+      }
+    },
+    "menu.mr.noChat": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "No linked assistant chat"
+          }
+        }
+      }
+    },
+    "menu.mr.noOwn": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "No open merge requests of your own"
+          }
+        }
+      }
+    },
+    "menu.mr.noRepository": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Choose a repository"
+          }
+        }
+      }
+    },
+    "menu.mr.noReviewed": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "No managed merge requests to review"
+          }
+        }
+      }
+    },
+    "menu.mr.pendingEvents": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Awaiting delivery: %lld"
+          }
+        }
+      }
+    },
+    "menu.mr.repository": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Repository"
+          }
+        }
+      }
+    },
+    "menu.mr.stale": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Couldn’t refresh every merge request. Showing the last available data."
+          }
+        }
+      }
+    },
+    "menu.mr.tab": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Merge Requests"
+          }
+        }
+      }
+    },
+    "menu.mr.tab.own": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Own"
+          }
+        }
+      }
+    },
+    "menu.mr.tab.reviewed": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Reviewed"
+          }
+        }
+      }
+    },
+    "menu.scope.notOpen": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Not in the current open MR list"
+          }
+        }
+      }
     }
   },
   "version": "1.0"

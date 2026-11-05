@@ -40,7 +40,7 @@
         "en": {
           "stringUnit": {
             "state": "translated",
-            "value": "Choose the default scope for existing rules. You can mix repository and individual MR choices in the menu bar. MR overrides take precedence over repository and global settings."
+            "value": "Automate all relevant merge requests discovered from your activity, or only selected repositories and individual MRs. Individual MR choices override repository settings."
           }
         }
       }
@@ -51,7 +51,7 @@
         "en": {
           "stringUnit": {
             "state": "translated",
-            "value": "Scope & Presets"
+            "value": "Profiles"
           }
         }
       }
@@ -1767,7 +1767,7 @@
         "en": {
           "stringUnit": {
             "state": "translated",
-            "value": "Comments and replies the assistant drafts wait in Attention → Ready for your OK until you publish them, unless you enable publication of all comments or replies to AI feedback. Then MergeTether publishes them once they stop changing between two refreshes, including your own pending drafts on merge requests the assistant worked on. Automatic approval needs the assistant's no-objections verdict for the current commit, no pending drafts of yours, and every discussion resolved, including other reviewers'. MergeTether checks this on every refresh. Turn it off for a single merge request in Managed MRs."
+            "value": "Comments and replies the assistant drafts wait in Inbox until you publish them, unless you enable publication of all comments or replies to AI feedback. Then MergeTether publishes them once they stop changing between two refreshes, including your own pending drafts on merge requests the assistant worked on. Automatic approval needs the assistant's no-objections verdict for the current commit, no pending drafts of yours, and every discussion resolved, including other reviewers'. MergeTether checks this on every refresh. Turn it off for a single merge request in Managed MRs."
           }
         }
       }
@@ -1944,6 +1944,28 @@
           "stringUnit": {
             "state": "translated",
             "value": "On new commits or author replies, recheck your earlier findings. The assistant may resolve only threads you started and only after verifying the fix. Remaining issues become private reply drafts. Approval and publication use their separate settings."
+          }
+        }
+      }
+    },
+    "settings.automation.page.scope": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Scope"
+          }
+        }
+      }
+    },
+    "settings.automation.scope.immediate": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Scope changes are saved immediately. Other automation settings use Apply Changes."
           }
         }
       }

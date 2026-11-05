@@ -16,6 +16,7 @@ struct ManagedMergeRequestsView: View {
             return Row(item: item, target: target)
         }
         let repositories = repositoryTargets(scope)
+        let missing = individualTargets(scope).filter { target in !rows.contains { $0.target == target } }
         VStack(spacing: 0) {
             HStack {
                 Spacer()
@@ -31,7 +32,7 @@ struct ManagedMergeRequestsView: View {
             .padding(.vertical, 6)
 
             if showingAdd { addForm }
-            list(rows, repositories: repositories, scope: scope)
+            list(rows, repositories: repositories, missing: missing, scope: scope)
         }
     }
 
@@ -79,9 +80,17 @@ struct ManagedMergeRequestsView: View {
         }
     }
 
+    private func individualTargets(_ scope: MRAutomationScope) -> [MRAutomationScope.Target] {
+        guard let host = monitor.glab.resolvedHost, let username = monitor.glab.currentUsername else { return [] }
+        return scope.individualOverrides(host: host, username: username).sorted {
+            (scope.repositoryLabel(for: $0) ?? "", $0.projectID, $0.iid ?? 0)
+                < (scope.repositoryLabel(for: $1) ?? "", $1.projectID, $1.iid ?? 0)
+        }
+    }
+
     @ViewBuilder
-    private func list(_ rows: [Row], repositories: [MRAutomationScope.Target], scope: MRAutomationScope) -> some View {
-        if rows.isEmpty && repositories.isEmpty {
+    private func list(_ rows: [Row], repositories: [MRAutomationScope.Target], missing: [MRAutomationScope.Target], scope: MRAutomationScope) -> some View {
+        if rows.isEmpty && repositories.isEmpty && missing.isEmpty {
             ContentUnavailableView {
                 Label { Text(.Menu.menuScopeEmpty) } icon: { Image(systemName: "bolt.circle") }
             } description: {
@@ -150,6 +159,20 @@ struct ManagedMergeRequestsView: View {
                             }
                         }
                         .padding(12)
+                        Divider()
+                    }
+                    ForEach(missing, id: \.self) { target in
+                        VStack(alignment: .leading, spacing: 6) {
+                            Text(verbatim: "!\(target.iid ?? 0)").font(.subheadline.weight(.semibold))
+                            if let label = scope.repositoryLabel(for: target) {
+                                RepositoryPathText(label)
+                            } else {
+                                Text(.Menu.menuAuthoredProject(target.projectID))
+                            }
+                            Text(.Menu.menuScopeNotOpen).foregroundStyle(.secondary)
+                            MRAutomationScopeMenu(settings: monitor.settings, target: target)
+                        }
+                        .font(.caption).padding(12)
                         Divider()
                     }
                 }

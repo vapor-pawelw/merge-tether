@@ -16,7 +16,7 @@ Everything on this page is optional. Without it, MergeTether is a plain GitLab t
 **When you are the reviewer**
 
 1. A review request lands in your to-dos. The assistant reviews the MR and saves its findings as private GitLab drafts.
-2. The drafts wait in **Attention → Ready for your OK**. Preview them, then **Publish comments**, or edit them in GitLab.
+2. The drafts wait in **Inbox**. Preview them, then **Publish comments**, or edit them in GitLab.
 3. New commits or new author replies after your comments trigger re-review in the same chat. The first poll establishes a baseline; each new reply is dispatched once, including across app restarts.
 4. With **Resolve my verified findings during re-review** on (the recommended default), the assistant checks each earlier concern against the current remote head. It resolves only threads whose first non-system note belongs to you, after verifying the fix. Unaddressed or uncertain findings stay open with private draft replies. Turning this option off leaves all discussion resolution to you.
 5. Once the assistant has no objections to the current commit and every discussion is resolved, MergeTether approves it.
@@ -24,7 +24,7 @@ Everything on this page is optional. Without it, MergeTether is a plain GitLab t
 **When you are the author**
 
 1. Review feedback arrives. The assistant implements warranted fixes in an isolated worktree, tests, commits and pushes them when follow-up push is enabled. A detached worktree protects other local checkouts; it still permits an authorized remote source-branch push.
-2. Before saving completion drafts, the assistant re-fetches the MR HEAD and verifies the actual remote source/test content. If follow-up push is off, pending or failed, that run's result stays in chat and no completion drafts are saved. After remote verification, replies wait in **Ready for your OK** or qualify for your chosen publication rule.
+2. Before saving completion drafts, the assistant re-fetches the MR HEAD and verifies the actual remote source/test content. If follow-up push is off, pending or failed, that run's result stays in chat and no completion drafts are saved. After remote verification, replies wait in **Inbox** or qualify for your chosen publication rule.
 3. MergeTether requests a re-review from the reviewers whose comments were addressed.
 4. Failed pipelines and conflicts become assistant tasks. Pipeline fixes wait for your handoff confirmation.
 5. When every merge check passes, MergeTether can merge the MR for you (off by default).
@@ -39,7 +39,7 @@ Assistant tasks are saved locally before they are handed to the desktop. Codex p
 
 For native Codex dispatch, choose **Install MergeTether Plugin** in onboarding or **Settings → Automation**. MergeTether detects an existing installation so it does not install a second copy. The installer configures the local queue relay path. The bundled plugin uses Python 3 from Xcode or the macOS Command Line Tools.
 
-In MergeTether, enable **Use a Codex listener for automatic GUI chats**, then choose **Open Setup Chat** from **Attention**. Send the prepared message in Codex and confirm the proposed local schedule. The plugin checks the local queue every five minutes and places new chats in a sidebar section named `[MT] <repository>` when Codex makes its sidebar tools available. Sections are created on demand. The **MergeTether** section holds the listener. With reuse enabled, it appends related events to the same chat without changing its location. Review and follow-up chats use local glab to save private GitLab drafts. Verified follow-up fixes on your own MRs are committed from an isolated worktree and pushed to the source branch. Jobs wait while Codex is closed, and its tool permissions still apply. If a long-lived listener loses its MCP connection, it can use the installed relay’s JSON-RPC subprocess transport; chats still use native desktop tools, and uncertain claims are never retried.
+In MergeTether, enable **Use a Codex listener for automatic GUI chats**, then choose **Open Setup Chat** from **Inbox**. Send the prepared message in Codex and confirm the proposed local schedule. The plugin checks the local queue every five minutes and places new chats in a sidebar section named `[MT] <repository>` when Codex makes its sidebar tools available. Sections are created on demand. The **MergeTether** section holds the listener. With reuse enabled, it appends related events to the same chat without changing its location. Review and follow-up chats use local glab to save private GitLab drafts. Verified follow-up fixes on your own MRs are committed from an isolated worktree and pushed to the source branch. Jobs wait while Codex is closed, and its tool permissions still apply. If a long-lived listener loses its MCP connection, it can use the installed relay’s JSON-RPC subprocess transport; chats still use native desktop tools, and uncertain claims are never retried.
 
 MergeTether warns in the menu bar if Codex is closed, the plugin has never checked the queue, or its last check is over 15 minutes old. A handoff that remains unconfirmed for over 15 minutes also raises a warning. If you already use the copied-prompt listener, disable its schedule before migrating; the old listener does not report health.
 
@@ -47,10 +47,10 @@ MergeTether warns in the menu bar if Codex is closed, the plugin has never check
 
 **Settings → Automation → Assistant → Human checkpoint**
 
-- **Publish comments without confirmation** (off by default). When off, drafts wait in **Ready for your OK**, except replies covered by the AI-feedback rule below. When on, MergeTether publishes drafts once they stop changing between two refreshes, then carries on with the MR. This also publishes your own pending drafts on MRs the assistant worked on, because GitLab cannot tell them apart.
+- **Publish comments without confirmation** (off by default). When off, drafts wait in **Inbox**, except replies covered by the AI-feedback rule below. When on, MergeTether publishes drafts once they stop changing between two refreshes, then carries on with the MR. This also publishes your own pending drafts on MRs the assistant worked on, because GitLab cannot tell them apart.
 - **Automatically publish replies to AI feedback** (on by default, including migration; a prior AI-package opt-out is preserved). Applies to managed MRs with assistant activity. Verified GitLab Duo feedback qualifies directly. Feedback posted by humans requires a very-high-confidence assessment from the assistant, with concrete evidence tied to the source comment ID and exact body hash. This is a heuristic, not proof of AI authorship; uncertain comments remain drafts. Editing the source invalidates the assessment. A new human follow-up in the same discussion needs its own assessment. Only individual replies are published; unrelated comments remain pending. Automatic publication, including publish-all, leaves drafts containing slash commands or discussion resolution for manual review. Publishing all comments overrides this narrower option. The setting also applies to your own replies on MRs the assistant worked on: GitLab cannot identify which assistant wrote a draft.
 - Before publishing, MergeTether fetches the drafts again. If they changed since you looked, nothing is sent.
-- Use **Publish comments** on the Attention card to publish the displayed review and immediately remove its draft blocker. If you publish in GitLab instead, the open Attention tab checks pending drafts every five seconds (plus request time), without waiting for the full polling interval. Other blockers keep the MR visible. Publication immediately rechecks eligibility for automatic re-review.
+- Use **Publish comments** on the Inbox card to publish the displayed review and immediately remove its draft blocker. If you publish in GitLab instead, the open Inbox checks pending drafts every five seconds (plus request time), without waiting for the full polling interval. Other blockers keep the MR visible. Publication immediately rechecks eligibility for automatic re-review.
 
 ## Remote proof for author follow-ups
 
@@ -76,7 +76,7 @@ their current session has not loaded the updated plugin tools.
 Automatic publishers verify the account, latest run, current follow-up permission,
 source branch, remote HEAD, file content and draft body again. New runs, edits,
 head changes, missing evidence and local-only corrections keep replies private,
-even with publish-all or AI-only publication enabled. Attention explains when
+even with publish-all or AI-only publication enabled. Inbox explains when
 remote verification is missing. Explicit manual publication remains available;
 existing drafts are never deleted or rewritten by the gate. Review-only drafts
 on other authors' MRs retain their existing publication rules.
@@ -87,20 +87,26 @@ reply claims to that content remain the assistant's responsibility. GitLab does
 not offer a conditional draft-publication endpoint, so another push/edit after the
 last check remains a small race window; checks are repeated immediately before sending.
 
-## What belongs in Attention
+## What belongs in Inbox
 
-Unmanaged MRs have an **Add to managed** action. Attention filters reasons, not
+The menu-bar count includes GitLab to-dos plus additional actions requiring you, with the same reason counted once. An unrelated to-do on an MR does not hide pending publication or ownership confirmation. Routine delivery history does not increase the count.
+
+Unmanaged MRs have an **Add to managed** action. Inbox filters reasons, not
 entire MRs: an enabled assistant workflow hides the reasons it handles while
 manual publication, pipeline ownership confirmation, failed tasks and uncertain
 re-review results remain visible. Conflicts are hidden only on managed, open,
 non-draft MRs you author when conflict tasks are enabled. Pipeline and feedback
 rules respect repository, target branch and label filters. The original reasons
 are retained; pausing an MR or disabling the relevant rule reveals them again
-without waiting for another GitLab poll. Managed MRs still shows the MR's status.
+without waiting for another GitLab poll. Merge Requests still shows the MR's status.
 
 Review verdicts include a fingerprint of the discussion text. New or edited
 comments require a fresh review even at the same commit; resolving an unchanged
 discussion alone does not invalidate a finished review.
+
+Merge Requests is a status browser: **Own** includes all your open MRs regardless of automation scope; **Reviewed** includes managed open MRs by other authors. Both offer existing assistant chat links. Proposed actions stay in Inbox. Add MR in Reviewed accepts a URL, or a number with an explicitly selected repository; adding it enables that MR under current automation settings.
+
+Manage global scope, repository and MR overrides in **Settings → Automation → Scope**. These changes save immediately; other automation pages use **Apply Changes**. Paused, unavailable and closed MR overrides remain editable there. Merged MRs leave the active lists without archiving their assistant chats. History records delivery separately from execution: a confirmed GUI delivery is not a completion signal.
 
 ## Automatic approval
 
@@ -111,7 +117,7 @@ discussion alone does not invalidate a finished review.
 - every discussion is resolved, including other reviewers',
 - you have not approved yet, and the MR is in your automation scope.
 
-MergeTether checks this on every refresh, so an MR is approved as soon as someone else's thread gets resolved. Approval is pinned to the checked commit, so GitLab refuses it if new commits arrived in the meantime. Turn it off for a single merge request with the **Approve automatically** checkbox in **Managed MRs**; that MR then shows an **Approve** button in **Ready for your OK** instead.
+MergeTether checks this on every refresh, so an MR is approved as soon as someone else's thread gets resolved. Approval is pinned to the checked commit, so GitLab refuses it if new commits arrived in the meantime. Turn it off for a single merge request with the **Approve automatically** checkbox in **Settings → Automation → Scope**; that MR then shows an **Approve** button in **Inbox** instead.
 
 ## Assistants: Codex and Claude
 
@@ -124,7 +130,7 @@ MergeTether checks this on every refresh, so an MR is approved as soon as someon
 
 Both plugins share a small local relay and use Python 3 from Xcode or the macOS Command Line Tools. Assistant tasks are saved locally before they are handed to the desktop, and they wait while the desktop app is closed.
 
-**Codex listener.** Enable **Use a Codex listener for automatic GUI chats**, then choose **Open Setup Chat** from **Attention**. Send the prepared message in Codex and confirm the proposed local schedule. MergeTether warns in the menu bar if Codex is closed, the plugin has never checked the queue, or its last check is over 15 minutes old. A handoff that remains unconfirmed for over 15 minutes also raises a warning. If you already use the copied-prompt listener, disable its schedule before migrating; the old listener does not report health.
+**Codex listener.** Enable **Use a Codex listener for automatic GUI chats**, then choose **Open Setup Chat** from **Inbox**. Send the prepared message in Codex and confirm the proposed local schedule. MergeTether warns in the menu bar if Codex is closed, the plugin has never checked the queue, or its last check is over 15 minutes old. A handoff that remains unconfirmed for over 15 minutes also raises a warning. If you already use the copied-prompt listener, disable its schedule before migrating; the old listener does not report health.
 
 **Claude.** Claude Desktop does not let other apps send a prompt on your behalf, so the first event for an MR opens a prefilled draft. When you send it, the session links itself to the MR, and later events for that MR reopen the same session with the prompt on the clipboard.
 
@@ -138,7 +144,7 @@ Both plugins share a small local relay and use Python 3 from Xcode or the macOS 
 | Conflict | The recommended package turns conflict tasks on; otherwise they are off. Preparation asks the assistant to suggest a resolution. | A source-branch push requires a separate toggle, tool access and a matching project. The assistant follows your configured permissions. A request to stop dispatching future tasks cannot revoke tools from a task already running. |
 | Merge | Auto-merge is off. | It requires a listed project, your own MR, required approvals, resolved discussions enforced by GitLab, a green pipeline when one exists, and the checked source SHA. If configured tools or scripts can act on the project, or a conflict task was started on the MR, auto-merge also requires a verified approval-reset policy. |
 | To-do acknowledgement and shell | Manual actions mark the to-do done when the action succeeds. The recommended assistant package also marks automatic to-dos done after delivery. | Scripts require listed projects and run with the macOS account's permissions. Unfinished attempts are recorded before dispatch to avoid rerunning an action after a restart. |
-| Publication, approval and discussion resolution | Drafts wait in **Ready for your OK**, except replies covered by the default AI-feedback publication rule. Approval happens automatically only after a no-objections verdict for the current commit, with no pending drafts and every discussion resolved. Requesting changes and resolving someone else's discussion are never automated. | **Publish comments without confirmation** sends drafts once they settle. Turn off automatic approval globally or per MR in **Managed MRs**. The installed MR skill governs resolution of your own review discussions. |
+| Publication, approval and discussion resolution | Drafts wait in **Inbox**, except replies covered by the default AI-feedback publication rule. Approval happens automatically only after a no-objections verdict for the current commit, with no pending drafts and every discussion resolved. Requesting changes and resolving someone else's discussion are never automated. | **Publish comments without confirmation** sends drafts once they settle. Turn off automatic approval globally or per MR in **Settings → Automation → Scope**. The installed MR skill governs resolution of your own review discussions. |
 
 ## What the assistant sees
 
