@@ -117,7 +117,7 @@ Manage global scope, repository and MR overrides in **Settings → Automation �
 - every discussion is resolved, including other reviewers',
 - you have not approved yet, and the MR is in your automation scope.
 
-MergeTether checks this on every refresh, so an MR is approved as soon as someone else's thread gets resolved. Approval is pinned to the checked commit, so GitLab refuses it if new commits arrived in the meantime. Turn it off for a single merge request with the **Approve automatically** checkbox in **Settings → Automation → Scope**; that MR then shows an **Approve** button in **Inbox** instead.
+MergeTether checks this on every refresh, so an MR is approved as soon as someone else's thread gets resolved. Approval is pinned to the checked commit, so GitLab refuses it if new commits arrived in the meantime. Turn it off for a single merge request with the **Approve automatically** checkbox in **Merge Requests → Reviewed** (or **Settings → Automation → Scope**); that MR then shows an **Approve** button in **Inbox** instead. Publishing the assistant's own drafts doesn't invalidate its verdict, but a new comment from anyone else does. If GitLab refuses an automatic approval, MergeTether stops retrying that commit and shows the **Approve** button.
 
 ## Assistants: Codex and Claude
 
@@ -144,7 +144,7 @@ Both plugins share a small local relay and use Python 3 from Xcode or the macOS 
 | Conflict | The recommended package turns conflict tasks on; otherwise they are off. Preparation asks the assistant to suggest a resolution. | A source-branch push requires a separate toggle, tool access and a matching project. The assistant follows your configured permissions. A request to stop dispatching future tasks cannot revoke tools from a task already running. |
 | Merge | Auto-merge is off. | It requires a listed project, your own MR, required approvals, resolved discussions enforced by GitLab, a green pipeline when one exists, and the checked source SHA. If configured tools or scripts can act on the project, or a conflict task was started on the MR, auto-merge also requires a verified approval-reset policy. |
 | To-do acknowledgement and shell | Manual actions mark the to-do done when the action succeeds. The recommended assistant package also marks automatic to-dos done after delivery. | Scripts require listed projects and run with the macOS account's permissions. Unfinished attempts are recorded before dispatch to avoid rerunning an action after a restart. |
-| Publication, approval and discussion resolution | Drafts wait in **Inbox**, except replies covered by the default AI-feedback publication rule. Approval happens automatically only after a no-objections verdict for the current commit, with no pending drafts and every discussion resolved. Requesting changes and resolving someone else's discussion are never automated. | **Publish comments without confirmation** sends drafts once they settle. Turn off automatic approval globally or per MR in **Settings → Automation → Scope**. The installed MR skill governs resolution of your own review discussions. |
+| Publication, approval and discussion resolution | Drafts wait in **Inbox**, except replies covered by the default AI-feedback publication rule. Approval happens automatically only after a no-objections verdict for the current commit, with no pending drafts and every discussion resolved. Requesting changes and resolving someone else's discussion are never automated. | **Publish comments without confirmation** sends drafts once they settle. Turn off automatic approval globally, or per MR in **Merge Requests → Reviewed**. The installed MR skill governs resolution of your own review discussions. |
 
 ## What the assistant sees
 
@@ -177,3 +177,25 @@ listener running without a sandbox, or a permissive CLI config, does not prove
 that a new delegated chat inherits that mode. If Codex creates a chat in Ask for
 approval, select the desired mode in that chat. MergeTether does not silently
 change Codex’s private settings or replace a waiting chat to avoid its approvals.
+
+## Verified Codex template (beta)
+
+Codex can start delegated `create_thread` chats in a restricted runtime even when
+its UI and saved defaults say Full access. The template route uses a clean native
+GUI chat and `fork_thread` in the same directory for new MRs. It does not modify
+Codex permission settings or grant access through the relay. Setup verifies the
+selected effective runtime with a harmless read-only probe before recording the
+native template ID. This is an experimental workaround, not a guarantee across
+Codex updates; existing restricted chats keep their actual permissions.
+
+Use **Settings → Automation → Assistant → Use a verified permission template for
+new Codex chats (beta)** to opt out. Existing MR chats are reused without being
+forked, moved or replaced. The template stays idle and contains no MR work.
+A confirmed delivery remains distinct from successful execution.
+
+A fresh listener heartbeat and an unconfirmed task delivery are separate states.
+A claim whose delivery is uncertain is retained for inspection, never retried
+blindly. The queue returns a short hash-bound instruction reference, so large
+prompts are not lost through command-output truncation.
+
+The native template registration is write-once: changing or repairing it requires **Reset template** in MergeTether settings. Reset removes only template routing metadata; it does not alter chat permissions or queued work. Every ordinary dispatch gets a separate scratch directory; source changes still use an isolated Git worktree.

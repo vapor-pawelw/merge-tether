@@ -1,4 +1,5 @@
 import Foundation
+import Darwin
 
 @MainActor
 enum CodexDesktopRelay {
@@ -19,6 +20,35 @@ enum CodexDesktopRelay {
     private static let gracePeriod: TimeInterval = 15 * 60
     static let directory = URL.homeDirectory
         .appending(path: "Library/Application Support/com.vaporpw.GitLabTodos/Codex Desktop Relay", directoryHint: .isDirectory)
+
+    static func templateURL(in directory: URL = directory) -> URL? {
+        struct Manifest: Decodable {
+            let version: Int
+            let threadID: UUID
+        }
+        guard let data = try? Data(contentsOf: directory.appending(path: "template.json")),
+              let manifest = try? JSONDecoder().decode(Manifest.self, from: data), manifest.version == 1
+        else { return nil }
+        return AssistantAutomationRunner.codexChatURL(manifest.threadID.uuidString)
+    }
+
+    static func resetTemplate(in directory: URL = directory) throws {
+        let path = directory.appending(path: "template.json").path
+        var metadata = stat()
+        guard path.withCString({ lstat($0, &metadata) }) == 0 else {
+            let code = errno
+            if code == ENOENT { return }
+            throw POSIXError(POSIXErrorCode(rawValue: code) ?? .EIO)
+        }
+        guard metadata.st_mode & S_IFMT != S_IFDIR else { throw POSIXError(.EISDIR) }
+        // unlink removes just this directory entry, including a symlink, and cannot
+        // recursively delete a directory if the entry changes after lstat.
+        guard path.withCString({ unlink($0) }) == 0 else {
+            let code = errno
+            if code == ENOENT { return }
+            throw POSIXError(POSIXErrorCode(rawValue: code) ?? .EIO)
+        }
+    }
 
     static func clearMergeRequestStatus(in directory: URL = directory) {
         try? FileManager.default.removeItem(at: directory.appending(path: "mr-status.json"))
@@ -67,6 +97,7 @@ enum CodexDesktopRelay {
         let prompt: String
         let conversationKey: String
         let reuse: Bool
+        let useTemplate: Bool
         let threadID: String?
         let model: CodexReviewModel?
         let thinking: CodexReviewThinking?
@@ -226,7 +257,7 @@ enum CodexDesktopRelay {
             let conversationKey = try encoder.encode(handoff.key).base64EncodedString()
             let reuse = settings.automation.reuseAssistantChats && !handoff.allowsPush
             let job = Job(id: handoff.id, title: handoff.title, prompt: handoff.prompt,
-                          conversationKey: conversationKey, reuse: reuse,
+                          conversationKey: conversationKey, reuse: reuse, useTemplate: settings.automation.codexUseTemplate,
                           threadID: reuse ? handoff.key.reusableChat(in: settings.assistantChats) : nil,
                           model: handoff.reviewModel, thinking: handoff.reviewThinking,
                           repository: handoff.repository)
@@ -312,7 +343,7 @@ enum CodexDesktopRelay {
             let encoder = JSONEncoder()
             encoder.outputFormatting = [.sortedKeys]
             let job = Job(id: handoff.id, title: handoff.title, prompt: handoff.prompt,
-                          conversationKey: try encoder.encode(handoff.key).base64EncodedString(), reuse: false,
+                          conversationKey: try encoder.encode(handoff.key).base64EncodedString(), reuse: false, useTemplate: false,
                           threadID: nil, model: nil, thinking: nil, repository: handoff.repository)
             try encoder.encode(job).write(to: folder.appending(path: handoff.id.uuidString.lowercased() + ".json"),
                                           options: [.atomic])

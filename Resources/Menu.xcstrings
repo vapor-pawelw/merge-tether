@@ -282,7 +282,7 @@
         "en": {
           "stringUnit": {
             "state": "translated",
-            "value": "A Codex handoff is still waiting for confirmation. Check the scheduled chat in Codex."
+            "value": "The listener is responding, but a task has no confirmed delivery yet. Open the MergeTether listener to inspect it."
           }
         }
       }
@@ -305,17 +305,6 @@
           "stringUnit": {
             "state": "translated",
             "value": "Codex is closed. Open it so the listener can pick up your queued tasks."
-          }
-        }
-      }
-    },
-    "menu.assistant.queue": {
-      "extractionState": "manual",
-      "localizations": {
-        "en": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "Assistant tasks"
           }
         }
       }
@@ -386,17 +375,6 @@
         }
       }
     },
-    "menu.assistant.enableListener": {
-      "extractionState": "manual",
-      "localizations": {
-        "en": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "Enable the MergeTether plugin listener in Automation settings to dispatch this task automatically."
-          }
-        }
-      }
-    },
     "menu.assistant.openCodexDraft": {
       "extractionState": "manual",
       "localizations": {
@@ -441,28 +419,6 @@
         }
       }
     },
-    "menu.assistant.queueDraft": {
-      "extractionState": "manual",
-      "localizations": {
-        "en": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "Queue for Codex Plugin"
-          }
-        }
-      }
-    },
-    "menu.gitLabTodoGroup": {
-      "extractionState": "manual",
-      "localizations": {
-        "en": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "GitLab To-Dos"
-          }
-        }
-      }
-    },
     "menu.attention.tab": {
       "extractionState": "manual",
       "localizations": {
@@ -470,17 +426,6 @@
           "stringUnit": {
             "state": "translated",
             "value": "Attention"
-          }
-        }
-      }
-    },
-    "menu.attention.empty": {
-      "extractionState": "manual",
-      "localizations": {
-        "en": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "Nothing needs attention"
           }
         }
       }
@@ -738,17 +683,6 @@
         }
       }
     },
-    "menu.attention.title.%lld": {
-      "extractionState": "manual",
-      "localizations": {
-        "en": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "Needs attention (%lld)"
-          }
-        }
-      }
-    },
     "menu.attention.draftSection": {
       "extractionState": "manual",
       "localizations": {
@@ -826,17 +760,6 @@
         }
       }
     },
-    "menu.attention.handoffs.%lld": {
-      "extractionState": "manual",
-      "localizations": {
-        "en": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "Review pipeline handoffs (%lld)"
-          }
-        }
-      }
-    },
     "menu.workflow.activity.result": {
       "extractionState": "manual",
       "localizations": {
@@ -877,17 +800,6 @@
           "stringUnit": {
             "state": "translated",
             "value": "No workflow activity"
-          }
-        }
-      }
-    },
-    "menu.workflow.activity.tab": {
-      "extractionState": "manual",
-      "localizations": {
-        "en": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "Workflow Activity"
           }
         }
       }
@@ -1277,17 +1189,6 @@
         }
       }
     },
-    "menu.authored.tab": {
-      "extractionState": "manual",
-      "localizations": {
-        "en": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "My Merge Requests"
-          }
-        }
-      }
-    },
     "menu.authored.targetBranch.%@": {
       "extractionState": "manual",
       "localizations": {
@@ -1295,17 +1196,6 @@
           "stringUnit": {
             "state": "translated",
             "value": "Into %@"
-          }
-        }
-      }
-    },
-    "menu.authored.todosTab": {
-      "extractionState": "manual",
-      "localizations": {
-        "en": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "To-Dos"
           }
         }
       }
@@ -1464,28 +1354,6 @@
         }
       }
     },
-    "menu.empty.subtitle": {
-      "extractionState": "manual",
-      "localizations": {
-        "en": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "Nothing needs your attention."
-          }
-        }
-      }
-    },
-    "menu.empty.title": {
-      "extractionState": "manual",
-      "localizations": {
-        "en": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "Inbox zero"
-          }
-        }
-      }
-    },
     "menu.error.automation.%lld": {
       "extractionState": "manual",
       "localizations": {
@@ -1574,17 +1442,6 @@
         }
       }
     },
-    "menu.footer.pendingCount.%lld": {
-      "extractionState": "manual",
-      "localizations": {
-        "en": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "%lld pending"
-          }
-        }
-      }
-    },
     "menu.header.neverUpdated": {
       "extractionState": "manual",
       "localizations": {
@@ -1651,17 +1508,6 @@
         }
       }
     },
-    "menu.authored.tabShort": {
-      "extractionState": "manual",
-      "localizations": {
-        "en": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "My MRs"
-          }
-        }
-      }
-    },
     "menu.workflow.activity.tabShort": {
       "extractionState": "manual",
       "localizations": {
@@ -1691,39 +1537,6 @@
           "stringUnit": {
             "state": "translated",
             "value": "Undo"
-          }
-        }
-      }
-    },
-    "menu.footer.attentionCount.%lld": {
-      "extractionState": "manual",
-      "localizations": {
-        "en": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "Needs attention: %lld"
-          }
-        }
-      }
-    },
-    "menu.footer.authoredSummary.%lld.%lld": {
-      "extractionState": "manual",
-      "localizations": {
-        "en": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "Ready to merge: %1$lld · Blocked: %2$lld"
-          }
-        }
-      }
-    },
-    "menu.footer.handoffCount.%lld": {
-      "extractionState": "manual",
-      "localizations": {
-        "en": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "Awaiting handoff: %lld"
           }
         }
       }
@@ -1987,7 +1800,7 @@
         "en": {
           "stringUnit": {
             "state": "translated",
-            "value": "Approve once the assistant has no objections to the current commit and every discussion is resolved."
+            "value": "Approve once the assistant has no objections to the latest commit and every discussion is resolved."
           }
         }
       }
@@ -2020,7 +1833,7 @@
         "en": {
           "stringUnit": {
             "state": "translated",
-            "value": "Automatic publication paused: follow-up replies need verified fixes on the current remote MR head."
+            "value": "Not published automatically yet: the fixes these replies describe aren't verified on GitLab. You can still publish them yourself."
           }
         }
       }
@@ -2175,6 +1988,28 @@
           "stringUnit": {
             "state": "translated",
             "value": "%lld own · %lld reviewed"
+          }
+        }
+      }
+    },
+    "menu.mr.automationActive": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Automation scope: active"
+          }
+        }
+      }
+    },
+    "menu.mr.automationPaused": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Automation scope: paused"
           }
         }
       }

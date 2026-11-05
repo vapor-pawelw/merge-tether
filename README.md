@@ -15,9 +15,10 @@ Triage reviews, see what blocks a merge, and hand routine follow-ups to Codex or
 
 ## A desk for your merge requests
 
-- **Inbox:** GitLab to-dos and additional actions requiring your attention, without repeating the same reason. Preview and publish drafts, confirm handoffs, or open the MR. Draft MRs stay at the bottom.
+- **Inbox:** GitLab to-dos and additional actions requiring your attention, without repeating the same reason. Comments and approvals waiting for your OK come first under **Ready for your OK**. Preview and publish drafts, confirm handoffs, or open the MR. Draft MRs stay at the bottom.
 - **Merge Requests → Own:** all your open MRs, their merge readiness and blockers, and existing Codex or Claude chat links.
-- **Merge Requests → Reviewed:** managed open MRs by other authors, with status and chat links. Add an MR by URL, or by its number and repository, to include it in automation.
+- **Merge Requests → Reviewed:** managed open MRs by other authors, with status, chat links and a per-MR **Approve automatically** switch. Add an MR by URL, or by its number and repository, to include it in automation.
+- **Merge Requests → Activity:** what automation did on its own: workflow events, prepared tasks and pipeline handoffs.
 - **Settings → Automation → Scope:** automate all relevant discovered MRs, selected repositories, individual MRs, or a mixture. Pause items without losing their assistant chats. Delivery and workflow history live here too.
 
 The menu-bar count includes to-dos and additional actions requiring you, including assistant setup or manual delivery. Routine queued and delivered events do not increase it. A delivery receipt confirms that the chat received work; it does not mean the assistant finished it.

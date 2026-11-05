@@ -6,12 +6,23 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 
 ## Unreleased
 
+### Fixed
+
+- Avoid a SwiftUI lazy-layout loop that can freeze Merge Requests.
+
 ### Changed
 
+- Add an optional verified native Codex template for new GUI chats, preserve existing MR chat identities, and isolate scratch files for every dispatch. Return compact delivery results so large instructions cannot be lost to output truncation.
+
+- Highlight each MR's automation scope, assistant chat and delivery status with larger, bold text and colored status icons.
 - Combine to-dos and actionable MR blockers in one deduplicated Inbox. Count only items requiring user attention, keeping draft MRs last and retaining distinct publication and ownership decisions.
 - Replace separate MR, managed and assistant tabs with Merge Requests → Own / Reviewed, read-only status and existing Codex/Claude chat links. Add specific reviewed MRs by URL or by repository and number.
 - Move scope controls and grouped delivery/workflow history into Automation settings; save scope changes immediately without overwriting them when applying assistant settings.
 - Preserve MR catalogs when an individual GitLab source fails and distinguish confirmed delivery from assistant completion.
+- Show comments and approvals waiting for your OK in their own group at the top of Inbox.
+- Add Merge Requests → Activity, and an Approve automatically switch on each reviewed MR.
+- Organize automation settings in a sidebar, starting with a Checkpoints page for the three decisions that affect other people, with shorter explanations.
+- Refresh at most every 30 seconds when opening the menu or switching tabs.
 
 - Deliver complete assistant instructions through a hash-bound local snapshot instead of relying on the listener to copy long prompts. Clarify that native Codex chat creation does not expose an execution-permission override.
 

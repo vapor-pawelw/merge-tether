@@ -121,6 +121,25 @@ class Queue:
     def receipt(self, job_id):
         return self.receipts / (job_id + ".json")
 
+    def dispatch_template(self):
+        record = read_object(self.root / "template.json")
+        if type(record.get("version")) is not int or record["version"] != 1:
+            return None
+        try:
+            return identifier(record.get("threadID"))
+        except ValueError:
+            return None
+
+    def record_dispatch_template(self, thread_id):
+        thread_id = identifier(thread_id)
+        with self.exclusive():
+            path = self.root / "template.json"
+            if os.path.lexists(path):
+                if self.dispatch_template() == thread_id:
+                    return
+                raise ValueError("To change or repair template routing, reset template in MergeTether settings first")
+            write_object(path, {"version": 1, "threadID": thread_id})
+
     def status(self):
         pending = claimed = 0
         for job in self.jobs.glob("*.json"):
@@ -130,7 +149,10 @@ class Queue:
                 claimed += 1
             else:
                 pending += 1
-        return {"pending": pending, "claimed": claimed}
+        result = {"pending": pending, "claimed": claimed}
+        if template := self.dispatch_template():
+            result["templateThreadID"] = template
+        return result
 
     def poll(self):
         self.root.mkdir(parents=True, exist_ok=True, mode=0o700)
@@ -219,21 +241,28 @@ class Queue:
                 write_object(claim / "job.json", metadata)
                 digest = hashlib.sha256(prompt.encode()).hexdigest()
                 instructions = claim / "instructions.json"
+                workspace = claim / "workspace"
+                workspace.mkdir(mode=0o700)
                 write_object(instructions, {"version": 1, "jobID": job_id, "title": title,
-                                            "prompt": prompt, "promptSHA256": digest})
+                                            "prompt": prompt, "promptSHA256": digest,
+                                            "workingDirectory": str(workspace)})
                 first_line = prompt.splitlines()[0]
                 link = first_line if len(first_line) <= 1000 and re.fullmatch(r"https?://[^\s<>]+", first_line) else title
                 bootstrap = (
                     f"{link}\n\n{title}\n\n"
                     "Continue this MergeTether task using its complete local instruction snapshot. "
                     f"Read the JSON file {json.dumps(str(instructions), ensure_ascii=False)}. "
+                    f"Use workingDirectory {json.dumps(str(workspace), ensure_ascii=False)} for all scratch files and command cwd. "
+                    "Leave the template folder untouched. Source edits and their commands must use the isolated worktree required by the full prompt. "
                     f"Verify SHA-256 of the exact UTF-8 prompt field equals {digest}, then follow that full prompt "
                     "with the applicable installed skills and repository instructions. "
                     "Do not substitute a summary or omit its permission, verification or publication rules. "
                     "If the file is missing or the hash differs, stop and report the blocker. "
                     "This task does not authorize changing Codex permission settings."
                 )
-                result = {"id": job_id, "title": title, "prompt": prompt, "deliveryPrompt": bootstrap, "threadID": thread}
+                result = {"id": job_id, "title": title, "deliveryPrompt": bootstrap, "threadID": thread}
+                if thread is None and payload.get("useTemplate") is not False and (template := self.dispatch_template()):
+                    result["templateThreadID"] = template
                 if thread is None and (section := repository_section(payload)):
                     result["sectionName"] = section
                 for field in ("model", "thinking"):
@@ -468,6 +497,9 @@ TOOLS = [
     tool("claim_next", "Claim at most one queued MergeTether job for native Codex Desktop dispatch."),
     tool("record_dispatch", "Record confirmed native delivery. Never call after an uncertain result.",
          ("jobID", "threadID")),
+    tool("record_dispatch_template", "Record the UUID of an explicitly configured native Codex template chat for new-chat routing. "
+         "Registration is write-once; changing or repairing it requires resetting the template in MergeTether settings first. "
+         "This stores a routing preference only and does not change or verify Codex permissions.", ("threadID",)),
     tool("record_claude_session",
          "Link this Claude Code session to the MergeTether job named in its first message, so later events for the "
          "same merge request continue here. Pass this session's local_ ID.",
@@ -547,6 +579,9 @@ def handle(request, queue):
             output = queue.record_verdict(**args)
         elif name == "record_dispatch" and set(args) == {"jobID", "threadID"}:
             queue.record(args["jobID"], args["threadID"])
+            output = {"recorded": True}
+        elif name == "record_dispatch_template" and set(args) == {"threadID"}:
+            queue.record_dispatch_template(args["threadID"])
             output = {"recorded": True}
         elif name == "read_merge_request" and set(args) in (
             {"host", "projectID", "iid", "resource"}, {"host", "projectID", "iid", "resource", "page"}

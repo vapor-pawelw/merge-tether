@@ -15,17 +15,43 @@ struct ReviewVerdict: Codable, Equatable, Sendable {
     let verdict: Kind
     var discussionFingerprint: String? = nil
 
-    func approves(head: String, discussions: [GitLabMergeRequestDiscussion] = []) -> Bool {
+    /// `reviewerID` and `publishedDrafts` let comments the reviewer published from drafts after the
+    /// verdict keep it valid: the verdict is recorded while its drafts still wait for confirmation.
+    func approves(
+        head: String, discussions: [GitLabMergeRequestDiscussion] = [],
+        reviewerID: Int? = nil, publishedDrafts: Set<String> = []
+    ) -> Bool {
         guard version == 1 && verdict == .noObjections && headSHA == head,
-              let current = Self.fingerprint(discussions) else { return false }
+              Self.fingerprint(discussions) != nil else { return false }
         // Older receipts remain valid only when there is no discussion content to miss.
-        return discussionFingerprint.map { $0 == current } ?? discussions.flatMap(\.notes).allSatisfy { $0.system == true }
+        guard let recorded = discussionFingerprint else {
+            return discussions.flatMap(\.notes).allSatisfy { $0.system == true }
+        }
+        // Notes created after the verdict have the highest IDs, so try excluding the newest
+        // of the reviewer's own published drafts one at a time.
+        var ownPublished: [Int] = []
+        if let reviewerID {
+            for note in discussions.flatMap(\.notes) where note.system != true && note.author?.id == reviewerID {
+                guard let id = note.id, let body = note.body,
+                      publishedDrafts.contains(AICommentAssessmentStore.digest(body)) else { continue }
+                ownPublished.append(id)
+            }
+        }
+        ownPublished.sort(by: >)
+        var excluded: Set<Int> = []
+        if Self.fingerprint(discussions) == recorded { return true }
+        for noteID in ownPublished {
+            excluded.insert(noteID)
+            if Self.fingerprint(discussions, excluding: excluded) == recorded { return true }
+        }
+        return false
     }
 
-    static func fingerprint(_ discussions: [GitLabMergeRequestDiscussion]) -> String? {
+    static func fingerprint(_ discussions: [GitLabMergeRequestDiscussion], excluding excluded: Set<Int> = []) -> String? {
         var rows: [(Int, Int, String)] = []
         for note in discussions.flatMap(\.notes) where note.system != true {
             guard let id = note.id, id > 0, let authorID = note.author?.id, authorID > 0, let body = note.body else { return nil }
+            guard !excluded.contains(id) else { continue }
             rows.append((id, authorID, AICommentAssessmentStore.digest(body)))
         }
         let content = rows.sorted { $0 < $1 }.map { "\($0.0):\($0.1):\($0.2)\n" }.joined()
@@ -51,6 +77,32 @@ enum ReviewVerdictStore {
               verdict.host == host, verdict.projectID == projectID, verdict.iid == iid
         else { return nil }
         return verdict
+    }
+
+    nonisolated static func draftsURL(host: String, projectID: Int, iid: Int, in directory: URL = directory) -> URL {
+        directory.appending(path: host, directoryHint: .isDirectory).appending(path: "\(projectID)-\(iid).drafts.json")
+    }
+
+    /// Digests of the user's own drafts seen on this MR, so their published comments don't invalidate a verdict.
+    nonisolated static func seenDrafts(host: String, projectID: Int, iid: Int, in directory: URL = directory) -> Set<String> {
+        let url = draftsURL(host: host, projectID: projectID, iid: iid, in: directory)
+        guard let data = try? Data(contentsOf: url), data.count < 100_000,
+              let digests = try? JSONDecoder().decode([String].self, from: data) else { return [] }
+        return Set(digests)
+    }
+
+    nonisolated static func rememberDrafts(_ drafts: [GitLabDraftNote], host: String, projectID: Int, iid: Int, in directory: URL = directory) {
+        let known = seenDrafts(host: host, projectID: projectID, iid: iid, in: directory)
+        let new = drafts.compactMap(\.note).map(AICommentAssessmentStore.digest).filter { !known.contains($0) }
+        guard !new.isEmpty else { return }
+        let url = draftsURL(host: host, projectID: projectID, iid: iid, in: directory)
+        do {
+            try FileManager.default.createDirectory(at: url.deletingLastPathComponent(), withIntermediateDirectories: true,
+                                                    attributes: [.posixPermissions: 0o700])
+            try JSONEncoder().encode(Array(known.union(new)).sorted().suffix(500)).write(to: url, options: .atomic)
+        } catch {
+            Log.monitor.error("Could not remember review drafts: \(String(describing: error), privacy: .private)")
+        }
     }
 
     /// Added to every review prompt so MergeTether knows when a review of a given head is finished.

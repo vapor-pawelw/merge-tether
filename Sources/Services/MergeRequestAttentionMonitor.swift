@@ -146,6 +146,8 @@ final class MergeRequestAttentionMonitor {
     private var publishedDrafts: [Item.ID: [GitLabDraftNote]] = [:]
     /// Heads approved here, until GitLab's reviewer state catches up.
     private var approvedHeads: [Item.ID: String] = [:]
+    /// Commits GitLab refused to auto-approve; retried only after a new commit or a manual approval.
+    private var failedApprovalHeads: [Item.ID: String] = [:]
     private var openItems: [Item] = []
     /// Historical chats remain recorded after their MR closes. Recheck them only
     /// after an open listing makes them current again, or after an account change.
@@ -213,6 +215,7 @@ final class MergeRequestAttentionMonitor {
             previousDrafts = [:]
             publishedDrafts = [:]
             approvedHeads = [:]
+            failedApprovalHeads = [:]
             verifiedRemoteFiles = [:]
             user = nil
             self.account = account
@@ -372,6 +375,7 @@ final class MergeRequestAttentionMonitor {
             await withTaskGroup(of: (Item, Bool, ReReviewFeedback?).self) { group in
                 for item in batch {
                     let approvedHead = approvedHeads[item.id]
+                    let failedHead = failedApprovalHeads[item.id]
                     let autoApproves = item.mergeRequest.map {
                         autoApproveApplies(to: $0, host: host, username: account.username)
                     } ?? false
@@ -382,6 +386,10 @@ final class MergeRequestAttentionMonitor {
                         )
                         let draftCount = drafts?.count
                         if let drafts { updated.drafts = drafts }
+                        if let drafts, !drafts.isEmpty {
+                            ReviewVerdictStore.rememberDrafts(drafts, host: host, projectID: item.id.projectID,
+                                                              iid: item.id.iid, in: verdictDirectory)
+                        }
                         updated.canApprove = false
                         updated.autoApproveReady = false
                         if drafts?.isEmpty == true, !item.isAuthored,
@@ -393,10 +401,15 @@ final class MergeRequestAttentionMonitor {
                             let check = await Self.approvalCheck(request, user: user, host: host, glab: glab)
                             let currentVerdict = check.discussions.map {
                                 ReviewVerdictStore.verdict(host: host, projectID: request.projectID, iid: request.iid, in: verdictDirectory)?
-                                    .approves(head: head, discussions: $0) == true
+                                    .approves(head: head, discussions: $0, reviewerID: user.id,
+                                              publishedDrafts: ReviewVerdictStore.seenDrafts(
+                                                  host: host, projectID: request.projectID, iid: request.iid, in: verdictDirectory
+                                              )) == true
                             } ?? false
-                            updated.canApprove = currentVerdict && check.ownReady && !autoApproves
-                            updated.autoApproveReady = currentVerdict && check.ownReady && check.allResolved && autoApproves
+                            // After GitLab refused an automatic approval, offer the button instead of retrying.
+                            let automatic = autoApproves && head != failedHead
+                            updated.canApprove = currentVerdict && check.ownReady && !automatic
+                            updated.autoApproveReady = currentVerdict && check.ownReady && check.allResolved && automatic
                         }
                         let hasReplies = (drafts ?? item.drafts).contains { $0.discussionID != nil }
                         let discussions = if item.authoredRequest != nil || hasReplies {
@@ -442,7 +455,7 @@ final class MergeRequestAttentionMonitor {
                         let run = FollowUpVerificationStore.latestRun(for: work, username: user.username, settings: settings)
                         if let run { FollowUpVerificationStore.register(run, pushAllowed: settings.automation.allowFollowUpPush, in: followUpDirectory) }
                         let receipt = FollowUpVerificationStore.receipt(work: work, username: user.username, in: followUpDirectory)
-                        item.awaitingRemoteVerification = !item.drafts.isEmpty && (!settings.automation.allowFollowUpPush || run?.followUpPushAllowed == false || item.drafts.contains { draft in
+                        item.awaitingRemoteVerification = !item.drafts.isEmpty && settings.automation.publishesAutomatically(any: item.drafts) && (!settings.automation.allowFollowUpPush || run?.followUpPushAllowed == false || item.drafts.contains { draft in
                             guard let run, let receipt, let request = item.mergeRequest else { return true }
                             return !receipt.covers(draft, request: request, host: host, user: user, runID: run.id)
                         })
@@ -774,7 +787,11 @@ final class MergeRequestAttentionMonitor {
             }
             let verdict = ReviewVerdictStore.verdict(host: host, projectID: id.projectID, iid: id.iid, in: verdictDirectory)
             guard current.state == "opened", current.draft != true, current.sha == head, current.author.id != user.id,
-                  drafts.isEmpty, verdict?.approves(head: head, discussions: discussions) == true,
+                  drafts.isEmpty,
+                  verdict?.approves(head: head, discussions: discussions, reviewerID: user.id,
+                                    publishedDrafts: ReviewVerdictStore.seenDrafts(
+                                        host: host, projectID: id.projectID, iid: id.iid, in: verdictDirectory
+                                    )) == true,
                   !requireAllResolved || (Self.allResolved(discussions)
                       && autoApproveApplies(to: current, host: host, username: account.username))
             else {
@@ -784,11 +801,13 @@ final class MergeRequestAttentionMonitor {
             }
             try await glab.approveMergeRequest(projectID: id.projectID, iid: id.iid, headSHA: head, host: host, userID: user.id)
             approvedHeads[id] = head
+            failedApprovalHeads[id] = nil
             updateItem(id) { $0.canApprove = false }
             confirmationStates[id] = nil
             return true
         } catch {
             confirmationStates[id] = .failed
+            if requireAllResolved { failedApprovalHeads[id] = head }
             Log.monitor.error("Could not approve merge request: \(String(describing: error), privacy: .private)")
             return false
         }
@@ -807,10 +826,13 @@ final class MergeRequestAttentionMonitor {
             if assistantWorks(username: user.username).contains(work) {
                 let run = FollowUpVerificationStore.latestRun(for: work, username: user.username, settings: settings)
                 let receipt = FollowUpVerificationStore.receipt(work: work, username: user.username, in: followUpDirectory)
-                item.awaitingRemoteVerification = item.awaitingRemoteVerification || !settings.automation.allowFollowUpPush || run?.followUpPushAllowed == false || item.drafts.contains { draft in
-                    guard let run, let receipt else { return true }
-                    return !receipt.covers(draft, request: request, host: account.host, user: user, runID: run.id)
-                }
+                // The warning only matters when something would otherwise be published without you.
+                item.awaitingRemoteVerification = settings.automation.publishesAutomatically(any: item.drafts) && (
+                    item.awaitingRemoteVerification || !settings.automation.allowFollowUpPush
+                        || run?.followUpPushAllowed == false || item.drafts.contains { draft in
+                            guard let run, let receipt else { return true }
+                            return !receipt.covers(draft, request: request, host: account.host, user: user, runID: run.id)
+                        })
             }
         }
         items.removeAll { $0.id == id }

@@ -98,14 +98,99 @@ class QueueTest(unittest.TestCase):
         job = self.queue.claim_next()
         self.assertEqual((job.get("model"), job.get("thinking")), ("gpt-6.1-sol", "high"))
 
+    def test_template_registration_is_exposed_validated_and_visible_to_setup(self):
+        tools = handle({"method": "tools/list"}, self.queue)["tools"]
+        registration = next((tool for tool in tools if tool["name"] == "record_dispatch_template"), None)
+        self.assertIsNotNone(registration)
+        self.assertEqual(registration["inputSchema"]["required"], ["threadID"])
+        self.assertFalse(registration["inputSchema"]["additionalProperties"])
+        thread = str(uuid.uuid4())
+        request = {"method": "tools/call", "params": {
+            "name": "record_dispatch_template", "arguments": {"threadID": thread.upper()}}}
+        self.assertFalse(handle(request, self.queue)["isError"])
+        self.assertEqual(json.loads((self.root / "template.json").read_text()), {"version": 1, "threadID": thread})
+        status = handle({"method": "tools/call", "params": {"name": "queue_status"}}, Queue(self.root))
+        self.assertEqual(json.loads(status["content"][0]["text"]), {
+            "pending": 0, "claimed": 0, "templateThreadID": thread,
+        })
+        for args in ({"threadID": "../not-a-thread"}, {"threadID": None},
+                     {"threadID": thread, "permissions": "full"}):
+            with self.subTest(args=args):
+                request["params"]["arguments"] = args
+                self.assertTrue(handle(request, self.queue)["isError"])
+                self.assertEqual(json.loads((self.root / "template.json").read_text())["threadID"], thread)
+
+    def test_configured_template_routes_only_new_chats_and_allows_explicit_opt_out(self):
+        template = str(uuid.uuid4())
+        (self.root / "template.json").write_text(json.dumps({"version": 1, "threadID": template}))
+        for index, fields in enumerate(({}, {"useTemplate": True}, {"useTemplate": False})):
+            with self.subTest(fields=fields):
+                self.job(reuse=False, conversationKey=f"review-{index}", repository="cards-api",
+                         model="gpt-6.1-sol", thinking="high", **fields)
+                job = self.queue.claim_next()
+                self.assertIsNone(job["threadID"])
+                if fields.get("useTemplate") is False:
+                    self.assertNotIn("templateThreadID", job)
+                else:
+                    self.assertEqual(job.get("templateThreadID"), template)
+                self.assertEqual(job["sectionName"], "[MT] cards-api")
+                self.assertEqual((job["model"], job["thinking"]), ("gpt-6.1-sol", "high"))
+                self.assertIn("deliveryPrompt", job)
+                self.assertNotIn("prompt", job)
+
+    def test_template_registration_is_idempotent_but_cannot_replace_existing_routing(self):
+        thread = str(uuid.uuid4())
+        self.queue.record_dispatch_template(thread)
+        path = self.root / "template.json"
+        original = path.read_bytes()
+        self.queue.record_dispatch_template(thread.upper())
+        self.assertEqual(path.read_bytes(), original)
+        with self.assertRaisesRegex(ValueError, "reset template in MergeTether settings first"):
+            self.queue.record_dispatch_template(str(uuid.uuid4()))
+        self.assertEqual(path.read_bytes(), original)
+
+    def test_template_registration_requires_gui_reset_of_unreadable_or_invalid_existing_metadata(self):
+        invalid = ["not json", "[]", "{}", json.dumps({"version": 2, "threadID": str(uuid.uuid4())}),
+                   json.dumps({"version": True, "threadID": str(uuid.uuid4())}),
+                   json.dumps({"version": 1, "threadID": "not-a-uuid"})]
+        path = self.root / "template.json"
+        for metadata in invalid:
+            with self.subTest(metadata=metadata):
+                path.write_text(metadata)
+                original = path.read_bytes()
+                result = handle({"method": "tools/call", "params": {
+                    "name": "record_dispatch_template", "arguments": {"threadID": str(uuid.uuid4())},
+                }}, self.queue)
+                self.assertTrue(result["isError"])
+                self.assertIn("reset template in MergeTether settings first", result["content"][0]["text"])
+                self.assertEqual(path.read_bytes(), original)
+
+    def test_missing_or_malformed_template_preserves_legacy_claim_and_status(self):
+        invalid = [None, "not json", [], {"version": 2, "threadID": str(uuid.uuid4())},
+                   {"version": True, "threadID": str(uuid.uuid4())},
+                   {"version": 1, "threadID": "not-a-uuid"}, {"version": 1}]
+        for index, template in enumerate(invalid):
+            with self.subTest(template=template):
+                path = self.root / "template.json"
+                if template is None:
+                    path.unlink(missing_ok=True)
+                else:
+                    path.write_text(template if isinstance(template, str) else json.dumps(template))
+                self.assertNotIn("templateThreadID", self.queue.status())
+                self.job(reuse=False, conversationKey=f"review-{index}")
+                self.assertNotIn("templateThreadID", self.queue.claim_next())
+
     def test_delivery_bootstrap_preserves_complete_instructions_after_job_withdrawal(self):
         import hashlib
         prompt = "https://gitlab.example.org/g/p/-/merge_requests/42\n\n" + "Pełne instrukcje — żadnego skracania.\n" * 500
         job_id = self.job(prompt=prompt)
         job = self.queue.claim_next()
         bootstrap = job.get("deliveryPrompt", "")
+        # The transport must stay small even when the immutable instructions are large.
+        self.assertNotIn("prompt", job)
+        self.assertLess(len(json.dumps(job)), 2500)
         self.assertTrue(bootstrap.startswith(prompt.splitlines()[0]))
-        self.assertLess(len(bootstrap), 1500)
+        self.assertLess(len(bootstrap), 2500)
         digest = hashlib.sha256(prompt.encode()).hexdigest()
         self.assertIn(digest, bootstrap)
         instructions = self.root / "claims" / job_id / "instructions.json"
@@ -118,7 +203,31 @@ class QueueTest(unittest.TestCase):
         self.queue.record(job_id, str(uuid.uuid4()))
         self.assertEqual(json.loads(instructions.read_text())["prompt"], prompt)
 
+    def test_each_claim_has_private_scratch_bound_to_its_instruction_snapshot(self):
+        import hashlib
+        import stat
+        prompt = "https://gitlab.example.org/g/p/-/merge_requests/42\n\nKeep the full instructions unchanged."
+        workspaces = []
+        for index in range(2):
+            self.job(reuse=False, conversationKey=f"isolated-{index}", prompt=prompt)
+            claim = self.queue.claim_next()
+            instructions = self.root / "claims" / claim["id"] / "instructions.json"
+            snapshot = json.loads(instructions.read_text())
+            workspace = pathlib.Path(snapshot.get("workingDirectory", ""))
+            self.assertEqual(workspace, instructions.parent / "workspace")
+            self.assertTrue(workspace.is_dir())
+            self.assertEqual(stat.S_IMODE(workspace.stat().st_mode), 0o700)
+            self.assertIn(json.dumps(str(workspace), ensure_ascii=False), claim["deliveryPrompt"])
+            self.assertIn("template folder untouched", claim["deliveryPrompt"])
+            self.assertEqual(snapshot["prompt"], prompt)
+            self.assertEqual(snapshot["promptSHA256"], hashlib.sha256(prompt.encode()).hexdigest())
+            self.assertNotIn("prompt", claim)
+            self.assertLess(len(claim["deliveryPrompt"]), 2500)
+            workspaces.append(workspace)
+        self.assertNotEqual(workspaces[0], workspaces[1])
+
     def test_merged_update_needs_capability_and_confirmed_chat(self):
+        (self.root / "template.json").write_text(json.dumps({"version": 1, "threadID": str(uuid.uuid4())}))
         thread = str(uuid.uuid4())
         path = self.root / "jobs" / (thread + ".json")
         path.write_text(json.dumps({
@@ -140,6 +249,7 @@ class QueueTest(unittest.TestCase):
         self.assertIsNone(self.queue.claim_next(allow_merged=True))
 
     def test_work_item_proposal_requires_a_compatible_listener(self):
+        (self.root / "template.json").write_text(json.dumps({"version": 1, "threadID": str(uuid.uuid4())}))
         thread = str(uuid.uuid4())
         key = base64.b64encode(json.dumps({"assistant": "codex", "work": {"iid": 42}}).encode()).decode()
         delivery = self.job(reuse=False, conversationKey=key)
@@ -159,6 +269,7 @@ class QueueTest(unittest.TestCase):
         self.assertIsNone(self.queue.claim_next(allow_merged=True, allow_work_item=True))
 
     def test_stack_title_can_change_and_then_clear_for_the_same_chat(self):
+        (self.root / "template.json").write_text(json.dumps({"version": 1, "threadID": str(uuid.uuid4())}))
         thread = str(uuid.uuid4())
         key = base64.b64encode(json.dumps({"assistant": "codex", "work": {"iid": 42}}).encode()).decode()
         links = self.root / "linked-chats"
@@ -216,6 +327,7 @@ class QueueTest(unittest.TestCase):
         self.assertEqual(result["data"][0]["notes"][0]["body"], body)
 
     def test_claim_then_reuse_confirmed_chat(self):
+        (self.root / "template.json").write_text(json.dumps({"version": 1, "threadID": str(uuid.uuid4())}))
         first = self.job(repository="cards-api", title="[MT] A custom title")
         job = self.queue.claim_next()
         self.assertEqual(job["id"], first)
@@ -227,6 +339,11 @@ class QueueTest(unittest.TestCase):
         job = self.queue.claim_next()
         self.assertEqual((job["id"], job["threadID"]), (second, thread))
         self.assertNotIn("sectionName", job)
+        self.assertNotIn("templateThreadID", job)
+        snapshot = json.loads((self.root / "claims" / second / "instructions.json").read_text())
+        workspace = self.root / "claims" / second / "workspace"
+        self.assertEqual(snapshot.get("workingDirectory"), str(workspace))
+        self.assertTrue(workspace.is_dir())
         self.assertEqual(json.loads((self.root / "receipts" / (first + ".json")).read_text())["threadID"], thread)
 
     def test_read_job_reuses_legacy_preparation_chat_after_delivery(self):

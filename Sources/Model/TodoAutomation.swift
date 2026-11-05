@@ -111,10 +111,17 @@ struct AutomationSettings: Codable, Equatable, Sendable {
     var assistantWorkspace = ""
     var reuseAssistantChats = true
     var codexRelayEnabled = false
+    var codexUseTemplate = true
     var autoMergeEnabled = false
     var autoReReviewEnabled = false
-    /// Off by default: assistant drafts wait for the user in Attention → Ready for your OK.
+    /// Off by default: assistant drafts wait for the user in Inbox → Ready for your OK.
     var publishDraftsWithoutConfirmation = false
+
+    /// Whether any of these drafts could be published without the user's confirmation.
+    /// The AI-feedback rule only ever covers replies in existing threads.
+    func publishesAutomatically(any drafts: [GitLabDraftNote]) -> Bool {
+        publishDraftsWithoutConfirmation || (publishAIRepliesWithoutConfirmation && drafts.contains { $0.discussionID != nil })
+    }
     /// Publishes only verified replies to AI feedback; general findings still wait for confirmation.
     var publishAIRepliesWithoutConfirmation = true
     /// On by default: approve once the assistant has no objections and every discussion is resolved.
@@ -187,6 +194,7 @@ struct AutomationSettings: Codable, Equatable, Sendable {
         assistantWorkspace = try values.decodeIfPresent(String.self, forKey: .assistantWorkspace)
             ?? legacy.decodeIfPresent(String.self, forKey: .codexWorkspace) ?? assistantWorkspace
         codexRelayEnabled = try values.decodeIfPresent(Bool.self, forKey: .codexRelayEnabled) ?? false
+        codexUseTemplate = try values.decodeIfPresent(Bool.self, forKey: .codexUseTemplate) ?? true
         reuseAssistantChats = try values.decodeIfPresent(Bool.self, forKey: .reuseAssistantChats) ?? true
         autoMergeEnabled = try values.decodeIfPresent(Bool.self, forKey: .autoMergeEnabled) ?? false
         autoReReviewEnabled = try values.decodeIfPresent(Bool.self, forKey: .autoReReviewEnabled) ?? false
@@ -230,7 +238,7 @@ struct AutomationSettings: Codable, Equatable, Sendable {
     }
 
     private enum CodingKeys: String, CodingKey {
-        case assistant, assistantWorkspace, reuseAssistantChats, codexRelayEnabled, autoMergeEnabled, conflictTasksEnabled, reviewRequested, authorFeedback
+        case assistant, assistantWorkspace, reuseAssistantChats, codexRelayEnabled, codexUseTemplate, autoMergeEnabled, conflictTasksEnabled, reviewRequested, authorFeedback
         case allowAssistantTools, assistantToolProjects, packageDecision, workflowRules
         case autoMergeProjects, allowConflictPush, allowFollowUpPush, conflictPushProjects, autoReReviewEnabled, publishDraftsWithoutConfirmation, publishAIRepliesWithoutConfirmation, autoApproveEnabled, autoResolveOwnReviewThreads
         case codexReviewModel, codexReviewThinking, assistantDefaultsVersion, scope
@@ -244,12 +252,14 @@ struct AutomationSettings: Codable, Equatable, Sendable {
         let workspace = assistantWorkspace
         let reuse = reuseAssistantChats
         let relay = codexRelayEnabled && assistant == .codex
+        let useTemplate = codexUseTemplate
         let scope = scope
         self = AutomationSettings()
         self.assistant = assistant
         assistantWorkspace = workspace
         reuseAssistantChats = reuse
         codexRelayEnabled = relay
+        codexUseTemplate = useTemplate
         self.scope = scope
         packageDecision = .enabled
         enableAssistantDefaults()

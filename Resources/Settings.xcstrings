@@ -40,7 +40,7 @@
         "en": {
           "stringUnit": {
             "state": "translated",
-            "value": "Automate all relevant merge requests discovered from your activity, or only selected repositories and individual MRs. Individual MR choices override repository settings."
+            "value": "Automate every merge request you're involved in, or only selected repositories and MRs. A choice for a single MR overrides its repository."
           }
         }
       }
@@ -84,7 +84,7 @@
         "en": {
           "stringUnit": {
             "state": "translated",
-            "value": "Starting folder for tasks that use extra project tool access, such as conflict resolution. Leave it blank to use the assistant’s default location. Regular Codex review chats use their own workspace."
+            "value": "Folder for tasks that need project tools, like resolving conflicts. Leave empty to use the assistant's default."
           }
         }
       }
@@ -117,7 +117,7 @@
         "en": {
           "stringUnit": {
             "state": "translated",
-            "value": "After an AI follow-up on your open merge request, notify the people whose feedback was addressed once all replies are handled and drafts are published. GitLab may reset a previous approval when re-requesting review."
+            "value": "When the assistant has addressed someone's feedback on your MR and its replies are published, ask that person to review again. GitLab may reset their earlier approval."
           }
         }
       }
@@ -382,6 +382,83 @@
           "stringUnit": {
             "state": "translated",
             "value": "Manual Setup"
+          }
+        }
+      }
+    },
+    "settings.automation.codexTemplate": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Use a verified permission template for new chats (beta)"
+          }
+        }
+      }
+    },
+    "settings.automation.codexTemplateHelp": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "New Codex chats inherit the verified template’s access settings. Existing chats keep their own settings. MergeTether does not change Codex permissions."
+          }
+        }
+      }
+    },
+    "settings.automation.codexTemplateMissing": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "No verified template yet. Open Setup Chat in the MergeTether plugin to prepare one. Until then, new chats open normally and may ask for tool approval."
+          }
+        }
+      }
+    },
+    "settings.automation.codexTemplateOpen": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Open verified template chat"
+          }
+        }
+      }
+    },
+    "settings.automation.codexTemplateReset": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Reset template"
+          }
+        }
+      }
+    },
+    "settings.automation.codexTemplateResetHelp": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Forgets MergeTether’s saved template link so Setup can register another chat. Keeps existing chats, queued work and Codex permissions unchanged."
+          }
+        }
+      }
+    },
+    "settings.automation.codexTemplateResetFailed": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Could not reset the saved template. Check access to MergeTether’s local queue and try again."
           }
         }
       }
@@ -667,7 +744,7 @@
         "en": {
           "stringUnit": {
             "state": "translated",
-            "value": "Merges eligible merge requests you authored after required approvals, resolved discussions, and all GitLab merge checks pass. The project must require approvals and enforce discussion resolution."
+            "value": "Merge your MR once it's approved, discussions are resolved and the pipeline passes. The project must require approvals and resolved discussions."
           }
         }
       }
@@ -859,28 +936,6 @@
         }
       }
     },
-    "settings.automation.package.claude": {
-      "extractionState": "manual",
-      "localizations": {
-        "en": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "Use recommended settings for Claude Code"
-          }
-        }
-      }
-    },
-    "settings.automation.package.codex": {
-      "extractionState": "manual",
-      "localizations": {
-        "en": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "Use recommended settings for Codex"
-          }
-        }
-      }
-    },
     "settings.automation.package.help": {
       "extractionState": "manual",
       "localizations": {
@@ -943,28 +998,6 @@
           "stringUnit": {
             "state": "translated",
             "value": "Automation package"
-          }
-        }
-      }
-    },
-    "settings.automation.package.turnOff": {
-      "extractionState": "manual",
-      "localizations": {
-        "en": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "Turn Off All Automation"
-          }
-        }
-      }
-    },
-    "settings.automation.package.unavailable": {
-      "extractionState": "manual",
-      "localizations": {
-        "en": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "No supported assistant detected. Install Codex or Claude Code, or keep automation off."
           }
         }
       }
@@ -1745,7 +1778,7 @@
         "en": {
           "stringUnit": {
             "state": "translated",
-            "value": "Human checkpoint"
+            "value": "What needs your OK"
           }
         }
       }
@@ -1756,7 +1789,7 @@
         "en": {
           "stringUnit": {
             "state": "translated",
-            "value": "Publish comments without confirmation"
+            "value": "Publish comments without asking me"
           }
         }
       }
@@ -1767,7 +1800,7 @@
         "en": {
           "stringUnit": {
             "state": "translated",
-            "value": "Comments and replies the assistant drafts wait in Inbox until you publish them, unless you enable publication of all comments or replies to AI feedback. Then MergeTether publishes them once they stop changing between two refreshes, including your own pending drafts on merge requests the assistant worked on. Automatic approval needs the assistant's no-objections verdict for the current commit, no pending drafts of yours, and every discussion resolved, including other reviewers'. MergeTether checks this on every refresh. Turn it off for a single merge request in Managed MRs."
+            "value": "Everything else that reaches other people waits in Inbox until you confirm it."
           }
         }
       }
@@ -1778,7 +1811,7 @@
         "en": {
           "stringUnit": {
             "state": "translated",
-            "value": "Approve automatically when every comment is addressed and the assistant has no objections"
+            "value": "Approve merge requests automatically"
           }
         }
       }
@@ -1877,7 +1910,7 @@
         "en": {
           "stringUnit": {
             "state": "translated",
-            "value": "Each merge request gets one Claude Code session. The first event opens a new draft; later events reopen that session with the prompt copied, ready to paste. Claude Desktop doesn’t allow other apps to send a prompt automatically."
+            "value": "Each merge request gets one Claude session. Claude doesn't let other apps send prompts, so you press Send on the first task; later tasks reopen the session with the prompt ready to paste."
           }
         }
       }
@@ -1899,7 +1932,7 @@
         "en": {
           "stringUnit": {
             "state": "translated",
-            "value": "Includes verified GitLab Duo comments and human comments assessed by the assistant as AI-written with very high confidence. Uncertain cases stay as drafts. Applies only to managed MRs with assistant activity. Publishing all comments overrides this choice."
+            "value": "Only replies to GitLab Duo and to comments the assistant is very confident were AI-written. Anything uncertain waits for you."
           }
         }
       }
@@ -1910,7 +1943,7 @@
         "en": {
           "stringUnit": {
             "state": "translated",
-            "value": "Push verified follow-up fixes to my MR branches"
+            "value": "Let the assistant push fixes to my merge requests"
           }
         }
       }
@@ -1921,7 +1954,7 @@
         "en": {
           "stringUnit": {
             "state": "translated",
-            "value": "Independent of conflict-resolution push. When enabled: implement, test, commit, push, verify the remote MR head and file content, then save reply drafts. When off or a push is pending/failed, the follow-up stays in chat; its replies are not automatically published."
+            "value": "It commits and pushes tested fixes for reviewers' feedback to your branch. Off: fixes stay in the assistant chat."
           }
         }
       }
@@ -1943,7 +1976,7 @@
         "en": {
           "stringUnit": {
             "state": "translated",
-            "value": "On new commits or author replies, recheck your earlier findings. The assistant may resolve only threads you started and only after verifying the fix. Remaining issues become private reply drafts. Approval and publication use their separate settings."
+            "value": "After new commits, the assistant rechecks your earlier comments and resolves only your own threads it has verified as fixed."
           }
         }
       }
@@ -1966,6 +1999,50 @@
           "stringUnit": {
             "state": "translated",
             "value": "Scope changes are saved immediately. Other automation settings use Apply Changes."
+          }
+        }
+      }
+    },
+    "settings.automation.checkpoint.autoApproveHelp": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Once the assistant has no objections to the latest commit and every discussion is resolved. You can turn this off for a single MR in Merge Requests → Reviewed."
+          }
+        }
+      }
+    },
+    "settings.automation.checkpoint.publishHelp": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Off: the assistant's comments wait in Inbox for you. On: they're published as soon as the assistant finishes writing them."
+          }
+        }
+      }
+    },
+    "settings.automation.learnMore": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "How automation works, in detail"
+          }
+        }
+      }
+    },
+    "settings.automation.page.checkpoints": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Checkpoints"
           }
         }
       }

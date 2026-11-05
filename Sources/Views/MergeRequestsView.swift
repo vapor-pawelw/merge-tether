@@ -10,7 +10,7 @@ struct MergeRequestsView: View {
     @State private var isAdding = false
     @State private var addFailed = false
 
-    private enum Tab { case own, reviewed }
+    private enum Tab { case own, reviewed, activity }
 
     var body: some View {
         VStack(spacing: 0) {
@@ -18,6 +18,7 @@ struct MergeRequestsView: View {
                 Picker(selection: $selection) {
                     Text(.Menu.menuMrTabOwn).tag(Tab.own)
                     Text(.Menu.menuMrTabReviewed).tag(Tab.reviewed)
+                    Text(.Menu.menuWorkflowActivityTabShort).tag(Tab.activity)
                 } label: { Text(.Menu.menuMrTabOwn) }
                 .labelsHidden()
                 .pickerStyle(.segmented)
@@ -38,18 +39,33 @@ struct MergeRequestsView: View {
             .padding(.horizontal, 14)
             .padding(.vertical, 8)
 
+            if selection == .activity {
+                // What automation did on its own, so the autopilot is never a black box.
+                MergeWorkflowActivityView(entries: monitor.authoredMergeRequests.workflow.entries,
+                                          onHandoff: monitor.authoredMergeRequests.workflow.confirmPipelineHandoff)
+            } else {
+                list
+            }
+        }
+    }
+
+    @ViewBuilder
+    private var list: some View {
+        VStack(spacing: 0) {
             if showingAdd && selection == .reviewed { addForm }
             if hasError { staleBanner }
             if items.isEmpty {
                 emptyState
             } else {
                 ScrollView {
-                    LazyVStack(alignment: .leading, spacing: 0) {
+                    // Dynamic MR/history heights can trap lazy layout in a measurement loop on macOS.
+                    VStack(alignment: .leading, spacing: 0) {
                         ForEach(items) { item in
                             requestRow(item)
                             Divider()
                         }
                     }
+                    .frame(maxWidth: .infinity, alignment: .leading)
                 }
             }
         }
@@ -201,7 +217,35 @@ struct MergeRequestsView: View {
             assistantDetails(item)
                 .padding(.horizontal, 12)
                 .padding(.bottom, 10)
+            if selection == .reviewed, let target = autoApproveTarget(for: item) {
+                Toggle(isOn: autoApproveBinding(target)) { Text(.Menu.menuScopeAutoApprove) }
+                    .toggleStyle(.checkbox)
+                    .font(.caption)
+                    .help(Text(.Menu.menuScopeAutoApproveHelp))
+                    .padding(.horizontal, 12)
+                    .padding(.bottom, 10)
+            }
         }
+    }
+
+    /// Per-MR opt-out from automatic approval, shown where the MR is, not only in Settings.
+    private func autoApproveTarget(for item: MergeRequestAttentionMonitor.Item) -> MRAutomationScope.Target? {
+        guard monitor.settings.automation.autoApproveEnabled, let request = item.mergeRequest,
+              let host = monitor.glab.resolvedHost, let username = monitor.glab.currentUsername,
+              request.author.username != username,
+              monitor.settings.automation.scope.permits(request, host: host, username: username) else { return nil }
+        return MRAutomationScope.Target(host: host, username: username, projectID: item.id.projectID, iid: item.id.iid)
+    }
+
+    private func autoApproveBinding(_ target: MRAutomationScope.Target) -> Binding<Bool> {
+        Binding(
+            get: { !monitor.settings.autoApproveOptOuts.contains(target) },
+            set: { enabled in
+                if enabled { monitor.settings.autoApproveOptOuts.remove(target) }
+                else { monitor.settings.autoApproveOptOuts.insert(target) }
+                monitor.settings.save()
+            }
+        )
     }
 
     private func assistantDetails(_ item: MergeRequestAttentionMonitor.Item) -> some View {
@@ -209,9 +253,16 @@ struct MergeRequestsView: View {
         let group = monitor.assistantGroups.first {
             $0.id.host == monitor.glab.resolvedHost && $0.id.projectID == item.id.projectID && $0.id.iid == item.id.iid
         }
-        return VStack(alignment: .leading, spacing: 6) {
+        return VStack(alignment: .leading, spacing: 8) {
+            if let target = monitor.scopeTarget(projectID: item.id.projectID, iid: item.id.iid, url: item.url) {
+                let active = monitor.settings.automation.scope.resolve(target).active
+                assistantStatus(active ? .Menu.menuMrAutomationActive : .Menu.menuMrAutomationPaused,
+                                icon: active ? "bolt.circle.fill" : "pause.circle.fill",
+                                color: active ? .green : .orange)
+            }
             if links.isEmpty {
-                Text(.Menu.menuMrNoChat).foregroundStyle(.secondary)
+                assistantStatus(.Menu.menuMrNoChat, icon: "bubble.left.and.exclamationmark.bubble.right",
+                                color: .orange)
             } else {
                 HStack(spacing: 12) {
                     ForEach(links, id: \.id) { link in
@@ -220,14 +271,15 @@ struct MergeRequestsView: View {
                                 Text(link.assistant == .codex ? .Menu.menuMrChatCodex : .Menu.menuMrChatClaude)
                             } icon: { Image(systemName: "bubble.left.and.bubble.right") }
                         }
+                        .foregroundStyle(.tint)
                     }
                 }
             }
             if let group {
                 if group.pendingCount > 0 {
-                    Text(.Menu.menuMrPendingEvents(group.pendingCount)).foregroundStyle(.secondary)
+                    assistantStatus(.Menu.menuMrPendingEvents(group.pendingCount), icon: "clock.fill", color: .orange)
                 } else if group.deliveredCount > 0 {
-                    Text(.Menu.menuMrDelivered).foregroundStyle(.secondary)
+                    assistantStatus(.Menu.menuMrDelivered, icon: "checkmark.circle.fill", color: .green)
                 }
                 DisclosureGroup {
                     VStack(alignment: .leading, spacing: 8) {
@@ -245,9 +297,26 @@ struct MergeRequestsView: View {
                     }
                     .padding(.top, 5)
                 } label: { Text(.Menu.menuMrHistory) }
+                .font(.caption)
+                .fontWeight(.regular)
             }
         }
-        .font(.caption)
+        .font(.subheadline.weight(.semibold))
+        .foregroundStyle(.primary)
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .padding(10)
+        .background(.secondary.opacity(0.07), in: RoundedRectangle(cornerRadius: 8))
+    }
+
+    private func assistantStatus(_ title: LocalizedStringResource, icon: String, color: Color) -> some View {
+        Label {
+            Text(title)
+        } icon: {
+            Image(systemName: icon)
+                .foregroundStyle(color)
+                .accessibilityHidden(true)
+        }
+        .fixedSize(horizontal: false, vertical: true)
     }
 }
 

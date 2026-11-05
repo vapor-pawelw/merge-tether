@@ -7,39 +7,58 @@ struct AutomationSettingsTab: View {
 
     @State private var draft: AutomationSettings
     @State private var trigger: Trigger = .reviewRequested
-    @State private var page: Page = .assistant
+    @State private var page: Page = .checkpoints
     @State private var packageChoice: AutomationPackageChoice?
     @State private var confirmRecommendedReset = false
     @State private var isChoosingWorkspace = false
     @State private var showTemplates = false
+    @State private var templateSetupFailed = false
+    @State private var openingTemplateSetup = false
+    @State private var codexTemplateURL: URL?
+    @State private var templateResetFailed = false
 
     init(monitor: TodoMonitorService) {
         self.monitor = monitor
         _draft = State(initialValue: monitor.settings.automation)
+        _codexTemplateURL = State(initialValue: CodexDesktopRelay.templateURL())
     }
 
     var body: some View {
-        VStack(spacing: 0) {
-            Picker(selection: $page) {
+        // Eight pages don't fit a segmented control; a sidebar keeps every name readable.
+        HStack(spacing: 0) {
+            List(selection: $page) {
                 ForEach(Page.allCases, id: \.self) { page in
-                    Text(page.title).tag(page)
+                    Label { Text(page.title) } icon: { Image(systemName: page.symbol) }
+                        .tag(page)
                 }
-            } label: {
-                Text(.Settings.settingsAutomationTab)
             }
-            .labelsHidden()
-            .pickerStyle(.segmented)
-            .fixedSize()
-            .padding(.top, 12)
+            .listStyle(.sidebar)
+            .frame(width: 170)
 
+            Divider()
+
+            pageContent
+        }
+        .onChange(of: settings.automation.scope) { _, current in
+            draft.scope = current
+        }
+        .onReceive(NotificationCenter.default.publisher(for: NSApplication.didBecomeActiveNotification)) { _ in
+            codexTemplateURL = CodexDesktopRelay.templateURL()
+        }
+    }
+
+    @ViewBuilder
+    private var pageContent: some View {
+        VStack(spacing: 0) {
             if page == .scope {
                 AutomationScopeSettingsView(monitor: monitor)
             } else {
                 Form {
                     switch page {
+                    case .checkpoints:
+                        checkpointFields
                     case .assistant:
                         assistantFields
-                        checkpointFields
                     case .presets:
                         packageFields
                     case .workflow:
@@ -86,9 +105,6 @@ struct AutomationSettingsTab: View {
                 .background(.bar)
             }
         }
-        .onChange(of: settings.automation.scope) { _, current in
-            draft.scope = current
-        }
     }
 
     private var rule: Binding<AutomationRule> {
@@ -103,43 +119,46 @@ struct AutomationSettingsTab: View {
     }
 
     private var checkpointFields: some View {
-        Section {
-            Toggle(isOn: $draft.allowFollowUpPush) {
-                Text(.Settings.settingsAutomationFollowUpPush)
+        Group {
+            Section {
+                checkpointToggle($draft.publishDraftsWithoutConfirmation, .Settings.settingsAutomationCheckpointPublish,
+                                 help: .Settings.settingsAutomationCheckpointPublishHelp)
+                checkpointToggle($draft.autoApproveEnabled, .Settings.settingsAutomationCheckpointAutoApprove,
+                                 help: .Settings.settingsAutomationCheckpointAutoApproveHelp)
+                checkpointToggle($draft.allowFollowUpPush, .Settings.settingsAutomationFollowUpPush,
+                                 help: .Settings.settingsAutomationFollowUpPushHelp)
+            } header: {
+                Text(.Settings.settingsAutomationCheckpointSection)
+            } footer: {
+                Text(.Settings.settingsAutomationCheckpointHelp)
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
             }
-            .toggleStyle(.checkbox)
-            Text(.Settings.settingsAutomationFollowUpPushHelp)
+            Section {
+                checkpointToggle($draft.publishAIRepliesWithoutConfirmation, .Settings.settingsAutomationPublishAIReplies,
+                                 help: .Settings.settingsAutomationPublishAIRepliesHelp)
+                    .disabled(draft.publishDraftsWithoutConfirmation)
+                checkpointToggle($draft.autoResolveOwnReviewThreads, .Settings.settingsAutomationResolveOwnReviewThreads,
+                                 help: .Settings.settingsAutomationResolveOwnReviewThreadsHelp)
+            } footer: {
+                Link(destination: URL(string: "https://github.com/vapor-pawelw/merge-tether/blob/main/docs/automation.md")!) {
+                    Text(.Settings.settingsAutomationLearnMore)
+                }
+                .font(.caption)
+            }
+        }
+    }
+
+    private func checkpointToggle(
+        _ isOn: Binding<Bool>, _ title: LocalizedStringResource, help: LocalizedStringResource
+    ) -> some View {
+        VStack(alignment: .leading, spacing: 3) {
+            Toggle(isOn: isOn) { Text(title) }
+                .toggleStyle(.checkbox)
+            Text(help)
                 .font(.caption)
                 .foregroundStyle(.secondary)
-            Toggle(isOn: $draft.publishDraftsWithoutConfirmation) {
-                Text(.Settings.settingsAutomationCheckpointPublish)
-            }
-            .toggleStyle(.checkbox)
-            Toggle(isOn: $draft.publishAIRepliesWithoutConfirmation) {
-                Text(.Settings.settingsAutomationPublishAIReplies)
-            }
-            .toggleStyle(.checkbox)
-            .disabled(draft.publishDraftsWithoutConfirmation)
-            Text(.Settings.settingsAutomationPublishAIRepliesHelp)
-                .font(.caption)
-                .foregroundStyle(.secondary)
-            Toggle(isOn: $draft.autoResolveOwnReviewThreads) {
-                Text(.Settings.settingsAutomationResolveOwnReviewThreads)
-            }
-            .toggleStyle(.checkbox)
-            Text(.Settings.settingsAutomationResolveOwnReviewThreadsHelp)
-                .font(.caption)
-                .foregroundStyle(.secondary)
-            Toggle(isOn: $draft.autoApproveEnabled) {
-                Text(.Settings.settingsAutomationCheckpointAutoApprove)
-            }
-            .toggleStyle(.checkbox)
-        } header: {
-            Text(.Settings.settingsAutomationCheckpointSection)
-        } footer: {
-            Text(.Settings.settingsAutomationCheckpointHelp)
-                .font(.caption)
-                .foregroundStyle(.secondary)
+                .padding(.leading, 20)
         }
     }
 
@@ -250,6 +269,37 @@ struct AutomationSettingsTab: View {
                 Text(.Settings.settingsAutomationCodexRelayHelp)
                     .font(.caption)
                     .foregroundStyle(.secondary)
+                Toggle(isOn: $draft.codexUseTemplate) {
+                    Text(.Settings.settingsAutomationCodexTemplate)
+                }
+                .toggleStyle(.checkbox)
+                Text(.Settings.settingsAutomationCodexTemplateHelp)
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+                if draft.codexUseTemplate {
+                    if let url = codexTemplateURL {
+                        HStack {
+                            Link(destination: url) { Text(.Settings.settingsAutomationCodexTemplateOpen) }
+                            resetTemplateButton
+                        }
+                    } else {
+                        Text(.Settings.settingsAutomationCodexTemplateMissing)
+                            .font(.caption)
+                            .foregroundStyle(.secondary)
+                        Button {
+                            Task { await openTemplateSetup() }
+                        } label: { Text(.Menu.menuAssistantPluginSetup) }
+                        .disabled(openingTemplateSetup)
+                        resetTemplateButton
+                    }
+                    if templateSetupFailed {
+                        Text(.Menu.menuAssistantSetupOpenFailed).font(.caption).foregroundStyle(.orange)
+                    }
+                    if templateResetFailed {
+                        Text(.Settings.settingsAutomationCodexTemplateResetFailed)
+                            .font(.caption).foregroundStyle(.orange)
+                    }
+                }
             } header: {
                 Text(.Settings.settingsCodexPluginTitle)
             }
@@ -274,6 +324,39 @@ struct AutomationSettingsTab: View {
             Text(.Settings.settingsAutomationReuseChatsHelp)
                 .font(.caption)
                 .foregroundStyle(.secondary)
+        }
+    }
+
+    private var resetTemplateButton: some View {
+        Button {
+            do {
+                try CodexDesktopRelay.resetTemplate()
+                codexTemplateURL = nil
+                templateResetFailed = false
+                templateSetupFailed = false
+            } catch {
+                templateResetFailed = true
+            }
+        } label: { Text(.Settings.settingsAutomationCodexTemplateReset) }
+        .help(Text(.Settings.settingsAutomationCodexTemplateResetHelp))
+    }
+
+    private func openTemplateSetup() async {
+        openingTemplateSetup = true
+        templateSetupFailed = false
+        defer { openingTemplateSetup = false }
+        do {
+            guard let url = try await CodexPluginInstaller.setupURL(),
+                  let app = AssistantAutomationRunner.desktopApplication(.codex)
+            else {
+                templateSetupFailed = true
+                return
+            }
+            let configuration = NSWorkspace.OpenConfiguration()
+            configuration.activates = true
+            _ = try await NSWorkspace.shared.open([url], withApplicationAt: app, configuration: configuration)
+        } catch {
+            templateSetupFailed = true
         }
     }
 
@@ -494,10 +577,24 @@ struct AutomationSettingsTab: View {
     }
 
     private enum Page: CaseIterable {
-        case assistant, presets, scope, todos, workflow, authored, advanced
+        case checkpoints, assistant, scope, todos, workflow, authored, presets, advanced
+
+        var symbol: String {
+            switch self {
+            case .checkpoints: "hand.raised"
+            case .assistant: "sparkles"
+            case .scope: "scope"
+            case .todos: "tray"
+            case .workflow: "bolt"
+            case .authored: "person.crop.circle"
+            case .presets: "square.stack"
+            case .advanced: "slider.horizontal.3"
+            }
+        }
 
         var title: LocalizedStringResource {
             switch self {
+            case .checkpoints: .Settings.settingsAutomationPageCheckpoints
             case .assistant: .Settings.settingsAutomationPageAssistant
             case .presets: .Settings.settingsAutomationPagePresets
             case .scope: .Settings.settingsAutomationPageScope

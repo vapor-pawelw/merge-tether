@@ -84,6 +84,8 @@ struct TodoListView: View {
     private func showSection() {
         monitor.authoredMergeRequests.setVisible(section == .mergeRequests)
         if section == .inbox { monitor.markMenuOpened() }
+        // Opening the menu or switching tabs shouldn't start a full glab sweep every time.
+        guard monitor.lastRefresh.map({ Date().timeIntervalSince($0) > 30 }) ?? true else { return }
         Task { await monitor.refreshNow() }
     }
 
@@ -257,7 +259,19 @@ struct TodoListView: View {
                     }
                     let open = items.filter { $0.section != .draftMergeRequests }
                     let drafts = items.filter { $0.section == .draftMergeRequests }
-                    if !open.isEmpty { attentionCards(open) }
+                    // What the assistant prepared and only you can send comes first.
+                    let ready = open.filter(\.needsConfirmation)
+                    let other = open.filter { !$0.needsConfirmation }
+                    if !ready.isEmpty {
+                        groupHeader(.Menu.menuConfirmSection, symbol: "checkmark.seal", tint: .green)
+                        attentionCards(ready)
+                    }
+                    if !other.isEmpty {
+                        if !ready.isEmpty {
+                            groupHeader(.Menu.menuAttentionTab, symbol: "exclamationmark.circle", tint: .orange)
+                        }
+                        attentionCards(other)
+                    }
                     if !inbox.todos.isEmpty {
                         groupHeader(.Menu.menuInboxGitLabTodos, symbol: "tray", tint: .accentColor)
                         ForEach(inbox.todos) { todo in
