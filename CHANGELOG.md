@@ -8,6 +8,8 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 
 ### Changed
 
+- Refresh public documentation, share concise agent instructions with Claude, and add a retro painted-style app icon.
+
 - Recover a closed Codex MCP connection through the bundled relay transport without replacing native GUI chats or retrying an uncertain claim.
 
 - Add unmanaged MRs to automation directly from Attention. Hide only reasons covered by an enabled workflow, retain manual decisions and failures, and reveal the original reasons when scope or settings change.
