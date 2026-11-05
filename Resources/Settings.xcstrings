@@ -1,391 +1,1953 @@
 {
-  "sourceLanguage" : "en",
-  "strings" : {
-    "settings.general.notifications.footer.denied" : {
-      "extractionState" : "manual",
-      "localizations" : {
-        "en" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "macOS notifications are turned off for GitLab To-Dos."
+  "sourceLanguage": "en",
+  "strings": {
+    "settings.automation.scope.title": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Automate merge requests"
           }
         }
       }
     },
-    "settings.general.notifications.openSystemSettings" : {
-      "extractionState" : "manual",
-      "localizations" : {
-        "en" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "Open System Settings…"
+    "settings.automation.scope.all": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "All eligible MRs"
           }
         }
       }
     },
-    "settings.general.notifications.reminderPicker" : {
-      "extractionState" : "manual",
-      "localizations" : {
-        "en" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "Remind about unread to-dos"
+    "settings.automation.scope.selected": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Selected repositories and MRs"
           }
         }
       }
     },
-    "settings.general.notifications.reminderSoundPicker" : {
-      "extractionState" : "manual",
-      "localizations" : {
-        "en" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "Reminder sound"
+    "settings.automation.scope.help": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Choose the default scope for existing rules. You can mix repository and individual MR choices in the menu bar. MR overrides take precedence over repository and global settings."
           }
         }
       }
     },
-    "settings.general.notifications.section" : {
-      "extractionState" : "manual",
-      "localizations" : {
-        "en" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "Notifications"
+    "settings.automation.page.presets": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Scope & Presets"
           }
         }
       }
     },
-    "settings.general.notifications.toggle" : {
-      "extractionState" : "manual",
-      "localizations" : {
-        "en" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "Show notifications for new to-dos"
+    "settings.automation.page.advanced": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Advanced"
           }
         }
       }
     },
-    "settings.general.refresh.picker" : {
-      "extractionState" : "manual",
-      "localizations" : {
-        "en" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "Check for new to-dos"
+    "settings.automation.workspace.choose": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Choose Folder…"
           }
         }
       }
     },
-    "settings.general.refresh.section" : {
-      "extractionState" : "manual",
-      "localizations" : {
-        "en" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "Refresh"
+    "settings.automation.workspace.help": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Starting folder for tasks that use extra project tool access, such as conflict resolution. Leave it blank to use the assistant’s default location. Regular Codex review chats use their own workspace."
           }
         }
       }
     },
-    "settings.general.startup.launchAtLogin" : {
-      "extractionState" : "manual",
-      "localizations" : {
-        "en" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "Launch at login"
+    "settings.automation.todo.customize": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Customize title, prompt or command"
           }
         }
       }
     },
-    "settings.general.startup.section" : {
-      "extractionState" : "manual",
-      "localizations" : {
-        "en" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "Startup"
+    "settings.automation.autoReReview.toggle": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Automatically request re-review"
           }
         }
       }
     },
-    "settings.general.tab" : {
-      "extractionState" : "manual",
-      "localizations" : {
-        "en" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "General"
+    "settings.automation.autoReReview.help": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "After an AI follow-up on your open merge request, notify the people whose feedback was addressed once all replies are handled and drafts are published. GitLab may reset a previous approval when re-requesting review."
           }
         }
       }
     },
-    "settings.integration.auth.authenticated.%@" : {
-      "extractionState" : "manual",
-      "localizations" : {
-        "en" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "Authenticated as @%@"
+    "settings.automation.reviewModel": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Review model"
           }
         }
       }
     },
-    "settings.integration.auth.notAuthenticated" : {
-      "extractionState" : "manual",
-      "localizations" : {
-        "en" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "Not authenticated"
+    "settings.automation.reviewThinking": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Review reasoning"
           }
         }
       }
     },
-    "settings.integration.auth.wrongHost.%@" : {
-      "extractionState" : "manual",
-      "localizations" : {
-        "en" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "Signed in to %@ (not default host)"
+    "settings.automation.reviewModelHelp": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Applied to reviews and re-reviews dispatched through the Codex plugin."
           }
         }
       }
     },
-    "settings.integration.auth.row" : {
-      "extractionState" : "manual",
-      "localizations" : {
-        "en" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "Authentication"
+    "settings.automation.claudeReviewModelHelp": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Choose the review model directly in Claude Desktop."
           }
         }
       }
     },
-    "settings.integration.footer" : {
-      "extractionState" : "manual",
-      "localizations" : {
-        "en" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "GitLab To-Dos shells out to glab to read your GitLab to-dos. It uses glab's default host and stored credentials."
+    "settings.automation.thinkingLow": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Low"
           }
         }
       }
     },
-    "settings.integration.glab.notFound" : {
-      "extractionState" : "manual",
-      "localizations" : {
-        "en" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "glab not found"
+    "settings.automation.thinkingMedium": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Medium"
           }
         }
       }
     },
-    "settings.integration.glab.path.row" : {
-      "extractionState" : "manual",
-      "localizations" : {
-        "en" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "glab path"
+    "settings.automation.thinkingHigh": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "High"
           }
         }
       }
     },
-    "settings.integration.glab.section" : {
-      "extractionState" : "manual",
-      "localizations" : {
-        "en" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "GitLab CLI"
+    "settings.automation.thinkingExtraHigh": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Extra high"
           }
         }
       }
     },
-    "settings.integration.host.row" : {
-      "extractionState" : "manual",
-      "localizations" : {
-        "en" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "Host"
+    "settings.automation.thinkingMax": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Max"
           }
         }
       }
     },
-    "settings.integration.host.unresolved" : {
-      "extractionState" : "manual",
-      "localizations" : {
-        "en" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "Unknown"
+    "settings.codexPlugin.title": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "MergeTether plugin for Codex"
           }
         }
       }
     },
-    "settings.integration.recheck" : {
-      "extractionState" : "manual",
-      "localizations" : {
-        "en" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "Re-check"
+    "settings.codexPlugin.checking": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Checking for the MergeTether plugin…"
           }
         }
       }
     },
-    "settings.integration.runSetupAgain" : {
-      "extractionState" : "manual",
-      "localizations" : {
-        "en" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "Run setup again"
+    "settings.codexPlugin.installing": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Installing the bundled plugin…"
           }
         }
       }
     },
-    "settings.integration.tab" : {
-      "extractionState" : "manual",
-      "localizations" : {
-        "en" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "Integration"
+    "settings.codexPlugin.install": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Install MergeTether Plugin"
           }
         }
       }
     },
-    "settings.refreshInterval.15m" : {
-      "extractionState" : "manual",
-      "localizations" : {
-        "en" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "Every 15 minutes"
+    "settings.codexPlugin.recheck": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Check Again"
           }
         }
       }
     },
-    "settings.refreshInterval.1h" : {
-      "extractionState" : "manual",
-      "localizations" : {
-        "en" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "Every hour"
+    "settings.codexPlugin.missing": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Install the included plugin to set up automatic Codex chats without copying a prompt."
           }
         }
       }
     },
-    "settings.refreshInterval.1m" : {
-      "extractionState" : "manual",
-      "localizations" : {
-        "en" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "Every minute"
+    "settings.codexPlugin.disabled": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "The plugin is installed but disabled. Enable it in Codex → Plugins."
           }
         }
       }
     },
-    "settings.refreshInterval.30m" : {
-      "extractionState" : "manual",
-      "localizations" : {
-        "en" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "Every 30 minutes"
+    "settings.codexPlugin.enabled": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "The plugin is enabled. In Codex, go to Plugins → MergeTether → Setup and confirm the schedule. If the plugin is not visible, reopen Codex."
           }
         }
       }
     },
-    "settings.refreshInterval.5m" : {
-      "extractionState" : "manual",
-      "localizations" : {
-        "en" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "Every 5 minutes"
+    "settings.codexPlugin.detectionFailed": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Could not check installed plugins. Make sure Codex is up to date and try again."
           }
         }
       }
     },
-    "settings.reminderInterval.15m" : {
-      "extractionState" : "manual",
-      "localizations" : {
-        "en" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "Every 15 minutes"
+    "settings.codexPlugin.pythonRequired": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "The plugin needs Python 3 from Xcode or the macOS Command Line Tools."
           }
         }
       }
     },
-    "settings.reminderInterval.1h" : {
-      "extractionState" : "manual",
-      "localizations" : {
-        "en" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "Every hour"
+    "settings.codexPlugin.installFailed": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Could not install the MergeTether plugin. Check that Codex is up to date and try again."
           }
         }
       }
     },
-    "settings.reminderInterval.30m" : {
-      "extractionState" : "manual",
-      "localizations" : {
-        "en" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "Every 30 minutes"
+    "settings.codexPlugin.openListener": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Open Listener"
           }
         }
       }
     },
-    "settings.reminderInterval.5m" : {
-      "extractionState" : "manual",
-      "localizations" : {
-        "en" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "Every 5 minutes"
+    "settings.codexPlugin.openFailed": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Could not open Codex. Open it from Applications."
           }
         }
       }
     },
-    "settings.reminderInterval.off" : {
-      "extractionState" : "manual",
-      "localizations" : {
-        "en" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "Off"
+    "settings.codexPlugin.listening": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Codex checked the queue within the last 15 minutes."
           }
         }
       }
     },
-    "settings.reminderSound.off" : {
-      "extractionState" : "manual",
-      "localizations" : {
-        "en" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "Off"
+    "settings.codexPlugin.manualSetup": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Manual Setup"
+          }
+        }
+      }
+    },
+    "settings.automation.codexRelay": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Use a Codex listener for automatic GUI chats"
+          }
+        }
+      }
+    },
+    "settings.automation.codexRelayHelp": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Codex review and follow-up tasks use glab to read their merge request. Set up the listener in the MergeTether plugin. Codex tool approvals still apply."
+          }
+        }
+      }
+    },
+    "settings.automation.assistant.lastCheck.%@": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Checked at %@"
+          }
+        }
+      }
+    },
+    "settings.automation.assistant.detected": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Detected"
+          }
+        }
+      }
+    },
+    "settings.automation.assistant.missing": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Not detected"
+          }
+        }
+      }
+    },
+    "settings.automation.package.recommended": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Enable recommended automation"
+          }
+        }
+      }
+    },
+    "settings.automation.reuseChats": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Reuse the assistant chat for each merge request"
+          }
+        }
+      }
+    },
+    "settings.automation.reuseChats.help": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "The Codex listener sends follow-ups to the same chat for each merge request and account. Conflict tasks allowed to push stay separate."
+          }
+        }
+      }
+    },
+    "settings.automation.toolProjects": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Projects allowed to use assistant tools"
+          }
+        }
+      }
+    },
+    "settings.automation.todoProjects": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Projects (comma-separated paths)"
+          }
+        }
+      }
+    },
+    "settings.automation.todoProjectsHelp": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Assistant rules match all projects when blank. Shell scripts require exact project paths."
+          }
+        }
+      }
+    },
+    "settings.automation.workflow.targetBranches": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Target branches (comma-separated, optional)"
+          }
+        }
+      }
+    },
+    "settings.automation.workflow.requiredLabel": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Required label (optional)"
+          }
+        }
+      }
+    },
+    "settings.automation.apply": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Apply Changes"
+          }
+        }
+      }
+    },
+    "settings.automation.apply.help": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Apply Changes to activate your settings."
+          }
+        }
+      }
+    },
+    "settings.automation.assistant.claude": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Claude Desktop"
+          }
+        }
+      }
+    },
+    "settings.automation.assistant.codex": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Codex Desktop"
+          }
+        }
+      }
+    },
+    "settings.automation.assistant.picker": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Assistant"
+          }
+        }
+      }
+    },
+    "settings.automation.assistant.tools": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Allow tools from my assistant profile"
+          }
+        }
+      }
+    },
+    "settings.automation.assistant.toolsHelp": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Controls the prompt and working folder. The desktop assistant still uses its own permission settings."
+          }
+        }
+      }
+    },
+    "settings.automation.authorFeedback": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Feedback on my MR"
+          }
+        }
+      }
+    },
+    "settings.automation.authorFeedback.description": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Runs when someone submits a review or addresses you in a comment on an open merge request you authored."
+          }
+        }
+      }
+    },
+    "settings.automation.authoredMergeRequests.polling": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Open My Merge Requests to load the list. Enabled actions run in the background at the refresh interval set in General."
+          }
+        }
+      }
+    },
+    "settings.automation.authoredMergeRequests.projectsHelp": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Enter exact GitLab project paths separated by commas for automatic merges or pushes from conflict tasks."
+          }
+        }
+      }
+    },
+    "settings.automation.authoredMergeRequests.section": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "My merge requests"
+          }
+        }
+      }
+    },
+    "settings.automation.autoMerge.help": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Merges eligible merge requests you authored after required approvals, resolved discussions, and all GitLab merge checks pass. The project must require approvals and enforce discussion resolution."
+          }
+        }
+      }
+    },
+    "settings.automation.autoMerge.projects": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Projects allowed to merge"
+          }
+        }
+      }
+    },
+    "settings.automation.autoMerge.toggle": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Merge when ready"
+          }
+        }
+      }
+    },
+    "settings.automation.claude.help": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Opens a prepared Code draft in Claude Desktop. Review and send it there to save the session."
+          }
+        }
+      }
+    },
+    "settings.automation.codex.help": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Opens a prepared draft in Codex Desktop. Send it there to create the chat, or set up the Codex listener."
+          }
+        }
+      }
+    },
+    "settings.automation.command": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Command"
+          }
+        }
+      }
+    },
+    "settings.automation.command.example": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "\"$HOME/bin/review-mr\" \"$GITLAB_MR_URL\""
+          }
+        }
+      }
+    },
+    "settings.automation.command.help": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Runs with your macOS account permissions using zsh. Exit with code 0 once the task has been handed off. GitLab details are available as environment variables."
+          }
+        }
+      }
+    },
+    "settings.automation.command.variables": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "GITLAB_TODO_ID, GITLAB_MR_IID, GITLAB_MR_URL, GITLAB_MR_TITLE, GITLAB_PROJECT_PATH, GITLAB_MR_AUTHOR, GITLAB_TODO_ACTOR, GITLAB_TODO_ACTOR_USERNAME, GITLAB_TODO_EVENT, GITLAB_TASK_TITLE"
+          }
+        }
+      }
+    },
+    "settings.automation.conflicts.allowPush": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Allow conflict fixes to be pushed"
+          }
+        }
+      }
+    },
+    "settings.automation.conflicts.help": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Queues a conflict task for the selected desktop assistant. Pushing to a source branch requires separate permission and a listed project."
+          }
+        }
+      }
+    },
+    "settings.automation.conflicts.pushProjects": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Projects allowed to receive fixes"
+          }
+        }
+      }
+    },
+    "settings.automation.conflicts.toggle": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Start tasks to fix conflicts"
+          }
+        }
+      }
+    },
+    "settings.automation.enable": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Run automatically"
+          }
+        }
+      }
+    },
+    "settings.automation.incomplete": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Enabled assistant rules need a task title and instructions. Enabled shell rules need a command."
+          }
+        }
+      }
+    },
+    "settings.automation.markDone": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Mark to-do done after success"
+          }
+        }
+      }
+    },
+    "settings.automation.outcome": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "GitLab to-dos are marked done after a successful configured script or confirmed Codex delivery of a feedback task. Opening a draft keeps the to-do pending."
+          }
+        }
+      }
+    },
+    "settings.automation.package.choose": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Choose how to start…"
+          }
+        }
+      }
+    },
+    "settings.automation.package.claude": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Use recommended settings for Claude Code"
+          }
+        }
+      }
+    },
+    "settings.automation.package.codex": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Use recommended settings for Codex"
+          }
+        }
+      }
+    },
+    "settings.automation.package.help": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Recommended automation enables reviews, follow-ups, CI diagnoses, and re-review after AI follow-ups. You can adjust each rule before saving."
+          }
+        }
+      }
+    },
+    "settings.automation.package.off": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Keep all automation off"
+          }
+        }
+      }
+    },
+    "settings.automation.package.recheck": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Check for installed assistants"
+          }
+        }
+      }
+    },
+    "settings.automation.package.reset": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Restore Recommended Defaults"
+          }
+        }
+      }
+    },
+    "settings.automation.package.resetMessage": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Replaces automation rules with the recommended settings for the selected assistant. Apply Changes to save."
+          }
+        }
+      }
+    },
+    "settings.automation.package.title": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Automation package"
+          }
+        }
+      }
+    },
+    "settings.automation.package.turnOff": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Turn Off All Automation"
+          }
+        }
+      }
+    },
+    "settings.automation.package.unavailable": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "No supported assistant detected. Install Codex or Claude Code, or keep automation off."
+          }
+        }
+      }
+    },
+    "settings.automation.package.useSelection": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Use Selection"
+          }
+        }
+      }
+    },
+    "settings.automation.prompt": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Task instructions"
+          }
+        }
+      }
+    },
+    "settings.automation.reviewRequested": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Review request"
+          }
+        }
+      }
+    },
+    "settings.automation.reviewRequested.description": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Runs when someone requests your review on a merge request."
+          }
+        }
+      }
+    },
+    "settings.automation.runner": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Run with"
+          }
+        }
+      }
+    },
+    "settings.automation.runner.assistant": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Selected assistant"
+          }
+        }
+      }
+    },
+    "settings.automation.runner.shell": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Shell command"
+          }
+        }
+      }
+    },
+    "settings.automation.tab": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Automation"
+          }
+        }
+      }
+    },
+    "settings.automation.templateHelp": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Templates can use {repo}, {iid}, {author}, {url}, {actor}, {actorUsername}, {title}, {todoId}, and {project}."
+          }
+        }
+      }
+    },
+    "settings.automation.title": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Task title"
+          }
+        }
+      }
+    },
+    "settings.automation.todo.section": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "To-do automation"
+          }
+        }
+      }
+    },
+    "settings.automation.trigger": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "When"
+          }
+        }
+      }
+    },
+    "settings.automation.workflow.blockerChange": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Merge blockers change"
+          }
+        }
+      }
+    },
+    "settings.automation.workflow.event": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "When"
+          }
+        }
+      }
+    },
+    "settings.automation.workflow.mode": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Action"
+          }
+        }
+      }
+    },
+    "settings.automation.workflow.mode.assistant": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Prepare in assistant"
+          }
+        }
+      }
+    },
+    "settings.automation.workflow.mode.notify": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Send notification"
+          }
+        }
+      }
+    },
+    "settings.automation.workflow.mode.off": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Off"
+          }
+        }
+      }
+    },
+    "settings.automation.workflow.mode.preview": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Log a preview"
+          }
+        }
+      }
+    },
+    "settings.automation.workflow.modesHelp": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Preview records what would run in Workflow Activity. Notify sends a notification. Prepare adds a task to the desktop assistant queue."
+          }
+        }
+      }
+    },
+    "settings.automation.workflow.newDiscussion": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "New merge request discussion"
+          }
+        }
+      }
+    },
+    "settings.automation.workflow.pipelineFailure": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Pipeline fails"
+          }
+        }
+      }
+    },
+    "settings.automation.workflow.projects": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Project paths"
+          }
+        }
+      }
+    },
+    "settings.automation.workflow.projectsHelp": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Enter exact GitLab project paths such as group/repo, separated by commas. Leave empty to match any project."
+          }
+        }
+      }
+    },
+    "settings.automation.workflow.retry": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Allow one infrastructure retry after handoff (listed projects only)"
+          }
+        }
+      }
+    },
+    "settings.automation.workflow.reviewUpdate": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Merge request changes after review"
+          }
+        }
+      }
+    },
+    "settings.automation.workflow.reviewWaiting": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Review is still waiting"
+          }
+        }
+      }
+    },
+    "settings.automation.workflow.section": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Merge request workflows"
+          }
+        }
+      }
+    },
+    "settings.automation.workflow.stackDependencyMerged": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Stack dependency merges"
+          }
+        }
+      }
+    },
+    "settings.automation.workflow.waitHours.%lld": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Wait %lld h before acting"
+          }
+        }
+      }
+    },
+    "settings.automation.workspace": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Starting folder (optional)"
+          }
+        }
+      }
+    },
+    "settings.general.notifications.footer.denied": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "macOS notifications are turned off for MergeTether."
+          }
+        }
+      }
+    },
+    "settings.general.notifications.openSystemSettings": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Open System Settings…"
+          }
+        }
+      }
+    },
+    "settings.general.notifications.reminderPicker": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Remind about unread to-dos"
+          }
+        }
+      }
+    },
+    "settings.general.notifications.reminderSoundPicker": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Reminder sound"
+          }
+        }
+      }
+    },
+    "settings.general.notifications.section": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Notifications"
+          }
+        }
+      }
+    },
+    "settings.general.notifications.toggle": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Show notifications for new to-dos"
+          }
+        }
+      }
+    },
+    "settings.general.refresh.picker": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Check for new to-dos"
+          }
+        }
+      }
+    },
+    "settings.general.refresh.section": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Refresh"
+          }
+        }
+      }
+    },
+    "settings.general.startup.launchAtLogin": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Launch at login"
+          }
+        }
+      }
+    },
+    "settings.general.startup.section": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Startup"
+          }
+        }
+      }
+    },
+    "settings.general.tab": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "General"
+          }
+        }
+      }
+    },
+    "settings.integration.auth.authenticated.%@": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Authenticated as @%@"
+          }
+        }
+      }
+    },
+    "settings.integration.auth.notAuthenticated": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Not authenticated"
+          }
+        }
+      }
+    },
+    "settings.integration.auth.wrongHost.%@": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Signed in to %@ (not default host)"
+          }
+        }
+      }
+    },
+    "settings.integration.auth.row": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Authentication"
+          }
+        }
+      }
+    },
+    "settings.integration.footer": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "MergeTether shells out to glab to read your GitLab to-dos. It uses glab's default host and stored credentials."
+          }
+        }
+      }
+    },
+    "settings.integration.glab.notFound": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "glab not found"
+          }
+        }
+      }
+    },
+    "settings.integration.glab.path.row": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "glab path"
+          }
+        }
+      }
+    },
+    "settings.integration.glab.section": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "GitLab CLI"
+          }
+        }
+      }
+    },
+    "settings.integration.host.row": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Host"
+          }
+        }
+      }
+    },
+    "settings.integration.host.unresolved": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Unknown"
+          }
+        }
+      }
+    },
+    "settings.integration.recheck": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Re-check"
+          }
+        }
+      }
+    },
+    "settings.integration.runSetupAgain": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Run setup again"
+          }
+        }
+      }
+    },
+    "settings.integration.tab": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Integration"
+          }
+        }
+      }
+    },
+    "settings.refreshInterval.15m": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Every 15 minutes"
+          }
+        }
+      }
+    },
+    "settings.refreshInterval.1h": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Every hour"
+          }
+        }
+      }
+    },
+    "settings.refreshInterval.1m": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Every minute"
+          }
+        }
+      }
+    },
+    "settings.refreshInterval.30m": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Every 30 minutes"
+          }
+        }
+      }
+    },
+    "settings.refreshInterval.5m": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Every 5 minutes"
+          }
+        }
+      }
+    },
+    "settings.reminderInterval.15m": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Every 15 minutes"
+          }
+        }
+      }
+    },
+    "settings.reminderInterval.1h": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Every hour"
+          }
+        }
+      }
+    },
+    "settings.reminderInterval.30m": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Every 30 minutes"
+          }
+        }
+      }
+    },
+    "settings.reminderInterval.5m": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Every 5 minutes"
+          }
+        }
+      }
+    },
+    "settings.reminderInterval.off": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Off"
+          }
+        }
+      }
+    },
+    "settings.reminderSound.off": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Off"
+          }
+        }
+      }
+    },
+    "settings.automation.page.assistant": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Assistant"
+          }
+        }
+      }
+    },
+    "settings.automation.page.workflow": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "MR Events"
+          }
+        }
+      }
+    },
+    "settings.automation.page.authored": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "My MRs"
+          }
+        }
+      }
+    },
+    "settings.automation.page.todos": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "To-Dos"
+          }
+        }
+      }
+    },
+    "settings.automation.checkpoint.section": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Human checkpoint"
+          }
+        }
+      }
+    },
+    "settings.automation.checkpoint.publish": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Publish comments without confirmation"
+          }
+        }
+      }
+    },
+    "settings.automation.checkpoint.help": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Comments and replies the assistant drafts wait in Attention → Ready for your OK until you publish them, unless you enable publication of all comments or replies to AI feedback. Then MergeTether publishes them once they stop changing between two refreshes, including your own pending drafts on merge requests the assistant worked on. Automatic approval needs the assistant's no-objections verdict for the current commit, no pending drafts of yours, and every discussion resolved, including other reviewers'. MergeTether checks this on every refresh. Turn it off for a single merge request in Managed MRs."
+          }
+        }
+      }
+    },
+    "settings.automation.checkpoint.autoApprove": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Approve automatically when every comment is addressed and the assistant has no objections"
+          }
+        }
+      }
+    },
+    "settings.claudePlugin.title": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Claude Code plugin"
+          }
+        }
+      }
+    },
+    "settings.claudePlugin.install": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Install MergeTether plugin"
+          }
+        }
+      }
+    },
+    "settings.claudePlugin.installing": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Installing the plugin in Claude Code…"
+          }
+        }
+      }
+    },
+    "settings.claudePlugin.missing": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Not installed. Without it, Claude can’t link its session to the merge request or record review verdicts with MergeTether’s tools."
+          }
+        }
+      }
+    },
+    "settings.claudePlugin.disabled": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Installed but disabled in Claude Code. Enable “merge-tether” in Claude Code’s plugin settings."
+          }
+        }
+      }
+    },
+    "settings.claudePlugin.enabled": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Installed. New Claude Code sessions get MergeTether’s tools."
+          }
+        }
+      }
+    },
+    "settings.claudePlugin.unavailable": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Claude Code’s command-line tool wasn’t found, so the plugin can’t be checked."
+          }
+        }
+      }
+    },
+    "settings.claudePlugin.installFailed": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Couldn’t install the plugin. Check that Claude Code is signed in, then try again."
+          }
+        }
+      }
+    },
+    "settings.claudePlugin.help": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Each merge request gets one Claude Code session. The first event opens a new draft; later events reopen that session with the prompt copied, ready to paste. Claude Desktop doesn’t allow other apps to send a prompt automatically."
+          }
+        }
+      }
+    },
+    "settings.automation.publishAIReplies": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Automatically publish replies to AI feedback"
+          }
+        }
+      }
+    },
+    "settings.automation.publishAIRepliesHelp": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Includes verified GitLab Duo comments and human comments assessed by the assistant as AI-written with very high confidence. Uncertain cases stay as drafts. Applies only to managed MRs with assistant activity. Publishing all comments overrides this choice."
+          }
+        }
+      }
+    },
+    "settings.automation.followUpPush": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Push verified follow-up fixes to my MR branches"
+          }
+        }
+      }
+    },
+    "settings.automation.followUpPushHelp": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Independent of conflict-resolution push. When enabled: implement, test, commit, push, verify the remote MR head and file content, then save reply drafts. When off or a push is pending/failed, the follow-up stays in chat; its replies are not automatically published."
+          }
+        }
+      }
+    },
+    "settings.automation.resolveOwnReviewThreads": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Resolve my verified findings during re-review"
+          }
+        }
+      }
+    },
+    "settings.automation.resolveOwnReviewThreadsHelp": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "On new commits or author replies, recheck your earlier findings. The assistant may resolve only threads you started and only after verifying the fix. Remaining issues become private reply drafts. Approval and publication use their separate settings."
           }
         }
       }
     }
   },
-  "version" : "1.0"
+  "version": "1.0"
 }

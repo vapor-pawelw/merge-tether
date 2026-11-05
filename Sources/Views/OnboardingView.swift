@@ -5,16 +5,25 @@ struct OnboardingView: View {
 
     @Environment(\.dismissWindow) private var dismissWindow
     @State private var step: Step = .glabInstall
+    @State private var automationChoice: AutomationPackageChoice?
+    @State private var assistant: AutomationAssistant
+    @State private var enableCodexRelay = false
+
+    init(monitor: TodoMonitorService) {
+        self.monitor = monitor
+        _assistant = State(initialValue: monitor.settings.automation.assistant)
+    }
 
     enum Step: Int, CaseIterable {
         case glabInstall
         case glabAuth
         case notifications
         case launchAtLogin
+        case automation
         case done
 
         var index: Int { rawValue + 1 }
-        static var totalUserFacing: Int { 4 }
+        static var totalUserFacing: Int { allCases.count - 1 }
         var isSkippable: Bool {
             switch self {
             case .notifications, .launchAtLogin: true
@@ -40,6 +49,11 @@ struct OnboardingView: View {
                 NotificationsStep(monitor: monitor)
             case .launchAtLogin:
                 LaunchAtLoginStep(monitor: monitor)
+            case .automation:
+                AutomationPackageStep(
+                    monitor: monitor, assistant: $assistant, selection: $automationChoice,
+                    enableCodexRelay: $enableCodexRelay
+                )
             case .done:
                 OnboardingDoneStep()
             }
@@ -51,6 +65,9 @@ struct OnboardingView: View {
         switch step {
         case .glabInstall: monitor.glab.glabPath != nil
         case .glabAuth: monitor.glab.currentUsername != nil
+        case .automation:
+            monitor.settings.automation.packageDecision != .undecided || automationChoice == .off
+                || (automationChoice == .recommended && monitor.availableAssistants.contains(assistant))
         case .notifications, .launchAtLogin, .done: true
         }
     }
@@ -70,6 +87,12 @@ struct OnboardingView: View {
     }
 
     private func finish() {
+        if monitor.settings.automation.packageDecision == .undecided, let automationChoice {
+            automationChoice.apply(to: &monitor.settings.automation, assistant: assistant)
+            if automationChoice == .recommended, assistant == .codex, enableCodexRelay {
+                monitor.settings.automation.codexRelayEnabled = true
+            }
+        }
         monitor.settings.onboardingCompleted = true
         monitor.settings.save()
         monitor.start()

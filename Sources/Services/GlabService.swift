@@ -39,13 +39,13 @@ final class GlabService {
 
     // MARK: - Commands
 
-    func fetchTodos() async -> Result<[Todo], GlabError> {
+    func fetchTodos(host: String? = nil) async -> Result<[Todo], GlabError> {
         guard let glabPath else { return .failure(.glabNotInstalled) }
         let output: ProcessRunner.Output
         do {
             output = try await ProcessRunner.run(
                 glabPath,
-                arguments: ["api", "--paginate", "/todos?per_page=100&state=pending"],
+                arguments: ["api", "--paginate", "/todos?per_page=100&state=pending"] + Self.hostArguments(host),
                 environment: Self.shellEnvironment,
                 timeout: 45
             )
@@ -68,13 +68,13 @@ final class GlabService {
         }
     }
 
-    func markAsDone(id: Int) async -> Result<Void, GlabError> {
+    func markAsDone(id: Int, host: String? = nil) async -> Result<Void, GlabError> {
         guard let glabPath else { return .failure(.glabNotInstalled) }
         let output: ProcessRunner.Output
         do {
             output = try await ProcessRunner.run(
                 glabPath,
-                arguments: ["api", "--method", "POST", "/todos/\(id)/mark_as_done"],
+                arguments: ["api", "--method", "POST", "/todos/\(id)/mark_as_done"] + Self.hostArguments(host),
                 environment: Self.shellEnvironment,
                 timeout: 15
             )
@@ -87,6 +87,27 @@ final class GlabService {
             return .failure(GlabError.classify(exitCode: output.exitCode, stderr: output.stderr))
         }
         return .success(())
+    }
+
+    func mergeRequestAuthor(projectID: Int, iid: Int, host: String) async throws -> Todo.Author {
+        guard let glabPath else { throw GlabError.glabNotInstalled }
+        let output = try await ProcessRunner.run(
+            glabPath,
+            arguments: ["api", "/projects/\(projectID)/merge_requests/\(iid)", "--hostname", host],
+            environment: Self.shellEnvironment,
+            timeout: 15
+        )
+        guard output.exitCode == 0 else {
+            throw GlabError.classify(exitCode: output.exitCode, stderr: output.stderr)
+        }
+        struct MergeRequest: Decodable {
+            let author: Todo.Author
+        }
+        return try JSONDecoder().decode(MergeRequest.self, from: output.stdout).author
+    }
+
+    private static func hostArguments(_ host: String?) -> [String] {
+        host.map { ["--hostname", $0] } ?? []
     }
 
     /// Refreshes `resolvedHost`, `authedHosts`, `authStatus` and `currentUsername`
@@ -188,7 +209,7 @@ final class GlabService {
                 debugDescription: "Invalid ISO8601 date: \(raw)"
             )
         }
-        return try decoder.decode([Todo].self, from: data)
+        return try GlabPaginatedJSON.decode(Todo.self, from: data, decoder: decoder)
     }
 
     nonisolated static func parseHost(from url: URL?) -> String? {
@@ -220,7 +241,7 @@ final class GlabService {
         return results
     }
 
-    private static var shellEnvironment: [String: String] {
+    static var shellEnvironment: [String: String] {
         var env: [String: String] = [
             "PATH": "/opt/homebrew/bin:/usr/local/bin:/opt/local/bin:/usr/bin:/bin",
             "HOME": NSHomeDirectory(),

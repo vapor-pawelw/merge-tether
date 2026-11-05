@@ -1,6 +1,39 @@
 {
   "sourceLanguage" : "en",
   "strings" : {
+    "onboarding.automation.alreadyConfigured" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Your automation settings are already configured. You can change them from Settings."
+          }
+        }
+      }
+    },
+    "onboarding.automation.body" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Choose whether MergeTether should automatically prepare work in a locally installed assistant."
+          }
+        }
+      }
+    },
+    "onboarding.automation.title" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Set up automation"
+          }
+        }
+      }
+    },
     "onboarding.auth.body" : {
       "extractionState" : "manual",
       "localizations" : {
@@ -62,7 +95,7 @@
         "en" : {
           "stringUnit" : {
             "state" : "translated",
-            "value" : "You're signed in to %@, but GitLab To-Dos reads from glab's default host."
+            "value" : "You're signed in to %@, but MergeTether reads from glab's default host."
           }
         }
       }
@@ -139,7 +172,7 @@
         "en" : {
           "stringUnit" : {
             "state" : "translated",
-            "value" : "GitLab To-Dos will start watching your inbox now. You can tweak refresh cadence and notifications in Settings."
+            "value" : "MergeTether will start watching your inbox now. You can tweak refresh cadence and notifications in Settings."
           }
         }
       }
@@ -172,7 +205,7 @@
         "en" : {
           "stringUnit" : {
             "state" : "translated",
-            "value" : "GitLab To-Dos uses glab, the official GitLab CLI, to read your to-do inbox. Install it with Homebrew and press Re-check."
+            "value" : "MergeTether uses glab, the official GitLab CLI, to read your to-do inbox. Install it with Homebrew and press Re-check."
           }
         }
       }
@@ -227,7 +260,7 @@
         "en" : {
           "stringUnit" : {
             "state" : "translated",
-            "value" : "Open GitLab To-Dos automatically when you sign in."
+            "value" : "Open MergeTether automatically when you sign in."
           }
         }
       }
@@ -359,7 +392,7 @@
         "en" : {
           "stringUnit" : {
             "state" : "translated",
-            "value" : "Set up GitLab To-Dos"
+            "value" : "Set up MergeTether"
           }
         }
       }

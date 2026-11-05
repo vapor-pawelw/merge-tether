@@ -1,6 +1,61 @@
 {
   "sourceLanguage" : "en",
   "strings" : {
+    "notifications.workflow.title" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Merge request workflow"
+          }
+        }
+      }
+    },
+    "notifications.workflow.handoff" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "A failed pipeline is waiting for your handoff in Workflow Activity."
+          }
+        }
+      }
+    },
+    "notifications.workflow.update" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "A monitored merge request changed. See Workflow Activity for details."
+          }
+        }
+      }
+    },
+    "notifications.mergeRequest.discussionsTitle" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Merge request has open discussions"
+          }
+        }
+      }
+    },
+    "notifications.mergeRequest.discussionsBody" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Resolve the open discussions in GitLab before automatic merge."
+          }
+        }
+      }
+    },
     "notifications.batch.body" : {
       "extractionState" : "manual",
       "localizations" : {
@@ -52,6 +107,28 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "New GitLab to-do"
+          }
+        }
+      }
+    },
+    "notifications.autoApproved.title" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Approved automatically"
+          }
+        }
+      }
+    },
+    "notifications.autoApproved.body" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "The assistant had no objections and every discussion is resolved."
           }
         }
       }

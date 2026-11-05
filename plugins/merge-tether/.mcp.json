@@ -1,0 +1,8 @@
+{
+  "mcpServers": {
+    "merge-tether-relay": {
+      "command": "/usr/bin/python3",
+      "args": ["-B", "${PLUGIN_ROOT}/relay.py"]
+    }
+  }
+}

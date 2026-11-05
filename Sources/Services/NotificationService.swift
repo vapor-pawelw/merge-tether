@@ -80,6 +80,64 @@ final class NotificationService: NSObject, UNUserNotificationCenterDelegate, @un
         }
     }
 
+    func deliverWorkflowEvent(_ event: MergeWorkflowEvent, requiresHandoff: Bool) {
+        let request = event.mergeRequest
+        let content = UNMutableNotificationContent()
+        content.title = String(localized: .Notifications.notificationsWorkflowTitle)
+        content.subtitle = "!\(request.iid) \(request.title)"
+        content.body = requiresHandoff
+            ? String(localized: .Notifications.notificationsWorkflowHandoff)
+            : String(localized: .Notifications.notificationsWorkflowUpdate)
+        content.userInfo = ["url": request.webURL.absoluteString]
+        let notification = UNNotificationRequest(
+            identifier: "workflow-\(event.kind.rawValue)-\(request.projectID)-\(request.iid)",
+            content: content,
+            trigger: nil
+        )
+        UNUserNotificationCenter.current().add(notification) { error in
+            if let error {
+                Log.notifications.error("Failed to post merge workflow update: \(error.localizedDescription, privacy: .private)")
+            }
+        }
+    }
+
+    func deliverUnresolvedMergeRequest(_ request: GitLabMergeRequest) {
+        let content = UNMutableNotificationContent()
+        content.title = String(localized: .Notifications.notificationsMergeRequestDiscussionsTitle)
+        content.subtitle = "!\(request.iid) \(request.title)"
+        content.body = String(localized: .Notifications.notificationsMergeRequestDiscussionsBody)
+        content.userInfo = ["url": request.webURL.absoluteString]
+        content.sound = .default
+        let notification = UNNotificationRequest(
+            identifier: "mr-discussions-\(request.projectID)-\(request.iid)",
+            content: content,
+            trigger: nil
+        )
+        UNUserNotificationCenter.current().add(notification) { error in
+            if let error {
+                Log.notifications.error("Failed to post unresolved discussions reminder: \(error.localizedDescription, privacy: .private)")
+            }
+        }
+    }
+
+    func deliverAutoApproved(_ request: GitLabMergeRequest) {
+        let content = UNMutableNotificationContent()
+        content.title = String(localized: .Notifications.notificationsAutoApprovedTitle)
+        content.subtitle = "!\(request.iid) \(request.title)"
+        content.body = String(localized: .Notifications.notificationsAutoApprovedBody)
+        content.userInfo = ["url": request.webURL.absoluteString]
+        let notification = UNNotificationRequest(
+            identifier: "mr-approved-\(request.projectID)-\(request.iid)",
+            content: content,
+            trigger: nil
+        )
+        UNUserNotificationCenter.current().add(notification) { error in
+            if let error {
+                Log.notifications.error("Failed to post automatic approval: \(error.localizedDescription, privacy: .private)")
+            }
+        }
+    }
+
     func deliverUnreadReminder(todoCount: Int, dashboardURL: URL?, sound: ReminderSound) {
         guard todoCount > 0 else { return }
         let center = UNUserNotificationCenter.current()

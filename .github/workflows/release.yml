@@ -6,7 +6,7 @@ on:
       - 'v*'
 
 env:
-  RELEASE_REPO: vapor-pawelw/gitlab-todos
+  RELEASE_REPO: ${{ github.repository }}
   APP_NAME: GitLabTodos
 
 permissions:

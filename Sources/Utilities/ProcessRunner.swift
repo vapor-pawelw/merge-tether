@@ -10,28 +10,30 @@ enum ProcessRunner {
     enum RunError: Error {
         case timedOut
         case launchFailed(String)
+        case outputCaptureFailed(String)
     }
 
     static func run(
         _ executable: URL,
         arguments: [String] = [],
         environment: [String: String],
+        currentDirectory: URL? = nil,
         timeout: TimeInterval = 30
     ) async throws -> Output {
         let process = Process()
         process.executableURL = executable
         process.arguments = arguments
         process.environment = environment
+        process.currentDirectoryURL = currentDirectory
 
-        let stdoutPipe = Pipe()
-        let stderrPipe = Pipe()
-        process.standardOutput = stdoutPipe
-        process.standardError = stderrPipe
-
-        let outputCollector = ProcessOutputCollector(
-            stdoutPipe: stdoutPipe,
-            stderrPipe: stderrPipe
-        )
+        let outputCollector: ProcessOutputCollector
+        do {
+            outputCollector = try ProcessOutputCollector()
+        } catch {
+            throw RunError.outputCaptureFailed(error.localizedDescription)
+        }
+        process.standardOutput = outputCollector.stdout.writer
+        process.standardError = outputCollector.stderr.writer
         let state = ProcessRunState()
 
         return try await withTaskCancellationHandler {
@@ -40,28 +42,26 @@ enum ProcessRunner {
                     guard let reason = state.finish() else { return }
                     finished.terminationHandler = nil
 
-                    outputCollector.whenFinished { stdoutData, stderrData in
-                        switch reason {
-                        case .completed:
-                            cont.resume(
-                                returning: Output(
-                                    stdout: stdoutData,
-                                    stderr: String(data: stderrData, encoding: .utf8) ?? "",
-                                    exitCode: finished.terminationStatus
-                                )
-                            )
-                        case .timedOut:
-                            cont.resume(throwing: RunError.timedOut)
-                        case .cancelled:
-                            cont.resume(throwing: CancellationError())
+                    switch reason {
+                    case .completed:
+                        do {
+                            cont.resume(returning: try Output(
+                                stdout: outputCollector.stdout.read(),
+                                stderr: String(data: outputCollector.stderr.read(), encoding: .utf8) ?? "",
+                                exitCode: finished.terminationStatus
+                            ))
+                        } catch {
+                            cont.resume(throwing: RunError.outputCaptureFailed(error.localizedDescription))
                         }
+                    case .timedOut:
+                        cont.resume(throwing: RunError.timedOut)
+                    case .cancelled:
+                        cont.resume(throwing: CancellationError())
                     }
                 }
 
-                outputCollector.start()
                 do {
                     try process.run()
-                    outputCollector.closeWritingEnds()
 
                     let timeoutTask = Task.detached {
                         try? await Task.sleep(
@@ -79,7 +79,6 @@ enum ProcessRunner {
                         stop(process)
                     }
                 } catch {
-                    outputCollector.closeWritingEnds()
                     process.terminationHandler = nil
                     if state.failLaunch() {
                         cont.resume(throwing: RunError.launchFailed(error.localizedDescription))
@@ -174,53 +173,40 @@ private final class ProcessRunState: @unchecked Sendable {
     }
 }
 
-private final class ProcessOutputCollector: @unchecked Sendable {
-    private let stdoutPipe: Pipe
-    private let stderrPipe: Pipe
-    private let group = DispatchGroup()
-    private let lock = NSLock()
-    private var stdoutData = Data()
-    private var stderrData = Data()
+private struct ProcessOutputCollector: Sendable {
+    let stdout: Stream
+    let stderr: Stream
 
-    init(stdoutPipe: Pipe, stderrPipe: Pipe) {
-        self.stdoutPipe = stdoutPipe
-        self.stderrPipe = stderrPipe
+    init() throws {
+        let files = FileManager.default
+        let directory = files.temporaryDirectory.appendingPathComponent(UUID().uuidString, isDirectory: true)
+        try files.createDirectory(
+            at: directory,
+            withIntermediateDirectories: false,
+            attributes: [.posixPermissions: 0o700]
+        )
+        // Open descriptors stay valid after unlinking the files.
+        defer { try? files.removeItem(at: directory) }
+        stdout = try Stream(url: directory.appendingPathComponent("stdout"))
+        stderr = try Stream(url: directory.appendingPathComponent("stderr"))
     }
 
-    func start() {
-        // Drain both pipes concurrently with the child. Waiting until process
-        // exit can deadlock once either kernel pipe buffer becomes full.
-        group.enter()
-        DispatchQueue.global(qos: .utility).async { [self] in
-            let data = (try? stdoutPipe.fileHandleForReading.readToEnd()) ?? Data()
-            lock.lock()
-            stdoutData = data
-            lock.unlock()
-            group.leave()
+    struct Stream: Sendable {
+        private let reader: FileHandle
+        let writer: FileHandle
+
+        init(url: URL) throws {
+            try Data().write(to: url)
+            reader = try FileHandle(forReadingFrom: url)
+            writer = try FileHandle(forWritingTo: url)
         }
 
-        group.enter()
-        DispatchQueue.global(qos: .utility).async { [self] in
-            let data = (try? stderrPipe.fileHandleForReading.readToEnd()) ?? Data()
-            lock.lock()
-            stderrData = data
-            lock.unlock()
-            group.leave()
-        }
-    }
-
-    func closeWritingEnds() {
-        try? stdoutPipe.fileHandleForWriting.close()
-        try? stderrPipe.fileHandleForWriting.close()
-    }
-
-    func whenFinished(_ completion: @escaping @Sendable (Data, Data) -> Void) {
-        group.notify(queue: .global(qos: .utility)) { [self] in
-            lock.lock()
-            let stdout = stdoutData
-            let stderr = stderrData
-            lock.unlock()
-            completion(stdout, stderr)
+        func read() throws -> Data {
+            // A background child can still own stdout or stderr. Read the
+            // current file length without waiting for that child to close it.
+            let length = try reader.seekToEnd()
+            try reader.seek(toOffset: 0)
+            return try reader.read(upToCount: Int(length)) ?? Data()
         }
     }
 }

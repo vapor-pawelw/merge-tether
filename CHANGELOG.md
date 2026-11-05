@@ -6,7 +6,80 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 
 ## Unreleased
 
-- _No notable changes yet._
+### Changed
+
+- Recover a closed Codex MCP connection through the bundled relay transport without replacing native GUI chats or retrying an uncertain claim.
+
+- Add unmanaged MRs to automation directly from Attention. Hide only reasons covered by an enabled workflow, retain manual decisions and failures, and reveal the original reasons when scope or settings change.
+- Invalidate completed review verdicts when discussion content changes, including author replies at the same commit, while retaining verdicts for resolution-only changes.
+
+- Re-review author replies even without a new commit, with restart-safe deduplication and a separate default-on setting for resolving only your own verified review findings.
+
+- Require current remote-head, source-file and exact draft evidence before automatically publishing author follow-up replies; add an independent follow-up push permission and keep unfinished fixes in chat.
+
+- Identify thread participants in draft reply previews, highlight repository names across MR and to-do lists, and align wrapped Managed MR titles to the left.
+
+- Publish replies to verified GitLab Duo feedback or very-high-confidence AI comments automatically, with a separate default-on setting, content-bound assessments and selective draft publication.
+- Clear published draft blockers across Attention and MR status immediately; check for browser publication every five seconds while Attention is open and promptly resume eligible re-review requests.
+
+- Renamed the app to MergeTether. Existing settings and Homebrew upgrades keep working.
+
+### General
+
+#### Features
+
+- Show Codex Desktop and Claude Desktop detection separately from the assistant and automation selections.
+- Add manual actions to supported to-dos and prevent duplicate runs when a click overlaps polling.
+- Show items needing attention as compact merge request cards.
+- Show item counts on the menu tabs and reopen the last used tab after a relaunch.
+- Add a short Undo window (⌘Z) after marking a to-do as done.
+- Show the pipeline status of authored merge requests as a colored icon.
+- Show a summary in the menu footer on every tab.
+- Added Ready for your OK in Attention: preview the comments and replies the assistant drafted, publish them in one click, and approve reviewed merge requests at the checked commit.
+- Added an opt-in setting to publish assistant comments without confirmation. It is off by default.
+- Added a MergeTether plugin for Claude Code and one Claude session per merge request: the first event opens a new Claude draft that links itself to the MR, and later events reopen that session with the prompt copied.
+- Approve reviewed merge requests automatically once the assistant has no objections to the current commit and every discussion is resolved, including other reviewers'. On by default; turn it off in Settings or for a single merge request in Managed MRs.
+- Make Settings a larger, resizable window and split Automation settings into Assistant, Merge Workflow, My Merge Requests and To-Dos pages.
+
+- Added durable desktop assistant handoffs and an opt-in Codex listener for native [MT] chats and reuse per merge request.
+- Added an experimental local Codex plugin with a Setup action for desktop dispatch.
+- Bundle the Codex plugin and offer installation in onboarding and settings. Show a menu bar warning when the listener stops checking the queue.
+- Organize new Codex chats in `[MT] <repository>` sections and reserve MergeTether for the listener.
+- Reuse the same Codex chat when a merge request moves from preparation to GitLab read access.
+- Save warranted review drafts in GitLab and commit and push verified follow-up fixes to the author's MR branch.
+- Request re-review after an assistant follow-up when all feedback on an authored MR is addressed and private drafts are published.
+- Enable new assistant workflows during upgrade for users already using AI automations.
+- Separate automation presets and advanced options from everyday assistant and MR settings.
+- Set the automation scope globally, by repository, or for an individual MR. Show effective choices and existing Codex chats in Managed MRs.
+- Keep MR links in assistant updates and route new chats into repository sections on older relay sessions.
+- After merge, ask Codex to propose an update in the existing chat when GitLab identifies one clear work item.
+- Add GitLab repository and MR links directly from Managed MRs and remove merged MR overrides automatically.
+- Continue to re-review when observed author drafts become published replies, even without an earlier AI handoff.
+- Include open authored and review-assigned merge request status in every Codex listener run.
+- Mark a GitLab to-do as done when a manually selected action succeeds, including when an assistant task is queued.
+- Open the existing Codex listener chat from Automation settings.
+- Apply installed MR skills before the built-in review and follow-up instructions.
+- Use `(Me)` for tasks on your own merge requests and ask assistants to summarize each update.
+- Mark chats for merged MRs with `[MT] [Merged]` in Codex. Archive them manually when ready.
+- Show each MR's stack position in assistant task titles and refresh it in existing Codex chats when the stack changes.
+- Pinned unpublished GitLab comments, merge blockers, and pending pipeline handoffs in the inbox.
+
+- Added an opt-in assistant package with six MR workflow rules, project and branch filters, a preview mode, and Workflow Activity.
+- Added exclusive CI handoff and preparation mode with assistant tools disabled. Scoped permissions cover configured tools, scripts, conflict pushes and automatic merges.
+
+- Added opt-in automation for merge request review requests and feedback on your own merge requests. Rules cover first reviews and re-reviews. They can use the selected assistant (Codex or Claude Code) or a custom shell command, and mark the to-do done after success.
+- Added My Merge Requests to the menu with pipeline status, approvals, conflicts, and other merge blockers. It uses the configurable inbox refresh interval.
+- Added separate opt-in actions to merge eligible authored MRs and send conflicts to the selected assistant. Auto-merge checks required approvals and resolved threads, and submits the verified source SHA to GitLab.
+
+#### Bug Fixes
+
+- Opening the menu no longer brings a Settings or Setup window that was left open behind other apps to the front.
+- Prevent a second MergeTether process from polling GitLab or dispatching duplicate automation.
+- Kept polling active when a manual refresh overlaps startup.
+- Kept unread reminders on schedule when the inbox refreshes frequently.
+- Kept a stale refresh from restoring an acknowledged to-do, and restored the row if marking it done failed.
+- Prevented background child processes from blocking completion of their parent command.
+- Fixed GitLab CLI pagination and recognition of the approver-added event.
 
 ## 1.1.0 - 2026-08-13
 

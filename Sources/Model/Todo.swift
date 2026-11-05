@@ -7,6 +7,7 @@ struct Todo: Identifiable, Codable, Hashable, Sendable {
     let targetURL: URL
     let body: String
     let createdAt: Date
+    var updatedAt: Date? = nil
     let state: String
     let project: Project
     let author: Author
@@ -45,6 +46,7 @@ struct Todo: Identifiable, Codable, Hashable, Sendable {
         let state: String?
         let draft: Bool?
         let workInProgress: Bool?
+        let author: Author?
 
         enum CodingKeys: String, CodingKey {
             case id
@@ -53,6 +55,7 @@ struct Todo: Identifiable, Codable, Hashable, Sendable {
             case state
             case draft
             case workInProgress = "work_in_progress"
+            case author
         }
 
         init(from decoder: Decoder) throws {
@@ -63,6 +66,7 @@ struct Todo: Identifiable, Codable, Hashable, Sendable {
             self.state = try c.decodeIfPresent(String.self, forKey: .state)
             self.draft = try c.decodeIfPresent(Bool.self, forKey: .draft)
             self.workInProgress = try c.decodeIfPresent(Bool.self, forKey: .workInProgress)
+            self.author = try? c.decodeIfPresent(Author.self, forKey: .author)
         }
 
         init(
@@ -71,7 +75,8 @@ struct Todo: Identifiable, Codable, Hashable, Sendable {
             title: String?,
             state: String?,
             draft: Bool?,
-            workInProgress: Bool?
+            workInProgress: Bool?,
+            author: Author? = nil
         ) {
             self.id = id
             self.iid = iid
@@ -79,6 +84,7 @@ struct Todo: Identifiable, Codable, Hashable, Sendable {
             self.state = state
             self.draft = draft
             self.workInProgress = workInProgress
+            self.author = author
         }
     }
 
@@ -89,6 +95,7 @@ struct Todo: Identifiable, Codable, Hashable, Sendable {
         case targetURL = "target_url"
         case body
         case createdAt = "created_at"
+        case updatedAt = "updated_at"
         case state
         case project
         case author
@@ -115,5 +122,24 @@ struct Todo: Identifiable, Codable, Hashable, Sendable {
     /// Primary display text for the row.
     var displayTitle: String {
         target.title ?? body
+    }
+
+    var linkedNoteID: Int? {
+        guard let fragment = targetURL.fragment, fragment.hasPrefix("note_"),
+              let id = Int(fragment.dropFirst("note_".count)), id > 0 else { return nil }
+        return id
+    }
+
+    struct FeedbackIdentity: Codable, Hashable, Sendable {
+        let id: Int
+        let targetURL: URL
+        let actorID: Int
+        let action: ActionName
+        let createdAt: Date
+        let updatedAt: Date?
+    }
+
+    var feedbackIdentity: FeedbackIdentity {
+        .init(id: id, targetURL: targetURL, actorID: author.id, action: actionName, createdAt: createdAt, updatedAt: updatedAt)
     }
 }

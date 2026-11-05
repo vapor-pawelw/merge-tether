@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# Builds an unsigned Release .app, ZIP and DMG for GitLab To-Dos.
+# Builds an unsigned Release .app, ZIP and DMG for MergeTether.
 #
 # Usage:
 #   scripts/build-release.sh [version]
@@ -11,7 +11,7 @@
 set -euo pipefail
 
 APP_NAME="GitLabTodos"
-DISPLAY_NAME="GitLab To-Dos"
+DISPLAY_NAME="MergeTether"
 SCHEME="GitLabTodos"
 CONFIGURATION="Release"
 

@@ -6,6 +6,7 @@ struct TodoBadgeView: View {
     var body: some View {
         let state = todo.targetState
         let identifier = todo.relativeIdentifier
+        let tint: Color = state == .open ? .secondary : state.tint
 
         HStack(spacing: 4) {
             if !identifier.isEmpty {
@@ -19,11 +20,11 @@ struct TodoBadgeView: View {
         }
         .padding(.horizontal, 6)
         .padding(.vertical, 2)
-        .background(state.tint.opacity(0.18), in: Capsule())
-        .foregroundStyle(state.tint)
+        .background(tint.opacity(0.12), in: Capsule())
+        .foregroundStyle(tint)
         .overlay {
             Capsule()
-                .stroke(state.tint.opacity(0.35), lineWidth: 0.5)
+                .stroke(tint.opacity(0.25), lineWidth: 0.5)
         }
         .opacity(identifier.isEmpty && state == .none ? 0 : 1)
     }

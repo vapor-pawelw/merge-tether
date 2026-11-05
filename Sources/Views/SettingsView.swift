@@ -10,7 +10,7 @@ struct SettingsView: View {
                     Label {
                         Text(.Settings.settingsGeneralTab)
                     } icon: {
-                        Image(systemName: "gear")
+                        Image(systemName: "gearshape")
                     }
                 }
 
@@ -22,7 +22,16 @@ struct SettingsView: View {
                         Image(systemName: "terminal")
                     }
                 }
+
+            AutomationSettingsTab(monitor: monitor)
+                .tabItem {
+                    Label {
+                        Text(.Settings.settingsAutomationTab)
+                    } icon: {
+                        Image(systemName: "bolt.circle")
+                    }
+                }
         }
-        .frame(width: 480, height: 400)
+        .frame(minWidth: 680, idealWidth: 720, minHeight: 560, idealHeight: 680)
     }
 }

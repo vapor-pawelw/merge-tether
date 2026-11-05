@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 # Regenerate the Xcode project, build a Debug .app, kill any running
-# instance of GitLab To-Dos and launch the freshly built one. Used during
+# instance of MergeTether and launch the freshly built one. Used during
 # development to pick up code changes end-to-end.
 
 set -euo pipefail

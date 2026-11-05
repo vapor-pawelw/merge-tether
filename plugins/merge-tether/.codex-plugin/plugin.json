@@ -1,0 +1,13 @@
+{
+  "name": "merge-tether",
+  "version": "0.1.13",
+  "description": "Deliver MergeTether GitLab work to native Codex chats.",
+  "requires_local_executor": true,
+  "skills": "./skills/",
+  "mcpServers": "./.mcp.json",
+  "onboardingSkill": "./skills/merge-tether-setup/SKILL.md",
+  "interface": {
+    "displayName": "MergeTether",
+    "shortDescription": "Send MergeTether work to Codex chats."
+  }
+}

@@ -17,7 +17,7 @@
 set -euo pipefail
 
 RELEASE_WORKFLOW_NAME="Release"
-DEFAULT_RELEASE_REPO="vapor-pawelw/gitlab-todos"
+DEFAULT_RELEASE_REPO="vapor-pawelw/merge-tether"
 CHANGELOG_FILE="CHANGELOG.md"
 CHANGELOG_UNRELEASED_PLACEHOLDER="- _No notable changes yet._"
 

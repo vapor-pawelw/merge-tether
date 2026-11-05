@@ -7,13 +7,33 @@ final class TodoMonitorService {
     let settings: SettingsManager
     let glab: GlabService
     let notifications: NotificationService
+    let attention: MergeRequestAttentionMonitor
+    let authoredMergeRequests: AuthoredMergeRequestMonitor
 
     private(set) var allTodos: [Todo] = []
     private(set) var lastError: GlabError?
+    private(set) var failedAutomationTodoID: Int?
     private(set) var lastRefresh: Date?
     private(set) var isLoading = false
+    private(set) var desktopHandoffError = false
+    private(set) var availableAssistants: Set<AutomationAssistant> = []
+    private(set) var codexListenerHealth: CodexDesktopRelay.ListenerHealth = .off
+    private(set) var codexPluginInstallation: CodexPluginInstaller.Installation?
+    private var lastListenerCheck: Date?
+    private var lastPluginCheck: Date?
+    private var isCheckingCodexPlugin = false
 
     private var optimisticallyDone: Set<Int> = []
+    private var pendingMarkDoneTask: Task<Void, Never>?
+    private(set) var undoableTodo: Todo?
+    static let undoWindow: Duration = .seconds(4)
+    private var acknowledgedDuringFetch: Set<Int> = []
+    private var inboxHost: String?
+    private var isAutomating = false
+    private let automation = TodoAutomationService()
+    private let mergedChats = MergedAssistantChatMonitor()
+    private var runningAttentionFeedback: Set<AssistantAutomationRunner.MergeRequestWork> = []
+    private var failedAttentionFeedback: Set<AssistantAutomationRunner.MergeRequestWork> = []
     private var timer: Timer?
     private var unreadReminderTimer: Timer?
     private var hasCompletedFirstFetch = false
@@ -26,6 +46,15 @@ final class TodoMonitorService {
         self.settings = settings
         self.glab = glab
         self.notifications = notifications
+        self.attention = MergeRequestAttentionMonitor(glab: glab, settings: settings,
+                                                       reportDirectory: CodexDesktopRelay.directory)
+        self.authoredMergeRequests = AuthoredMergeRequestMonitor(settings: settings, glab: glab, notifications: notifications)
+        attention.onAutoApproved = { [settings, notifications] request in
+            if settings.notificationsEnabled { notifications.deliverAutoApproved(request) }
+        }
+        attention.onRefreshed = { [weak self] in
+            Task { await self?.prepareAutomaticAttentionFeedback() }
+        }
 
         // Hydrate the service from any previously persisted state so the
         // glab wrapper survives a cold launch without needing onboarding.
@@ -41,7 +70,12 @@ final class TodoMonitorService {
     /// off the first fetch + polling timer if onboarding is already done so
     /// the menu bar count reflects the real inbox without waiting for the
     /// user to open the dropdown.
+    func refreshAvailableAssistants() {
+        availableAssistants = Set(AutomationAssistant.allCases.filter(AssistantAutomationRunner.isAvailable))
+    }
+
     func bootstrap() async {
+        refreshAvailableAssistants()
         if glab.glabPath == nil {
             glab.glabPath = await OnboardingDetector.findGlabExecutable()
             settings.glabPath = glab.glabPath
@@ -51,8 +85,13 @@ final class TodoMonitorService {
         settings.resolvedHost = glab.resolvedHost
         settings.save()
 
-        if settings.onboardingCompleted, lastRefresh == nil {
-            start()
+        if settings.onboardingCompleted, timer == nil {
+            if lastRefresh == nil {
+                start()
+            } else {
+                restartTimer()
+                authoredMergeRequests.refreshIfNeeded()
+            }
         }
     }
 
@@ -64,7 +103,201 @@ final class TodoMonitorService {
             .sorted { $0.createdAt > $1.createdAt }
     }
 
-    var badgeCount: Int { visibleTodos.count }
+    var pipelineHandoffs: [MergeWorkflowActivityEntry] {
+        authoredMergeRequests.workflow.pendingPipelineHandoffs
+    }
+
+    func scopeTarget(projectID: Int, iid: Int, url: URL) -> MRAutomationScope.Target? {
+        guard let host = glab.resolvedHost, let username = glab.currentUsername,
+              url.isGitLabMergeRequest(host: host, iid: iid) else { return nil }
+        return .init(host: host, username: username, projectID: projectID, iid: iid)
+    }
+
+    /// The selected assistant's chat for this MR: a Codex thread or a Claude Code session.
+    func existingCodexChat(for target: MRAutomationScope.Target) -> URL? {
+        guard let iid = target.iid else { return nil }
+        let assistant = settings.automation.assistant
+        let work = AssistantAutomationRunner.MergeRequestWork(host: target.host, projectID: target.projectID, iid: iid)
+        let key = AssistantAutomationRunner.ChatKey(assistant: assistant, work: work, username: target.username,
+                                                     workspace: "", access: .gitLabRead)
+        let chatID = key.reusableChat(in: settings.assistantChats) ?? settings.assistantChats.first {
+            $0.key.assistant == assistant && $0.key.work == work && $0.key.username == target.username
+        }?.value ?? assistantHandoffs.last {
+            $0.key.work == work && $0.key.assistant == assistant && $0.chatID != nil
+        }?.chatID
+        return chatID.flatMap(assistant == .codex ? AssistantAutomationRunner.codexChatURL
+                                                  : AssistantAutomationRunner.claudeSessionURL)
+    }
+
+    func addAutomationTarget(from address: String) async throws {
+        guard let host = glab.resolvedHost, let username = glab.currentUsername,
+              let url = URL(string: address.trimmingCharacters(in: .whitespacesAndNewlines)),
+              let expected = URLComponents(string: "https://\(host)"),
+              let parts = URLComponents(url: url, resolvingAgainstBaseURL: false),
+              let scheme = parts.scheme, ["https", "http"].contains(scheme),
+              parts.host?.lowercased() == expected.host?.lowercased(), parts.user == nil, parts.password == nil,
+              (parts.port ?? (scheme == "https" ? 443 : 80)) == (expected.port ?? (scheme == "https" ? 443 : 80))
+        else { throw GlabError.decoding("Use a URL on the current GitLab host") }
+        let path = url.path.trimmingCharacters(in: CharacterSet(charactersIn: "/"))
+        let components = path.components(separatedBy: "/-/merge_requests/")
+        let projectPath = components[0]
+        guard (components.count == 1 || components.count == 2), projectPath.contains("/"),
+              !projectPath.contains("/-/"), !projectPath.hasSuffix(".git") else {
+            throw GlabError.decoding("Enter a GitLab repository or merge request URL")
+        }
+        let projectID = try await glab.resolveAutomationProject(path: projectPath, host: host)
+        var iid: Int? = nil
+        if components.count == 2 {
+            guard let number = Int(components[1]), number > 0 else {
+                throw GlabError.decoding("Invalid merge request URL")
+            }
+            let request = try await glab.fetchMergeRequest(projectID: projectID, iid: number, host: host)
+            guard request.state == "opened", request.webURL.isGitLabMergeRequest(host: host, iid: number) else {
+                throw GlabError.decoding("The merge request is no longer open")
+            }
+            iid = number
+        }
+        guard glab.resolvedHost == host, glab.currentUsername == username else { throw CancellationError() }
+        let target = MRAutomationScope.Target(host: host, username: username, projectID: projectID, iid: iid)
+        settings.automation.scope[target] = .active
+        settings.automation.scope.rememberRepository(projectPath, for: target)
+        settings.save()
+        await refreshNow()
+    }
+
+    var attentionItems: [MergeRequestAttentionMonitor.Item] {
+        var items = attention.currentItems.compactMap { item -> MergeRequestAttentionMonitor.Item? in
+            guard let host = glab.resolvedHost, let username = glab.currentUsername, !item.feedback.isEmpty else { return item }
+            let work = AssistantAutomationRunner.MergeRequestWork(host: host, projectID: item.id.projectID, iid: item.id.iid)
+            let remaining = Set(AssistantAutomationRunner.unhandledFeedback(
+                item.feedback.compactMap(\.id), work: work, username: username, settings: settings
+            ))
+            var item = item
+            item.feedback.removeAll { $0.id.map { !remaining.contains($0) } ?? false }
+            if item.feedback.isEmpty { item.needsDiscussion = false }
+            return item.needsAttention ? item : nil
+        }
+        let handoffs = pipelineHandoffs
+        for handoff in handoffs {
+            let mr = handoff.event.mergeRequest
+            let id = MergeRequestAttentionMonitor.Item.ID(projectID: mr.projectID, iid: mr.iid)
+            if let index = items.firstIndex(where: { $0.id == id }) {
+                items[index].needsPipelineHandoff = true
+                if items[index].mergeRequest == nil { items[index].mergeRequest = mr }
+            } else {
+                items.append(.init(id: id, title: mr.title, url: mr.webURL, needsPipelineHandoff: true, mergeRequest: mr))
+            }
+        }
+        let visible = items.compactMap { item -> MergeRequestAttentionMonitor.Item? in
+            guard let target = scopeTarget(projectID: item.id.projectID, iid: item.id.iid, url: item.url) else { return item }
+            let work = AssistantAutomationRunner.MergeRequestWork(host: target.host, projectID: item.id.projectID, iid: item.id.iid)
+            let currentEvents = authoredMergeRequests.workflow.entries.filter {
+                $0.event.mergeRequest.projectID == item.id.projectID && $0.event.mergeRequest.iid == item.id.iid
+                    && $0.event.mergeRequest.sha == item.mergeRequest?.sha
+            }
+            var failures = Set(MergeWorkflowTrigger.allCases.filter { trigger in
+                currentEvents.first { $0.event.kind == trigger }?.state == .failed
+            })
+            if failedAttentionFeedback.contains(work) { failures.insert(.newDiscussion) }
+            let conflictFailed = item.mergeRequest.map { authoredMergeRequests.conflictTaskFailed(for: $0) } ?? false
+            let pipelineState = currentEvents.first { $0.event.kind == .pipelineFailure
+                && $0.event.pipelineID == item.mergeRequest?.headPipeline?.id }?.state
+            let pipelineOwned = pipelineState.map { [.queued, .running, .waitingForAssistant, .completed, .alreadyRegistered].contains($0) } ?? false
+            let feedbackState = currentEvents.first { $0.event.kind == .newDiscussion }?.state
+            let feedbackOwned = feedbackState.map { [.queued, .running, .waitingForAssistant, .completed].contains($0) } ?? false
+            let visible = item.requiringUserAttention(automation: settings.automation, target: target,
+                                                     failedTriggers: failures, conflictTaskFailed: conflictFailed,
+                                                     pipelineOwnedAutomatically: pipelineOwned, feedbackOwnedAutomatically: feedbackOwned)
+            return visible.needsAttention ? visible : nil
+        }
+        return MergeRequestAttentionMonitor.Item.ordered(visible)
+    }
+
+    func unmanagedTarget(for item: MergeRequestAttentionMonitor.Item) -> MRAutomationScope.Target? {
+        guard let target = scopeTarget(projectID: item.id.projectID, iid: item.id.iid, url: item.url),
+              !settings.automation.scope.resolve(target).active else { return nil }
+        return target
+    }
+
+    func manageAttentionItem(_ item: MergeRequestAttentionMonitor.Item) async {
+        guard let target = unmanagedTarget(for: item) else { return }
+        settings.automation.scope[target] = .active
+        settings.automation.scope.rememberRepository(item.url.gitLabProjectPath, for: target)
+        settings.save()
+        if automaticallyHandlesFeedback(item) { await runAttentionFeedback(for: item, manual: false) }
+        await refreshNow()
+    }
+
+    private func automaticallyHandlesFeedback(_ item: MergeRequestAttentionMonitor.Item) -> Bool {
+        guard let target = scopeTarget(projectID: item.id.projectID, iid: item.id.iid, url: item.url),
+              settings.automation.scope.resolve(target).active,
+              let request = item.authoredRequest, request.state == "opened", request.draft == false,
+              request.author.username == target.username else { return false }
+        let rule = settings.automation.workflowRules[.newDiscussion]
+        let feedback = settings.automation.authorFeedback
+        guard feedback.runner == .assistant, feedback.isConfigured, feedback.includes(project: item.url.gitLabProjectPath) else { return false }
+        return feedback.isEnabled || (rule.mode == .assistant && rule.includes(request))
+    }
+
+    private func prepareAutomaticAttentionFeedback() async {
+        // This also picks up existing feedback when an MR becomes managed, after the
+        // event monitor has already seeded its baseline. Shared handoffs deduplicate it.
+        for item in attention.currentItems where automaticallyHandlesFeedback(item) {
+            guard let host = glab.resolvedHost else { return }
+            let work = AssistantAutomationRunner.MergeRequestWork(host: host, projectID: item.id.projectID, iid: item.id.iid)
+            guard !failedAttentionFeedback.contains(work) else { continue }
+            await runAttentionFeedback(for: item, manual: false)
+        }
+    }
+
+    var assistantHandoffs: [AssistantAutomationRunner.Handoff] {
+        guard let host = glab.resolvedHost, let username = glab.currentUsername else { return [] }
+        return settings.assistantHandoffs.filter { $0.key.work.host == host && $0.key.username == username }
+    }
+
+    var unavailableAssistant: AutomationAssistant? {
+        let assistant = settings.automation.assistant
+        if settings.automation.usesAssistant && !availableAssistants.contains(assistant) { return assistant }
+        return assistantHandoffs.first { $0.relayComplete != true && !availableAssistants.contains($0.key.assistant) }?.key.assistant
+    }
+
+    func checkCodexListener(force: Bool = false, now: Date = Date()) {
+        let automatic = settings.automation.assistant == .codex && settings.automation.codexRelayEnabled
+        let manual = assistantHandoffs.contains { $0.codexDispatchRequested == true && $0.relayComplete != true }
+        guard automatic || manual else {
+            if codexListenerHealth != .off { codexListenerHealth = .off }
+            lastListenerCheck = nil
+            return
+        }
+        if !force, let lastListenerCheck, (0..<15).contains(now.timeIntervalSince(lastListenerCheck)) { return }
+        lastListenerCheck = now
+        let next = AssistantAutomationRunner.isDesktopRunning(.codex)
+            ? CodexDesktopRelay.listenerHealth(now: now, pendingIDs: assistantHandoffs.filter {
+                $0.openedAt == nil && AssistantAutomationRunner.usesRelay($0, settings: settings)
+            }.map(\.id)) : .desktopClosed
+        if next != codexListenerHealth { codexListenerHealth = next }
+        if !isCheckingCodexPlugin, lastPluginCheck.map({ now.timeIntervalSince($0) >= 60 }) ?? true {
+            isCheckingCodexPlugin = true
+            lastPluginCheck = now
+            Task { [weak self] in
+                guard let self else { return }
+                self.codexPluginInstallation = try? await CodexPluginInstaller.detect()
+                self.isCheckingCodexPlugin = false
+            }
+        }
+    }
+
+    var codexListenerWarning: LocalizedStringResource? {
+        guard codexListenerHealth != .off else { return nil }
+        switch codexPluginInstallation {
+        case .missing: return .Menu.menuAssistantPluginMissing
+        case .disabled: return .Menu.menuAssistantPluginDisabled
+        case .enabled, nil: return codexListenerHealth.warning
+        }
+    }
+
+    var attentionCount: Int { attentionItems.count + assistantHandoffs.filter { $0.relayComplete != true }.count }
+    var badgeCount: Int { visibleTodos.count + attentionCount }
 
     var hasUnseenTodos: Bool {
         guard !visibleTodos.isEmpty else { return false }
@@ -107,15 +340,18 @@ final class TodoMonitorService {
     }
 
     func restartUnreadReminderTimer() {
-        stopUnreadReminderTimer()
-
         guard settings.notificationsEnabled,
               hasUnseenTodos,
               let interval = settings.unreadReminderInterval.seconds
         else {
+            stopUnreadReminderTimer()
             return
         }
 
+        // Refreshes can happen more often than reminders. Keep an active
+        // reminder's deadline unless the reminder interval changed.
+        guard unreadReminderTimer?.timeInterval != interval else { return }
+        stopUnreadReminderTimer()
         unreadReminderTimer = Timer.scheduledTimer(withTimeInterval: interval, repeats: true) { [weak self] _ in
             Task { @MainActor in
                 self?.sendUnreadReminderIfNeeded()
@@ -138,7 +374,7 @@ final class TodoMonitorService {
         }
 
         notifications.deliverUnreadReminder(
-            todoCount: badgeCount,
+            todoCount: visibleTodos.count,
             dashboardURL: dashboardURL,
             sound: settings.unreadReminderSound
         )
@@ -147,17 +383,35 @@ final class TodoMonitorService {
     // MARK: - Commands
 
     func refreshNow() async {
+        refreshAvailableAssistants()
+        refreshAssistantRelay()
+        authoredMergeRequests.refreshIfNeeded()
         guard !isLoading else { return }
         isLoading = true
         defer {
             isLoading = false
+            acknowledgedDuringFetch.removeAll()
             lastRefresh = Date()
         }
 
-        let result = await glab.fetchTodos()
+        let username = glab.currentUsername
+        let host = username == nil ? nil : glab.resolvedHost
+        let result = await glab.fetchTodos(host: host)
         switch result {
         case .success(let fetched):
-            let fetchedFiltered = fetched.filter { !optimisticallyDone.contains($0.id) }
+            let fetchedFiltered = fetched.filter { !acknowledgedDuringFetch.contains($0.id) }
+            let fetchedIDs = Set(fetchedFiltered.map(\.id))
+            glab.resolveHostFromTodos(fetchedFiltered)
+            settings.resolvedHost = glab.resolvedHost
+            inboxHost = host
+
+            if let failedAutomationTodoID, !fetchedIDs.contains(failedAutomationTodoID) {
+                self.failedAutomationTodoID = nil
+            }
+
+            if let host, let username, !isAutomating {
+                automation.prune(fetchedIDs: fetchedIDs, host: host, username: username, settings: settings)
+            }
 
             let newIDs = TodoDiff.newIDs(
                 fetched: fetchedFiltered,
@@ -166,22 +420,27 @@ final class TodoMonitorService {
             )
 
             if settings.notificationsEnabled && !newIDs.isEmpty {
-                let newTodos = fetchedFiltered.filter { newIDs.contains($0.id) }
-                glab.resolveHostFromTodos(fetchedFiltered)
-                settings.resolvedHost = glab.resolvedHost
+                let newTodos = fetchedFiltered.filter {
+                    newIDs.contains($0.id) && !optimisticallyDone.contains($0.id)
+                }
                 notifications.deliver(newTodos: newTodos, dashboardURL: glab.dashboardTodosURL)
-            } else {
-                glab.resolveHostFromTodos(fetchedFiltered)
-                settings.resolvedHost = glab.resolvedHost
             }
 
-            settings.lastSeenTodoIDs = Set(fetchedFiltered.map(\.id))
+            settings.lastSeenTodoIDs = fetchedIDs
             settings.save()
 
             allTodos = fetchedFiltered
             lastError = nil
             hasCompletedFirstFetch = true
             restartUnreadReminderTimer()
+            if let host, let username {
+                if settings.onboardingCompleted {
+                    attention.refresh(host: host, username: username, todos: fetchedFiltered)
+                    mergedChats.refresh(todos: fetched, glab: glab, host: host, username: username, settings: settings)
+                }
+                await acknowledgeHandledTodos(host: host, username: username)
+                scheduleAutomation(host: host, username: username)
+            }
 
         case .failure(let err):
             Log.monitor.error("Refresh failed: \(String(describing: err), privacy: .public)")
@@ -191,21 +450,221 @@ final class TodoMonitorService {
         }
     }
 
+    private func scheduleAutomation(host: String, username: String) {
+        guard !isAutomating,
+              settings.onboardingCompleted,
+              settings.automation.reviewRequested.isEnabled || settings.automation.authorFeedback.isEnabled
+        else { return }
+
+        let candidates = visibleTodos.reversed().compactMap { todo in
+            TodoAutomationEvent(todo: todo, username: username).map { (todo, $0) }
+        }
+        guard !candidates.isEmpty else { return }
+
+        isAutomating = true
+        Task {
+            defer { isAutomating = false }
+            for (todo, event) in candidates {
+                await runAutomation(todo, event: event, host: host, username: username, manual: false)
+            }
+        }
+    }
+
+    func automationAction(for todo: Todo) -> TodoAutomationService.ActionState? {
+        guard let host = glab.resolvedHost, let username = glab.currentUsername, inboxHost == host else { return nil }
+        return automation.actionState(
+            for: todo, host: host, username: username, settings: settings, available: availableAssistants
+        )
+    }
+
+    func attentionFeedbackAction(for item: MergeRequestAttentionMonitor.Item) -> TodoAutomationService.ActionState? {
+        guard let host = glab.resolvedHost, let username = glab.currentUsername, inboxHost == host,
+              let request = item.authoredRequest, request.author.username == username,
+              availableAssistants.contains(settings.automation.assistant) else { return nil }
+        let rule = settings.automation.authorFeedback
+        guard rule.runner == .assistant, rule.isConfigured, rule.includes(project: item.url.gitLabProjectPath) else { return nil }
+        let work = AssistantAutomationRunner.MergeRequestWork(host: host, projectID: item.id.projectID, iid: item.id.iid)
+        if runningAttentionFeedback.contains(work) { return .running }
+        guard !attentionFeedbackNoteIDs(for: item, work: work, username: username).isEmpty else { return nil }
+        return failedAttentionFeedback.contains(work) ? .failed : .ready(.assistant)
+    }
+
+    private func attentionFeedbackNoteIDs(
+        for item: MergeRequestAttentionMonitor.Item, work: AssistantAutomationRunner.MergeRequestWork, username: String
+    ) -> [Int] {
+        let notes = TodoAutomationEvent.feedbackWithoutTodo(
+            item.feedback, todos: allTodos, host: work.host, projectID: work.projectID, iid: work.iid, username: username
+        ).compactMap(\.id)
+        return AssistantAutomationRunner.unhandledFeedback(notes, work: work, username: username, settings: settings)
+    }
+
+    func runAttentionFeedback(for item: MergeRequestAttentionMonitor.Item, manual: Bool = true) async {
+        guard let action = attentionFeedbackAction(for: item), action == .ready(.assistant) || action == .failed,
+              let host = glab.resolvedHost, let username = glab.currentUsername else { return }
+        let work = AssistantAutomationRunner.MergeRequestWork(host: host, projectID: item.id.projectID, iid: item.id.iid)
+        guard runningAttentionFeedback.insert(work).inserted else { return }
+        defer { runningAttentionFeedback.remove(work) }
+        failedAttentionFeedback.remove(work)
+        let notes = attentionFeedbackNoteIDs(for: item, work: work, username: username)
+        do {
+            try await automation.prepareFeedback(work: work, noteIDs: notes, username: username, settings: settings, glab: glab, manual: manual) {
+                self.glab.resolvedHost == host && self.glab.currentUsername == username && self.inboxHost == host
+                    && self.attentionFeedbackNoteIDs(for: item, work: work, username: username) == notes
+                    && (manual || self.automaticallyHandlesFeedback(item))
+            }
+        } catch {
+            failedAttentionFeedback.insert(work)
+            Log.monitor.error("Could not prepare MR feedback: \(String(describing: error), privacy: .private)")
+        }
+    }
+
+    private func acknowledgeHandledTodos(host: String, username: String) async {
+        var handled = Set(assistantHandoffs.flatMap(\.deliveredFeedbackTodos))
+        handled.formUnion(settings.pendingTodoAcknowledgements.lazy
+            .filter { $0.host == host && $0.username == username }.map(\.todo))
+        for todo in visibleTodos where handled.contains(todo.feedbackIdentity) {
+            guard glab.resolvedHost == host, glab.currentUsername == username, inboxHost == host else { return }
+            await markDone(todo)
+        }
+    }
+
+    func runAutomationManually(for todo: Todo) async {
+        guard case .ready = automationAction(for: todo),
+              let host = glab.resolvedHost, let username = glab.currentUsername,
+              let event = TodoAutomationEvent(todo: todo, username: username) else { return }
+        await runAutomation(todo, event: event, host: host, username: username, manual: true)
+    }
+
+    private func runAutomation(
+        _ todo: Todo, event: TodoAutomationEvent, host: String, username: String, manual: Bool
+    ) async {
+        @MainActor func isPending() -> Bool {
+            glab.resolvedHost == host && glab.currentUsername == username && inboxHost == host
+                && !optimisticallyDone.contains(todo.id) && allTodos.contains { $0.id == todo.id }
+        }
+
+        guard isPending() else { return }
+        do {
+            let shouldAcknowledge = try await automation.prepareToAcknowledge(
+                todo, event: event, host: host, username: username,
+                settings: settings, glab: glab, manual: manual, isPending: isPending
+            )
+            if failedAutomationTodoID == todo.id,
+               settings.automationReceipts.contains(.init(host: host, username: username, todoID: todo.id)) {
+                failedAutomationTodoID = nil
+            }
+            if shouldAcknowledge, isPending() { await markDone(todo) }
+        } catch {
+            if isPending() { failedAutomationTodoID = todo.id }
+            Log.monitor.error("Automation failed for todo \(todo.id, privacy: .public): \(String(describing: error), privacy: .private)")
+        }
+    }
+
+    func refreshAssistantRelay() {
+        FollowUpVerificationStore.synchronizeRuns(settings: settings)
+        CodexDesktopRelay.synchronize(settings: settings, host: glab.resolvedHost, username: glab.currentUsername)
+        CodexDesktopRelay.synchronizeClaude(settings: settings)
+        checkCodexListener(force: true)
+    }
+
+    func openAssistantHandoff(_ id: UUID) async {
+        guard let handoff = assistantHandoffs.first(where: { $0.id == id }) else { return }
+        if handoff.relayComplete != true {
+            guard !AssistantAutomationRunner.usesRelay(handoff, settings: settings) else { return }
+            // Withdraw before checking the claim so a listener cannot take over while we open manually.
+            CodexDesktopRelay.withdraw(id)
+            guard !CodexDesktopRelay.hasClaim(id) else { return }
+        }
+        do {
+            try await AssistantAutomationRunner.open(id, settings: settings)
+            desktopHandoffError = false
+        } catch {
+            desktopHandoffError = true
+            Log.monitor.error("Could not open assistant handoff: \(String(describing: error), privacy: .private)")
+        }
+    }
+
+    func openCodexForListener() async {
+        do {
+            try await AssistantAutomationRunner.openCodexListener()
+            desktopHandoffError = false
+        } catch {
+            desktopHandoffError = true
+        }
+    }
+
+    func requestCodexDispatch(_ id: UUID) {
+        guard assistantHandoffs.contains(where: { $0.id == id }) else { return }
+        CodexDesktopRelay.requestDispatch(id, settings: settings)
+        checkCodexListener(force: true)
+    }
+
+    func dismissAssistantHandoff(_ id: UUID) {
+        guard let handoff = assistantHandoffs.first(where: { $0.id == id }) else { return }
+        CodexDesktopRelay.withdraw(id)
+        if let reservation = handoff.pipelineReservation {
+            try? ExistingPipelineWorkDetector().finishHandoff(for: reservation)
+        }
+        settings.assistantHandoffs.removeAll { $0.id == id }
+        settings.save()
+    }
+
     func markDone(_ todo: Todo) async {
-        optimisticallyDone.insert(todo.id)
-        let result = await glab.markAsDone(id: todo.id)
+        guard optimisticallyDone.insert(todo.id).inserted else { return }
+        await performMarkDone(todo)
+    }
+
+    /// Hides the to-do immediately but waits `undoWindow` before calling GitLab,
+    /// so a misclick can be reverted with `undoMarkDone()`.
+    func markDoneWithUndo(_ todo: Todo) {
+        commitPendingMarkDone()
+        guard optimisticallyDone.insert(todo.id).inserted else { return }
+        undoableTodo = todo
+        pendingMarkDoneTask = Task { [weak self] in
+            try? await Task.sleep(for: Self.undoWindow)
+            guard !Task.isCancelled else { return }
+            self?.commitPendingMarkDone()
+        }
+    }
+
+    func undoMarkDone() {
+        guard let todo = undoableTodo else { return }
+        pendingMarkDoneTask?.cancel()
+        pendingMarkDoneTask = nil
+        undoableTodo = nil
+        optimisticallyDone.remove(todo.id)
+    }
+
+    private func commitPendingMarkDone() {
+        guard let todo = undoableTodo else { return }
+        pendingMarkDoneTask?.cancel()
+        pendingMarkDoneTask = nil
+        undoableTodo = nil
+        Task { await performMarkDone(todo) }
+    }
+
+    /// Expects `todo.id` to already be in `optimisticallyDone`.
+    private func performMarkDone(_ todo: Todo) async {
+        let host = inboxHost
+        let username = glab.currentUsername
+        let result = await glab.markAsDone(id: todo.id, host: host)
+        optimisticallyDone.remove(todo.id)
+        guard inboxHost == host, glab.currentUsername == username else { return }
         switch result {
         case .success:
+            if isLoading { acknowledgedDuringFetch.insert(todo.id) }
             allTodos.removeAll { $0.id == todo.id }
-            optimisticallyDone.remove(todo.id)
+            if failedAutomationTodoID == todo.id { failedAutomationTodoID = nil }
             settings.lastSeenTodoIDs.remove(todo.id)
+            if let host, let username {
+                settings.pendingTodoAcknowledgements.remove(.init(host: host, username: username, todo: todo.feedbackIdentity))
+            }
             settings.save()
-            restartUnreadReminderTimer()
         case .failure(let err):
-            optimisticallyDone.remove(todo.id)
             lastError = err
             Log.monitor.error("Mark-as-done failed for \(todo.id, privacy: .public): \(String(describing: err), privacy: .public)")
         }
+        restartUnreadReminderTimer()
     }
 
     /// Re-runs glab detection and pushes the resolved state into settings so a
@@ -218,5 +677,6 @@ final class TodoMonitorService {
         }
         settings.resolvedHost = glab.resolvedHost
         settings.save()
+        authoredMergeRequests.refreshIfNeeded()
     }
 }

@@ -23,8 +23,8 @@ let project = Project(
             deploymentTargets: .macOS("14.0"),
             infoPlist: .extendingDefault(with: [
                 "LSUIElement": .boolean(true),
-                "CFBundleDisplayName": .string("GitLab To-Dos"),
-                "CFBundleName": .string("GitLab To-Dos"),
+                "CFBundleDisplayName": .string("MergeTether"),
+                "CFBundleName": .string("MergeTether"),
                 "CFBundleShortVersionString": .string("0.1.0"),
                 "CFBundleVersion": .string("1"),
                 "NSHumanReadableCopyright": .string("Copyright © 2026 vaporpw. MIT License."),
@@ -33,6 +33,7 @@ let project = Project(
             resources: [
                 "Resources/**",
                 "CHANGELOG.md",
+                .folderReference(path: "plugins/merge-tether"),
             ]
         ),
         .target(

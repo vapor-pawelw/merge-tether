@@ -21,6 +21,23 @@ struct ProcessRunnerTests {
         #expect(output.stderr.isEmpty)
     }
 
+    @Test("returns the command output even when a background child inherits it")
+    func returnsWhileBackgroundChildIsRunning() async throws {
+        let clock = ContinuousClock()
+        let start = clock.now
+        let output = try await ProcessRunner.run(
+            URL(fileURLWithPath: "/bin/sh"),
+            arguments: ["-c", "/bin/sleep 3 & printf ready; printf diagnostic >&2"],
+            environment: [:],
+            timeout: 1
+        )
+
+        #expect(output.exitCode == 0)
+        #expect(String(decoding: output.stdout, as: UTF8.self) == "ready")
+        #expect(output.stderr == "diagnostic")
+        #expect(start.duration(to: clock.now) < .seconds(2))
+    }
+
     @Test("force-stops a process that ignores termination after timing out")
     func forceStopsAfterTimeout() async throws {
         let pidFile = FileManager.default.temporaryDirectory

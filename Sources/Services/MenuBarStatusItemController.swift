@@ -15,6 +15,8 @@ final class MenuBarStatusItemController: NSObject {
     private var remainingBlinkSteps = 0
     private var isBlinkAlertVisible = false
     private lazy var redDotImage = Self.makeRedDotImage()
+    private var activationObserver: NSObjectProtocol?
+    private var windowsToKeepBehind: [NSWindow] = []
 
     init(monitor: TodoMonitorService, updates: UpdateService, avatarCache: AvatarCache) {
         self.monitor = monitor
@@ -55,11 +57,13 @@ final class MenuBarStatusItemController: NSObject {
 
     private func updateStatusButton() {
         guard let button = statusItem.button else { return }
+        monitor.checkCodexListener()
 
         if isBlinkAlertVisible {
             button.image = redDotImage
             button.image?.isTemplate = false
-        } else if monitor.lastError != nil {
+        } else if monitor.lastError != nil || monitor.unavailableAssistant != nil
+                    || monitor.codexListenerWarning != nil || monitor.desktopHandoffError {
             button.image = NSImage(systemSymbolName: "exclamationmark.triangle", accessibilityDescription: nil)
             button.image?.isTemplate = true
         } else if monitor.settings.onboardingCompleted {
@@ -76,7 +80,9 @@ final class MenuBarStatusItemController: NSObject {
             button.image = NSImage(systemSymbolName: "checkmark.circle", accessibilityDescription: nil)
         }
         button.title = " \(monitor.badgeCount)"
-        button.toolTip = "GitLab To-Dos"
+        let appName = String(localized: .Menu.menuHeaderTitle)
+        button.toolTip = appName
+        button.setAccessibilityLabel("\(appName) \(monitor.badgeCount)")
     }
 
     private func synchronizeBlinkReminderTimer() {
@@ -171,8 +177,36 @@ final class MenuBarStatusItemController: NSObject {
             popover.performClose(sender)
         } else {
             monitor.markMenuOpened()
+            if !NSApp.isActive {
+                keepWindowsBehindOnActivation(NSApp.windows.filter { $0.isVisible && $0.styleMask.contains(.titled) })
+            }
             popover.show(relativeTo: sender.bounds, of: sender, preferredEdge: .minY)
+            // The popover needs the app to be active to receive keyboard focus.
             NSApplication.shared.activate(ignoringOtherApps: true)
         }
+    }
+
+    /// Activating the app raises its other windows (Settings, Setup, What's New).
+    /// If one was left open behind other apps, it would appear on top of the
+    /// popover, so push those windows back once activation has finished.
+    private func keepWindowsBehindOnActivation(_ windows: [NSWindow]) {
+        if let activationObserver { NotificationCenter.default.removeObserver(activationObserver) }
+        activationObserver = nil
+        windowsToKeepBehind = windows
+        guard !windows.isEmpty else { return }
+        activationObserver = NotificationCenter.default.addObserver(
+            forName: NSApplication.didBecomeActiveNotification, object: nil, queue: .main
+        ) { [weak self] _ in
+            MainActor.assumeIsolated { self?.sendWindowsBehind() }
+        }
+    }
+
+    private func sendWindowsBehind() {
+        if let activationObserver { NotificationCenter.default.removeObserver(activationObserver) }
+        activationObserver = nil
+        for window in windowsToKeepBehind where window.isVisible {
+            window.orderBack(nil)
+        }
+        windowsToKeepBehind = []
     }
 }

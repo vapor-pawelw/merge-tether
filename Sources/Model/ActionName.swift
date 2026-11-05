@@ -27,7 +27,7 @@ enum ActionName: Hashable, Codable, Sendable {
         case .unmergeable: "unmergeable"
         case .directlyAddressed: "directly_addressed"
         case .mergeTrainRemoved: "merge_train_removed"
-        case .addedApprovers: "added_approvers"
+        case .addedApprovers: "added_approver"
         case .reviewSubmitted: "review_submitted"
         case .okrCheckinRequested: "okr_checkin_requested"
         case .memberAccessRequested: "member_access_requested"
@@ -46,7 +46,7 @@ enum ActionName: Hashable, Codable, Sendable {
         case "unmergeable": self = .unmergeable
         case "directly_addressed": self = .directlyAddressed
         case "merge_train_removed": self = .mergeTrainRemoved
-        case "added_approvers": self = .addedApprovers
+        case "added_approver", "added_approvers": self = .addedApprovers
         case "review_submitted": self = .reviewSubmitted
         case "okr_checkin_requested": self = .okrCheckinRequested
         case "member_access_requested": self = .memberAccessRequested

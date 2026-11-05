@@ -15,6 +15,17 @@ struct GlabServiceDecodingTests {
         #expect(Self.todos.count == 6)
     }
 
+    @Test("decodes every to-do page when glab concatenates JSON arrays")
+    func decodesConcatenatedPages() throws {
+        let encoder = JSONEncoder()
+        encoder.dateEncodingStrategy = .iso8601
+        let firstPage = try encoder.encode(Array(Self.todos.prefix(2)))
+        let secondPage = try encoder.encode(Array(Self.todos.dropFirst(2)))
+        let output = firstPage + secondPage + Data("\n[]".utf8)
+
+        #expect(try GlabService.decodeTodos(output).map(\.id) == Self.todos.map(\.id))
+    }
+
     @Test("maps top-level fields correctly for a review request")
     func topLevelMapping() {
         let mr = Self.todos.first { $0.id == 10001 }!
@@ -74,6 +85,17 @@ struct GlabServiceDecodingTests {
         #expect(unknown.targetType == .unknown("SomeFutureType"))
         #expect(unknown.relativeIdentifier == "")
         #expect(unknown.displayTitle == "Unknown target kind")
+    }
+
+    @Test("decodes the GitLab approver action and encodes its canonical API name")
+    func addedApproverAction() throws {
+        let decoder = JSONDecoder()
+        let action = try decoder.decode(ActionName.self, from: Data(#""added_approver""#.utf8))
+        let legacyAction = try decoder.decode(ActionName.self, from: Data(#""added_approvers""#.utf8))
+        let encodedAction = try JSONEncoder().encode(action)
+        #expect(action == .addedApprovers)
+        #expect(legacyAction == action)
+        #expect(encodedAction == Data(#""added_approver""#.utf8))
     }
 
     @Test("createdAt parses ISO8601 with and without fractional seconds")

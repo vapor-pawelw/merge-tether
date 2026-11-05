@@ -16,10 +16,47 @@ final class SettingsManager {
     var resolvedHost: String?
     var launchAtLoginPreference: Bool
     var lastMenuOpenedAt: Date?
+    var lastMenuSection: String?
+    /// Managed MRs where the user turned off automatic approval.
+    var autoApproveOptOuts: Set<MRAutomationScope.Target>
+    var automation: AutomationSettings
+    var automationReceipts: Set<TodoAutomationReceipt>
+    var automationAttemptReceipts: Set<TodoAutomationReceipt>
+    var pendingTodoAcknowledgements: Set<TodoActionAcknowledgement>
+    var conflictReceipts: Set<MergeConflictReceipt>
+    var reReviewReceipts: [ReReviewReceipt.Key: ReReviewReceipt]
+    var reReviewDraftBaselines: [MRAutomationScope.Target: Int]
+    var assistantHandoffs: [AssistantAutomationRunner.Handoff]
+    var assistantChats: [AssistantAutomationRunner.ChatKey: String]
+    var workflowActivity: [MergeWorkflowActivityEntry]
 
     init(defaults: UserDefaults = .standard) {
         self.defaults = defaults
         Self.registerDefaults(in: defaults)
+
+        automation = defaults.data(forKey: Key.automation)
+            .flatMap { try? JSONDecoder().decode(AutomationSettings.self, from: $0) }
+            ?? AutomationSettings()
+        automationReceipts = defaults.data(forKey: Key.automationReceipts)
+            .flatMap { try? JSONDecoder().decode(Set<TodoAutomationReceipt>.self, from: $0) }
+            ?? []
+        automationAttemptReceipts = defaults.data(forKey: Key.automationAttemptReceipts)
+            .flatMap { try? JSONDecoder().decode(Set<TodoAutomationReceipt>.self, from: $0) } ?? []
+        pendingTodoAcknowledgements = defaults.data(forKey: Key.pendingTodoAcknowledgements)
+            .flatMap { try? JSONDecoder().decode(Set<TodoActionAcknowledgement>.self, from: $0) } ?? []
+        assistantHandoffs = defaults.data(forKey: Key.assistantHandoffs)
+            .flatMap { try? JSONDecoder().decode([AssistantAutomationRunner.Handoff].self, from: $0) } ?? []
+        assistantChats = defaults.data(forKey: Key.assistantChats)
+            .flatMap { try? JSONDecoder().decode([AssistantAutomationRunner.ChatKey: String].self, from: $0) } ?? [:]
+        workflowActivity = defaults.data(forKey: Key.workflowActivity)
+            .flatMap { try? JSONDecoder().decode([MergeWorkflowActivityEntry].self, from: $0) } ?? []
+        conflictReceipts = defaults.data(forKey: Key.conflictReceipts)
+            .flatMap { try? JSONDecoder().decode(Set<MergeConflictReceipt>.self, from: $0) }
+            ?? []
+        reReviewReceipts = defaults.data(forKey: Key.reReviewReceipts)
+            .flatMap { try? JSONDecoder().decode([ReReviewReceipt.Key: ReReviewReceipt].self, from: $0) } ?? [:]
+        reReviewDraftBaselines = defaults.data(forKey: Key.reReviewDraftBaselines)
+            .flatMap { try? JSONDecoder().decode([MRAutomationScope.Target: Int].self, from: $0) } ?? [:]
 
         let rawInterval = defaults.integer(forKey: Key.refreshInterval)
         self.refreshInterval = RefreshInterval(rawValue: rawInterval) ?? .fiveMinutes
@@ -35,6 +72,10 @@ final class SettingsManager {
         self.lastMenuOpenedAt = storedMenuOpenedAt > 0
             ? Date(timeIntervalSince1970: storedMenuOpenedAt)
             : nil
+
+        self.lastMenuSection = defaults.string(forKey: Key.lastMenuSection)
+        self.autoApproveOptOuts = defaults.data(forKey: Key.autoApproveOptOuts)
+            .flatMap { try? JSONDecoder().decode(Set<MRAutomationScope.Target>.self, from: $0) } ?? []
 
         if let pathString = defaults.string(forKey: Key.glabPath), !pathString.isEmpty {
             self.glabPath = URL(fileURLWithPath: pathString)
@@ -52,6 +93,36 @@ final class SettingsManager {
     }
 
     func save() {
+        if let data = try? JSONEncoder().encode(automation) {
+            defaults.set(data, forKey: Key.automation)
+        }
+        if let data = try? JSONEncoder().encode(automationReceipts) {
+            defaults.set(data, forKey: Key.automationReceipts)
+        }
+        if let data = try? JSONEncoder().encode(automationAttemptReceipts) {
+            defaults.set(data, forKey: Key.automationAttemptReceipts)
+        }
+        if let data = try? JSONEncoder().encode(pendingTodoAcknowledgements) {
+            defaults.set(data, forKey: Key.pendingTodoAcknowledgements)
+        }
+        if let data = try? JSONEncoder().encode(assistantHandoffs) {
+            defaults.set(data, forKey: Key.assistantHandoffs)
+        }
+        if let data = try? JSONEncoder().encode(assistantChats) {
+            defaults.set(data, forKey: Key.assistantChats)
+        }
+        if let data = try? JSONEncoder().encode(workflowActivity) {
+            defaults.set(data, forKey: Key.workflowActivity)
+        }
+        if let data = try? JSONEncoder().encode(conflictReceipts) {
+            defaults.set(data, forKey: Key.conflictReceipts)
+        }
+        if let data = try? JSONEncoder().encode(reReviewReceipts) {
+            defaults.set(data, forKey: Key.reReviewReceipts)
+        }
+        if let data = try? JSONEncoder().encode(reReviewDraftBaselines) {
+            defaults.set(data, forKey: Key.reReviewDraftBaselines)
+        }
         defaults.set(refreshInterval.rawValue, forKey: Key.refreshInterval)
         defaults.set(unreadReminderInterval.rawValue, forKey: Key.unreadReminderInterval)
         defaults.set(unreadReminderSound.rawValue, forKey: Key.unreadReminderSound)
@@ -76,6 +147,14 @@ final class SettingsManager {
         } else {
             defaults.removeObject(forKey: Key.lastMenuOpenedAt)
         }
+        if let data = try? JSONEncoder().encode(autoApproveOptOuts) {
+            defaults.set(data, forKey: Key.autoApproveOptOuts)
+        }
+        if let lastMenuSection {
+            defaults.set(lastMenuSection, forKey: Key.lastMenuSection)
+        } else {
+            defaults.removeObject(forKey: Key.lastMenuSection)
+        }
     }
 
     var isFirstLaunch: Bool {
@@ -99,6 +178,16 @@ final class SettingsManager {
     }
 
     private enum Key {
+        static let automation = "automation"
+        static let automationReceipts = "automationReceipts"
+        static let automationAttemptReceipts = "automationAttemptReceipts"
+        static let pendingTodoAcknowledgements = "pendingTodoAcknowledgements"
+        static let conflictReceipts = "conflictReceipts"
+        static let reReviewReceipts = "reReviewReceipts"
+        static let reReviewDraftBaselines = "reReviewDraftBaselines"
+        static let assistantHandoffs = "assistantHandoffs"
+        static let assistantChats = "assistantChats"
+        static let workflowActivity = "workflowActivity"
         static let refreshInterval = "refreshInterval"
         static let unreadReminderInterval = "unreadReminderInterval"
         static let unreadReminderSound = "unreadReminderSound"
@@ -110,5 +199,7 @@ final class SettingsManager {
         static let launchAtLoginPreference = "launchAtLoginPreference"
         static let hasLaunchedBefore = "hasLaunchedBefore"
         static let lastMenuOpenedAt = "lastMenuOpenedAt"
+        static let lastMenuSection = "lastMenuSection"
+        static let autoApproveOptOuts = "autoApproveOptOuts"
     }
 }
