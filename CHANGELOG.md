@@ -12,6 +12,8 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 
 ### Changed
 
+- Center to-do avatars beside MR status and title, align metadata and actions to the left, and move the read checkbox to the upper-right corner.
+
 - Add an optional verified native Codex template for new GUI chats, preserve existing MR chat identities, and isolate scratch files for every dispatch. Return compact delivery results so large instructions cannot be lost to output truncation.
 
 - Highlight each MR's automation scope, assistant chat and delivery status with larger, bold text and colored status icons.

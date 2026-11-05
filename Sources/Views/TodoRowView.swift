@@ -12,41 +12,41 @@ struct TodoRowView: View {
 
     @State private var isHovered = false
     @State private var isAutomationHovered = false
+    @State private var isMarkDoneHovered = false
+    @State private var isScopeHovered = false
 
     var body: some View {
-        HStack(alignment: .top, spacing: 10) {
-            Button(action: onMarkDone) {
-                Image(systemName: "circle")
-                    .font(.title3)
-                    .foregroundStyle(.secondary)
-            }
-            .buttonStyle(.plain)
-            .help(Text(.Menu.menuActionMarkAsDone))
-            .accessibilityLabel(Text(.Menu.menuActionMarkAsDone))
-
-            VStack(alignment: .leading, spacing: 6) {
+        VStack(alignment: .leading, spacing: 6) {
+            HStack(alignment: .top, spacing: 10) {
                 Button(action: onOpen) {
-                    HStack(alignment: .top, spacing: 10) {
+                    HStack(alignment: .center, spacing: 10) {
                         AvatarView(url: todo.author.avatarURL, size: 32)
-                        details
+                        heading
                     }
                     .frame(maxWidth: .infinity, alignment: .leading)
                     .contentShape(Rectangle())
                 }
                 .buttonStyle(.plain)
 
-                if automationState != nil || scopeMenu != nil {
-                    ViewThatFits(in: .horizontal) {
-                        HStack(spacing: 8) {
-                            if let automationState { automationControl(automationState) }
-                            scopeMenu
-                        }
-                        VStack(alignment: .leading, spacing: 4) {
-                            if let automationState { automationControl(automationState) }
-                            scopeMenu
-                        }
+                markDoneButton
+            }
+
+            Button(action: onOpen) {
+                metadata
+                    .contentShape(Rectangle())
+            }
+            .buttonStyle(.plain)
+
+            if automationState != nil || scopeMenu != nil {
+                ViewThatFits(in: .horizontal) {
+                    HStack(spacing: 8) {
+                        if let automationState { automationControl(automationState) }
+                        scopeControl
                     }
-                    .padding(.leading, 42)
+                    VStack(alignment: .leading, spacing: 4) {
+                        if let automationState { automationControl(automationState) }
+                        scopeControl
+                    }
                 }
             }
         }
@@ -55,7 +55,7 @@ struct TodoRowView: View {
         .contentShape(Rectangle())
         .background {
             RoundedRectangle(cornerRadius: 6)
-                .fill(isHovered && !isAutomationHovered ? Color.primary.opacity(0.06) : .clear)
+                .fill(isHovered && !isAutomationHovered && !isMarkDoneHovered && !isScopeHovered ? Color.primary.opacity(0.06) : .clear)
                 .padding(.horizontal, 6)
         }
         .onHover { isHovered = $0 }
@@ -78,25 +78,47 @@ struct TodoRowView: View {
         }
     }
 
-    private var details: some View {
+    private var markDoneButton: some View {
+        Button(action: onMarkDone) {
+            Image(systemName: isMarkDoneHovered ? "checkmark.circle.fill" : "circle")
+                .font(.title3)
+                .foregroundStyle(isMarkDoneHovered ? Color.accentColor : .secondary)
+                .frame(width: 24, height: 24)
+                .contentShape(Circle())
+        }
+        .buttonStyle(.plain)
+        .help(Text(.Menu.menuActionMarkAsDone))
+        .accessibilityLabel(Text(.Menu.menuActionMarkAsDone))
+        .onHover { isMarkDoneHovered = $0 }
+    }
+
+    private var heading: some View {
         VStack(alignment: .leading, spacing: 3) {
             TodoBadgeView(todo: todo)
             Text(todo.displayTitle)
                 .font(.body.weight(.semibold))
                 .lineLimit(2)
                 .truncationMode(.tail)
+        }
+        .frame(maxWidth: .infinity, alignment: .leading)
+    }
 
+    private var metadata: some View {
+        VStack(alignment: .leading, spacing: 3) {
             RepositoryPathText(todo.project.pathWithNamespace)
                 .font(.caption)
                 .foregroundStyle(.secondary)
                 .lineLimit(1)
 
-            HStack(alignment: .top, spacing: 6) {
+            HStack(alignment: .firstTextBaseline, spacing: 6) {
                 ActionDescriptionText(todo: todo, currentUsername: currentUsername)
                     .font(.caption)
                     .foregroundStyle(.secondary)
                     .lineLimit(2)
-                Spacer(minLength: 4)
+                Text(verbatim: "·")
+                    .font(.caption2)
+                    .foregroundStyle(.secondary)
+                    .accessibilityHidden(true)
                 Text(RelativeTime.string(from: todo.createdAt))
                     .font(.caption2)
                     .foregroundStyle(.secondary)
@@ -104,6 +126,13 @@ struct TodoRowView: View {
             }
         }
         .frame(maxWidth: .infinity, alignment: .leading)
+    }
+
+    @ViewBuilder
+    private var scopeControl: some View {
+        if let scopeMenu {
+            scopeMenu.onHover { isScopeHovered = $0 }
+        }
     }
 
     @ViewBuilder
