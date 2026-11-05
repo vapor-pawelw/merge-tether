@@ -157,3 +157,17 @@ rmdir "$claim"
 ```
 
 Remove only a reservation created by the current task. The app recognizes cooperative reservations and keeps a separate receipt for each pipeline it hands off. Arbitrary assistant chats do not reliably expose which pipeline they are fixing. When a reservation is absent, Workflow Activity asks you to confirm the handoff. Interrupted runs may leave a reservation. Check the associated session before clearing it.
+
+## Complete instructions and Codex approvals
+
+The relay saves each claimed task’s complete prompt in an immutable local snapshot.
+New and reused chats receive a short bootstrap with the file path and SHA-256, so
+a dispatcher does not need to reconstruct a long prompt. The worker checks the
+hash before following the full instructions; snapshots survive receipt cleanup.
+
+Codex execution permissions are separate from MergeTether’s workflow switches.
+The native chat-creation tool currently has no permission-mode argument. A
+listener running without a sandbox, or a permissive CLI config, does not prove
+that a new delegated chat inherits that mode. If Codex creates a chat in Ask for
+approval, select the desired mode in that chat. MergeTether does not silently
+change Codex’s private settings or replace a waiting chat to avoid its approvals.

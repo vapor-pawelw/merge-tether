@@ -98,6 +98,26 @@ class QueueTest(unittest.TestCase):
         job = self.queue.claim_next()
         self.assertEqual((job.get("model"), job.get("thinking")), ("gpt-6.1-sol", "high"))
 
+    def test_delivery_bootstrap_preserves_complete_instructions_after_job_withdrawal(self):
+        import hashlib
+        prompt = "https://gitlab.example.org/g/p/-/merge_requests/42\n\n" + "Pełne instrukcje — żadnego skracania.\n" * 500
+        job_id = self.job(prompt=prompt)
+        job = self.queue.claim_next()
+        bootstrap = job.get("deliveryPrompt", "")
+        self.assertTrue(bootstrap.startswith(prompt.splitlines()[0]))
+        self.assertLess(len(bootstrap), 1500)
+        digest = hashlib.sha256(prompt.encode()).hexdigest()
+        self.assertIn(digest, bootstrap)
+        instructions = self.root / "claims" / job_id / "instructions.json"
+        self.assertIn(str(instructions), bootstrap)
+        record = json.loads(instructions.read_text())
+        self.assertEqual(record["prompt"], prompt)
+        self.assertEqual(record["promptSHA256"], digest)
+        self.assertEqual(record["title"], job["title"])
+        (self.root / "jobs" / (job_id + ".json")).unlink()
+        self.queue.record(job_id, str(uuid.uuid4()))
+        self.assertEqual(json.loads(instructions.read_text())["prompt"], prompt)
+
     def test_merged_update_needs_capability_and_confirmed_chat(self):
         thread = str(uuid.uuid4())
         path = self.root / "jobs" / (thread + ".json")

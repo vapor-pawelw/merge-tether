@@ -217,7 +217,23 @@ class Queue:
                         result["followUpPrompt"] = follow_up
                     return result
                 write_object(claim / "job.json", metadata)
-                result = {"id": job_id, "title": title, "prompt": prompt, "threadID": thread}
+                digest = hashlib.sha256(prompt.encode()).hexdigest()
+                instructions = claim / "instructions.json"
+                write_object(instructions, {"version": 1, "jobID": job_id, "title": title,
+                                            "prompt": prompt, "promptSHA256": digest})
+                first_line = prompt.splitlines()[0]
+                link = first_line if len(first_line) <= 1000 and re.fullmatch(r"https?://[^\s<>]+", first_line) else title
+                bootstrap = (
+                    f"{link}\n\n{title}\n\n"
+                    "Continue this MergeTether task using its complete local instruction snapshot. "
+                    f"Read the JSON file {json.dumps(str(instructions), ensure_ascii=False)}. "
+                    f"Verify SHA-256 of the exact UTF-8 prompt field equals {digest}, then follow that full prompt "
+                    "with the applicable installed skills and repository instructions. "
+                    "Do not substitute a summary or omit its permission, verification or publication rules. "
+                    "If the file is missing or the hash differs, stop and report the blocker. "
+                    "This task does not authorize changing Codex permission settings."
+                )
+                result = {"id": job_id, "title": title, "prompt": prompt, "deliveryPrompt": bootstrap, "threadID": thread}
                 if thread is None and (section := repository_section(payload)):
                     result["sectionName"] = section
                 for field in ("model", "thinking"):

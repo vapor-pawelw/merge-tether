@@ -8,6 +8,8 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 
 ### Changed
 
+- Deliver complete assistant instructions through a hash-bound local snapshot instead of relying on the listener to copy long prompts. Clarify that native Codex chat creation does not expose an execution-permission override.
+
 - Refresh public documentation, share concise agent instructions with Claude, and add a retro painted-style app icon.
 
 - Recover a closed Codex MCP connection through the bundled relay transport without replacing native GUI chats or retrying an uncertain claim.
