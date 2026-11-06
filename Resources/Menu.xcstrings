@@ -1915,6 +1915,17 @@
         }
       }
     },
+    "menu.mr.draftBadge": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "DRAFT"
+          }
+        }
+      }
+    },
     "menu.mr.add": {
       "extractionState": "manual",
       "localizations": {

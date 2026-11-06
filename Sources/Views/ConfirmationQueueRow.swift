@@ -18,10 +18,8 @@ struct ConfirmationQueueRow<AdditionalActions: View>: View {
         VStack(alignment: .leading, spacing: 6) {
             Button(action: onOpen) {
                 HStack(alignment: .top, spacing: 6) {
-                    Text(verbatim: "!\(item.id.iid) · \(item.title)")
-                        .font(.subheadline.weight(.semibold))
-                        .lineLimit(2)
-                        .frame(maxWidth: .infinity, alignment: .leading)
+                    MergeRequestTitle(title: "!\(item.id.iid) · \(item.title)",
+                                      isDraft: item.section == .draftMergeRequests)
                     Image(systemName: "arrow.up.right")
                         .foregroundStyle(.secondary)
                         .accessibilityHidden(true)

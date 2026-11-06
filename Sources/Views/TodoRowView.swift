@@ -95,10 +95,9 @@ struct TodoRowView: View {
     private var heading: some View {
         VStack(alignment: .leading, spacing: 3) {
             TodoBadgeView(todo: todo)
-            Text(todo.displayTitle)
-                .font(.body.weight(.semibold))
-                .lineLimit(2)
-                .truncationMode(.tail)
+            MergeRequestTitle(title: todo.displayTitle,
+                              isDraft: todo.targetType == .mergeRequest && todo.isDraft,
+                              font: .body.weight(.semibold))
         }
         .frame(maxWidth: .infinity, alignment: .leading)
     }

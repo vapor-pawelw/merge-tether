@@ -116,10 +116,9 @@ struct ManagedMergeRequestsView: View {
                     ForEach(rows) { row in
                         VStack(alignment: .leading, spacing: 6) {
                             Link(destination: row.item.url) {
-                                Text(verbatim: "!\(row.item.id.iid) · \(row.item.title)")
-                                    .font(.subheadline.weight(.semibold))
-                                    .multilineTextAlignment(.leading)
-                                    .frame(maxWidth: .infinity, alignment: .leading)
+                                MergeRequestTitle(title: "!\(row.item.id.iid) · \(row.item.title)",
+                                                  isDraft: row.item.section == .draftMergeRequests,
+                                                  lineLimit: nil, titleColor: .accentColor)
                             }
                             RepositoryPathText(row.item.url.gitLabProjectPath).font(.caption).foregroundStyle(.secondary)
                             if row.item.draftCount > 0 { Text(.Menu.menuAttentionDrafts(row.item.draftCount)).font(.caption) }

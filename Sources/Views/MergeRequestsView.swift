@@ -22,19 +22,23 @@ struct MergeRequestsView: View {
                 } label: { Text(.Menu.menuMrTabOwn) }
                 .labelsHidden()
                 .pickerStyle(.segmented)
-                if selection == .reviewed {
-                    Button {
-                        address = ""
-                        addFailed = false
-                        selectedProjectID = repositories.count == 1 ? repositories.first?.id : nil
-                        showingAdd.toggle()
-                    } label: {
-                        Label { Text(.Menu.menuMrAdd) } icon: { Image(systemName: "plus") }
-                    }
-                    .buttonStyle(.bordered)
-                    .controlSize(.small)
-                    .disabled(isAdding)
+                .fixedSize()
+                Spacer(minLength: 8)
+                Button {
+                    address = ""
+                    addFailed = false
+                    selectedProjectID = repositories.count == 1 ? repositories.first?.id : nil
+                    showingAdd.toggle()
+                } label: {
+                    Label { Text(.Menu.menuMrAdd) } icon: { Image(systemName: "plus") }
                 }
+                .buttonStyle(.bordered)
+                .controlSize(.small)
+                .disabled(isAdding || selection != .reviewed)
+                // Reserve the same space on every tab so the segmented control never moves.
+                .opacity(selection == .reviewed ? 1 : 0)
+                .allowsHitTesting(selection == .reviewed)
+                .accessibilityHidden(selection != .reviewed)
             }
             .padding(.horizontal, 14)
             .padding(.vertical, 8)
@@ -327,17 +331,12 @@ private struct MergeRequestSummary: View {
         Link(destination: item.url) {
             VStack(alignment: .leading, spacing: 5) {
                 HStack(alignment: .top) {
-                    Text(verbatim: "!\(item.id.iid) · \(item.title)")
-                        .font(.subheadline.weight(.semibold))
-                        .multilineTextAlignment(.leading)
-                        .lineLimit(3)
+                    MergeRequestTitle(title: "!\(item.id.iid) · \(item.title)",
+                                      isDraft: item.section == .draftMergeRequests, lineLimit: 3)
                     Spacer(minLength: 4)
                     Image(systemName: "arrow.up.right.square").accessibilityHidden(true)
                 }
                 RepositoryPathText(item.url.gitLabProjectPath)
-                if item.mergeRequest?.draft == true || item.draftFromTodo {
-                    Text(.Menu.menuAuthoredBlockerDraft).foregroundStyle(.secondary)
-                }
                 if let pipeline = item.mergeRequest?.headPipeline {
                     Text(.Menu.menuAuthoredPipeline(pipeline.status.replacingOccurrences(of: "_", with: " ")))
                         .foregroundStyle(pipeline.status == "success" ? Color.green : pipeline.status == "failed" ? .red : .secondary)

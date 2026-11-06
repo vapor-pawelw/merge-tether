@@ -568,9 +568,8 @@ private struct AttentionRow: View {
                     .frame(width: 24)
                     .padding(.top, 2)
                 VStack(alignment: .leading, spacing: 3) {
-                    Text("!\(item.id.iid) · \(item.title)")
-                        .font(.subheadline.weight(.semibold))
-                        .lineLimit(2)
+                    MergeRequestTitle(title: "!\(item.id.iid) · \(item.title)",
+                                      isDraft: item.section == .draftMergeRequests)
                     RepositoryPathText(item.url.gitLabProjectPath)
                         .foregroundStyle(.secondary)
                         .lineLimit(1)

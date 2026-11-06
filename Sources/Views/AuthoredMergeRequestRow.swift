@@ -11,10 +11,9 @@ struct AuthoredMergeRequestRow: View {
                         .font(.caption.monospacedDigit())
                         .foregroundStyle(.secondary)
 
-                    Text(status.request.title)
-                        .font(.body.weight(.semibold))
-                        .foregroundStyle(.primary)
-                        .lineLimit(2)
+                    MergeRequestTitle(title: status.request.title,
+                                      isDraft: status.blockers.contains(.draft),
+                                      font: .body.weight(.semibold))
 
                     RepositoryPathText(projectPath)
                         .lineLimit(1)

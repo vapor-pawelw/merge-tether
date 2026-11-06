@@ -13,7 +13,7 @@ struct TodoBadgeView: View {
                 Text(identifier)
                     .font(.caption2.monospaced().weight(.semibold))
             }
-            if let label = state.label {
+            if let label = state.label, !(state == .draft && todo.targetType == .mergeRequest) {
                 Text(label)
                     .font(.caption2.weight(.semibold))
             }
