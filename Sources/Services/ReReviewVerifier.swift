@@ -7,6 +7,23 @@ enum ReReviewVerifier {
 
     static let schema = #"{"type":"object","additionalProperties":false,"properties":{"notes":{"type":"array","items":{"type":"object","additionalProperties":false,"properties":{"noteID":{"type":"integer"},"state":{"type":"string","enum":["addressed","informational","blocking","uncertain"]},"reason":{"type":"string"},"acceptanceNoteID":{"type":["integer","null"]}},"required":["noteID","state","reason","acceptanceNoteID"]}}},"required":["notes"]}"#
 
+    private static func outputSchema(noteIDs: [Int]) throws -> String {
+        guard var document = try JSONSerialization.jsonObject(with: Data(schema.utf8)) as? [String: Any],
+              var properties = document["properties"] as? [String: Any],
+              var notes = properties["notes"] as? [String: Any],
+              var item = notes["items"] as? [String: Any],
+              var fields = item["properties"] as? [String: Any] else { throw VerificationError.incompleteEvidence }
+        let identity: [String: Any] = ["type": "integer", "enum": noteIDs]
+        fields["noteID"] = identity
+        notes["minItems"] = noteIDs.count
+        notes["maxItems"] = noteIDs.count
+        item["properties"] = fields
+        notes["items"] = item
+        properties["notes"] = notes
+        document["properties"] = properties
+        return String(decoding: try JSONSerialization.data(withJSONObject: document, options: [.sortedKeys]), as: UTF8.self)
+    }
+
     struct Input: Encodable, Sendable {
         let authorID: Int
         let headSHA: String
@@ -24,9 +41,29 @@ enum ReReviewVerifier {
     }
 
     static func run(_ input: Input, assistant: AutomationAssistant, model: String, executable: URL) async throws -> ReReviewAssessment {
+        do { return try await runOnce(input, assistant: assistant, model: model, executable: executable) }
+        catch {
+            guard !Task.isCancelled, !(error is CancellationError),
+                  error as? VerificationError != .unavailable else { throw error }
+            // This call has no tools or remote writes. A bounded retry can recover
+            // incomplete provider output without replaying an assistant's MR work.
+            try await Task.sleep(for: .seconds(1))
+            return try await runOnce(input, assistant: assistant, model: model, executable: executable)
+        }
+    }
+
+    private static func runOnce(_ input: Input, assistant: AutomationAssistant, model: String, executable: URL) async throws -> ReReviewAssessment {
         guard input.discussions.flatMap(\.notes).allSatisfy({ $0.system == true || $0.body != nil }) else {
             throw VerificationError.incompleteEvidence
         }
+        let external = input.discussions.flatMap(\.notes).filter { $0.system != true && $0.author?.id != input.authorID }
+        let noteIDs = external.compactMap(\.id).sorted()
+        guard noteIDs.count == external.count, Set(noteIDs).count == noteIDs.count,
+              noteIDs.allSatisfy({ $0 > 0 }), external.allSatisfy({ ($0.author?.id ?? 0) > 0 }) else {
+            throw VerificationError.incompleteEvidence
+        }
+        guard !noteIDs.isEmpty else { return .init(notes: []) }
+        let constrainedSchema = try outputSchema(noteIDs: noteIDs)
         let discussions = input.discussions.map { discussion in
             GitLabMergeRequestDiscussion(id: discussion.id, notes: discussion.notes.map { note in
                 var sanitized = note
@@ -67,6 +104,10 @@ enum ReReviewVerifier {
             conditions, requests or edits. A reviewer saying 'approved, but still do X' leaves X blocking
             until implemented or substantively answered with a justified explanation. A mere promise
             to do X is not addressed. A generic thanks does not imply acceptance of every issue.
+
+            Required external note IDs: \(noteIDs.map(String.init).joined(separator: ", ")).
+            Return exactly one assessment for each listed ID, including resolved and informational
+            notes. Do not omit a note because its thread is closed. Do not repeat IDs.
             """
         let folder = FileManager.default.temporaryDirectory.appending(path: UUID().uuidString)
         try FileManager.default.createDirectory(at: folder, withIntermediateDirectories: false, attributes: [.posixPermissions: 0o700])
@@ -76,7 +117,7 @@ enum ReReviewVerifier {
         if assistant == .codex {
             let schemaURL = folder.appending(path: "schema.json")
             let outputURL = folder.appending(path: "result.json")
-            try Data(schema.utf8).write(to: schemaURL)
+            try Data(constrainedSchema.utf8).write(to: schemaURL)
             output = try await ProcessRunner.run(executable, arguments: ["exec", "--ignore-user-config", "--ignore-rules",
                 "--ephemeral", "--skip-git-repo-check", "--sandbox", "read-only", "--model", model,
                 "-c", "model_reasoning_effort=\"medium\"", "-c", "web_search=\"disabled\"",
@@ -89,7 +130,7 @@ enum ReReviewVerifier {
         } else {
             output = try await ProcessRunner.run(executable, arguments: ["-p", prompt, "--model", model, "--effort", "medium",
                 "--safe-mode", "--tools", "", "--strict-mcp-config", "--mcp-config", #"{"mcpServers":{}}"#,
-                "--setting-sources", "", "--no-session-persistence", "--output-format", "json", "--json-schema", schema],
+                "--setting-sources", "", "--no-session-persistence", "--output-format", "json", "--json-schema", constrainedSchema],
                 environment: AssistantCLI.environment, currentDirectory: folder, timeout: 90, input: Data(evidence.utf8))
             guard output.exitCode == 0, !Task.isCancelled else { throw VerificationError.failed }
             struct Envelope: Decodable {
