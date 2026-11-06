@@ -63,3 +63,19 @@ test('R2/R3: concurrent delivery of the same encrypted message is accepted once'
   const attempts = await Promise.allSettled([phone.open(wire), phone.open(wire)]);
   assert.equal(attempts.filter(result => result.status === 'fulfilled').length, 1);
 });
+
+test('R2: replay protection lasts for the entire acceptance window when the sender clock is ahead', async () => {
+  const pair = await pairing();
+  const host = await channel(pair.secret, 'host');
+  const phone = await channel(pair.secret, 'phone');
+  const originalNow = Date.now;
+  const base = originalNow();
+  try {
+    Date.now = () => base + 50000;
+    const wire = await host.seal({ revision: 1 });
+    Date.now = () => base;
+    assert.equal((await phone.open(wire)).revision, 1);
+    Date.now = () => base + 61000;
+    await assert.rejects(phone.open(wire), /replay/i);
+  } finally { Date.now = originalNow; }
+});

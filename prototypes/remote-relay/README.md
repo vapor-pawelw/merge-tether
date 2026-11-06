@@ -37,6 +37,8 @@ QR and HTML files are private, are never overwritten, and are removed on a norma
 host exit. Credentials are never printed to stdout. After a crash, remove the old
 pairing files before starting again. Use `--qr /another/path.png` to choose a
 different output location for both files. `npm run host -- --help` describes the options.
+Cleanup is best effort: force-killing a process group or interrupting startup can
+leave pairing files behind. Remove those files before starting a new host.
 
 ## Cloudflare Free deployment
 
@@ -115,6 +117,10 @@ upgrade; this experiment is specifically intended to establish compatibility.
   readiness or completion. Each snapshot must echo a fresh phone challenge, so a
   prior snapshot cannot renew readiness after reconnect. The browser distinguishes
   accepted from completed.
+- A missing transport pong abandons the old socket without waiting for its close
+  handshake, then reconnects with backoff. Expired/replayed frames are ignored.
+  Explicit relay policy codes 4008/4009 and role replacement 4001 end the session;
+  local verification errors reconnect without executing or retrying a command.
 - The relay serves the probe's JavaScript, so the web experiment trusts that
   delivered client code. A maliciously modified web client could leak keys.
   Production end-to-end protection requires independently trusted clients,

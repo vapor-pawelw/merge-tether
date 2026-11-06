@@ -28,6 +28,8 @@ function controls() {
   if (!phone.pending) clearTimeout(timeout);
   if (phone.state === 'connected' && phone.fresh && !phone.hostAvailable) {
     byID('status').textContent = 'Brak aktualnego potwierdzenia z Maca — odświeżanie…';
+  } else if (phone.state === 'connected' && !phone.fresh) {
+    byID('status').textContent = 'Oczekiwanie na aktualny podgląd z Maca…';
   }
 }
 function render(data) {
@@ -37,9 +39,9 @@ function render(data) {
   byID('ready-count').textContent = '1';
   const card = document.createElement('div');
   card.className = 'card';
-  card.textContent = 'Mac jest gotowy';
+  card.textContent = 'Ostatni podgląd z Maca';
   const detail = document.createElement('p');
-  detail.textContent = 'Możesz sprawdzić wykonanie akcji z telefonu.';
+  detail.textContent = 'Dane testowe otrzymane z Maca. Aktualny stan połączenia widzisz powyżej.';
   card.append(detail);
   byID('ready').replaceChildren(card);
   renderCount(data.executions);
@@ -79,7 +81,7 @@ async function start() {
         controls();
       },
     });
-    if (current !== generation || document.hidden) { next.close(); return; }
+    if (current !== generation || document.hidden) { next.close(); await next.ready.catch(() => {}); return; }
     connection = next;
     await next.ready;
     if (current !== generation) return;

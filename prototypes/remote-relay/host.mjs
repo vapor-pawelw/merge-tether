@@ -68,6 +68,7 @@ try {
   const stop = async () => { connection.close(); await cleanup(); process.exit(0); };
   process.once('SIGINT', stop);
   process.once('SIGTERM', stop);
+  process.once('SIGHUP', stop);
   await connection.ready;
 } catch {
   connection?.close();

@@ -82,7 +82,7 @@ test('R4: oversized frames close the sender', async () => {
   const host = await connect('host', 'f'.repeat(43));
   const closed = new Promise(resolve => host.webSocket.addEventListener('close', resolve, { once: true }));
   host.webSocket.send('x'.repeat(16385));
-  assert.equal((await closed).code, 1009);
+  assert.equal((await closed).code, 4009);
 });
 
 test('R2: browser connections from another origin are rejected', async () => {
@@ -99,5 +99,5 @@ test('R4: excessive messages close the sender instead of allowing unlimited rela
   const timeout = setTimeout(() => host.webSocket.close(1000), 1500);
   const result = await closed;
   clearTimeout(timeout);
-  assert.equal(result.code, 1008);
+  assert.equal(result.code, 4008);
 });

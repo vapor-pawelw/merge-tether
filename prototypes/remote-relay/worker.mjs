@@ -65,14 +65,14 @@ export class RelayRoom extends DurableObject {
     const state = socket.deserializeAttachment();
     if (!state?.active) return;
     if (typeof message !== 'string' || new TextEncoder().encode(message).byteLength > 16384) {
-      socket.close(1009, 'Frame too large');
+      socket.close(4009, 'Frame too large');
       return;
     }
     const now = Date.now();
     const windowStart = now - (state.windowStart ?? 0) < 60000 ? state.windowStart : now;
     const messages = windowStart === state.windowStart ? state.messages + 1 : 1;
     if (messages > 120) {
-      socket.close(1008, 'Message limit reached');
+      socket.close(4008, 'Message limit reached');
       return;
     }
     socket.serializeAttachment({ ...state, windowStart, messages });

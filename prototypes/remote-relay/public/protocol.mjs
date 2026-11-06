@@ -2,6 +2,7 @@ const encoder = new TextEncoder();
 const decoder = new TextDecoder();
 const credential = /^[A-Za-z0-9_-]{43}$/;
 export const MAX_FRAME_BYTES = 16384;
+export class IgnoredFrameError extends Error {}
 
 function encode(bytes) {
   return btoa(String.fromCharCode(...bytes)).replaceAll('+', '-').replaceAll('/', '_').replaceAll('=', '');
@@ -44,16 +45,17 @@ export async function channel(secret, role) {
       if (typeof wire !== 'string' || encoder.encode(wire).byteLength > MAX_FRAME_BYTES) throw new Error('Invalid frame');
       const frame = JSON.parse(wire);
       if (frame?.v !== 1 || frame.sender !== peer || !Number.isSafeInteger(frame.at)
-          || Math.abs(Date.now() - frame.at) > 60000 || !/^[A-Za-z0-9_-]{16}$/.test(frame.nonce)
+          || !/^[A-Za-z0-9_-]{16}$/.test(frame.nonce)
           || typeof frame.data !== 'string' || !/^[A-Za-z0-9_-]+$/.test(frame.data)) throw new Error('Invalid frame');
+      if (Math.abs(Date.now() - frame.at) > 60000) throw new IgnoredFrameError('Expired frame');
       for (const [nonce, at] of seen) if (Date.now() - at > 60000) seen.delete(nonce);
-      if (seen.has(frame.nonce)) throw new Error('Replay rejected');
+      if (seen.has(frame.nonce)) throw new IgnoredFrameError('Replay rejected');
       if (seen.size >= 2048) throw new Error('Receiver rate exceeded');
       const plain = await crypto.subtle.decrypt({ name: 'AES-GCM', iv: decode(frame.nonce), additionalData: aad(frame) }, peerKey, decode(frame.data));
       const result = JSON.parse(decoder.decode(plain));
       // Another caller can finish decrypting this nonce while WebCrypto is awaited.
-      if (seen.has(frame.nonce)) throw new Error('Replay rejected');
-      seen.set(frame.nonce, Date.now());
+      if (seen.has(frame.nonce)) throw new IgnoredFrameError('Replay rejected');
+      seen.set(frame.nonce, frame.at);
       return result;
     },
   };
