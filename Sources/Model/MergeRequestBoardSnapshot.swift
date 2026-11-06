@@ -90,7 +90,7 @@ struct MergeRequestBoardSnapshot {
         let ownRows = own + orphanRows.filter(\.isAuthored)
         let reviewedRows = reviewed + orphanRows.filter { !$0.isAuthored }
         self.own = Self.ordered(ownRows.map(row))
-        self.reviewed = Self.ordered(reviewedRows.map(row))
+        self.reviewed = Self.ordered(reviewedRows.map(row), draftsLast: true)
         let listed = ownRows + reviewedRows
         otherMergeRequests = Self.ordered(attention.filter { candidate in
             guard !listed.contains(where: { sameMergeRequest($0, candidate) }) else { return false }
@@ -126,9 +126,12 @@ struct MergeRequestBoardSnapshot {
         otherTodos = unknown
     }
 
-    private static func ordered(_ rows: [Row]) -> [Row] {
+    private static func ordered(_ rows: [Row], draftsLast: Bool = false) -> [Row] {
         rows.enumerated().sorted {
-            ($0.element.needsAttention ? 0 : 1, $0.offset) < ($1.element.needsAttention ? 0 : 1, $1.offset)
+            (draftsLast && $0.element.item.section == .draftMergeRequests ? 1 : 0,
+             $0.element.needsAttention ? 0 : 1, $0.offset)
+                < (draftsLast && $1.element.item.section == .draftMergeRequests ? 1 : 0,
+                   $1.element.needsAttention ? 0 : 1, $1.offset)
         }.map(\.element)
     }
 }

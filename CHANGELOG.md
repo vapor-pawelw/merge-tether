@@ -36,6 +36,7 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 
 ### Fixed
 
+- Keep draft MRs at the bottom of Reviewing even when they have pending actions.
 - Keep Activity and assistant history in the main window, removing the nested tabs from Automation Scope settings.
 
 - Keep draft confirmations outside Ready when the current MR head or discussion content has not been checked. Refresh visible Inbox confirmations without waiting for the regular poll.

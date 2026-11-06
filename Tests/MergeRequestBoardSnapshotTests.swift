@@ -34,6 +34,13 @@ struct MergeRequestBoardSnapshotTests {
             handoffs: [job(3, state: .failed, at: .distantPast), job(3, state: .succeeded)])
         #expect(recovered.own.map(\.item.id.iid) == [1, 3])
     }
+    @Test func reviewedDraftMRsStayLastEvenWhenTheyNeedAttention() {
+        var draft = item(1, attention: true)
+        draft.draftFromTodo = true
+        let board = snapshot(own: [draft, item(4)], reviewed: [draft, item(2), item(3, attention: true)])
+        #expect(board.reviewed.map(\.item.id.iid) == [3, 2, 1])
+        #expect(board.own.map(\.item.id.iid) == [1, 4])
+    }
     @Test(arguments: [AssistantJobExecution.State.failed, .blocked, .interrupted, .cancelled])
     func problematicJobPromotesCard(state: AssistantJobExecution.State) {
         #expect(snapshot(own: [item(1), item(2)], handoffs: [job(2, state: state)]).own.map(\.item.id.iid) == [2, 1])
