@@ -8,14 +8,20 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 
 ### Added
 
-- Verify all expectations on your own MRs before resolving accepted feedback, with a default-on setting, generic reviewer acceptance and visible remaining blockers. Keep conditional advance approvals from bypassing follow-up work or automatic merge.
+- Let the lightweight verifier read live MR evidence through Codex CLI or Claude CLI tools while keeping GitLab actions in the app's policy checks.
+- Show MR authors with compact avatars on Reviewing and proposal cards, explain proposal sources, and show factual review participation and reply context.
+- Browse complete discussion threads with inline private drafts in Review and confirm, including AI badges for verified agent identities or very-high-confidence current-comment assessments.
+- Offer Full automation, With checkpoints and Manual only profiles with separate scope and publication controls; preserve existing settings until explicitly changed.
+- Add optional publication conditions for repositories, MR authors, source-comment authors and current AI evidence, combined with AND, plus individual resets to profile defaults.
+
+- Verify all expectations on your own MRs before resolving accepted feedback, with configurable thread resolution, generic reviewer acceptance and visible remaining blockers. Keep conditional advance approvals from bypassing follow-up work or automatic merge.
 - Show a neutral or amber menu-bar attention indicator and notify about work needing a human decision, with in-app notification permission controls.
 
 - Open MergeTether as a regular macOS Dock application with a resizable three-column MR board, direct card actions and detailed MR views.
-- Run assistant tasks headlessly through authenticated Codex CLI or Claude CLI, with local execution history, output, failure reporting and deliberate retries.
-- Offer installed desktop assistants and CLIs as optional, manually selected MR destinations.
+- Run agent tasks headlessly through authenticated Codex CLI or Claude CLI, with local execution history, output, failure reporting and deliberate retries.
+- Offer installed desktop agents and CLIs as optional, manually selected MR destinations.
 - Verify re-review readiness with independent Luna/Haiku defaults, comment-specific blockers and content-bound manual confirmation when automatic verification is off or unavailable.
-- Offer CLI compatibility/sign-in checks, installation and Terminal login during assistant setup; preserve the prior selection on cancellation.
+- Offer CLI compatibility/sign-in checks, installation and Terminal login during agent setup; preserve the prior selection on cancellation.
 - Turn recognized GitLab to-dos into durable MR actions, acknowledge routed events, and keep unknown events or new-MR proposals in Other items. Support explicit Add/Ignore and automatic adoption within enabled scope.
 - Keep checked drafts, approvals, blockers and agent results on their MR cards and promote cards requiring attention.
 - Browse My merge requests and Reviewing, add individual reviewed MRs by URL or repository/number, and control automatic approval per MR.
@@ -23,27 +29,32 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 
 ### Changed
 
+- Show one main action per MR card, keep comments in a stable detail layout, and collapse metadata and run/activity history until requested.
+- Use Agent and coding agent terminology throughout the interface and documentation, with an explicit Start a conversation with an agent action for manual CLI or desktop sessions.
 - Replace the menu-bar popover with the main window and remove automatic desktop chat creation, listener dispatch, chat-title synchronization, permission templates and plugin setup from the app.
-- Require a working, signed-in selected CLI for assistant automation independently of the automatic re-review verification setting. Desktop applications are optional.
+- Require a working, signed-in selected CLI for agent automation independently of the automatic re-review verification setting. Desktop applications are optional.
 - Preserve legacy GUI history without automatically replaying uncertain pending work. Distinguish agent completion from verified GitLab effects.
-- Keep assistant task results and user decisions in MergeTether; allow manual GitLab operations without an AI dependency.
+- Keep agent task results and user decisions in MergeTether; allow manual GitLab operations without an AI dependency.
 - Keep follow-up push permission separate from conflict pushes. Verify the current account, remote head, committed file contents, discussion text and exact draft bodies before automatically publishing author-follow-up replies.
 - Re-review author replies even without a new commit. Resolve only your own findings after verification when enabled.
 - Publish eligible replies to verified GitLab Duo feedback or very-high-confidence AI comments selectively; keep uncertain replies private and reject automatic quick actions.
 - Request another review only after relevant feedback is addressed and unpublished replies no longer block it. Bind manual confirmation to current content.
-- Organize automation settings by checkpoints, assistant, scope and workflow; save scope immediately without later assistant changes overwriting it.
+- Organize automation settings by checkpoints, agent, scope and workflow; save scope immediately without later agent changes overwriting it.
 - Preserve the release bundle identifier, macOS 14 minimum and legacy GitLabTodos target/cask names.
 - Refresh public documentation and use the retro painted-style MergeTether icon.
 
 ### Fixed
 
+- Include the current MR description in feedback verification and recheck its context before resolving feedback, requesting re-review or automatically merging.
+- Keep cancelled conflict preparation retryable, freeze automatic publication to checked draft IDs, and preserve readable discussion caches during authentication errors.
+- Advance verified conflict plans to a newly authorized push stage once, keeping automatic preparation neutral while preserving stopped push attempts for manual review.
 - Give CLI workers full tool access instead of falling back to text-only preparation, while retaining task-specific GitLab action checks and the separate tool-free verifier.
 - Align documentation and interface wording with the MR board, CLI automation, current checkpoints and manual review actions.
 - Recheck GitLab authentication on refresh after a startup connection failure.
 - Explain the specific human action on each attention card and open pending comments or a stopped run directly, replacing generic blocker labels.
 - Keep automatic processing and reviewer waits neutral, share human-attention decisions across cards and the menu bar, and require complete verifier output with a bounded read-only retry.
 - Keep draft MRs at the bottom of Reviewing even when they have pending actions.
-- Keep Activity and assistant history in the main window, removing the nested tabs from Automation Scope settings.
+- Keep Activity and agent history in the main window, removing the nested tabs from Automation Scope settings.
 
 - Keep drafts marked as needing review when the current MR head or discussion content has not been checked. Refresh visible MR confirmations without waiting for the regular poll.
 - Invalidate review verdicts after new or edited discussion text, while retaining them for resolution-only changes.

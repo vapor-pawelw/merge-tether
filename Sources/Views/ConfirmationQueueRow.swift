@@ -9,6 +9,8 @@ struct ConfirmationQueueRow<AdditionalActions: View>: View {
     let onOpen: () -> Void
     var onManage: (() -> Void)? = nil
     var initiallyExpanded = false
+    var showDraftPreview = true
+    var showHeader = true
     let additionalActions: AdditionalActions
 
     @State private var showsComments = false
@@ -17,37 +19,41 @@ struct ConfirmationQueueRow<AdditionalActions: View>: View {
 
     var body: some View {
         VStack(alignment: .leading, spacing: 6) {
-            Button(action: onOpen) {
-                HStack(alignment: .top, spacing: 10) {
-                    MergeRequestTitle(title: "!\(item.id.iid) · \(item.title)",
-                                      isDraft: item.section == .draftMergeRequests)
-                    Image(systemName: "arrow.up.right")
-                        .foregroundStyle(.secondary)
-                        .mrRowAccessoryFrame()
-                        .accessibilityHidden(true)
+            if showHeader {
+                Button(action: onOpen) {
+                    HStack(alignment: .top, spacing: 10) {
+                        MergeRequestTitle(title: "!\(item.id.iid) · \(item.title)",
+                                          isDraft: item.section == .draftMergeRequests)
+                        Image(systemName: "arrow.up.right")
+                            .foregroundStyle(.secondary)
+                            .mrRowAccessoryFrame()
+                            .accessibilityHidden(true)
+                    }
+                    .contentShape(Rectangle())
                 }
-                .contentShape(Rectangle())
-            }
-            .buttonStyle(.plain)
-            .help(Text(.Menu.menuActionOpenInBrowser))
+                .buttonStyle(.plain)
+                .help(Text(.Menu.menuActionOpenInBrowser))
 
-            RepositoryPathText(item.url.gitLabProjectPath)
-                .foregroundStyle(.secondary)
-                .lineLimit(1)
+                RepositoryPathText(item.url.gitLabProjectPath)
+                    .foregroundStyle(.secondary)
+                    .lineLimit(1)
+            }
 
             if !item.drafts.isEmpty {
                 Text(item.isAuthored
                      ? .Menu.menuConfirmReplies(item.drafts.count)
                      : .Menu.menuConfirmComments(item.drafts.count))
-                DisclosureGroup(isExpanded: $showsComments) {
-                    VStack(alignment: .leading, spacing: 8) {
-                        ForEach(Array(item.drafts.enumerated()), id: \.offset) { _, draft in
-                            draftPreview(draft)
+                if showDraftPreview {
+                    DisclosureGroup(isExpanded: $showsComments) {
+                        VStack(alignment: .leading, spacing: 8) {
+                            ForEach(Array(item.drafts.enumerated()), id: \.offset) { _, draft in
+                                draftPreview(draft)
+                            }
                         }
+                        .padding(.top, 4)
+                    } label: {
+                        Text(.Menu.menuConfirmShowComments)
                     }
-                    .padding(.top, 4)
-                } label: {
-                    Text(.Menu.menuConfirmShowComments)
                 }
             } else if item.canApprove {
                 Text(.Menu.menuConfirmApproveReady)

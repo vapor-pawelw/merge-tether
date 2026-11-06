@@ -1,0 +1,260 @@
+{
+  "sourceLanguage": "en",
+  "strings": {
+    "mrDiscussions.title": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Comments and replies"
+          }
+        }
+      }
+    },
+    "mrDiscussions.loading": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Loading discussion threads…"
+          }
+        }
+      }
+    },
+    "mrDiscussions.failed": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Couldn’t load the full discussion. Any pending drafts remain available below."
+          }
+        }
+      }
+    },
+    "mrDiscussions.unavailable": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Discussion context is unavailable. Pending drafts remain available for review."
+          }
+        }
+      }
+    },
+    "mrDiscussions.empty": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "No published comments or pending drafts."
+          }
+        }
+      }
+    },
+    "mrDiscussions.refresh": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Refresh discussion"
+          }
+        }
+      }
+    },
+    "mrDiscussions.open": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Open thread"
+          }
+        }
+      }
+    },
+    "mrDiscussions.resolved": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Resolved"
+          }
+        }
+      }
+    },
+    "mrDiscussions.general": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "General comment"
+          }
+        }
+      }
+    },
+    "mrDiscussions.privateDraft": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Private draft"
+          }
+        }
+      }
+    },
+    "mrDiscussions.unknownAuthor": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Unknown author"
+          }
+        }
+      }
+    },
+    "mrDiscussions.you": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "You"
+          }
+        }
+      }
+    },
+    "mrDiscussions.bodyUnavailable": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Comment text is unavailable."
+          }
+        }
+      }
+    },
+    "mrDiscussions.newComment": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "New comment"
+          }
+        }
+      }
+    },
+    "mrDiscussions.unmatchedReply": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Reply draft — thread unavailable"
+          }
+        }
+      }
+    },
+    "mrDiscussions.openInGitLab": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Open comment in GitLab"
+          }
+        }
+      }
+    },
+    "mrDiscussions.ai": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "AI"
+          }
+        }
+      }
+    },
+    "mrDiscussions.aiLegend": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "An AI badge means a verified agent identity or a very-high-confidence assessment for the current comment. No badge means unclassified, not necessarily human."
+          }
+        }
+      }
+    },
+    "mrDiscussions.aiVerified": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Verified agent identity. The badge does not approve the comment or change publication permissions."
+          }
+        }
+      }
+    },
+    "mrDiscussions.aiAssessed": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Assessed as AI-written with very high confidence for this exact comment. This does not approve the comment or change publication permissions."
+          }
+        }
+      }
+    },
+    "mrDiscussions.draftCount.%lld": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "variations": {
+            "plural": {
+              "one": {
+                "stringUnit": {
+                  "state": "translated",
+                  "value": "%lld private draft"
+                }
+              },
+              "other": {
+                "stringUnit": {
+                  "state": "translated",
+                  "value": "%lld private drafts"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "mrDiscussions.replyDraft": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Reply draft"
+          }
+        }
+      }
+    }
+  },
+  "version": "1.0"
+}

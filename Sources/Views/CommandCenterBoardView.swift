@@ -5,9 +5,15 @@ struct CommandCenterBoardView: View {
     private struct Selection: Identifiable {
         let item: MergeRequestAttentionMonitor.Item
         let section: CommandCenterMRDetailSection
+        let account: GlabService.AuthedHost?
         var id: MergeRequestAttentionMonitor.Item.ID { item.id }
     }
     @State private var selected: Selection?
+
+    private var account: GlabService.AuthedHost? {
+        guard let host = monitor.glab.resolvedHost, let username = monitor.glab.currentUsername else { return nil }
+        return .init(host: host, username: username)
+    }
 
     private var snapshot: MergeRequestBoardSnapshot {
         let own = monitor.ownMergeRequestItems
@@ -72,11 +78,14 @@ struct CommandCenterBoardView: View {
                 }
                 .padding(16)
                 Divider()
-                CommandCenterMRDetail(item: current(selection.item), monitor: monitor, initialSection: selection.section)
-                    .id(selection.id)
+                if selection.account == account {
+                    CommandCenterMRDetail(item: current(selection.item), monitor: monitor, initialSection: selection.section)
+                        .id(selection.id)
+                }
             }
             .frame(minWidth: 700, idealWidth: 820, minHeight: 600, idealHeight: 780)
         }
+        .onChange(of: account) { _, _ in selected = nil }
         .task {
             while !Task.isCancelled {
                 await monitor.attention.refreshPendingDrafts()
@@ -91,9 +100,9 @@ struct CommandCenterBoardView: View {
 
     private func card(_ row: MergeRequestBoardSnapshot.Row, removable: Bool = false) -> some View {
         CommandCenterMRCard(row: row, monitor: monitor, allowsRemoval: removable, onAttention: { section in
-            selected = Selection(item: row.item, section: section)
+            selected = Selection(item: row.item, section: section, account: account)
         }, onDetails: {
-            selected = Selection(item: row.item, section: .overview)
+            selected = Selection(item: row.item, section: .overview, account: account)
         })
     }
 

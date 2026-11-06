@@ -12,16 +12,21 @@ struct CommandCenterMRCard: View {
     @Environment(\.openSettings) private var openSettings
 
     private var item: MergeRequestAttentionMonitor.Item { row.item }
+    private var automaticConflictProgress: Bool {
+        item.mergeRequest.map { monitor.automaticConflictIsProcessing(for: $0) } ?? false
+    }
     private var busy: Bool {
         let state = monitor.attention.confirmationStates[item.id]
         return state == .publishing || state == .approving || item.authorFeedbackStatus?.phase == .checking
             || item.reReviewReadiness == .checking
+            || (automaticConflictProgress && row.latestJob?.execution?.state.isActive != true)
     }
     private var nextIntent: MRTodoIntent? {
         row.intents.first { $0.state == .failed } ?? row.intents.first { $0.state == .pending }
     }
     private var needsCLI: Bool { !monitor.availableAssistants.contains(monitor.settings.automation.assistant) }
     private var humanAction: MRHumanAction? {
+        guard row.needsAttention, !busy else { return nil }
         let target = monitor.scopeTarget(projectID: item.id.projectID, iid: item.id.iid, url: item.url)
         let automatic = target.map {
             item.draftIDsHandledAutomatically(automation: monitor.settings.automation, target: $0,
@@ -44,43 +49,51 @@ struct CommandCenterMRCard: View {
                 moreMenu
             }
             HStack(spacing: 6) {
-                Text(verbatim: "!\(item.id.iid)").monospacedDigit()
+                if allowsRemoval {
+                    foreignAuthor
+                    Text(verbatim: "·")
+                }
+                Text(verbatim: "!\(item.id.iid)").monospacedDigit().fixedSize()
                 Text(verbatim: "·")
                 RepositoryPathText(item.url.gitLabProjectPath).lineLimit(1)
             }
             .font(.caption).foregroundStyle(.secondary)
-            if !chips.isEmpty {
-                HStack(spacing: 5) {
-                    ForEach(Array(chips.prefix(3).enumerated()), id: \.offset) { _, chip in
-                        BoardStatusChip(title: chip.title, symbol: chip.symbol, tint: chip.tint)
-                    }
-                    if chips.count > 3 {
-                        Text(verbatim: "+\(chips.count - 3)").font(.caption2).foregroundStyle(.secondary)
-                            .help(Text(.Board.boardCompactMoreStatuses(chips.count - 3)))
-                    }
-                }
-            }
+            .help(metadataHelp)
             if let action = humanAction {
                 Group {
                     if let detail = action.detail, !detail.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
-                        Text(verbatim: detail)
+                        Text(verbatim: detail).help(Text(verbatim: detail))
                     } else {
                         Text(action.message)
                     }
                 }
-                .font(.caption).foregroundStyle(.secondary)
-                .lineLimit(3).fixedSize(horizontal: false, vertical: true)
+                .font(.caption).foregroundStyle(.orange)
+                .lineLimit(2).fixedSize(horizontal: false, vertical: true)
             }
-            HStack(spacing: 8) {
-                if let job = row.latestJob, job.execution?.state.isActive == true {
-                    ProgressView().controlSize(.mini)
-                    Text(job.key.assistant.displayName).font(.caption).foregroundStyle(.secondary)
-                } else {
-                    Button(action: onDetails) { Text(.Board.boardDetails) }
-                        .buttonStyle(.plain).font(.caption).foregroundStyle(.secondary)
+            if busy || row.latestJob?.execution?.state.isActive == true || humanAction != nil || neutralStatus != nil {
+                HStack(spacing: 6) {
+                    if let job = row.latestJob, job.execution?.state.isActive == true {
+                        ProgressView().controlSize(.mini)
+                        Text(.Board.boardCompactWorking)
+                        Text(verbatim: "·")
+                        Text(job.key.assistant.displayName)
+                    } else if busy {
+                        ProgressView().controlSize(.mini)
+                        Text(.Board.boardCompactWorking)
+                    } else if humanAction == nil, let status = neutralStatus {
+                        Text(status).lineLimit(1)
+                    }
+                    Spacer(minLength: 6)
+                    primaryAction
                 }
-                Spacer(minLength: 6)
-                primaryAction
+                .font(.caption).foregroundStyle(.secondary)
+            }
+            if !chips.isEmpty {
+                HStack(spacing: 5) {
+                    ForEach(Array(chips.enumerated()), id: \.offset) { _, chip in
+                        BoardStatusChip(title: chip.title, symbol: chip.symbol)
+                    }
+                }
             }
         }
         .controlSize(.small)
@@ -89,7 +102,7 @@ struct CommandCenterMRCard: View {
         .background(Color(nsColor: .controlBackgroundColor), in: RoundedRectangle(cornerRadius: 8))
         .overlay(RoundedRectangle(cornerRadius: 8).stroke(Color.secondary.opacity(0.12), lineWidth: 0.5))
         .overlay(alignment: .leading) {
-            if row.needsAttention {
+            if humanAction != nil {
                 RoundedRectangle(cornerRadius: 2).fill(.orange.opacity(0.65)).frame(width: 3)
                     .padding(.vertical, 10)
             }
@@ -100,53 +113,45 @@ struct CommandCenterMRCard: View {
     }
 
     @ViewBuilder
+    private var foreignAuthor: some View {
+        let context = ReviewingContext(row: row)
+        if let author = context.author {
+            HStack(spacing: 4) {
+                AvatarView(url: author.avatarURL, size: 18).accessibilityHidden(true)
+                Text(verbatim: "@\(author.username)").lineLimit(1)
+            }
+            .help(Text(verbatim: "\(author.name) (@\(author.username))"))
+            .accessibilityElement(children: .combine)
+            .accessibilityLabel(Text(.ReviewingContext.reviewingAuthorLabel) + Text(verbatim: ": \(author.name) (@\(author.username))"))
+        } else {
+            AvatarView(url: nil, size: 18)
+                .help(Text(.ReviewingContext.reviewingAuthorUnknown))
+                .accessibilityLabel(Text(.ReviewingContext.reviewingAuthorUnknown))
+        }
+    }
+
+    private var metadataHelp: Text {
+        if allowsRemoval {
+            let context = ReviewingContext(row: row)
+            return Text(context.presenceMessage) + Text(verbatim: "\n") + Text(context.statusMessage)
+        }
+        return Text(verbatim: item.url.gitLabProjectPath)
+    }
+
+    private var neutralStatus: LocalizedStringResource? {
+        if item.authorFeedbackStatus?.waitingForReviewer == true { return .AuthorFeedback.authorFeedbackWaitingChip }
+        guard allowsRemoval else { return nil }
+        let context = ReviewingContext(row: row)
+        return context.status == .activityUnknown ? context.presenceMessage : context.statusMessage
+    }
+
+    @ViewBuilder
     private var primaryAction: some View {
-        if busy {
-            ProgressView().controlSize(.small)
-        } else if let job = row.latestJob, job.execution?.state.isActive == true {
+        if let job = row.latestJob, job.execution?.state.isActive == true {
             Button(role: .destructive) { monitor.cancelAssistantJob(job.id) } label: { Text(.AssistantJobs.assistantJobsStop) }
                 .buttonStyle(.plain)
-        } else if let action = humanAction {
+        } else if !busy, let action = humanAction {
             humanActionButton(action)
-        } else if item.awaitingRemoteVerification || item.requiresDiscussionRecheck
-                    || monitor.attention.confirmationStates[item.id] == .changed {
-            primary(.Board.boardCompactReviewChecks, action: onDetails)
-        } else if item.canConfirmReReview {
-            primary(.Board.boardCompactReviewDecision, action: onDetails)
-        } else if !item.drafts.isEmpty {
-            primary(.Board.boardCompactReviewDrafts, action: onDetails)
-        } else if item.canApprove {
-            primary(.Board.boardCompactReviewApproval, action: onDetails)
-        } else if item.authorFeedbackStatus?.phase == .failed {
-            primary(.AuthorFeedback.authorFeedbackRetry) { monitor.attention.retryAuthorFeedback(item.id) }
-        } else if item.authorFeedbackStatus?.needsAttention == true {
-            primary(.Board.boardCompactReviewChecks, action: onDetails)
-        } else if let intent = nextIntent {
-            if intent.kind != .refresh && needsCLI {
-                primary(.Board.boardCompactSetupCli) { openSettings() }
-            } else {
-                primary(intent.state == .failed ? .Board.boardIntentRetry : BoardMRIntentActions.action(intent.kind)) {
-                    start { await monitor.runMRTodoIntent(id: intent.id) }
-                }
-            }
-        } else if let job = row.latestJob, MergeRequestBoardSnapshot.Row.jobNeedsAttention(job.execution?.state) {
-            if needsCLI { primary(.Board.boardCompactSetupCli) { openSettings() } }
-            else { primary(.AssistantJobs.assistantJobsRetry) { start { await monitor.retryAssistantJob(job.id) } } }
-        } else if item.needsMerge {
-            primary(.Board.boardCompactMerge, action: onDetails)
-        } else if item.needsPipelineHandoff {
-            primary(.Board.boardCompactReviewHandoff, action: onDetails)
-        } else if item.reReviewReadiness != nil {
-            primary(.Board.boardCompactReviewChecks, action: onDetails)
-        } else if let action = monitor.attentionFeedbackAction(for: item), action == .ready(.assistant) || action == .failed {
-            primary(.Board.boardIntentHandleFeedback) { start { await monitor.runAttentionFeedback(for: item) } }
-        } else if !item.isAuthored {
-            if needsCLI { primary(.Board.boardCompactSetupCli) { openSettings() } }
-            else {
-                primary(.CommandCenter.commandCenterReviewRun, enabled: monitor.canRunReview(for: item)) {
-                    start { await monitor.runReview(for: item) }
-                }
-            }
         }
     }
 
@@ -206,6 +211,10 @@ struct CommandCenterMRCard: View {
         Menu {
             Button(action: onDetails) { Text(.Board.boardDetails) }
             Link(destination: item.url) { Text(.CommandCenter.commandCenterOpenGitLab) }
+            if !item.isAuthored {
+                Button { start { await monitor.runReview(for: item) } } label: { Text(.CommandCenter.commandCenterReviewRun) }
+                    .disabled(isStarting || busy || !monitor.canRunReview(for: item))
+            }
             AssistantContextMenu(mergeRequestURL: item.url, title: item.title,
                                  workspace: monitor.settings.automation.assistantWorkspace)
             if let target = monitor.scopeTarget(projectID: item.id.projectID, iid: item.id.iid, url: item.url) {
@@ -228,63 +237,22 @@ struct CommandCenterMRCard: View {
         .accessibilityLabel(Text(.CommandCenter.commandCenterActions))
     }
 
-    private struct Chip { let title: LocalizedStringResource; let symbol: String; let tint: Color }
+    private struct Chip { let title: LocalizedStringResource; let symbol: String }
     private var chips: [Chip] {
         var result: [Chip] = []
-        if let feedback = item.authorFeedbackStatus {
-            switch feedback.phase {
-            case .failed:
-                result.append(.init(title: .AuthorFeedback.authorFeedbackVerificationFailedChip, symbol: "exclamationmark.shield", tint: .orange))
-            case .checking:
-                result.append(.init(title: .AuthorFeedback.authorFeedbackVerifyingChip, symbol: "arrow.triangle.2.circlepath", tint: .blue))
-            case .waitingPublication:
-                if item.drafts.isEmpty && !item.awaitingRemoteVerification && !item.requiresDiscussionRecheck {
-                    result.append(.init(title: .AuthorFeedback.authorFeedbackPendingRepliesChip, symbol: "text.bubble", tint: .blue))
-                }
-            case .complete:
-                if feedback.needsAttention {
-                    result.append(.init(title: .AuthorFeedback.authorFeedbackNeedsWorkChip, symbol: "text.bubble", tint: .orange))
-                } else if feedback.waitingForReviewer {
-                    result.append(.init(title: .AuthorFeedback.authorFeedbackWaitingChip, symbol: "clock", tint: .secondary))
-                }
-            }
+        if item.hasConflict || item.mergeRequest?.hasMergeConflict == true {
+            result.append(.init(title: .Board.boardCompactConflict, symbol: "arrow.triangle.branch"))
         }
-        if let intent = nextIntent, intent.kind != .refresh, needsCLI {
-            result.append(.init(title: .Board.boardCompactCliRequired, symbol: "terminal", tint: .orange))
-        }
-        if humanAction == nil && (item.awaitingRemoteVerification || item.requiresDiscussionRecheck) {
-            result.append(.init(title: .Board.boardCompactVerification, symbol: "shield.lefthalf.filled", tint: .orange))
-        }
-        if monitor.attention.confirmationStates[item.id] == .failed || monitor.attention.confirmationStates[item.id] == .changed {
-            result.append(.init(title: .Board.boardCompactRecheck, symbol: "exclamationmark.circle", tint: .orange))
-        }
-        if let job = row.latestJob {
-            if job.execution?.state.isActive == true {
-                result.append(.init(title: .Board.boardCompactWorking, symbol: "arrow.triangle.2.circlepath", tint: .blue))
-            } else if humanAction == nil && MergeRequestBoardSnapshot.Row.jobNeedsAttention(job.execution?.state) {
-                result.append(.init(title: .Board.boardCompactBlocked, symbol: "exclamationmark.circle", tint: .orange))
-            }
-        }
-        if !item.drafts.isEmpty { result.append(.init(title: .Board.boardCompactDrafts(item.drafts.count), symbol: "text.bubble", tint: .blue)) }
-        if item.hasConflict { result.append(.init(title: .Board.boardCompactConflict, symbol: "arrow.triangle.branch", tint: .orange)) }
         if item.failedPipeline || item.mergeRequest?.headPipeline?.status == "failed" {
-            result.append(.init(title: .Board.boardCompactPipelineFailed, symbol: "xmark.circle", tint: .orange))
+            result.append(.init(title: .Board.boardCompactPipelineFailed, symbol: "xmark.circle"))
+        } else if let pipeline = item.mergeRequest?.headPipeline,
+                  ["running", "pending", "created", "preparing", "waiting_for_resource"].contains(pipeline.status) {
+            result.append(.init(title: .Board.boardCompactPipelineRunning, symbol: "clock"))
         }
-        if let pipeline = item.mergeRequest?.headPipeline, ["running", "pending", "created", "preparing", "waiting_for_resource"].contains(pipeline.status) {
-            result.append(.init(title: .Board.boardCompactPipelineRunning, symbol: "clock", tint: .blue))
+        if humanAction == nil, !busy, !allowsRemoval, max(item.draftCount, item.drafts.count) > 0 {
+            result.append(.init(title: .Board.boardCompactDrafts(max(item.draftCount, item.drafts.count)), symbol: "text.bubble"))
         }
-        let showResidualDiscussion = item.authorFeedbackStatus.map { $0.phase == .complete && !$0.needsAttention } ?? true
-        if showResidualDiscussion && (item.needsDiscussion || !item.feedback.isEmpty) {
-            result.append(.init(title: .Board.boardCompactFeedback, symbol: "text.bubble", tint: .orange))
-        }
-        if item.needsChanges { result.append(.init(title: .Board.boardCompactChanges, symbol: "pencil", tint: .orange)) }
-        if item.reReviewReadiness != nil || item.canConfirmReReview {
-            result.append(.init(title: .Board.boardCompactReReview, symbol: "person.crop.circle.badge.checkmark", tint: .orange))
-        }
-        if let intent = nextIntent, result.isEmpty {
-            result.append(.init(title: BoardMRIntentActions.title(intent.kind), symbol: "bolt", tint: .orange))
-        }
-        return result
+        return Array(result.prefix(2))
     }
 }
 

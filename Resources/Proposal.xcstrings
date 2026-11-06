@@ -1,0 +1,160 @@
+{
+  "sourceLanguage": "en",
+  "version": "1.0",
+  "strings": {
+    "proposal.authorUnknown": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Author unavailable"
+          }
+        }
+      }
+    },
+    "proposal.authorLoading": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Loading MR author…"
+          }
+        }
+      }
+    },
+    "proposal.authorLabel": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "MR author"
+          }
+        }
+      }
+    },
+    "proposal.moreReasons.%lld": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "+%1$lld"
+          }
+        }
+      }
+    },
+    "proposal.moreReasonsHelp": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Show all reasons for this proposal."
+          }
+        }
+      }
+    },
+    "proposal.reason.review": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "You were asked to review this merge request."
+          }
+        }
+      }
+    },
+    "proposal.reason.followUp": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Reviewer feedback needs a follow-up."
+          }
+        }
+      }
+    },
+    "proposal.reason.pipeline": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "A failed pipeline needs attention."
+          }
+        }
+      }
+    },
+    "proposal.reason.conflict": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Merge conflicts need attention."
+          }
+        }
+      }
+    },
+    "proposal.reason.refresh": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "An MR update needs to be checked."
+          }
+        }
+      }
+    },
+    "proposal.reason.feedback": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "An unresolved discussion needs attention."
+          }
+        }
+      }
+    },
+    "proposal.reason.merge": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "A merge decision is waiting."
+          }
+        }
+      }
+    },
+    "proposal.reason.drafts": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Unpublished comments need review."
+          }
+        }
+      }
+    },
+    "proposal.reason.unmanaged": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "This MR is not in your managed list."
+          }
+        }
+      }
+    }
+  }
+}
