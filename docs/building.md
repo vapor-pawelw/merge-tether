@@ -23,7 +23,7 @@ open GitLabTodos.xcworkspace
 
 Build and run the `GitLabTodos` scheme from Xcode. MergeTether is a regular Dock application with a resizable main window. Closing the window keeps background monitoring active until the app is quit. The release bundle identifier and legacy target/scheme names remain unchanged.
 
-Manual GitLab management requires authenticated `glab`. Assistant automation additionally requires a compatible, signed-in Codex CLI or Claude CLI. Desktop assistant applications and their listener/plugin setup are not prerequisites.
+Manual GitLab management requires authenticated `glab`. Agent automation additionally requires a compatible, signed-in Codex CLI or Claude CLI. Desktop agent applications and their listener/plugin setup are not prerequisites.
 
 ## Command-line build
 

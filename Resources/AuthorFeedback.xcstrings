@@ -206,7 +206,7 @@
         "en": {
           "stringUnit": {
             "state": "translated",
-            "value": "Follow-up push is off. Proposed fixes stay in the assistant result until you deliver them manually or enable push."
+            "value": "Follow-up push is off. Proposed fixes stay in the agent result until you deliver them manually or enable push."
           }
         }
       }

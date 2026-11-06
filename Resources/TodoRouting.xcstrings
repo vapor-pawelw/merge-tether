@@ -40,7 +40,7 @@
         "en": {
           "stringUnit": {
             "state": "translated",
-            "value": "This action uses a configured shell command. Run it explicitly outside automatic MR handling or switch the action to a CLI assistant."
+            "value": "This action uses a configured shell command. Run it explicitly outside automatic MR handling or switch the action to a coding agent CLI."
           }
         }
       }

@@ -8,7 +8,7 @@
         "en": {
           "stringUnit": {
             "state": "translated",
-            "value": "The assistant stopped before finishing. Review the run result."
+            "value": "The agent stopped before finishing. Review the run result."
           }
         }
       }
@@ -63,7 +63,7 @@
         "en": {
           "stringUnit": {
             "state": "translated",
-            "value": "Set up the selected assistant CLI to continue automation."
+            "value": "Set up the selected agent CLI to continue automation."
           }
         }
       }

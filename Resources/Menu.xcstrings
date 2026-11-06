@@ -293,7 +293,7 @@
         "en": {
           "stringUnit": {
             "state": "translated",
-            "value": "%@ Desktop is unavailable. Assistant tasks stay in your queue."
+            "value": "%@ Desktop is unavailable. Agent tasks stay in your queue."
           }
         }
       }
@@ -315,7 +315,7 @@
         "en": {
           "stringUnit": {
             "state": "translated",
-            "value": "Could not open the desktop assistant. The task is still saved here."
+            "value": "Could not open the desktop agent. The task is still saved here."
           }
         }
       }
@@ -359,7 +359,7 @@
         "en": {
           "stringUnit": {
             "state": "translated",
-            "value": "Open the assistant, then paste and send the prepared prompt."
+            "value": "Open the agent, then paste and send the prepared prompt."
           }
         }
       }
@@ -370,7 +370,7 @@
         "en": {
           "stringUnit": {
             "state": "translated",
-            "value": "Review and send the draft in the assistant. Copy prompt includes the available evidence."
+            "value": "Review and send the draft in the agent. Copy prompt includes the available evidence."
           }
         }
       }
@@ -590,7 +590,7 @@
         "en": {
           "stringUnit": {
             "state": "translated",
-            "value": "Recorded for assistant handling"
+            "value": "Recorded for agent handling"
           }
         }
       }
@@ -601,7 +601,7 @@
         "en": {
           "stringUnit": {
             "state": "translated",
-            "value": "Waiting for the assistant run"
+            "value": "Waiting for the agent run"
           }
         }
       }
@@ -766,7 +766,7 @@
         "en": {
           "stringUnit": {
             "state": "translated",
-            "value": "Assistant result"
+            "value": "Agent result"
           }
         }
       }
@@ -777,7 +777,7 @@
         "en": {
           "stringUnit": {
             "state": "translated",
-            "value": "Open linked assistant chat"
+            "value": "Open linked agent chat"
           }
         }
       }
@@ -821,7 +821,7 @@
         "en": {
           "stringUnit": {
             "state": "translated",
-            "value": "Start Assistant Task"
+            "value": "Start agent task"
           }
         }
       }
@@ -832,7 +832,7 @@
         "en": {
           "stringUnit": {
             "state": "translated",
-            "value": "Continue only if you have confirmed that no other assistant is working on this merge request or pipeline."
+            "value": "Continue only if you have confirmed that no other agent is working on this merge request or pipeline."
           }
         }
       }
@@ -854,7 +854,7 @@
         "en": {
           "stringUnit": {
             "state": "translated",
-            "value": "An assistant is already registered for this pipeline"
+            "value": "An agent is already registered for this pipeline"
           }
         }
       }
@@ -931,7 +931,7 @@
         "en": {
           "stringUnit": {
             "state": "translated",
-            "value": "Assistant running"
+            "value": "Agent running"
           }
         }
       }
@@ -986,7 +986,7 @@
         "en": {
           "stringUnit": {
             "state": "translated",
-            "value": "The assistant could not complete the conflict task"
+            "value": "The agent could not complete the conflict task"
           }
         }
       }
@@ -1657,7 +1657,7 @@
         "en": {
           "stringUnit": {
             "state": "translated",
-            "value": "The assistant has no objections to this commit, and your review threads are resolved. Approve it?"
+            "value": "The agent has no objections to this commit, and your review threads are resolved. Approve it?"
           }
         }
       }
@@ -1800,7 +1800,7 @@
         "en": {
           "stringUnit": {
             "state": "translated",
-            "value": "Approve once the assistant has no objections to the latest commit and every discussion is resolved."
+            "value": "Approve once the agent has no objections to the latest commit and every discussion is resolved."
           }
         }
       }
@@ -1866,7 +1866,7 @@
         "en": {
           "stringUnit": {
             "state": "translated",
-            "value": "Assistant needs you"
+            "value": "Agent needs you"
           }
         }
       }
@@ -2042,7 +2042,7 @@
         "en": {
           "stringUnit": {
             "state": "translated",
-            "value": "Delivered to assistant"
+            "value": "Delivered to agent"
           }
         }
       }
@@ -2053,7 +2053,7 @@
         "en": {
           "stringUnit": {
             "state": "translated",
-            "value": "Assistant history"
+            "value": "Agent history"
           }
         }
       }
@@ -2064,7 +2064,7 @@
         "en": {
           "stringUnit": {
             "state": "translated",
-            "value": "No linked assistant chat"
+            "value": "No linked agent chat"
           }
         }
       }
@@ -2207,7 +2207,7 @@
         "en": {
           "stringUnit": {
             "state": "translated",
-            "value": "Automatic verification is unavailable. Set up the assistant, or confirm readiness manually."
+            "value": "Automatic verification is unavailable. Set up the agent, or confirm readiness manually."
           }
         }
       }

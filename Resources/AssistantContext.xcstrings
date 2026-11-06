@@ -7,7 +7,7 @@
         "en": {
           "stringUnit": {
             "state": "translated",
-            "value": "Open with assistant…"
+            "value": "Start a conversation with an agent…"
           }
         }
       }
@@ -62,7 +62,7 @@
         "en": {
           "stringUnit": {
             "state": "translated",
-            "value": "No assistant app or CLI detected"
+            "value": "No supported agent app or CLI detected"
           }
         }
       }
@@ -84,7 +84,7 @@
         "en": {
           "stringUnit": {
             "state": "translated",
-            "value": "Could not open the assistant. Check that it is installed and try again."
+            "value": "Could not open the agent. Check that it is installed and try again."
           }
         }
       }

@@ -7,7 +7,7 @@
         "en": {
           "stringUnit": {
             "state": "translated",
-            "value": "The selected assistant's desktop app is unavailable."
+            "value": "The selected agent's desktop app is unavailable."
           }
         }
       }
@@ -18,7 +18,7 @@
         "en": {
           "stringUnit": {
             "state": "translated",
-            "value": "MergeTether could not open the assistant."
+            "value": "MergeTether could not open the agent."
           }
         }
       }
@@ -29,7 +29,7 @@
         "en": {
           "stringUnit": {
             "state": "translated",
-            "value": "An assistant job is already active for this merge request."
+            "value": "An agent job is already active for this merge request."
           }
         }
       }

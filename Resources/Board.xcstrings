@@ -206,7 +206,7 @@
         "en": {
           "stringUnit": {
             "state": "translated",
-            "value": "Remove this MR from Reviewing, stop its active assistant runs and pause its automation. Its GitLab assignments and drafts are kept. You can add it again manually."
+            "value": "Remove this MR from Reviewing, stop its active agent runs and pause its automation. Its GitLab assignments and drafts are kept. You can add it again manually."
           }
         }
       }
