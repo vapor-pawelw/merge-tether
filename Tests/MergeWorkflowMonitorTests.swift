@@ -4,6 +4,183 @@ import Testing
 
 @MainActor
 struct MergeWorkflowMonitorTests {
+    @Test func staleCurrentHeadVerdictSchedulesOneReviewPerDiscussionRevision() async throws {
+        let fixture = try FreshnessFixture(request: mergeRequest(13, sha: String(repeating: "a", count: 40), author: 2))
+        defer { fixture.cleanUp() }
+        var events: [MergeWorkflowEvent] = []
+        let monitor = MergeWorkflowMonitor(defaults: fixture.defaults, verdictDirectory: fixture.verdictDirectory)
+        await fixture.poll(monitor) { events.append($0) }
+        #expect(events.count == 1)
+        #expect(events.first?.kind == .reviewUpdate)
+        #expect(events.first?.context.contains("discussion") == true)
+        await fixture.poll(monitor) { events.append($0) }
+        let restarted = MergeWorkflowMonitor(defaults: fixture.defaults, verdictDirectory: fixture.verdictDirectory)
+        await fixture.poll(restarted) { events.append($0) }
+        #expect(events.count == 1)
+
+        // Resolution changes do not invalidate the verdict's text or start another run.
+        try fixture.write("threads", fixture.liveThreads.replacingOccurrences(of: "\"resolved\":false", with: "\"resolved\":true"))
+        await fixture.poll(restarted) { events.append($0) }
+        #expect(events.count == 1)
+        let edited = fixture.liveThreads.replacingOccurrences(of: "Other reviewer's condition", with: "Additional requirement")
+        try fixture.write("threads", edited)
+        await fixture.poll(restarted) { events.append($0) }
+        #expect(events.count == 2)
+        #expect(Set(events.map(\.identity)).count == 2)
+        try fixture.recordVerdict(threads: edited)
+        await fixture.poll(restarted) { events.append($0) }
+        #expect(events.count == 2)
+    }
+
+    @Test(arguments: ["our-open-thread", "pending-draft"])
+    func freshnessReviewWaitsForOurResolvedFindingsAndNoDrafts(_ blocker: String) async throws {
+        let fixture = try FreshnessFixture(request: mergeRequest(13, sha: String(repeating: "a", count: 40), author: 2))
+        defer { fixture.cleanUp() }
+        if blocker == "our-open-thread" {
+            try fixture.write("threads", fixture.liveThreads.replacingOccurrences(of: "\"resolved\":true", with: "\"resolved\":false"))
+        } else {
+            try fixture.write("drafts", #"[{"id":301,"author_id":1,"note":"Private finding"}]"#)
+        }
+        let monitor = MergeWorkflowMonitor(defaults: fixture.defaults, verdictDirectory: fixture.verdictDirectory)
+        var events: [MergeWorkflowEvent] = []
+        await fixture.poll(monitor) { events.append($0) }
+        #expect(events.isEmpty)
+        try fixture.write("threads", fixture.liveThreads)
+        try fixture.write("drafts", "[]")
+        await fixture.poll(monitor) { events.append($0) }
+        #expect(events.count == 1)
+    }
+
+    @Test func publishingKnownOwnDraftsDoesNotTriggerARedundantFreshnessReview() async throws {
+        let fixture = try FreshnessFixture(request: mergeRequest(13, sha: String(repeating: "a", count: 40), author: 2))
+        defer { fixture.cleanUp() }
+        let body = "My published review summary"
+        let live = String(fixture.reviewedThreads.dropLast())
+            + #",{"id":"published","notes":[{"id":200,"author":{"id":1},"system":false,"body":"My published review summary"}]}]"#
+        try fixture.write("threads", live)
+        ReviewVerdictStore.rememberDrafts([.init(id: 301, authorID: 1, note: body, discussionID: nil, position: nil)],
+            host: "gitlab.example.test", projectID: 7, iid: 13, in: fixture.verdictDirectory)
+        let monitor = MergeWorkflowMonitor(defaults: fixture.defaults, verdictDirectory: fixture.verdictDirectory)
+        var events: [MergeWorkflowEvent] = []
+        await fixture.poll(monitor) { events.append($0) }
+        await fixture.poll(monitor) { events.append($0) }
+        #expect(events.isEmpty)
+    }
+
+    @Test func freshReviewCoverageStartsANewDurableAttemptEpochWhenDiscussionBodiesCycle() async throws {
+        let fixture = try FreshnessFixture(request: mergeRequest(13, sha: String(repeating: "a", count: 40), author: 2))
+        defer { fixture.cleanUp() }
+        let contextA = fixture.liveThreads.replacingOccurrences(of: "Other reviewer's condition", with: "Baseline condition")
+        try fixture.recordVerdict(threads: contextA)
+        var events: [MergeWorkflowEvent] = []
+        let monitor = MergeWorkflowMonitor(defaults: fixture.defaults, verdictDirectory: fixture.verdictDirectory)
+        await fixture.poll(monitor) { events.append($0) }
+        #expect(events.count == 1)
+
+        try fixture.recordVerdict(threads: fixture.liveThreads)
+        await fixture.poll(monitor) { events.append($0) }
+        await fixture.poll(monitor) { events.append($0) }
+        #expect(events.count == 1)
+        try fixture.write("threads", contextA)
+        await fixture.poll(monitor) { events.append($0) }
+        #expect(events.count == 2)
+
+        // A fresh manual review of A must permit a later A→B refresh, even though
+        // head, note IDs, bodies and receipt fingerprint now repeat the first case.
+        try fixture.recordVerdict(threads: contextA)
+        await fixture.poll(monitor) { events.append($0) }
+        await fixture.poll(monitor) { events.append($0) }
+        let restarted = MergeWorkflowMonitor(defaults: fixture.defaults, verdictDirectory: fixture.verdictDirectory)
+        await fixture.poll(restarted) { events.append($0) }
+        #expect(events.count == 2)
+        try fixture.write("threads", fixture.liveThreads)
+        await fixture.poll(restarted) { events.append($0) }
+        #expect(events.count == 3)
+        #expect(Set(events.map(\.identity)).count == 3)
+        await fixture.poll(restarted) { events.append($0) }
+        #expect(events.count == 3)
+    }
+
+    @Test func changedReviewReceiptsPermitDiscussionCyclesWithoutAnIntermediateCoveredPoll() async throws {
+        let fixture = try FreshnessFixture(request: mergeRequest(13, sha: String(repeating: "a", count: 40), author: 2))
+        defer { fixture.cleanUp() }
+        let contextA = fixture.liveThreads.replacingOccurrences(of: "Other reviewer's condition", with: "Baseline condition")
+        try fixture.recordVerdict(threads: contextA)
+        let monitor = MergeWorkflowMonitor(defaults: fixture.defaults, verdictDirectory: fixture.verdictDirectory)
+        var events: [MergeWorkflowEvent] = []
+        await fixture.poll(monitor) { events.append($0) }
+        #expect(events.count == 1)
+
+        // Each worker saves a fresh verdict, but the next discussion edit wins
+        // the race before any poll can observe that verdict covering live text.
+        try fixture.recordVerdict(threads: fixture.liveThreads)
+        try fixture.write("threads", contextA)
+        await fixture.poll(monitor) { events.append($0) }
+        #expect(events.count == 2)
+        try fixture.recordVerdict(threads: contextA)
+        try fixture.write("threads", fixture.liveThreads)
+        let restarted = MergeWorkflowMonitor(defaults: fixture.defaults, verdictDirectory: fixture.verdictDirectory)
+        await fixture.poll(restarted) { events.append($0) }
+        #expect(events.count == 3)
+        #expect(Set(events.map(\.identity)).count == 3)
+        await fixture.poll(restarted) { events.append($0) }
+        #expect(events.count == 3)
+    }
+
+    @MainActor private final class FreshnessFixture {
+        let directory: URL
+        let defaults: UserDefaults
+        let suite = "ReviewFreshness.\(UUID())"
+        let glab = GlabService()
+        var verdictDirectory: URL { directory.appending(path: "verdicts") }
+        let reviewedThreads = #"[{"id":"mine","notes":[{"id":100,"author":{"id":1},"system":false,"body":"Use a safe fallback","resolvable":true,"resolved":true},{"id":101,"author":{"id":2},"system":false,"body":"Fallback implemented"}]}]"#
+        var liveThreads: String {
+            String(reviewedThreads.dropLast()) + #",{"id":"other","notes":[{"id":200,"author":{"id":3},"system":false,"body":"Other reviewer's condition","resolvable":true,"resolved":false}]}]"#
+        }
+
+        init(request: String) throws {
+            directory = FileManager.default.temporaryDirectory.appending(path: UUID().uuidString)
+            try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
+            defaults = try #require(UserDefaults(suiteName: suite))
+            try write("request", request)
+            try write("threads", liveThreads)
+            try write("drafts", "[]")
+            try recordVerdict(threads: reviewedThreads)
+            let executable = directory.appending(path: "glab")
+            try write("glab", """
+                #!/bin/sh
+                case "$2" in
+                  *scope=all*reviewer_id=1*) printf '['; cat "${0%/*}/request"; printf ']'; exit ;;
+                  */reviewers*) printf '%s' '[{"user":{"id":1},"state":"review_started"}]'; exit ;;
+                  */discussions*) file=threads ;;
+                  */draft_notes*) file=drafts ;;
+                  */merge_requests/13) file=request ;;
+                  *) exit 100 ;;
+                esac
+                cat "${0%/*}/$file"
+                """)
+            try FileManager.default.setAttributes([.posixPermissions: 0o700], ofItemAtPath: executable.path)
+            glab.glabPath = executable
+        }
+
+        func recordVerdict(threads: String) throws {
+            let discussions = try JSONDecoder().decode([GitLabMergeRequestDiscussion].self, from: Data(threads.utf8))
+            let verdict = ReviewVerdict(version: 1, host: "gitlab.example.test", projectID: 7, iid: 13,
+                headSHA: String(repeating: "a", count: 40), verdict: .noObjections,
+                discussionFingerprint: ReviewVerdict.fingerprint(discussions))
+            let file = ReviewVerdictStore.fileURL(host: "gitlab.example.test", projectID: 7, iid: 13, in: verdictDirectory)
+            try FileManager.default.createDirectory(at: file.deletingLastPathComponent(), withIntermediateDirectories: true)
+            try JSONEncoder().encode(verdict).write(to: file)
+        }
+
+        func poll(_ monitor: MergeWorkflowMonitor, deliver: @MainActor (MergeWorkflowEvent) -> Void) async {
+            await monitor.poll(glab: glab, host: "gitlab.example.test", user: .init(id: 1, username: "owner"),
+                authored: [], enabled: [.reviewUpdate], reviewSLA: 3600, deliver: deliver)
+        }
+        func write(_ name: String, _ content: String) throws { try Data(content.utf8).write(to: directory.appending(path: name)) }
+        func cleanUp() { defaults.removePersistentDomain(forName: suite); try? FileManager.default.removeItem(at: directory) }
+    }
+
     @Test func renumbersStackFromTheBaseAndDropsPositionForTheLastMR() throws {
         let decoder = JSONDecoder()
         let base = try decoder.decode(GitLabMergeRequest.self, from: Data(mergeRequest(1, sha: "a", source: "base", target: "main").utf8))
@@ -155,8 +332,9 @@ struct MergeWorkflowMonitorTests {
         try write(assigned ? "[\(request)]" : "[]", to: directory.appending(path: "assigned"))
         try write(request, to: directory.appending(path: "request"))
         try write(assigned ? #"[{"user":{"id":1},"state":"reviewed"}]"# : "[]", to: directory.appending(path: "reviewer"))
-        let before = #"[{"id":"mine","notes":[{"id":100,"author":{"id":1},"system":false,"resolvable":true,"resolved":false}]}]"#
-        let after = #"[{"id":"mine","notes":[{"id":100,"author":{"id":1},"system":false,"resolvable":true,"resolved":false},{"id":101,"author":{"id":2},"system":false}]}]"#
+        let historical = #"{"id":"historical","notes":[{"id":90,"author":{"id":1},"system":false,"resolvable":true,"resolved":true},{"id":91,"author":{"id":2},"system":false,"resolvable":true,"resolved":true}]}"#
+        let before = "[" + historical + #",{"id":"mine","notes":[{"id":100,"author":{"id":1},"system":false,"resolvable":true,"resolved":false}]}]"#
+        let after = "[" + historical + #",{"id":"mine","notes":[{"id":100,"author":{"id":1},"system":false,"resolvable":true,"resolved":false},{"id":101,"author":{"id":2},"system":false}]}]"#
         try write(before, to: directory.appending(path: "threads"))
         let executable = directory.appending(path: "glab")
         try write("""

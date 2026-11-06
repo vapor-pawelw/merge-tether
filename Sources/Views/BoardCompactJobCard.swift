@@ -24,8 +24,9 @@ struct BoardCompactJobCard: View {
                         AssistantContextMenu(mergeRequestURL: url, title: handoff.title,
                             workspace: monitor.settings.automation.assistantWorkspace)
                     }
-                } label: { Image(systemName: "ellipsis") }
+                } label: { BoardCardActionIcon(systemName: "ellipsis") }
                 .menuStyle(.borderlessButton).menuIndicator(.hidden).fixedSize()
+                .frame(width: 24, height: 24)
                 .accessibilityLabel(Text(.CommandCenter.commandCenterActions))
                 .disabled(handoff.mergeRequestURL == nil)
             }
@@ -42,7 +43,6 @@ struct BoardCompactJobCard: View {
                 BoardMRIdentifier(iid: handoff.key.work.iid)
             }
             .font(.caption).foregroundStyle(.secondary)
-            if !repositoryPath.isEmpty { BoardRepositoryFooter(path: repositoryPath) }
         }
         .padding(12).controlSize(.small)
         .frame(maxWidth: .infinity, alignment: .leading)

@@ -237,6 +237,171 @@
           }
         }
       }
+    },
+    "reviewing.automatic": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Handled automatically; no action needed."
+          }
+        }
+      }
+    },
+    "reviewing.verificationAutomatic": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Checking automatically; no action needed."
+          }
+        }
+      }
+    },
+    "reviewing.setupRequired": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Set up or sign in to the selected agent CLI to continue."
+          }
+        }
+      }
+    },
+    "reviewing.runNeeded": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Run a review to check the current changes and discussion."
+          }
+        }
+      }
+    },
+    "reviewing.draftsNeedReview": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Review the private comments before publication."
+          }
+        }
+      }
+    },
+    "reviewing.runNeedsInput": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "The last review stopped. Check its result before continuing."
+          }
+        }
+      }
+    },
+    "reviewing.inspectDiscussions": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Open the discussion to see the review context."
+          }
+        }
+      }
+    },
+    "reviewing.waitingOtherThreads": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "No action needed. Waiting for other review threads to be resolved."
+          }
+        }
+      }
+    },
+    "reviewing.waitingAuthor": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "No action needed. Waiting for updates to your review threads."
+          }
+        }
+      }
+    },
+    "reviewing.monitoring": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "No action needed. Watching for updates."
+          }
+        }
+      }
+    },
+    "reviewing.viewDiscussions": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "View discussions"
+          }
+        }
+      }
+    },
+    "reviewing.queued": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Review queued"
+          }
+        }
+      }
+    },
+    "reviewing.verifying": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Checking review evidence"
+          }
+        }
+      }
+    },
+    "reviewing.reviewNeeded": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Review required"
+          }
+        }
+      }
+    },
+    "reviewing.otherThreadsOpen": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Waiting for other review threads"
+          }
+        }
+      }
     }
   }
 }

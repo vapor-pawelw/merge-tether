@@ -25,7 +25,7 @@ Recognized GitLab to-dos update an MR’s durable action and are then marked rea
 
 Open **Review and confirm** to read complete discussion threads alongside private drafts. An **AI** badge marks verified agent identities or a very-high-confidence assessment tied to the current comment; an unbadged comment is unclassified.
 
-Pin any card to keep it at the top of its column; pins are saved for your account. Within pinned and unpinned groups, cards requiring attention rise to the top and draft MRs stay at the bottom of Reviewing. Insertions, removals and reordering animate naturally and respect macOS Reduce Motion. Open a card for its full details and execution history. **Activity** shows workflow events and agent results. **Settings → Automation → Scope** controls automation globally, by repository or by MR without losing history.
+Pin any card to keep it at the top of its column; pins are saved for your account. Within pinned and unpinned groups, cards requiring attention rise to the top and draft MRs stay at the bottom of Reviewing. Insertions, removals and reordering animate naturally and respect macOS Reduce Motion. Hover over the short repository name for its full path, or open a card for full repository details and execution history. **Activity** shows workflow events and agent results. **Settings → Automation → Scope** controls automation globally, by repository or by MR without losing history.
 
 Use **Add merge request…** to add a reviewed MR by URL or repository and number. **Remove from my list** on a reviewed MR keeps it out of automatic adoption until you explicitly add it again.
 

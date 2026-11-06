@@ -182,7 +182,8 @@ private struct CommandCenterMRDetailContent: View {
                 RepositoryPathText(item.url.gitLabProjectPath).lineLimit(1)
                 if let author = item.mergeRequest?.author {
                     AvatarView(url: author.avatarURL, size: 18).accessibilityHidden(true)
-                    Text(verbatim: "@\(author.username)").lineLimit(1)
+                    Text(verbatim: author.name.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty ? author.username : author.name).lineLimit(1)
+                        .help(Text(verbatim: "@\(author.username)"))
                 }
                 Spacer()
                 headerMenu
@@ -312,7 +313,9 @@ private struct CommandCenterMRDetailContent: View {
             if detailsExpanded {
                 VStack(alignment: .leading, spacing: 10) {
                     if let request = item.mergeRequest {
-                        metadata(.CommandCenter.commandCenterAuthor, value: "@\(request.author.username)")
+                        metadata(.CommandCenter.commandCenterAuthor,
+                            value: request.author.name.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty ? request.author.username : request.author.name)
+                            .help(Text(verbatim: "@\(request.author.username)"))
                         metadata(.CommandCenter.commandCenterSource, value: request.sourceBranch)
                         metadata(.CommandCenter.commandCenterTarget, value: request.targetBranch)
                         if let sha = request.sha { metadata(.CommandCenter.commandCenterCommit, value: sha, monospaced: true) }

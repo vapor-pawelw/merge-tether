@@ -20,6 +20,7 @@ struct CommandCenterMRCard: View {
         let state = monitor.attention.confirmationStates[item.id]
         return state == .publishing || state == .approving || item.authorFeedbackStatus?.phase == .checking
             || item.reReviewReadiness == .checking
+            || (allowsRemoval && reviewingContext.isAutomaticProcessing)
             || (automaticConflictProgress && row.latestJob?.execution?.state.isActive != true)
     }
     private var nextIntent: MRTodoIntent? {
@@ -27,7 +28,8 @@ struct CommandCenterMRCard: View {
     }
     private var needsCLI: Bool { !monitor.availableAssistants.contains(monitor.settings.automation.assistant) }
     private var humanAction: MRHumanAction? {
-        guard row.needsAttention, !busy else { return nil }
+        guard row.needsAttention, !busy,
+              !(allowsRemoval && reviewingContext.nextStep == .setupAgent) else { return nil }
         let target = monitor.scopeTarget(projectID: item.id.projectID, iid: item.id.iid, url: item.url)
         let automatic = target.map {
             item.draftIDsHandledAutomatically(automation: monitor.settings.automation, target: $0,
@@ -59,7 +61,7 @@ struct CommandCenterMRCard: View {
                         Text(action.message)
                     }
                 }
-                .font(.caption).foregroundStyle(.orange)
+                .font(.callout.weight(.medium)).foregroundStyle(.orange)
                 .lineLimit(2).fixedSize(horizontal: false, vertical: true)
             }
             if let retryError {
@@ -80,12 +82,19 @@ struct CommandCenterMRCard: View {
                         Button { openAttention(.assistantRuns) } label: { Text(.MRHumanAction.mrHumanActionActionReviewRun) }
                             .buttonStyle(.plain)
                     } else if humanAction == nil, let status = neutralStatus {
-                        Text(status).lineLimit(1)
+                        Text(status).font(.callout.weight(.medium)).foregroundStyle(.primary).lineLimit(1)
+                            .help(Text(reviewingContext.presenceMessage)
+                                  + Text(verbatim: "\n") + Text(reviewingContext.statusMessage))
                     }
                     Spacer(minLength: 6)
                     primaryAction
                 }
                 .font(.caption).foregroundStyle(.secondary)
+            }
+            if allowsRemoval, humanAction == nil {
+                Text(reviewingContext.nextStepMessage)
+                    .font(.subheadline).foregroundStyle(.secondary)
+                    .fixedSize(horizontal: false, vertical: true)
             }
             if !chips.isEmpty {
                 HStack(spacing: 5) {
@@ -127,24 +136,15 @@ struct CommandCenterMRCard: View {
                 if item.section == .draftMergeRequests { BoardDraftBadge() }
                 BoardMRIdentifier(iid: item.id.iid)
             }
-            BoardRepositoryFooter(path: item.url.gitLabProjectPath)
         }
-        .help(metadataHelp)
     }
 
-    private var metadataHelp: Text {
-        if allowsRemoval {
-            let context = ReviewingContext(row: row)
-            return Text(context.presenceMessage) + Text(verbatim: "\n") + Text(context.statusMessage)
-                + Text(verbatim: "\n\(item.url.gitLabProjectPath)")
-        }
-        return Text(verbatim: item.url.gitLabProjectPath)
-    }
+    private var reviewingContext: ReviewingContext { monitor.reviewingContext(for: row) }
 
     private var neutralStatus: LocalizedStringResource? {
         if item.authorFeedbackStatus?.waitingForReviewer == true { return .AuthorFeedback.authorFeedbackWaitingChip }
         guard allowsRemoval else { return nil }
-        let context = ReviewingContext(row: row)
+        let context = reviewingContext
         return context.status == .activityUnknown ? context.presenceMessage : context.statusMessage
     }
 
@@ -155,6 +155,29 @@ struct CommandCenterMRCard: View {
                 .buttonStyle(.plain)
         } else if !busy, let action = humanAction {
             humanActionButton(action)
+        } else if !busy, allowsRemoval {
+            reviewingAction
+        }
+    }
+
+    @ViewBuilder
+    private var reviewingAction: some View {
+        if let label = reviewingContext.actionLabel {
+            switch reviewingContext.nextStep {
+            case .runReview:
+                if needsCLI {
+                    primary(.Board.boardCompactSetupCli) { openSettings() }
+                } else {
+                    primary(label, enabled: monitor.canRunReview(for: item)) {
+                        start { await monitor.runReview(for: item) }
+                    }
+                }
+            case .setupAgent: primary(label) { openSettings() }
+            case .monitoring, .viewDiscussions: primary(label) { openAttention(.feedback) }
+            case .reviewComments: primary(label) { openAttention(.drafts) }
+            case .viewRun: primary(label) { openAttention(.assistantRuns) }
+            case .automaticReview, .verifying: EmptyView()
+            }
         }
     }
 
@@ -250,8 +273,9 @@ struct CommandCenterMRCard: View {
                 Divider()
                 Button(role: .destructive) { confirmRemoval = true } label: { Label { Text(.Board.boardRemove) } icon: { Image(systemName: "minus.circle") } }
             }
-        } label: { Image(systemName: "ellipsis") }
+        } label: { BoardCardActionIcon(systemName: "ellipsis") }
         .menuStyle(.borderlessButton).menuIndicator(.hidden).fixedSize()
+        .frame(width: 24, height: 24)
         .accessibilityLabel(Text(.CommandCenter.commandCenterActions))
     }
 
@@ -335,7 +359,6 @@ struct BoardTodoRow: View {
                         Text(verbatim: todo.relativeIdentifier).font(.caption).foregroundStyle(.secondary)
                     }
                 }
-                BoardRepositoryFooter(path: todo.project.pathWithNamespace)
             }
         }
         .controlSize(.small)
@@ -353,8 +376,9 @@ struct BoardTodoRow: View {
                 AssistantContextMenu(mergeRequestURL: todo.targetURL, title: todo.displayTitle,
                     workspace: monitor.settings.automation.assistantWorkspace)
             }
-        } label: { Image(systemName: "ellipsis") }
+        } label: { BoardCardActionIcon(systemName: "ellipsis") }
         .menuStyle(.borderlessButton).menuIndicator(.hidden).fixedSize()
+        .frame(width: 24, height: 24)
         .accessibilityLabel(Text(.CommandCenter.commandCenterActions))
     }
 }

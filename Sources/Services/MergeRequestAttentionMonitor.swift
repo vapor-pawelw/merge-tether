@@ -55,6 +55,7 @@ final class MergeRequestAttentionMonitor {
         var feedback: [GitLabMergeRequestDiscussion.Note] = []
         /// Informational participation from complete discussions; nil means not loaded.
         var reviewingActivity: ReviewingActivity?
+        var reviewingProgress: ReviewingProgress?
 
         var authoredRequest: GitLabMergeRequest? { isAuthored ? mergeRequest : nil }
 
@@ -369,7 +370,11 @@ final class MergeRequestAttentionMonitor {
             do {
                 try await poll(account, todos: todos, revision: revision)
             } catch {
-                if isCurrent(account), revision == glab.accountRevision { hasError = true }
+                if isCurrent(account), revision == glab.accountRevision {
+                    hasError = true
+                    for index in items.indices { items[index].reviewingProgress = nil }
+                    for index in openItems.indices { openItems[index].reviewingProgress = nil }
+                }
             }
         }
     }
@@ -524,6 +529,7 @@ final class MergeRequestAttentionMonitor {
                     let followUpDirectory = followUpDirectory
                     group.addTask { [glab] in
                         var updated = item
+                        updated.reviewingProgress = nil
                         let drafts = try? await glab.fetchOwnDraftNotes(
                             projectID: item.id.projectID, iid: item.id.iid, host: host, userID: user.id
                         )
@@ -565,9 +571,13 @@ final class MergeRequestAttentionMonitor {
                             updated.reviewingActivity = discussions.map {
                                 ReviewingActivity(discussions: $0, reviewerID: user.id, authorID: request.author.id)
                             }
+                            updated.reviewingProgress = Self.reviewingProgress(for: item, request: request,
+                                discussions: discussions, host: host, user: user, verdictDirectory: verdictDirectory)
                         }
                         if hasDrafts {
                             let live = try? await glab.fetchMergeRequest(projectID: item.id.projectID, iid: item.id.iid, host: host)
+                            updated.reviewingProgress = Self.reviewingProgress(for: item, request: live,
+                                discussions: discussions, host: host, user: user, verdictDirectory: verdictDirectory)
                             updated.requiresDiscussionRecheck = !Self.draftContextIsCurrent(
                                 request: live, drafts: drafts, discussions: discussions, host: host, user: user,
                                 verdictDirectory: verdictDirectory, followUpDirectory: followUpDirectory
@@ -703,6 +713,30 @@ final class MergeRequestAttentionMonitor {
     }
 
     // MARK: - Ready for your OK
+
+    private nonisolated static func reviewingProgress(
+        for item: Item, request: GitLabMergeRequest?, discussions: [GitLabMergeRequestDiscussion]?,
+        host: String, user: GitLabAuthenticatedUser, verdictDirectory: URL
+    ) -> ReviewingProgress? {
+        guard !item.isAuthored, let request, let displayed = item.mergeRequest,
+              request.projectID == item.id.projectID, request.iid == item.id.iid,
+              request.webURL == item.url, request.webURL == displayed.webURL,
+              request.webURL.isGitLabMergeRequest(host: host, iid: request.iid),
+              request.state == "opened", request.author.id != user.id,
+              let head = request.sha, !head.isEmpty, head == displayed.sha,
+              request.semanticContextFingerprint == displayed.semanticContextFingerprint,
+              let discussions, ReviewVerdict.fingerprint(discussions) != nil else { return nil }
+        let verdict = ReviewVerdictStore.verdict(host: host, projectID: request.projectID,
+            iid: request.iid, in: verdictDirectory)
+        guard verdict?.covers(head: head, discussions: discussions, reviewerID: user.id,
+            publishedDrafts: ReviewVerdictStore.seenDrafts(host: host, projectID: request.projectID,
+                iid: request.iid, in: verdictDirectory)) == true else { return .needsReview }
+        let ownOpen = discussions.flatMap(\.notes).contains {
+            $0.system != true && $0.author?.id == user.id && $0.resolvable == true && $0.resolved != true
+        }
+        return verdict?.verdict == .noObjections && !ownOpen && !allResolved(discussions)
+            ? .waitingForOtherDiscussions : .current
+    }
 
     private nonisolated static func draftContextIsCurrent(
         request: GitLabMergeRequest?, drafts: [GitLabDraftNote]?, discussions: [GitLabMergeRequestDiscussion]?,
@@ -1167,6 +1201,7 @@ final class MergeRequestAttentionMonitor {
                     $0.requiresDiscussionRecheck = !$0.drafts.isEmpty
                     $0.canApprove = false
                     $0.canConfirmReReview = false
+                    $0.reviewingProgress = nil
                 }
                 continue
             }
@@ -1187,6 +1222,8 @@ final class MergeRequestAttentionMonitor {
             } ?? false
             updateItem(item.id) {
                 $0.drafts = current; $0.draftCount = current.count
+                $0.reviewingProgress = Self.reviewingProgress(for: item, request: request,
+                    discussions: discussions, host: account.host, user: user, verdictDirectory: verdictDirectory)
                 if !$0.isAuthored, let request {
                     $0.reviewingActivity = discussions.map {
                         ReviewingActivity(discussions: $0, reviewerID: user.id, authorID: request.author.id)

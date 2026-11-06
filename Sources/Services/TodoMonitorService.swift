@@ -326,6 +326,13 @@ final class TodoMonitorService {
         if let error = mrTodoRouter.acknowledgementError { assistantJobActionError = error.localizedDescription }
     }
 
+    func reviewingContext(for row: MergeRequestBoardSnapshot.Row) -> ReviewingContext {
+        ReviewingContext(row: row,
+            workflowState: ReviewingContext.workflowState(for: row, entries: authoredMergeRequests.workflow.entries),
+            assistantReady: availableAssistants.contains(settings.automation.assistant),
+            assistantChecking: assistantDependencies.isChecking)
+    }
+
     var ownMergeRequestItems: [MergeRequestAttentionMonitor.Item] { mergeRequestBrowser?.own ?? [] }
     var reviewedMergeRequestItems: [MergeRequestAttentionMonitor.Item] {
         (mergeRequestBrowser?.reviewed ?? []).filter { item in
@@ -702,6 +709,7 @@ final class TodoMonitorService {
             let busy = row.latestJob?.execution?.state.isActive == true || state == .publishing || state == .approving
                 || row.item.authorFeedbackStatus?.phase == .checking
                 || conflictProcessing
+                || (!row.item.isAuthored && reviewingContext(for: row).isAutomaticProcessing)
             var actions: [UserAttentionSnapshot.Action] = []
             func add(_ reason: UserAttentionSnapshot.Reason, _ token: String, automatic: Bool = false) {
                 actions.append(.init(reason: reason, token: token, automatic: automatic))

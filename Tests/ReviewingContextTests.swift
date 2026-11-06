@@ -23,7 +23,7 @@ struct ReviewingContextTests {
         .init(id: UUID(), key: .init(assistant: .codex,
             work: .init(host: "gitlab.example.test", projectID: 1, iid: 2), username: "me", workspace: "", access: .gitLabRead),
               title: "Review", prompt: "", createdAt: Date(), allowsPush: false,
-              execution: .init(state: state), workflow: .review)
+              execution: .init(state: state), workflow: .review, expectedHeadSHA: "abc")
     }
 
     @Test func unknownActivityDoesNotInventAFirstReviewOrARecentlyAddedReceipt() throws {
@@ -123,6 +123,142 @@ struct ReviewingContextTests {
         ])], reviewerID: 3, authorID: 7)
         #expect(activity.authorReplyCount == 0)
         #expect(activity.publishedCommentCount == 2)
+    }
+
+    @Test func resolvedHistoricalAuthorRepliesDoNotLookLikePendingReviewWork() throws {
+        let activity = ReviewingActivity(discussions: [.init(id: "closed", notes: [
+            note(10, user: 3, resolved: true), note(11, user: 7, resolved: true)
+        ])], reviewerID: 3, authorID: 7)
+        #expect(activity.authorReplyCount == 0)
+        var item = try item(); item.reviewingActivity = activity; item.humanActionRequired = false
+        let snapshot = row(item)
+        let context = ReviewingContext(row: snapshot)
+        #expect(context.status == .commented(1))
+        #expect(context.nextStep == .monitoring)
+        #expect(String(localized: try #require(context.actionLabel)) == "View discussions")
+        #expect(!snapshot.needsAttention)
+    }
+
+    @Test func untouchedOtherReviewersThreadsAreNotOurPendingAuthorReplies() throws {
+        let activity = ReviewingActivity(discussions: [
+            .init(id: "ours", notes: [note(10, user: 3, resolved: true), note(11, user: 7, resolved: true)]),
+            .init(id: "other", notes: [note(20, user: 9)])
+        ], reviewerID: 3, authorID: 7)
+        #expect(activity.authorReplyCount == 0 && activity.openThreadCount == 0)
+        #expect(activity.otherOpenThreadCount == 1)
+    }
+
+    @Test func aKnownEmptyReviewHasAnExplicitManualAction() throws {
+        var item = try item()
+        item.reviewingActivity = ReviewingActivity(discussions: [], reviewerID: 3, authorID: 7)
+        let context = ReviewingContext(row: row(item))
+        #expect(context.nextStep == .runReview)
+        #expect(String(localized: try #require(context.actionLabel)) == "Run review")
+    }
+
+    @Test(arguments: [MergeWorkflowActivityState.queued, .running, .waitingForAssistant])
+    func queuedAutomaticReviewDoesNotAskForASecondManualRun(_ state: MergeWorkflowActivityState) throws {
+        var item = try item()
+        item.reviewingActivity = ReviewingActivity(discussions: [], reviewerID: 3, authorID: 7)
+        item.humanActionRequired = false
+        let context = ReviewingContext(row: row(item), workflowState: state)
+        #expect(context.nextStep == .automaticReview)
+        #expect(context.actionLabel == nil)
+    }
+
+    @Test func automaticallyHandledDraftsDoNotAskForManualReviewComments() throws {
+        var item = try item(); item.draftCount = 2; item.humanActionRequired = false
+        let context = ReviewingContext(row: row(item))
+        #expect(context.nextStep == .automaticReview)
+        #expect(context.actionLabel == nil)
+    }
+
+    @Test func staleSucceededJobIsNotProofOfAReviewOfTheCurrentHead() throws {
+        var job = reviewJob(.succeeded); job.expectedHeadSHA = "old-head"
+        let context = ReviewingContext(row: row(try item(), job: job))
+        #expect(context.status != .reviewCompleted)
+    }
+
+    @Test func actualVerificationShowsProgressWithoutAskingForManualReview() throws {
+        var item = try item(); item.reReviewReadiness = .checking
+        let context = ReviewingContext(row: row(item))
+        #expect(context.nextStep == .verifying)
+        #expect(context.actionLabel == nil)
+    }
+
+    @Test func workflowProgressIgnoresOtherWorkflowsAndOlderHeads() throws {
+        func entry(_ state: MergeWorkflowActivityState, head: String, kind: MergeWorkflowTrigger,
+                   createdAt: Double) throws -> MergeWorkflowActivityEntry {
+            var snapshot = try #require(JSONSerialization.jsonObject(with: JSONEncoder().encode(request())) as? [String: Any])
+            snapshot["sha"] = head
+            let value: [String: Any] = [
+                "id": "event-\(createdAt)", "createdAt": createdAt, "host": "gitlab.example.test",
+                "user": ["id": 3, "username": "me"], "state": state.rawValue,
+                "event": ["kind": kind.rawValue, "mergeRequest": snapshot, "identity": "event-\(createdAt)", "context": "Review update", "isInfrastructureFailure": false, "noteIDs": []]
+            ]
+            return try JSONDecoder().decode(MergeWorkflowActivityEntry.self, from: JSONSerialization.data(withJSONObject: value))
+        }
+        let current = try entry(.queued, head: "abc", kind: .reviewUpdate, createdAt: 1)
+        let obsolete = try entry(.failed, head: "old", kind: .reviewUpdate, createdAt: 9)
+        let unrelated = try entry(.running, head: "abc", kind: .newDiscussion, createdAt: 10)
+        let snapshot = row(try item())
+        #expect(ReviewingContext.workflowState(for: snapshot, entries: [obsolete, unrelated, current]) == .queued)
+        #expect(ReviewingContext.workflowState(for: snapshot, entries: [obsolete, unrelated]) == nil)
+    }
+
+    @Test func missingCurrentReviewEvidenceExposesAReviewActionUnlessAlreadyQueued() throws {
+        var item = try item(); item.reviewingProgress = .needsReview
+        let snapshot = row(item)
+        #expect(ReviewingContext(row: snapshot).nextStep == .runReview)
+        #expect(ReviewingContext(row: snapshot, workflowState: .queued).nextStep == .automaticReview)
+    }
+
+    @Test func waitingForOtherReviewThreadsIsReadOnlyAndDoesNotInventApproval() throws {
+        var item = try item(); item.reviewingProgress = .waitingForOtherDiscussions
+        item.humanActionRequired = false
+        let snapshot = row(item)
+        let context = ReviewingContext(row: snapshot)
+        #expect(context.nextStep == .monitoring)
+        #expect(String(localized: context.nextStepMessage) == "No action needed. Waiting for other review threads to be resolved.")
+        #expect(String(localized: try #require(context.actionLabel)) == "View discussions")
+        #expect(!snapshot.needsAttention && !item.canApprove && !item.autoApproveReady)
+    }
+
+    @Test func freshReviewEvidenceSupersedesAnOlderFailedWorkflow() throws {
+        var item = try item(); item.reviewingProgress = .current
+        item.humanActionRequired = false
+        let context = ReviewingContext(row: row(item), workflowState: .failed, assistantReady: false)
+        #expect(context.status == .reviewCompleted)
+        #expect(context.nextStep == .monitoring)
+        #expect(!context.isAutomaticProcessing)
+        #expect(String(localized: context.nextStepMessage) == "No action needed. Watching for updates.")
+        #expect(String(localized: try #require(context.actionLabel)) == "View discussions")
+    }
+
+    @Test func freshWaitingForOtherThreadsSupersedesAnOlderFailedWorkflow() throws {
+        var item = try item(); item.reviewingProgress = .waitingForOtherDiscussions
+        item.humanActionRequired = false
+        let context = ReviewingContext(row: row(item), workflowState: .failed, assistantReady: false)
+        #expect(context.status == .waitingForOtherDiscussions)
+        #expect(context.nextStep == .monitoring)
+        #expect(!context.isAutomaticProcessing)
+        #expect(String(localized: context.nextStepMessage) == "No action needed. Waiting for other review threads to be resolved.")
+        #expect(String(localized: try #require(context.actionLabel)) == "View discussions")
+    }
+
+    @Test func missingCLICannotPretendAQueuedReviewIsBeingHandled() throws {
+        let context = ReviewingContext(row: row(try item()), workflowState: .waitingForAssistant,
+            assistantReady: false, assistantChecking: false)
+        #expect(context.nextStep == .setupAgent)
+        #expect(!context.isAutomaticProcessing)
+        #expect(String(localized: try #require(context.actionLabel)) == "Open settings")
+    }
+
+    @Test func aPendingDependencyCheckKeepsActualQueuedWorkNeutral() throws {
+        let context = ReviewingContext(row: row(try item()), workflowState: .queued,
+            assistantReady: false, assistantChecking: true)
+        #expect(context.nextStep == .automaticReview && context.isAutomaticProcessing)
+        #expect(context.actionLabel == nil)
     }
 
 }

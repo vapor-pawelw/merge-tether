@@ -42,6 +42,10 @@ final class MergeWorkflowMonitor {
         var hasReviewed: Bool
         var reportedHeads: Set<String> = []
         var seenAuthorReplies: Set<Int>? = nil
+        var reportedEvidenceContexts: Set<String>? = nil
+        var reviewWasCovered: Bool? = nil
+        var reviewCoverageEpoch: Int? = nil
+        var lastObservedVerdictDigest: String? = nil
     }
 
     private struct BlockerCheckpoint: Codable, Equatable {
@@ -87,11 +91,13 @@ final class MergeWorkflowMonitor {
 
     private static let storageKey = "automation.mergeWorkflowBaselines.v1"
     private let defaults: UserDefaults
+    private let verdictDirectory: URL
     private var baselines: [Account: Baselines]
     private var isPolling = false
 
-    init(defaults: UserDefaults = .standard) {
+    init(defaults: UserDefaults = .standard, verdictDirectory: URL = ReviewVerdictStore.directory) {
         self.defaults = defaults
+        self.verdictDirectory = verdictDirectory
         baselines = defaults.data(forKey: Self.storageKey)
             .flatMap { try? JSONDecoder().decode([Account: Baselines].self, from: $0) } ?? [:]
     }
@@ -104,6 +110,7 @@ final class MergeWorkflowMonitor {
         deliver: @MainActor (MergeWorkflowEvent) -> Void
     ) async {
         guard !isPolling, !Task.isCancelled else { return }
+        let accountRevision = glab.accountRevision
         isPolling = true
         defer { isPolling = false }
 
@@ -160,7 +167,7 @@ final class MergeWorkflowMonitor {
             next.reviews.removeAll()
         }
 
-        guard !Task.isCancelled else { return }
+        guard !Task.isCancelled, glab.accountRevision == accountRevision else { return }
         if prior != next {
             baselines[account] = next
             if let encoded = try? JSONEncoder().encode(baselines) {
@@ -399,27 +406,96 @@ final class MergeWorkflowMonitor {
             }
             let hasReviewEvidence = reviewed || discussions?.contains(where: { $0.notes.contains { $0.system != true && $0.author?.id == account.userID } }) == true
             guard reviewer != nil || hasReviewEvidence else { continue }
-            guard var previous = baselines.reviews[key] else {
-                baselines.reviews[key] = ReviewCheckpoint(head: head, hasReviewed: hasReviewEvidence, reportedHeads: [head], seenAuthorReplies: replies)
+            let firstObservation = baselines.reviews[key] == nil
+            var previous = baselines.reviews[key] ?? ReviewCheckpoint(head: head, hasReviewed: hasReviewEvidence,
+                reportedHeads: [head], seenAuthorReplies: replies)
+            let verdict = ReviewVerdictStore.verdict(host: account.host, projectID: request.projectID,
+                iid: request.iid, in: verdictDirectory)
+            let verdictDigest: String? = {
+                guard let verdict, verdict.version == 1, verdict.headSHA == head else { return nil }
+                let encoder = JSONEncoder()
+                encoder.outputFormatting = [.sortedKeys]
+                return (try? encoder.encode(verdict)).map { UserAttentionSnapshot.digest(String(decoding: $0, as: UTF8.self)) }
+            }()
+            let changedVerdict = verdictDigest.map {
+                previous.lastObservedVerdictDigest != nil && previous.lastObservedVerdictDigest != $0
+            } ?? false
+            let covered = reviewCoverage(request, discussions: discussions, account: account, verdict: verdict)
+            if changedVerdict || (covered == true && previous.reviewWasCovered != true) {
+                previous.reviewCoverageEpoch = (previous.reviewCoverageEpoch ?? 0) + 1
+            }
+            if let verdictDigest { previous.lastObservedVerdictDigest = verdictDigest }
+            if let covered {
+                previous.reviewWasCovered = covered
+            }
+            let epoch = previous.reviewCoverageEpoch ?? 0
+            let staleContext = await staleReviewContext(request, discussions: discussions, glab: glab,
+                account: account, verdict: verdict)
+                .map { epoch == 0 ? $0 : $0 + "-coverage-\(epoch)" }
+            if firstObservation {
+                previous.hasReviewed = hasReviewEvidence || staleContext != nil
+                previous.reportedEvidenceContexts = staleContext.map { Set([$0]) }
+                baselines.reviews[key] = previous
+                if let staleContext {
+                    let observation = Observation(glab: glab, account: account, request: request)
+                    events.append(observation.event(.reviewUpdate, token: head + "-context-" + staleContext,
+                        context: "Your recorded review does not cover the current discussion content at this head. Recheck current discussions and record a fresh review verdict."))
+                }
                 continue
             }
             let newReplies = replies.flatMap { current in previous.seenAuthorReplies.map { current.subtracting($0) } } ?? []
             if let replies { previous.seenAuthorReplies = (previous.seenAuthorReplies ?? []).union(replies) }
-            let hasReviewed = previous.hasReviewed || hasReviewEvidence
+            let hasReviewed = previous.hasReviewed || hasReviewEvidence || staleContext != nil
             let changedHead = hasReviewed && previous.head != head && previous.reportedHeads.insert(head).inserted
-            if hasReviewed && (changedHead || !newReplies.isEmpty) {
+            let staleUnreported = staleContext.map { !(previous.reportedEvidenceContexts ?? []).contains($0) } == true
+            if hasReviewed && (changedHead || !newReplies.isEmpty || staleUnreported) {
                 let observation = Observation(glab: glab, account: account, request: request)
                 let ids = newReplies.sorted()
-                let token = head + (ids.isEmpty ? "" : "-replies-" + ids.map(String.init).joined(separator: ","))
+                let token = staleUnreported && !changedHead && ids.isEmpty
+                    ? head + "-context-" + (staleContext ?? "")
+                    : head + (ids.isEmpty ? "" : "-replies-" + ids.map(String.init).joined(separator: ","))
                 let context = (changedHead ? "The MR head changed after your recorded review. " : "")
                     + (ids.isEmpty ? "" : "The author replied after your review comments. Recheck reply note IDs: " + ids.map(String.init).joined(separator: ", ") + ".")
+                    + (staleUnreported ? " Your recorded review does not cover the current discussion content. Recheck all current discussions and record a fresh verdict." : "")
                 events.append(observation.event(.reviewUpdate, token: token, context: context, noteIDs: ids))
+                if let staleContext {
+                    previous.reportedEvidenceContexts = (previous.reportedEvidenceContexts ?? []).union([staleContext])
+                }
             }
             previous.head = head
             previous.hasReviewed = hasReviewed
             baselines.reviews[key] = previous
         }
         return events
+    }
+
+    private func reviewCoverage(_ request: GitLabMergeRequest, discussions: [GitLabMergeRequestDiscussion]?,
+                                account: Account, verdict: ReviewVerdict?) -> Bool? {
+        guard let head = request.sha, let discussions, ReviewVerdict.fingerprint(discussions) != nil else { return nil }
+        return verdict?.covers(head: head, discussions: discussions, reviewerID: account.userID,
+                publishedDrafts: ReviewVerdictStore.seenDrafts(host: account.host, projectID: request.projectID,
+                    iid: request.iid, in: verdictDirectory)) == true
+    }
+
+    private func staleReviewContext(_ request: GitLabMergeRequest,
+                                   discussions: [GitLabMergeRequestDiscussion]?, glab: GlabService,
+                                   account: Account, verdict: ReviewVerdict?) async -> String? {
+        guard let head = request.sha, let discussions, let fingerprint = ReviewVerdict.fingerprint(discussions),
+              let verdict, verdict.version == 1, verdict.headSHA == head,
+              !verdict.covers(head: head, discussions: discussions, reviewerID: account.userID,
+                  publishedDrafts: ReviewVerdictStore.seenDrafts(host: account.host, projectID: request.projectID,
+                      iid: request.iid, in: verdictDirectory)),
+              !discussions.flatMap(\.notes).contains(where: {
+                  $0.system != true && $0.author?.id == account.userID && $0.resolvable == true && $0.resolved != true
+              }),
+              !AssistantAutomationRunner.isWorking(on: .init(host: account.host, projectID: request.projectID, iid: request.iid)),
+              let draftCount = try? await glab.fetchOwnDraftNoteCount(projectID: request.projectID, iid: request.iid,
+                  host: account.host, userID: account.userID), draftCount == 0 else { return nil }
+        guard !Task.isCancelled,
+              !AssistantAutomationRunner.isWorking(on: .init(host: account.host, projectID: request.projectID, iid: request.iid))
+        else { return nil }
+        return UserAttentionSnapshot.digest([head, request.semanticContextFingerprint, fingerprint,
+            String(verdict.version), verdict.verdict.rawValue, verdict.discussionFingerprint ?? "legacy"].joined(separator: "|"))
     }
 
     private static func key(_ request: GitLabMergeRequest) -> String {

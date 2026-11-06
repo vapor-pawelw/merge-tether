@@ -133,7 +133,9 @@ import Testing
             fi
             case "$2" in
                 /user) cat live-user.json ;;
-                /merge_requests?scope=created_by_me*) cat authored.json ;;
+                /merge_requests?scope=created_by_me*)
+                    if [ -f fail-owned-list ]; then exit 1; fi
+                    cat authored.json ;;
                 /merge_requests?scope=all*) cat reviewing.json ;;
                 */draft_notes/bulk_publish)
                     echo published >> publish.log; echo '[]' > drafts.json
@@ -256,6 +258,87 @@ import Testing
          {"id":12,"author_id":3,"note":"Thanks, looks fixed.","discussion_id":"abc","position":null},
          {"id":13,"author_id":8,"note":"Someone else's draft","discussion_id":null,"position":null}]
         """#
+
+    @Test func reviewingProgressSeparatesStaleEvidenceFromOtherReviewersOpenThreads() async throws {
+        let harness = try makeHarness(assistantWorked: false)
+        defer { harness.cleanUp() }
+        harness.settings.automation.autoApproveEnabled = false
+        let threads = #"[{"id":"mine","notes":[{"id":40,"author":{"id":3},"body":"Use a safe fallback","system":false,"resolvable":true,"resolved":true},{"id":41,"author":{"id":9},"body":"Fallback implemented","system":false}]},{"id":"other","notes":[{"id":50,"author":{"id":8},"body":"Other reviewer's condition","system":false,"resolvable":true,"resolved":false}]}]"#
+        try harness.write("discussions.json", threads)
+        try harness.recordVerdict("no_objections", head: head)
+        try await harness.poll()
+        #expect(harness.monitor.currentOpenItems.first?.reviewingProgress == .waitingForOtherDiscussions)
+        let edited = threads.replacingOccurrences(of: "Other reviewer's condition", with: "Additional condition")
+        try harness.write("discussions.json", edited)
+        try await harness.poll()
+        #expect(harness.monitor.currentOpenItems.first?.reviewingProgress == .needsReview)
+        try harness.recordVerdict("no_objections", head: head)
+        try await harness.poll()
+        #expect(harness.monitor.currentOpenItems.first?.reviewingProgress == .waitingForOtherDiscussions)
+        try harness.write("discussions.json", edited.replacingOccurrences(of: "\"resolved\":false", with: "\"resolved\":true"))
+        try await harness.poll()
+        #expect(harness.monitor.currentOpenItems.first?.reviewingProgress == .current)
+    }
+
+    @Test(arguments: ["failed-discussions", "incomplete-discussions", "different-head", "failed-drafts"])
+    func quickRefreshDropsReviewProgressWhenItsSnapshotCannotBeValidated(_ failure: String) async throws {
+        let harness = try makeHarness(assistantWorked: false)
+        defer { harness.cleanUp() }
+        try harness.write("drafts.json", draftJSON)
+        try harness.recordVerdict("objections", head: head)
+        try await harness.poll()
+        #expect(harness.monitor.currentItems.first?.reviewingProgress == .current)
+        switch failure {
+        case "failed-discussions": try harness.write("fail-discussion-read", "yes")
+        case "incomplete-discussions":
+            try harness.write("discussions.json", #"[{"id":"partial","notes":[{"id":40,"author":{"id":8},"system":false}]}]"#)
+        case "different-head":
+            let updatedHead = String(repeating: "b", count: 40)
+            try harness.write("request.json", harness.log("request.json").replacingOccurrences(of: head, with: updatedHead))
+            try harness.recordVerdict("no_objections", head: updatedHead)
+        default: try harness.write("fail-next-draft-read", "yes")
+        }
+        await harness.monitor.refreshPendingDrafts()
+        let refreshed = try #require(harness.monitor.currentItems.first)
+        #expect(refreshed.reviewingProgress == nil)
+        #expect(refreshed.mergeRequest?.sha == head)
+    }
+
+    @Test func quickRefreshRecomputesSameHeadReviewProgressAfterTextAndResolutionChanges() async throws {
+        let harness = try makeHarness(assistantWorked: false)
+        defer { harness.cleanUp() }
+        try harness.write("drafts.json", draftJSON)
+        try harness.recordVerdict("no_objections", head: head)
+        try await harness.poll()
+        #expect(harness.monitor.currentItems.first?.reviewingProgress == .current)
+        try harness.write("discussions.json", othersThread)
+        await harness.monitor.refreshPendingDrafts()
+        #expect(harness.monitor.currentItems.first?.reviewingProgress == .needsReview)
+        try harness.recordVerdict("no_objections", head: head)
+        await harness.monitor.refreshPendingDrafts()
+        #expect(harness.monitor.currentItems.first?.reviewingProgress == .waitingForOtherDiscussions)
+        try harness.write("discussions.json", othersThread.replacingOccurrences(of: "\"resolved\":false", with: "\"resolved\":true"))
+        await harness.monitor.refreshPendingDrafts()
+        #expect(harness.monitor.currentItems.first?.reviewingProgress == .current)
+    }
+
+    @Test func failedCatalogRefreshCannotRetainCurrentProgressFromAnEarlierSnapshot() async throws {
+        let harness = try makeHarness(assistantWorked: false)
+        defer { harness.cleanUp() }
+        try harness.write("drafts.json", draftJSON)
+        try harness.recordVerdict("objections", head: head)
+        try await harness.poll()
+        #expect(harness.monitor.currentItems.first?.reviewingProgress == .current)
+        try harness.write("fail-owned-list", "yes")
+        try harness.write("reviewing.json", "[]")
+        try harness.write("fail-discussion-read", "yes")
+        harness.monitor.refresh(host: host, username: "me", todos: [])
+        let deadline = ContinuousClock.now + .seconds(5)
+        while harness.monitor.isLoading, ContinuousClock.now < deadline { try await Task.sleep(for: .milliseconds(20)) }
+        try #require(!harness.monitor.isLoading)
+        #expect(harness.monitor.hasError)
+        #expect(try #require(harness.monitor.currentItems.first).reviewingProgress == nil)
+    }
 
     @Test func draftsAppearWithPreviewsAndPublishOnlyWhenUnchanged() async throws {
         let harness = try makeHarness(assistantWorked: false)

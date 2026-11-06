@@ -25,16 +25,14 @@ struct BoardCardTitle: View {
     }
 }
 
-struct BoardRepositoryFooter: View {
-    let path: String
+struct BoardCardActionIcon: View {
+    let systemName: String
 
     var body: some View {
-        Text(verbatim: path)
-            .font(.caption2)
-            .foregroundStyle(.secondary)
-            .lineLimit(1)
-            .truncationMode(.middle)
-            .help(Text(verbatim: path))
+        Image(systemName: systemName)
+            .font(.system(size: 12, weight: .medium))
+            .frame(width: 24, height: 24)
+            .contentShape(Rectangle())
     }
 }
 
@@ -72,7 +70,8 @@ struct BoardCardAuthor: View {
     var body: some View {
         HStack(spacing: 4) {
             AvatarView(url: author.avatarURL, size: 16).accessibilityHidden(true)
-            Text(verbatim: "@\(author.username)").lineLimit(1)
+            Text(verbatim: author.name.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+                 ? author.username : author.name).lineLimit(1)
         }
         .font(.caption).foregroundStyle(.secondary)
         .help(Text(verbatim: "\(author.name) (@\(author.username))"))

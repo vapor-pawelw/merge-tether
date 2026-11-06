@@ -74,7 +74,6 @@ struct BoardMRProposalCard: View {
                     }
                     if let iid = proposal.target.iid { BoardMRIdentifier(iid: iid) }
                 }
-                BoardRepositoryFooter(path: proposal.url.gitLabProjectPath)
             }
         }
         .confirmationDialog(Text(.Board.boardProposalIgnore), isPresented: $confirmIgnore, titleVisibility: .visible) {
@@ -101,8 +100,9 @@ struct BoardMRProposalCard: View {
             }
             AssistantContextMenu(mergeRequestURL: proposal.url, title: proposal.title,
                 workspace: monitor.settings.automation.assistantWorkspace)
-        } label: { Image(systemName: "ellipsis") }
+        } label: { BoardCardActionIcon(systemName: "ellipsis") }
         .menuStyle(.borderlessButton).menuIndicator(.hidden).fixedSize()
+        .frame(width: 24, height: 24)
         .accessibilityLabel(Text(.CommandCenter.commandCenterActions))
     }
 
@@ -141,7 +141,7 @@ struct BoardMRProposalCard: View {
                 .help(Text(.Proposal.proposalMoreReasonsHelp))
             }
         }
-        .font(.caption).foregroundStyle(.secondary)
+        .font(.callout.weight(.medium)).foregroundStyle(.primary)
     }
 
     @ViewBuilder

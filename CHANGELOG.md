@@ -34,7 +34,9 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 
 ### Changed
 
-- Place the repository name inline after card titles, move author and full repository context to the footer, and standardize card menus and icons.
+- Show MR authors by display name, with their account handle available on hover.
+
+- Place the repository name inline after card titles, move author information to the footer and full repository paths to hover help and details, and standardize card menus and icons.
 
 - Show one main action per MR card, keep comments in a stable detail layout, and collapse metadata and run/activity history until requested.
 - Use Agent and coding agent terminology throughout the interface and documentation, with an explicit Start a conversation with an agent action for manual CLI or desktop sessions.
@@ -51,6 +53,10 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 - Refresh public documentation and use the retro painted-style MergeTether icon.
 
 ### Fixed
+
+- Explain the next step on Reviewing cards, stop presenting resolved author replies as pending work, and recheck outdated current-head review evidence once per discussion context under the configured workflow rule.
+
+- Align card pin and menu controls, emphasize the reason a card needs attention, and keep full repository paths in hover help and MR details instead of card footers.
 
 - Ingest submitted-review summaries into durable MR actions without leaving handled events in Other items, and assess general feedback before starting fixes.
 
