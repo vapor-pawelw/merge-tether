@@ -45,6 +45,8 @@ MergeTether warns in the menu bar if Codex is closed, the plugin has never check
 
 Before claiming ordinary MR work, the relay verifies the queued GitLab account and reads that exact MR's live state. Only an open MR can start or continue review/fix work. Merged and closed requests are recorded as skipped; MergeTether withdraws their pending handoffs without inventing a delivery, marking feedback to-dos done or removing existing chat links. Errors and unknown states leave work pending. An MR missing from an open-list snapshot is not sufficient evidence that it closed: the list may be partial or filtered. Reopened MRs can receive new jobs. Existing-chat `[Merged]` title updates and linked work-item proposals remain available, and uncertain prior deliveries are preserved for recovery.
 
+Existing Codex chats receive exactly one MR state tag after `[MT]`: `[Draft]` for an open draft, `[Closed]` for a closed MR, or `[Merged]` after merge. Open non-draft MRs have no state tag. The app checks both your MRs and those you review, including closed MRs that may reopen. Unknown draft data leaves the title alone. These are metadata jobs for confirmed chats: they never create or move a chat, send draft/closed/open messages, or archive anything. Pending and ambiguous title deliveries are retained; later refreshes synchronize the latest state. Terminal titles omit stack position, which is refreshed after reopening. The listener uses the relay's deterministic formatter so state tags cannot accumulate.
+
 ## The human checkpoint
 
 **Settings → Automation → Assistant → Human checkpoint**

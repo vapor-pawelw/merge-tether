@@ -198,6 +198,18 @@ def live_merge_request_state(key):
     return request["state"]
 
 
+def format_chat_status_title(title, status):
+    if not isinstance(title, str) or status not in ("open", "draft", "merged", "closed"):
+        raise ValueError("Expected a chat title and a supported MR status")
+    if not title.startswith("[MT] "):
+        return None
+    body = re.sub(r"^(?:\[(?:Merged|Closed|Draft)\]\s*)+", "", title[5:])
+    if status in ("merged", "closed"):
+        body = re.sub(r"(![0-9]+) [1-9][0-9]*/[1-9][0-9]*(?=\s|$)", r"\1", body)
+    tag = {"open": "", "draft": "[Draft] ", "merged": "[Merged] ", "closed": "[Closed] "}[status]
+    return "[MT] " + tag + body
+
+
 class Queue:
     def __init__(self, root):
         self.root = root
@@ -252,7 +264,7 @@ class Queue:
                 claimed += 1
             elif not self.is_skipped(job.stem, read_object(job).get("conversationKey")):
                 pending += 1
-        result = {"pending": pending, "claimed": claimed, "validatesOpenMR": True}
+        result = {"pending": pending, "claimed": claimed, "validatesOpenMR": True, "supportsStatusTitles": True}
         if template := self.dispatch_template():
             result["templateThreadID"] = template
         return result
@@ -267,7 +279,7 @@ class Queue:
             result["mrStatusMarkdown"] = mr_status_markdown(report, result["pending"], result["claimed"], report_language)
         return result
 
-    def claim_next(self, allow_merged=False, allow_work_item=False, state_reader=None):
+    def claim_next(self, allow_merged=False, allow_work_item=False, state_reader=None, allow_status=False):
         with self.exclusive():
             candidates = []
             for job in self.jobs.glob("*.json"):
@@ -289,16 +301,21 @@ class Queue:
                     continue
                 operation = payload.get("operation")
                 target_thread = None
-                if operation in ("mark_merged", "mark_merged_with_work_item", "set_stack_position"):
-                    if not allow_merged or prompt is not None:
+                if operation in ("mark_merged", "mark_merged_with_work_item", "set_stack_position", "set_mr_status"):
+                    if not (allow_status if operation == "set_mr_status" else allow_merged) or prompt is not None:
                         continue
                     try:
                         target_thread = identifier(payload.get("threadID"))
                     except ValueError:
                         continue
-                    if operation != "set_stack_position" and (target_thread != job_id or key != f"merged:{job_id}"):
+                    if operation not in ("set_stack_position", "set_mr_status") and (target_thread != job_id or key != f"merged:{job_id}"):
                         continue
                     follow_up = payload.get("followUpPrompt")
+                    if operation == "set_mr_status" and (
+                            key != f"status:{target_thread}" or payload.get("status") not in ("open", "draft", "closed", "merged")
+                            or (follow_up is not None and (payload["status"] != "merged" or not allow_work_item
+                                or not isinstance(follow_up, str) or not 0 < len(follow_up) <= 6000))):
+                        continue
                     if operation == "mark_merged_with_work_item" and (
                             not allow_work_item or not isinstance(follow_up, str) or not 0 < len(follow_up) <= 6000):
                         continue
@@ -348,6 +365,10 @@ class Queue:
                     result = {"id": job_id, "operation": operation, "threadID": target_thread}
                     if operation == "set_stack_position":
                         result.update(iid=payload["iid"], position=payload.get("position"))
+                    elif operation == "set_mr_status":
+                        result["status"] = payload["status"]
+                        if follow_up is not None:
+                            result["followUpPrompt"] = follow_up
                     elif operation == "mark_merged_with_work_item":
                         result["followUpPrompt"] = follow_up
                     return result
@@ -608,6 +629,7 @@ TOOLS = [
     tool("queue_status", "Count pending and claimed MergeTether jobs without reading their prompts."),
     tool("poll", "Check the queue, record a listener heartbeat, and return the latest open MR status report. Only use in the scheduled dispatch."),
     tool("claim_next", "Claim at most one queued job after live account/MR GET checks. Skip merged/closed MR work without delivery; errors leave it pending. Existing-chat title jobs remain supported."),
+    tool("format_chat_status_title", "Format an existing MT chat title with exactly one MR state tag, or none for open. Pure formatting; does not rename, create or archive chats.", ("title", "status")),
     tool("record_dispatch", "Record confirmed native delivery. Never call after an uncertain result.",
          ("jobID", "threadID")),
     tool("record_dispatch_template", "Record the UUID of an explicitly configured native Codex template chat for new-chat routing. "
@@ -637,6 +659,9 @@ TOOLS = [
          ("host", "projectID", "iid", "headSHA", "verdict")),
 ]
 claim_tool = next(item for item in TOOLS if item["name"] == "claim_next")
+claim_tool["inputSchema"]["properties"]["allowStatus"] = {
+    "type": "boolean", "description": "Allow set_mr_status only with the updated title workflow and native read_thread/set_thread_title tools. Never create a chat for status metadata.",
+}
 poll_tool = next(item for item in TOOLS if item["name"] == "poll")
 poll_tool["inputSchema"]["properties"]["reportLanguage"] = {"type": "string", "enum": ["en", "pl"]}
 claim_tool["inputSchema"]["properties"]["allowMerged"] = {
@@ -675,9 +700,12 @@ def handle(request, queue):
             output = queue.status()
         elif name == "poll" and set(args) <= {"reportLanguage"} and args.get("reportLanguage", "en") in ("en", "pl"):
             output = queue.poll(report_language=args.get("reportLanguage", "en"))
-        elif name == "claim_next" and set(args) <= {"allowMerged", "allowWorkItem"} and all(type(v) is bool for v in args.values()):
+        elif name == "claim_next" and set(args) <= {"allowMerged", "allowWorkItem", "allowStatus"} and all(type(v) is bool for v in args.values()):
             output = {"job": queue.claim_next(allow_merged=args.get("allowMerged", False),
-                                              allow_work_item=args.get("allowWorkItem", False), state_reader=live_merge_request_state)}
+                                              allow_work_item=args.get("allowWorkItem", False), state_reader=live_merge_request_state,
+                                              allow_status=args.get("allowStatus", False))}
+        elif name == "format_chat_status_title" and set(args) == {"title", "status"}:
+            output = {"title": format_chat_status_title(args["title"], args["status"])}
         elif name == "record_claude_session" and set(args) == {"jobID", "sessionID"}:
             queue.record_claude_session(args["jobID"], args["sessionID"])
             output = {"recorded": True}

@@ -142,6 +142,59 @@ enum CodexDesktopRelay {
         let position: String?
     }
 
+    private struct StatusTitleJob: Codable {
+        var version = 1
+        var operation = "set_mr_status"
+        let id: UUID
+        let threadID: UUID
+        let conversationKey: String
+        let status: MRChatStatus
+        let followUpPrompt: String?
+    }
+
+    nonisolated static func publishChatStatus(
+        for threadID: UUID, status: MRChatStatus, directory: URL, followUpPrompt: String? = nil
+    ) {
+        guard followUpPrompt == nil || status == .merged else { return }
+        let files = FileManager.default
+        let thread = threadID.uuidString.lowercased()
+        let marker = directory.appending(path: "status-titles/\(thread).json")
+        let previous = (try? Data(contentsOf: marker)).flatMap { try? JSONDecoder().decode(StatusTitleJob.self, from: $0) }
+        guard previous != nil || status != .open else { return }
+        do {
+            let job: StatusTitleJob
+            if let previous, previous.version == 1, previous.operation == "set_mr_status",
+               previous.threadID == threadID, previous.conversationKey == "status:\(thread)" {
+                let name = previous.id.uuidString.lowercased()
+                let recorded = (try? Data(contentsOf: directory.appending(path: "receipts/\(name).json")))
+                    .flatMap { try? JSONDecoder().decode(Receipt.self, from: $0) }
+                let confirmed = recorded?.version == 1 && recorded?.jobID == previous.id
+                    && recorded?.threadID.lowercased() == thread
+                let pending = !confirmed && (files.fileExists(atPath: directory.appending(path: "jobs/\(name).json").path)
+                    || files.fileExists(atPath: directory.appending(path: "claims/\(name)").path))
+                if pending || (confirmed && previous.status == status) { return }
+                job = previous.status == status ? previous : StatusTitleJob(id: UUID(), threadID: threadID,
+                    conversationKey: "status:\(thread)", status: status, followUpPrompt: followUpPrompt)
+            } else {
+                job = StatusTitleJob(id: UUID(), threadID: threadID, conversationKey: "status:\(thread)",
+                                     status: status, followUpPrompt: followUpPrompt)
+            }
+            for child in ["jobs", "claims", "receipts", "status-titles"] {
+                try files.createDirectory(at: directory.appending(path: child), withIntermediateDirectories: true,
+                                          attributes: [.posixPermissions: 0o700])
+            }
+            let data = try JSONEncoder().encode(job)
+            try data.write(to: marker, options: .atomic)
+            try data.write(to: directory.appending(path: "jobs/\(job.id.uuidString.lowercased()).json"), options: .atomic)
+            if previous?.status == .closed, status == .open || status == .draft {
+                // Terminal titles omit stack position; force its fresh restoration after reopening.
+                try? files.removeItem(at: directory.appending(path: "stack-titles/\(thread).json"))
+            }
+        } catch {
+            Log.monitor.error("Could not publish a Codex MR status title: \(String(describing: error), privacy: .private)")
+        }
+    }
+
     nonisolated static func publishStackTitle(for threadID: UUID, iid: Int, position: String?, directory: URL) {
         let thread = threadID.uuidString.lowercased()
         let marker = directory.appending(path: "stack-titles/\(thread).json")
@@ -197,6 +250,13 @@ enum CodexDesktopRelay {
             let name = receipt.threadID.uuidString.lowercased() + ".json"
             guard !files.fileExists(atPath: receipts.appending(path: name).path),
                   !files.fileExists(atPath: directory.appending(path: "jobs/\(name)").path) else { continue }
+            if let marker = try? Data(contentsOf: directory.appending(path: "status-titles/\(name)")),
+               let status = try? decoder.decode(StatusTitleJob.self, from: marker), status.version == 1,
+               status.threadID == receipt.threadID, status.status == .merged,
+               files.fileExists(atPath: directory.appending(path: "jobs/\(status.id.uuidString.lowercased()).json").path)
+                || files.fileExists(atPath: directory.appending(path: "receipts/\(status.id.uuidString.lowercased()).json").path) {
+                continue
+            }
             result[key.work, default: []].insert(receipt.threadID)
         }
         return result

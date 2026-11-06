@@ -31,7 +31,7 @@ final class TodoMonitorService {
     private var inboxHost: String?
     private var isAutomating = false
     private let automation = TodoAutomationService()
-    private let mergedChats = MergedAssistantChatMonitor()
+    private let chatStatuses = AssistantChatStatusMonitor()
     private var runningAttentionFeedback: Set<AssistantAutomationRunner.MergeRequestWork> = []
     private var failedAttentionFeedback: Set<AssistantAutomationRunner.MergeRequestWork> = []
     private var timer: Timer?
@@ -578,7 +578,7 @@ final class TodoMonitorService {
             if let host, let username {
                 if settings.onboardingCompleted {
                     attention.refresh(host: host, username: username, todos: fetchedFiltered)
-                    mergedChats.refresh(todos: fetched, glab: glab, host: host, username: username, settings: settings)
+                    chatStatuses.refresh(glab: glab, host: host, username: username, settings: settings)
                 }
                 await acknowledgeHandledTodos(host: host, username: username)
                 scheduleAutomation(host: host, username: username)

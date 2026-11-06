@@ -9,6 +9,41 @@ from relay import Queue, handle
 
 
 class QueueTest(unittest.TestCase):
+    def test_status_title_formatter_uses_one_tag_and_preserves_mr_identity(self):
+        for state, expected in (
+            ("closed", "[MT] [Closed] cards-api !42 (Me)"),
+            ("merged", "[MT] [Merged] cards-api !42 (Me)"),
+            ("draft", "[MT] [Draft] cards-api !42 1/2 (Me)"),
+            ("open", "[MT] cards-api !42 1/2 (Me)"),
+        ):
+            call = {"method": "tools/call", "params": {"name": "format_chat_status_title", "arguments": {
+                "title": "[MT] [Closed] [Draft] cards-api !42 1/2 (Me)", "status": state}}}
+            reply = handle(call, Queue(pathlib.Path("/unused")))
+            self.assertFalse(reply["isError"])
+            self.assertEqual(json.loads(reply["content"][0]["text"])["title"], expected)
+        untouched = handle({"method": "tools/call", "params": {"name": "format_chat_status_title", "arguments": {
+            "title": "My manually named chat", "status": "closed"}}}, Queue(pathlib.Path("/unused")))
+        self.assertIsNone(json.loads(untouched["content"][0]["text"])["title"])
+
+    def test_status_jobs_require_listener_capability_and_never_create_chats(self):
+        from unittest.mock import patch
+        thread, job_id = str(uuid.uuid4()), str(uuid.uuid4())
+        key = base64.b64encode(json.dumps({"assistant": "codex", "work": {"iid": 42}}).encode()).decode()
+        delivery = self.job(conversationKey=key)
+        self.queue.claim_next()
+        self.queue.record(delivery, thread)
+        (self.root / "jobs" / (job_id + ".json")).write_text(json.dumps({"version": 1, "id": job_id,
+            "operation": "set_mr_status", "threadID": thread, "conversationKey": "status:" + thread, "status": "closed"}))
+        self.assertIsNone(self.queue.claim_next(allow_merged=True))
+        call = {"method": "tools/call", "params": {"name": "claim_next", "arguments": {"allowStatus": True}}}
+        with patch("relay.gitlab_get") as remote:
+            reply = handle(call, self.queue)
+        remote.assert_not_called()
+        self.assertFalse(reply["isError"])
+        self.assertEqual(json.loads(reply["content"][0]["text"])["job"], {
+            "id": job_id, "operation": "set_mr_status", "threadID": thread, "status": "closed"})
+        self.queue.record(job_id, thread)
+
     def setUp(self):
         folder = tempfile.TemporaryDirectory()
         self.addCleanup(folder.cleanup)
@@ -116,7 +151,7 @@ class QueueTest(unittest.TestCase):
         self.assertEqual(json.loads((self.root / "template.json").read_text()), {"version": 1, "threadID": thread})
         status = handle({"method": "tools/call", "params": {"name": "queue_status"}}, Queue(self.root))
         self.assertEqual(json.loads(status["content"][0]["text"]), {
-            "pending": 0, "claimed": 0, "validatesOpenMR": True, "templateThreadID": thread,
+            "pending": 0, "claimed": 0, "validatesOpenMR": True, "supportsStatusTitles": True, "templateThreadID": thread,
         })
         for args in ({"threadID": "../not-a-thread"}, {"threadID": None},
                      {"threadID": thread, "permissions": "full"}):
