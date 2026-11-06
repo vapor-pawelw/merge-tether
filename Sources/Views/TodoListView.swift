@@ -291,7 +291,8 @@ struct TodoListView: View {
                     }
                 }
                 .frame(maxWidth: .infinity, alignment: .leading)
-                .padding(.horizontal, 14).padding(.vertical, 10)
+                .padding(.horizontal, MRRowLayout.listInset)
+                .padding(.vertical, MRRowLayout.verticalInset)
             }
         }
     }
@@ -307,13 +308,10 @@ struct TodoListView: View {
                     onManage: manageAction(for: item), additionalActions: attentionActions(item)
                 )
             } else {
-                VStack(alignment: .leading, spacing: 5) {
-                    AttentionRow(item: item, onManage: manageAction(for: item)) {
-                        NSWorkspace.shared.open(item.url)
-                        dismissMenuBarExtra()
-                    }
-                    attentionActions(item)
-                }
+                AttentionRow(item: item, onManage: manageAction(for: item), onOpen: {
+                    NSWorkspace.shared.open(item.url)
+                    dismissMenuBarExtra()
+                }, additionalActions: attentionActions(item))
             }
         }
     }
@@ -423,7 +421,7 @@ struct TodoListView: View {
             .buttonStyle(.bordered)
             .controlSize(.small)
         }
-        .padding(8)
+        .mrRowContentPadding()
         .frame(maxWidth: .infinity, alignment: .leading)
         .background(Color.primary.opacity(0.045), in: RoundedRectangle(cornerRadius: 7))
     }
@@ -541,10 +539,11 @@ struct TodoListView: View {
 }
 
 
-private struct AttentionRow: View {
+private struct AttentionRow<AdditionalActions: View>: View {
     let item: MergeRequestAttentionMonitor.Item
     let onManage: (() -> Void)?
     let onOpen: () -> Void
+    let additionalActions: AdditionalActions
     @State private var isHovered = false
 
     var body: some View {
@@ -554,10 +553,13 @@ private struct AttentionRow: View {
                 Button(action: onManage) { Label { Text(.Menu.menuScopeAddManaged) } icon: { Image(systemName: "bolt.badge.plus") } }
                     .buttonStyle(.bordered)
                     .controlSize(.small)
-                    .padding(.leading, 12)
             }
-
+            additionalActions
         }
+        .mrRowContentPadding()
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .background(isHovered ? Color.primary.opacity(0.10) : Color.primary.opacity(0.045),
+                    in: RoundedRectangle(cornerRadius: 7))
     }
 
     private var openButton: some View {
@@ -584,16 +586,12 @@ private struct AttentionRow: View {
                     }
                     .foregroundStyle(.secondary)
                 }
-                Spacer(minLength: 4)
                 Image(systemName: "arrow.up.right")
                     .foregroundStyle(.secondary)
+                    .mrRowAccessoryFrame()
                     .accessibilityHidden(true)
             }
             .font(.caption)
-            .padding(.horizontal, 10)
-            .padding(.vertical, 8)
-            .background(isHovered ? Color.primary.opacity(0.10) : Color.primary.opacity(0.045),
-                        in: RoundedRectangle(cornerRadius: 7))
             .contentShape(Rectangle())
         }
         .buttonStyle(.plain)

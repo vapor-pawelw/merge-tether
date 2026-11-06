@@ -110,7 +110,7 @@ struct ManagedMergeRequestsView: View {
                             MRAutomationScopeMenu(settings: monitor.settings, target: target)
                         }
                         .font(.caption)
-                        .padding(12)
+                        .mrRowContentPadding()
                         Divider()
                     }
                     ForEach(rows) { row in
@@ -157,7 +157,7 @@ struct ManagedMergeRequestsView: View {
                                 }
                             }
                         }
-                        .padding(12)
+                        .mrRowContentPadding()
                         Divider()
                     }
                     ForEach(missing, id: \.self) { target in
@@ -171,7 +171,7 @@ struct ManagedMergeRequestsView: View {
                             Text(.Menu.menuScopeNotOpen).foregroundStyle(.secondary)
                             MRAutomationScopeMenu(settings: monitor.settings, target: target)
                         }
-                        .font(.caption).padding(12)
+                        .font(.caption).mrRowContentPadding()
                         Divider()
                     }
                 }

@@ -70,6 +70,7 @@ struct MergeRequestsView: View {
                         }
                     }
                     .frame(maxWidth: .infinity, alignment: .leading)
+                    .padding(.horizontal, MRRowLayout.listInset)
                 }
             }
         }
@@ -330,11 +331,13 @@ private struct MergeRequestSummary: View {
     var body: some View {
         Link(destination: item.url) {
             VStack(alignment: .leading, spacing: 5) {
-                HStack(alignment: .top) {
+                HStack(alignment: .top, spacing: 10) {
                     MergeRequestTitle(title: "!\(item.id.iid) · \(item.title)",
                                       isDraft: item.section == .draftMergeRequests, lineLimit: 3)
-                    Spacer(minLength: 4)
-                    Image(systemName: "arrow.up.right.square").accessibilityHidden(true)
+                    Image(systemName: "arrow.up.right.square")
+                        .foregroundStyle(.secondary)
+                        .mrRowAccessoryFrame()
+                        .accessibilityHidden(true)
                 }
                 RepositoryPathText(item.url.gitLabProjectPath)
                 if let pipeline = item.mergeRequest?.headPipeline {
@@ -357,8 +360,7 @@ private struct MergeRequestSummary: View {
             }
             .font(.caption)
             .frame(maxWidth: .infinity, alignment: .leading)
-            .padding(.horizontal, 12)
-            .padding(.vertical, 10)
+            .mrRowContentPadding()
             .contentShape(Rectangle())
         }
         .buttonStyle(.plain)

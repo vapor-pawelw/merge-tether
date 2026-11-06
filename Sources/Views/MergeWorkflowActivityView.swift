@@ -24,6 +24,7 @@ struct MergeWorkflowActivityView: View {
                         Divider()
                     }
                 }
+                .padding(.horizontal, MRRowLayout.listInset)
             }
         }
     }
@@ -94,8 +95,7 @@ private struct MergeWorkflowActivityRow: View {
             }
         }
         .font(.caption)
-        .padding(.horizontal, 12)
-        .padding(.vertical, 10)
+        .mrRowContentPadding()
         .frame(maxWidth: .infinity, alignment: .leading)
     }
 }

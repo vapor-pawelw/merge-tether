@@ -50,13 +50,11 @@ struct TodoRowView: View {
                 }
             }
         }
-        .padding(.horizontal, 12)
-        .padding(.vertical, 10)
+        .mrRowContentPadding()
         .contentShape(Rectangle())
         .background {
             RoundedRectangle(cornerRadius: 6)
                 .fill(isHovered && !isAutomationHovered && !isMarkDoneHovered && !isScopeHovered ? Color.primary.opacity(0.06) : .clear)
-                .padding(.horizontal, 6)
         }
         .onHover { isHovered = $0 }
         .contextMenu {
@@ -83,8 +81,8 @@ struct TodoRowView: View {
             Image(systemName: isMarkDoneHovered ? "checkmark.circle.fill" : "circle")
                 .font(.title3)
                 .foregroundStyle(isMarkDoneHovered ? Color.accentColor : .secondary)
-                .frame(width: 24, height: 24)
-                .contentShape(Circle())
+                .mrRowAccessoryFrame()
+                .contentShape(Rectangle())
         }
         .buttonStyle(.plain)
         .help(Text(.Menu.menuActionMarkAsDone))

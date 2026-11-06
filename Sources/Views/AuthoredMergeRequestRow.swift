@@ -61,10 +61,10 @@ struct AuthoredMergeRequestRow: View {
                 Image(systemName: "arrow.up.right.square")
                     .font(.caption)
                     .foregroundStyle(.secondary)
+                    .mrRowAccessoryFrame()
                     .accessibilityHidden(true)
             }
-            .padding(.horizontal, 12)
-            .padding(.vertical, 10)
+            .mrRowContentPadding()
             .contentShape(Rectangle())
         }
         .buttonStyle(.plain)

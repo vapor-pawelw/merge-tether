@@ -37,7 +37,5 @@ struct InboxAttentionActions: View {
         }
         .font(.caption)
         .controlSize(.small)
-        .padding(.horizontal, 12)
-        .padding(.bottom, 4)
     }
 }

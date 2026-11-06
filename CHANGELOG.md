@@ -8,6 +8,8 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 
 ### Fixed
 
+- Align content and trailing controls across to-dos, Inbox cards and MR lists; remove duplicate insets from nested Inbox actions.
+
 - Render listener reports directly from the current relay snapshot, preserving exact MR roles, links and unpublished-comment counts instead of having the model reconstruct rows.
 
 - Avoid a SwiftUI lazy-layout loop that can freeze Merge Requests.

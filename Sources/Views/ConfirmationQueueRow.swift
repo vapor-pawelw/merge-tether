@@ -17,11 +17,12 @@ struct ConfirmationQueueRow<AdditionalActions: View>: View {
     var body: some View {
         VStack(alignment: .leading, spacing: 6) {
             Button(action: onOpen) {
-                HStack(alignment: .top, spacing: 6) {
+                HStack(alignment: .top, spacing: 10) {
                     MergeRequestTitle(title: "!\(item.id.iid) · \(item.title)",
                                       isDraft: item.section == .draftMergeRequests)
                     Image(systemName: "arrow.up.right")
                         .foregroundStyle(.secondary)
+                        .mrRowAccessoryFrame()
                         .accessibilityHidden(true)
                 }
                 .contentShape(Rectangle())
@@ -81,7 +82,7 @@ struct ConfirmationQueueRow<AdditionalActions: View>: View {
             }
         }
         .font(.caption)
-        .padding(10)
+        .mrRowContentPadding()
         .frame(maxWidth: .infinity, alignment: .leading)
         .background(Color.accentColor.opacity(0.07), in: RoundedRectangle(cornerRadius: 7))
         .overlay(RoundedRectangle(cornerRadius: 7).stroke(Color.accentColor.opacity(0.18), lineWidth: 0.5))
