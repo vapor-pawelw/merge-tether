@@ -10,7 +10,7 @@ struct AssistantDependenciesTests {
         try FileManager.default.createDirectory(at: folder, withIntermediateDirectories: false)
         defer { try? FileManager.default.removeItem(at: folder) }
         let cli = folder.appending(path: assistant.rawValue)
-        try Data("#!/bin/sh\ncase \"$*\" in\n  --version) echo version-1 ;;\n  'auth status') echo '{\"loggedIn\":true}' ;;\n  *) echo 'exec --output-schema --ignore-user-config --print --tools --safe-mode --output-format --json-schema' ;;\nesac\n".utf8).write(to: cli)
+        try Data("#!/bin/sh\ncase \"$*\" in\n  --version) echo version-1 ;;\n  'auth status') echo '{\"loggedIn\":true}' ;;\n  *) echo 'exec --output-schema --ignore-user-config --ignore-rules --dangerously-bypass-approvals-and-sandbox --print --tools --safe-mode --dangerously-skip-permissions --output-format --json-schema' ;;\nesac\n".utf8).write(to: cli)
         try FileManager.default.setAttributes([.posixPermissions: 0o700], ofItemAtPath: cli.path)
 
         let status = await AssistantCLI.check(assistant, desktopURL: nil, candidates: [cli])
@@ -18,6 +18,24 @@ struct AssistantDependenciesTests {
         #expect(status == .ready(cli))
         try FileManager.default.removeItem(at: cli)
         #expect(await AssistantCLI.check(assistant, desktopURL: nil, candidates: [cli]) == .missingCLI)
+    }
+
+    @Test(arguments: AutomationAssistant.allCases)
+    func aCLIWithoutFullAccessSupportNeedsAnUpdate(_ assistant: AutomationAssistant) async throws {
+        let folder = FileManager.default.temporaryDirectory.appending(path: UUID().uuidString)
+        try FileManager.default.createDirectory(at: folder, withIntermediateDirectories: false)
+        defer { try? FileManager.default.removeItem(at: folder) }
+        let cli = folder.appending(path: assistant.rawValue)
+        try Data("""
+        #!/bin/sh
+        case "$*" in
+          --version) echo version-1 ;;
+          'auth status') echo '{"loggedIn":true}' ;;
+          *) echo 'exec --output-schema --ignore-user-config --print --tools --safe-mode --output-format --json-schema' ;;
+        esac
+        """.utf8).write(to: cli)
+        try FileManager.default.setAttributes([.posixPermissions: 0o700], ofItemAtPath: cli.path)
+        #expect(await AssistantCLI.check(assistant, desktopURL: nil, candidates: [cli]) == .invalidCLI)
     }
 
     @Test(arguments: AutomationAssistant.allCases)
@@ -32,7 +50,7 @@ struct AssistantDependenciesTests {
         try FileManager.default.createDirectory(at: folder, withIntermediateDirectories: false)
         defer { try? FileManager.default.removeItem(at: folder) }
         let cli = folder.appending(path: assistant.rawValue)
-        try Data("#!/bin/sh\ncase \"$*\" in\n 'login status'|'auth status') exit 1 ;;\n *) echo '--output-schema --ignore-user-config --tools --safe-mode --json-schema' ;;\nesac\n".utf8).write(to: cli)
+        try Data("#!/bin/sh\ncase \"$*\" in\n 'login status'|'auth status') exit 1 ;;\n *) echo '--output-schema --ignore-user-config --ignore-rules --dangerously-bypass-approvals-and-sandbox --tools --safe-mode --dangerously-skip-permissions --json-schema' ;;\nesac\n".utf8).write(to: cli)
         try FileManager.default.setAttributes([.posixPermissions: 0o700], ofItemAtPath: cli.path)
         #expect(await AssistantCLI.check(assistant, desktopURL: nil, candidates: [cli]) == .loginRequired(cli))
         #expect(await AssistantCLI.check(assistant, desktopURL: nil, candidates: [cli], requireCLI: false) == .loginRequired(cli))

@@ -276,6 +276,7 @@ final class MergeWorkflowAutomation {
         } else if settingsBeforeLaunch.permitsAssistantTools(project: latest.webURL.gitLabProjectPath) {
             .configuredTools
         } else { .preparation }
+        // Planning events keep their narrower remote-action policy, but every CLI route can inspect live evidence with tools.
         let mrWorkflow: AssistantAutomationRunner.MRWorkflow? = switch event.kind {
         case .reviewUpdate: .review
         case .newDiscussion, .pipelineFailure: current.author.username == entry.user.username ? .followUp : nil

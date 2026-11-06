@@ -14,7 +14,7 @@ MergeTether is a local MR command center. Manual GitLab management works without
 
 **When you are the author**
 
-1. Review feedback arrives. The assistant implements warranted fixes in an isolated worktree, tests, commits and pushes when follow-up push is enabled. Isolation protects other local checkouts and does not prohibit an authorized remote source-branch push.
+1. Review feedback arrives. The assistant implements warranted fixes in an isolated worktree, tests, commits and pushes when follow-up push is enabled. It is instructed to keep work inside its run directory and leave other checkouts alone; this is a workflow rule, not a filesystem sandbox.
 2. Before saving completion replies, the worker re-fetches the MR HEAD and verifies the remote source/test content. With push off, pending or failed, the proposal stays in the task result and no completion drafts are created.
 3. Verified replies wait on the relevant MR card or qualify for the selected publication rule. MergeTether requests another review only when feedback is ready and unpublished replies no longer block it.
 4. Failed pipelines and conflicts can become separate tasks. Unverified pipeline ownership requires your confirmation.
@@ -30,9 +30,9 @@ The CLI requirement applies even when automatic re-review verification is off. D
 
 Codex review and re-review tasks use the configured review model and reasoning setting. Other Codex tasks use the CLI’s configured model. Claude full tasks use the model configured in Claude CLI. The lightweight re-review readiness assessment has its own model setting.
 
-The optional starting folder applies to manually opened CLI sessions. Desktop destinations receive the MR prompt without a starting folder. Automated jobs always run in isolated per-run workspaces. The project-tool permission applies to tasks that explicitly require it; other tasks can still use tools permitted by the selected CLI sandbox.
+The optional starting folder applies to manually opened CLI sessions. Desktop destinations receive the MR prompt without a starting folder. Automated workers start in separate per-run directories and are instructed to keep clones and worktrees there. They have full read, write, command and network access, without a CLI filesystem sandbox or interactive approval prompts. The additional project-task setting controls which configured tasks may run; it does not grant or restrict the worker’s tools.
 
-CLI execution permissions still apply. Headless execution cannot answer an interactive permission prompt; a denied action or missing dependency must remain visible as a failed or blocked task. MergeTether does not change the provider’s private settings or silently grant broader permissions.
+Full tool access does not change the task’s GitLab authorization. Publication, approval, merge, thread resolution, author-follow-up push and conflict push keep their separate instructions and live app/helper checks. Missing dependencies or failed commands remain visible as failed or blocked work. The separate bounded re-review verifier remains tool-free; it receives supplied evidence and does not execute MR work.
 
 ## Task history, failure and migration
 
@@ -91,7 +91,7 @@ The worker runs the bundled `author_follow_up.py status` command at the start an
 
 Only after verification may the worker save/refetch reply drafts and bind their IDs and exact body hashes using `author_follow_up.py seal`. Preflight tokens are one-use. Existing user-created or legacy drafts cannot be silently adopted. A previous sealed draft can be rebound after fresh verification when a later stacked fix changes the remote head. The bundled standalone `author_follow_up.py` helper supports this evidence flow without desktop setup.
 
-Automatic publication rechecks the account, current run, push permission, source branch, remote head, file content, discussion fingerprint and draft body. Missing or stale evidence keeps replies private even under publish-all. Existing drafts are never deleted or rewritten by this gate.
+Automatic publication rechecks the account, current run, push permission, source branch, remote head, file content, discussion fingerprint and draft body. Missing or stale evidence keeps replies private even under publish-all. Existing drafts are never deleted or rewritten by this gate. These are local app/helper records accessible to a full-access worker; filesystem isolation does not make them tamper-proof.
 
 The verifier proves the selected committed files reached the remote revision. Meaningful tests, sufficient file selection and claims matching the changes remain the worker’s responsibility. GitLab has no conditional draft-publication endpoint, so a small race window remains after the final check; checks are repeated immediately before sending.
 
@@ -141,8 +141,8 @@ Approval is pinned to the checked source SHA. A new or edited comment invalidate
 | Author follow-up | Isolate edits, test, commit and push only under its own follow-up permission; verify remote content before completion drafts. |
 | Stack follow-up | Prepare a plan and identify the proposed target and changes. |
 | Pipeline failure | Coordinate ownership before fixing. Full CI traces stay out of the preparation prompt. Infrastructure retries need a listed project, current-head evidence and a confirmed handoff. |
-| Conflict resolution | Prepare a resolution. A push requires its separate toggle, tool access and matching project. |
-| Merge | Off by default. Requires a listed project, your own MR, required approvals, resolved discussions, an eligible pipeline and the checked source SHA. Configured tools/scripts or conflict work can also require a verified approval-reset policy. |
+| Conflict resolution | Prepare a resolution. A push requires its separate toggle, the additional project-task permission and a matching project. |
+| Merge | Off by default. Requires a listed project, your own MR, required approvals, resolved discussions, an eligible pipeline and the checked source SHA. Advanced task configurations or conflict work can also require a verified approval-reset policy. |
 | To-do events | A recognized event is marked read only after its MR action is durably recorded and the live MR refreshed. This acknowledges the event, not the agent’s work. Unknown events remain unread in Other. Explicitly ignored MR events are acknowledged without running a task. |
 | Legacy shell rules | Retained for reference and compatibility. They do not run automatically or get replaced by an AI task. Choose the selected assistant CLI in Settings to migrate the handler. |
 
@@ -150,7 +150,7 @@ Saving automation policy or scope changes synchronizes proof permissions immedia
 
 ## What the assistant sees
 
-Tasks receive bounded diff and discussion excerpts after common credential patterns are removed. These filters do not identify every secret. Scope automation to repositories you may share with the chosen provider. Settings, task history and results stay on the Mac; necessary task content is sent to the provider used by the CLI.
+Prepared diff and discussion excerpts filter common credential patterns. Worker tasks can also read files and live GitLab data through their full tool access; these later reads are not covered by the preparation filter. The tool-free verifier receives only its bounded, filtered input. Scope automation to repositories you may share with the chosen provider. Settings, task history and results are stored on the Mac; task content and data read by the worker can be sent to the CLI’s provider.
 
 ## Coordinating pipeline work with another session
 

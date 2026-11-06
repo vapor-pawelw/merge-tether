@@ -381,7 +381,7 @@
         "en": {
           "stringUnit": {
             "state": "translated",
-            "value": "Allow tasks requiring project tool permission"
+            "value": "Enable additional project-restricted tasks"
           }
         }
       }
@@ -392,7 +392,7 @@
         "en": {
           "stringUnit": {
             "state": "translated",
-            "value": "Grant the project tool permission for listed repositories, including eligible conflict tasks. Other assistant tasks can still use tools allowed by their CLI sandbox. Automated work stays in an isolated per-run workspace."
+            "value": "Enables the additional repository permission used by some event tasks and conflict pushes. Worker CLIs always have file, command and network access. Publishing, approvals and push permissions stay separate."
           }
         }
       }
@@ -568,7 +568,7 @@
         "en": {
           "stringUnit": {
             "state": "translated",
-            "value": "Prepares a conflict-resolution task through the selected CLI. Pushing a fix requires project tool access, conflict-push permission and a listed project."
+            "value": "Prepares a conflict-resolution task through the selected CLI. Pushing a fix requires the additional project-task permission, conflict-push permission and a listed project."
           }
         }
       }

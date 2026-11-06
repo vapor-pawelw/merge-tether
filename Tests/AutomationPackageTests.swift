@@ -170,6 +170,72 @@ struct AutomationPackageTests {
         #expect(FollowUpVerificationStore.latestRun(for: work, username: "me", settings: settings)?.id == author.id)
     }
 
+    @Test(arguments: [AutomationAssistant.codex, .claude],
+          [AssistantAutomationRunner.Access.preparation, .gitLabRead, .configuredTools])
+    @MainActor func executableCLITasksCanInspectLiveEvidenceAndSavePrivateDrafts(
+        assistant: AutomationAssistant, access: AssistantAutomationRunner.Access
+    ) async throws {
+        let suite = "ExecutableCLITaskPolicy.\(UUID())"
+        let defaults = try #require(UserDefaults(suiteName: suite))
+        defer { defaults.removePersistentDomain(forName: suite) }
+        let settings = SettingsManager(defaults: defaults)
+        settings.automation.assistant = assistant
+        let work = AssistantAutomationRunner.MergeRequestWork(host: "gitlab.example.test", projectID: 7, iid: 11)
+        let url = try #require(URL(string: "https://gitlab.example.test/team/repo/-/merge_requests/11"))
+        let coordinator = AssistantJobCoordinator(execute: { _, _ in
+            .init(result: .init(status: .succeeded, summary: "Synthetic prompt fixture"), output: "")
+        })
+        let handoff = try await AssistantAutomationRunner.launch(assistant, title: "Inspect merge blocker",
+            mergeRequestURL: url, prompt: "Inspect the live MR and save a private reply if warranted.", workspace: "",
+            access: access, work: work, username: "me", settings: settings,
+            expectedHeadSHA: String(repeating: "a", count: 40), jobCoordinator: coordinator)
+        defer { coordinator.cancel(handoff.id) }
+        #expect(!handoff.prompt.contains("external tools, follow URLs"))
+        #expect(!handoff.prompt.contains("as text using the supplied evidence"))
+        #expect(!handoff.prompt.contains("Otherwise leave drafts in this chat"))
+        #expect(handoff.prompt.contains("authenticated local `glab`"))
+        #expect(handoff.prompt.contains("private `draft_notes` endpoint"))
+        #expect(handoff.prompt.contains("Never classify your own reply as the source comment"))
+        #expect(handoff.prompt.contains("load and follow the applicable installed MR skills"))
+        #expect(handoff.prompt.contains("Do not publish directly yourself"))
+        #expect(!handoff.allowsPush && handoff.followUpPushAllowed == nil)
+        #expect(!handoff.prompt.contains("Automatic author-follow-up push is ON"))
+        #expect(handoff.workflow == nil)
+    }
+
+    @Test(arguments: [AssistantAutomationRunner.MRWorkflow.review, .draftReply, .followUp])
+    @MainActor func explicitMRWorkflowsKeepLiveToolsAndTheirRemoteActionBoundaries(
+        workflow: AssistantAutomationRunner.MRWorkflow
+    ) async throws {
+        let suite = "ExecutableMRWorkflowPolicy.\(UUID())"
+        let defaults = try #require(UserDefaults(suiteName: suite))
+        defer { defaults.removePersistentDomain(forName: suite) }
+        let settings = SettingsManager(defaults: defaults)
+        settings.automation.assistant = .claude
+        let work = AssistantAutomationRunner.MergeRequestWork(host: "gitlab.example.test", projectID: 7, iid: 11)
+        let url = try #require(URL(string: "https://gitlab.example.test/team/repo/-/merge_requests/11"))
+        let coordinator = AssistantJobCoordinator(execute: { _, _ in
+            .init(result: .init(status: .succeeded, summary: "Synthetic workflow fixture"), output: "")
+        })
+        let handoff = try await AssistantAutomationRunner.launch(.claude, title: "MR workflow",
+            mergeRequestURL: url, prompt: "Inspect this synthetic MR.", workspace: "", access: .preparation,
+            work: work, username: "me", settings: settings, mrWorkflow: workflow,
+            expectedHeadSHA: String(repeating: "a", count: 40), jobCoordinator: coordinator)
+        defer { coordinator.cancel(handoff.id) }
+        #expect(!handoff.prompt.contains("external tools, follow URLs"))
+        #expect(handoff.prompt.contains("authenticated local `glab`"))
+        #expect(handoff.prompt.contains("private `draft_notes` endpoint"))
+        #expect(handoff.prompt.contains("Get my explicit approval before publishing"))
+        #expect(!handoff.allowsPush)
+        if workflow == .followUp {
+            #expect(handoff.followUpPushAllowed == true)
+            #expect(handoff.prompt.contains("Mandatory author follow-up order"))
+        } else {
+            #expect(handoff.followUpPushAllowed == nil)
+            #expect(handoff.prompt.contains("Leave the MR branches and code unchanged"))
+        }
+    }
+
     @Test @MainActor func reviewPublicationPolicyKeepsHumanRepliesPrivateUnlessPublishAllIsOn() async throws {
         let suite = "ReviewPublicationPolicy.\(UUID())"
         let defaults = try #require(UserDefaults(suiteName: suite))

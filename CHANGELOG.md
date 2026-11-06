@@ -37,6 +37,7 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 
 ### Fixed
 
+- Give CLI workers full tool access instead of falling back to text-only preparation, while retaining task-specific GitLab action checks and the separate tool-free verifier.
 - Align documentation and interface wording with the MR board, CLI automation, current checkpoints and manual review actions.
 - Recheck GitLab authentication on refresh after a startup connection failure.
 - Explain the specific human action on each attention card and open pending comments or a stopped run directly, replacing generic blocker labels.

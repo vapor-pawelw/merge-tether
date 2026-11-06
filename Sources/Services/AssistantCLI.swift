@@ -55,8 +55,10 @@ enum AssistantCLI {
                                                        environment: environment, timeout: 5)
                 let text = String(decoding: help.stdout, as: UTF8.self)
                 guard version.exitCode == 0, help.exitCode == 0,
-                      assistant == .codex ? (text.contains("--output-schema") && text.contains("--ignore-user-config"))
-                        : (text.contains("--json-schema") && text.contains("--tools") && text.contains("--safe-mode")) else {
+                      assistant == .codex ? (text.contains("--output-schema") && text.contains("--ignore-user-config")
+                        && text.contains("--ignore-rules") && text.contains("--dangerously-bypass-approvals-and-sandbox"))
+                        : (text.contains("--json-schema") && text.contains("--tools") && text.contains("--safe-mode")
+                            && text.contains("--dangerously-skip-permissions")) else {
                     failure = .invalidCLI
                     continue
                 }

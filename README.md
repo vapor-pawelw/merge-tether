@@ -70,13 +70,13 @@ Choose your assistant, scope and rules in **Settings → Automation**. Installed
 
 Tasks run headlessly through the selected CLI. MergeTether stores their lifecycle, output and errors locally. A completed agent process is distinct from verified remote changes, review evidence or a passing pipeline. Failed and interrupted runs remain inspectable and require a deliberate retry; uncertain work is not silently replayed after a restart. Legacy desktop handoffs are retained without automatic replay.
 
-Assistant setup checks CLI compatibility and sign-in before accepting your choice. It offers CLI installation and sign-in in Terminal; cancelling keeps the previous selection. Turning off automatic re-review verification does not remove the CLI requirement for assistant automation. CLI execution permissions still apply. No desktop listener, scheduled dispatcher, plugin installation or permission-template setup is required.
+Assistant setup checks CLI compatibility and sign-in before accepting your choice. It offers CLI installation and sign-in in Terminal; cancelling keeps the previous selection. Turning off automatic re-review verification does not remove the CLI requirement for assistant automation. Workers run non-interactively with full file, command and network access; publication, approvals and pushes still follow the configured policy. The separate lightweight verifier has no tools. No desktop listener, scheduled dispatcher, plugin installation or permission-template setup is required.
 
 You can also choose an installed desktop assistant or CLI from an MR’s **…** menu. MergeTether passes an MR context prompt through a desktop deep link or opens the CLI in Terminal; very long desktop prompts are copied for pasting instead. These actions do not enable automatic desktop dispatch or track the resulting conversation. See [all permissions, defaults and limits](docs/automation.md).
 
 ## Privacy
 
-MergeTether runs locally, without a hosted MergeTether service or analytics. It uses your local `glab` credentials, stores settings and activity on your Mac, downloads avatars directly and checks GitHub for releases. Assistant tasks share the GitLab data needed for the task with the assistant/provider you choose. Preparation filters remove common credential patterns, not every possible secret; scope automation to repositories you are allowed to share.
+MergeTether runs locally, without a hosted MergeTether service or analytics. It uses your local `glab` credentials, stores settings and activity on your Mac, downloads avatars directly and checks GitHub for releases. Assistant workers can read local files, run commands and access the network; task content and data they read can reach the provider you choose. Credential filtering applies to prepared excerpts, not every live tool read. Scope automation to repositories you are allowed to share.
 
 ## Contributing
 

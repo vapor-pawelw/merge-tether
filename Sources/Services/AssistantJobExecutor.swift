@@ -54,8 +54,8 @@ enum AssistantJobExecutor {
         let evidenceDirectory = ReviewVerdictStore.directory.deletingLastPathComponent()
         try FileManager.default.createDirectory(at: evidenceDirectory, withIntermediateDirectories: true,
                                                 attributes: [.posixPermissions: 0o700])
-        let sandbox = AssistantExecutionSandbox(workspace: folder, evidenceRoot: evidenceDirectory, host: handoff.key.work.host)
-        try sandbox.prepare()
+        let invocation = AssistantJobInvocation(workspace: folder, evidenceRoot: evidenceDirectory)
+        try invocation.prepareEvidenceDirectories()
         let instructions = handoff.prompt + """
 
             This is a headless MergeTether run. Do not open desktop apps, create GUI chats, or request interactive input.
@@ -63,9 +63,10 @@ enum AssistantJobExecutor {
             This is an empty scratch directory, not an existing repository. If you need source code, read the live source project
             (project ID \(request.sourceProjectID ?? request.projectID)) with glab, obtain its clone URL, and clone it beneath this directory.
             Fetch the exact current MR head \(request.sha ?? "(read from live MR)") without updating other local branches.
-            Only the helper evidence subdirectories are writable; app-owned follow-up permission records remain read-only.
-            The bundled verification helpers can record receipts there;
-            no assistant desktop app, installed plugin or listener is required. Use helper shell fallbacks from the instructions.
+            The CLI has full tool, filesystem and network access without an interactive approval prompt.
+            Full tool access does not authorize extra GitLab actions. Do not edit app-owned policy or proof records
+            directly; use the bundled verification helpers to record legitimate receipts.
+            No assistant desktop app, installed plugin or listener is required. Use helper shell fallbacks from the instructions.
             The verified account is \(handoff.key.username) on \(handoff.key.work.host); recheck before remote writes.
             Use only the task's explicit permissions. If a command needs unavailable approval or evidence, stop with status blocked.
             In your final structured result, status succeeded means the assigned work finished; it never substitutes for remote verification receipts.
@@ -81,32 +82,17 @@ enum AssistantJobExecutor {
         let result: AssistantJobResult
         do {
         if handoff.key.assistant == .codex {
-            let schema = folder.appending(path: "schema.json")
-            let response = folder.appending(path: "result.json")
-            try Data(AssistantJobResult.schema.utf8).write(to: schema, options: .atomic)
-            var arguments = ["exec", "--ignore-user-config", "--ephemeral", "--skip-git-repo-check",
-                             "--sandbox", "workspace-write", "-c", "sandbox_workspace_write.network_access=true",
-                             "--disable", "apps", "--disable", "plugins", "--disable", "memories",
-                             "--output-schema", schema.path, "--output-last-message", response.path, "--json"]
-            for directory in sandbox.writableEvidenceDirectories { arguments += ["--add-dir", directory.path] }
-            if let model = handoff.reviewModel { arguments += ["--model", model.rawValue] }
-            if let thinking = handoff.reviewThinking { arguments += ["-c", "model_reasoning_effort=\"\(thinking.rawValue)\""] }
-            arguments.append("-")
+            try Data(AssistantJobResult.schema.utf8).write(to: invocation.schemaURL, options: .atomic)
+            let arguments = invocation.codexArguments(model: handoff.reviewModel, thinking: handoff.reviewThinking)
             output = try await ProcessRunner.run(executable, arguments: arguments, environment: environment,
                                                   currentDirectory: folder, timeout: 1_800, input: input)
             capturedOutput = output
             guard output.exitCode == 0 else { throw CLIProcessError(exitCode: output.exitCode, diagnostic: output.stderr) }
             try AssistantJobResult.validateCodexEvents(output.stdout)
-            guard let data = try? Data(contentsOf: response) else { throw ExecutionError.missingResult }
+            guard let data = try? Data(contentsOf: invocation.resultURL) else { throw ExecutionError.missingResult }
             result = try AssistantJobResult.codex(data)
         } else {
-            // File editing tools bypass Claude's Bash sandbox, so edits are performed
-            // through the sandboxed shell only. Missing sandbox support fails closed.
-            let arguments = ["-p", "--safe-mode", "--permission-mode", "dontAsk", "--permission-prompts", "none",
-                             "--tools", sandbox.claudeTools, "--allowedTools", sandbox.claudeTools,
-                             "--settings", sandbox.claudeSettings,
-                             "--strict-mcp-config", "--mcp-config", #"{"mcpServers":{}}"#,
-                             "--no-session-persistence", "--output-format", "json", "--json-schema", AssistantJobResult.schema]
+            let arguments = invocation.claudeArguments
             output = try await ProcessRunner.run(executable, arguments: arguments, environment: environment,
                                                   currentDirectory: folder, timeout: 1_800, input: input)
             capturedOutput = output
