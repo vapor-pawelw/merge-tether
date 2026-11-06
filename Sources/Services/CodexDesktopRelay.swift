@@ -110,6 +110,13 @@ enum CodexDesktopRelay {
         let threadID: String
     }
 
+    private struct SkippedReceipt: Decodable {
+        let version: Int
+        let jobID: UUID
+        let conversationKey: Data
+        let state: String
+    }
+
     private struct ChatReceipt: Decodable {
         let version: Int
         let threadID: UUID
@@ -271,6 +278,7 @@ enum CodexDesktopRelay {
         settings: SettingsManager, host: String?, username: String?, directory: URL = directory
     ) {
         var changed = false
+        var skippedIDs: Set<UUID> = []
         for index in settings.assistantHandoffs.indices {
             var handoff = settings.assistantHandoffs[index]
             guard handoff.key.assistant == .codex else { continue }
@@ -280,6 +288,19 @@ enum CodexDesktopRelay {
             }
             guard handoff.openedAt == nil else { continue }
             let id = handoff.id.uuidString.lowercased()
+            let skipped = directory.appending(path: "skipped/\(id).json")
+            if !hasClaim(handoff.id, directory: directory),
+               let data = try? Data(contentsOf: skipped), data.count < 4096,
+               let receipt = try? JSONDecoder().decode(SkippedReceipt.self, from: data),
+               receipt.version == 1, receipt.jobID == handoff.id, ["merged", "closed"].contains(receipt.state),
+               let key = try? JSONDecoder().decode(AssistantAutomationRunner.ChatKey.self, from: receipt.conversationKey),
+               key == handoff.key {
+                // A terminal skip is not delivery: retain chat mappings and do not acknowledge feedback todos.
+                withdraw(handoff.id, directory: directory)
+                skippedIDs.insert(handoff.id)
+                changed = true
+                continue
+            }
             let url = directory.appending(path: "receipts/\(id).json")
             if let data = try? Data(contentsOf: url), data.count < 4096,
                let receipt = try? JSONDecoder().decode(Receipt.self, from: data),
@@ -299,6 +320,7 @@ enum CodexDesktopRelay {
                 withdraw(handoff.id, directory: directory)
             }
         }
+        if !skippedIDs.isEmpty { settings.assistantHandoffs.removeAll { skippedIDs.contains($0.id) } }
         if changed { settings.save() }
     }
 

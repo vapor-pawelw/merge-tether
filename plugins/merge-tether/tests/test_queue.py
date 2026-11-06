@@ -24,7 +24,9 @@ class QueueTest(unittest.TestCase):
         canonical = home / "Library/Application Support/com.vaporpw.GitLabTodos/Codex Desktop Relay"
         for name in ("jobs", "claims", "receipts"):
             (canonical / name).mkdir(parents=True)
-        job_id = self.job(reuse=False)
+        key = base64.b64encode(json.dumps({"assistant": "codex", "access": "gitLabRead", "username": "me",
+            "work": {"host": "gitlab.example.org", "projectID": 1, "iid": 42}, "workspace": ""}).encode()).decode()
+        job_id = self.job(reuse=False, conversationKey=key)
         (canonical / "jobs" / (job_id + ".json")).write_bytes((self.root / "jobs" / (job_id + ".json")).read_bytes())
         requests = [
             {"jsonrpc":"2.0", "id":1, "method":"tools/list"},
@@ -32,7 +34,10 @@ class QueueTest(unittest.TestCase):
             {"jsonrpc":"2.0", "id":3, "method":"tools/call", "params":{"name":"claim_next","arguments":{}}},
         ]
         relay = pathlib.Path(__file__).resolve().parents[1] / "relay.py"
-        result = subprocess.run([sys.executable, "-B", str(relay)], input="".join(json.dumps(r)+"\n" for r in requests),
+        server = (f"import sys; sys.path.insert(0, {str(relay.parent)!r}); import relay; "
+                  "relay.gitlab_get = lambda host, endpoint: ({'username':'me'} if endpoint == '/user' "
+                  "else {'project_id':1,'iid':42,'state':'opened'}); relay.serve()")
+        result = subprocess.run([sys.executable, "-B", "-c", server], input="".join(json.dumps(r)+"\n" for r in requests),
                                 capture_output=True, text=True, timeout=5, cwd=home,
                                 env={"HOME":str(home), "PATH":"/usr/bin:/bin"}, check=True)
         replies = [json.loads(line)["result"] for line in result.stdout.splitlines()]
@@ -111,7 +116,7 @@ class QueueTest(unittest.TestCase):
         self.assertEqual(json.loads((self.root / "template.json").read_text()), {"version": 1, "threadID": thread})
         status = handle({"method": "tools/call", "params": {"name": "queue_status"}}, Queue(self.root))
         self.assertEqual(json.loads(status["content"][0]["text"]), {
-            "pending": 0, "claimed": 0, "templateThreadID": thread,
+            "pending": 0, "claimed": 0, "validatesOpenMR": True, "templateThreadID": thread,
         })
         for args in ({"threadID": "../not-a-thread"}, {"threadID": None},
                      {"threadID": thread, "permissions": "full"}):
@@ -240,7 +245,12 @@ class QueueTest(unittest.TestCase):
         self.assertEqual(self.queue.claim_next()["id"], delivery)
         self.queue.record(delivery, thread)
         self.assertIsNone(self.queue.claim_next())
-        self.assertEqual(self.queue.claim_next(allow_merged=True), {
+        from unittest.mock import patch
+        with patch("relay.gitlab_get") as remote:
+            reply = handle({"method": "tools/call", "params": {"name": "claim_next", "arguments": {"allowMerged": True}}}, self.queue)
+        self.assertFalse(reply["isError"])
+        remote.assert_not_called()
+        self.assertEqual(json.loads(reply["content"][0]["text"])["job"], {
             "id": thread, "threadID": thread, "operation": "mark_merged",
         })
         with self.assertRaises(ValueError):
@@ -440,6 +450,58 @@ class QueueTest(unittest.TestCase):
         self.assertTrue(rows[1].endswith("| **DRAFT** | — | 0 |"))
         self.assertLess(markdown.index(rows[0]), markdown.index("### For review"))
         self.assertGreater(markdown.index(rows[1]), markdown.index("### For review"))
+
+    def test_native_claim_skips_terminal_mrs_without_claim_or_delivery(self):
+        from unittest.mock import patch
+        key = base64.b64encode(json.dumps({"assistant": "codex", "access": "gitLabRead", "username": "me",
+            "work": {"host": "gitlab.example.org", "projectID": 1, "iid": 42}, "workspace": ""}).encode()).decode()
+        call = {"method": "tools/call", "params": {"name": "claim_next"}}
+        for state in ("merged", "closed"):
+            with self.subTest(state=state):
+                job_id = self.job(conversationKey=key)
+                def read(host, endpoint):
+                    self.assertEqual(host, "gitlab.example.org")
+                    if endpoint == "/user": return {"username": "me"}
+                    self.assertEqual(endpoint, "/projects/1/merge_requests/42")
+                    return {"project_id": 1, "iid": 42, "state": state}
+                with patch("relay.gitlab_get", side_effect=read) as remote:
+                    response = handle(call, self.queue)
+                self.assertFalse(response["isError"])
+                self.assertIsNone(json.loads(response["content"][0]["text"])["job"])
+                self.assertEqual(remote.call_count, 2)
+                self.assertFalse((self.root / "claims" / job_id).exists())
+                self.assertFalse(self.queue.receipt(job_id).exists())
+                skipped = json.loads((self.root / "skipped" / (job_id + ".json")).read_text())
+                self.assertEqual((skipped["jobID"], skipped["state"], skipped["conversationKey"]), (job_id, state, key))
+                self.assertEqual(self.queue.status()["pending"], 0)
+        reopened_job = self.job(conversationKey=key)
+        with patch("relay.gitlab_get", side_effect=[{"username": "me"}, {"project_id": 1, "iid": 42, "state": "opened"}]):
+            reopened = handle(call, self.queue)
+        self.assertEqual(json.loads(reopened["content"][0]["text"])["job"]["id"], reopened_job)
+
+    def test_native_claim_requires_verified_open_state_and_matching_account(self):
+        from unittest.mock import patch
+        key = base64.b64encode(json.dumps({"assistant": "codex", "access": "gitLabRead", "username": "me",
+            "work": {"host": "gitlab.example.org", "projectID": 1, "iid": 42}, "workspace": ""}).encode()).decode()
+        job_id = self.job(conversationKey=key)
+        call = {"method": "tools/call", "params": {"name": "claim_next"}}
+        for replies in ([ValueError("offline")], [{"username": "other"}],
+                        [{"username": "me"}, {"project_id": 1, "iid": 42, "state": "unknown"}],
+                        [{"username": "me"}, {"project_id": 2, "iid": 42, "state": "opened"}]):
+            with patch("relay.gitlab_get", side_effect=replies):
+                self.assertTrue(handle(call, self.queue)["isError"])
+            self.assertFalse((self.root / "claims" / job_id).exists())
+            self.assertEqual(self.queue.status()["pending"], 1)
+        with patch("relay.gitlab_get", side_effect=[{"username": "me"}, {"project_id": 1, "iid": 42, "state": "opened"}]):
+            result = handle(call, self.queue)
+        self.assertFalse(result["isError"])
+        self.assertEqual(json.loads(result["content"][0]["text"])["job"]["id"], job_id)
+        with patch("relay.gitlab_get") as remote:
+            uncertain = handle(call, self.queue)
+        remote.assert_not_called()
+        self.assertIsNone(json.loads(uncertain["content"][0]["text"])["job"])
+        self.assertTrue((self.root / "claims" / job_id).is_dir())
+        self.assertFalse((self.root / "skipped" / (job_id + ".json")).exists())
 
     def test_polish_report_uses_current_snapshot_and_puts_draft_mrs_last(self):
         report = {"checkedAt": "2026-11-06T00:34:10Z", "complete": False, "mergeRequests": [

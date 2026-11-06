@@ -31,6 +31,50 @@ import Testing
 }
 
 struct CodexDesktopRelayTests {
+    @MainActor
+    @Test func terminalSkipWithdrawsOnlyThePendingHandoffWithoutFakingDelivery() throws {
+        let folder = FileManager.default.temporaryDirectory.appending(path: UUID().uuidString)
+        defer { try? FileManager.default.removeItem(at: folder) }
+        let suite = "TerminalSkipTests.\(UUID())"
+        let defaults = try #require(UserDefaults(suiteName: suite))
+        defer { defaults.removePersistentDomain(forName: suite) }
+        let settings = SettingsManager(defaults: defaults)
+        settings.automation.codexRelayEnabled = true
+        let key = AssistantAutomationRunner.ChatKey(assistant: .codex,
+            work: .init(host: "gitlab.example.org", projectID: 1, iid: 42), username: "me", workspace: "", access: .gitLabRead)
+        let existingChat = UUID().uuidString
+        settings.assistantChats[key] = existingChat
+        let handoff = AssistantAutomationRunner.Handoff(id: UUID(), key: key, title: "[MT] repo !42",
+            prompt: "Review", createdAt: Date(), allowsPush: false)
+        settings.assistantHandoffs = [handoff]
+        func sync() { CodexDesktopRelay.synchronize(settings: settings, host: key.work.host, username: key.username, directory: folder) }
+        sync()
+        let name = handoff.id.uuidString.lowercased()
+        let skipped = folder.appending(path: "skipped/\(name).json")
+        try FileManager.default.createDirectory(at: skipped.deletingLastPathComponent(), withIntermediateDirectories: true)
+        func skip(_ boundKey: AssistantAutomationRunner.ChatKey) throws {
+            let data = try JSONSerialization.data(withJSONObject: ["version": 1, "jobID": handoff.id.uuidString,
+                "conversationKey": try JSONEncoder().encode(boundKey).base64EncodedString(), "state": "merged"])
+            try data.write(to: skipped)
+        }
+        let otherKey = AssistantAutomationRunner.ChatKey(assistant: .codex, work: key.work,
+            username: "someone-else", workspace: "", access: .gitLabRead)
+        try skip(otherKey)
+        sync()
+        #expect(settings.assistantHandoffs.count == 1)
+        try skip(key)
+        let claim = folder.appending(path: "claims/\(name)")
+        try FileManager.default.createDirectory(at: claim, withIntermediateDirectories: true)
+        sync()
+        #expect(settings.assistantHandoffs.count == 1)
+        try FileManager.default.removeItem(at: claim)
+        sync()
+        #expect(settings.assistantHandoffs.isEmpty)
+        #expect(settings.assistantChats[key] == existingChat)
+        #expect(!FileManager.default.fileExists(atPath: folder.appending(path: "jobs/\(name).json").path))
+        #expect(!FileManager.default.fileExists(atPath: folder.appending(path: "receipts/\(name).json").path))
+    }
+
     @Test func olderSettingsUseSolHighAndReviewSelectionPersists() throws {
         var settings = try JSONDecoder().decode(AutomationSettings.self, from: Data("{}".utf8))
         #expect(settings.codexReviewModel.rawValue == "gpt-6.1-sol")

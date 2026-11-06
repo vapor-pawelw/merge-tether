@@ -179,6 +179,25 @@ def write_object(path, data):
             temporary.unlink(missing_ok=True)
 
 
+def live_merge_request_state(key):
+    identity = conversation_identity(key)
+    if len(identity) != 5 or identity[0] != "codex-mr":
+        raise ValueError("This job has no verifiable GitLab merge request identity; leave it pending")
+    _, host, project_id, iid, username = identity
+    if (not isinstance(host, str) or not re.fullmatch(r"[a-zA-Z0-9][a-zA-Z0-9.-]{0,252}(?::[0-9]{1,5})?", host)
+            or not isinstance(username, str) or not username
+            or not all(type(value) is int and 0 < value <= 9_999_999_999 for value in (project_id, iid))):
+        raise ValueError("Invalid GitLab merge request identity; leave the job pending")
+    account = gitlab_get(host, "/user")
+    if not isinstance(account, dict) or account.get("username") != username:
+        raise ValueError("The GitLab login does not match the queued job; leave it pending")
+    request = gitlab_get(host, f"/projects/{project_id}/merge_requests/{iid}")
+    if (not isinstance(request, dict) or request.get("project_id") != project_id or request.get("iid") != iid
+            or request.get("state") not in ("opened", "merged", "closed")):
+        raise ValueError("Could not verify the queued MR's current state; leave it pending")
+    return request["state"]
+
+
 class Queue:
     def __init__(self, root):
         self.root = root
@@ -198,6 +217,12 @@ class Queue:
 
     def receipt(self, job_id):
         return self.receipts / (job_id + ".json")
+
+    def is_skipped(self, job_id, key):
+        record = read_object(self.root / "skipped" / (job_id + ".json"))
+        return (record.get("version") == 1 and record.get("jobID") == job_id
+                and isinstance(key, str) and record.get("conversationKey") == key
+                and record.get("state") in ("merged", "closed"))
 
     def dispatch_template(self):
         record = read_object(self.root / "template.json")
@@ -225,9 +250,9 @@ class Queue:
                 continue
             if (self.claims / job.stem).is_dir():
                 claimed += 1
-            else:
+            elif not self.is_skipped(job.stem, read_object(job).get("conversationKey")):
                 pending += 1
-        result = {"pending": pending, "claimed": claimed}
+        result = {"pending": pending, "claimed": claimed, "validatesOpenMR": True}
         if template := self.dispatch_template():
             result["templateThreadID"] = template
         return result
@@ -242,7 +267,7 @@ class Queue:
             result["mrStatusMarkdown"] = mr_status_markdown(report, result["pending"], result["claimed"], report_language)
         return result
 
-    def claim_next(self, allow_merged=False, allow_work_item=False):
+    def claim_next(self, allow_merged=False, allow_work_item=False, state_reader=None):
         with self.exclusive():
             candidates = []
             for job in self.jobs.glob("*.json"):
@@ -260,7 +285,7 @@ class Queue:
                 except ValueError:
                     continue
                 if (job_id != job.stem or payload.get("version") != 1 or
-                        not isinstance(key, str) or not key or self.receipt(job_id).exists()):
+                        not isinstance(key, str) or not key or self.receipt(job_id).exists() or self.is_skipped(job_id, key)):
                     continue
                 operation = payload.get("operation")
                 target_thread = None
@@ -298,6 +323,15 @@ class Queue:
                         break
                 if active:
                     continue
+                if state_reader is not None and target_thread is None:
+                    state = state_reader(key)
+                    if state in ("merged", "closed"):
+                        skipped = self.root / "skipped"
+                        skipped.mkdir(exist_ok=True, mode=0o700)
+                        write_object(skipped / (job_id + ".json"), {
+                            "version": 1, "jobID": job_id, "conversationKey": key, "state": state,
+                        })
+                        continue
                 thread = self.find_thread(payload) if payload.get("reuse") is True else None
                 claim = self.claims / job_id
                 try:
@@ -573,7 +607,7 @@ def tool(name, description, fields=()):
 TOOLS = [
     tool("queue_status", "Count pending and claimed MergeTether jobs without reading their prompts."),
     tool("poll", "Check the queue, record a listener heartbeat, and return the latest open MR status report. Only use in the scheduled dispatch."),
-    tool("claim_next", "Claim at most one queued MergeTether job for native Codex Desktop dispatch."),
+    tool("claim_next", "Claim at most one queued job after live account/MR GET checks. Skip merged/closed MR work without delivery; errors leave it pending. Existing-chat title jobs remain supported."),
     tool("record_dispatch", "Record confirmed native delivery. Never call after an uncertain result.",
          ("jobID", "threadID")),
     tool("record_dispatch_template", "Record the UUID of an explicitly configured native Codex template chat for new-chat routing. "
@@ -643,7 +677,7 @@ def handle(request, queue):
             output = queue.poll(report_language=args.get("reportLanguage", "en"))
         elif name == "claim_next" and set(args) <= {"allowMerged", "allowWorkItem"} and all(type(v) is bool for v in args.values()):
             output = {"job": queue.claim_next(allow_merged=args.get("allowMerged", False),
-                                              allow_work_item=args.get("allowWorkItem", False))}
+                                              allow_work_item=args.get("allowWorkItem", False), state_reader=live_merge_request_state)}
         elif name == "record_claude_session" and set(args) == {"jobID", "sessionID"}:
             queue.record_claude_session(args["jobID"], args["sessionID"])
             output = {"recorded": True}

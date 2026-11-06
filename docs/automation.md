@@ -43,6 +43,8 @@ In MergeTether, enable **Use a Codex listener for automatic GUI chats**, then ch
 
 MergeTether warns in the menu bar if Codex is closed, the plugin has never checked the queue, or its last check is over 15 minutes old. A handoff that remains unconfirmed for over 15 minutes also raises a warning. If you already use the copied-prompt listener, disable its schedule before migrating; the old listener does not report health.
 
+Before claiming ordinary MR work, the relay verifies the queued GitLab account and reads that exact MR's live state. Only an open MR can start or continue review/fix work. Merged and closed requests are recorded as skipped; MergeTether withdraws their pending handoffs without inventing a delivery, marking feedback to-dos done or removing existing chat links. Errors and unknown states leave work pending. An MR missing from an open-list snapshot is not sufficient evidence that it closed: the list may be partial or filtered. Reopened MRs can receive new jobs. Existing-chat `[Merged]` title updates and linked work-item proposals remain available, and uncertain prior deliveries are preserved for recovery.
+
 ## The human checkpoint
 
 **Settings → Automation → Assistant → Human checkpoint**
