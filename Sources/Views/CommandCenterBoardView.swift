@@ -25,8 +25,8 @@ struct CommandCenterBoardView: View {
               ignoredTargets: monitor.settings.ignoredMergeRequests, humanAttention: monitor.userAttention)
     }
 
-    private var unattachedJobs: [AssistantAutomationRunner.Handoff] {
-        let rows = snapshot.own + snapshot.reviewed + snapshot.otherMergeRequests
+    private func unattachedJobs(in board: MergeRequestBoardSnapshot) -> [AssistantAutomationRunner.Handoff] {
+        let rows = board.own + board.reviewed + board.otherMergeRequests
         let latest = Dictionary(grouping: monitor.assistantHandoffs, by: \.key.work)
             .values.compactMap { $0.max { $0.createdAt < $1.createdAt } }
         return latest.filter { job in
@@ -42,6 +42,7 @@ struct CommandCenterBoardView: View {
 
     var body: some View {
         let board = snapshot
+        let unattachedJobs = unattachedJobs(in: board)
         HStack(alignment: .top, spacing: 18) {
             lane(title: .Board.boardLaneOwn, symbol: "arrow.triangle.pull", count: board.own.count) {
                 if board.own.isEmpty { empty(.Board.boardLaneOwnEmpty) }
@@ -95,7 +96,8 @@ struct CommandCenterBoardView: View {
     }
 
     private func current(_ original: MergeRequestAttentionMonitor.Item) -> MergeRequestAttentionMonitor.Item {
-        (snapshot.own + snapshot.reviewed + snapshot.otherMergeRequests).first { $0.id == original.id && $0.item.url == original.url }?.item ?? original
+        let board = snapshot
+        return (board.own + board.reviewed + board.otherMergeRequests).first { $0.id == original.id && $0.item.url == original.url }?.item ?? original
     }
 
     private func card(_ row: MergeRequestBoardSnapshot.Row, removable: Bool = false) -> some View {

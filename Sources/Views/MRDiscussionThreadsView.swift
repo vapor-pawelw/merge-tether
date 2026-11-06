@@ -80,16 +80,18 @@ private struct MRDiscussionThreadView: View {
 
     var body: some View {
         DisclosureGroup(isExpanded: $isExpanded) {
-            VStack(alignment: .leading, spacing: 12) {
-                ForEach(Array(comments.enumerated()), id: \.offset) { _, note in
-                    MRDiscussionNoteView(note: note, origin: note.id.flatMap { thread.origins[$0] },
-                                         mergeRequestURL: mergeRequestURL, threadLocation: thread.location)
+            if isExpanded {
+                VStack(alignment: .leading, spacing: 12) {
+                    ForEach(Array(comments.enumerated()), id: \.offset) { _, note in
+                        MRDiscussionNoteView(note: note, origin: note.id.flatMap { thread.origins[$0] },
+                                             mergeRequestURL: mergeRequestURL, threadLocation: thread.location)
+                    }
+                    ForEach(Array(thread.drafts.enumerated()), id: \.offset) { _, draft in
+                        MRDiscussionDraftView(draft: draft, username: currentUsername, threadLocation: thread.location)
+                    }
                 }
-                ForEach(Array(thread.drafts.enumerated()), id: \.offset) { _, draft in
-                    MRDiscussionDraftView(draft: draft, username: currentUsername, threadLocation: thread.location)
-                }
+                .padding(.top, 10)
             }
-            .padding(.top, 10)
         } label: {
             VStack(alignment: .leading, spacing: 5) {
                 HStack(alignment: .firstTextBaseline, spacing: 8) {

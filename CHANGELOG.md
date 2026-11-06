@@ -45,6 +45,8 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 
 ### Fixed
 
+- Offer Try again directly on stopped agent-run cards while keeping the run result available as a secondary action.
+- Keep discussion expansion responsive by avoiding repeated board-wide attention calculations and deferring collapsed section contents.
 - Include the current MR description in feedback verification and recheck its context before resolving feedback, requesting re-review or automatically merging.
 - Keep cancelled conflict preparation retryable, freeze automatic publication to checked draft IDs, and preserve readable discussion caches during authentication errors.
 - Advance verified conflict plans to a newly authorized push stage once, keeping automatic preparation neutral while preserving stopped push attempts for manual review.

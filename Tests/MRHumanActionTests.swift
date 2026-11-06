@@ -10,12 +10,13 @@ struct MRHumanActionTests {
     }
     private func row(_ item: MergeRequestAttentionMonitor.Item,
                      execution: AssistantJobExecution? = nil, expectedHead: String? = nil,
-                     mayPush: Bool = false) -> MergeRequestBoardSnapshot.Row {
+                     mayPush: Bool = false, executable: Bool = true) -> MergeRequestBoardSnapshot.Row {
         let job = execution.map { execution in
             AssistantAutomationRunner.Handoff(id: UUID(), key: .init(assistant: .codex,
                 work: .init(host: "gitlab.example.test", projectID: 1, iid: 2), username: "me", workspace: "", access: .gitLabRead),
                 title: "Example run", prompt: "", createdAt: Date(), allowsPush: false, followUpPushAllowed: mayPush,
-                execution: execution, expectedHeadSHA: expectedHead)
+                execution: execution, taskPrompt: executable ? "Review this MR" : nil,
+                mergeRequestURL: executable ? item.url : nil, expectedHeadSHA: expectedHead)
         }
         return .init(item: item, latestJob: job, intents: [])
     }
@@ -75,24 +76,45 @@ struct MRHumanActionTests {
         #expect(previous.detail == nil)
     }
 
-    @Test func blockedRunTakesPriorityOverDraftsAndShowsTheActualReason() throws {
+    @Test(arguments: [AssistantJobExecution.State.blocked, .failed])
+    func stoppedRunOffersRetryWithoutLosingTheActualReasonOrDraftPriority(_ state: AssistantJobExecution.State) throws {
         var item = item()
         item.draftCount = 3
         let reason = "The source branch could not be pushed because push permission is off."
-        let execution = AssistantJobExecution(state: .blocked, summary: "[MR](https://gitlab.example.test/mr/2)\n\nThree comments checked.\n\n\(reason)")
+        let execution = AssistantJobExecution(state: state, summary: "[MR](https://gitlab.example.test/mr/2)\n\nThree comments checked.\n\n\(reason)")
         let action = try #require(MRHumanAction(row: row(item, execution: execution), assistantReady: true))
         #expect(action.kind == .blockedRun)
-        #expect(action.action == .reviewRun)
+        #expect(action.action == .retryRun)
         #expect(action.detail == reason)
-        #expect(String(localized: action.actionLabel) == "View run result")
+        #expect(String(localized: action.actionLabel) == "Try again")
     }
 
     @Test(arguments: [AssistantJobExecution.State.interrupted, .cancelled])
-    func interruptedRunRequiresAReviewOfTheRun(_ state: AssistantJobExecution.State) throws {
+    func interruptedOrCancelledRunOffersRetry(_ state: AssistantJobExecution.State) throws {
         let action = try #require(MRHumanAction(row: row(item(), execution: .init(state: state)), assistantReady: true))
         #expect(action.kind == .interruptedRun)
-        #expect(action.action == .reviewRun)
+        #expect(action.action == .retryRun)
         #expect(action.detail == nil)
+    }
+
+    @Test func cancelledWorkDoesNotOverrideAnExplicitNeutralAttentionProjection() {
+        var item = item()
+        item.humanActionRequired = false
+        #expect(MRHumanAction(row: row(item, execution: .init(state: .cancelled)), assistantReady: true) == nil)
+    }
+
+    @Test func aLegacyRunWithoutExecutableInstructionsKeepsItsResultAction() throws {
+        let action = try #require(MRHumanAction(row: row(item(), execution: .init(state: .failed), executable: false),
+                                              assistantReady: true))
+        #expect(action.action == .reviewRun)
+        #expect(String(localized: action.actionLabel) == "View run result")
+    }
+
+    @Test func aCompletedRunDoesNotReplaceTheCurrentPublicationDecisionWithRetry() throws {
+        var item = item()
+        item.draftCount = 1
+        let action = try #require(MRHumanAction(row: row(item, execution: .init(state: .succeeded)), assistantReady: true))
+        #expect(action.kind == .publication && action.action == .reviewDrafts)
     }
 
     @Test func draftCountAloneProducesAConcretePublicationReason() throws {

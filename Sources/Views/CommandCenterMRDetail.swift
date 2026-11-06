@@ -18,8 +18,30 @@ struct CommandCenterMRDetail: View {
     let item: MergeRequestAttentionMonitor.Item
     let monitor: TodoMonitorService
     var initialSection: CommandCenterMRDetailSection = .overview
+
+    var body: some View {
+        // Resolve the shared board projection once, outside layout-driven child updates.
+        let required = item.humanActionRequired ?? needsHumanAttention
+        CommandCenterMRDetailContent(item: item, monitor: monitor, initialSection: initialSection,
+                                     needsHumanAttention: required)
+    }
+
+    private var needsHumanAttention: Bool {
+        guard let target = monitor.scopeTarget(projectID: item.id.projectID, iid: item.id.iid, url: item.url) else { return false }
+        let key = "\(target.host)/\(target.username)/mr/\(item.id.projectID)/\(item.id.iid)"
+        return monitor.userAttention.items.contains { $0.id == key }
+    }
+}
+
+private struct CommandCenterMRDetailContent: View {
+    let item: MergeRequestAttentionMonitor.Item
+    let monitor: TodoMonitorService
+    let initialSection: CommandCenterMRDetailSection
+    let needsHumanAttention: Bool
     @Environment(\.openSettings) private var openSettings
     @State private var isStartingReview = false
+    @State private var isRetrying = false
+    @State private var retryError: String?
     @State private var discussionStore = MRDiscussionStore()
     @State private var detailsExpanded = false
     @State private var automationExpanded = false
@@ -38,11 +60,6 @@ struct CommandCenterMRDetail: View {
     }
     private var work: AssistantAutomationRunner.MergeRequestWork? {
         target.map { .init(host: $0.host, projectID: item.id.projectID, iid: item.id.iid) }
-    }
-    private var needsHumanAttention: Bool {
-        guard let target else { return false }
-        let key = "\(target.host)/\(target.username)/mr/\(item.id.projectID)/\(item.id.iid)"
-        return monitor.userAttention.items.contains { $0.id == key }
     }
     private var presentationItem: MergeRequestAttentionMonitor.Item {
         var value = item
@@ -142,6 +159,7 @@ struct CommandCenterMRDetail: View {
             .onChange(of: monitor.attention.confirmationStates[item.id]) { old, current in
                 if old == .publishing && current != .publishing { refreshDiscussions() }
             }
+            .onChange(of: jobs.first?.id) { _, _ in retryError = nil }
             .onChange(of: needsHumanAttention) { _, required in
                 if required && item.authorFeedbackStatus?.needsAttention == true { feedbackExpanded = true }
             }
@@ -211,7 +229,32 @@ struct CommandCenterMRDetail: View {
                     else if !item.needsConfirmation || (action.kind != .publication && action.kind != .approval) {
                         Text(action.message)
                     }
-                    if action.action == .reviewRun {
+                    if action.action == .retryRun, let job = jobs.first {
+                        HStack {
+                            Button {
+                                guard !isRetrying else { return }
+                                isRetrying = true
+                                retryError = nil
+                                Task {
+                                    defer { isRetrying = false }
+                                    guard monitor.assistantHandoffs.contains(where: { $0.id == job.id }) else { return }
+                                    await monitor.retryAssistantJob(job.id)
+                                    retryError = monitor.assistantJobActionError
+                                }
+                            } label: {
+                                if isRetrying { ProgressView().controlSize(.mini) }
+                                else { Text(action.actionLabel) }
+                            }
+                            .buttonStyle(.borderedProminent)
+                            .disabled(isRetrying || job.execution?.state.isActive != false
+                                      || !monitor.availableAssistants.contains(job.key.assistant)
+                                      || AssistantAutomationRunner.isWorking(on: job.key.work))
+                            Button { runsExpanded = true; Task { await scroll(to: .assistantRuns, proxy: proxy) } } label: {
+                                Text(.MRHumanAction.mrHumanActionActionReviewRun)
+                            }
+                            .buttonStyle(.plain)
+                        }
+                    } else if action.action == .reviewRun {
                         Button { runsExpanded = true; Task { await scroll(to: .assistantRuns, proxy: proxy) } } label: {
                             Text(action.actionLabel)
                         }
@@ -224,6 +267,9 @@ struct CommandCenterMRDetail: View {
                     }
                 } else if !needsHumanAttention && !item.needsConfirmation {
                     Text(.CommandCenter.commandCenterNoPendingDecision).foregroundStyle(.secondary)
+                }
+                if let retryError {
+                    Text(verbatim: retryError).foregroundStyle(.red).fixedSize(horizontal: false, vertical: true)
                 }
                 if item.needsConfirmation { confirmationControls }
                 decisionActions
@@ -255,71 +301,79 @@ struct CommandCenterMRDetail: View {
 
     private var feedbackCheck: some View {
         DisclosureGroup(isExpanded: $feedbackExpanded) {
-            AuthorFeedbackView(item: presentationItem, monitor: monitor).padding(.top, 8)
+            if feedbackExpanded {
+                AuthorFeedbackView(item: presentationItem, monitor: monitor).padding(.top, 8)
+            }
         } label: { Text(.CommandCenter.commandCenterFeedbackCheck).font(.subheadline.weight(.medium)) }
     }
 
     private var details: some View {
         DisclosureGroup(isExpanded: $detailsExpanded) {
-            VStack(alignment: .leading, spacing: 10) {
-                if let request = item.mergeRequest {
-                    metadata(.CommandCenter.commandCenterAuthor, value: "@\(request.author.username)")
-                    metadata(.CommandCenter.commandCenterSource, value: request.sourceBranch)
-                    metadata(.CommandCenter.commandCenterTarget, value: request.targetBranch)
-                    if let sha = request.sha { metadata(.CommandCenter.commandCenterCommit, value: sha, monospaced: true) }
-                    metadata(.CommandCenter.commandCenterMergeState,
-                        value: request.detailedMergeStatus?.replacingOccurrences(of: "_", with: " ")
-                            ?? String(localized: .CommandCenter.commandCenterStatusUnavailable))
-                    metadata(.CommandCenter.commandCenterPipeline,
-                        value: request.headPipeline?.status.replacingOccurrences(of: "_", with: " ")
-                            ?? String(localized: .CommandCenter.commandCenterNoPipeline))
+            if detailsExpanded {
+                VStack(alignment: .leading, spacing: 10) {
+                    if let request = item.mergeRequest {
+                        metadata(.CommandCenter.commandCenterAuthor, value: "@\(request.author.username)")
+                        metadata(.CommandCenter.commandCenterSource, value: request.sourceBranch)
+                        metadata(.CommandCenter.commandCenterTarget, value: request.targetBranch)
+                        if let sha = request.sha { metadata(.CommandCenter.commandCenterCommit, value: sha, monospaced: true) }
+                        metadata(.CommandCenter.commandCenterMergeState,
+                            value: request.detailedMergeStatus?.replacingOccurrences(of: "_", with: " ")
+                                ?? String(localized: .CommandCenter.commandCenterStatusUnavailable))
+                        metadata(.CommandCenter.commandCenterPipeline,
+                            value: request.headPipeline?.status.replacingOccurrences(of: "_", with: " ")
+                                ?? String(localized: .CommandCenter.commandCenterNoPipeline))
+                    }
+                    statusReasons
                 }
-                statusReasons
+                .padding(.top, 12)
             }
-            .padding(.top, 12)
         } label: { Text(.CommandCenter.commandCenterDetails).font(.headline) }
     }
 
     private var automation: some View {
         DisclosureGroup(isExpanded: $automationExpanded) {
-            VStack(alignment: .leading, spacing: 12) {
-                if !showsDecisions {
-                    if item.needsConfirmation { confirmationControls }
-                    decisionActions
-                    if item.authorFeedbackStatus != nil { feedbackCheck.id(Anchor.feedbackStatus) }
-                }
-                if !item.isAuthored && !monitor.mrTodoIntents(for: item).contains(where: { $0.kind == .review }) {
-                    Button {
-                        isStartingReview = true
-                        Task { defer { isStartingReview = false }; await monitor.runReview(for: item) }
-                    } label: {
-                        Label { Text(isStartingReview ? .CommandCenter.commandCenterReviewStarting : .CommandCenter.commandCenterReviewRun) }
-                            icon: { Image(systemName: "text.magnifyingglass") }
+            if automationExpanded {
+                VStack(alignment: .leading, spacing: 12) {
+                    if !showsDecisions {
+                        if item.needsConfirmation { confirmationControls }
+                        decisionActions
+                        if item.authorFeedbackStatus != nil { feedbackCheck.id(Anchor.feedbackStatus) }
                     }
-                    .disabled(isStartingReview || !monitor.canRunReview(for: item))
-                    .help(Text(.CommandCenter.commandCenterReviewHelp))
+                    if !item.isAuthored && !monitor.mrTodoIntents(for: item).contains(where: { $0.kind == .review }) {
+                        Button {
+                            isStartingReview = true
+                            Task { defer { isStartingReview = false }; await monitor.runReview(for: item) }
+                        } label: {
+                            Label { Text(isStartingReview ? .CommandCenter.commandCenterReviewStarting : .CommandCenter.commandCenterReviewRun) }
+                                icon: { Image(systemName: "text.magnifyingglass") }
+                        }
+                        .disabled(isStartingReview || !monitor.canRunReview(for: item))
+                        .help(Text(.CommandCenter.commandCenterReviewHelp))
+                    }
+                    if let error = monitor.assistantJobActionError {
+                        Text(verbatim: error).font(.caption).foregroundStyle(.orange)
+                    }
                 }
-                if let error = monitor.assistantJobActionError {
-                    Text(verbatim: error).font(.caption).foregroundStyle(.orange)
-                }
+                .controlSize(.small).padding(.top, 12)
             }
-            .controlSize(.small).padding(.top, 12)
         } label: { Text(.CommandCenter.commandCenterAutomation).font(.headline) }
     }
 
     private var agentRuns: some View {
         DisclosureGroup(isExpanded: $runsExpanded) {
-            VStack(alignment: .leading, spacing: 12) {
-                if jobs.isEmpty { Text(.AssistantJobs.assistantJobsEmpty).foregroundStyle(.secondary) }
-                ForEach(showAllRuns ? jobs : Array(jobs.prefix(1))) { job in AssistantJobRow(handoff: job, monitor: monitor) }
-                if jobs.count > 1 {
-                    Button { showAllRuns.toggle() } label: {
-                        Text(showAllRuns ? .CommandCenter.commandCenterShowLess : .CommandCenter.commandCenterShowAll)
+            if runsExpanded {
+                VStack(alignment: .leading, spacing: 12) {
+                    if jobs.isEmpty { Text(.AssistantJobs.assistantJobsEmpty).foregroundStyle(.secondary) }
+                    ForEach(showAllRuns ? jobs : Array(jobs.prefix(1))) { job in AssistantJobRow(handoff: job, monitor: monitor) }
+                    if jobs.count > 1 {
+                        Button { showAllRuns.toggle() } label: {
+                            Text(showAllRuns ? .CommandCenter.commandCenterShowLess : .CommandCenter.commandCenterShowAll)
+                        }
+                        .buttonStyle(.link)
                     }
-                    .buttonStyle(.link)
                 }
+                .padding(.top, 12)
             }
-            .padding(.top, 12)
         } label: {
             Text(.CommandCenter.commandCenterAgentRunsCount(jobs.count)).font(.headline)
                 .help(Text(.AssistantJobs.assistantJobsExplanation))
@@ -328,28 +382,30 @@ struct CommandCenterMRDetail: View {
 
     private var recentActivity: some View {
         DisclosureGroup(isExpanded: $activityExpanded) {
-            VStack(alignment: .leading, spacing: 12) {
-                if workflowEntries.isEmpty { Text(.CommandCenter.commandCenterActivityEmpty).foregroundStyle(.secondary) }
-                ForEach(showAllActivity ? workflowEntries : Array(workflowEntries.prefix(3))) { entry in
-                    VStack(alignment: .leading, spacing: 5) {
-                        HStack {
-                            Text(entry.event.kind.displayLabel).font(.subheadline.weight(.medium))
-                            Spacer()
-                            Text(entry.createdAt, style: .relative).font(.caption).foregroundStyle(.secondary)
+            if activityExpanded {
+                VStack(alignment: .leading, spacing: 12) {
+                    if workflowEntries.isEmpty { Text(.CommandCenter.commandCenterActivityEmpty).foregroundStyle(.secondary) }
+                    ForEach(showAllActivity ? workflowEntries : Array(workflowEntries.prefix(3))) { entry in
+                        VStack(alignment: .leading, spacing: 5) {
+                            HStack {
+                                Text(entry.event.kind.displayLabel).font(.subheadline.weight(.medium))
+                                Spacer()
+                                Text(entry.createdAt, style: .relative).font(.caption).foregroundStyle(.secondary)
+                            }
+                            Text(verbatim: entry.summary ?? entry.event.context)
+                                .font(.subheadline).foregroundStyle(.secondary).textSelection(.enabled)
                         }
-                        Text(verbatim: entry.summary ?? entry.event.context)
-                            .font(.subheadline).foregroundStyle(.secondary).textSelection(.enabled)
+                        Divider()
                     }
-                    Divider()
-                }
-                if workflowEntries.count > 3 {
-                    Button { showAllActivity.toggle() } label: {
-                        Text(showAllActivity ? .CommandCenter.commandCenterShowLess : .CommandCenter.commandCenterShowAll)
+                    if workflowEntries.count > 3 {
+                        Button { showAllActivity.toggle() } label: {
+                            Text(showAllActivity ? .CommandCenter.commandCenterShowLess : .CommandCenter.commandCenterShowAll)
+                        }
+                        .buttonStyle(.link)
                     }
-                    .buttonStyle(.link)
                 }
+                .padding(.top, 12)
             }
-            .padding(.top, 12)
         } label: { Text(.CommandCenter.commandCenterActivity).font(.headline) }
     }
 

@@ -8,6 +8,7 @@ struct CommandCenterMRCard: View {
     var onAttention: ((CommandCenterMRDetailSection) -> Void)? = nil
     let onDetails: () -> Void
     @State private var isStarting = false
+    @State private var retryError: String?
     @State private var confirmRemoval = false
     @Environment(\.openSettings) private var openSettings
 
@@ -70,6 +71,10 @@ struct CommandCenterMRCard: View {
                 .font(.caption).foregroundStyle(.orange)
                 .lineLimit(2).fixedSize(horizontal: false, vertical: true)
             }
+            if let retryError {
+                Text(verbatim: retryError).font(.caption).foregroundStyle(.red)
+                    .fixedSize(horizontal: false, vertical: true)
+            }
             if busy || row.latestJob?.execution?.state.isActive == true || humanAction != nil || neutralStatus != nil {
                 HStack(spacing: 6) {
                     if let job = row.latestJob, job.execution?.state.isActive == true {
@@ -80,6 +85,9 @@ struct CommandCenterMRCard: View {
                     } else if busy {
                         ProgressView().controlSize(.mini)
                         Text(.Board.boardCompactWorking)
+                    } else if humanAction?.action == .retryRun {
+                        Button { openAttention(.assistantRuns) } label: { Text(.MRHumanAction.mrHumanActionActionReviewRun) }
+                            .buttonStyle(.plain)
                     } else if humanAction == nil, let status = neutralStatus {
                         Text(status).lineLimit(1)
                     }
@@ -96,6 +104,7 @@ struct CommandCenterMRCard: View {
                 }
             }
         }
+        .onChange(of: row.latestJob?.id) { _, _ in retryError = nil }
         .controlSize(.small)
         .padding(12)
         .frame(maxWidth: .infinity, alignment: .leading)
@@ -160,6 +169,21 @@ struct CommandCenterMRCard: View {
         switch action.action {
         case .reviewRun:
             primary(action.actionLabel) { openAttention(.assistantRuns) }
+        case .retryRun:
+            if let job = row.latestJob {
+                primary(action.actionLabel,
+                        enabled: job.execution?.state.isActive == false
+                            && monitor.availableAssistants.contains(job.key.assistant)
+                            && !AssistantAutomationRunner.isWorking(on: job.key.work)) {
+                    guard !isStarting else { return }
+                    retryError = nil
+                    start {
+                        guard monitor.assistantHandoffs.contains(where: { $0.id == job.id }) else { return }
+                        await monitor.retryAssistantJob(job.id)
+                        retryError = monitor.assistantJobActionError
+                    }
+                }
+            }
         case .reviewDrafts, .reviewApproval:
             primary(action.actionLabel) { openAttention(.drafts) }
         case .verifyFeedback:

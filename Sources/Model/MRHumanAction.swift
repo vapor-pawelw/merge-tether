@@ -4,7 +4,7 @@ import Foundation
 @MainActor
 struct MRHumanAction {
     enum Kind: Equatable { case blockedRun, interruptedRun, publication, uncheckedDrafts, verificationFailure, setupAssistant, reviewDecision, approval, pipelineHandoff, merge, feedback, intent }
-    enum Action: Equatable { case reviewRun, reviewDrafts, verifyFeedback, setupAssistant, reviewDecision, reviewApproval, reviewHandoff, reviewMerge, handleFeedback, retryIntent, reviewFeedback, reviewIssue }
+    enum Action: Equatable { case reviewRun, retryRun, reviewDrafts, verifyFeedback, setupAssistant, reviewDecision, reviewApproval, reviewHandoff, reviewMerge, handleFeedback, retryIntent, reviewFeedback, reviewIssue }
     let kind: Kind
     let action: Action
     let message: LocalizedStringResource
@@ -12,6 +12,7 @@ struct MRHumanAction {
     var actionLabel: LocalizedStringResource {
         switch action {
         case .reviewRun: .MRHumanAction.mrHumanActionActionReviewRun
+        case .retryRun: .MRHumanAction.mrHumanActionActionRetryRun
         case .reviewDrafts: .MRHumanAction.mrHumanActionActionReviewDrafts
         case .verifyFeedback: .MRHumanAction.mrHumanActionActionVerifyFeedback
         case .setupAssistant: .MRHumanAction.mrHumanActionActionSetupAssistant
@@ -45,7 +46,8 @@ struct MRHumanAction {
         let stoppedOnOlderHead = !mayHavePushed && previousHead != nil && currentHead != nil && previousHead != currentHead
         if let execution = stoppedRun, !stoppedOnOlderHead {
             let interrupted = execution.state == .interrupted || execution.state == .cancelled
-            self.init(kind: interrupted ? .interruptedRun : .blockedRun, action: .reviewRun,
+            let executable = row.latestJob?.taskPrompt != nil && row.latestJob?.mergeRequestURL != nil
+            self.init(kind: interrupted ? .interruptedRun : .blockedRun, action: executable ? .retryRun : .reviewRun,
                       message: interrupted ? .MRHumanAction.mrHumanActionInterruptedRun : .MRHumanAction.mrHumanActionBlockedRun,
                       detail: execution.attentionExplanation)
             return

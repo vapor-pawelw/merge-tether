@@ -2,13 +2,24 @@
   "sourceLanguage": "en",
   "version": "1.0",
   "strings": {
+    "mrHumanAction.action.retryRun": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Try again"
+          }
+        }
+      }
+    },
     "mrHumanAction.blockedRun": {
       "extractionState": "manual",
       "localizations": {
         "en": {
           "stringUnit": {
             "state": "translated",
-            "value": "The agent stopped before finishing. Review the run result."
+            "value": "The agent stopped before finishing."
           }
         }
       }
@@ -19,7 +30,7 @@
         "en": {
           "stringUnit": {
             "state": "translated",
-            "value": "The previous run was interrupted. Review it before continuing."
+            "value": "The previous run was interrupted."
           }
         }
       }
