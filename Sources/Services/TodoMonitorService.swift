@@ -163,10 +163,7 @@ final class TodoMonitorService {
         catch { Log.monitor.error("Could not retire legacy GUI queue: \(String(describing: error), privacy: .private)") }
     }
 
-    /// Runs at app launch: probes glab, refreshes persisted state, and kicks
-    /// off the first fetch + polling timer if onboarding is already done so
-    /// the menu bar count reflects the real inbox without waiting for the
-    /// user to open the dropdown.
+    /// Refreshes CLI availability and sign-in without depending on desktop chats.
     func refreshAvailableAssistants() {
         assistantDependencies.refresh(requireCLI: requiresAssistantCLI, force: true)
     }
@@ -795,7 +792,6 @@ final class TodoMonitorService {
         retireLegacyGUIQueueIfNeeded()
         refreshAvailableAssistants()
         refreshAssistantRelay()
-        authoredMergeRequests.refreshIfNeeded()
         guard !isLoading else { return }
         isLoading = true
         defer {
@@ -805,6 +801,12 @@ final class TodoMonitorService {
             scheduleUserAttentionNotifications()
         }
 
+        // A launch-time probe can fail while offline. Fetching to-dos alone
+        // cannot restore the account required by the MR monitors.
+        if glab.currentUsername == nil || lastError == .notAuthenticated {
+            if await recheckIntegration() != nil { return }
+        }
+        authoredMergeRequests.refreshIfNeeded()
         let username = glab.currentUsername
         let host = username == nil ? nil : glab.resolvedHost
         let result = await glab.fetchTodos(host: host)
@@ -1119,16 +1121,14 @@ final class TodoMonitorService {
         restartUnreadReminderTimer()
     }
 
-    /// Re-runs glab detection and pushes the resolved state into settings so a
-    /// Re-check button in Settings or Onboarding updates the monitor live.
-    func recheckIntegration() async {
-        if let error = await glab.recheck() {
-            lastError = error
-        } else {
-            lastError = nil
-        }
+    /// Refreshes glab authentication and shares the current host with settings.
+    @discardableResult
+    func recheckIntegration() async -> GlabError? {
+        let error = await glab.recheck()
+        lastError = error
         settings.resolvedHost = glab.resolvedHost
         settings.save()
-        authoredMergeRequests.refreshIfNeeded()
+        if error == nil { authoredMergeRequests.refreshIfNeeded() }
+        return error
     }
 }

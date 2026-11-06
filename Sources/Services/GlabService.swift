@@ -18,6 +18,7 @@ final class GlabService {
 
     /// Authentication state relative to the default host.
     var authStatus: AuthStatus = .unknown
+    @ObservationIgnored private var authenticationCheck: Task<GlabError?, Never>?
 
     /// Dashboard URL for "Open in browser" links in the menu header.
     var dashboardTodosURL: URL? {
@@ -111,21 +112,30 @@ final class GlabService {
     }
 
     /// Refreshes `resolvedHost`, `authedHosts`, `authStatus` and `currentUsername`
-    /// by parsing `glab auth status`. Returns a hard error only when we can't
-    /// reach glab at all; the "wrong default host" and "not authenticated"
-    /// cases are surfaced via `authStatus`, not as thrown errors.
+    /// by parsing `glab auth status`. Probe failures preserve the last known
+    /// account; an explicit missing login is reflected in `authStatus`.
     @discardableResult
     func recheck() async -> GlabError? {
+        if let authenticationCheck { return await authenticationCheck.value }
+        let task = Task { await performRecheck() }
+        authenticationCheck = task
+        let result = await task.value
+        authenticationCheck = nil
+        return result
+    }
+
+    private func performRecheck() async -> GlabError? {
         guard let glabPath else {
             authStatus = .notAuthenticated
             return .glabNotInstalled
         }
 
-        if let host = await resolveHost(executable: glabPath) {
-            resolvedHost = host
+        let probedHost = await resolveHost(executable: glabPath)
+        switch await probeAuthedHosts(executable: glabPath, defaultHost: probedHost ?? resolvedHost) {
+        case .success(let hosts): authedHosts = hosts
+        case .failure(let error): return error
         }
-
-        authedHosts = await probeAuthedHosts(executable: glabPath)
+        if let probedHost { resolvedHost = probedHost }
 
         if let defaultHost = resolvedHost,
            let entry = authedHosts.first(where: { $0.host == defaultHost }) {
@@ -164,7 +174,7 @@ final class GlabService {
         return host
     }
 
-    private func probeAuthedHosts(executable: URL) async -> [AuthedHost] {
+    private func probeAuthedHosts(executable: URL, defaultHost: String?) async -> Result<[AuthedHost], GlabError> {
         let output: ProcessRunner.Output
         do {
             output = try await ProcessRunner.run(
@@ -173,12 +183,40 @@ final class GlabService {
                 environment: Self.shellEnvironment,
                 timeout: 10
             )
+        } catch ProcessRunner.RunError.timedOut {
+            return .failure(.timedOut)
         } catch {
-            return []
+            return .failure(.unknown(error.localizedDescription))
         }
-        // glab writes the status report to stderr; parse both streams just in case.
+        // A multi-host report may contain a valid login even when another host fails.
         let stdoutString = String(data: output.stdout, encoding: .utf8) ?? ""
-        return Self.parseAuthedHosts(from: output.stderr + "\n" + stdoutString)
+        let report = (output.stderr + "\n" + stdoutString).trimmingCharacters(in: .whitespacesAndNewlines)
+        let hosts = Self.parseAuthedHosts(from: report)
+        guard output.exitCode != 0, !hosts.contains(where: { $0.host == defaultHost }) else { return .success(hosts) }
+        let diagnostic = Self.authenticationDiagnostic(report, host: defaultHost)
+        let error = GlabError.classify(exitCode: output.exitCode, stderr: diagnostic)
+        if case .network = error { return .failure(error) }
+        let lower = diagnostic.lowercased()
+        if error == .notAuthenticated || lower.contains("not logged in") || lower.contains("no token found") {
+            return .success(hosts)
+        }
+        return .failure(diagnostic.isEmpty ? .nonZeroExit(code: output.exitCode, stderr: report) : error)
+    }
+
+    /// glab reports one unindented host followed by its indented diagnostics.
+    /// Never let another host's missing token explain a default-host failure.
+    private static func authenticationDiagnostic(_ report: String, host: String?) -> String {
+        guard let host else { return report }
+        let lines = report.components(separatedBy: "\n")
+        if let index = lines.firstIndex(where: { $0.trimmingCharacters(in: .whitespaces) == host }) {
+            return lines.dropFirst(index + 1).prefix { $0.isEmpty || $0.first?.isWhitespace == true }
+                .joined(separator: "\n").trimmingCharacters(in: .whitespacesAndNewlines)
+        }
+        let scoped = lines.filter {
+            $0.trimmingCharacters(in: .whitespaces).hasPrefix(host + ":")
+                || $0.contains("https://" + host + "/") || $0.contains("http://" + host + "/")
+        }.joined(separator: "\n")
+        return scoped.isEmpty && lines.count == 1 ? report : scoped
     }
 
     /// Backfills `resolvedHost` from a fetched todo's `target_url` when
