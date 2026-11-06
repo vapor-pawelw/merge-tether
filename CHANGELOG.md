@@ -6,6 +6,10 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 
 ## Unreleased
 
+### Added
+
+- Add a development-only remote-connectivity probe under `prototypes/remote-relay`, with encrypted QR pairing, a synthetic acknowledged action, and a deployment configuration for Cloudflare Free.
+
 ### Fixed
 
 - Verify live MR state and queued account before Codex dispatch. Skip merged/closed MR work without creating chats or false delivery receipts, retain failed checks for retry, and preserve existing-chat title updates.

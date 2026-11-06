@@ -1,0 +1,34 @@
+<!doctype html>
+<html lang="pl">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="referrer" content="no-referrer">
+  <title>MergeTether · Test połączenia</title>
+  <link rel="stylesheet" href="/style.css">
+  <script type="module" src="/app.mjs"></script>
+</head>
+<body>
+  <main>
+    <header><span class="brand">MergeTether</span><span class="badge">PROTOTYP</span></header>
+    <section class="intro">
+      <p class="eyebrow">TWÓJ MAC, POD RĘKĄ</p>
+      <h1>Test połączenia</h1>
+      <p class="subtitle">Podgląd i akcje z telefonu. Bez dodatkowego VPN.</p>
+      <div class="status"><span id="dot"></span><span id="status" role="status">Zeskanuj kod QR wyświetlony na Macu</span></div>
+      <p id="updated" class="muted">Ten prototyp używa wyłącznie danych testowych.</p>
+    </section>
+    <section class="lanes" aria-label="Status zadań">
+      <article class="lane"><h2>Do potwierdzenia <span id="ready-count">0</span></h2><div id="ready"></div></article>
+      <article class="lane"><h2>W trakcie <span>0</span></h2><p class="empty">Brak zadań</p></article>
+      <article class="lane"><h2>Gotowe <span id="done-count">0</span></h2><div id="done"><p class="empty">Brak wyników</p></div></article>
+    </section>
+    <section class="controls">
+      <button id="action" disabled>Testuj akcję na Macu</button>
+      <button id="refresh" class="secondary" disabled>Odśwież</button>
+      <p id="result" role="status" class="muted">Wynik pojawi się po potwierdzeniu z Maca.</p>
+    </section>
+    <footer>Połączenie jest aktywne podczas korzystania ze strony. Mac musi być włączony.</footer>
+  </main>
+</body>
+</html>
