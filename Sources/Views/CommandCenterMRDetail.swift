@@ -19,6 +19,7 @@ struct CommandCenterMRDetail: View {
         ScrollView {
             VStack(alignment: .leading, spacing: 24) {
                 header
+                AuthorFeedbackView(item: item, monitor: monitor)
                 if item.needsConfirmation {
                     ConfirmationQueueRow(
                         item: item, state: monitor.attention.confirmationStates[item.id],

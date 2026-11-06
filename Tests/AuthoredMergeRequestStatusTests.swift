@@ -250,6 +250,7 @@ struct AuthoredMergeRequestStatusTests {
                 /projects/1/merge_requests/2) cat request.json ;;
                 /projects/1/merge_requests/2/approval_state)
                     echo '{"rules":[{"approvals_required":2,"approved":true}]}' ;;
+                /projects/1/merge_requests/2/draft_notes\\?*) echo '[]' ;;
                 /projects/1/merge_requests/2/discussions\\?*)
                     if [ -e resolve ]; then echo '[]'; else echo '[{"notes":[{"resolvable":true,"resolved":false}]}]'; fi ;;
                 /projects/1) echo '{"only_allow_merge_if_all_discussions_are_resolved":true}' ;;

@@ -371,6 +371,7 @@ extension GlabService {
         headSHA: String,
         host: String,
         expectedUser: GitLabAuthenticatedUser,
+        expectedDiscussionFingerprint: String? = nil,
         shouldProceed: @MainActor () -> Bool = { true }
     ) async throws {
         struct MergeResult: Decodable {
@@ -388,6 +389,17 @@ extension GlabService {
             throw GlabError.decoding("GitLab did not provide a full source SHA")
         }
         guard let executable = glabPath else { throw GlabError.glabNotInstalled }
+        if let expectedDiscussionFingerprint {
+            async let request = fetchMergeRequest(projectID: projectID, iid: iid, host: host)
+            async let discussions = fetchMergeRequestDiscussions(projectID: projectID, iid: iid, host: host)
+            async let drafts = fetchOwnDraftNoteCount(projectID: projectID, iid: iid, host: host, userID: expectedUser.id)
+            let (live, threads, pending) = try await (request, discussions, drafts)
+            guard live.author.id == expectedUser.id, live.state == "opened", live.draft == false,
+                  live.sha == headSHA, live.webURL.isGitLabMergeRequest(host: host, iid: iid), pending == 0,
+                  ReviewVerdict.fingerprint(threads) == expectedDiscussionFingerprint else {
+                throw CancellationError()
+            }
+        }
         let user = try await fetchAuthenticatedUser(host: host, expectedUsername: expectedUser.username)
         guard user == expectedUser, glabPath == executable else { throw GlabError.notAuthenticated }
         try Task.checkCancellation()

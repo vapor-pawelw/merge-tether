@@ -83,6 +83,8 @@ enum AssistantAutomationRunner {
         var openedAt: Date?
         var chatID: String?
         var feedbackNoteIDs: [Int]?
+        /// Attempts bind reviewer content, so our own replies or pushes cannot replay a fix.
+        var verifiedFeedbackNotes: [Int: String]?
         var feedbackTodos: [Todo.FeedbackIdentity]?
         var codexDispatchRequested: Bool?
         var reviewModel: CodexReviewModel?
@@ -189,7 +191,8 @@ enum AssistantAutomationRunner {
         allowsPush: Bool = false,
         showChat: Bool = false,
         pipelineReservation: ExistingPipelineWorkDetector.Key? = nil,
-        feedbackNoteIDs: [Int] = [], feedbackTodo: Todo.FeedbackIdentity? = nil,
+        feedbackNoteIDs: [Int] = [], verifiedFeedbackNotes: [Int: String]? = nil,
+        feedbackTodo: Todo.FeedbackIdentity? = nil,
         feedbackTodos: [Todo.FeedbackIdentity] = [],
         isReview: Bool = false,
         mrWorkflow: MRWorkflow? = nil,
@@ -204,6 +207,7 @@ enum AssistantAutomationRunner {
         if jobCoordinator == nil {
             headSHA = try await freshRequest(work: work, username: username, settings: settings).sha
             guard let headSHA, !headSHA.isEmpty else { throw AssistantJobExecutor.ExecutionError.inactiveMergeRequest }
+            if let expectedHeadSHA, expectedHeadSHA != headSHA { throw AssistantJobExecutor.ExecutionError.headChanged }
         } else { headSHA = expectedHeadSHA }
         guard !executionCoordinator.isWorking(on: work) else { throw HandoffError.executionUnavailable }
         let boundedPrompt = refreshedTaskPrompt(prompt, expectedHeadSHA: headSHA)
@@ -288,6 +292,7 @@ enum AssistantAutomationRunner {
                 """,
             createdAt: Date(), allowsPush: allowsPush, pipelineReservation: pipelineReservation,
             feedbackNoteIDs: feedbackNoteIDs.isEmpty ? nil : feedbackNoteIDs,
+            verifiedFeedbackNotes: verifiedFeedbackNotes,
             feedbackTodos: acknowledgements.isEmpty ? nil : acknowledgements,
             reviewModel: useReviewModel ? settings.automation.codexReviewModel : nil,
             reviewThinking: useReviewModel ? settings.automation.codexReviewThinking : nil,
@@ -298,6 +303,10 @@ enum AssistantAutomationRunner {
             resolvesOwnThreads: (isReview || mrWorkflow == .review) ? settings.automation.autoResolveOwnReviewThreads : nil,
             manual: manual, expectedHeadSHA: headSHA, configurationSnapshot: settings.automation
         )
+        let target = MRAutomationScope.Target(host: work.host, username: username, projectID: work.projectID, iid: work.iid)
+        for (noteID, revision) in verifiedFeedbackNotes ?? [:] {
+            settings.authorFeedbackAttempts.insert(.init(target: target, noteID: noteID, revision: revision))
+        }
         settings.assistantHandoffs.append(handoff)
         settings.save()
         if mrWorkflow == .followUp { FollowUpVerificationStore.register(handoff, settings: settings) }

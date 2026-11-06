@@ -52,10 +52,14 @@ struct GitLabMergeRequestDiscussion: Codable, Sendable {
         let resolved: Bool?
         let resolvedBy: GitLabWorkflowUser?
         var body: String? = nil
+        var createdAt: String? = nil
+        var updatedAt: String? = nil
 
         enum CodingKeys: String, CodingKey {
             case id, author, system, resolvable, resolved, body
             case resolvedBy = "resolved_by"
+            case createdAt = "created_at"
+            case updatedAt = "updated_at"
         }
     }
 

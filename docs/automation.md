@@ -101,9 +101,23 @@ The verifier proves the selected committed files reached the remote revision. Me
 
 The verifier receives bounded, credential-filtered current diff and discussion evidence. It classifies every external non-system comment, including general comments, and returns reasons tied to note IDs. Informational summaries require no answer. A concern blocks its reviewer; unrelated feedback need not block another reviewer whose concerns are addressed. Unsupported author claims are not proof, and missing evidence stays uncertain.
 
-These assessments request another review; they do not approve merges or resolve discussions. Results are reused for unchanged inputs during the app session and invalidated by account, head, discussion, provider or model changes. Failed assessments do not rerun on every refresh.
+These assessments support re-review requests and the accepted-feedback checks below; they never themselves authorize a GitLab write. Results are reused for unchanged inputs during the app session and invalidated by account, head, discussion, provider or model changes. Failed assessments do not rerun on every refresh.
 
 When verification fails or is unavailable, the MR shows the reason and **Verify again**. If no other feedback or draft blocker is known, **Confirm readiness and request re-review** allows explicit manual confirmation. That confirmation binds the displayed head/discussion content; the app rechecks the live account, scope, MR state and drafts before notifying reviewers. With automatic verification off, manual confirmation remains available, but other assistant automation still requires a signed-in CLI.
+
+## Accepted feedback on your own merge requests
+
+**Settings → Automation → Checkpoints → Resolve addressed feedback after reviewer acceptance** defaults to on for new and migrated settings. Explicitly disabling it is preserved. It applies only to your own open, non-draft MRs within the enabled automation scope and requires the signed-in selected CLI.
+
+The verifier checks the current diff and every external comment, including general comments and conditions in other threads. A reviewer's current approval is consent to close their verified addressed threads; it is never proof that their requests were fulfilled. An advance approval such as “approved, but still do X” remains blocked until the request is implemented or substantively answered with a justified explanation. Warranted work enters the configured author-follow-up workflow, with its existing push and publication permissions.
+
+A later explicit acceptance comment by the same reviewer can also provide consent. It may be a general summary covering several findings. The verifier must tie it to the current code and concerns; the app checks the cited note's author and chronology. Generic thanks, another person's approval, stale acceptance and account-specific exceptions do not qualify. Every actionable participant in a thread must be satisfied, and missing evidence prevents resolution.
+
+Before each resolution the app rechecks the live account, owned MR, source head, entire discussion text, current approvals, drafts, settings and scope. Pending replies must be published first. The MR detail shows remaining corrections or explanations, unpublished replies, verification failures and reviewers whose acceptance is missing. A reviewer who has already accepted is not asked to review the same unchanged feedback again.
+
+Each automatic follow-up attempt records the reviewer note ID and content revision. An assistant reply or new commit alone cannot replay that attempt; edited or new reviewer feedback can start new work, and explicit manual retries remain available. Large sets are handled in bounded batches. Stale live evidence triggers a fresh poll; actual verification/API failures remain visible for deliberate retry rather than automatically repeating uncertain remote work.
+
+Automatic merge also requires a fresh complete semantic assessment when external feedback exists. A remaining condition in a general comment blocks it even when GitLab's approval rules are satisfied and every resolvable thread is closed. Turning off thread resolution does not bypass this merge check.
 
 ## Automatic approval
 
@@ -115,7 +129,7 @@ When verification fails or is unavailable, the MR shows the reason and **Verify 
 - an open, non-draft MR you review, within automation scope, which you have not approved yet;
 - the selected CLI ready for automation.
 
-Approval is pinned to the checked source SHA. A new or edited comment invalidates the verdict; resolution-only changes preserve it. If GitLab refuses automatic approval, the app stops retrying that commit and retains the manual **Approve** action. Disable approval for an individual reviewed MR in its detail controls or automation scope settings. Nobody else’s discussion is automatically resolved.
+Approval is pinned to the checked source SHA. A new or edited comment invalidates the verdict; resolution-only changes preserve it. If GitLab refuses automatic approval, the app stops retrying that commit and retains the manual **Approve** action. Disable approval for an individual reviewed MR in its detail controls or automation scope settings. On someone else's MR, resolution remains limited to your own verified review findings; accepted-feedback resolution applies only when you own the MR.
 
 ## What each action may do
 

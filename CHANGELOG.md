@@ -8,6 +8,7 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 
 ### Added
 
+- Verify all expectations on your own MRs before resolving accepted feedback, with a default-on setting, generic reviewer acceptance and visible remaining blockers. Keep conditional advance approvals from bypassing follow-up work or automatic merge.
 - Show a neutral or amber menu-bar attention indicator and notify about work needing a human decision, with in-app notification permission controls.
 
 - Open MergeTether as a regular macOS Dock application with a resizable three-column MR board, direct card actions and detailed MR views.

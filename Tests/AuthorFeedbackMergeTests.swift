@@ -1,0 +1,131 @@
+import Foundation
+import Testing
+@testable import GitLabTodos
+
+@MainActor
+struct AuthorFeedbackMergeTests {
+    @Test func advanceApprovalWithGeneralConditionCannotMergeWithoutSemanticProof() async throws {
+        try await withFixture { monitor, folder, _ in
+            monitor.refreshIfNeeded()
+            let deadline = ContinuousClock.now + .seconds(5)
+            while monitor.isLoading, ContinuousClock.now < deadline { try await Task.sleep(for: .milliseconds(20)) }
+            try #require(!monitor.isLoading)
+            #expect(!monitor.hasError)
+            #expect(!FileManager.default.fileExists(atPath: folder.appending(path: "merged").path))
+            #expect(monitor.requests.count == 1)
+        }
+    }
+
+    @Test func semanticProofCanAuthorizeMergeOfTheVerifiedConversation() async throws {
+        try await withFixture { monitor, folder, _ in
+            var verified = false
+            monitor.authorFeedbackAllowsMerge = { request, discussions, author in
+                verified = request.iid == 2 && author == 3 && discussions.flatMap(\.notes).map(\.id) == [10]
+                return verified
+            }
+            try await refresh(monitor)
+            #expect(verified)
+            #expect(!monitor.hasError)
+            #expect(FileManager.default.fileExists(atPath: folder.appending(path: "merged").path))
+        }
+    }
+
+    @Test func rejectedSemanticProofKeepsTheMRPending() async throws {
+        try await withFixture { monitor, folder, _ in
+            monitor.authorFeedbackAllowsMerge = { _, _, _ in false }
+            try await refresh(monitor)
+            #expect(!monitor.hasError)
+            #expect(!FileManager.default.fileExists(atPath: folder.appending(path: "merged").path))
+            #expect(monitor.requests.count == 1)
+        }
+    }
+
+    enum Drift: String, CaseIterable, Sendable { case newComment, editedComment, unpublishedReply, changedHead }
+
+    @Test(arguments: Drift.allCases)
+    func finalMergeRecheckRejectsChangesAfterTheSemanticVerdict(_ drift: Drift) async throws {
+        try await withFixture { monitor, folder, _ in
+            var changed = false
+            monitor.authorFeedbackAllowsMerge = { _, _, _ in
+                do {
+                    switch drift {
+                    case .newComment:
+                        let file = folder.appending(path: "discussions.json")
+                        let body = try String(contentsOf: file, encoding: .utf8)
+                        let extra = #",{"id":"new-condition","notes":[{"id":11,"author":{"id":7,"username":"reviewer"},"body":"Please also document the fallback.","system":false,"resolvable":false}]}]"#
+                        try (String(body.dropLast()) + extra).write(to: file, atomically: true, encoding: .utf8)
+                    case .editedComment:
+                        let file = folder.appending(path: "discussions.json")
+                        let body = try String(contentsOf: file, encoding: .utf8)
+                        try body.replacingOccurrences(of: "regression test.", with: "regression test and documentation.")
+                            .write(to: file, atomically: true, encoding: .utf8)
+                    case .unpublishedReply:
+                        try #"[{"id":20,"author_id":3,"note":"Pending response"}]"#
+                            .write(to: folder.appending(path: "drafts.json"), atomically: true, encoding: .utf8)
+                    case .changedHead:
+                        let file = folder.appending(path: "request.json")
+                        let body = try String(contentsOf: file, encoding: .utf8)
+                        try body.replacingOccurrences(of: "0123456789012345678901234567890123456789",
+                                                     with: "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa")
+                            .write(to: file, atomically: true, encoding: .utf8)
+                    }
+                    changed = true
+                } catch { Issue.record(error) }
+                return true
+            }
+            try await refresh(monitor)
+            #expect(changed)
+            #expect(!monitor.hasError)
+            #expect(!FileManager.default.fileExists(atPath: folder.appending(path: "merged").path))
+            #expect(monitor.requests.count == 1)
+        }
+    }
+
+    private func refresh(_ monitor: AuthoredMergeRequestMonitor) async throws {
+        monitor.refreshIfNeeded()
+        let deadline = ContinuousClock.now + .seconds(5)
+        while monitor.isLoading, ContinuousClock.now < deadline { try await Task.sleep(for: .milliseconds(20)) }
+        try #require(!monitor.isLoading)
+    }
+
+    private func withFixture(_ body: (AuthoredMergeRequestMonitor, URL, GlabService) async throws -> Void) async throws {
+        let folder = FileManager.default.temporaryDirectory.appending(path: UUID().uuidString)
+        try FileManager.default.createDirectory(at: folder, withIntermediateDirectories: false)
+        let suite = "AuthorFeedbackMergeTests.\(UUID())"
+        let defaults = try #require(UserDefaults(suiteName: suite))
+        defer { try? FileManager.default.removeItem(at: folder); defaults.removePersistentDomain(forName: suite) }
+        let request = #"{"project_id":1,"iid":2,"author":{"id":3,"username":"me","name":"Me"},"labels":[],"title":"Feature","web_url":"https://gitlab.example.org/g/p/-/merge_requests/2","state":"opened","draft":false,"sha":"0123456789012345678901234567890123456789","source_branch":"feature","target_branch":"main","detailed_merge_status":"mergeable","has_conflicts":false,"blocking_discussions_resolved":true,"user":{"can_merge":true}}"#
+        try Data(request.utf8).write(to: folder.appending(path: "request.json"))
+        let discussions = #"[{"id":"general","notes":[{"id":10,"author":{"id":7,"username":"reviewer"},"body":"Approved in advance, but please add the missing regression test.","system":false,"resolvable":false}]}]"#
+        try Data(discussions.utf8).write(to: folder.appending(path: "discussions.json"))
+        try Data("[]".utf8).write(to: folder.appending(path: "drafts.json"))
+        let executable = folder.appending(path: "glab")
+        try Data("""
+        #!/bin/sh
+        set -eu
+        cd "$(dirname "$0")"
+        case "$2" in
+          /user) echo '{"id":3,"username":"me"}' ;;
+          /merge_requests\\?*) printf '['; cat request.json; printf ']' ;;
+          /projects/1/merge_requests/2) cat request.json ;;
+          */approval_state) echo '{"rules":[{"approvals_required":1,"approved":true}]}' ;;
+          */discussions\\?*) cat discussions.json ;;
+          */draft_notes\\?*) cat drafts.json ;;
+          /projects/1) echo '{"only_allow_merge_if_all_discussions_are_resolved":true,"reset_approvals_on_push":true}' ;;
+          */merge) touch merged; echo '{"project_id":1,"iid":2,"state":"merged"}' ;;
+          *) exit 100 ;;
+        esac
+        """.utf8).write(to: executable)
+        try FileManager.default.setAttributes([.posixPermissions: 0o700], ofItemAtPath: executable.path)
+        let glab = GlabService()
+        glab.glabPath = executable; glab.resolvedHost = "gitlab.example.org"; glab.currentUsername = "me"
+        let settings = SettingsManager(defaults: defaults)
+        settings.onboardingCompleted = true; settings.notificationsEnabled = false
+        settings.automation.autoMergeEnabled = true; settings.automation.autoMergeProjects = "g/p"
+        let monitor = AuthoredMergeRequestMonitor(settings: settings, glab: glab, notifications: NotificationService(), canAutomate: { _ in true })
+        let listed = try await glab.fetchAuthoredMergeRequests(host: "gitlab.example.org")
+        try #require(listed.count == 1)
+        _ = try await glab.fetchMergeRequest(projectID: 1, iid: 2, host: "gitlab.example.org")
+        try await body(monitor, folder, glab)
+    }
+}

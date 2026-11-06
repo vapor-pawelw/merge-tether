@@ -8,6 +8,7 @@ struct ReReviewAssessment: Codable, Sendable {
         let noteID: Int
         let state: State
         let reason: String
+        var acceptanceNoteID: Int? = nil
     }
     let notes: [Note]
     enum ValidationError: Error { case incompleteEvidence }

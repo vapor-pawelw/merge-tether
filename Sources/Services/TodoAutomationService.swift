@@ -194,7 +194,9 @@ final class TodoAutomationService {
 
     func prepareFeedback(
         work: AssistantAutomationRunner.MergeRequestWork, noteIDs: [Int], username: String,
-        settings: SettingsManager, glab: GlabService, manual: Bool = true, shouldProceed: @MainActor () -> Bool
+        settings: SettingsManager, glab: GlabService, manual: Bool = true,
+        verifiedFingerprint: String? = nil, expectedHeadSHA: String? = nil,
+        shouldProceed: @MainActor () -> Bool
     ) async throws {
         let configuration = settings.automation
         let rule = configuration.authorFeedback
@@ -204,11 +206,39 @@ final class TodoAutomationService {
         guard request.state == "opened", request.author.username == username,
               request.webURL.isGitLabMergeRequest(host: work.host, iid: work.iid), rule.includes(project: project) else { return }
         let discussions = try await glab.fetchMergeRequestDiscussions(projectID: work.projectID, iid: work.iid, host: work.host)
-        let remaining = Set(AssistantAutomationRunner.unhandledFeedback(noteIDs, work: work, username: username, settings: settings))
-        let feedback = Array(GitLabMergeRequestDiscussion.unresolvedFeedback(in: discussions, excluding: request.author.id)
+        if let verifiedFingerprint {
+            guard request.sha == expectedHeadSHA, ReviewVerdict.fingerprint(discussions) == verifiedFingerprint else { return }
+        }
+        let markerPrefix = verifiedFingerprint.map { "Verified feedback snapshot: \(expectedHeadSHA ?? "")/\($0)/" }
+        var remaining = verifiedFingerprint == nil
+            ? Set(AssistantAutomationRunner.unhandledFeedback(noteIDs, work: work, username: username, settings: settings)) : Set(noteIDs)
+        let candidates = verifiedFingerprint == nil
+            ? GitLabMergeRequestDiscussion.unresolvedFeedback(in: discussions, excluding: request.author.id)
+            : discussions.flatMap(\.notes).filter { $0.system == false && $0.author?.id != request.author.id }
+        func revision(_ note: GitLabMergeRequestDiscussion.Note) -> String {
+            UserAttentionSnapshot.digest("\(note.author?.id ?? 0)\n" + (note.body ?? ""))
+        }
+        if verifiedFingerprint != nil {
+            let attempts = settings.assistantHandoffs.filter { $0.key.work == work && $0.key.username == username }
+            let target = MRAutomationScope.Target(host: work.host, username: username, projectID: work.projectID, iid: work.iid)
+            let attempted = Set(candidates.compactMap { note -> Int? in
+                guard let id = note.id else { return nil }
+                let receipt = AuthorFeedbackAttempt(target: target, noteID: id, revision: revision(note))
+                guard settings.authorFeedbackAttempts.contains(receipt)
+                    || attempts.contains(where: { $0.verifiedFeedbackNotes?[id] == receipt.revision }) else { return nil }
+                return id
+            })
+            let unattempted = remaining.subtracting(attempted)
+            if !manual || !unattempted.isEmpty { remaining = unattempted }
+        }
+        let feedback = Array(candidates
             .filter { $0.id.map(remaining.contains) == true }.prefix(12))
         let ids = feedback.compactMap(\.id)
         guard !ids.isEmpty else { return }
+        let marker = markerPrefix.map { $0 + "\(ids.sorted())" }
+        let verifiedNotes: [Int: String]? = verifiedFingerprint.map { _ in
+            Dictionary(feedback.compactMap { note in note.id.map { ($0, revision(note)) } }, uniquingKeysWith: { first, _ in first })
+        }
 
         let invocation = Invocation(rule: rule, assistant: configuration.assistant, workspace: configuration.assistantWorkspace,
                                     allowTools: configuration.permitsAssistantTools(project: project))
@@ -216,14 +246,21 @@ final class TodoAutomationService {
             projectID: work.projectID, iid: work.iid, host: work.host, noteIDs: ids
         ) : ""
         let stackPosition = await glab.stackPosition(for: work)
+        if let verifiedFingerprint {
+            let latest = try await glab.fetchMergeRequest(projectID: work.projectID, iid: work.iid, host: work.host)
+            let latestDiscussions = try await glab.fetchMergeRequestDiscussions(projectID: work.projectID, iid: work.iid, host: work.host)
+            guard latest.sha == expectedHeadSHA, latest.state == "opened", latest.author == request.author,
+                  ReviewVerdict.fingerprint(latestDiscussions) == verifiedFingerprint else { return }
+        }
         guard shouldProceed(), settings.automation == configuration,
-              AssistantAutomationRunner.unhandledFeedback(ids, work: work, username: username, settings: settings) == ids.sorted()
+              (verifiedFingerprint != nil || AssistantAutomationRunner.unhandledFeedback(ids, work: work, username: username, settings: settings) == ids.sorted())
         else { return }
         try await run(
             .init(request: request, feedback: feedback),
             invocation: invocation,
             work: work, stackPosition: stackPosition, evidence: evidence, username: username, settings: settings, manual: manual,
-            feedbackNoteIDs: ids
+            feedbackNoteIDs: ids, verifiedFeedbackMarker: marker, expectedHeadSHA: expectedHeadSHA,
+            verifiedFeedbackNotes: verifiedNotes
         )
     }
 
@@ -237,7 +274,9 @@ final class TodoAutomationService {
         settings: SettingsManager,
         manual: Bool,
         feedbackNoteIDs: [Int] = [],
-        feedbackTodo: Todo.FeedbackIdentity? = nil
+        feedbackTodo: Todo.FeedbackIdentity? = nil,
+        verifiedFeedbackMarker: String? = nil, expectedHeadSHA: String? = nil,
+        verifiedFeedbackNotes: [Int: String]? = nil
     ) async throws {
         let rule = invocation.rule
         let titleTemplate = rule.titleTemplate.trimmingCharacters(in: .whitespacesAndNewlines)
@@ -260,17 +299,20 @@ final class TodoAutomationService {
                 "Check the current head and only the indicated feedback, or unresolved feedback when no notes are specified. Verify it against the code. For warranted fixes follow the mandatory implement, test, commit, authorized push and remote-content verification sequence before saving any response drafts. If push is off, pending or failed, keep that run's result in chat only."
             }
             let suppliedEvidence = invocation.access == .gitLabRead ? "" : "\n\n<gitlab-evidence>\n" + evidence + "\n</gitlab-evidence>"
-            let prompt = "\(task)\(scope)\(custom)\(isolation)\n\nFallback if needed: \(fallback)\(suppliedEvidence)"
+            let verifiedContext = verifiedFeedbackMarker.map {
+                "\n\n\($0)\nThe verifier identified remaining expectations or a missing reply. Include general comments and conditions attached to an advance approval. Decide whether each request is justified. Implement and test warranted corrections; for an unwarranted request, prepare an evidence-based explanation instead of unnecessary code changes. Some indicated concerns may already be fixed and only need a verified response. Follow the existing push and publication permissions."
+            } ?? ""
+            let prompt = "\(task)\(scope)\(custom)\(isolation)\n\nFallback if needed: \(fallback)\(suppliedEvidence)\(verifiedContext)"
             try await AssistantAutomationRunner.launch(
                 assistant, title: title, stackPosition: stackPosition, mergeRequestURL: context.url,
                 prompt: prompt,
                 workspace: invocation.workspace,
                 access: invocation.access,
                 work: work, username: username, settings: settings,
-                feedbackNoteIDs: feedbackNoteIDs, feedbackTodo: feedbackTodo,
+                feedbackNoteIDs: feedbackNoteIDs, verifiedFeedbackNotes: verifiedFeedbackNotes, feedbackTodo: feedbackTodo,
                 isReview: context.event == .reviewRequested,
                 mrWorkflow: context.event == .authorFeedback ? .followUp : .review,
-                manual: manual, jobCoordinator: jobCoordinator
+                manual: manual, expectedHeadSHA: expectedHeadSHA, jobCoordinator: jobCoordinator
             )
         } else {
             var environment = AssistantAutomationRunner.environment

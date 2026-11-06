@@ -1,0 +1,189 @@
+import Foundation
+import Testing
+@testable import GitLabTodos
+
+@Suite("Author feedback policy")
+struct AuthorFeedbackPolicyTests {
+    private let fixedA = ReReviewAssessment.Note(noteID: 10, state: .addressed, reason: "Current diff fixes A")
+    private var alicesThread: String {
+        thread("d1", note(10, by: 7, "Fix A", resolvable: true), note(11, by: 3, "Fixed A", at: "2026-01-01T11:00:00Z"))
+    }
+
+    private func note(_ id: Int?, by author: Int, _ body: String, at created: String? = "2026-01-01T10:00:00Z",
+                      updated: String? = nil, resolvable: Bool = false, resolved: Bool = false,
+                      system: Bool = false) -> String {
+        let names = [3: "me", 7: "alice", 8: "bob", 9: "carol"]
+        let dates = [("created_at", created), ("updated_at", updated)]
+            .compactMap { key, value in value.map { ",\"\(key)\":\"\($0)\"" } }.joined()
+        return """
+            {"id":\(id.map(String.init) ?? "null"),"author":{"id":\(author),"username":"\(names[author] ?? "")"},\
+            "system":\(system),"resolvable":\(resolvable),"resolved":\(resolved),"body":"\(body)"\(dates)}
+            """
+    }
+
+    private func thread(_ id: String?, _ notes: String...) -> String {
+        "{\(id.map { "\"id\":\"\($0)\"," } ?? "")\"notes\":[\(notes.joined(separator: ","))]}"
+    }
+
+    private func decode(_ threads: [String]) throws -> [GitLabMergeRequestDiscussion] {
+        try JSONDecoder().decode([GitLabMergeRequestDiscussion].self, from: Data("[\(threads.joined(separator: ","))]".utf8))
+    }
+
+    private func evaluate(_ threads: [String], _ verdicts: [ReReviewAssessment.Note]?, approved: Set<Int> = [],
+                          enabled: Bool = true, drafts: Int = 0) throws -> [AuthorFeedbackPolicy.Finding] {
+        AuthorFeedbackPolicy.evaluate(discussions: try decode(threads), assessment: verdicts.map { ReReviewAssessment(notes: $0) },
+                                      authorID: 3, approvedReviewerIDs: approved, enabled: enabled,
+                                      pendingDraftCount: drafts)
+    }
+
+    @Test func verifiedFixApprovedBySameReviewerIsReady() throws {
+        let findings = try evaluate([alicesThread], [fixedA], approved: [7])
+        #expect(findings == [.init(id: 10, discussionID: "d1", reviewerID: 7, reviewerUsername: "alice", state: .ready,
+                                   reason: "Current diff fixes A", waitingForReviewers: [])])
+        #expect(findings.first?.canResolve == true)
+    }
+
+    @Test func advanceApprovalNeverOverridesARemainingConditionElsewhere() throws {
+        let general = thread("g1", note(20, by: 7, "Also rename X", at: "2026-01-01T10:05:00Z"))
+        let otherThread = thread("d2", note(20, by: 7, "Also rename X", at: "2026-01-01T10:05:00Z", resolvable: true))
+        for elsewhere in [general, otherThread] {
+            for state in [ReReviewAssessment.Note.State.blocking, .uncertain] {
+                let blocked = try evaluate([alicesThread, elsewhere],
+                                           [fixedA, .init(noteID: 20, state: state, reason: "X is not renamed")], approved: [7])
+                #expect(blocked.map(\.id) == [10, 20])
+                #expect(blocked.map(\.state) == [.needsChanges, .needsChanges])
+                #expect(blocked.map(\.reason) == ["X is not renamed", "X is not renamed"])
+                #expect(blocked[0].waitingForReviewers == ["alice"])
+                #expect(blocked[1].discussionID == (elsewhere == general ? nil : "d2"))
+                #expect(blocked.allSatisfy { !$0.canResolve })
+            }
+            let addressed = try evaluate([alicesThread, elsewhere],
+                                         [fixedA, .init(noteID: 20, state: .addressed, reason: "X renamed")], approved: [7])
+            #expect(addressed.first?.id == 10)
+        #expect(!addressed.isEmpty)
+        #expect(addressed.allSatisfy { $0.canResolve })
+        }
+    }
+
+    @Test func approvalBySomeoneElseIsNotConsent() throws {
+        let findings = try evaluate([alicesThread], [fixedA], approved: [3, 8])
+        #expect(findings.map(\.state) == [.waitingAcceptance])
+        #expect(findings.first?.waitingForReviewers == ["alice"])
+    }
+
+    @Test func oneLaterGeneralCommentCanAcceptSeveralFindings() throws {
+        let threads = [alicesThread,
+                       thread("d2", note(30, by: 7, "Fix B", at: "2026-01-01T10:10:00Z", resolvable: true)),
+                       thread("g1", note(40, by: 7, "Thanks, both look good", at: "2026-01-01T12:00:00.250Z"))]
+        let findings = try evaluate(threads, [
+            .init(noteID: 10, state: .addressed, reason: "Fixed A", acceptanceNoteID: 40),
+            .init(noteID: 30, state: .addressed, reason: "Fixed B", acceptanceNoteID: 40),
+            .init(noteID: 40, state: .informational, reason: "Reviewer accepts both fixes")])
+        #expect(findings.map(\.id) == [10, 30])
+        #expect(findings.allSatisfy { $0.canResolve })
+    }
+
+    @Test func invalidCommentAcceptanceIsRejected() throws {
+        let concern = note(10, by: 7, "Fix A", resolvable: true)
+        let ack = note(40, by: 7, "Looks good now", at: "2026-01-01T12:00:00Z")
+        let cases: [(concern: String, ack: String, cited: Int?, ready: Bool)] = [
+            (concern, ack, 40, true),
+            (concern, note(40, by: 8, "Looks good now", at: "2026-01-01T12:00:00Z"), 40, false),
+            (concern, note(9, by: 7, "Looks good now", at: "2026-01-01T12:00:00Z"), 9, false),
+            (concern, note(40, by: 7, "Looks good now", at: "2026-01-01T09:00:00Z"), 40, false),
+            (concern, note(40, by: 7, "Looks good now", at: "yesterday"), 40, false),
+            (concern, note(40, by: 7, "Looks good now", at: nil), 40, false),
+            (concern, note(40, by: 7, "approved this merge request", at: "2026-01-01T12:00:00Z", system: true), 40, false),
+            (concern, ack, nil, false),
+            (concern, ack, 999, false),
+            (note(10, by: 7, "Fix A", updated: "2026-01-01T13:00:00Z", resolvable: true), ack, 40, false),
+            (note(10, by: 7, "Fix A", at: nil, resolvable: true), ack, 40, false),
+        ]
+        for item in cases {
+            let threads = [thread("d1", item.concern), thread("g1", item.ack)]
+            let external = try decode(threads).flatMap(\.notes).filter { $0.system == false }.compactMap(\.id)
+            let verdicts = external.map { id -> ReReviewAssessment.Note in
+                id == 10 ? .init(noteID: 10, state: .addressed, reason: "Fixed A", acceptanceNoteID: item.cited)
+                    : .init(noteID: id, state: .informational, reason: "Acknowledgement")
+            }
+            let findings = try evaluate(threads, verdicts)
+            #expect(findings.map(\.state) == [item.ready ? AuthorFeedbackPolicy.State.ready : .waitingAcceptance])
+        }
+    }
+
+    @Test func everyActionableParticipantMustConsentButBystandersNeedNot() throws {
+        let threads = [thread("d1", note(10, by: 7, "Fix A", resolvable: true),
+                              note(11, by: 3, "Fixed A", at: "2026-01-01T11:00:00Z"),
+                              note(12, by: 8, "Also cover nil input", at: "2026-01-01T11:30:00Z"),
+                              note(13, by: 9, "+1", at: "2026-01-01T11:40:00Z"))]
+        let verdicts = [fixedA, .init(noteID: 12, state: .addressed, reason: "Nil input covered"),
+                        .init(noteID: 13, state: .informational, reason: "Agreement only")]
+        let waiting = try evaluate(threads, verdicts, approved: [7])
+        #expect(waiting.map(\.state) == [.waitingAcceptance])
+        #expect(waiting.first?.waitingForReviewers == ["bob"])
+        #expect(try evaluate(threads, verdicts, approved: [7, 8]).first?.canResolve == true)
+
+        let informationalRoot = try evaluate([alicesThread], [.init(noteID: 10, state: .informational, reason: "Answered")])
+        #expect(informationalRoot.map(\.state) == [.waitingAcceptance])
+        #expect(informationalRoot.first?.waitingForReviewers == ["alice"])
+    }
+
+    @Test func unknownOrIncompleteAssessmentNeverResolves() throws {
+        let threads = [alicesThread, thread("g1", note(20, by: 7, "Nit", at: "2026-01-01T10:05:00Z"))]
+        let cases: [[ReReviewAssessment.Note]?] = [
+            nil, [fixedA], [fixedA, fixedA],
+            [fixedA, .init(noteID: 20, state: .informational, reason: " ")],
+            [fixedA, .init(noteID: 999, state: .informational, reason: "Unknown")],
+        ]
+        for verdicts in cases {
+            let findings = try evaluate(threads, verdicts, approved: [7])
+            #expect(findings.map(\.id) == [10])
+            #expect(findings.map(\.state) == [.needsVerification])
+            #expect(findings.first?.reason == nil)
+        }
+    }
+
+    @Test func explicitAcceptanceSurvivesResolutionWithoutAnotherReviewRequest() throws {
+        let closed = thread("d1", note(10, by: 7, "Fix A", resolvable: true, resolved: true))
+        let acknowledgment = thread("g1", note(40, by: 7, "All fixed", at: "2026-01-01T12:00:00Z"))
+        let verdicts: [ReReviewAssessment.Note] = [
+            .init(noteID: 10, state: .addressed, reason: "Fixed", acceptanceNoteID: 40),
+            .init(noteID: 40, state: .informational, reason: "Reviewer accepts the fix")]
+        #expect(AuthorFeedbackPolicy.acceptedReviewers(discussions: try decode([closed, acknowledgment]),
+            assessment: .init(notes: verdicts), authorID: 3, approvedReviewerIDs: []) == [7])
+        let remaining = thread("g2", note(50, by: 7, "But still rename X", at: "2026-01-01T13:00:00Z"))
+        #expect(AuthorFeedbackPolicy.acceptedReviewers(discussions: try decode([closed, acknowledgment, remaining]),
+            assessment: .init(notes: verdicts + [.init(noteID: 50, state: .blocking, reason: "Rename pending")]),
+            authorID: 3, approvedReviewerIDs: [7]).isEmpty)
+    }
+
+    @Test func resolvedThreadDoesNotEraseAnUnfulfilledReviewerExpectation() throws {
+        let closed = thread("old", note(20, by: 7, "Still add regression coverage", resolvable: true, resolved: true))
+        let findings = try evaluate([alicesThread, closed], [fixedA,
+            .init(noteID: 20, state: .blocking, reason: "The requested regression test is missing")], approved: [7])
+        #expect(findings.map(\.id) == [10, 20])
+        #expect(findings.allSatisfy { $0.state == .needsChanges })
+        #expect(findings.allSatisfy { !$0.canResolve })
+    }
+
+    @Test func draftsDisabledResolvedSystemAndAuthorRootsAreUntouched() throws {
+        let threads = [alicesThread,
+                       thread("d5", note(50, by: 7, "Fixed earlier", resolvable: true, resolved: true)),
+                       thread("d6", note(60, by: 3, "Self note", resolvable: true),
+                              note(61, by: 7, "Agreed", at: "2026-01-01T10:30:00Z")),
+                       thread("d7", note(70, by: 7, "changed the description", resolvable: true, system: true)),
+                       thread(nil, note(80, by: 7, "Fix C", resolvable: true))]
+        let verdicts = [fixedA, .init(noteID: 50, state: .addressed, reason: "Fixed earlier"),
+                        .init(noteID: 61, state: .informational, reason: "Agreement"),
+                        .init(noteID: 80, state: .addressed, reason: "Fixed C")]
+        #expect(try evaluate(threads, verdicts, approved: [7]).map(\.id) == [10])
+        #expect(try evaluate(threads, verdicts, approved: [7], enabled: false).map(\.state) == [.disabled])
+        #expect(try evaluate(threads, verdicts, approved: [7], drafts: 1).map(\.state) == [.waitingPublication])
+        #expect(try evaluate(threads, verdicts, approved: [7], drafts: 1).allSatisfy { !$0.canResolve })
+
+        let malformed = threads + [thread("d8", note(nil, by: 7, "Fix D", resolvable: true))]
+        let findings = try evaluate(malformed, verdicts, approved: [7])
+        #expect(findings.map(\.id) == [10])
+        #expect(findings.map(\.state) == [.needsVerification])
+    }
+}

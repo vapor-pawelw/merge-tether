@@ -93,6 +93,8 @@ struct CommandCenterMRCard: View {
             primary(.Board.boardCompactReviewDrafts, action: onDetails)
         } else if item.canApprove {
             primary(.Board.boardCompactReviewApproval, action: onDetails)
+        } else if item.authorFeedbackStatus?.needsAttention == true || item.authorFeedbackStatus?.waitingForReviewer == true {
+            primary(.Board.boardCompactReviewChecks, action: onDetails)
         } else if let intent = nextIntent {
             if intent.kind != .refresh && needsCLI {
                 primary(.Board.boardCompactSetupCli) { openSettings() }
@@ -164,6 +166,13 @@ struct CommandCenterMRCard: View {
     private struct Chip { let title: LocalizedStringResource; let symbol: String; let tint: Color }
     private var chips: [Chip] {
         var result: [Chip] = []
+        if let feedback = item.authorFeedbackStatus {
+            if feedback.needsAttention {
+                result.append(.init(title: .AuthorFeedback.authorFeedbackNeedsWorkChip, symbol: "text.bubble", tint: .orange))
+            } else if feedback.waitingForReviewer {
+                result.append(.init(title: .AuthorFeedback.authorFeedbackWaitingChip, symbol: "clock", tint: .secondary))
+            }
+        }
         if let intent = nextIntent, intent.kind != .refresh, needsCLI {
             result.append(.init(title: .Board.boardCompactCliRequired, symbol: "terminal", tint: .orange))
         }
@@ -188,7 +197,9 @@ struct CommandCenterMRCard: View {
         if let pipeline = item.mergeRequest?.headPipeline, ["running", "pending", "created", "preparing", "waiting_for_resource"].contains(pipeline.status) {
             result.append(.init(title: .Board.boardCompactPipelineRunning, symbol: "clock", tint: .blue))
         }
-        if item.needsDiscussion || !item.feedback.isEmpty { result.append(.init(title: .Board.boardCompactFeedback, symbol: "text.bubble", tint: .orange)) }
+        if item.authorFeedbackStatus?.findings.isEmpty != false && (item.needsDiscussion || !item.feedback.isEmpty) {
+            result.append(.init(title: .Board.boardCompactFeedback, symbol: "text.bubble", tint: .orange))
+        }
         if item.needsChanges { result.append(.init(title: .Board.boardCompactChanges, symbol: "pencil", tint: .orange)) }
         if item.reReviewReadiness != nil || item.canConfirmReReview {
             result.append(.init(title: .Board.boardCompactReReview, symbol: "person.crop.circle.badge.checkmark", tint: .orange))

@@ -149,6 +149,8 @@ struct AutomationSettingsTab: View {
                     .disabled(draft.publishDraftsWithoutConfirmation)
                 checkpointToggle($draft.autoResolveOwnReviewThreads, .Settings.settingsAutomationResolveOwnReviewThreads,
                                  help: .Settings.settingsAutomationResolveOwnReviewThreadsHelp)
+                checkpointToggle($draft.autoResolveAcceptedFeedback, .AuthorFeedback.authorFeedbackSetting,
+                                 help: .AuthorFeedback.authorFeedbackSettingHelp)
             } footer: {
                 Link(destination: URL(string: "https://github.com/vapor-pawelw/merge-tether/blob/main/docs/automation.md")!) {
                     Text(.Settings.settingsAutomationLearnMore)

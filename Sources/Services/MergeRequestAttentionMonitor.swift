@@ -27,6 +27,7 @@ final class MergeRequestAttentionMonitor {
         var awaitingRemoteVerification = false
         /// Drafts remain accessible, but cannot be advertised as ready without current evidence.
         var requiresDiscussionRecheck = false
+        var authorFeedbackStatus: AuthorFeedbackStatus?
         /// The assistant has no objections to the current head and the user has nothing open,
         /// but automatic approval does not apply, so the user approves in Ready for your OK.
         var canApprove = false
@@ -99,6 +100,7 @@ final class MergeRequestAttentionMonitor {
         private var hasOpenAction: Bool {
             needsDiscussion || hasConflict || needsChanges || needsMerge || failedPipeline || needsPipelineHandoff
                 || requiresDiscussionRecheck || reReviewUnconfirmed || !feedback.isEmpty || (reReviewReadiness != nil && reReviewReadiness != .checking)
+                || authorFeedbackStatus?.needsAttention == true
         }
 
         var needsAttention: Bool { needsConfirmation || hasOpenAction }
@@ -191,6 +193,9 @@ final class MergeRequestAttentionMonitor {
     private var accountGeneration = 0
     private var refreshGeneration = 0
     private var recentTodos: [Item] = []
+    let authorFeedbackCoordinator: AuthorFeedbackCoordinator?
+    private var feedbackNeedsRefresh = false
+    var onAuthorFeedbackNeedsWork: ((GitLabMergeRequest, Set<Int>, String) async -> Void)?
 
     private struct Account: Equatable {
         let host: String
@@ -217,6 +222,16 @@ final class MergeRequestAttentionMonitor {
         self.followUpDirectory = followUpDirectory
         self.verifyReReview = verifyReReview
         self.canAutomate = canAutomate
+        self.authorFeedbackCoordinator = settings.map { AuthorFeedbackCoordinator(settings: $0, glab: glab,
+            canAutomate: canAutomate, verify: verifyReReview) }
+        authorFeedbackCoordinator?.onNeedsWork = { [weak self] request, notes, fingerprint in
+            await self?.onAuthorFeedbackNeedsWork?(request, notes, fingerprint)
+        }
+        authorFeedbackCoordinator?.onRemoteChange = { [weak self] in
+            guard let self, let account, isCurrent(account) else { return }
+            if isLoading { feedbackNeedsRefresh = true }
+            else { refresh(host: account.host, username: account.username, todos: []) }
+        }
     }
 
     private func permitsAssistantAutomation(for account: Account) async -> Bool {
@@ -231,18 +246,32 @@ final class MergeRequestAttentionMonitor {
 
     var currentItems: [Item] {
         guard let account, isCurrent(account) else { return [] }
-        return items
+        return items.map(presentAuthorFeedback)
     }
 
     var currentOpenItems: [Item] {
         guard let account, isCurrent(account) else { return [] }
-        return openItems
+        return openItems.map(presentAuthorFeedback)
+    }
+
+    private func presentAuthorFeedback(_ original: Item) -> Item {
+        var item = original
+        let status = authorFeedbackCoordinator?.status(projectID: item.id.projectID, iid: item.id.iid)
+        if status?.head == item.mergeRequest?.sha { item.authorFeedbackStatus = status }
+        return item
+    }
+
+    func retryAuthorFeedback(_ id: Item.ID) {
+        authorFeedbackCoordinator?.invalidate(projectID: id.projectID, iid: id.iid)
+        guard let account, isCurrent(account) else { return }
+        refresh(host: account.host, username: account.username, todos: [])
     }
 
     func refresh(host: String, username: String, todos: [Todo]) {
         let account = Account(host: host, username: username)
         guard !isLoading, isCurrent(account) else { return }
         if self.account != account {
+            authorFeedbackCoordinator?.cancel()
             accountGeneration += 1
             items = []
             openItems = []
@@ -267,7 +296,13 @@ final class MergeRequestAttentionMonitor {
         refreshGeneration += 1
         isLoading = true
         Task {
-            defer { isLoading = false; onRefreshed?() }
+            defer {
+                isLoading = false; onRefreshed?()
+                if feedbackNeedsRefresh, isCurrent(account) {
+                    feedbackNeedsRefresh = false
+                    refresh(host: account.host, username: account.username, todos: [])
+                }
+            }
             do {
                 try await poll(account, todos: todos)
             } catch {
@@ -534,6 +569,10 @@ final class MergeRequestAttentionMonitor {
                                     duoUserIDs: duoIDs, host: host, projectID: item.id.projectID, iid: item.id.iid, in: aiAssessmentDirectory)
                             }.compactMap(\.id))
                         }
+                    }
+                    if success, let request = item.authoredRequest, let discussions {
+                        authorFeedbackCoordinator?.refresh(request: request, discussions: discussions,
+                            drafts: item.draftCount, host: host, user: user)
                     }
                     if success, let feedback, let request = item.authoredRequest {
                         await requestReReviewsIfReady(for: request, feedback: feedback, draftCount: item.draftCount,
@@ -1074,6 +1113,8 @@ final class MergeRequestAttentionMonitor {
     }
 
     func automationConfigurationChanged(outsideScope scope: MRAutomationScope? = nil) {
+        authorFeedbackCoordinator?.cancel(outsideScope: scope)
+        feedbackNeedsRefresh = false
         let affected = Set(reReviewTasks.keys).union(reReviewChecks.keys)
         for id in affected {
             if let scope, let account {
@@ -1153,13 +1194,13 @@ final class MergeRequestAttentionMonitor {
             settings.save()
         }
         guard request.draft == false, let head = request.sha else { return }
+        let authorProgress = authorFeedbackCoordinator?.status(projectID: request.projectID, iid: request.iid)
         let work = AssistantAutomationRunner.MergeRequestWork(host: host, projectID: request.projectID, iid: request.iid)
         let usedAssistant = settings.assistantHandoffs.contains {
             $0.key.work == work && $0.key.username == user.username
                 && $0.execution?.state == .succeeded
                 && !feedback.addressedNotes.isDisjoint(with: $0.feedbackNoteIDs ?? [])
         }
-        guard usedAssistant || observedPublication || manualReReviewApprovals[id] != nil else { return }
         let discussions: [GitLabMergeRequestDiscussion]
         if let suppliedDiscussions { discussions = suppliedDiscussions }
         else {
@@ -1167,9 +1208,18 @@ final class MergeRequestAttentionMonitor {
             discussions = fresh
         }
         guard let fingerprint = ReviewVerdict.fingerprint(discussions) else { return }
+        let sharedAssessment = authorFeedbackCoordinator?.assessment(projectID: request.projectID, iid: request.iid,
+            head: head, fingerprint: fingerprint)
+        guard usedAssistant || observedPublication || manualReReviewApprovals[id] != nil
+                || sharedAssessment != nil else { return }
         let key = reReviewKey(request, fingerprint: fingerprint, account: account)
+        if let assessment = sharedAssessment, reReviewChecks[id]?.key != key {
+            reReviewChecks[id] = .init(key: key, fingerprint: fingerprint, state: .checking, assessment: assessment)
+        }
         var pendingReviewers: [Int: Int] = [:]
         for (reviewerID, noteID) in feedback.addressedByReviewer {
+            if authorProgress?.phase == .complete, authorProgress?.head == head, authorProgress?.fingerprint == fingerprint,
+               authorProgress?.acceptedReviewerIDs.contains(reviewerID) == true { continue }
             let receiptKey = ReReviewReceipt.Key(host: host, authorID: user.id, projectID: request.projectID, iid: request.iid, reviewerID: reviewerID)
             guard (settings.reReviewReceipts[receiptKey]?.noteID ?? 0) < noteID else { continue }
             // Bot summaries never need a human review request, nor an expensive assessment.

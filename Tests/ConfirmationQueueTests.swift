@@ -188,6 +188,8 @@ import Testing
         try FileManager.default.setAttributes([.posixPermissions: 0o700], ofItemAtPath: executable.path)
 
         let settings = SettingsManager(defaults: defaults)
+        // These tests isolate publication/re-review from the independent acceptance workflow.
+        settings.automation.autoResolveAcceptedFeedback = false
         if assistantWorked {
             let work = AssistantAutomationRunner.MergeRequestWork(host: host, projectID: 1, iid: 2)
             let key = AssistantAutomationRunner.ChatKey(

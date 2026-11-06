@@ -25,6 +25,7 @@ final class SettingsManager {
     var automation: AutomationSettings
     var automationReceipts: Set<TodoAutomationReceipt>
     var automationAttemptReceipts: Set<TodoAutomationReceipt>
+    var authorFeedbackAttempts: Set<AuthorFeedbackAttempt>
     var pendingTodoAcknowledgements: Set<TodoActionAcknowledgement>
     var conflictReceipts: Set<MergeConflictReceipt>
     var reReviewReceipts: [ReReviewReceipt.Key: ReReviewReceipt]
@@ -47,6 +48,8 @@ final class SettingsManager {
             ?? []
         automationAttemptReceipts = defaults.data(forKey: Key.automationAttemptReceipts)
             .flatMap { try? JSONDecoder().decode(Set<TodoAutomationReceipt>.self, from: $0) } ?? []
+        authorFeedbackAttempts = defaults.data(forKey: Key.authorFeedbackAttempts)
+            .flatMap { try? JSONDecoder().decode(Set<AuthorFeedbackAttempt>.self, from: $0) } ?? []
         pendingTodoAcknowledgements = defaults.data(forKey: Key.pendingTodoAcknowledgements)
             .flatMap { try? JSONDecoder().decode(Set<TodoActionAcknowledgement>.self, from: $0) } ?? []
         assistantHandoffs = defaults.data(forKey: Key.assistantHandoffs)
@@ -101,6 +104,13 @@ final class SettingsManager {
         } else {
             self.lastSeenTodoIDs = []
         }
+        for handoff in assistantHandoffs {
+            let target = MRAutomationScope.Target(host: handoff.key.work.host, username: handoff.key.username,
+                projectID: handoff.key.work.projectID, iid: handoff.key.work.iid)
+            for (noteID, revision) in handoff.verifiedFeedbackNotes ?? [:] {
+                authorFeedbackAttempts.insert(.init(target: target, noteID: noteID, revision: revision))
+            }
+        }
         lastSavedAutomation = automation
     }
 
@@ -115,6 +125,9 @@ final class SettingsManager {
         }
         if let data = try? JSONEncoder().encode(automationAttemptReceipts) {
             defaults.set(data, forKey: Key.automationAttemptReceipts)
+        }
+        if let data = try? JSONEncoder().encode(authorFeedbackAttempts) {
+            defaults.set(data, forKey: Key.authorFeedbackAttempts)
         }
         if let data = try? JSONEncoder().encode(pendingTodoAcknowledgements) {
             defaults.set(data, forKey: Key.pendingTodoAcknowledgements)
@@ -201,6 +214,7 @@ final class SettingsManager {
         static let automation = "automation"
         static let automationReceipts = "automationReceipts"
         static let automationAttemptReceipts = "automationAttemptReceipts"
+        static let authorFeedbackAttempts = "authorFeedbackAttempts"
         static let pendingTodoAcknowledgements = "pendingTodoAcknowledgements"
         static let conflictReceipts = "conflictReceipts"
         static let reReviewReceipts = "reReviewReceipts"

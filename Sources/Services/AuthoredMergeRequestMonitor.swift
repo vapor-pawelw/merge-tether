@@ -9,6 +9,9 @@ final class AuthoredMergeRequestMonitor {
     private(set) var hasError = false
     private(set) var lastRefresh: Date?
     let workflow: MergeWorkflowAutomation
+    /// The acceptance coordinator supplies a verdict bound to this exact source and discussion text.
+    /// Missing or incomplete verification cannot authorize merging a reviewer's outstanding conditions.
+    var authorFeedbackAllowsMerge: ((GitLabMergeRequest, [GitLabMergeRequestDiscussion], Int) -> Bool)?
 
     private let settings: SettingsManager
     private let glab: GlabService
@@ -130,8 +133,20 @@ final class AuthoredMergeRequestMonitor {
                     continue
                 }
                 do {
+                    let discussions = try await glab.fetchMergeRequestDiscussions(
+                        projectID: request.projectID, iid: request.iid, host: host
+                    )
+                    guard let fingerprint = ReviewVerdict.fingerprint(discussions),
+                          !discussions.flatMap(\.notes).contains(where: {
+                              $0.system != true && $0.author?.id != user.id
+                          }) || authorFeedbackAllowsMerge?(request, discussions, user.id) == true,
+                          isCurrent(account), settings.automation == configuration else {
+                        results.append(status)
+                        continue
+                    }
                     try await glab.mergeMergeRequest(
                         projectID: request.projectID, iid: request.iid, headSHA: sha, host: host, expectedUser: user,
+                        expectedDiscussionFingerprint: fingerprint,
                         shouldProceed: {
                             self.isCurrent(account) && self.settings.automation == configuration
                                 && self.settings.automation.permitsAutoMerge(project: project)

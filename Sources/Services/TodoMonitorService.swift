@@ -66,11 +66,18 @@ final class TodoMonitorService {
         self.attention = MergeRequestAttentionMonitor(glab: glab, settings: settings,
                                                        reportDirectory: CodexDesktopRelay.directory)
         self.authoredMergeRequests = AuthoredMergeRequestMonitor(settings: settings, glab: glab, notifications: notifications)
+        authoredMergeRequests.authorFeedbackAllowsMerge = { [weak self] request, discussions, authorID in
+            guard let self, let head = request.sha, let fingerprint = ReviewVerdict.fingerprint(discussions),
+                  let assessment = self.attention.authorFeedbackCoordinator?.assessment(
+                    projectID: request.projectID, iid: request.iid, head: head, fingerprint: fingerprint),
+                  (try? assessment.reviewers(in: discussions, authorID: authorID)) != nil else { return false }
+            return assessment.notes.allSatisfy { $0.state == .addressed || $0.state == .informational }
+        }
         attention.onAutoApproved = { [settings, notifications] request in
             if settings.notificationsEnabled { notifications.deliverAutoApproved(request) }
         }
-        attention.onRefreshed = { [weak self] in
-            Task { await self?.prepareAutomaticAttentionFeedback() }
+        attention.onAuthorFeedbackNeedsWork = { [weak self] request, notes, fingerprint in
+            await self?.runVerifiedAuthorFeedback(request: request, noteIDs: notes, fingerprint: fingerprint, manual: false)
         }
         assistantDependencies.onRecovered = { [weak self] assistant in
             guard let self, self.settings.automation.autoVerifyReReview,
@@ -595,17 +602,6 @@ final class TodoMonitorService {
         return feedback.isEnabled || (rule.mode == .assistant && rule.includes(request))
     }
 
-    private func prepareAutomaticAttentionFeedback() async {
-        // This also picks up existing feedback when an MR becomes managed, after the
-        // event monitor has already seeded its baseline. Shared handoffs deduplicate it.
-        for item in attention.currentItems where automaticallyHandlesFeedback(item) {
-            guard let host = glab.resolvedHost else { return }
-            let work = AssistantAutomationRunner.MergeRequestWork(host: host, projectID: item.id.projectID, iid: item.id.iid)
-            guard !failedAttentionFeedback.contains(work) else { continue }
-            await runAttentionFeedback(for: item, manual: false)
-        }
-    }
-
     var assistantHandoffs: [AssistantAutomationRunner.Handoff] {
         guard let host = glab.resolvedHost, let username = glab.currentUsername else { return [] }
         return settings.assistantHandoffs.filter { $0.key.work.host == host && $0.key.username == username }
@@ -674,6 +670,12 @@ final class TodoMonitorService {
             for note in item.feedback { add(.discussion, "\(note.id ?? 0):" + UserAttentionSnapshot.digest(note.body ?? "")) }
             if item.needsDiscussion && item.feedback.isEmpty { add(.discussion, item.reReviewFingerprint ?? "open-discussions") }
             if item.needsChanges { add(.discussion, "changes-requested") }
+            if let feedback = row.item.authorFeedbackStatus, feedback.needsAttention {
+                if feedback.phase == .failed { add(.failedWork, "author-feedback:" + feedback.fingerprint) }
+                for finding in feedback.findings where [.needsChanges, .needsVerification].contains(finding.state) {
+                    add(.discussion, "\(finding.id):" + UserAttentionSnapshot.digest(finding.reason ?? ""))
+                }
+            }
             if item.requiresDiscussionRecheck && item.reReviewReadiness != .checking { add(.review, item.mergeRequest?.sha ?? "recheck") }
             if item.canConfirmReReview || item.reReviewUnconfirmed { add(.reviewConfirmation, item.reReviewFingerprint ?? "confirm") }
             switch item.reReviewReadiness {
@@ -918,6 +920,33 @@ final class TodoMonitorService {
         } catch {
             failedAttentionFeedback.insert(work)
             Log.monitor.error("Could not prepare MR feedback: \(String(describing: error), privacy: .private)")
+        }
+    }
+
+    func runVerifiedAuthorFeedback(request: GitLabMergeRequest, noteIDs: Set<Int>, fingerprint: String,
+                                  manual: Bool = true) async {
+        guard let host = glab.resolvedHost, let username = glab.currentUsername,
+              request.author.username == username, !noteIDs.isEmpty else { return }
+        let configuration = settings.automation
+        let rule = configuration.authorFeedback
+        let workflow = configuration.workflowRules[.newDiscussion]
+        guard rule.runner == .assistant, rule.isConfigured, rule.includes(project: request.webURL.gitLabProjectPath),
+              manual || (configuration.packageDecision != .disabled && configuration.scope.permits(request, host: host, username: username)
+                  && (rule.isEnabled || (workflow.mode == .assistant && workflow.includes(request)))) else { return }
+        let work = AssistantAutomationRunner.MergeRequestWork(host: host, projectID: request.projectID, iid: request.iid)
+        guard manual || !failedAttentionFeedback.contains(work),
+              !AssistantAutomationRunner.isWorking(on: work), runningAttentionFeedback.insert(work).inserted else { return }
+        defer { runningAttentionFeedback.remove(work) }
+        failedAttentionFeedback.remove(work)
+        do {
+            try await automation.prepareFeedback(work: work, noteIDs: noteIDs.sorted(), username: username,
+                settings: settings, glab: glab, manual: manual, verifiedFingerprint: fingerprint, expectedHeadSHA: request.sha) {
+                    self.glab.resolvedHost == host && self.glab.currentUsername == username
+                        && self.settings.automation == configuration
+                }
+        } catch {
+            failedAttentionFeedback.insert(work)
+            Log.monitor.error("Could not handle verified author feedback: \(String(describing: error), privacy: .private)")
         }
     }
 

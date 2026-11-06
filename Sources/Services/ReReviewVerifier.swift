@@ -5,7 +5,7 @@ import Foundation
 enum ReReviewVerifier {
     enum VerificationError: Error, Equatable { case unavailable, failed, incompleteEvidence }
 
-    static let schema = #"{"type":"object","additionalProperties":false,"properties":{"notes":{"type":"array","items":{"type":"object","additionalProperties":false,"properties":{"noteID":{"type":"integer"},"state":{"type":"string","enum":["addressed","informational","blocking","uncertain"]},"reason":{"type":"string"}},"required":["noteID","state","reason"]}}},"required":["notes"]}"#
+    static let schema = #"{"type":"object","additionalProperties":false,"properties":{"notes":{"type":"array","items":{"type":"object","additionalProperties":false,"properties":{"noteID":{"type":"integer"},"state":{"type":"string","enum":["addressed","informational","blocking","uncertain"]},"reason":{"type":"string"},"acceptanceNoteID":{"type":["integer","null"]}},"required":["noteID","state","reason","acceptanceNoteID"]}}},"required":["notes"]}"#
 
     struct Input: Encodable, Sendable {
         let authorID: Int
@@ -56,6 +56,17 @@ enum ReReviewVerifier {
             informational note. A remaining unrelated concern from another reviewer does not block a
             reviewer whose own concerns are addressed. If a shared prerequisite is missing, classify the
             dependent concern as blocking or uncertain too. Return only the requested structured result.
+            Approval is never evidence that expectations were fulfilled: a reviewer can approve in
+            advance while still requesting changes or an explanation. Find ALL remaining expectations
+            by that reviewer across the entire MR, including general comments and other threads.
+            For each note set acceptanceNoteID to the exact ID of a later published comment by THAT
+            note's author explicitly accepting this fix or declaring the relevant concerns cleared;
+            otherwise return null. A general summary can accept several earlier findings. No account
+            or bot gets special treatment. Never accept an author's own claim or someone else's praise.
+            An acceptance must still apply to the current code and must not be superseded by later
+            conditions, requests or edits. A reviewer saying 'approved, but still do X' leaves X blocking
+            until implemented or substantively answered with a justified explanation. A mere promise
+            to do X is not addressed. A generic thanks does not imply acceptance of every issue.
             """
         let folder = FileManager.default.temporaryDirectory.appending(path: UUID().uuidString)
         try FileManager.default.createDirectory(at: folder, withIntermediateDirectories: false, attributes: [.posixPermissions: 0o700])

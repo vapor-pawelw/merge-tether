@@ -23,7 +23,7 @@ MergeTether opens a resizable main window and appears in the Dock. Its board kee
 
 Recognized GitLab to-dos update an MR’s durable action and are then marked read. Unknown events stay in Other; new foreign MRs can be added and handled or ignored, and matching enabled automation adopts them automatically. Agent completion remains a separate state.
 
-Cards requiring attention rise to the top of their column. Open a card for its full details and execution history. **Activity** shows workflow events and assistant results. **Settings → Automation → Scope** controls automation globally, by repository or by MR without losing history.
+Cards requiring attention rise to the top of their column; draft MRs stay at the bottom of Reviewing. Open a card for its full details and execution history. **Activity** shows workflow events and assistant results. **Settings → Automation → Scope** controls automation globally, by repository or by MR without losing history.
 
 The menu-bar icon stays neutral while work is handled automatically and turns amber when something needs your attention. Optional macOS notifications bring those decisions to you without announcing every automatically handled update. Enable notification permission inside the app; if macOS has denied it, the app links to System Settings.
 
@@ -50,6 +50,7 @@ Choose your assistant, scope and rules in **Settings → Automation**. Installed
 | --- | --- |
 | Review and re-review | Recheck new commits or author replies, verify earlier findings, resolve only your own addressed threads when enabled, and draft replies for anything still wrong. |
 | Follow up on your MR | Implement justified fixes, test, commit, push when enabled, verify the remote HEAD and file content, then save response drafts. |
+| Accepted feedback on your MR | Verify all reviewer expectations, then close addressed threads after that reviewer approves or explicitly confirms acceptance. Advance approval never overrides remaining conditions. Enabled by default; configurable in Checkpoints. |
 | Failed pipeline | Check whether another task already owns the fix; otherwise prepare a scoped diagnosis/fix. |
 | Conflict resolution | Prepare an isolated resolution; pushing it has a separate permission from ordinary follow-ups. |
 | Re-review requests | Request another review after feedback is addressed and no unpublished replies remain. |

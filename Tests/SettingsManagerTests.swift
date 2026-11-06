@@ -84,6 +84,15 @@ struct SettingsManagerTests {
         #expect(reloaded.glabPath == nil)
     }
 
+    @Test func acceptedFeedbackResolutionDefaultsOnAndPreservesAnExplicitOptOut() throws {
+        #expect(AutomationSettings().autoResolveAcceptedFeedback)
+        #expect(try JSONDecoder().decode(AutomationSettings.self, from: Data("{}".utf8)).autoResolveAcceptedFeedback)
+        var configuration = AutomationSettings()
+        configuration.autoResolveAcceptedFeedback = false
+        let saved = try JSONEncoder().encode(configuration)
+        #expect(try !JSONDecoder().decode(AutomationSettings.self, from: saved).autoResolveAcceptedFeedback)
+    }
+
     @Test("markLaunched flips isFirstLaunch")
     func firstLaunchFlip() {
         let defaults = makeDefaults()

@@ -137,6 +137,7 @@ struct AutomationSettings: Codable, Equatable, Sendable {
     /// On by default: approve once the assistant has no objections and every discussion is resolved.
     var autoApproveEnabled = true
     var autoResolveOwnReviewThreads = true
+    var autoResolveAcceptedFeedback = true
     var autoMergeProjects = ""
     var conflictTasksEnabled = false
     var allowConflictPush = false
@@ -213,6 +214,7 @@ struct AutomationSettings: Codable, Equatable, Sendable {
         autoReReviewEnabled = try values.decodeIfPresent(Bool.self, forKey: .autoReReviewEnabled) ?? false
         publishDraftsWithoutConfirmation = try values.decodeIfPresent(Bool.self, forKey: .publishDraftsWithoutConfirmation) ?? false
         autoResolveOwnReviewThreads = try values.decodeIfPresent(Bool.self, forKey: .autoResolveOwnReviewThreads) ?? true
+        autoResolveAcceptedFeedback = try values.decodeIfPresent(Bool.self, forKey: .autoResolveAcceptedFeedback) ?? true
         autoApproveEnabled = try values.decodeIfPresent(Bool.self, forKey: .autoApproveEnabled) ?? true
         autoMergeProjects = try values.decodeIfPresent(String.self, forKey: .autoMergeProjects) ?? ""
         conflictTasksEnabled = try values.decodeIfPresent(Bool.self, forKey: .conflictTasksEnabled) ?? false
@@ -256,6 +258,7 @@ struct AutomationSettings: Codable, Equatable, Sendable {
         case autoMergeProjects, allowConflictPush, allowFollowUpPush, conflictPushProjects, autoReReviewEnabled, publishDraftsWithoutConfirmation, publishAIRepliesWithoutConfirmation, autoApproveEnabled, autoResolveOwnReviewThreads
         case codexReviewModel, codexReviewThinking, assistantDefaultsVersion, scope
         case autoVerifyReReview, codexVerificationModel, claudeVerificationModel
+        case autoResolveAcceptedFeedback
     }
 
     private enum LegacyKeys: String, CodingKey {
