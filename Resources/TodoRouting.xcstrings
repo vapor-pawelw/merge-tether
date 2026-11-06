@@ -44,6 +44,83 @@
           }
         }
       }
+    },
+    "todoRouting.banner.accepted": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Automatically handled"
+          }
+        }
+      }
+    },
+    "todoRouting.banner.review": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Review request received"
+          }
+        }
+      }
+    },
+    "todoRouting.banner.followUp": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Feedback received"
+          }
+        }
+      }
+    },
+    "todoRouting.banner.pipeline": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Pipeline update received"
+          }
+        }
+      }
+    },
+    "todoRouting.banner.conflict": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Conflict update received"
+          }
+        }
+      }
+    },
+    "todoRouting.banner.refresh": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Merge request updated"
+          }
+        }
+      }
+    },
+    "todoRouting.banner.dismiss": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Dismiss event banner"
+          }
+        }
+      }
     }
   },
   "version": "1.0"

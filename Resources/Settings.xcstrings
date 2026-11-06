@@ -2057,6 +2057,39 @@
           }
         }
       }
+    },
+    "settings.general.automaticEventBanners.toggle": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Show automatically handled events"
+          }
+        }
+      }
+    },
+    "settings.general.automaticEventBanners.section": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "In-app event banners"
+          }
+        }
+      }
+    },
+    "settings.general.automaticEventBanners.help": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Show brief banners for GitLab updates handled automatically. These appear only inside the app; system notifications have a separate setting."
+          }
+        }
+      }
     }
   },
   "version": "1.0"

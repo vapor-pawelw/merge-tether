@@ -7,12 +7,14 @@ import Testing
     private final class Readiness { var ready = false }
     private final class ProbeGate {
         var entered = false
+        private var released = false
         var continuation: CheckedContinuation<Bool, Never>?
         func wait() async -> Bool {
             entered = true
+            if released { return false }
             return await withCheckedContinuation { continuation = $0 }
         }
-        func release() { continuation?.resume(returning: false); continuation = nil }
+        func release() { released = true; continuation?.resume(returning: false); continuation = nil }
     }
 
     private struct Fixture {
@@ -177,6 +179,81 @@ import Testing
         #expect(f.settings.mrActionIntents[0].kind == .followUp)
         #expect(f.settings.mrActionIntents[0].noteIDs == [42])
     }
+    @Test func manuallyAcceptedEventsRemainDurableWithoutAnAutomaticEventBanner() async throws {
+        let f = try fixture(); defer { f.cleanup() }
+        let router = MergeRequestTodoRouter(settings: f.settings, glab: f.glab, canAutomate: { false })
+        var banners = 0
+        router.onAcceptedIntent = { _ in banners += 1 }
+        let received = await router.process([todo()], host: target.host, username: target.username,
+                                            managed: [target], automatically: false)
+        #expect(received == [10])
+        #expect(f.settings.mrActionIntents.count == 1)
+        #expect(banners == 0)
+    }
+
+    @Test func acceptedEventBannerFollowsDurableIntentAndDoesNotRepeatOnAcknowledgementRetries() async throws {
+        let f = try fixture(acknowledgementFails: true); defer { f.cleanup() }
+        let router = MergeRequestTodoRouter(settings: f.settings, glab: f.glab, canAutomate: { false })
+        var acceptedIDs: [UUID] = []
+        router.onAcceptedIntent = { intent in
+            #expect(SettingsManager(defaults: f.defaults).mrActionIntents.contains { $0.id == intent.id })
+            acceptedIDs.append(intent.id)
+        }
+        _ = await router.process([todo()], host: target.host, username: target.username, managed: [target])
+        #expect(acceptedIDs.count == 1)
+        _ = await router.process([todo()], host: target.host, username: target.username, managed: [target])
+        #expect(acceptedIDs.count == 1)
+        try FileManager.default.removeItem(at: f.root.appending(path: "fail-ack"))
+        _ = await router.process([todo()], host: target.host, username: target.username, managed: [target])
+        #expect(acceptedIDs.count == 1)
+    }
+
+    @Test func submittedReviewWithoutOpenFeedbackRefreshesOwnedMRAndAcknowledgesEvent() async throws {
+        let f = try fixture(owned: true); defer { f.cleanup() }
+        let router = MergeRequestTodoRouter(settings: f.settings, glab: f.glab, canAutomate: { false })
+        let event = todo(action: .reviewSubmitted)
+        let acknowledged = await router.process([event], host: target.host, username: target.username, managed: [])
+        #expect(acknowledged == [event.id])
+        let intent = try #require(f.settings.mrActionIntents.first)
+        #expect(intent.kind == .refresh)
+        #expect(intent.state == .completed)
+        #expect(SettingsManager(defaults: f.defaults).mrActionIntents.first?.sourceEvents == [event.feedbackIdentity])
+    }
+
+    @Test func submittedGeneralReviewRefreshesBeforeSharedSemanticAssessment() async throws {
+        let f = try fixture(owned: true); defer { f.cleanup() }
+        try #"[{"id":"general","notes":[{"id":42,"author":{"id":2,"username":"other"},"system":false,"resolvable":false,"body":"Please also check the documented edge case."}]}]"#
+            .write(to: f.root.appending(path: "discussions"), atomically: true, encoding: .utf8)
+        f.settings.automation.authorFeedback.isEnabled = true
+        var launchedNotes: Set<Int> = []
+        let router = MergeRequestTodoRouter(settings: f.settings, glab: f.glab, canAutomate: { true }, launcher: { intent, _ in
+            launchedNotes = intent.noteIDs; return UUID()
+        })
+        let event = todo(action: .reviewSubmitted)
+        let acknowledged = await router.process([event], host: target.host, username: target.username, managed: [])
+        #expect(acknowledged == [event.id])
+        #expect(f.settings.mrActionIntents.first?.kind == .refresh)
+        #expect(f.settings.mrActionIntents.first?.state == .completed)
+        #expect(launchedNotes.isEmpty)
+    }
+
+    @Test func submittedReviewOnManagedForeignMRRefreshesWithoutAuthorFollowUp() async throws {
+        let f = try fixture(); defer { f.cleanup() }
+        let router = MergeRequestTodoRouter(settings: f.settings, glab: f.glab, canAutomate: { false })
+        let event = todo(action: .reviewSubmitted)
+        #expect(await router.process([event], host: target.host, username: target.username, managed: [target]) == [event.id])
+        #expect(f.settings.mrActionIntents.first?.kind == .refresh)
+    }
+
+    @Test func failedReviewEvidenceReadKeepsEventUnreadWithoutDurableAcceptance() async throws {
+        let f = try fixture(owned: true); defer { f.cleanup() }
+        try "unavailable".write(to: f.root.appending(path: "discussions"), atomically: true, encoding: .utf8)
+        let router = MergeRequestTodoRouter(settings: f.settings, glab: f.glab, canAutomate: { false })
+        #expect(await router.process([todo(action: .reviewSubmitted)], host: target.host, username: target.username, managed: []).isEmpty)
+        #expect(f.settings.mrActionIntents.isEmpty)
+        #expect(!FileManager.default.fileExists(atPath: f.root.appending(path: "acks").path))
+    }
+
     @Test func newEventDuringRunningReviewRemainsASeparatePendingAction() async throws {
         let f = try fixture(); defer { f.cleanup() }
         var launches = 0
@@ -489,8 +566,10 @@ import Testing
             return false
         })
         let refresh = Task { await router.process([todo(10)], host: target.host, username: target.username, managed: []) }
-        for _ in 0..<100 where !gate.entered { try await Task.sleep(for: .milliseconds(2)) }
-        #expect(gate.entered)
+        defer { gate.release(); refresh.cancel() }
+        let deadline = ContinuousClock.now + .seconds(5)
+        while !gate.entered, ContinuousClock.now < deadline { try await Task.sleep(for: .milliseconds(10)) }
+        try #require(gate.entered)
         let explicit = Task { await router.process([todo(20)], host: target.host, username: target.username, managed: [target]) }
         try await Task.sleep(for: .milliseconds(10))
         gate.release()

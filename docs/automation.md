@@ -60,6 +60,8 @@ To-dos are incoming events. A recognized update for an MR already on the board u
 
 A new foreign MR is proposed in **Other items** with **Add and handle** or **Ignore this MR**. With matching enabled automation, active scope and a ready selected CLI, eligible MRs are adopted and handled automatically. Explicitly ignored or paused MRs are not silently re-adopted. Manual re-addition restores an ignored MR.
 
+A submitted review is handled by its event type and live MR evidence, regardless of the reviewer identity. Open threads on your MR enter the configured follow-up action. General reviewer comments are assessed by the shared semantic verifier before it starts warranted follow-up work; informational summaries do not require code changes. Reviews with no open threads refresh the durable MR state. A failed evidence read leaves the event unread.
+
 Events that cannot be classified safely remain in **Other items** for manual reading; they are never acknowledged as understood. Marking a routed event read does not prove a review finished, a fix was pushed or a draft can be published. Those outcomes keep their separate execution and remote-evidence checks.
 
 ## Automation profiles
@@ -87,6 +89,8 @@ Manage global scope and repository/MR overrides in **Settings → Automation →
 ## Attention and notifications
 
 The menu-bar indicator is neutral when there is no human action waiting and amber when the board needs your attention. Running automation and read-only verification show progress; waiting only for a reviewer remains neutral. Each attention card explains the required decision and opens the relevant comments, run result or MR details. System notifications are optional and focus on new human actions; automatically handled updates do not create routine notification noise. Repeated polls do not repeat the same alert, and legacy periodic unread reminders are no longer delivered.
+
+**Settings → General → In-app event banners** controls brief banners for automatically accepted GitLab events. This is enabled by default for new and existing installations, while an explicit opt-out is preserved. Banners identify the received update, expire automatically and do not repeat on polling or acknowledgement retries. They contain repository/MR context without the review body; the durable action stays on the MR card. This setting is independent of macOS notifications.
 
 Use **Enable notifications** in the main window, onboarding or **Settings → General** to request macOS permission. The system prompt requires your choice. If permission was denied, use **Open System Settings**; returning to the app refreshes the displayed permission state. The app notification toggle and macOS authorization are separate controls.
 

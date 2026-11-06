@@ -21,11 +21,11 @@ MergeTether opens a resizable main window and appears in the Dock. Its board kee
 - **Reviewing:** MRs you review, with the author’s avatar, the reason they are tracked, discussion activity and direct review actions.
 - **Other items:** unmatched GitLab to-dos and MR proposals showing the author and the event that brought them here. Add or ignore a proposed MR.
 
-Recognized GitLab to-dos update an MR’s durable action and are then marked read. Unknown events stay in Other items; new foreign MRs can be added and handled or ignored, and matching enabled automation adopts them automatically. Agent completion remains a separate state.
+Recognized GitLab to-dos update an MR’s durable action and are then marked read. Unknown events stay in Other items; new foreign MRs can be added and handled or ignored, and matching enabled automation adopts them automatically. Agent completion remains a separate state. Optional brief in-app banners announce automatically accepted events; Settings → General controls them, independently of system notifications.
 
 Open **Review and confirm** to read complete discussion threads alongside private drafts. An **AI** badge marks verified agent identities or a very-high-confidence assessment tied to the current comment; an unbadged comment is unclassified.
 
-Cards requiring attention rise to the top of their column; draft MRs stay at the bottom of Reviewing. Open a card for its full details and execution history. **Activity** shows workflow events and agent results. **Settings → Automation → Scope** controls automation globally, by repository or by MR without losing history.
+Pin any card to keep it at the top of its column; pins are saved for your account. Within pinned and unpinned groups, cards requiring attention rise to the top and draft MRs stay at the bottom of Reviewing. Insertions, removals and reordering animate naturally and respect macOS Reduce Motion. Open a card for its full details and execution history. **Activity** shows workflow events and agent results. **Settings → Automation → Scope** controls automation globally, by repository or by MR without losing history.
 
 Use **Add merge request…** to add a reviewed MR by URL or repository and number. **Remove from my list** on a reviewed MR keeps it out of automatic adoption until you explicitly add it again.
 
@@ -34,7 +34,7 @@ Each attention card explains what needs you and offers a matching action. Pendin
 
 The menu-bar icon stays neutral while work is handled automatically and turns amber when something needs your attention. Optional macOS notifications bring those decisions to you without announcing every automatically handled update. Enable notification permission inside the app; if macOS has denied it, the app links to System Settings.
 
-Polling, notifications and launch at login are configurable. Monitoring continues while the app is running, including when its window is closed. A failed GitLab request keeps the previous inbox usable.
+Polling, notifications and launch at login are configurable. Monitoring continues while the app is running, including when its window is closed. A failed GitLab request keeps the previous inbox usable. On launch, saved pending work can restore a partial board before the complete MR list arrives. Cards are dimmed during the first sync, with a progress indicator. An unsuccessful first sync keeps available work visible and offers a refresh; later background refreshes do not dim the board.
 
 ## Get started
 

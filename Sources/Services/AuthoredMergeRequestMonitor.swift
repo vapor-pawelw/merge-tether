@@ -21,6 +21,10 @@ final class AuthoredMergeRequestMonitor {
     private(set) var requests: [AuthoredMergeRequestStatus] = []
     private(set) var isLoading = false
     private(set) var hasError = false
+    /// Catalog readiness concerns fetched MR data, independently of whether an
+    /// optional automation action succeeds. Soft refreshes keep it ready.
+    private var syncedCatalogRevision: UInt64?
+    var hasSyncedCurrentCatalog: Bool { syncedCatalogRevision == glab.accountRevision && lastAccount.map(isCurrent) == true }
     private(set) var lastRefresh: Date?
     let workflow: MergeWorkflowAutomation
     /// The acceptance coordinator supplies a verdict bound to this exact source and discussion text.
@@ -124,8 +128,9 @@ final class AuthoredMergeRequestMonitor {
     }
 
     func refreshIfNeeded() {
+        if isLoading { refreshAfterLoad = true; return }
         let automation = settings.automation
-        guard !isLoading, settings.onboardingCompleted,
+        guard settings.onboardingCompleted,
               isVisible || automation.autoMergeEnabled || automation.conflictTasksEnabled
                 || !automation.workflowRules.enabled.isEmpty || wasWatchingWorkflow
         else { return }
@@ -136,7 +141,10 @@ final class AuthoredMergeRequestMonitor {
         }
 
         let account = Account(host: host, username: username)
+        let revision = glab.accountRevision
         if lastAccount != account {
+            syncedCatalogRevision = nil
+            hasError = false
             requests = []
             notifiedDiscussions = []
             lastAccount = account
@@ -149,8 +157,9 @@ final class AuthoredMergeRequestMonitor {
                 if refreshAfterLoad { refreshAfterLoad = false; refreshIfNeeded() }
             }
             do {
-                try await refresh(account)
+                try await refresh(account, revision: revision)
             } catch {
+                guard isCurrent(account), glab.accountRevision == revision else { return }
                 hasError = true
                 Log.monitor.error("Authored merge request refresh failed: \(String(describing: error), privacy: .private)")
             }
@@ -161,7 +170,7 @@ final class AuthoredMergeRequestMonitor {
         account.host == glab.resolvedHost && account.username == glab.currentUsername
     }
 
-    private func refresh(_ account: Account) async throws {
+    private func refresh(_ account: Account, revision: UInt64) async throws {
         let host = account.host
         async let accountUser = glab.fetchAuthenticatedUser(host: host, expectedUsername: account.username)
         async let authored = glab.fetchAuthoredMergeRequests(host: host)
@@ -246,6 +255,7 @@ final class AuthoredMergeRequestMonitor {
 
         guard isCurrent(account) else { return }
         requests = results
+        syncedCatalogRevision = revision
         hasError = actionFailed
         lastRefresh = Date()
         notifyUnresolvedDiscussions(results)

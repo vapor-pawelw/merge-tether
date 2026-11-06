@@ -41,25 +41,16 @@ struct CommandCenterMRCard: View {
         VStack(alignment: .leading, spacing: 9) {
             HStack(alignment: .top, spacing: 6) {
                 Button(action: onDetails) {
-                    MergeRequestTitle(title: item.title, isDraft: item.section == .draftMergeRequests,
-                                      lineLimit: 2, font: .callout.weight(.semibold))
+                    BoardCardTitle(title: item.title, repositoryPath: item.url.gitLabProjectPath)
                         .contentShape(Rectangle())
                 }
                 .buttonStyle(.plain)
-                .help(Text(.Board.boardDetails))
+                .help(Text(verbatim: "\(item.title)\n\(item.url.gitLabProjectPath)\n") + Text(.Board.boardDetails))
+                BoardPinButton(pin: .mergeRequest(host: monitor.glab.resolvedHost,
+                    username: monitor.glab.currentUsername, projectID: item.id.projectID, iid: item.id.iid),
+                    settings: monitor.settings)
                 moreMenu
             }
-            HStack(spacing: 6) {
-                if allowsRemoval {
-                    foreignAuthor
-                    Text(verbatim: "·")
-                }
-                Text(verbatim: "!\(item.id.iid)").monospacedDigit().fixedSize()
-                Text(verbatim: "·")
-                RepositoryPathText(item.url.gitLabProjectPath).lineLimit(1)
-            }
-            .font(.caption).foregroundStyle(.secondary)
-            .help(metadataHelp)
             if let action = humanAction {
                 Group {
                     if let detail = action.detail, !detail.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
@@ -103,6 +94,7 @@ struct CommandCenterMRCard: View {
                     }
                 }
             }
+            footer
         }
         .onChange(of: row.latestJob?.id) { _, _ in retryError = nil }
         .controlSize(.small)
@@ -121,28 +113,30 @@ struct CommandCenterMRCard: View {
         } message: { Text(.Board.boardRemoveExplanation) }
     }
 
-    @ViewBuilder
-    private var foreignAuthor: some View {
-        let context = ReviewingContext(row: row)
-        if let author = context.author {
-            HStack(spacing: 4) {
-                AvatarView(url: author.avatarURL, size: 18).accessibilityHidden(true)
-                Text(verbatim: "@\(author.username)").lineLimit(1)
+    private var footer: some View {
+        VStack(alignment: .leading, spacing: 4) {
+            HStack(spacing: 6) {
+                if let author = ReviewingContext(row: row).author {
+                    BoardCardAuthor(author: author)
+                } else if allowsRemoval {
+                    AvatarView(url: nil, size: 16)
+                        .help(Text(.ReviewingContext.reviewingAuthorUnknown))
+                        .accessibilityLabel(Text(.ReviewingContext.reviewingAuthorUnknown))
+                }
+                Spacer(minLength: 4)
+                if item.section == .draftMergeRequests { BoardDraftBadge() }
+                BoardMRIdentifier(iid: item.id.iid)
             }
-            .help(Text(verbatim: "\(author.name) (@\(author.username))"))
-            .accessibilityElement(children: .combine)
-            .accessibilityLabel(Text(.ReviewingContext.reviewingAuthorLabel) + Text(verbatim: ": \(author.name) (@\(author.username))"))
-        } else {
-            AvatarView(url: nil, size: 18)
-                .help(Text(.ReviewingContext.reviewingAuthorUnknown))
-                .accessibilityLabel(Text(.ReviewingContext.reviewingAuthorUnknown))
+            BoardRepositoryFooter(path: item.url.gitLabProjectPath)
         }
+        .help(metadataHelp)
     }
 
     private var metadataHelp: Text {
         if allowsRemoval {
             let context = ReviewingContext(row: row)
             return Text(context.presenceMessage) + Text(verbatim: "\n") + Text(context.statusMessage)
+                + Text(verbatim: "\n\(item.url.gitLabProjectPath)")
         }
         return Text(verbatim: item.url.gitLabProjectPath)
     }
@@ -233,10 +227,10 @@ struct CommandCenterMRCard: View {
 
     private var moreMenu: some View {
         Menu {
-            Button(action: onDetails) { Text(.Board.boardDetails) }
-            Link(destination: item.url) { Text(.CommandCenter.commandCenterOpenGitLab) }
+            Button(action: onDetails) { Label { Text(.Board.boardDetails) } icon: { Image(systemName: "rectangle.expand.vertical") } }
+            Link(destination: item.url) { Label { Text(.CommandCenter.commandCenterOpenGitLab) } icon: { Image(systemName: "arrow.up.right.square") } }
             if !item.isAuthored {
-                Button { start { await monitor.runReview(for: item) } } label: { Text(.CommandCenter.commandCenterReviewRun) }
+                Button { start { await monitor.runReview(for: item) } } label: { Label { Text(.CommandCenter.commandCenterReviewRun) } icon: { Image(systemName: "text.magnifyingglass") } }
                     .disabled(isStarting || busy || !monitor.canRunReview(for: item))
             }
             AssistantContextMenu(mergeRequestURL: item.url, title: item.title,
@@ -249,12 +243,12 @@ struct CommandCenterMRCard: View {
                         if enabled { monitor.settings.autoApproveOptOuts.remove(target) }
                         else { monitor.settings.autoApproveOptOuts.insert(target) }
                         monitor.settings.save()
-                    })) { Text(.CommandCenter.commandCenterAutoApprove) }
+                    })) { Label { Text(.CommandCenter.commandCenterAutoApprove) } icon: { Image(systemName: "checkmark.seal") } }
                 }
             }
             if allowsRemoval {
                 Divider()
-                Button(role: .destructive) { confirmRemoval = true } label: { Text(.Board.boardRemove) }
+                Button(role: .destructive) { confirmRemoval = true } label: { Label { Text(.Board.boardRemove) } icon: { Image(systemName: "minus.circle") } }
             }
         } label: { Image(systemName: "ellipsis") }
         .menuStyle(.borderlessButton).menuIndicator(.hidden).fixedSize()
@@ -302,26 +296,65 @@ struct BoardTodoRow: View {
 
     var body: some View {
         VStack(alignment: .leading, spacing: 8) {
-            Text(verbatim: todo.displayTitle).font(.callout.weight(.medium)).lineLimit(2).textSelection(.enabled)
-            RepositoryPathText(todo.project.pathWithNamespace).font(.caption).foregroundStyle(.secondary)
-            ActionDescriptionText(todo: todo, currentUsername: monitor.glab.currentUsername)
-                .font(.caption).foregroundStyle(.secondary).lineLimit(1)
-            if !todo.body.isEmpty && todo.body != todo.displayTitle {
-                Text(verbatim: todo.body).font(.caption).foregroundStyle(.secondary).lineLimit(2)
+            HStack(alignment: .top, spacing: 6) {
+                Link(destination: todo.targetURL) {
+                    ActionDescriptionText(todo: todo, currentUsername: monitor.glab.currentUsername,
+                        repositoryPath: todo.project.pathWithNamespace)
+                        .font(.callout.weight(.semibold)).foregroundStyle(.primary)
+                        .multilineTextAlignment(.leading).lineLimit(2)
+                        .fixedSize(horizontal: false, vertical: true)
+                        .frame(maxWidth: .infinity, alignment: .leading)
+                }
+                .buttonStyle(.plain)
+                .help(Text(verbatim: "\(todo.displayTitle)\n\(todo.project.pathWithNamespace)"))
+                BoardPinButton(pin: .todo(host: monitor.glab.resolvedHost,
+                    username: monitor.glab.currentUsername, id: todo.id), settings: monitor.settings)
+                moreMenu
+            }
+            if let title = todo.target.title ?? (todo.body.isEmpty ? nil : todo.body), !title.isEmpty {
+                Text(verbatim: title).font(.caption).foregroundStyle(.secondary)
+                    .lineLimit(2).fixedSize(horizontal: false, vertical: true)
+                    .help(Text(verbatim: title))
             }
             HStack {
-                Link(destination: todo.targetURL) { Text(.Board.boardEventOpen) }.buttonStyle(.plain)
-                Spacer()
-                Button { withAnimation { monitor.markDoneWithUndo(todo) } } label: { Text(.Board.boardEventMarkRead) }
+                Spacer(minLength: 0)
+                Button { monitor.markDoneWithUndo(todo) } label: { Text(.Board.boardEventMarkRead) }
                     .buttonStyle(.bordered)
-                if todo.targetType == .mergeRequest {
-                    AssistantContextMenu(mergeRequestURL: todo.targetURL, title: todo.displayTitle,
-                                         workspace: monitor.settings.automation.assistantWorkspace)
-                        .labelStyle(.iconOnly)
-                }
             }
             .font(.caption)
+            VStack(alignment: .leading, spacing: 4) {
+                HStack(spacing: 6) {
+                    BoardCardAuthor(author: todo.target.author ?? todo.author,
+                        roleLabel: todo.targetType == .mergeRequest && todo.target.author != nil
+                            ? .ReviewingContext.reviewingAuthorLabel : nil)
+                    Spacer(minLength: 4)
+                    if todo.isDraft { BoardDraftBadge() }
+                    if todo.targetType == .mergeRequest, let iid = todo.target.iid {
+                        BoardMRIdentifier(iid: iid)
+                    } else if !todo.relativeIdentifier.isEmpty {
+                        Text(verbatim: todo.relativeIdentifier).font(.caption).foregroundStyle(.secondary)
+                    }
+                }
+                BoardRepositoryFooter(path: todo.project.pathWithNamespace)
+            }
         }
         .controlSize(.small)
+    }
+
+    private var moreMenu: some View {
+        Menu {
+            Link(destination: todo.targetURL) {
+                Label { Text(.Board.boardEventOpen) } icon: { Image(systemName: "arrow.up.right.square") }
+            }
+            Button { monitor.markDoneWithUndo(todo) } label: {
+                Label { Text(.Board.boardEventMarkRead) } icon: { Image(systemName: "checkmark") }
+            }
+            if todo.targetType == .mergeRequest {
+                AssistantContextMenu(mergeRequestURL: todo.targetURL, title: todo.displayTitle,
+                    workspace: monitor.settings.automation.assistantWorkspace)
+            }
+        } label: { Image(systemName: "ellipsis") }
+        .menuStyle(.borderlessButton).menuIndicator(.hidden).fixedSize()
+        .accessibilityLabel(Text(.CommandCenter.commandCenterActions))
     }
 }

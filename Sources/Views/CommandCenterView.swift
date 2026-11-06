@@ -10,8 +10,18 @@ struct CommandCenterView: View {
     @Environment(\.openWindow) private var openWindow
 
     var body: some View {
+        let initialRefresh = monitor.boardRefreshState
         VStack(spacing: 0) {
             statusBanners
+            if !showActivity, initialRefresh == .syncing {
+                HStack {
+                    ProgressView().controlSize(.small)
+                    Text(.Board.boardInitialSync)
+                    Spacer()
+                }
+                .font(.caption).padding(10)
+                .help(Text(.Board.boardInitialSyncHelp))
+            }
             NotificationPermissionView(notifications: monitor.notifications,
                                        enabled: monitor.settings.notificationsEnabled)
                 .padding(.horizontal, 18)
@@ -23,13 +33,19 @@ struct CommandCenterView: View {
                         .frame(minHeight: 180)
                 }
             } else {
-                CommandCenterBoardView(monitor: monitor)
+                CommandCenterBoardView(monitor: monitor, dimUnverifiedContent: initialRefresh != .current)
                     .id("\(monitor.glab.resolvedHost ?? "")|\(monitor.glab.currentUsername ?? "")")
             }
             if let todo = monitor.undoableTodo { undoBanner(todo) }
             accountFooter
         }
         .frame(minWidth: 1040, minHeight: 680)
+        .overlay(alignment: .bottomTrailing) {
+            if let event = monitor.autoHandledEventBanner {
+                AutoHandledEventBannerView(event: event) { monitor.dismissAutoHandledEventBanner(event.id) }
+                    .padding(18)
+            }
+        }
         .navigationTitle(Text(.Board.boardTitle))
         .toolbar {
             ToolbarItem(placement: .navigation) {
@@ -76,6 +92,13 @@ struct CommandCenterView: View {
     private var statusBanners: some View {
         if let error = monitor.lastError {
             ErrorBannerView(error: error) { openWindow(id: "onboarding") }
+        } else if !showActivity, monitor.boardRefreshState == .unavailable {
+            HStack {
+                Label { Text(.Board.boardInitialSyncFailed) } icon: { Image(systemName: "exclamationmark.triangle") }
+                Spacer()
+                Button { Task { await monitor.refreshNow() } } label: { Text(.CommandCenter.commandCenterRefresh) }
+            }
+            .font(.caption).foregroundStyle(.orange).padding(10)
         } else if monitor.attention.hasError || monitor.authoredMergeRequests.hasError {
             Label { Text(.Board.boardStale) } icon: { Image(systemName: "exclamationmark.triangle") }
                 .font(.caption).foregroundStyle(.orange).padding(10)

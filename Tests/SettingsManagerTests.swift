@@ -55,6 +55,18 @@ struct SettingsManagerTests {
         #expect(reloaded.glabPath?.path == "/opt/homebrew/bin/glab")
     }
 
+    @Test func automaticEventBannersDefaultOnForNewAndExistingInstallsAndPreserveOptOut() {
+        let defaults = makeDefaults()
+        #expect(SettingsManager(defaults: defaults).autoHandledEventBannersEnabled)
+        defaults.set(true, forKey: "onboardingCompleted")
+        defaults.set(false, forKey: "notificationsEnabled")
+        let upgraded = SettingsManager(defaults: defaults)
+        #expect(upgraded.autoHandledEventBannersEnabled)
+        upgraded.autoHandledEventBannersEnabled = false
+        upgraded.save()
+        #expect(!SettingsManager(defaults: defaults).autoHandledEventBannersEnabled)
+    }
+
     @Test func ignoredMRsPersistPerHostAccountProjectAndNumber() {
         let defaults = makeDefaults()
         let settings = SettingsManager(defaults: defaults)

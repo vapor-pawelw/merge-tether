@@ -29,15 +29,19 @@ struct AssistantContextMenu: View {
                                 context: .init(url: mergeRequestURL, title: title), workspace: workspace)
                         } catch { openFailed = true }
                     }
-                } label: { Text(destination.label) }
+                } label: {
+                    Label { Text(destination.label) } icon: { Image(systemName: destination.isCLI ? "terminal" : "macwindow") }
+                }
             }
             if destinations.isEmpty { Text(.AssistantContext.assistantContextNone) }
             Divider()
             Button {
                 AssistantAutomationRunner.copyPrompt(AssistantLaunchContext(url: mergeRequestURL, title: title).prompt)
-            } label: { Text(.AssistantContext.assistantContextCopy) }
+            } label: {
+                Label { Text(.AssistantContext.assistantContextCopy) } icon: { Image(systemName: "doc.on.clipboard") }
+            }
         } label: {
-            Label { Text(.AssistantContext.assistantContextOpen) } icon: { Image(systemName: "ellipsis.circle") }
+            Label { Text(.AssistantContext.assistantContextOpen) } icon: { Image(systemName: "bubble.left.and.bubble.right") }
         }
         .disabled(isOpening)
         .task { destinations = AssistantContextLauncher.availableDestinations() }

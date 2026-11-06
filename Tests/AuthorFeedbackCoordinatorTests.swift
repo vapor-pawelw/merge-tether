@@ -128,6 +128,24 @@ struct AuthorFeedbackCoordinatorTests {
         }
     }
 
+    @Test func generalOnlyInformationalReviewCompletesAssessmentWithoutRequestingChanges() async throws {
+        try await withFixture { fixture in
+            let summary = #"[{"id":"summary","notes":[{"id":20,"author":{"id":7,"username":"alice"},"system":false,"body":"Review complete; no changes needed.","resolvable":false}]}]"#
+            try fixture.write("discussions.json", summary)
+            fixture.settings.automation.authorFeedback.isEnabled = true
+            let coordinator = fixture.coordinator(assessment: .init(notes: [
+                .init(noteID: 20, state: .informational, reason: "A review summary without a requested change")
+            ]))
+            var requested: Set<Int> = []
+            coordinator.onNeedsWork = { _, notes, _ in requested = notes }
+            try await fixture.run(coordinator)
+            #expect(fixture.verified)
+            #expect(requested.isEmpty)
+            #expect(coordinator.status(projectID: 1, iid: 2)?.phase == .complete)
+            #expect(coordinator.status(projectID: 1, iid: 2)?.needsAttention == false)
+        }
+    }
+
     @Test func advanceApprovalKeepsGeneralConditionsOpenAndRequestsFollowUp() async throws {
         try await withFixture { fixture in
             try fixture.write("discussions.json", "[\(Fixture.thread),\(Fixture.condition)]")

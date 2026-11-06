@@ -7,6 +7,7 @@ struct BoardMRProposalCard: View {
     @State private var isWorking = false
     @State private var failed = false
     @State private var confirmIgnore = false
+    @State private var isShowingRun = false
     @State private var authorLoader: ProposalAuthorLoader
 
     init(proposal: MergeRequestBoardSnapshot.Proposal, monitor: TodoMonitorService) {
@@ -28,18 +29,13 @@ struct BoardMRProposalCard: View {
             BoardStatusChip(title: .Board.boardCompactProposal, symbol: "plus.circle")
             HStack(alignment: .top) {
                 Link(destination: proposal.url) {
-                    VStack(alignment: .leading, spacing: 5) {
-                        Text(verbatim: "!\(proposal.target.iid ?? 0) · \(proposal.title)").font(.callout.weight(.semibold)).lineLimit(2)
-                        RepositoryPathText(proposal.url.gitLabProjectPath).font(.caption).foregroundStyle(.secondary)
-                    }
-                    .frame(maxWidth: .infinity, alignment: .leading)
+                    BoardCardTitle(title: proposal.title, repositoryPath: proposal.url.gitLabProjectPath)
                 }
                 .buttonStyle(.plain)
-                AssistantContextMenu(mergeRequestURL: proposal.url, title: proposal.title,
-                                     workspace: monitor.settings.automation.assistantWorkspace)
-                    .labelStyle(.iconOnly)
+                BoardPinButton(pin: .mergeRequest(host: proposal.target.host, username: proposal.target.username,
+                    projectID: proposal.target.projectID, iid: proposal.target.iid ?? 0), settings: monitor.settings)
+                moreMenu
             }
-            author
             reasons
             HStack {
                 Button {
@@ -68,6 +64,18 @@ struct BoardMRProposalCard: View {
                 BoardStatusChip(title: .Board.boardCompactBlocked, symbol: "exclamationmark.circle", tint: .orange)
                     .help(Text(.Menu.menuMrAddFailed))
             }
+            runResult
+            VStack(alignment: .leading, spacing: 4) {
+                HStack(spacing: 6) {
+                    author
+                    Spacer(minLength: 4)
+                    if proposal.item?.section == .draftMergeRequests || proposal.todos.contains(where: \.isDraft) {
+                        BoardDraftBadge()
+                    }
+                    if let iid = proposal.target.iid { BoardMRIdentifier(iid: iid) }
+                }
+                BoardRepositoryFooter(path: proposal.url.gitLabProjectPath)
+            }
         }
         .confirmationDialog(Text(.Board.boardProposalIgnore), isPresented: $confirmIgnore, titleVisibility: .visible) {
             Button(role: .destructive) {
@@ -86,25 +94,39 @@ struct BoardMRProposalCard: View {
         .task(id: authorTaskID) { await authorLoader.load(proposal) }
     }
 
+    private var moreMenu: some View {
+        Menu {
+            Link(destination: proposal.url) {
+                Label { Text(.CommandCenter.commandCenterOpenGitLab) } icon: { Image(systemName: "arrow.up.right.square") }
+            }
+            AssistantContextMenu(mergeRequestURL: proposal.url, title: proposal.title,
+                workspace: monitor.settings.automation.assistantWorkspace)
+        } label: { Image(systemName: "ellipsis") }
+        .menuStyle(.borderlessButton).menuIndicator(.hidden).fixedSize()
+        .accessibilityLabel(Text(.CommandCenter.commandCenterActions))
+    }
+
     @ViewBuilder
     private var author: some View {
         if let author = context.author {
-            HStack(spacing: 5) {
-                AvatarView(url: author.avatarURL, size: 18)
-                    .accessibilityHidden(true)
-                if !author.name.isEmpty && author.name != author.username { Text(verbatim: author.name) }
-                Text(verbatim: "@\(author.username)").foregroundStyle(.secondary)
-            }
-            .font(.caption).lineLimit(1)
-            .help(Text(verbatim: "\(author.name) (@\(author.username))"))
-            .accessibilityLabel(Text(.Proposal.proposalAuthorLabel))
-            .accessibilityValue(Text(verbatim: "\(author.name) (@\(author.username))"))
+            BoardCardAuthor(author: author)
         } else {
             HStack(spacing: 5) {
                 if authorLoader.isLoading(proposal) { ProgressView().controlSize(.mini) }
                 Text(authorLoader.isLoading(proposal) ? .Proposal.proposalAuthorLoading : .Proposal.proposalAuthorUnknown)
             }
             .font(.caption).foregroundStyle(.secondary)
+        }
+    }
+
+    @ViewBuilder
+    private var runResult: some View {
+        if let job = proposal.latestJob {
+            BoardJobStatusActions(handoff: job, monitor: monitor)
+            DisclosureGroup(isExpanded: $isShowingRun) {
+                if isShowingRun { AssistantJobRow(handoff: job, monitor: monitor) }
+            } label: { Text(.MRHumanAction.mrHumanActionActionReviewRun).foregroundStyle(.secondary) }
+            .font(.caption)
         }
     }
 

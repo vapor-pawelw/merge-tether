@@ -2,6 +2,7 @@ import SwiftUI
 
 struct CommandCenterBoardView: View {
     let monitor: TodoMonitorService
+    var dimUnverifiedContent = false
     private struct Selection: Identifiable {
         let item: MergeRequestAttentionMonitor.Item
         let section: CommandCenterMRDetailSection
@@ -9,6 +10,7 @@ struct CommandCenterBoardView: View {
         var id: MergeRequestAttentionMonitor.Item.ID { item.id }
     }
     @State private var selected: Selection?
+    @Environment(\.accessibilityReduceMotion) private var reduceMotion
 
     private var account: GlabService.AuthedHost? {
         guard let host = monitor.glab.resolvedHost, let username = monitor.glab.currentUsername else { return nil }
@@ -19,53 +21,34 @@ struct CommandCenterBoardView: View {
         let own = monitor.ownMergeRequestItems
         let reviewed = monitor.reviewedMergeRequestItems
         let attention = monitor.attentionItems
-        return .init(own: own, reviewed: reviewed, todos: monitor.visibleTodos, attention: attention,
+        return .init(own: own, reviewed: reviewed, todos: monitor.currentAccountTodos, attention: attention,
               handoffs: monitor.assistantHandoffs, host: monitor.glab.resolvedHost, username: monitor.glab.currentUsername,
               intents: monitor.currentMRTodoIntents, routedTodoIDs: monitor.routedMRTodoIDs,
-              ignoredTargets: monitor.settings.ignoredMergeRequests, humanAttention: monitor.userAttention)
-    }
-
-    private func unattachedJobs(in board: MergeRequestBoardSnapshot) -> [AssistantAutomationRunner.Handoff] {
-        let rows = board.own + board.reviewed + board.otherMergeRequests
-        let latest = Dictionary(grouping: monitor.assistantHandoffs, by: \.key.work)
-            .values.compactMap { $0.max { $0.createdAt < $1.createdAt } }
-        return latest.filter { job in
-            !monitor.settings.ignoredMergeRequests.contains(.init(host: job.key.work.host, username: job.key.username,
-                projectID: job.key.work.projectID, iid: job.key.work.iid))
-                && (job.execution?.state.isActive == true || MergeRequestBoardSnapshot.Row.jobNeedsAttention(job.execution?.state))
-                && !rows.contains { row in
-                    row.item.id.projectID == job.key.work.projectID && row.item.id.iid == job.key.work.iid
-                        && row.item.url.isGitLabMergeRequest(host: job.key.work.host, iid: job.key.work.iid)
-                }
-        }.sorted { $0.createdAt > $1.createdAt }
+              ignoredTargets: monitor.settings.ignoredMergeRequests, humanAttention: monitor.userAttention,
+              pinnedCards: monitor.settings.boardPins)
     }
 
     var body: some View {
         let board = snapshot
-        let unattachedJobs = unattachedJobs(in: board)
+        let otherCards = board.otherCards(jobs: monitor.assistantHandoffs, host: account?.host, username: account?.username,
+            pinnedCards: monitor.settings.boardPins)
         HStack(alignment: .top, spacing: 18) {
-            lane(title: .Board.boardLaneOwn, symbol: "arrow.triangle.pull", count: board.own.count) {
+            lane(title: .Board.boardLaneOwn, symbol: "arrow.triangle.pull", cardIDs: board.own.map(\.id)) {
                 if board.own.isEmpty { empty(.Board.boardLaneOwnEmpty) }
                 ForEach(board.own) { row in card(row) }
             }
-            lane(title: .Board.boardLaneReviewing, symbol: "text.magnifyingglass", count: board.reviewed.count) {
+            lane(title: .Board.boardLaneReviewing, symbol: "text.magnifyingglass", cardIDs: board.reviewed.map(\.id)) {
                 if board.reviewed.isEmpty { empty(.Board.boardLaneReviewingEmpty) }
                 ForEach(board.reviewed) { row in card(row, removable: true) }
             }
-            lane(title: .Board.boardLaneOther, symbol: "tray", count: board.otherTodos.count + board.proposals.count + unattachedJobs.count) {
-                if board.otherTodos.isEmpty && board.proposals.isEmpty && unattachedJobs.isEmpty {
-                    empty(.Board.boardLaneOtherEmpty)
+            lane(title: .Board.boardLaneOther, symbol: "tray", cardIDs: otherCards.map(\.id)) {
+                if otherCards.isEmpty { empty(.Board.boardLaneOtherEmpty) }
+                ForEach(otherCards) { entry in
+                    otherCard(entry).transition(cardTransition)
                 }
-                ForEach(board.proposals) { proposal in BoardMRProposalCard(proposal: proposal, monitor: monitor) }
-                ForEach(board.otherTodos) { todo in
-                    BoardTodoRow(todo: todo, monitor: monitor)
-                        .padding(10)
-                        .frame(maxWidth: .infinity, alignment: .leading)
-                        .background(Color(nsColor: .controlBackgroundColor), in: RoundedRectangle(cornerRadius: 8))
-                }
-                ForEach(unattachedJobs) { job in BoardCompactJobCard(handoff: job, monitor: monitor) }
             }
         }
+        .id(account)
         .padding(14)
         .background(Color(nsColor: .windowBackgroundColor))
         .sheet(item: $selected) { selection in
@@ -106,16 +89,34 @@ struct CommandCenterBoardView: View {
         }, onDetails: {
             selected = Selection(item: row.item, section: .overview, account: account)
         })
+        .transition(cardTransition)
     }
 
-    private func lane<Content: View>(title: LocalizedStringResource, symbol: String, count: Int,
+    @ViewBuilder
+    private func otherCard(_ card: MergeRequestBoardSnapshot.OtherCard) -> some View {
+        switch card.content {
+        case .proposal(let proposal): BoardMRProposalCard(proposal: proposal, monitor: monitor)
+        case .todo(let todo):
+            BoardTodoRow(todo: todo, monitor: monitor)
+                .padding(10)
+                .frame(maxWidth: .infinity, alignment: .leading)
+                .background(Color(nsColor: .controlBackgroundColor), in: RoundedRectangle(cornerRadius: 8))
+        case .job(let job): BoardCompactJobCard(handoff: job, monitor: monitor)
+        }
+    }
+
+    private var cardTransition: AnyTransition {
+        reduceMotion ? .identity : .opacity.combined(with: .scale(scale: 0.98, anchor: .top))
+    }
+
+    private func lane<Content: View, ID: Hashable>(title: LocalizedStringResource, symbol: String, cardIDs: [ID],
                                      @ViewBuilder content: () -> Content) -> some View {
         VStack(spacing: 0) {
             HStack {
                 Label { Text(title) } icon: { Image(systemName: symbol) }
                     .font(.subheadline.weight(.semibold))
                 Spacer()
-                Text(count, format: .number).font(.caption.monospacedDigit()).foregroundStyle(.secondary)
+                Text(cardIDs.count, format: .number).font(.caption.monospacedDigit()).foregroundStyle(.secondary)
             }
             .padding(.horizontal, 6).padding(.vertical, 10)
             Divider()
@@ -123,6 +124,8 @@ struct CommandCenterBoardView: View {
                 VStack(alignment: .leading, spacing: 10, content: content)
                     .frame(maxWidth: .infinity, alignment: .leading)
                     .padding(.vertical, 10).padding(.horizontal, 1)
+                    .opacity(dimUnverifiedContent ? 0.55 : 1)
+                    .animation(reduceMotion ? nil : .spring(duration: 0.28, bounce: 0.12), value: cardIDs)
             }
         }
         .frame(minWidth: 320, maxWidth: .infinity, maxHeight: .infinity)
@@ -132,52 +135,6 @@ struct CommandCenterBoardView: View {
     private func empty(_ title: LocalizedStringResource) -> some View {
         Text(title).font(.subheadline).foregroundStyle(.secondary).padding(.vertical, 24)
             .frame(maxWidth: .infinity, alignment: .leading)
-    }
-}
-
-private struct BoardCompactJobCard: View {
-    let handoff: AssistantAutomationRunner.Handoff
-    let monitor: TodoMonitorService
-    @State private var retrying = false
-    @Environment(\.openSettings) private var openSettings
-
-    var body: some View {
-        VStack(alignment: .leading, spacing: 9) {
-            Text(verbatim: handoff.title).font(.callout.weight(.semibold)).lineLimit(2)
-            HStack {
-                Text(handoff.key.assistant.displayName)
-                Spacer()
-                Text(handoff.createdAt, style: .relative)
-            }
-            .font(.caption).foregroundStyle(.secondary)
-            HStack {
-                BoardStatusChip(title: handoff.execution?.state.isActive == true
-                    ? .Board.boardCompactWorking : .Board.boardCompactBlocked,
-                    symbol: handoff.execution?.state.isActive == true ? "arrow.triangle.2.circlepath" : "exclamationmark.circle",
-                    tint: handoff.execution?.state.isActive == true ? .blue : .orange)
-                Spacer()
-                if handoff.execution?.state.isActive == true {
-                    Button(role: .destructive) { monitor.cancelAssistantJob(handoff.id) } label: { Text(.AssistantJobs.assistantJobsStop) }
-                        .buttonStyle(.plain)
-                } else if !monitor.availableAssistants.contains(handoff.key.assistant) {
-                    Button { openSettings() } label: { Text(.Board.boardCompactSetupCli) }
-                        .buttonStyle(.bordered)
-                } else {
-                    Button {
-                        retrying = true
-                        Task { defer { retrying = false }; await monitor.retryAssistantJob(handoff.id) }
-                    } label: { Text(.AssistantJobs.assistantJobsRetry) }
-                    .buttonStyle(.bordered)
-                    .disabled(retrying || AssistantAutomationRunner.isWorking(on: handoff.key.work))
-                }
-            }
-            DisclosureGroup {
-                AssistantJobRow(handoff: handoff, monitor: monitor)
-            } label: { Text(.Board.boardDetails) }
-            .font(.caption)
-        }
-        .padding(12).controlSize(.small)
-        .frame(maxWidth: .infinity, alignment: .leading)
-        .background(Color(nsColor: .controlBackgroundColor), in: RoundedRectangle(cornerRadius: 8))
+            .transition(cardTransition)
     }
 }

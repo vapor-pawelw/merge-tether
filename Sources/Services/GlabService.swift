@@ -8,10 +8,17 @@ final class GlabService {
     var glabPath: URL?
 
     /// Username on the default host, set only when that host is authenticated.
-    var currentUsername: String?
+    var currentUsername: String? {
+        didSet { if currentUsername != oldValue { accountRevision &+= 1 } }
+    }
 
     /// Resolved GitLab host, e.g. `"gitlab.com"` or a self-hosted instance.
-    var resolvedHost: String?
+    var resolvedHost: String? {
+        didSet { if resolvedHost != oldValue { accountRevision &+= 1 } }
+    }
+
+    /// A round-trip through another account must not revive earlier session data.
+    private(set) var accountRevision: UInt64 = 0
 
     /// All hosts glab reports as logged in.
     var authedHosts: [AuthedHost] = []

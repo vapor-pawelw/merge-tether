@@ -3,12 +3,15 @@ import SwiftUI
 struct ActionDescriptionText: View {
     let todo: Todo
     let currentUsername: String?
+    var repositoryPath: String? = nil
 
     var body: some View {
-        if let viewerText {
-            Text(viewerText)
+        let description = viewerText.map { Text(verbatim: $0) } ?? composedText
+        if let repositoryPath, let repositoryName = repositoryPath.split(separator: "/").last {
+            let repository = Text(verbatim: String(repositoryName)).font(.caption).foregroundStyle(Color.accentColor)
+            description + Text(verbatim: "  ") + repository
         } else {
-            composedText
+            description
         }
     }
 

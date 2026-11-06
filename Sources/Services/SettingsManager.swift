@@ -12,6 +12,7 @@ final class SettingsManager {
     var unreadReminderInterval: UnreadReminderInterval
     var unreadReminderSound: ReminderSound
     var notificationsEnabled: Bool
+    var autoHandledEventBannersEnabled: Bool
     var lastSeenTodoIDs: Set<Int>
     var onboardingCompleted: Bool
     var glabPath: URL?
@@ -35,6 +36,7 @@ final class SettingsManager {
     var workflowActivity: [MergeWorkflowActivityEntry]
     var mrActionIntents: [MRTodoIntent]
     var routedMRTodoReceipts: Set<MRTodoRouteReceipt>
+    var boardPins: Set<BoardCardPin>
 
     init(defaults: UserDefaults = .standard) {
         self.defaults = defaults
@@ -62,6 +64,8 @@ final class SettingsManager {
             .flatMap { try? JSONDecoder().decode([MRTodoIntent].self, from: $0) } ?? []
         routedMRTodoReceipts = defaults.data(forKey: Key.routedMRTodoReceipts)
             .flatMap { try? JSONDecoder().decode(Set<MRTodoRouteReceipt>.self, from: $0) } ?? []
+        boardPins = defaults.data(forKey: Key.boardPins)
+            .flatMap { try? JSONDecoder().decode(Set<BoardCardPin>.self, from: $0) } ?? []
         conflictReceipts = defaults.data(forKey: Key.conflictReceipts)
             .flatMap { try? JSONDecoder().decode(Set<MergeConflictReceipt>.self, from: $0) }
             ?? []
@@ -77,6 +81,7 @@ final class SettingsManager {
         let rawReminderSound = defaults.string(forKey: Key.unreadReminderSound) ?? ReminderSound.off.rawValue
         self.unreadReminderSound = ReminderSound(rawValue: rawReminderSound) ?? .off
         self.notificationsEnabled = defaults.bool(forKey: Key.notificationsEnabled)
+        self.autoHandledEventBannersEnabled = defaults.bool(forKey: Key.autoHandledEventBannersEnabled)
         self.onboardingCompleted = defaults.bool(forKey: Key.onboardingCompleted)
         self.launchAtLoginPreference = defaults.bool(forKey: Key.launchAtLoginPreference)
         self.resolvedHost = defaults.string(forKey: Key.resolvedHost)
@@ -143,6 +148,7 @@ final class SettingsManager {
         }
         if let data = try? JSONEncoder().encode(mrActionIntents) { defaults.set(data, forKey: Key.mrActionIntents) }
         if let data = try? JSONEncoder().encode(routedMRTodoReceipts) { defaults.set(data, forKey: Key.routedMRTodoReceipts) }
+        if let data = try? JSONEncoder().encode(boardPins) { defaults.set(data, forKey: Key.boardPins) }
         if let data = try? JSONEncoder().encode(conflictReceipts) {
             defaults.set(data, forKey: Key.conflictReceipts)
         }
@@ -156,6 +162,7 @@ final class SettingsManager {
         defaults.set(unreadReminderInterval.rawValue, forKey: Key.unreadReminderInterval)
         defaults.set(unreadReminderSound.rawValue, forKey: Key.unreadReminderSound)
         defaults.set(notificationsEnabled, forKey: Key.notificationsEnabled)
+        defaults.set(autoHandledEventBannersEnabled, forKey: Key.autoHandledEventBannersEnabled)
         defaults.set(onboardingCompleted, forKey: Key.onboardingCompleted)
         defaults.set(launchAtLoginPreference, forKey: Key.launchAtLoginPreference)
         if let glabPath {
@@ -204,6 +211,7 @@ final class SettingsManager {
             Key.unreadReminderInterval: UnreadReminderInterval.fiveMinutes.rawValue,
             Key.unreadReminderSound: ReminderSound.off.rawValue,
             Key.notificationsEnabled: true,
+            Key.autoHandledEventBannersEnabled: true,
             Key.onboardingCompleted: false,
             Key.launchAtLoginPreference: true,
             Key.hasLaunchedBefore: false,
@@ -216,6 +224,7 @@ final class SettingsManager {
         static let automationAttemptReceipts = "automationAttemptReceipts"
         static let authorFeedbackAttempts = "authorFeedbackAttempts"
         static let pendingTodoAcknowledgements = "pendingTodoAcknowledgements"
+        static let boardPins = "boardPins"
         static let conflictReceipts = "conflictReceipts"
         static let reReviewReceipts = "reReviewReceipts"
         static let reReviewDraftBaselines = "reReviewDraftBaselines"
@@ -228,6 +237,7 @@ final class SettingsManager {
         static let unreadReminderInterval = "unreadReminderInterval"
         static let unreadReminderSound = "unreadReminderSound"
         static let notificationsEnabled = "notificationsEnabled"
+        static let autoHandledEventBannersEnabled = "autoHandledEventBannersEnabled"
         static let lastSeenTodoIDs = "lastSeenTodoIDs"
         static let onboardingCompleted = "onboardingCompleted"
         static let glabPath = "glabPath"

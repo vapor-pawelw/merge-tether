@@ -52,6 +52,15 @@ struct GeneralSettingsTab: View {
             } header: {
                 Text(.Settings.settingsGeneralNotificationsSection)
             }
+            Section {
+                Toggle(isOn: autoHandledEventBannersBinding) {
+                    Text(.Settings.settingsGeneralAutomaticEventBannersToggle)
+                }
+            } header: {
+                Text(.Settings.settingsGeneralAutomaticEventBannersSection)
+            } footer: {
+                Text(.Settings.settingsGeneralAutomaticEventBannersHelp)
+            }
         }
         .formStyle(.grouped)
         .task {
@@ -66,6 +75,16 @@ struct GeneralSettingsTab: View {
                 monitor.settings.refreshInterval = newValue
                 monitor.settings.save()
                 monitor.restartTimer()
+            }
+        )
+    }
+
+    private var autoHandledEventBannersBinding: Binding<Bool> {
+        Binding(
+            get: { monitor.settings.autoHandledEventBannersEnabled },
+            set: { newValue in
+                monitor.settings.autoHandledEventBannersEnabled = newValue
+                monitor.settings.save()
             }
         )
     }

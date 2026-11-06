@@ -9,6 +9,14 @@ final class TodoMonitorService {
     let notifications: NotificationService
     let attention: MergeRequestAttentionMonitor
     let authoredMergeRequests: AuthoredMergeRequestMonitor
+    let autoHandledEventBanners = AutoHandledEventBannerCenter()
+
+    var autoHandledEventBanner: AutoHandledEventBannerCenter.Event? {
+        autoHandledEventBanners.current(host: glab.resolvedHost, username: glab.currentUsername,
+                                       enabled: settings.autoHandledEventBannersEnabled)
+    }
+
+    func dismissAutoHandledEventBanner(_ id: UUID) { autoHandledEventBanners.dismiss(id) }
 
     private(set) var allTodos: [Todo] = []
     private(set) var lastError: GlabError?
@@ -32,15 +40,24 @@ final class TodoMonitorService {
     private var acknowledgedDuringFetch: Set<Int> = []
     private var inboxHost: String?
     private var inboxUsername: String?
+    private var inboxAccountRevision: UInt64?
     @ObservationIgnored private var attentionNotificationTask: Task<Void, Never>?
     @ObservationIgnored private var attentionNotificationGeneration = UUID()
     @ObservationIgnored private var attentionNotificationLedger = UserAttentionNotificationLedger()
+    @ObservationIgnored private var manualAdoptions: [MRAutomationScope.Target: Int] = [:]
     private var isAutomating = false
     private let automation: TodoAutomationService
-    @ObservationIgnored private lazy var mrTodoRouter = MergeRequestTodoRouter(settings: settings, glab: glab, canAutomate: { [weak self] in
-        guard let self else { return false }
-        return await AssistantCLI.detect(self.settings.automation.assistant, requireCLI: true).isReady
-    })
+    @ObservationIgnored private lazy var mrTodoRouter: MergeRequestTodoRouter = {
+        let router = MergeRequestTodoRouter(settings: settings, glab: glab, canAutomate: { [weak self] in
+            guard let self else { return false }
+            return await AssistantCLI.detect(self.settings.automation.assistant, requireCLI: true).isReady
+        })
+        router.onAcceptedIntent = { [weak self] intent in
+            guard let self, self.manualAdoptions[intent.target, default: 0] == 0 else { return }
+            autoHandledEventBanners.receive(intent, enabled: settings.autoHandledEventBannersEnabled)
+        }
+        return router
+    }()
     private let cancelPolicyJob: @MainActor (UUID, SettingsManager) -> Void
     private var runningAttentionFeedback: Set<AssistantAutomationRunner.MergeRequestWork> = []
     private var failedAttentionFeedback: Set<AssistantAutomationRunner.MergeRequestWork> = []
@@ -169,6 +186,18 @@ final class TodoMonitorService {
 
     var requiresAssistantCLI: Bool { true }
 
+    var boardRefreshState: BoardRefreshState {
+        guard settings.onboardingCompleted else { return .current }
+        let todosReady = hasCompletedFirstFetch && glab.currentUsername != nil
+            && inboxHost == glab.resolvedHost && inboxUsername == glab.currentUsername
+            && inboxAccountRevision == glab.accountRevision
+        let accountUnavailable = glab.currentUsername == nil && glab.authStatus != .unknown
+        return .init(todosReady: todosReady, catalogReady: attention.hasSyncedCurrentCatalog,
+                     authoredReady: authoredMergeRequests.hasSyncedCurrentCatalog,
+                     isRefreshing: isLoading || attention.isLoading || authoredMergeRequests.isLoading,
+                     hasError: lastError != nil || attention.hasError || authoredMergeRequests.hasError || accountUnavailable)
+    }
+
     func bootstrap() async {
         retireLegacyGUIQueueIfNeeded()
         refreshAvailableAssistants()
@@ -197,6 +226,14 @@ final class TodoMonitorService {
         allTodos
             .filter { !optimisticallyDone.contains($0.id) }
             .sorted { $0.createdAt > $1.createdAt }
+    }
+
+    /// Display only the inbox fetched for this exact authenticated account epoch.
+    var currentAccountTodos: [Todo] {
+        guard let host = glab.resolvedHost, let username = glab.currentUsername,
+              inboxHost == host, inboxUsername == username,
+              inboxAccountRevision == glab.accountRevision else { return [] }
+        return visibleTodos
     }
 
     var pipelineHandoffs: [MergeWorkflowActivityEntry] {
@@ -247,11 +284,18 @@ final class TodoMonitorService {
         guard let iid = todo.target.iid, let host = glab.resolvedHost,
               let canonical = todo.targetURL.gitLabTodoMergeRequestURL(host: host, iid: iid),
               let target = scopeTarget(projectID: todo.project.id, iid: iid, url: canonical) else { return }
+        // Register before exposing the active scope to an already-running background pass.
+        manualAdoptions[target, default: 0] += 1
+        defer {
+            let remaining = manualAdoptions[target, default: 1] - 1
+            if remaining == 0 { manualAdoptions.removeValue(forKey: target) }
+            else { manualAdoptions[target] = remaining }
+        }
         settings.ignoredMergeRequests.remove(target)
         settings.automation.scope[target] = .active
         settings.automation.scope.rememberRepository(todo.project.pathWithNamespace, for: target)
         settings.save()
-        await routeMRTodos(host: target.host, username: target.username)
+        await routeMRTodos(host: target.host, username: target.username, automatically: false)
         guard !Task.isCancelled else { return }
         for intent in currentMRTodoIntents where intent.target == target && intent.state != .completed {
             await mrTodoRouter.run(intent.id, manual: true)
@@ -271,11 +315,11 @@ final class TodoMonitorService {
             }
     }
 
-    private func routeMRTodos(host: String, username: String) async {
+    private func routeMRTodos(host: String, username: String, automatically: Bool = true) async {
         let managed = Set(reviewedMergeRequestItems.compactMap {
             scopeTarget(projectID: $0.id.projectID, iid: $0.id.iid, url: $0.url)
         })
-        let acknowledged = await mrTodoRouter.process(allTodos, host: host, username: username, managed: managed)
+        let acknowledged = await mrTodoRouter.process(allTodos, host: host, username: username, managed: managed, automatically: automatically)
         guard glab.resolvedHost == host, glab.currentUsername == username else { return }
         allTodos.removeAll { acknowledged.contains($0.id) }
         acknowledgedDuringFetch.formUnion(acknowledged)
@@ -313,7 +357,7 @@ final class TodoMonitorService {
     }
 
     var inbox: InboxSnapshot {
-        InboxSnapshot(todos: visibleTodos, attention: attentionItems, host: glab.resolvedHost, username: glab.currentUsername)
+        InboxSnapshot(todos: currentAccountTodos, attention: attentionItems, host: glab.resolvedHost, username: glab.currentUsername)
     }
 
     var manualAssistantGroups: [AssistantTaskGroup] {
@@ -638,7 +682,7 @@ final class TodoMonitorService {
         let ready = availableAssistants.contains(settings.automation.assistant)
         let preparing = ready || assistantDependencies.isChecking
         let board = MergeRequestBoardSnapshot(own: ownMergeRequestItems, reviewed: reviewedMergeRequestItems,
-            todos: inboxHost == host && inboxUsername == username ? visibleTodos : [], attention: attentionItems, handoffs: settings.assistantHandoffs,
+            todos: currentAccountTodos, attention: attentionItems, handoffs: settings.assistantHandoffs,
             host: host, username: username, intents: currentMRTodoIntents, routedTodoIDs: routedMRTodoIDs,
             ignoredTargets: settings.ignoredMergeRequests)
         var candidates: [UserAttentionSnapshot.Candidate] = []
@@ -749,9 +793,9 @@ final class TodoMonitorService {
     var badgeCount: Int { inbox.count + standaloneManualAssistantGroups.count + (hasAssistantAction ? 1 : 0) }
 
     var hasUnseenTodos: Bool {
-        guard !visibleTodos.isEmpty else { return false }
+        guard !currentAccountTodos.isEmpty else { return false }
         guard let lastOpened = settings.lastMenuOpenedAt else { return false }
-        return visibleTodos.contains { $0.createdAt > lastOpened }
+        return currentAccountTodos.contains { $0.createdAt > lastOpened }
     }
 
     var dashboardURL: URL {
@@ -819,8 +863,10 @@ final class TodoMonitorService {
         authoredMergeRequests.refreshIfNeeded()
         let username = glab.currentUsername
         let host = username == nil ? nil : glab.resolvedHost
+        let revision = glab.accountRevision
         let result = await glab.fetchTodos(host: host)
-        guard glab.currentUsername == username, username == nil || glab.resolvedHost == host else { return }
+        guard glab.accountRevision == revision, glab.currentUsername == username,
+              username == nil || glab.resolvedHost == host else { return }
         switch result {
         case .success(let fetched):
             let fetchedFiltered = fetched.filter { !acknowledgedDuringFetch.contains($0.id) }
@@ -829,6 +875,7 @@ final class TodoMonitorService {
             settings.resolvedHost = glab.resolvedHost
             inboxHost = host
             inboxUsername = username
+            inboxAccountRevision = revision
 
             if let failedAutomationTodoID, !fetchedIDs.contains(failedAutomationTodoID) {
                 self.failedAutomationTodoID = nil

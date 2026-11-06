@@ -14,6 +14,7 @@ final class MergeRequestTodoRouter {
     private var processing = false
     private var launching: Set<UUID> = []
     private(set) var acknowledgementError: GlabError?
+    var onAcceptedIntent: (@MainActor (MRTodoIntent) -> Void)?
 
     init(settings: SettingsManager, glab: GlabService,
          canAutomate: @escaping @MainActor () async -> Bool, launcher: Launcher? = nil,
@@ -28,7 +29,7 @@ final class MergeRequestTodoRouter {
     }
 
     func process(_ todos: [Todo], host: String, username: String,
-                 managed: Set<MRAutomationScope.Target>) async -> Set<Int> {
+                 managed: Set<MRAutomationScope.Target>, automatically: Bool = true) async -> Set<Int> {
         guard isCurrent(host, username) else { return [] }
         // A manual Add/handle pass must wait for the current refresh, not be
         // discarded. The wait yields the actor and exits promptly on cancellation.
@@ -104,6 +105,9 @@ final class MergeRequestTodoRouter {
             let intentID = persist(todo, kind: kind, notes: classification.1, request: request, target: target,
                                    head: head, previousAttempt: previousAttempt)
             // The action is durable before any remote acknowledgement or worker dispatch.
+            if automatically, let accepted = settings.mrActionIntents.first(where: { $0.id == intentID }) {
+                onAcceptedIntent?(accepted)
+            }
             if await acknowledge(todo, target: target, intentID: intentID) { acknowledged.insert(todo.id) }
         }
         await synchronize(host: host, username: username, cachedRequests: requests)
@@ -232,8 +236,18 @@ final class MergeRequestTodoRouter {
         case .unmergeable:
             guard let conflicts = request.hasConflicts else { return nil }
             return (conflicts ? .conflict : .refresh, [])
-        case .mentioned, .directlyAddressed, .reviewSubmitted:
-            guard owned, request.state == "opened", todo.actionName == .reviewSubmitted || todo.linkedNoteID != nil else { return nil }
+        case .reviewSubmitted:
+            guard owned, request.state == "opened" else { return (.refresh, []) }
+            let discussions = try await glab.fetchMergeRequestDiscussions(projectID: request.projectID, iid: request.iid, host: host)
+            // General review comments are assessed by AuthorFeedbackCoordinator
+            // before it dispatches warranted work. Do not race that verifier
+            // with a second worker or require fix proof for a no-change summary.
+            let notes = GitLabMergeRequestDiscussion.unresolvedFeedback(in: discussions, excluding: user.id)
+                .filter { $0.author?.id == todo.author.id }
+            let ids = Set(notes.compactMap(\.id))
+            return ids.isEmpty ? (.refresh, []) : (.followUp, ids)
+        case .mentioned, .directlyAddressed:
+            guard owned, request.state == "opened", todo.linkedNoteID != nil else { return nil }
             let discussions = try await glab.fetchMergeRequestDiscussions(projectID: request.projectID, iid: request.iid, host: host)
             let feedback = GitLabMergeRequestDiscussion.unresolvedFeedback(in: discussions, excluding: user.id)
                 .filter { note in
@@ -416,7 +430,7 @@ final class MergeRequestTodoRouter {
         }
         let task: String = switch intent.kind {
         case .review: "Review or re-review the current merge request. Save warranted findings as private GitLab drafts."
-        case .followUp: "Assess the specified unresolved feedback on my MR. Implement warranted fixes, verify and push only within the configured author-follow-up permission, then save verified private replies."
+        case .followUp: "First assess the specified reviewer comments on my MR against the current code and discussion. Informational summaries or accepted feedback require no code changes or reply. For warranted actionable feedback only, implement fixes, verify and push only within the configured author-follow-up permission, then save verified private replies."
         case .pipeline: "Diagnose this MR's failed pipeline and prepare an in-scope verified fix."
         case .conflict: "Resolve conflicts in an isolated worktree. Do not push unless the separate conflict-push permission below authorizes it."
         case .refresh: "Refresh current merge request state."

@@ -11,8 +11,12 @@ struct MRAutomationScopeMenu: View {
             if target.iid == nil {
                 choices(for: target)
             } else {
-                Menu { choices(for: target) } label: { Text(.Menu.menuScopeThisMR) }
-                Menu { choices(for: target.repository) } label: { Text(.Menu.menuScopeThisRepo) }
+                Menu { choices(for: target) } label: {
+                    Label { Text(.Menu.menuScopeThisMR) } icon: { Image(systemName: "arrow.triangle.pull") }
+                }
+                Menu { choices(for: target.repository) } label: {
+                    Label { Text(.Menu.menuScopeThisRepo) } icon: { Image(systemName: "folder") }
+                }
             }
         } label: {
             Label {
@@ -39,11 +43,14 @@ struct MRAutomationScopeMenu: View {
                 settings.save()
             }
         )) {
-            Text(.Menu.menuScopeInherit).tag(MRAutomationScope.Choice.inherit)
-            Text(.Menu.menuScopeEnable).tag(MRAutomationScope.Choice.active)
-            Text(.Menu.menuScopePause).tag(MRAutomationScope.Choice.paused)
+            Label { Text(.Menu.menuScopeInherit) } icon: { Image(systemName: "arrow.turn.up.left") }
+                .tag(MRAutomationScope.Choice.inherit)
+            Label { Text(.Menu.menuScopeEnable) } icon: { Image(systemName: "bolt") }
+                .tag(MRAutomationScope.Choice.active)
+            Label { Text(.Menu.menuScopePause) } icon: { Image(systemName: "pause") }
+                .tag(MRAutomationScope.Choice.paused)
         } label: {
-            Text(.Menu.menuScopeTitle)
+            Label { Text(.Menu.menuScopeTitle) } icon: { Image(systemName: "slider.horizontal.3") }
         }
         .pickerStyle(.inline)
     }

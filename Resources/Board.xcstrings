@@ -101,6 +101,28 @@
         }
       }
     },
+    "board.pin": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Pin to top"
+          }
+        }
+      }
+    },
+    "board.unpin": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Unpin"
+          }
+        }
+      }
+    },
     "board.details": {
       "extractionState": "manual",
       "localizations": {
@@ -426,7 +448,7 @@
         "en": {
           "stringUnit": {
             "state": "translated",
-            "value": "Review checks…"
+            "value": "Review checks\u2026"
           }
         }
       }
@@ -670,6 +692,50 @@
           "stringUnit": {
             "state": "translated",
             "value": "Merge\u2026"
+          }
+        }
+      }
+    },
+    "board.initialSync": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Syncing merge requests\u2026"
+          }
+        }
+      }
+    },
+    "board.initialSyncHelp": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Saved work may be incomplete until the first sync finishes."
+          }
+        }
+      }
+    },
+    "board.initialSyncFailed": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Initial sync incomplete"
+          }
+        }
+      }
+    },
+    "board.mergeRequest.number": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Merge request %lld"
           }
         }
       }

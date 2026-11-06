@@ -8,6 +8,11 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 
 ### Added
 
+- Pin cards per account and animate card insertion, removal and reordering within each lane, respecting Reduce Motion.
+- Offer brief, optional banners for automatically accepted GitLab events, enabled by default for existing installations as well.
+
+- Distinguish the first board sync from background refreshes, dim restored work until catalogs are current, and offer a retry when the first sync fails.
+
 - Let the lightweight verifier read live MR evidence through Codex CLI or Claude CLI tools while keeping GitLab actions in the app's policy checks.
 - Show MR authors with compact avatars on Reviewing and proposal cards, explain proposal sources, and show factual review participation and reply context.
 - Browse complete discussion threads with inline private drafts in Review and confirm, including AI badges for verified agent identities or very-high-confidence current-comment assessments.
@@ -29,6 +34,8 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 
 ### Changed
 
+- Place the repository name inline after card titles, move author and full repository context to the footer, and standardize card menus and icons.
+
 - Show one main action per MR card, keep comments in a stable detail layout, and collapse metadata and run/activity history until requested.
 - Use Agent and coding agent terminology throughout the interface and documentation, with an explicit Start a conversation with an agent action for manual CLI or desktop sessions.
 - Replace the menu-bar popover with the main window and remove automatic desktop chat creation, listener dispatch, chat-title synchronization, permission templates and plugin setup from the app.
@@ -45,12 +52,14 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 
 ### Fixed
 
+- Ingest submitted-review summaries into durable MR actions without leaving handled events in Other items, and assess general feedback before starting fixes.
+
 - Offer Try again directly on stopped agent-run cards while keeping the run result available as a secondary action.
 - Keep discussion expansion responsive by avoiding repeated board-wide attention calculations and deferring collapsed section contents.
 - Include the current MR description in feedback verification and recheck its context before resolving feedback, requesting re-review or automatically merging.
 - Keep cancelled conflict preparation retryable, freeze automatic publication to checked draft IDs, and preserve readable discussion caches during authentication errors.
 - Advance verified conflict plans to a newly authorized push stage once, keeping automatic preparation neutral while preserving stopped push attempts for manual review.
-- Give CLI workers full tool access instead of falling back to text-only preparation, while retaining task-specific GitLab action checks and the separate tool-free verifier.
+- Give CLI workers full tool access instead of falling back to text-only preparation, while retaining task-specific GitLab action checks and the read-only verifier role.
 - Align documentation and interface wording with the MR board, CLI automation, current checkpoints and manual review actions.
 - Recheck GitLab authentication on refresh after a startup connection failure.
 - Explain the specific human action on each attention card and open pending comments or a stopped run directly, replacing generic blocker labels.

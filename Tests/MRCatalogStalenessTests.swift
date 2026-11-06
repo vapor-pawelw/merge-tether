@@ -22,6 +22,198 @@ struct MRCatalogStalenessTests {
         #expect(!h.monitor.hasCurrentOwnListing)
     }
 
+    @Test(arguments: ["fail-auth", "fail-owned", "fail-reviewing", "fail-explicit"])
+    func initialCatalogWaitsForAllSourcesThenStaysSyncedAfterASoftFailure(_ failedSource: String) async throws {
+        let h = try harness()
+        defer { h.cleanUp() }
+        let explicit = MRAutomationScope.Target(host: host, username: "me", projectID: 1, iid: 3)
+        h.settings.automation.scope[explicit] = .active
+        #expect(!h.monitor.hasSyncedCurrentCatalog)
+        try h.write(failedSource, "yes")
+
+        try await h.poll()
+
+        #expect(h.monitor.hasError && !h.monitor.hasSyncedCurrentCatalog)
+        try FileManager.default.removeItem(at: h.folder.appending(path: failedSource))
+        try await h.poll()
+        #expect(h.monitor.hasSyncedCurrentCatalog)
+        #expect(Set(h.monitor.currentOpenItems.map(\.id.iid)) == [1, 2, 3])
+        try h.write(failedSource, "yes")
+        try await h.poll()
+        #expect(h.monitor.hasError && h.monitor.hasSyncedCurrentCatalog)
+        #expect(Set(h.monitor.currentOpenItems.map(\.id.iid)) == [1, 2, 3])
+    }
+
+    @Test(arguments: [true, false])
+    func accountRoundTripCannotResurrectReadinessWithoutAnotherSync(_ switchHost: Bool) async throws {
+        let h = try harness()
+        defer { h.cleanUp() }
+        let authored = h.authoredMonitor()
+        try await h.poll()
+        try await h.pollAuthored(authored)
+        try #require(h.monitor.hasSyncedCurrentCatalog && authored.hasSyncedCurrentCatalog)
+        if switchHost {
+            h.glab.resolvedHost = "other.example.org"
+            h.glab.resolvedHost = host
+        } else {
+            h.glab.currentUsername = "other"
+            h.glab.currentUsername = "me"
+        }
+        #expect(!h.monitor.hasSyncedCurrentCatalog)
+        #expect(!authored.hasSyncedCurrentCatalog)
+        try await h.poll()
+        try await h.pollAuthored(authored)
+        #expect(h.monitor.hasSyncedCurrentCatalog && authored.hasSyncedCurrentCatalog)
+        h.glab.currentUsername = "me"
+        h.glab.resolvedHost = host
+        #expect(h.monitor.hasSyncedCurrentCatalog && authored.hasSyncedCurrentCatalog)
+    }
+
+    @Test func anEmptyCatalogIsACompletedSync() async throws {
+        let h = try harness()
+        defer { h.cleanUp() }
+        try h.write("owned.json", "[]")
+        try h.write("reviewing.json", "[]")
+        try await h.poll()
+        #expect(h.monitor.hasSyncedCurrentCatalog && h.monitor.currentOpenItems.isEmpty)
+    }
+
+    @Test func discussionFailureStillCompletesInitialCatalogSync() async throws {
+        let h = try harness()
+        defer { h.cleanUp() }
+        try h.write("fail-discussions", "yes")
+        try await h.poll()
+        #expect(h.monitor.hasError && h.monitor.hasSyncedCurrentCatalog)
+    }
+
+    @Test func accountSwitchDoesNotInheritThePreviousAccountsStickySync() async throws {
+        let h = try harness()
+        defer { h.cleanUp() }
+        try await h.poll()
+        #expect(h.monitor.hasSyncedCurrentCatalog)
+        h.glab.currentUsername = "other"
+        #expect(!h.monitor.hasSyncedCurrentCatalog)
+        try h.write("user.json", #"{"id":8,"username":"other"}"#)
+        try h.write("fail-owned", "yes")
+        try await h.poll(username: "other")
+        #expect(!h.monitor.hasSyncedCurrentCatalog)
+        h.glab.currentUsername = "me"
+        #expect(!h.monitor.hasSyncedCurrentCatalog)
+    }
+
+    @Test(arguments: [false, true])
+    func anObsoleteInFlightCatalogCannotMarkAnotherAccountSynced(_ returnsToOriginal: Bool) async throws {
+        let h = try harness()
+        defer { h.cleanUp() }
+        try h.write("pause-owned", "yes")
+        h.monitor.refresh(host: host, username: "me", todos: [])
+        try await h.waitForFile("owned-started")
+        h.glab.currentUsername = "other"
+        if returnsToOriginal { h.glab.currentUsername = "me" }
+        try h.write("release-owned", "yes")
+        let deadline = ContinuousClock.now + .seconds(5)
+        while h.monitor.isLoading, ContinuousClock.now < deadline { try await Task.sleep(for: .milliseconds(20)) }
+        try #require(!h.monitor.isLoading)
+        #expect(!h.monitor.hasSyncedCurrentCatalog)
+    }
+
+    @Test(arguments: [false, true])
+    func anAccountRefreshRequestedDuringAnOlderPollRunsWithoutAnotherUserRefresh(_ returnsToOriginal: Bool) async throws {
+        let h = try harness()
+        defer { h.cleanUp() }
+        try h.write("pause-owned", "yes")
+        h.monitor.refresh(host: host, username: "me", todos: [])
+        try await h.waitForFile("owned-started")
+        try await h.waitForFile("user-read")
+        h.glab.currentUsername = "other"
+        try h.write("user.json", #"{"id":8,"username":"other"}"#)
+        h.monitor.refresh(host: host, username: "other", todos: [])
+        if returnsToOriginal {
+            h.glab.currentUsername = "me"
+            try h.write("user.json", #"{"id":3,"username":"me"}"#)
+            h.monitor.refresh(host: host, username: "me", todos: [])
+        }
+        try h.write("release-owned", "yes")
+        let deadline = ContinuousClock.now + .seconds(5)
+        while h.monitor.isLoading, ContinuousClock.now < deadline { try await Task.sleep(for: .milliseconds(20)) }
+        try #require(!h.monitor.isLoading)
+        #expect(h.monitor.hasSyncedCurrentCatalog)
+    }
+
+    @Test(arguments: [false, true])
+    func anAuthoredRefreshRequestedDuringAnOlderPollRunsWithoutAnotherUserRefresh(_ returnsToOriginal: Bool) async throws {
+        let h = try harness()
+        defer { h.cleanUp() }
+        let monitor = h.authoredMonitor()
+        try h.write("pause-owned", "yes")
+        monitor.setVisible(true)
+        try await h.waitForFile("owned-started")
+        try await h.waitForFile("user-read")
+        h.glab.currentUsername = "other"
+        try h.write("user.json", #"{"id":8,"username":"other"}"#)
+        monitor.refreshIfNeeded()
+        if returnsToOriginal {
+            h.glab.currentUsername = "me"
+            try h.write("user.json", #"{"id":3,"username":"me"}"#)
+            monitor.refreshIfNeeded()
+        }
+        try h.write("release-owned", "yes")
+        let deadline = ContinuousClock.now + .seconds(5)
+        while monitor.isLoading, ContinuousClock.now < deadline { try await Task.sleep(for: .milliseconds(20)) }
+        try #require(!monitor.isLoading)
+        #expect(monitor.hasSyncedCurrentCatalog)
+    }
+
+    @Test(arguments: ["fail-auth", "fail-owned"])
+    func authoredCatalogSyncIsStickyOnlyAfterASuccessfulCurrentListing(_ failedSource: String) async throws {
+        let h = try harness()
+        defer { h.cleanUp() }
+        let monitor = h.authoredMonitor()
+        #expect(!monitor.hasSyncedCurrentCatalog)
+        try h.write(failedSource, "yes")
+        try await h.pollAuthored(monitor)
+        #expect(monitor.hasError && !monitor.hasSyncedCurrentCatalog)
+        try FileManager.default.removeItem(at: h.folder.appending(path: failedSource))
+        try await h.pollAuthored(monitor)
+        #expect(monitor.hasSyncedCurrentCatalog && monitor.requests.count == 1)
+        try h.write(failedSource, "yes")
+        try await h.pollAuthored(monitor)
+        #expect(monitor.hasError && monitor.hasSyncedCurrentCatalog && monitor.requests.count == 1)
+        h.glab.currentUsername = "other"
+        #expect(!monitor.hasSyncedCurrentCatalog)
+        try h.write("user.json", #"{"id":8,"username":"other"}"#)
+        try await h.pollAuthored(monitor)
+        #expect(!monitor.hasSyncedCurrentCatalog && monitor.requests.isEmpty)
+        h.glab.currentUsername = "me"
+        #expect(!monitor.hasSyncedCurrentCatalog)
+    }
+
+    @Test func emptyAuthoredCatalogCompletesItsInitialSync() async throws {
+        let h = try harness()
+        defer { h.cleanUp() }
+        try h.write("owned.json", "[]")
+        let monitor = h.authoredMonitor()
+        try await h.pollAuthored(monitor)
+        #expect(monitor.hasSyncedCurrentCatalog && monitor.requests.isEmpty)
+    }
+
+    @Test(arguments: [false, true])
+    func obsoleteInFlightAuthoredListingCannotCompleteAnotherAccountsInitialSync(_ returnsToOriginal: Bool) async throws {
+        let h = try harness()
+        defer { h.cleanUp() }
+        let monitor = h.authoredMonitor()
+        try h.write("pause-owned", "yes")
+        monitor.setVisible(true)
+        try await h.waitForFile("owned-started")
+        h.glab.resolvedHost = "another.example.org"
+        if returnsToOriginal { h.glab.resolvedHost = host }
+        try h.write("release-owned", "yes")
+        let deadline = ContinuousClock.now + .seconds(5)
+        while monitor.isLoading, ContinuousClock.now < deadline { try await Task.sleep(for: .milliseconds(20)) }
+        try #require(!monitor.isLoading)
+        #expect(!monitor.hasSyncedCurrentCatalog)
+    }
+
     @MainActor
     private struct Harness {
         let folder: URL
@@ -41,6 +233,29 @@ struct MRCatalogStalenessTests {
             while monitor.isLoading, ContinuousClock.now < deadline {
                 try await Task.sleep(for: .milliseconds(20))
             }
+            try #require(!monitor.isLoading)
+        }
+
+        func waitForFile(_ name: String) async throws {
+            let file = folder.appending(path: name)
+            let deadline = ContinuousClock.now + .seconds(5)
+            while !FileManager.default.fileExists(atPath: file.path), ContinuousClock.now < deadline {
+                try await Task.sleep(for: .milliseconds(20))
+            }
+            try #require(FileManager.default.fileExists(atPath: file.path))
+        }
+
+        func authoredMonitor() -> AuthoredMergeRequestMonitor {
+            settings.onboardingCompleted = true
+            settings.notificationsEnabled = false
+            return AuthoredMergeRequestMonitor(settings: settings, glab: glab,
+                notifications: NotificationService(), canAutomate: { _ in false })
+        }
+
+        func pollAuthored(_ monitor: AuthoredMergeRequestMonitor) async throws {
+            monitor.setVisible(true)
+            let deadline = ContinuousClock.now + .seconds(5)
+            while monitor.isLoading, ContinuousClock.now < deadline { try await Task.sleep(for: .milliseconds(20)) }
             try #require(!monitor.isLoading)
         }
 
@@ -88,8 +303,13 @@ struct MRCatalogStalenessTests {
         cd "$(dirname "$0")"
         echo "$2" >> calls
         case "$2" in
-            /user) cat user.json ;;
-            /merge_requests?scope=created_by_me*) [ ! -f fail-owned ] || exit 2; cat owned.json ;;
+            /user) [ ! -f fail-auth ] || exit 2; cat user.json; touch user-read ;;
+            /merge_requests?scope=created_by_me*)
+                if [ -f pause-owned ]; then
+                    touch owned-started
+                    while [ ! -f release-owned ]; do sleep 0.02; done
+                fi
+                [ ! -f fail-owned ] || exit 2; cat owned.json ;;
             /merge_requests?scope=all*) [ ! -f fail-reviewing ] || exit 2; cat reviewing.json ;;
             /projects/1/merge_requests/3) [ ! -f fail-explicit ] || exit 2; cat explicit.json ;;
             /projects/1/merge_requests/1/discussions*) [ ! -f fail-discussions ] || exit 2; cat discussions.json ;;

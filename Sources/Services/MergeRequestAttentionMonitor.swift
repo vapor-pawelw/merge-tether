@@ -211,6 +211,10 @@ final class MergeRequestAttentionMonitor {
     private var terminalCatalogRequests: Set<Item.ID> = []
     private(set) var isLoading = false
     private(set) var hasError = false
+    /// Initial catalog readiness is sticky within this account session. Later
+    /// metadata or transport failures retain the last authoritative catalog.
+    private var syncedCatalogRevision: UInt64?
+    var hasSyncedCurrentCatalog: Bool { syncedCatalogRevision == glab.accountRevision && account.map(isCurrent) == true }
     private var hasOwnListing = false
     var hasCurrentOwnListing: Bool { hasOwnListing && account.map(isCurrent) == true }
     private let glab: GlabService
@@ -236,6 +240,7 @@ final class MergeRequestAttentionMonitor {
     /// Called after MergeTether approved a merge request on its own.
     var onAutoApproved: ((GitLabMergeRequest) -> Void)?
     var onRefreshed: (() -> Void)?
+    private var pendingRefresh: (account: Account, todos: [Todo], revision: UInt64)?
     private var account: Account?
     private var accountGeneration = 0
     private var refreshGeneration = 0
@@ -316,7 +321,12 @@ final class MergeRequestAttentionMonitor {
 
     func refresh(host: String, username: String, todos: [Todo]) {
         let account = Account(host: host, username: username)
-        guard !isLoading, isCurrent(account) else { return }
+        guard isCurrent(account) else { return }
+        let revision = glab.accountRevision
+        if isLoading {
+            pendingRefresh = (account, todos, revision)
+            return
+        }
         if self.account != account {
             authorFeedbackCoordinator?.cancel()
             accountGeneration += 1
@@ -326,6 +336,7 @@ final class MergeRequestAttentionMonitor {
             recentTodos = []
             hasError = false
             hasOwnListing = false
+            syncedCatalogRevision = nil
             confirmationStates = [:]
             previousDrafts = [:]
             publishedDrafts = [:]
@@ -345,15 +356,20 @@ final class MergeRequestAttentionMonitor {
         Task {
             defer {
                 isLoading = false; onRefreshed?()
-                if feedbackNeedsRefresh, isCurrent(account) {
+                let pending = pendingRefresh
+                pendingRefresh = nil
+                if let pending, pending.revision == glab.accountRevision, isCurrent(pending.account) {
+                    feedbackNeedsRefresh = false
+                    refresh(host: pending.account.host, username: pending.account.username, todos: pending.todos)
+                } else if feedbackNeedsRefresh, isCurrent(account) {
                     feedbackNeedsRefresh = false
                     refresh(host: account.host, username: account.username, todos: [])
                 }
             }
             do {
-                try await poll(account, todos: todos)
+                try await poll(account, todos: todos, revision: revision)
             } catch {
-                if isCurrent(account) { hasError = true }
+                if isCurrent(account), revision == glab.accountRevision { hasError = true }
             }
         }
     }
@@ -362,7 +378,7 @@ final class MergeRequestAttentionMonitor {
         glab.resolvedHost == account.host && glab.currentUsername == account.username
     }
 
-    private func poll(_ account: Account, todos: [Todo]) async throws {
+    private func poll(_ account: Account, todos: [Todo], revision: UInt64) async throws {
         let host = account.host
         let user = try await glab.fetchAuthenticatedUser(host: host, expectedUsername: account.username)
         self.user = user
@@ -675,6 +691,7 @@ final class MergeRequestAttentionMonitor {
         // Retention belongs only to the read-only catalog. Stale rows do not become
         // new publication, approval or re-review action candidates.
         openItems = Item.ordered(Array(retainedCatalog.values))
+        if owned != nil, assigned != nil, !explicitFetchFailed { syncedCatalogRevision = revision }
         await publishSettledDrafts(agentWorks: agentWorks, account: account)
         for item in results where item.autoApproveReady {
             guard let request = item.mergeRequest, let head = request.sha else { continue }
