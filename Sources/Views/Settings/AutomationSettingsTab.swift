@@ -9,7 +9,6 @@ struct AutomationSettingsTab: View {
     @State private var trigger: Trigger = .reviewRequested
     @State private var page: Page = .checkpoints
     @State private var packageChoice: AutomationPackageChoice?
-    @State private var confirmRecommendedReset = false
     @State private var isChoosingWorkspace = false
     @State private var showTemplates = false
     @State private var setupAction: SetupAction?
@@ -21,10 +20,11 @@ struct AutomationSettingsTab: View {
     init(monitor: TodoMonitorService) {
         self.monitor = monitor
         _draft = State(initialValue: monitor.settings.automation)
+        _packageChoice = State(initialValue: monitor.settings.automation.baselinePreset)
     }
 
     var body: some View {
-        // Eight pages don't fit a segmented control; a sidebar keeps every name readable.
+        // Keep detailed automation controls readable in the sidebar.
         HStack(spacing: 0) {
             List(selection: $page) {
                 ForEach(Page.allCases, id: \.self) { page in
@@ -59,11 +59,10 @@ struct AutomationSettingsTab: View {
                 Form {
                     switch page {
                     case .checkpoints:
+                        packageFields
                         checkpointFields
                     case .assistant:
                         assistantFields
-                    case .presets:
-                        packageFields
                     case .workflow:
                         MergeWorkflowSettingsSection(rules: $draft.workflowRules)
                     case .authored:
@@ -130,86 +129,73 @@ struct AutomationSettingsTab: View {
     private var checkpointFields: some View {
         Group {
             Section {
-                checkpointToggle($draft.publishDraftsWithoutConfirmation, .Settings.settingsAutomationCheckpointPublish,
-                                 help: .Settings.settingsAutomationCheckpointPublishHelp)
+                VStack(alignment: .leading, spacing: 4) {
+                    Picker(selection: $draft.publicationMode) {
+                        ForEach(AutomationPublicationMode.allCases, id: \.self) { mode in
+                            Text(mode.title).tag(mode)
+                        }
+                    } label: { Text(.Settings.settingsAutomationPublicationTitle) }
+                    HStack {
+                        Text(draft.publicationMode.explanation).font(.caption).foregroundStyle(.secondary)
+                        Spacer()
+                        AutomationDefaultsResetButton(preset: draft.baselinePreset) { draft.resetPublication(to: $0) }
+                    }
+                }
                 checkpointToggle($draft.autoApproveEnabled, .Settings.settingsAutomationCheckpointAutoApprove,
-                                 help: .Settings.settingsAutomationCheckpointAutoApproveHelp)
+                                 help: .Settings.settingsAutomationCheckpointAutoApproveHelp, reset: .approval)
                 checkpointToggle($draft.allowFollowUpPush, .Settings.settingsAutomationFollowUpPush,
-                                 help: .Settings.settingsAutomationFollowUpPushHelp)
+                                 help: .Settings.settingsAutomationFollowUpPushHelp, reset: .followUpPush)
             } header: {
                 Text(.Settings.settingsAutomationCheckpointSection)
             } footer: {
-                Text(.Settings.settingsAutomationCheckpointHelp)
-                    .font(.caption)
-                    .foregroundStyle(.secondary)
+                Text(.Settings.settingsAutomationProfilePermissionsHelp)
+                    .font(.caption).foregroundStyle(.secondary)
             }
             Section {
-                checkpointToggle($draft.publishAIRepliesWithoutConfirmation, .Settings.settingsAutomationPublishAIReplies,
-                                 help: .Settings.settingsAutomationPublishAIRepliesHelp)
-                    .disabled(draft.publishDraftsWithoutConfirmation)
                 checkpointToggle($draft.autoResolveOwnReviewThreads, .Settings.settingsAutomationResolveOwnReviewThreads,
-                                 help: .Settings.settingsAutomationResolveOwnReviewThreadsHelp)
+                                 help: .Settings.settingsAutomationResolveOwnReviewThreadsHelp, reset: .ownThreadResolution)
                 checkpointToggle($draft.autoResolveAcceptedFeedback, .AuthorFeedback.authorFeedbackSetting,
-                                 help: .AuthorFeedback.authorFeedbackSettingHelp)
-            } footer: {
-                Link(destination: URL(string: "https://github.com/vapor-pawelw/merge-tether/blob/main/docs/automation.md")!) {
-                    Text(.Settings.settingsAutomationLearnMore)
-                }
-                .font(.caption)
+                                 help: .AuthorFeedback.authorFeedbackSettingHelp, reset: .acceptedFeedbackResolution)
             }
+            PublicationRestrictionsSettingsView(restrictions: $draft.publicationRestrictions, glab: monitor.glab)
         }
     }
 
     private func checkpointToggle(
-        _ isOn: Binding<Bool>, _ title: LocalizedStringResource, help: LocalizedStringResource
+        _ isOn: Binding<Bool>, _ title: LocalizedStringResource, help: LocalizedStringResource,
+        reset: AutomationCheckpoint? = nil
     ) -> some View {
         VStack(alignment: .leading, spacing: 3) {
-            Toggle(isOn: isOn) { Text(title) }
-                .toggleStyle(.checkbox)
-            Text(help)
-                .font(.caption)
-                .foregroundStyle(.secondary)
-                .padding(.leading, 20)
+            HStack {
+                Toggle(isOn: isOn) { Text(title) }.toggleStyle(.checkbox)
+                if let reset {
+                    Spacer()
+                    AutomationDefaultsResetButton(preset: draft.baselinePreset) {
+                        draft.resetCheckpoint(reset, to: $0)
+                    }
+                }
+            }
         }
+        .help(Text(help))
     }
 
     @ViewBuilder
     private var packageFields: some View {
         Section {
-            AutomationPackagePicker(
-                selection: $packageChoice, canUseRecommended: monitor.availableAssistants.contains(draft.assistant)
-            )
-
-            Button {
-                if packageChoice == .recommended {
-                    confirmRecommendedReset = true
-                } else if packageChoice == .off {
-                    draft.disableAssistantPackage()
-                }
-            } label: {
-                Text(.Settings.settingsAutomationPackageUseSelection)
+            HStack {
+                AutomationPackagePicker(
+                    selection: $packageChoice, canUseAutomatic: monitor.availableAssistants.contains(draft.assistant)
+                )
+                .help(Text(packageChoice?.explanation ?? .Settings.settingsAutomationPackageHelp))
+                Button {
+                    if let packageChoice {
+                        let assistant = draft.assistant
+                        packageChoice.apply(to: &draft, assistant: assistant)
+                    }
+                } label: { Text(.Settings.settingsAutomationPackageUseSelection) }
+                    .disabled(packageChoice == nil || (packageChoice?.requiresCLI == true
+                        && !monitor.availableAssistants.contains(draft.assistant)))
             }
-            .disabled(packageChoice == nil || (packageChoice == .recommended
-                && !monitor.availableAssistants.contains(draft.assistant)))
-            .confirmationDialog(
-                Text(.Settings.settingsAutomationPackageReset),
-                isPresented: $confirmRecommendedReset,
-                titleVisibility: .visible
-            ) {
-                Button(role: .destructive) {
-                    draft.applyRecommended(for: draft.assistant)
-                } label: {
-                    Text(.Settings.settingsAutomationPackageReset)
-                }
-            } message: {
-                Text(.Settings.settingsAutomationPackageResetMessage)
-            }
-        } header: {
-            Text(.Settings.settingsAutomationPackageTitle)
-        } footer: {
-            Text(.Settings.settingsAutomationPackageHelp)
-                .font(.caption)
-                .foregroundStyle(.secondary)
         }
     }
 
@@ -481,7 +467,7 @@ struct AutomationSettingsTab: View {
     }
 
     private enum Page: CaseIterable {
-        case checkpoints, assistant, scope, todos, workflow, authored, presets, advanced
+        case checkpoints, assistant, scope, todos, workflow, authored, advanced
 
         var symbol: String {
             switch self {
@@ -491,7 +477,6 @@ struct AutomationSettingsTab: View {
             case .todos: "tray"
             case .workflow: "bolt"
             case .authored: "person.crop.circle"
-            case .presets: "square.stack"
             case .advanced: "slider.horizontal.3"
             }
         }
@@ -500,7 +485,6 @@ struct AutomationSettingsTab: View {
             switch self {
             case .checkpoints: .Settings.settingsAutomationPageCheckpoints
             case .assistant: .Settings.settingsAutomationPageAssistant
-            case .presets: .Settings.settingsAutomationPagePresets
             case .scope: .Settings.settingsAutomationPageScope
             case .workflow: .Settings.settingsAutomationPageWorkflow
             case .authored: .Settings.settingsAutomationPageAuthored

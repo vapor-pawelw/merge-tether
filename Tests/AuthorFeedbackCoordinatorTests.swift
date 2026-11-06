@@ -4,6 +4,56 @@ import Testing
 
 @MainActor
 struct AuthorFeedbackCoordinatorTests {
+    @Test func passesCurrentMergeRequestDescriptionToSemanticVerification() async throws {
+        try await withFixture { fixture in
+            let request = Fixture.request.replacingOccurrences(of: "\"title\":\"Example MR\"",
+                with: "\"title\":\"Example MR\",\"description\":\"Documented fallback and verification steps\"")
+            try fixture.write("request.json", request)
+            let coordinator = fixture.coordinator()
+            try await fixture.run(coordinator, requestJSON: request)
+            #expect(fixture.inputs.first?.description == "Documented fallback and verification steps")
+            #expect(fixture.inputs.first?.target?.host == Fixture.host)
+            #expect(fixture.inputs.first?.target?.projectID == 1)
+            #expect(fixture.inputs.first?.target?.iid == 2)
+            #expect(fixture.inputs.first?.target?.expectedUsername == "me")
+            let snapshot = try JSONDecoder().decode(GitLabMergeRequest.self, from: Data(request.utf8))
+            #expect(fixture.inputs.first?.target?.url == snapshot.webURL)
+            #expect(fixture.inputs.first?.semanticContextFingerprint == snapshot.semanticContextFingerprint)
+        }
+    }
+
+    @Test(arguments: ["title", "description"])
+    func sameHeadContextEditInvalidatesCachedSemanticAssessment(_ field: String) async throws {
+        try await withFixture { fixture in
+            fixture.settings.automation.autoResolveAcceptedFeedback = false
+            fixture.settings.automation.authorFeedback.isEnabled = true
+            let coordinator = fixture.coordinator()
+            try await fixture.run(coordinator)
+            #expect(fixture.inputs.count == 1)
+            let edited = Fixture.request.replacingOccurrences(of: "\"title\":\"Example MR\"",
+                with: field == "title" ? "\"title\":\"Updated requirements\""
+                    : "\"title\":\"Example MR\",\"description\":\"Updated requirements\"")
+            try fixture.write("request.json", edited)
+            try await fixture.run(coordinator, requestJSON: edited)
+            #expect(fixture.inputs.count == 2)
+        }
+    }
+
+    @Test(arguments: ["title", "description"])
+    func contextChangedDuringVerificationCannotAuthorizeAcceptedThreadResolution(_ field: String) async throws {
+        try await withFixture { fixture in
+            let edited = Fixture.request.replacingOccurrences(of: "\"title\":\"Example MR\"",
+                with: field == "title" ? "\"title\":\"New acceptance criteria\""
+                    : "\"title\":\"Example MR\",\"description\":\"New acceptance criteria\"")
+            let coordinator = fixture.coordinator(duringVerification: {
+                do { try fixture.write("request.json", edited) } catch { Issue.record(error) }
+            })
+            try await fixture.run(coordinator)
+            #expect(!fixture.resolved)
+            #expect(coordinator.status(projectID: 1, iid: 2)?.phase != .complete)
+        }
+    }
+
     @Test func resolvesOnlyTheVerifiedThreadAfterFreshChecks() async throws {
         try await withFixture { fixture in
             let coordinator = fixture.coordinator()
@@ -193,6 +243,7 @@ struct AuthorFeedbackCoordinatorTests {
         let settings: SettingsManager
         let glab: GlabService
         var verified = false
+        var inputs: [ReReviewVerifier.Input] = []
         var resolved: Bool { FileManager.default.fileExists(atPath: directory.appending(path: "resolved").path) }
 
         init() throws {
@@ -243,21 +294,24 @@ struct AuthorFeedbackCoordinatorTests {
         }
 
         func coordinator(assessment: ReReviewAssessment? = nil, duringVerification: (() -> Void)? = nil) -> AuthorFeedbackCoordinator {
-            AuthorFeedbackCoordinator(settings: settings, glab: glab, canAutomate: { _ in true }, verify: { [self] _, _, _ in
+            AuthorFeedbackCoordinator(settings: settings, glab: glab, canAutomate: { _ in true }, verify: { [self] input, _, _ in
+                inputs.append(input)
                 duringVerification?()
                 verified = true
                 return assessment ?? .init(notes: [.init(noteID: 10, state: .addressed, reason: "Current diff fixes A")])
             })
         }
 
-        func start(_ coordinator: AuthorFeedbackCoordinator, initialDiscussions: [GitLabMergeRequestDiscussion]? = nil) throws {
-            let request = try JSONDecoder().decode(GitLabMergeRequest.self, from: Data(Self.request.utf8))
+        func start(_ coordinator: AuthorFeedbackCoordinator, initialDiscussions: [GitLabMergeRequestDiscussion]? = nil,
+                   requestJSON: String = Fixture.request) throws {
+            let request = try JSONDecoder().decode(GitLabMergeRequest.self, from: Data(requestJSON.utf8))
             coordinator.refresh(request: request, discussions: try initialDiscussions ?? discussions(), drafts: 0,
                                 host: Self.host, user: .init(id: 3, username: "me"))
         }
 
-        func run(_ coordinator: AuthorFeedbackCoordinator, initialDiscussions: [GitLabMergeRequestDiscussion]? = nil) async throws {
-            try start(coordinator, initialDiscussions: initialDiscussions)
+        func run(_ coordinator: AuthorFeedbackCoordinator, initialDiscussions: [GitLabMergeRequestDiscussion]? = nil,
+                 requestJSON: String = Fixture.request) async throws {
+            try start(coordinator, initialDiscussions: initialDiscussions, requestJSON: requestJSON)
             let deadline = ContinuousClock.now + .seconds(5)
             while ContinuousClock.now < deadline {
                 if let phase = coordinator.status(projectID: 1, iid: 2)?.phase, phase == .complete || phase == .failed { return }

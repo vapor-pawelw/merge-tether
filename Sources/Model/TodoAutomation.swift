@@ -111,7 +111,21 @@ struct AutomationRule: Codable, Equatable, Sendable {
     }
 }
 
+enum AutomationPreset: String, CaseIterable, Codable, Hashable, Sendable {
+    case full, checkpoints, manual
+
+    static func onboardingDefault(for decision: AutomationPackageDecision) -> Self? {
+        decision == .undecided ? .full : nil
+    }
+}
+
+enum AutomationPublicationMode: String, CaseIterable, Hashable, Sendable {
+    case all, aiReplies, manual
+}
+
 struct AutomationSettings: Codable, Equatable, Sendable {
+    var publicationRestrictions = AutomaticPublicationRestrictions()
+    var baselinePreset: AutomationPreset?
     var autoVerifyReReview = true
     var codexVerificationModel: CodexReviewModel = .luna
     var claudeVerificationModel: ClaudeVerificationModel = .haiku
@@ -124,8 +138,25 @@ struct AutomationSettings: Codable, Equatable, Sendable {
     var codexUseTemplate = true
     var autoMergeEnabled = false
     var autoReReviewEnabled = false
-    /// Off by default: assistant drafts wait for the user in Inbox → Ready for your OK.
+    /// Stored publication flags stay compatible; the selected profile determines new defaults.
     var publishDraftsWithoutConfirmation = false
+
+    var publicationMode: AutomationPublicationMode {
+        get { publishDraftsWithoutConfirmation ? .all : publishAIRepliesWithoutConfirmation ? .aiReplies : .manual }
+        set {
+            switch newValue {
+            case .all:
+                publishDraftsWithoutConfirmation = true
+                publishAIRepliesWithoutConfirmation = true
+            case .aiReplies:
+                publishDraftsWithoutConfirmation = false
+                publishAIRepliesWithoutConfirmation = true
+            case .manual:
+                publishDraftsWithoutConfirmation = false
+                publishAIRepliesWithoutConfirmation = false
+            }
+        }
+    }
 
     /// Whether any of these drafts could be published without the user's confirmation.
     /// The AI-feedback rule only ever covers replies in existing threads.
@@ -150,6 +181,7 @@ struct AutomationSettings: Codable, Equatable, Sendable {
     var workflowRules = MergeWorkflowRules()
     var scope = MRAutomationScope()
     private var assistantDefaultsVersion = 1
+    private var projectPermissionsVersion = 1
 
     var reviewRequested = AutomationRule(promptTemplate: """
         Review the GitLab merge request at {url} using the installed MR skill and repository instructions.
@@ -199,6 +231,9 @@ struct AutomationSettings: Codable, Equatable, Sendable {
         self.init()
         let values = try decoder.container(keyedBy: CodingKeys.self)
         let legacy = try decoder.container(keyedBy: LegacyKeys.self)
+        publicationRestrictions = try values.decodeIfPresent(AutomaticPublicationRestrictions.self, forKey: .publicationRestrictions) ?? .init()
+        baselinePreset = try values.decodeIfPresent(AutomationPreset.self, forKey: .baselinePreset)
+        projectPermissionsVersion = try values.decodeIfPresent(Int.self, forKey: .projectPermissionsVersion) ?? 0
         autoVerifyReReview = try values.decodeIfPresent(Bool.self, forKey: .autoVerifyReReview) ?? true
         codexVerificationModel = (try? values.decode(CodexReviewModel.self, forKey: .codexVerificationModel)) ?? .luna
         claudeVerificationModel = (try? values.decode(ClaudeVerificationModel.self, forKey: .claudeVerificationModel)) ?? .haiku
@@ -247,9 +282,31 @@ struct AutomationSettings: Codable, Equatable, Sendable {
         let storedDefaults = try values.decodeIfPresent(Int.self, forKey: .assistantDefaultsVersion) ?? 0
         if storedDefaults == 0, packageDecision != .disabled,
            packageDecision == .enabled || codexRelayEnabled || usesAssistant {
+            let previousReReview = autoReReviewEnabled
+            let previousConflicts = conflictTasksEnabled
+            let previousReview = reviewRequested
+            let previousFeedback = authorFeedback
             enableAssistantDefaults()
+            if values.contains(.autoReReviewEnabled) { autoReReviewEnabled = previousReReview }
+            if values.contains(.conflictTasksEnabled) { conflictTasksEnabled = previousConflicts }
+            if let stored = try? values.nestedContainer(keyedBy: RuleMigrationKeys.self, forKey: .reviewRequested) {
+                if stored.contains(.isEnabled) { reviewRequested.isEnabled = previousReview.isEnabled }
+                if stored.contains(.markDoneOnSuccess) { reviewRequested.markDoneOnSuccess = previousReview.markDoneOnSuccess }
+            }
+            if let stored = try? values.nestedContainer(keyedBy: RuleMigrationKeys.self, forKey: .authorFeedback) {
+                if stored.contains(.isEnabled) { authorFeedback.isEnabled = previousFeedback.isEnabled }
+                if stored.contains(.markDoneOnSuccess) { authorFeedback.markDoneOnSuccess = previousFeedback.markDoneOnSuccess }
+            }
         }
         assistantDefaultsVersion = max(assistantDefaultsVersion, storedDefaults)
+        if projectPermissionsVersion < 1 {
+            // Empty lists previously granted nothing. An upgrade must not turn
+            // an ineffective old toggle into permission for every repository.
+            if MergeWorkflowRule.projectPaths(assistantToolProjects).isEmpty { allowAssistantTools = false }
+            if MergeWorkflowRule.projectPaths(conflictPushProjects).isEmpty { allowConflictPush = false }
+            if MergeWorkflowRule.projectPaths(autoMergeProjects).isEmpty { autoMergeEnabled = false }
+        }
+        projectPermissionsVersion = 1
     }
 
     private enum CodingKeys: String, CodingKey {
@@ -258,11 +315,37 @@ struct AutomationSettings: Codable, Equatable, Sendable {
         case autoMergeProjects, allowConflictPush, allowFollowUpPush, conflictPushProjects, autoReReviewEnabled, publishDraftsWithoutConfirmation, publishAIRepliesWithoutConfirmation, autoApproveEnabled, autoResolveOwnReviewThreads
         case codexReviewModel, codexReviewThinking, assistantDefaultsVersion, scope
         case autoVerifyReReview, codexVerificationModel, claudeVerificationModel
-        case autoResolveAcceptedFeedback
+        case autoResolveAcceptedFeedback, publicationRestrictions, baselinePreset, projectPermissionsVersion
     }
+
+    private enum RuleMigrationKeys: String, CodingKey { case isEnabled, markDoneOnSuccess }
 
     private enum LegacyKeys: String, CodingKey {
         case codexWorkspace
+    }
+
+    mutating func applyPreset(_ preset: AutomationPreset, for assistant: AutomationAssistant) {
+        switch preset {
+        case .full:
+            applyRecommended(for: assistant)
+            publicationMode = .all
+            autoMergeEnabled = true
+            allowAssistantTools = true
+            allowConflictPush = true
+            for trigger in MergeWorkflowTrigger.allCases { workflowRules[trigger].mode = .assistant }
+        case .checkpoints:
+            applyRecommended(for: assistant)
+            publicationMode = .manual
+            autoApproveEnabled = false
+            allowFollowUpPush = false
+            autoResolveOwnReviewThreads = false
+            autoResolveAcceptedFeedback = false
+        case .manual:
+            self.assistant = assistant
+            disableAssistantPackage()
+        }
+        baselinePreset = preset
+        publicationRestrictions = .init()
     }
 
     mutating func applyRecommended(for assistant: AutomationAssistant) {
@@ -313,6 +396,7 @@ struct AutomationSettings: Codable, Equatable, Sendable {
         publishAIRepliesWithoutConfirmation = false
         autoApproveEnabled = false
         autoResolveOwnReviewThreads = false
+        autoResolveAcceptedFeedback = false
         conflictTasksEnabled = false
         allowConflictPush = false
         allowFollowUpPush = false
@@ -336,16 +420,21 @@ struct AutomationSettings: Codable, Equatable, Sendable {
     }
 
     func permitsAutoMerge(project: String) -> Bool {
-        autoMergeEnabled && MergeWorkflowRule.projectPaths(autoMergeProjects).contains(project)
+        autoMergeEnabled && matchesOptionalProjectRestriction(project, paths: autoMergeProjects)
     }
 
     func permitsAssistantTools(project: String) -> Bool {
-        allowAssistantTools && MergeWorkflowRule.projectPaths(assistantToolProjects).contains(project)
+        allowAssistantTools && matchesOptionalProjectRestriction(project, paths: assistantToolProjects)
     }
 
     func permitsConflictPush(project: String) -> Bool {
         conflictTasksEnabled && permitsAssistantTools(project: project) && allowConflictPush
-            && MergeWorkflowRule.projectPaths(conflictPushProjects).contains(project)
+            && matchesOptionalProjectRestriction(project, paths: conflictPushProjects)
+    }
+
+    private func matchesOptionalProjectRestriction(_ project: String, paths: String) -> Bool {
+        let projects = MergeWorkflowRule.projectPaths(paths)
+        return projects.isEmpty || projects.contains(project)
     }
 
     subscript(event: TodoAutomationEvent) -> AutomationRule {

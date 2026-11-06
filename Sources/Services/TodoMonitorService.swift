@@ -67,9 +67,8 @@ final class TodoMonitorService {
                                                        reportDirectory: CodexDesktopRelay.directory)
         self.authoredMergeRequests = AuthoredMergeRequestMonitor(settings: settings, glab: glab, notifications: notifications)
         authoredMergeRequests.authorFeedbackAllowsMerge = { [weak self] request, discussions, authorID in
-            guard let self, let head = request.sha, let fingerprint = ReviewVerdict.fingerprint(discussions),
-                  let assessment = self.attention.authorFeedbackCoordinator?.assessment(
-                    projectID: request.projectID, iid: request.iid, head: head, fingerprint: fingerprint),
+            guard let self, let fingerprint = ReviewVerdict.fingerprint(discussions),
+                  let assessment = self.attention.authorFeedbackCoordinator?.assessment(for: request, fingerprint: fingerprint),
                   (try? assessment.reviewers(in: discussions, authorID: authorID)) != nil else { return false }
             return assessment.notes.allSatisfy { $0.state == .addressed || $0.state == .informational }
         }
@@ -559,7 +558,10 @@ final class TodoMonitorService {
                 currentEvents.first { $0.event.kind == trigger }?.state == .failed
             })
             if failedAttentionFeedback.contains(work) { failures.insert(.newDiscussion) }
-            let conflictFailed = item.mergeRequest.map { authoredMergeRequests.conflictTaskFailed(for: $0) } ?? false
+            let conflictFailed = item.mergeRequest.map {
+                authoredMergeRequests.conflictTaskFailed(for: $0)
+                    || ($0.hasMergeConflict && authoredMergeRequests.conflictAutomationState(for: $0) == nil)
+            } ?? false
             let pipelineState = currentEvents.first { $0.event.kind == .pipelineFailure
                 && $0.event.pipelineID == item.mergeRequest?.headPipeline?.id }?.state
             let pipelineOwned = pipelineState.map { [.queued, .running, .waitingForAssistant, .completed, .alreadyRegistered].contains($0) } ?? false
@@ -624,6 +626,12 @@ final class TodoMonitorService {
     func checkCodexListener(force: Bool = false, now: Date = Date()) {}
     var codexListenerWarning: LocalizedStringResource? { nil }
 
+    func automaticConflictIsProcessing(for request: GitLabMergeRequest) -> Bool {
+        guard availableAssistants.contains(settings.automation.assistant) || assistantDependencies.isChecking,
+              let state = authoredMergeRequests.conflictAutomationState(for: request) else { return false }
+        return state == .available || state == .processing
+    }
+
     /// Shared semantic projection for the menu indicator and native notifications.
     var userAttention: UserAttentionSnapshot {
         guard let host = glab.resolvedHost, let username = glab.currentUsername else { return .empty }
@@ -646,8 +654,10 @@ final class TodoMonitorService {
                 unfiltered: attention.currentItems.first { $0.id == row.id },
                 assistantReady: preparing)
             let state = attention.confirmationStates[row.id]
+            let conflictProcessing = row.item.mergeRequest.map { automaticConflictIsProcessing(for: $0) } ?? false
             let busy = row.latestJob?.execution?.state.isActive == true || state == .publishing || state == .approving
                 || row.item.authorFeedbackStatus?.phase == .checking
+                || conflictProcessing
             var actions: [UserAttentionSnapshot.Action] = []
             func add(_ reason: UserAttentionSnapshot.Reason, _ token: String, automatic: Bool = false) {
                 actions.append(.init(reason: reason, token: token, automatic: automatic))
@@ -1019,6 +1029,7 @@ final class TodoMonitorService {
         }
         attention.automationConfigurationChanged(outsideScope: scopeOnly ? current.scope : nil)
         assistantDependencies.refresh(requireCLI: true, force: !scopeOnly)
+        authoredMergeRequests.automationConfigurationChanged(outsideScope: scopeOnly ? current.scope : nil)
         authoredMergeRequests.workflow.synchronizeAssistantJobs()
         if let host = glab.resolvedHost, let username = glab.currentUsername {
             attention.refresh(host: host, username: username, todos: visibleTodos)

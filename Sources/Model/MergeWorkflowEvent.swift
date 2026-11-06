@@ -54,9 +54,10 @@ struct GitLabMergeRequestDiscussion: Codable, Sendable {
         var body: String? = nil
         var createdAt: String? = nil
         var updatedAt: String? = nil
+        var position: GitLabDraftNote.Position? = nil
 
         enum CodingKeys: String, CodingKey {
-            case id, author, system, resolvable, resolved, body
+            case id, author, system, resolvable, resolved, body, position
             case resolvedBy = "resolved_by"
             case createdAt = "created_at"
             case updatedAt = "updated_at"

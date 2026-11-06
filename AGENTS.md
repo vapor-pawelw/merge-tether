@@ -16,8 +16,8 @@ macOS GitLab inbox and MR automation. Read [README.md](README.md) for behavior,
 ## Expensive mistakes to avoid
 
 - Run executable MR workers with full tool access in both Codex CLI and Claude CLI.
-  Diagnostic and planning tasks still need live tools; only the separate semantic
-  verifier is tool-free. Keep GitLab action permissions independent of tool access.
+  Diagnostic, planning and semantic-verifier tasks need live tools too. The verifier
+  only reads evidence; keep GitLab action permissions independent of tool access.
 - Isolate test-runner home/preferences from a running installation; otherwise the
   single-instance lock can make tests exit before running. See the build guide.
 - `glab` subprocesses need an explicit environment containing `HOME` and `PATH`.

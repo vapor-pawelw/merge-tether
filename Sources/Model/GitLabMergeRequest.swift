@@ -10,6 +10,7 @@ struct GitLabMergeRequest: Codable, Sendable {
     let iid: Int
     let author: Todo.Author
     let title: String
+    let description: String?
     let webURL: URL
     let state: String
     let draft: Bool?
@@ -26,6 +27,12 @@ struct GitLabMergeRequest: Codable, Sendable {
     private let user: UserPermissions?
 
     var canMerge: Bool? { user?.canMerge }
+
+    /// Semantic feedback checks depend on MR text as well as code and discussions.
+    var semanticContextFingerprint: String {
+        let body = description ?? ""
+        return UserAttentionSnapshot.digest("\(title.utf8.count):\(title)\(body.utf8.count):\(body)")
+    }
 
     struct Pipeline: Codable, Sendable {
         let id: Int?
@@ -49,7 +56,7 @@ struct GitLabMergeRequest: Codable, Sendable {
 
     enum CodingKeys: String, CodingKey {
         case projectID = "project_id"
-        case iid, author, title
+        case iid, author, title, description
         case webURL = "web_url"
         case state, draft, sha
         case sourceProjectID = "source_project_id"
@@ -129,7 +136,7 @@ struct GitLabDraftNote: Decodable, Equatable, Sendable {
     var resolveDiscussion: Bool? = nil
     let position: Position?
 
-    struct Position: Decodable, Equatable, Sendable {
+    struct Position: Codable, Equatable, Sendable {
         let newPath: String?
         let newLine: Int?
         let oldPath: String?

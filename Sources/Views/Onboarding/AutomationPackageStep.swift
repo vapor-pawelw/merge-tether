@@ -19,7 +19,7 @@ struct AutomationPackageStep: View {
             if monitor.settings.automation.packageDecision == .undecided {
                 Text(.Onboarding.onboardingAutomationBody)
                     .foregroundStyle(.secondary)
-                Text(.Settings.settingsAutomationPackageHelp)
+                Text(selection?.explanation ?? .Settings.settingsAutomationPackageHelp)
                     .foregroundStyle(.secondary)
                 AutomationAssistantPicker(
                     assistant: $assistant, available: monitor.availableAssistants,
@@ -27,7 +27,7 @@ struct AutomationPackageStep: View {
                     statuses: monitor.assistantDependencies.statuses
                 )
                 AutomationPackagePicker(
-                    selection: $selection, canUseRecommended: monitor.availableAssistants.contains(assistant)
+                    selection: $selection, canUseAutomatic: monitor.availableAssistants.contains(assistant)
                 )
 
             } else {

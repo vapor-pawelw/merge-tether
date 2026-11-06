@@ -20,6 +20,17 @@ struct AICommentPublicationTests {
         #expect(settings.publishAIRepliesWithoutConfirmation)
     }
 
+    @Test func advancedAIRestrictionRequestsAssessmentsEvenForLegacyAllModeWithAIFlagOff() throws {
+        var settings = try JSONDecoder().decode(AutomationSettings.self, from: Data(
+            #"{"publishDraftsWithoutConfirmation":true,"publishAIRepliesWithoutConfirmation":false}"#.utf8))
+        #expect(!settings.needsAIAssessment)
+        settings.publicationRestrictions.requireAI = true
+        #expect(settings.needsAIAssessment)
+        settings.publicationRestrictions.requireAI = false
+        settings.publicationMode = .aiReplies
+        #expect(settings.needsAIAssessment)
+    }
+
     @Test func repliesNeverResolveSomeoneElsesThreadOrInheritPermissionForHumanFollowUps() throws {
         let draftJSON = #"{"id":1,"author_id":3,"note":"Fixed","discussion_id":"abc","position":null}"#
         let note = #"{"id":40,"author":{"id":8},"system":false,"body":"AI finding"}"#

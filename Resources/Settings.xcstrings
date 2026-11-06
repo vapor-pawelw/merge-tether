@@ -1,6 +1,17 @@
 {
   "sourceLanguage": "en",
   "strings": {
+    "settings.automation.profilePermissionsHelp": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Choose a profile, then adjust permissions. Reset restores only that setting to the chosen profile."
+          }
+        }
+      }
+    },
     "settings.automation.scope.title": {
       "extractionState": "manual",
       "localizations": {
@@ -84,7 +95,7 @@
         "en": {
           "stringUnit": {
             "state": "translated",
-            "value": "Starting folder for assistant conversations you open in Terminal. Automated tasks use separate workspaces for each run."
+            "value": "Starting folder for coding agent conversations you open in Terminal. Automated tasks use separate workspaces for each run."
           }
         }
       }
@@ -260,7 +271,7 @@
         "en": {
           "stringUnit": {
             "state": "translated",
-            "value": "Enable recommended automation"
+            "value": "With checkpoints"
           }
         }
       }
@@ -271,7 +282,7 @@
         "en": {
           "stringUnit": {
             "state": "translated",
-            "value": "Projects allowed to use assistant tools"
+            "value": "Project permission repositories (optional)"
           }
         }
       }
@@ -370,7 +381,7 @@
         "en": {
           "stringUnit": {
             "state": "translated",
-            "value": "Assistant"
+            "value": "Coding agent"
           }
         }
       }
@@ -381,7 +392,7 @@
         "en": {
           "stringUnit": {
             "state": "translated",
-            "value": "Enable additional project-restricted tasks"
+            "value": "Project permission for conflict pushes"
           }
         }
       }
@@ -392,7 +403,7 @@
         "en": {
           "stringUnit": {
             "state": "translated",
-            "value": "Enables the additional repository permission used by some event tasks and conflict pushes. Worker CLIs always have file, command and network access. Publishing, approvals and push permissions stay separate."
+            "value": "CLI tasks have full tool access. This project permission is separate from the conflict-push switch. Leave its repository list blank for all active Scope, or list exact paths to narrow it."
           }
         }
       }
@@ -436,7 +447,7 @@
         "en": {
           "stringUnit": {
             "state": "translated",
-            "value": "Enter exact GitLab project paths separated by commas for automatic merges or pushes from conflict tasks."
+            "value": "Leave repository restrictions blank to cover all eligible MRs in active Scope. Enter exact project paths separated by commas to narrow the permission."
           }
         }
       }
@@ -469,7 +480,7 @@
         "en": {
           "stringUnit": {
             "state": "translated",
-            "value": "Projects allowed to merge"
+            "value": "Automatic merge repositories (optional)"
           }
         }
       }
@@ -535,7 +546,7 @@
         "en": {
           "stringUnit": {
             "state": "translated",
-            "value": "Saved scripts are retained for reference. MR automation runs through the selected assistant CLI."
+            "value": "Saved scripts are retained for reference. MR automation runs through the selected coding agent CLI."
           }
         }
       }
@@ -568,7 +579,7 @@
         "en": {
           "stringUnit": {
             "state": "translated",
-            "value": "Prepares a conflict-resolution task through the selected CLI. Pushing a fix requires the additional project-task permission, conflict-push permission and a listed project."
+            "value": "The coding agent prepares and checks conflict fixes. Enable conflict pushes to deliver them automatically; otherwise inspect the run result and deliver them manually. Project permission in Advanced also applies."
           }
         }
       }
@@ -579,7 +590,7 @@
         "en": {
           "stringUnit": {
             "state": "translated",
-            "value": "Projects allowed to receive fixes"
+            "value": "Conflict push repositories (optional)"
           }
         }
       }
@@ -645,7 +656,7 @@
         "en": {
           "stringUnit": {
             "state": "translated",
-            "value": "Choose how to start…"
+            "value": "Choose a profile…"
           }
         }
       }
@@ -656,7 +667,7 @@
         "en": {
           "stringUnit": {
             "state": "translated",
-            "value": "Recommended enables reviews, follow-ups, CI workflows and re-review. It allows verified follow-up pushes, AI-reply publication, approvals and thread resolution. Publishing all comments, automatic merge and conflict pushes remain off."
+            "value": "Profiles fill in automation defaults. You can adjust individual permissions afterwards. Applying a profile keeps your Scope."
           }
         }
       }
@@ -667,7 +678,7 @@
         "en": {
           "stringUnit": {
             "state": "translated",
-            "value": "Keep all automation off"
+            "value": "Manual only"
           }
         }
       }
@@ -678,7 +689,7 @@
         "en": {
           "stringUnit": {
             "state": "translated",
-            "value": "Check for installed assistants"
+            "value": "Check for installed coding agents"
           }
         }
       }
@@ -689,7 +700,7 @@
         "en": {
           "stringUnit": {
             "state": "translated",
-            "value": "Restore Recommended Defaults"
+            "value": "Use selected profile?"
           }
         }
       }
@@ -700,7 +711,7 @@
         "en": {
           "stringUnit": {
             "state": "translated",
-            "value": "Restores recommended rules and permissions for the selected CLI. Automation scope and your manual starting folder are kept. Apply Changes to save."
+            "value": "Replaces rules and action permissions with the selected profile. Scope and your manual CLI starting folder are kept. Apply Changes to save."
           }
         }
       }
@@ -711,7 +722,7 @@
         "en": {
           "stringUnit": {
             "state": "translated",
-            "value": "Automation package"
+            "value": "Automation profile"
           }
         }
       }
@@ -722,7 +733,7 @@
         "en": {
           "stringUnit": {
             "state": "translated",
-            "value": "Use Selection"
+            "value": "Use profile"
           }
         }
       }
@@ -777,7 +788,7 @@
         "en": {
           "stringUnit": {
             "state": "translated",
-            "value": "Selected assistant CLI"
+            "value": "Selected coding agent CLI"
           }
         }
       }
@@ -887,7 +898,7 @@
         "en": {
           "stringUnit": {
             "state": "translated",
-            "value": "Run with assistant CLI"
+            "value": "Run with coding agent CLI"
           }
         }
       }
@@ -931,7 +942,7 @@
         "en": {
           "stringUnit": {
             "state": "translated",
-            "value": "Preview and Track event record events in Activity without starting work. Run with assistant CLI starts a task. System notifications follow the General setting and alert you only to new work needing your attention."
+            "value": "Preview and Track event record events in Activity without starting work. Run with coding agent CLI starts a task. System notifications follow the General setting and alert you only to new work needing your attention."
           }
         }
       }
@@ -1448,7 +1459,7 @@
         "en": {
           "stringUnit": {
             "state": "translated",
-            "value": "Assistant"
+            "value": "Coding agent"
           }
         }
       }
@@ -1492,7 +1503,7 @@
         "en": {
           "stringUnit": {
             "state": "translated",
-            "value": "What needs your OK"
+            "value": "Action permissions"
           }
         }
       }
@@ -1514,7 +1525,7 @@
         "en": {
           "stringUnit": {
             "state": "translated",
-            "value": "These permissions control publishing, approvals and follow-up pushes. Other enabled rules can request reviews or resolve verified threads."
+            "value": "These choices control automatic publication, approvals and follow-up pushes. Thread resolution is controlled below. Scope and verification checks still apply."
           }
         }
       }
@@ -1558,7 +1569,7 @@
         "en": {
           "stringUnit": {
             "state": "translated",
-            "value": "Let the assistant push fixes to my merge requests"
+            "value": "Let the coding agent push fixes to my merge requests"
           }
         }
       }
@@ -1591,7 +1602,7 @@
         "en": {
           "stringUnit": {
             "state": "translated",
-            "value": "After new commits, the assistant rechecks your earlier comments and resolves only your own threads it has verified as fixed."
+            "value": "After new commits, the coding agent rechecks your earlier comments and resolves only your own threads it has verified as fixed."
           }
         }
       }
@@ -1624,7 +1635,7 @@
         "en": {
           "stringUnit": {
             "state": "translated",
-            "value": "Once the assistant has no objections to the latest commit and every discussion is resolved. You can turn this off for a single MR on its Reviewing card."
+            "value": "Once the coding agent has no objections to the latest commit and every discussion is resolved. You can turn this off for a single MR on its Reviewing card."
           }
         }
       }
@@ -1657,7 +1668,7 @@
         "en": {
           "stringUnit": {
             "state": "translated",
-            "value": "Checkpoints"
+            "value": "Profile & permissions"
           }
         }
       }
@@ -1778,7 +1789,7 @@
         "en": {
           "stringUnit": {
             "state": "translated",
-            "value": "Set up assistant"
+            "value": "Set up coding agent"
           }
         }
       }
@@ -1800,7 +1811,7 @@
         "en": {
           "stringUnit": {
             "state": "translated",
-            "value": "%@ is missing. Assistant automation is unavailable until the CLI is installed."
+            "value": "%@ is missing. Coding agent automation is unavailable until the CLI is installed."
           }
         }
       }
@@ -1811,7 +1822,7 @@
         "en": {
           "stringUnit": {
             "state": "translated",
-            "value": "%@ cannot run or needs an update. Assistant automation is unavailable."
+            "value": "%@ cannot run or needs an update. Coding agent automation is unavailable."
           }
         }
       }
@@ -1822,7 +1833,7 @@
         "en": {
           "stringUnit": {
             "state": "translated",
-            "value": "%@ needs sign-in. Assistant automation is unavailable."
+            "value": "%@ needs sign-in. Coding agent automation is unavailable."
           }
         }
       }
@@ -1855,7 +1866,7 @@
         "en": {
           "stringUnit": {
             "state": "translated",
-            "value": "Assess comments and the current diff with the selected CLI before requesting re-review. When off or a check is inconclusive, confirm readiness manually. Other assistant automation still requires a signed-in CLI."
+            "value": "Assess comments and the current diff with the selected CLI before requesting re-review. When off or a check is inconclusive, confirm readiness manually. Other coding agent automation still requires a signed-in CLI."
           }
         }
       }
@@ -1877,7 +1888,7 @@
         "en": {
           "stringUnit": {
             "state": "translated",
-            "value": "This saved script is retained for reference. MR automation no longer runs scripts or substitutes AI for them. Choose the assistant CLI to enable this handler."
+            "value": "This saved script is retained for reference. MR automation no longer runs scripts or substitutes AI for them. Choose the coding agent CLI to enable this handler."
           }
         }
       }
@@ -1922,6 +1933,127 @@
           "stringUnit": {
             "state": "translated",
             "value": "Sign-in not verified"
+          }
+        }
+      }
+    },
+    "settings.automation.package.full": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Full automation"
+          }
+        }
+      }
+    },
+    "settings.automation.package.fullHelp": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Automatically run reviews, feedback fixes, CI workflows, publication of all eligible comments, approvals, thread resolution and eligible merges. Verified follow-up and conflict fixes may be pushed within active Scope. Project and verification checks still apply."
+          }
+        }
+      }
+    },
+    "settings.automation.package.checkpointsHelp": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Run reviews, diagnoses and local fix proposals automatically. Review findings stay private; proposed fixes stay in run results for manual delivery. Publishing, pushes, approvals, merges and thread resolution are manual. Readiness verification and re-review requests stay on."
+          }
+        }
+      }
+    },
+    "settings.automation.package.manualHelp": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Monitor MRs and manage actions manually. Automatic runs, verification and remote actions are off. You can explicitly start a coding-agent review when a signed-in CLI is available."
+          }
+        }
+      }
+    },
+    "settings.automation.publication.title": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Comment publication"
+          }
+        }
+      }
+    },
+    "settings.automation.publication.all": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "All eligible comments"
+          }
+        }
+      }
+    },
+    "settings.automation.publication.aiReplies": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Replies to AI feedback"
+          }
+        }
+      }
+    },
+    "settings.automation.publication.manual": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Private drafts only"
+          }
+        }
+      }
+    },
+    "settings.automation.publication.allHelp": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Publish eligible checked drafts automatically after they remain unchanged across two refreshes and current verification passes. Optional restrictions can narrow this further."
+          }
+        }
+      }
+    },
+    "settings.automation.publication.aiRepliesHelp": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Automatically publish checked replies to verified AI comments or comments assessed as AI-written with very high confidence. Human or uncertain feedback and new standalone comments stay private. Optional restrictions can narrow this further."
+          }
+        }
+      }
+    },
+    "settings.automation.publication.manualHelp": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Keep comments and replies as private drafts until you explicitly publish them. Automatic publication is off."
           }
         }
       }

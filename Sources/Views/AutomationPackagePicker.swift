@@ -1,31 +1,58 @@
 import SwiftUI
 
-enum AutomationPackageChoice: Hashable {
-    case recommended, off
+typealias AutomationPackageChoice = AutomationPreset
 
-    func apply(to settings: inout AutomationSettings, assistant: AutomationAssistant) {
-        settings.assistant = assistant
+extension AutomationPreset {
+    var requiresCLI: Bool { self != .manual }
+    var title: LocalizedStringResource {
         switch self {
-        case .recommended: settings.applyRecommended(for: assistant)
-        case .off: settings.disableAssistantPackage()
+        case .full: .Settings.settingsAutomationPackageFull
+        case .checkpoints: .Settings.settingsAutomationPackageRecommended
+        case .manual: .Settings.settingsAutomationPackageOff
+        }
+    }
+    var explanation: LocalizedStringResource {
+        switch self {
+        case .full: .Settings.settingsAutomationPackageFullHelp
+        case .checkpoints: .Settings.settingsAutomationPackageCheckpointsHelp
+        case .manual: .Settings.settingsAutomationPackageManualHelp
+        }
+    }
+    func apply(to settings: inout AutomationSettings, assistant: AutomationAssistant) {
+        settings.applyPreset(self, for: assistant)
+    }
+}
+
+extension AutomationPublicationMode {
+    var title: LocalizedStringResource {
+        switch self {
+        case .all: .Settings.settingsAutomationPublicationAll
+        case .aiReplies: .Settings.settingsAutomationPublicationAiReplies
+        case .manual: .Settings.settingsAutomationPublicationManual
+        }
+    }
+    var explanation: LocalizedStringResource {
+        switch self {
+        case .all: .Settings.settingsAutomationPublicationAllHelp
+        case .aiReplies: .Settings.settingsAutomationPublicationAiRepliesHelp
+        case .manual: .Settings.settingsAutomationPublicationManualHelp
         }
     }
 }
 
 struct AutomationPackagePicker: View {
     @Binding var selection: AutomationPackageChoice?
-    let canUseRecommended: Bool
+    let canUseAutomatic: Bool
 
     var body: some View {
         Picker(selection: $selection) {
             Text(.Settings.settingsAutomationPackageChoose)
                 .tag(nil as AutomationPackageChoice?)
                 .disabled(true)
-            Text(.Settings.settingsAutomationPackageRecommended)
-                .tag(AutomationPackageChoice.recommended as AutomationPackageChoice?)
-                .disabled(!canUseRecommended)
-            Text(.Settings.settingsAutomationPackageOff)
-                .tag(AutomationPackageChoice.off as AutomationPackageChoice?)
+            ForEach(AutomationPreset.allCases, id: \.self) { choice in
+                Text(choice.title).tag(choice as AutomationPackageChoice?)
+                    .disabled(choice.requiresCLI && !canUseAutomatic)
+            }
         } label: {
             Text(.Settings.settingsAutomationPackageTitle)
         }

@@ -126,6 +126,18 @@ struct MergeConflictReceipt: Codable, Hashable {
     let iid: Int
     let sourceSHA: String
     let targetSHA: String
+    var allowsPush: Bool? = nil
+    var jobID: UUID? = nil
+
+    static func == (lhs: Self, rhs: Self) -> Bool {
+        lhs.host == rhs.host && lhs.userID == rhs.userID && lhs.projectID == rhs.projectID
+            && lhs.iid == rhs.iid && lhs.sourceSHA == rhs.sourceSHA && lhs.targetSHA == rhs.targetSHA
+    }
+
+    func hash(into hasher: inout Hasher) {
+        hasher.combine(host); hasher.combine(userID); hasher.combine(projectID)
+        hasher.combine(iid); hasher.combine(sourceSHA); hasher.combine(targetSHA)
+    }
 
     func matches(_ request: GitLabMergeRequest, host: String, userID: Int) -> Bool {
         self.host == host && self.userID == userID && projectID == request.projectID && iid == request.iid

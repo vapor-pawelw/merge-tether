@@ -2,7 +2,7 @@ import CryptoKit
 import Foundation
 
 /// A content-bound assessment; changing the source comment invalidates it automatically.
-struct AICommentAssessment: Codable, Sendable {
+struct AICommentAssessment: Codable, Sendable, Equatable {
     let version: Int
     let host: String
     let projectID: Int
@@ -28,22 +28,25 @@ enum AICommentAssessmentStore {
     nonisolated static func isAI(
         _ note: GitLabMergeRequestDiscussion.Note, host: String, projectID: Int, iid: Int, in directory: URL
     ) -> Bool {
+        assessment(for: note, host: host, projectID: projectID, iid: iid, in: directory) != nil
+    }
+
+    nonisolated static func assessment(
+        for note: GitLabMergeRequestDiscussion.Note, host: String, projectID: Int, iid: Int, in directory: URL
+    ) -> AICommentAssessment? {
         guard let id = note.id, let body = note.body, !body.isEmpty,
               let data = try? Data(contentsOf: fileURL(host: host, projectID: projectID, iid: iid, noteID: id, in: directory)),
               data.count < 16384, let record = try? JSONDecoder().decode(AICommentAssessment.self, from: data)
-        else { return false }
-        return record.version == 1 && record.host == host && record.projectID == projectID && record.iid == iid
+        else { return nil }
+        guard record.version == 1 && record.host == host && record.projectID == projectID && record.iid == iid
             && record.noteID == id && record.confidence == "very_high" && !record.evidence.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
             && record.bodySHA256 == digest(body)
+        else { return nil }
+        return record
     }
 
     nonisolated static func safeForAutomaticPublication(_ draft: GitLabDraftNote) -> Bool {
-        guard draft.resolveDiscussion != true, let body = draft.note,
-              !body.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else { return false }
-        // Publishing a note executes GitLab quick actions. Even fenced examples wait for a human.
-        return !body.split(whereSeparator: \.isNewline).contains {
-            $0.trimmingCharacters(in: .whitespaces).hasPrefix("/")
-        }
+        AutomaticPublicationPolicy.safeForAutomaticPublication(draft)
     }
 
     /// Every external comment since the user's last reply must qualify, so a human follow-up
@@ -53,12 +56,8 @@ enum AICommentAssessmentStore {
         duoUserIDs: Set<Int>, host: String, projectID: Int, iid: Int, in directory: URL
     ) -> Bool {
         guard draft.id != nil, draft.authorID == userID, safeForAutomaticPublication(draft),
-              let threadID = draft.discussionID, !threadID.isEmpty,
-              let thread = discussions.first(where: { $0.id == threadID }),
-              !thread.notes.contains(where: { $0.system != true && ($0.id == nil || $0.author == nil) })
+              let sources = AutomaticPublicationPolicy.sourceNotes(for: draft, discussions: discussions, userID: userID)
         else { return false }
-        let lastReply = thread.notes.filter { $0.author?.id == userID && $0.system != true }.compactMap(\.id).max() ?? 0
-        let sources = thread.notes.filter { $0.system != true && $0.author?.id != userID && ($0.id ?? 0) > lastReply }
         return !sources.isEmpty && sources.allSatisfy { note in
             duoUserIDs.contains(note.author?.id ?? 0)
                 || isAI(note, host: host, projectID: projectID, iid: iid, in: directory)

@@ -250,7 +250,7 @@ enum AssistantAutomationRunner {
         let verdict = isReview || mrWorkflow == .review
             ? "\n\n" + ReviewVerdictStore.recordingInstructions(host: work.host, projectID: work.projectID, iid: work.iid)
             : ""
-        let aiAssessment = settings.automation.publishAIRepliesWithoutConfirmation
+        let aiAssessment = settings.automation.needsAIAssessment
             && (mrWorkflow != .followUp || settings.automation.allowFollowUpPush)
             ? "\n\n" + AICommentAssessmentStore.recordingInstructions(host: work.host, projectID: work.projectID, iid: work.iid)
             : ""

@@ -40,7 +40,7 @@ struct AuthorFeedbackMergeTests {
         }
     }
 
-    enum Drift: String, CaseIterable, Sendable { case newComment, editedComment, unpublishedReply, changedHead }
+    enum Drift: String, CaseIterable, Sendable { case newComment, editedComment, unpublishedReply, changedHead, changedTitle, changedDescription }
 
     @Test(arguments: Drift.allCases)
     func finalMergeRecheckRejectsChangesAfterTheSemanticVerdict(_ drift: Drift) async throws {
@@ -68,6 +68,13 @@ struct AuthorFeedbackMergeTests {
                         try body.replacingOccurrences(of: "0123456789012345678901234567890123456789",
                                                      with: "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa")
                             .write(to: file, atomically: true, encoding: .utf8)
+                    case .changedTitle, .changedDescription:
+                        let file = folder.appending(path: "request.json")
+                        let body = try String(contentsOf: file, encoding: .utf8)
+                        try body.replacingOccurrences(of: "\"title\":\"Feature\"",
+                            with: drift == .changedTitle ? "\"title\":\"Changed acceptance criteria\""
+                                : "\"title\":\"Feature\",\"description\":\"Changed acceptance criteria\"")
+                            .write(to: file, atomically: true, encoding: .utf8)
                     }
                     changed = true
                 } catch { Issue.record(error) }
@@ -76,6 +83,22 @@ struct AuthorFeedbackMergeTests {
             try await refresh(monitor)
             #expect(changed)
             #expect(!monitor.hasError)
+            #expect(!FileManager.default.fileExists(atPath: folder.appending(path: "merged").path))
+            #expect(monitor.requests.count == 1)
+        }
+    }
+
+    @Test func finalMergeRejectsDescriptionEditedDuringFinalAuthentication() async throws {
+        try await withFixture { monitor, folder, _ in
+            monitor.authorFeedbackAllowsMerge = { _, _, _ in
+                do { try Data("yes".utf8).write(to: folder.appending(path: "edit-description-during-auth")) }
+                catch { Issue.record(error) }
+                return true
+            }
+
+            try await refresh(monitor)
+
+            #expect(FileManager.default.fileExists(atPath: folder.appending(path: "description-edited-during-auth").path))
             #expect(!FileManager.default.fileExists(atPath: folder.appending(path: "merged").path))
             #expect(monitor.requests.count == 1)
         }
@@ -105,7 +128,13 @@ struct AuthorFeedbackMergeTests {
         set -eu
         cd "$(dirname "$0")"
         case "$2" in
-          /user) echo '{"id":3,"username":"me"}' ;;
+          /user)
+            if [ -f edit-description-during-auth ]; then
+                rm edit-description-during-auth
+                /usr/bin/python3 -c 'import json; p="request.json"; a=json.load(open(p)); a["description"]="Changed acceptance criteria during authentication"; json.dump(a,open(p,"w"))'
+                touch description-edited-during-auth
+            fi
+            echo '{"id":3,"username":"me"}' ;;
           /merge_requests\\?*) printf '['; cat request.json; printf ']' ;;
           /projects/1/merge_requests/2) cat request.json ;;
           */approval_state) echo '{"rules":[{"approvals_required":1,"approved":true}]}' ;;

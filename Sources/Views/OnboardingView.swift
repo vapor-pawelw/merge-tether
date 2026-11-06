@@ -13,6 +13,7 @@ struct OnboardingView: View {
     init(monitor: TodoMonitorService) {
         self.monitor = monitor
         _assistant = State(initialValue: monitor.settings.automation.assistant)
+        _automationChoice = State(initialValue: AutomationPreset.onboardingDefault(for: monitor.settings.automation.packageDecision))
     }
 
     enum Step: Int, CaseIterable {
@@ -73,8 +74,8 @@ struct OnboardingView: View {
         case .glabInstall: monitor.glab.glabPath != nil
         case .glabAuth: monitor.glab.currentUsername != nil
         case .automation:
-            monitor.settings.automation.packageDecision != .undecided || automationChoice == .off
-                || (automationChoice == .recommended && monitor.availableAssistants.contains(assistant))
+            monitor.settings.automation.packageDecision != .undecided || automationChoice == .manual
+                || (automationChoice?.requiresCLI == true && monitor.availableAssistants.contains(assistant))
         case .notifications, .launchAtLogin, .done: true
         }
     }
@@ -98,7 +99,7 @@ struct OnboardingView: View {
         if monitor.settings.automation.packageDecision == .undecided, let automationChoice {
             automationChoice.apply(to: &updated, assistant: assistant)
 
-            if automationChoice == .recommended {
+            if automationChoice.requiresCLI {
                 pendingAutomation = updated
                 showingAssistantSetup = true
                 return

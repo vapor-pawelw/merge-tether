@@ -1,0 +1,242 @@
+{
+  "sourceLanguage": "en",
+  "version": "1.0",
+  "strings": {
+    "reviewing.authorUnknown": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Author unavailable"
+          }
+        }
+      }
+    },
+    "reviewing.authorLabel": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "MR author"
+          }
+        }
+      }
+    },
+    "reviewing.tracked": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Tracked for review"
+          }
+        }
+      }
+    },
+    "reviewing.reviewRequested": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Review requested"
+          }
+        }
+      }
+    },
+    "reviewing.reviewRequestedBy.%@": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Review requested by @%1$@"
+          }
+        }
+      }
+    },
+    "reviewing.approvalRequested": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Approval requested"
+          }
+        }
+      }
+    },
+    "reviewing.approvalRequestedBy.%@": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Approval requested by @%1$@"
+          }
+        }
+      }
+    },
+    "reviewing.activityUnknown": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Review activity not loaded"
+          }
+        }
+      }
+    },
+    "reviewing.running": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Review in progress"
+          }
+        }
+      }
+    },
+    "reviewing.reviewCompleted": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Review run completed"
+          }
+        }
+      }
+    },
+    "reviewing.noPublishedComments": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "No published comments from you"
+          }
+        }
+      }
+    },
+    "reviewing.drafts.%lld": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "variations": {
+            "plural": {
+              "one": {
+                "stringUnit": {
+                  "state": "translated",
+                  "value": "%1$lld private draft"
+                }
+              },
+              "other": {
+                "stringUnit": {
+                  "state": "translated",
+                  "value": "%1$lld private drafts"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "reviewing.authorReplied.%lld": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "variations": {
+            "plural": {
+              "one": {
+                "stringUnit": {
+                  "state": "translated",
+                  "value": "Author replied in %1$lld thread"
+                }
+              },
+              "other": {
+                "stringUnit": {
+                  "state": "translated",
+                  "value": "Author replied in %1$lld threads"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "reviewing.otherReplied.%lld": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "variations": {
+            "plural": {
+              "one": {
+                "stringUnit": {
+                  "state": "translated",
+                  "value": "Reply to your comments in %1$lld thread"
+                }
+              },
+              "other": {
+                "stringUnit": {
+                  "state": "translated",
+                  "value": "Replies to your comments in %1$lld threads"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "reviewing.openThreads.%lld": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "variations": {
+            "plural": {
+              "one": {
+                "stringUnit": {
+                  "state": "translated",
+                  "value": "%1$lld open review thread"
+                }
+              },
+              "other": {
+                "stringUnit": {
+                  "state": "translated",
+                  "value": "%1$lld open review threads"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "reviewing.commented.%lld": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "variations": {
+            "plural": {
+              "one": {
+                "stringUnit": {
+                  "state": "translated",
+                  "value": "%1$lld published comment from you"
+                }
+              },
+              "other": {
+                "stringUnit": {
+                  "state": "translated",
+                  "value": "%1$lld published comments from you"
+                }
+              }
+            }
+          }
+        }
+      }
+    }
+  }
+}

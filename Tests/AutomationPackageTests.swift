@@ -73,7 +73,7 @@ struct AutomationPackageTests {
             """.utf8)
         let decoder = JSONDecoder()
         var migrated = try decoder.decode(AutomationSettings.self, from: legacy)
-        #expect(migrated.autoReReviewEnabled && migrated.conflictTasksEnabled)
+        #expect(!migrated.autoReReviewEnabled && migrated.conflictTasksEnabled)
         #expect(migrated.reviewRequested.isEnabled && migrated.authorFeedback.isEnabled)
         #expect(migrated.workflowRules[.newDiscussion].mode == .assistant)
         #expect(migrated.workflowRules[.pipelineFailure].mode == .off)
@@ -85,15 +85,15 @@ struct AutomationPackageTests {
         #expect(try !decoder.decode(AutomationSettings.self, from: optedOut).autoReReviewEnabled)
     }
 
-    @Test func toolsAndRemoteChangesRequireAnExactProject() {
+    @Test func enabledProjectPermissionsUseOptionalExactAllowlists() {
         var settings = AutomationSettings()
         settings.allowAssistantTools = true
         settings.allowConflictPush = true
         settings.conflictTasksEnabled = true
         settings.autoMergeEnabled = true
-        #expect(!settings.permitsAssistantTools(project: "group/api"))
-        #expect(!settings.permitsConflictPush(project: "group/api"))
-        #expect(!settings.permitsAutoMerge(project: "group/api"))
+        #expect(settings.permitsAssistantTools(project: "group/api"))
+        #expect(settings.permitsConflictPush(project: "group/api"))
+        #expect(settings.permitsAutoMerge(project: "group/api"))
 
         settings.assistantToolProjects = "group/api"
         settings.conflictPushProjects = "group/api"
@@ -101,6 +101,87 @@ struct AutomationPackageTests {
         #expect(settings.permitsConflictPush(project: "group/api"))
         #expect(settings.permitsAutoMerge(project: "group/api"))
         #expect(!settings.permitsConflictPush(project: "group/api-v2"))
+    }
+
+    @Test func fullPresetEnablesEveryConfiguredAutomaticActionWithinScope() {
+        var settings = AutomationSettings()
+        settings.applyPreset(.full, for: .claude)
+        #expect(settings.packageDecision == .enabled && settings.assistant == .claude)
+        #expect(settings.reviewRequested.isEnabled && settings.authorFeedback.isEnabled)
+        #expect(settings.autoVerifyReReview && settings.autoReReviewEnabled)
+        #expect(settings.publicationMode == .all && settings.autoApproveEnabled && settings.autoMergeEnabled)
+        #expect(settings.allowFollowUpPush && settings.autoResolveOwnReviewThreads && settings.autoResolveAcceptedFeedback)
+        #expect(settings.conflictTasksEnabled && settings.allowAssistantTools && settings.allowConflictPush)
+        #expect(settings.permitsConflictPush(project: "any/repository") && settings.permitsAutoMerge(project: "any/repository"))
+    }
+
+    @Test func checkpointsPresetPreparesWorkButLeavesSensitiveActionsManual() {
+        var settings = AutomationSettings()
+        settings.applyPreset(.checkpoints, for: .codex)
+        #expect(settings.packageDecision == .enabled && settings.reviewRequested.isEnabled && settings.authorFeedback.isEnabled)
+        #expect(settings.conflictTasksEnabled && settings.autoVerifyReReview)
+        #expect(settings.publicationMode == .manual && !settings.autoApproveEnabled && !settings.autoMergeEnabled)
+        #expect(!settings.allowFollowUpPush && !settings.allowConflictPush)
+        #expect(!settings.autoResolveOwnReviewThreads && !settings.autoResolveAcceptedFeedback)
+    }
+
+    @Test func manualPresetDisablesAutomaticActionsAndVerifierWithoutErasingTaskConfiguration() {
+        var settings = AutomationSettings()
+        settings.authorFeedback.promptTemplate = "My custom task"
+        settings.applyPreset(.manual, for: .codex)
+        #expect(settings.packageDecision == .disabled && !settings.usesAssistant)
+        #expect(!settings.autoVerifyReReview && !settings.autoReReviewEnabled)
+        #expect(settings.publicationMode == .manual && !settings.autoApproveEnabled && !settings.autoMergeEnabled)
+        #expect(!settings.autoResolveOwnReviewThreads && !settings.autoResolveAcceptedFeedback)
+        #expect(!settings.allowFollowUpPush && !settings.allowConflictPush)
+        #expect(settings.authorFeedback.promptTemplate == "My custom task")
+    }
+
+    @Test func onboardingOffersFullByDefaultOnlyBeforeTheUserHasChosen() {
+        #expect(AutomationPreset.onboardingDefault(for: .undecided) == .full)
+        #expect(AutomationPreset.onboardingDefault(for: .enabled) == nil)
+        #expect(AutomationPreset.onboardingDefault(for: .disabled) == nil)
+    }
+
+    @Test func publicationModesAreExclusiveAndKeepLegacyBooleanPersistence() throws {
+        var settings = AutomationSettings()
+        settings.publicationMode = .all
+        #expect(settings.publishDraftsWithoutConfirmation && settings.publishAIRepliesWithoutConfirmation)
+        settings.publicationMode = .manual
+        #expect(!settings.publishDraftsWithoutConfirmation && !settings.publishAIRepliesWithoutConfirmation)
+        settings.publicationMode = .aiReplies
+        #expect(!settings.publishDraftsWithoutConfirmation && settings.publishAIRepliesWithoutConfirmation)
+        #expect(try JSONDecoder().decode(AutomationSettings.self, from: JSONEncoder().encode(settings)).publicationMode == .aiReplies)
+        let legacyAll = try JSONDecoder().decode(AutomationSettings.self, from: Data(#"{"publishDraftsWithoutConfirmation":true,"publishAIRepliesWithoutConfirmation":false}"#.utf8))
+        #expect(legacyAll.publicationMode == .all)
+        let legacyManual = try JSONDecoder().decode(AutomationSettings.self, from: Data(#"{"publishDraftsWithoutConfirmation":false,"publishAIRepliesWithoutConfirmation":false}"#.utf8))
+        #expect(legacyManual.publicationMode == .manual)
+    }
+
+    @Test func legacyMigrationPreservesExplicitOptOutsWhileFillingOnlyMissingDefaults() throws {
+        let json = #"{"packageDecision":"enabled","autoReReviewEnabled":false,"conflictTasksEnabled":false,"publishAIRepliesWithoutConfirmation":false,"autoResolveOwnReviewThreads":false,"autoResolveAcceptedFeedback":false,"allowFollowUpPush":false,"reviewRequested":{"isEnabled":false,"runner":"assistant","promptTemplate":"Custom review"},"authorFeedback":{"isEnabled":false,"runner":"assistant","promptTemplate":"Custom follow-up"}}"#
+        let loaded = try JSONDecoder().decode(AutomationSettings.self, from: Data(json.utf8))
+        #expect(!loaded.autoReReviewEnabled && !loaded.conflictTasksEnabled)
+        #expect(!loaded.reviewRequested.isEnabled && !loaded.authorFeedback.isEnabled)
+        #expect(!loaded.publishAIRepliesWithoutConfirmation && !loaded.autoResolveOwnReviewThreads && !loaded.autoResolveAcceptedFeedback)
+        #expect(!loaded.allowFollowUpPush && !loaded.allowConflictPush && !loaded.autoMergeEnabled)
+    }
+
+    @Test func legacyEnabledButEmptyAllowlistsCannotGainPermissionsOnUpgrade() throws {
+        let json = #"{"assistantDefaultsVersion":1,"conflictTasksEnabled":true,"allowAssistantTools":true,"assistantToolProjects":"","allowConflictPush":true,"conflictPushProjects":"","autoMergeEnabled":true,"autoMergeProjects":""}"#
+        let loaded = try JSONDecoder().decode(AutomationSettings.self, from: Data(json.utf8))
+        #expect(!loaded.permitsAssistantTools(project: "any/repo"))
+        #expect(!loaded.permitsConflictPush(project: "any/repo"))
+        #expect(!loaded.permitsAutoMerge(project: "any/repo"))
+    }
+
+    @Test func explicitlyAppliedFullKeepsUnrestrictedPermissionsAcrossReload() throws {
+        var settings = AutomationSettings()
+        settings.applyPreset(.full, for: .codex)
+        let loaded = try JSONDecoder().decode(AutomationSettings.self, from: JSONEncoder().encode(settings))
+        #expect(loaded.permitsAssistantTools(project: "any/repo"))
+        #expect(loaded.permitsConflictPush(project: "any/repo"))
+        #expect(loaded.permitsAutoMerge(project: "any/repo"))
     }
 
     @Test func removesKnownCredentialsAndTruncatedPrivateKeysFromEvidence() {
