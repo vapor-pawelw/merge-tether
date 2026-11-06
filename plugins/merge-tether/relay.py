@@ -14,7 +14,7 @@ import subprocess
 import sys
 import tempfile
 import uuid
-from urllib.parse import urlsplit
+from urllib.parse import quote, urlsplit
 
 ROOT = Path.home() / "Library/Application Support/com.vaporpw.GitLabTodos/Codex Desktop Relay"
 GLAB_PATH = "/opt/homebrew/bin:/usr/local/bin:/usr/bin:/bin"
@@ -22,6 +22,84 @@ VERDICTS = ("no_objections", "objections")
 CLAUDE_SESSION = re.compile(r"local_[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}")
 HOST_PATTERN = re.compile(r"[A-Za-z0-9.-]{1,253}(:[0-9]{1,5})?")
 MR_RESOURCES = ("details", "diffs", "discussions", "notes", "draft_notes", "approval_state", "pipelines")
+
+
+def mr_status_markdown(report, pending, claimed, language):
+    def text(en, pl):
+        return pl if language == "pl" else en
+
+    def escape(value):
+        value = str(value).replace("\\", "\\\\").replace("\n", " ").replace("\r", " ")
+        for char in "|`*_[]":
+            value = value.replace(char, "\\" + char)
+        return value.replace("<", "&lt;").replace(">", "&gt;")
+
+    statuses = {
+        "discussions_not_resolved": text("Open discussions", "Otwarte dyskusje"),
+        "blocked": text("Blocked (reason not supplied)", "Zablokowana (brak przyczyny)"),
+        "merge_request_blocked": text("Blocked (GitLab)", "Zablokowana (GitLab)"),
+        "unchecked": text("Merge checks pending", "Oczekuje na kontrole merge"),
+        "checking": text("Merge checks pending", "Oczekuje na kontrole merge"),
+        "not_approved": text("Approvals needed", "Brakuje approvali"),
+        "need_rebase": text("Rebase needed", "Wymaga rebase"),
+        "conflict": text("Merge conflict", "Konflikt merge"),
+        "mergeable": text("GitLab merge checks passed", "Kontrole merge GitLaba przeszły"),
+        "ci_must_pass": text("CI must pass", "CI musi przejść"),
+        "ci_still_running": text("CI running", "CI w toku"),
+        "requested_changes": text("Changes requested", "Zażądano zmian"),
+    }
+    pipelines = {"success": text("Passed", "Przeszedł"), "failed": text("Failed", "Błąd"),
+                 "running": text("Running", "W toku"), "pending": text("Pending", "Oczekuje"),
+                 "canceled": text("Canceled", "Anulowany"), "skipped": text("Skipped", "Pominięty"),
+                 "manual": text("Manual action", "Akcja ręczna")}
+
+    def row_data(entry):
+        url = str(entry.get("url", ""))
+        try:
+            parsed = urlsplit(url)
+            parts = parsed.path.split("/")
+            repo = parts[parts.index("-") - 1] if "-" in parts else "—"
+            valid_url = parsed.scheme in ("http", "https") and bool(parsed.netloc)
+        except ValueError:
+            repo, valid_url = "—", False
+        iid = entry.get("iid")
+        label = "!" + (str(iid) if type(iid) is int and iid > 0 else "?")
+        link = "[" + label + "](<" + quote(url, safe=":/?#@!$&'+,;=%") + ">)" if valid_url else label
+        merge_status = entry.get("mergeStatus") if isinstance(entry.get("mergeStatus"), str) else None
+        draft = entry.get("draft") is True or merge_status == "draft_status"
+        status = "**DRAFT**" if draft else escape(statuses.get(merge_status, text("Unknown", "Nieznany")))
+        if entry.get("openDiscussions") is True or merge_status == "discussions_not_resolved":
+            discussion = "**" + text("Open discussions", "Otwarte dyskusje") + "**"
+            status = discussion if merge_status == "discussions_not_resolved" and not draft else status + "; " + discussion
+        if entry.get("reReviewUnconfirmed") is True:
+            status += "; **" + text("Re-review unconfirmed", "Re-review niepotwierdzone") + "**"
+        pipeline = entry.get("pipeline") if isinstance(entry.get("pipeline"), str) else None
+        ci = escape(pipelines.get(pipeline, pipeline or "—"))
+        if pipeline == "failed":
+            ci = "**" + ci + "**"
+        count = entry.get("unpublishedComments")
+        comments = ("**" + str(count) + "**" if count > 0 else "0") if type(count) is int and count >= 0 else "—"
+        return repo, draft, iid if type(iid) is int else 0, "| " + " | ".join((escape(repo), link, status, ci, comments)) + " |"
+
+    entries = [entry for entry in report["mergeRequests"] if isinstance(entry, dict)]
+    timestamp = escape(report["checkedAt"].replace("T", " ").replace("Z", " UTC"))
+    completeness = text("Complete", "Kompletny") if report.get("complete") is True else text("Partial", "Częściowy")
+    lines = ["## " + text("MR report", "Raport MR"), "",
+             text("Snapshot: ", "Stan na: ") + timestamp + " · " + completeness + " · MR: " + str(len(entries))]
+    for role, heading in (("author", text("Own MRs", "Własne MR-y")), ("reviewer", text("For review", "Do review")),
+                          ("other", text("Role unknown", "Nieznana rola"))):
+        rows = [row_data(entry) for entry in entries
+                if (entry.get("role") if entry.get("role") in ("author", "reviewer") else "other") == role]
+        if not rows:
+            continue
+        lines += ["", "### " + heading, "", text("| Repository | MR | Status / blockers | CI | To publish |",
+                    "| Repozytorium | MR | Status / blokery | CI | Do publikacji |"), "|---|---|---|---|---|"]
+        lines.extend(row[3] for row in sorted(rows, key=lambda row: (row[0].casefold(), row[1], row[2])))
+    if not entries:
+        lines += ["", text("No open MRs in the snapshot.", "Brak otwartych MR-ów w zestawieniu.")]
+    lines += ["", text("**Queue:** ", "**Kolejka:** ") + str(pending) + text(" pending · ", " oczekujących · ")
+              + str(claimed) + text(" claimed", " zajętych")]
+    return "\n".join(lines)
 
 
 def gitlab_get(host, endpoint):
@@ -154,13 +232,14 @@ class Queue:
             result["templateThreadID"] = template
         return result
 
-    def poll(self):
+    def poll(self, report_language="en"):
         self.root.mkdir(parents=True, exist_ok=True, mode=0o700)
         write_object(self.root / "heartbeat.json", {"version": 1})
         result = self.status()
         report = read_object(self.root / "mr-status.json")
         if isinstance(report.get("mergeRequests"), list) and isinstance(report.get("checkedAt"), str):
             result["mrStatus"] = report
+            result["mrStatusMarkdown"] = mr_status_markdown(report, result["pending"], result["claimed"], report_language)
         return result
 
     def claim_next(self, allow_merged=False, allow_work_item=False):
@@ -524,6 +603,8 @@ TOOLS = [
          ("host", "projectID", "iid", "headSHA", "verdict")),
 ]
 claim_tool = next(item for item in TOOLS if item["name"] == "claim_next")
+poll_tool = next(item for item in TOOLS if item["name"] == "poll")
+poll_tool["inputSchema"]["properties"]["reportLanguage"] = {"type": "string", "enum": ["en", "pl"]}
 claim_tool["inputSchema"]["properties"]["allowMerged"] = {
     "type": "boolean",
     "description": "Allow title-only updates if the current chat has native read_thread and set_thread_title tools.",
@@ -558,8 +639,8 @@ def handle(request, queue):
     try:
         if name == "queue_status" and not args:
             output = queue.status()
-        elif name == "poll" and not args:
-            output = queue.poll()
+        elif name == "poll" and set(args) <= {"reportLanguage"} and args.get("reportLanguage", "en") in ("en", "pl"):
+            output = queue.poll(report_language=args.get("reportLanguage", "en"))
         elif name == "claim_next" and set(args) <= {"allowMerged", "allowWorkItem"} and all(type(v) is bool for v in args.values()):
             output = {"job": queue.claim_next(allow_merged=args.get("allowMerged", False),
                                               allow_work_item=args.get("allowWorkItem", False))}

@@ -414,7 +414,75 @@ class QueueTest(unittest.TestCase):
     def test_poll_includes_mr_status_with_an_empty_queue(self):
         report = {"checkedAt": "2026-11-04T20:00:00Z", "complete": True, "mergeRequests": [{"iid": 42}]}
         (self.root / "mr-status.json").write_text(json.dumps(report))
-        self.assertEqual(self.queue.poll(), {"pending": 0, "claimed": 0, "mrStatus": report})
+        result = self.queue.poll()
+        self.assertEqual({key: result[key] for key in ("pending", "claimed", "mrStatus")},
+                         {"pending": 0, "claimed": 0, "mrStatus": report})
+
+    def test_poll_formats_current_rows_with_exact_roles_and_unpublished_counts(self):
+        report = {"checkedAt": "2026-11-06T00:34:10Z", "complete": True, "mergeRequests": [
+            {"iid": 42, "url": "https://gitlab.example.org/team/cards-api/-/merge_requests/42",
+             "role": "author", "mergeStatus": "merge_request_blocked", "pipeline": "failed", "unpublishedComments": 1},
+            {"iid": 7, "url": "https://gitlab.example.org/team/mobile/-/merge_requests/7",
+             "role": "reviewer", "draft": True, "unpublishedComments": 0},
+        ]}
+        (self.root / "mr-status.json").write_text(json.dumps(report))
+        result = self.queue.poll()
+        markdown = result.get("mrStatusMarkdown")
+        self.assertIsInstance(markdown, str)
+        self.assertIn("2026-11-06 00:34:10 UTC", markdown)
+        self.assertIn("### Own MRs", markdown)
+        self.assertIn("### For review", markdown)
+        rows = [line for line in markdown.splitlines() if "[!" in line]
+        self.assertEqual(len(rows), 2)
+        self.assertIn("[!42](<https://gitlab.example.org/team/cards-api/-/merge_requests/42>)", rows[0])
+        self.assertIn("Blocked", rows[0])
+        self.assertTrue(rows[0].endswith("| **Failed** | **1** |"))
+        self.assertTrue(rows[1].endswith("| **DRAFT** | — | 0 |"))
+        self.assertLess(markdown.index(rows[0]), markdown.index("### For review"))
+        self.assertGreater(markdown.index(rows[1]), markdown.index("### For review"))
+
+    def test_polish_report_uses_current_snapshot_and_puts_draft_mrs_last(self):
+        report = {"checkedAt": "2026-11-06T00:34:10Z", "complete": False, "mergeRequests": [
+            {"iid": 1, "url": "https://gitlab.example.org/team/cards-api/-/merge_requests/1",
+             "role": "author", "draft": True, "unpublishedComments": 0},
+            {"iid": 2, "url": "https://gitlab.example.org/team/cards-api/-/merge_requests/2",
+             "role": "author", "mergeStatus": "discussions_not_resolved", "pipeline": "failed", "unpublishedComments": 3},
+        ]}
+        path = self.root / "mr-status.json"
+        path.write_text(json.dumps(report))
+        call = {"method": "tools/call", "params": {"name": "poll", "arguments": {"reportLanguage": "pl"}}}
+        result = handle(call, self.queue)
+        self.assertFalse(result["isError"])
+        markdown = json.loads(result["content"][0]["text"])["mrStatusMarkdown"]
+        self.assertIn("Częściowy", markdown)
+        self.assertIn("**Otwarte dyskusje** | **Błąd** | **3**", markdown)
+        self.assertLess(markdown.index("[!2]"), markdown.index("[!1]"))
+        self.assertIn("### Własne MR-y", markdown)
+        self.assertNotIn("### Do review", markdown)
+        self.assertIn("0 oczekujących · 0 zajętych", markdown)
+        report["mergeRequests"] = []
+        path.write_text(json.dumps(report))
+        current = self.queue.poll(report_language="pl")["mrStatusMarkdown"]
+        self.assertNotIn("[!", current)
+        self.assertIn("Brak otwartych MR-ów", current)
+
+    def test_report_does_not_turn_untrusted_fields_into_markup_or_break_poll(self):
+        report = {"checkedAt": "2026-11-06T00:34:10Z", "complete": True, "mergeRequests": [
+            {"iid": 1, "url": "https://gitlab.example.org/team/a|[link]/-/merge_requests/1",
+             "role": "author", "mergeStatus": [], "pipeline": {}, "unpublishedComments": None},
+            {"iid": 2, "url": "javascript:alert(1)", "role": "reviewer", "draft": False},
+        ]}
+        (self.root / "mr-status.json").write_text(json.dumps(report))
+        call = {"method": "tools/call", "params": {"name": "poll"}}
+        response = handle(call, self.queue)
+        self.assertFalse(response["isError"])
+        result = json.loads(response["content"][0]["text"])
+        self.assertEqual((result["pending"], result["claimed"]), (0, 0))
+        markdown = result["mrStatusMarkdown"]
+        self.assertIn(r"a\|\[link\]", markdown)
+        self.assertNotIn("javascript:", markdown)
+        self.assertNotIn("[link]", markdown)
+        self.assertIn("Unknown | — | —", markdown)
 
 
 class ClaudeSessionTest(unittest.TestCase):

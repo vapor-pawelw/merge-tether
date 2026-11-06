@@ -16,7 +16,7 @@ enum CodexPluginInstaller {
     private static let marketplace = "merge-tether-desktop"
     private static let bundledPluginID = "\(name)@\(marketplace)"
     private static let dispatchID = "mergetether-dispatch"
-    private static let oldBundledVersions = ["0.1.0", "0.1.1", "0.1.2", "0.1.3", "0.1.4", "0.1.5", "0.1.6", "0.1.7", "0.1.8", "0.1.9", "0.1.10", "0.1.11", "0.1.12", "0.1.13", "0.1.14", "0.1.15"]
+    private static let oldBundledVersions = ["0.1.0", "0.1.1", "0.1.2", "0.1.3", "0.1.4", "0.1.5", "0.1.6", "0.1.7", "0.1.8", "0.1.9", "0.1.10", "0.1.11", "0.1.12", "0.1.13", "0.1.14", "0.1.15", "0.1.16"]
     private static var attemptedBundledUpdate = false
     private static let source = URL.homeDirectory
         .appending(path: "Library/Application Support/com.vaporpw.GitLabTodos/Codex Plugin Marketplace")
