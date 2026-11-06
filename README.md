@@ -25,6 +25,8 @@ Recognized GitLab to-dos update an MR’s durable action and are then marked rea
 
 Cards requiring attention rise to the top of their column; draft MRs stay at the bottom of Reviewing. Open a card for its full details and execution history. **Activity** shows workflow events and assistant results. **Settings → Automation → Scope** controls automation globally, by repository or by MR without losing history.
 
+Attention means a human action is required. Automatic work and verification show progress without an attention marker; waiting for a reviewer stays neutral. Cards, the menu-bar indicator and notifications use the same decision.
+
 The menu-bar icon stays neutral while work is handled automatically and turns amber when something needs your attention. Optional macOS notifications bring those decisions to you without announcing every automatically handled update. Enable notification permission inside the app; if macOS has denied it, the app links to System Settings.
 
 Polling, notifications and launch at login are configurable. Monitoring continues while the app is running, including when its window is closed. A failed GitLab request keeps the previous inbox usable.

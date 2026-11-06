@@ -198,6 +198,50 @@
           }
         }
       }
+    },
+    "authorFeedback.retry": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Verify again"
+          }
+        }
+      }
+    },
+    "authorFeedback.verificationFailedChip": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Verification failed"
+          }
+        }
+      }
+    },
+    "authorFeedback.verifyingChip": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Verifying feedback"
+          }
+        }
+      }
+    },
+    "authorFeedback.pendingRepliesChip": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Replies pending"
+          }
+        }
+      }
     }
   },
   "version": "1.0"

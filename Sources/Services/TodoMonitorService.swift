@@ -650,6 +650,7 @@ final class TodoMonitorService {
                 assistantReady: preparing)
             let state = attention.confirmationStates[row.id]
             let busy = row.latestJob?.execution?.state.isActive == true || state == .publishing || state == .approving
+                || row.item.authorFeedbackStatus?.phase == .checking
             var actions: [UserAttentionSnapshot.Action] = []
             func add(_ reason: UserAttentionSnapshot.Reason, _ token: String, automatic: Bool = false) {
                 actions.append(.init(reason: reason, token: token, automatic: automatic))

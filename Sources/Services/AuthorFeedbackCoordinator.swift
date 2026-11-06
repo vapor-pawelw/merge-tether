@@ -11,9 +11,10 @@ struct AuthorFeedbackStatus: Equatable, Sendable {
     var acceptedReviewerIDs: Set<Int> = []
     var followUpNoteIDs: Set<Int> = []
     var replyNoteIDs: Set<Int> = []
+    var addressedNoteIDs: Set<Int> = []
 
     var needsAttention: Bool {
-        phase == .failed || phase == .waitingPublication || findings.contains {
+        phase == .failed || phase == .waitingPublication || !replyNoteIDs.isEmpty || findings.contains {
             [.needsChanges, .needsVerification].contains($0.state)
         }
     }
@@ -225,7 +226,8 @@ final class AuthorFeedbackCoordinator {
         if !followUp.isEmpty, isCurrent(input) { await onNeedsWork?(request, followUp, input.fingerprint) }
         guard isCurrent(input) else { throw CancellationError() }
         let completed = AuthorFeedbackStatus(head: request.sha ?? "", fingerprint: input.fingerprint, phase: .complete,
-            findings: findings, acceptedReviewerIDs: accepted, followUpNoteIDs: followUp, replyNoteIDs: missingReplies)
+            findings: findings, acceptedReviewerIDs: accepted, followUpNoteIDs: followUp, replyNoteIDs: missingReplies,
+            addressedNoteIDs: Set(assessment.notes.filter { $0.state == .addressed || $0.state == .informational }.map(\.noteID)))
         let updated = statuses[input.target] != completed
         statuses[input.target] = completed
         if changed || updated { onRemoteChange?() }

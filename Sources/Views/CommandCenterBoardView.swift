@@ -11,7 +11,7 @@ struct CommandCenterBoardView: View {
         return .init(own: own, reviewed: reviewed, todos: monitor.visibleTodos, attention: attention,
               handoffs: monitor.assistantHandoffs, host: monitor.glab.resolvedHost, username: monitor.glab.currentUsername,
               intents: monitor.currentMRTodoIntents, routedTodoIDs: monitor.routedMRTodoIDs,
-              ignoredTargets: monitor.settings.ignoredMergeRequests)
+              ignoredTargets: monitor.settings.ignoredMergeRequests, humanAttention: monitor.userAttention)
     }
 
     private var unattachedJobs: [AssistantAutomationRunner.Handoff] {

@@ -8,7 +8,9 @@ struct MergeRequestBoardSnapshot {
         let intents: [MRTodoIntent]
         var id: MergeRequestAttentionMonitor.Item.ID { item.id }
         var needsAttention: Bool {
-            item.needsAttention || intents.contains { $0.state == .pending || $0.state == .failed }
+            if let humanActionRequired = item.humanActionRequired { return humanActionRequired }
+            if latestJob?.execution?.state.isActive == true || item.authorFeedbackStatus?.phase == .checking { return false }
+            return item.needsAttention || intents.contains { $0.state == .pending || $0.state == .failed }
                 || Self.jobNeedsAttention(latestJob?.execution?.state)
         }
         static func jobNeedsAttention(_ state: AssistantJobExecution.State?) -> Bool {
@@ -39,7 +41,7 @@ struct MergeRequestBoardSnapshot {
          todos: [Todo], attention: [MergeRequestAttentionMonitor.Item],
          handoffs: [AssistantAutomationRunner.Handoff], host: String?, username: String?,
          intents: [MRTodoIntent] = [], routedTodoIDs: Set<Int> = [],
-         ignoredTargets: Set<MRAutomationScope.Target> = []) {
+         ignoredTargets: Set<MRAutomationScope.Target> = [], humanAttention: UserAttentionSnapshot? = nil) {
         func target(for todo: Todo) -> MRAutomationScope.Target? {
             guard let host, let username, todo.targetType == .mergeRequest,
                   let iid = todo.target.iid, iid > 0, todo.project.id > 0,
@@ -65,6 +67,7 @@ struct MergeRequestBoardSnapshot {
             var item = attention.first { sameMergeRequest($0, original) } ?? original
             if item.mergeRequest == nil { item.mergeRequest = original.mergeRequest }
             item.isAuthored = original.isAuthored || username.map { original.mergeRequest?.author.username == $0 } == true
+            item = item.presentingVerifiedAuthorFeedback()
             let latest = handoffs.filter {
                 valid && $0.key.work.host == host && $0.key.username == username
                     && $0.key.work.projectID == item.id.projectID && $0.key.work.iid == item.id.iid
@@ -73,6 +76,8 @@ struct MergeRequestBoardSnapshot {
                 valid && $0.target.host == host && $0.target.username == username
                     && $0.target.projectID == item.id.projectID && $0.target.iid == item.id.iid
             }.sorted { $0.updatedAt > $1.updatedAt }
+            let actionKey = "\(host ?? "")/\(username ?? "")/mr/\(item.id.projectID)/\(item.id.iid)"
+            item.humanActionRequired = humanAttention.map { $0.items.contains { $0.id == actionKey } }
             return Row(item: item, latestJob: latest, intents: currentIntents)
         }
         let originalListed = own + reviewed

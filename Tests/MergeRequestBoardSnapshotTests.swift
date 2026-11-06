@@ -34,6 +34,119 @@ struct MergeRequestBoardSnapshotTests {
             handoffs: [job(3, state: .failed, at: .distantPast), job(3, state: .succeeded)])
         #expect(recovered.own.map(\.item.id.iid) == [1, 3])
     }
+    private func addressedFeedbackItem() throws -> MergeRequestAttentionMonitor.Item {
+        let request = try JSONDecoder().decode(GitLabMergeRequest.self, from: Data(#"{"project_id":1,"iid":42,"title":"My MR","author":{"id":3,"username":"me","name":"Me"},"web_url":"https://gitlab.example.org/g/p/-/merge_requests/42","state":"opened","draft":false,"source_branch":"feature","target_branch":"main","labels":[],"sha":"abc"}"#.utf8))
+        let note = GitLabMergeRequestDiscussion.Note(id: 40, author: .init(id: 8, username: "reviewer", name: nil),
+            system: false, resolvable: true, resolved: false, resolvedBy: nil, body: "Please handle the fallback.")
+        var result = MergeRequestAttentionMonitor.Item(id: .init(projectID: 1, iid: 42), title: request.title,
+            url: request.webURL, needsDiscussion: true, mergeRequest: request, isAuthored: true, feedback: [note])
+        result.observedDiscussionFingerprint = "current-conversation"
+        result.authorFeedbackStatus = .init(head: "abc", fingerprint: "current-conversation", phase: .complete,
+            findings: [.init(id: 40, discussionID: "thread", reviewerID: 8, reviewerUsername: "reviewer",
+                state: .waitingAcceptance, reason: "The correction is verified; awaiting the reviewer.", waitingForReviewers: ["reviewer"])],
+            addressedNoteIDs: [40])
+        return result
+    }
+
+    @Test func verifiedFeedbackAwaitingOnlyTheReviewerIsQuietOnCatalogFallback() throws {
+        let original = try addressedFeedbackItem()
+        let row = try #require(snapshot(own: [original]).own.first)
+        #expect(!row.needsAttention)
+        #expect(!row.item.needsDiscussion && row.item.feedback.isEmpty)
+        #expect(row.item.authorFeedbackStatus?.waitingForReviewer == true)
+        #expect(original.needsDiscussion && !original.feedback.isEmpty)
+    }
+
+    @Test(arguments: [AssistantJobExecution.State.queued, .running])
+    func activeAutomationDoesNotAskForHumanAttention(_ state: AssistantJobExecution.State) throws {
+        let row = try #require(snapshot(own: [item(42, attention: true)], handoffs: [job(42, state: state)]).own.first)
+        #expect(!row.needsAttention)
+        #expect(row.latestJob?.execution?.state == state)
+    }
+
+    @Test func readOnlyVerificationIsProcessingRatherThanHumanAttention() throws {
+        var original = try addressedFeedbackItem()
+        original.authorFeedbackStatus?.phase = .checking
+        let row = try #require(snapshot(own: [original]).own.first)
+        #expect(!row.needsAttention)
+        #expect(row.item.authorFeedbackStatus?.phase == .checking)
+    }
+
+    @Test func boardUsesTheSameHumanActionsAsTheMenuIndicator() throws {
+        let projection = UserAttentionSnapshot(candidates: [
+            .init(id: "\(host)/me/mr/1/42", title: "Automatic reply", actions: [.init(reason: .drafts, token: "auto", automatic: true)]),
+            .init(id: "\(host)/me/mr/1/43", title: "Needs publication", actions: [.init(reason: .drafts, token: "human")])])
+        let board = MergeRequestBoardSnapshot(own: [item(42, attention: true), item(43)], reviewed: [],
+            todos: [], attention: [], handoffs: [], host: host, username: "me", humanAttention: projection)
+        #expect(board.own.map(\.id.iid) == [43, 42])
+        #expect(board.own.first?.needsAttention == true)
+        #expect(board.own.last?.needsAttention == false)
+        #expect(board.own.last?.item.needsAttention == false)
+        #expect(board.own.last?.item.needsDiscussion == true)
+    }
+
+    @Test func awaitingReviewerPreservesIndependentActions() throws {
+        var original = try addressedFeedbackItem()
+        original.draftCount = 2
+        original.hasConflict = true
+        original.failedPipeline = true
+        original.needsChanges = true
+        original.hasOtherUnresolvedDiscussions = true
+        let row = try #require(snapshot(own: [original]).own.first)
+        #expect(row.needsAttention)
+        #expect(row.item.draftCount == 2 && row.item.hasConflict && row.item.failedPipeline && row.item.needsChanges)
+        #expect(row.item.needsDiscussion)
+        #expect(row.item.feedback.isEmpty)
+    }
+
+    @Test func failedVerificationCannotHideUnresolvedFeedback() throws {
+        var original = try addressedFeedbackItem()
+        original.authorFeedbackStatus?.phase = .failed
+        let row = try #require(snapshot(own: [original]).own.first)
+        #expect(row.needsAttention && row.item.needsDiscussion && !row.item.feedback.isEmpty)
+    }
+
+    @Test(arguments: ["new-conversation", "missing-snapshot"])
+    func changedOrUnavailableDiscussionEvidenceCannotHideFeedback(_ snapshot: String) throws {
+        var original = try addressedFeedbackItem()
+        original.observedDiscussionFingerprint = snapshot == "missing-snapshot" ? nil : snapshot
+        let row = try #require(self.snapshot(own: [original]).own.first)
+        #expect(row.needsAttention && row.item.needsDiscussion && !row.item.feedback.isEmpty)
+        #expect(row.item.authorFeedbackStatus == nil)
+    }
+
+    @Test(arguments: [AuthorFeedbackStatus.Phase.checking, .failed, .waitingPublication], ["new-conversation", "missing-snapshot"])
+    func informativeFeedbackStatesRemainVisibleWithoutCompletedTextProof(_ phase: AuthorFeedbackStatus.Phase, _ text: String) throws {
+        var original = try addressedFeedbackItem()
+        original.authorFeedbackStatus?.phase = phase
+        original.observedDiscussionFingerprint = text == "missing-snapshot" ? nil : text
+        let row = try #require(snapshot(own: [original]).own.first)
+        #expect(row.item.authorFeedbackStatus?.phase == phase)
+        #expect(row.item.needsDiscussion && row.item.feedback.map(\.id) == [40])
+    }
+
+    @Test func verdictForAnOlderSourceCannotHideFeedback() throws {
+        var original = try addressedFeedbackItem()
+        original.authorFeedbackStatus = .init(head: "previous-head", fingerprint: "current-conversation", phase: .complete,
+            findings: original.authorFeedbackStatus!.findings, addressedNoteIDs: [40])
+        let row = try #require(snapshot(own: [original]).own.first)
+        #expect(row.needsAttention && row.item.needsDiscussion && !row.item.feedback.isEmpty)
+        #expect(row.item.authorFeedbackStatus == nil)
+    }
+
+    @Test func waitingForReviewerDoesNotHideAnUnaddressedNoteOrMissingReply() throws {
+        var original = try addressedFeedbackItem()
+        let unassessed = GitLabMergeRequestDiscussion.Note(id: 41, author: .init(id: 8, username: "reviewer", name: nil),
+            system: false, resolvable: true, resolved: false, resolvedBy: nil, body: "Also cover the timeout.")
+        original.feedback.append(unassessed)
+        var row = try #require(snapshot(own: [original]).own.first)
+        #expect(row.needsAttention && row.item.feedback.map(\.id) == [41])
+        original.feedback.removeLast()
+        original.authorFeedbackStatus?.replyNoteIDs = [40]
+        row = try #require(snapshot(own: [original]).own.first)
+        #expect(row.needsAttention && row.item.feedback.map(\.id) == [40])
+    }
+
     @Test func reviewedDraftMRsStayLastEvenWhenTheyNeedAttention() {
         var draft = item(1, attention: true)
         draft.draftFromTodo = true

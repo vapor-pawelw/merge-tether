@@ -13,7 +13,7 @@ struct CommandCenterMRCard: View {
     private var item: MergeRequestAttentionMonitor.Item { row.item }
     private var busy: Bool {
         let state = monitor.attention.confirmationStates[item.id]
-        return state == .publishing || state == .approving
+        return state == .publishing || state == .approving || item.authorFeedbackStatus?.phase == .checking
     }
     private var nextIntent: MRTodoIntent? {
         row.intents.first { $0.state == .failed } ?? row.intents.first { $0.state == .pending }
@@ -93,7 +93,9 @@ struct CommandCenterMRCard: View {
             primary(.Board.boardCompactReviewDrafts, action: onDetails)
         } else if item.canApprove {
             primary(.Board.boardCompactReviewApproval, action: onDetails)
-        } else if item.authorFeedbackStatus?.needsAttention == true || item.authorFeedbackStatus?.waitingForReviewer == true {
+        } else if item.authorFeedbackStatus?.phase == .failed {
+            primary(.AuthorFeedback.authorFeedbackRetry) { monitor.attention.retryAuthorFeedback(item.id) }
+        } else if item.authorFeedbackStatus?.needsAttention == true {
             primary(.Board.boardCompactReviewChecks, action: onDetails)
         } else if let intent = nextIntent {
             if intent.kind != .refresh && needsCLI {
@@ -167,10 +169,21 @@ struct CommandCenterMRCard: View {
     private var chips: [Chip] {
         var result: [Chip] = []
         if let feedback = item.authorFeedbackStatus {
-            if feedback.needsAttention {
-                result.append(.init(title: .AuthorFeedback.authorFeedbackNeedsWorkChip, symbol: "text.bubble", tint: .orange))
-            } else if feedback.waitingForReviewer {
-                result.append(.init(title: .AuthorFeedback.authorFeedbackWaitingChip, symbol: "clock", tint: .secondary))
+            switch feedback.phase {
+            case .failed:
+                result.append(.init(title: .AuthorFeedback.authorFeedbackVerificationFailedChip, symbol: "exclamationmark.shield", tint: .orange))
+            case .checking:
+                result.append(.init(title: .AuthorFeedback.authorFeedbackVerifyingChip, symbol: "arrow.triangle.2.circlepath", tint: .blue))
+            case .waitingPublication:
+                if item.drafts.isEmpty && !item.awaitingRemoteVerification && !item.requiresDiscussionRecheck {
+                    result.append(.init(title: .AuthorFeedback.authorFeedbackPendingRepliesChip, symbol: "text.bubble", tint: .blue))
+                }
+            case .complete:
+                if feedback.needsAttention {
+                    result.append(.init(title: .AuthorFeedback.authorFeedbackNeedsWorkChip, symbol: "text.bubble", tint: .orange))
+                } else if feedback.waitingForReviewer {
+                    result.append(.init(title: .AuthorFeedback.authorFeedbackWaitingChip, symbol: "clock", tint: .secondary))
+                }
             }
         }
         if let intent = nextIntent, intent.kind != .refresh, needsCLI {
@@ -197,7 +210,8 @@ struct CommandCenterMRCard: View {
         if let pipeline = item.mergeRequest?.headPipeline, ["running", "pending", "created", "preparing", "waiting_for_resource"].contains(pipeline.status) {
             result.append(.init(title: .Board.boardCompactPipelineRunning, symbol: "clock", tint: .blue))
         }
-        if item.authorFeedbackStatus?.findings.isEmpty != false && (item.needsDiscussion || !item.feedback.isEmpty) {
+        let showResidualDiscussion = item.authorFeedbackStatus.map { $0.phase == .complete && !$0.needsAttention } ?? true
+        if showResidualDiscussion && (item.needsDiscussion || !item.feedback.isEmpty) {
             result.append(.init(title: .Board.boardCompactFeedback, symbol: "text.bubble", tint: .orange))
         }
         if item.needsChanges { result.append(.init(title: .Board.boardCompactChanges, symbol: "pencil", tint: .orange)) }

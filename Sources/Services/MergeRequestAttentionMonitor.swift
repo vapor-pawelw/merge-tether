@@ -28,6 +28,10 @@ final class MergeRequestAttentionMonitor {
         /// Drafts remain accessible, but cannot be advertised as ready without current evidence.
         var requiresDiscussionRecheck = false
         var authorFeedbackStatus: AuthorFeedbackStatus?
+        /// Text actually read for this row; semantic results must match both this and its source head.
+        var observedDiscussionFingerprint: String?
+        /// Presentation only; the shared human-action projection leaves raw safety evidence intact.
+        var humanActionRequired: Bool?
         /// The assistant has no objections to the current head and the user has nothing open,
         /// but automatic approval does not apply, so the user approves in Ready for your OK.
         var canApprove = false
@@ -51,6 +55,35 @@ final class MergeRequestAttentionMonitor {
         var feedback: [GitLabMergeRequestDiscussion.Note] = []
 
         var authoredRequest: GitLabMergeRequest? { isAuthored ? mergeRequest : nil }
+
+        func presentingVerifiedAuthorFeedback() -> Self {
+            var visible = self
+            guard isAuthored, let status = authorFeedbackStatus,
+                  status.head == mergeRequest?.sha else {
+                visible.authorFeedbackStatus = nil
+                return visible
+            }
+            guard status.phase == .complete else { return visible }
+            guard status.fingerprint == observedDiscussionFingerprint else {
+                visible.authorFeedbackStatus = nil
+                return visible
+            }
+            let addressed = status.addressedNoteIDs.subtracting(status.replyNoteIDs)
+            visible.feedback.removeAll { $0.id.map(addressed.contains) == true }
+            if visible.feedback.count != feedback.count && visible.feedback.isEmpty {
+                visible.needsDiscussion = hasOtherUnresolvedDiscussions
+            }
+            return visible
+        }
+
+        /// A partial read cannot bind existing raw feedback to a newly observed conversation.
+        mutating func invalidateChangedDiscussionSnapshot(head: String?, fingerprint: String?) {
+            guard let head, head == mergeRequest?.sha,
+                  let fingerprint, fingerprint == observedDiscussionFingerprint else {
+                observedDiscussionFingerprint = nil
+                return
+            }
+        }
 
         func canOfferMerge(using status: AuthoredMergeRequestStatus) -> Bool {
             status.blockers.isEmpty && status.request.isReadyForMergeChecks
@@ -103,7 +136,7 @@ final class MergeRequestAttentionMonitor {
                 || authorFeedbackStatus?.needsAttention == true
         }
 
-        var needsAttention: Bool { needsConfirmation || hasOpenAction }
+        var needsAttention: Bool { humanActionRequired ?? (needsConfirmation || hasOpenAction) }
 
         /// Something the user must confirm before it reaches other people.
         var needsConfirmation: Bool { draftCount > 0 || canApprove || canConfirmReReview }
@@ -257,8 +290,8 @@ final class MergeRequestAttentionMonitor {
     private func presentAuthorFeedback(_ original: Item) -> Item {
         var item = original
         let status = authorFeedbackCoordinator?.status(projectID: item.id.projectID, iid: item.id.iid)
-        if status?.head == item.mergeRequest?.sha { item.authorFeedbackStatus = status }
-        return item
+        item.authorFeedbackStatus = status
+        return item.presentingVerifiedAuthorFeedback()
     }
 
     func retryAuthorFeedback(_ id: Item.ID) {
@@ -497,6 +530,7 @@ final class MergeRequestAttentionMonitor {
                                 projectID: item.id.projectID, iid: item.id.iid, host: host
                             )
                         } else { nil as [GitLabMergeRequestDiscussion]? }
+                        updated.observedDiscussionFingerprint = discussions.flatMap { ReviewVerdict.fingerprint($0) }
                         if hasDrafts {
                             let live = try? await glab.fetchMergeRequest(projectID: item.id.projectID, iid: item.id.iid, host: host)
                             updated.requiresDiscussionRecheck = !Self.draftContextIsCurrent(
@@ -1055,6 +1089,8 @@ final class MergeRequestAttentionMonitor {
             } ?? false
             updateItem(item.id) {
                 $0.drafts = current; $0.draftCount = current.count
+                $0.invalidateChangedDiscussionSnapshot(head: request?.sha,
+                    fingerprint: discussions.flatMap { ReviewVerdict.fingerprint($0) })
                 $0.requiresDiscussionRecheck = !current.isEmpty && !contextCurrent
                 if !approvalCurrent { $0.canApprove = false }
                 if request == nil || discussions == nil || request?.sha != item.mergeRequest?.sha
@@ -1077,6 +1113,9 @@ final class MergeRequestAttentionMonitor {
               let drafts = try? await glab.fetchOwnDraftNotes(projectID: id.projectID, iid: id.iid, host: account.host, userID: user.id),
               let discussions = try? await glab.fetchMergeRequestDiscussions(projectID: id.projectID, iid: id.iid, host: account.host),
               isCurrent(account) else { return }
+        updateItem(id) {
+            $0.invalidateChangedDiscussionSnapshot(head: request.sha, fingerprint: ReviewVerdict.fingerprint(discussions))
+        }
         await requestReReviewsIfReady(for: request, feedback: ReReviewFeedback(discussions: discussions, authorID: user.id),
                                       draftCount: drafts.count, account: account, user: user)
     }

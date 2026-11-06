@@ -823,6 +823,30 @@ import Testing
         #expect(harness.log("re-review.log") == "requested\n")
     }
 
+    @Test(arguments: [false, true])
+    func partialDiscussionReadsDoNotRebindAnOlderFeedbackSnapshot(afterPublication: Bool) async throws {
+        let harness = try makeHarness(assistantWorked: false, authored: true)
+        defer { harness.cleanUp() }
+        try harness.write("drafts.json", draftJSON)
+        let original = #"[{"id":"abc","notes":[{"id":40,"author":{"id":8},"body":"Original feedback","system":false,"resolvable":true,"resolved":false}]}]"#
+        try harness.write("discussions.json", original)
+        try await harness.poll()
+        let before = try #require(harness.monitor.currentOpenItems.first)
+        try #require(before.observedDiscussionFingerprint != nil)
+        #expect(before.feedback.first?.body == "Original feedback")
+        let edited = original.replacingOccurrences(of: "Original feedback", with: "New expectation after the snapshot")
+        if afterPublication {
+            try harness.write("published-discussions.json", edited)
+            await harness.monitor.publishDrafts(of: before.id)
+        } else {
+            try harness.write("discussions.json", edited)
+            await harness.monitor.refreshPendingDrafts()
+        }
+        let current = try #require(harness.monitor.currentOpenItems.first)
+        #expect(current.feedback.first?.body == "Original feedback")
+        #expect(current.observedDiscussionFingerprint == nil)
+    }
+
     @Test func publishButtonImmediatelyRequestsEligibleReReview() async throws {
         let harness = try makeHarness(assistantWorked: true, authored: true)
         defer { harness.cleanUp() }
