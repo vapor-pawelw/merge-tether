@@ -16,7 +16,7 @@ struct AutomationScopeSettingsView: View {
                 TabView {
                     MergeWorkflowActivityView(entries: monitor.authoredMergeRequests.workflow.entries)
                         .tabItem { Text(.Menu.menuWorkflowActivityTabShort) }
-                    AssistantDeliveryHistoryView(monitor: monitor)
+                    AssistantJobHistoryView(monitor: monitor)
                         .tabItem { Text(.Menu.menuMrHistory) }
                 }
             } else {
@@ -41,38 +41,5 @@ struct AutomationScopeSettingsView: View {
             Task { await monitor.refreshNow() }
         }
         .onDisappear { monitor.authoredMergeRequests.setVisible(false) }
-    }
-}
-
-private struct AssistantDeliveryHistoryView: View {
-    let monitor: TodoMonitorService
-    var body: some View {
-        ScrollView {
-            LazyVStack(alignment: .leading, spacing: 12) {
-                ForEach(monitor.assistantGroups) { group in
-                    VStack(alignment: .leading, spacing: 6) {
-                        Text(verbatim: group.title).font(.subheadline.weight(.semibold))
-                        if let url = group.chatURL, let handoff = group.chatHandoff {
-                            Link(destination: url) {
-                                Text(handoff.key.assistant == .codex ? .Menu.menuMrChatCodex : .Menu.menuMrChatClaude)
-                            }
-                        }
-                        DisclosureGroup {
-                            ForEach(group.handoffs) { handoff in
-                                VStack(alignment: .leading, spacing: 2) {
-                                    Text(verbatim: handoff.title)
-                                    Text(handoff.relayComplete == true ? .Menu.menuMrDelivered : .Menu.menuMrPendingEvents(1))
-                                        .foregroundStyle(.secondary)
-                                    Text(RelativeTime.string(from: handoff.createdAt)).foregroundStyle(.secondary)
-                                }.padding(.vertical, 4)
-                            }
-                        } label: { Text(.Menu.menuMrHistory) }
-                    }
-                    .font(.caption).padding(12)
-                    .frame(maxWidth: .infinity, alignment: .leading)
-                    .background(.secondary.opacity(0.07), in: RoundedRectangle(cornerRadius: 8))
-                }
-            }.padding()
-        }
     }
 }

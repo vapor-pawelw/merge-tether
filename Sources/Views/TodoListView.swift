@@ -4,19 +4,23 @@ import SwiftUI
 struct TodoListView: View {
     @Bindable var monitor: TodoMonitorService
     let updates: UpdateService
+    let inboxOnly: Bool
     @State private var section: Section
     @State private var setupOpenFailed = false
+    @State private var dependencySetup: AutomationAssistant?
     @Environment(\.openWindow) private var openWindow
     @Environment(\.openSettings) private var openSettings
 
-    init(monitor: TodoMonitorService, updates: UpdateService) {
+    init(monitor: TodoMonitorService, updates: UpdateService, inboxOnly: Bool = false) {
         self.monitor = monitor
         self.updates = updates
-        _section = State(initialValue: Section.restored(from: monitor.settings.lastMenuSection))
+        self.inboxOnly = inboxOnly
+        _section = State(initialValue: inboxOnly ? .inbox : Section.restored(from: monitor.settings.lastMenuSection))
     }
 
     var body: some View {
         VStack(spacing: 0) {
+            if !inboxOnly {
             header
 
             Picker(selection: $section) {
@@ -33,6 +37,10 @@ struct TodoListView: View {
 
             Divider()
 
+            }
+
+            assistantWarnings
+
             switch section {
             case .inbox:
                 inboxWarnings
@@ -42,20 +50,21 @@ struct TodoListView: View {
                 MergeRequestsView(monitor: monitor)
             }
 
-            Divider()
-
-            footer
+            if !inboxOnly {
+                Divider()
+                footer
+            }
         }
-        .frame(width: 420, height: 560)
+        .frame(maxWidth: .infinity, maxHeight: .infinity)
         .task {
-            await performFirstLaunchIfNeeded()
+            if !inboxOnly { await performFirstLaunchIfNeeded() }
         }
         .onAppear { showSection() }
         .task(id: section) {
             guard section == .inbox else { return }
             while !Task.isCancelled {
-                do { try await Task.sleep(for: .seconds(5)) } catch { return }
                 await monitor.attention.refreshPendingDrafts()
+                do { try await Task.sleep(for: .seconds(5)) } catch { return }
             }
         }
         .onChange(of: section) {
@@ -63,7 +72,12 @@ struct TodoListView: View {
             monitor.settings.save()
             showSection()
         }
-        .onDisappear { monitor.authoredMergeRequests.setVisible(false) }
+        .onDisappear { if !inboxOnly { monitor.authoredMergeRequests.setVisible(false) } }
+        .sheet(item: $dependencySetup) { assistant in
+            AssistantSetupView(assistant: assistant, requireCLI: true) {
+                monitor.assistantDependencies.refresh(requireCLI: monitor.requiresAssistantCLI, force: true)
+            }
+        }
     }
 
     private typealias Section = MainMenuSection
@@ -82,7 +96,7 @@ struct TodoListView: View {
     }
 
     private func showSection() {
-        monitor.authoredMergeRequests.setVisible(section == .mergeRequests)
+        if !inboxOnly { monitor.authoredMergeRequests.setVisible(section == .mergeRequests) }
         if section == .inbox { monitor.markMenuOpened() }
         // Opening the menu or switching tabs shouldn't start a full glab sweep every time.
         guard monitor.lastRefresh.map({ Date().timeIntervalSince($0) > 30 }) ?? true else { return }
@@ -177,6 +191,11 @@ struct TodoListView: View {
                     dismissMenuBarExtra()
                 }
             )
+            if todo.targetType == .mergeRequest {
+                AssistantContextMenu(mergeRequestURL: todo.targetURL, title: todo.displayTitle,
+                                     workspace: monitor.settings.automation.assistantWorkspace)
+                    .padding(.horizontal, 12)
+            }
             if let id = inbox.todoApprovals[todo.id] {
                 todoApproval(id)
             }
@@ -215,28 +234,13 @@ struct TodoListView: View {
         } else if let id = monitor.failedAutomationTodoID {
             Text(.Menu.menuErrorAutomation(id)).font(.caption).padding(10).background(.red.opacity(0.12))
         }
+    }
+
+    @ViewBuilder
+    private var assistantWarnings: some View {
         if let assistant = monitor.unavailableAssistant {
-            assistantWarning(.Menu.menuAssistantUnavailable(String(localized: assistant.displayName)),
-                             button: .Menu.menuActionSettings, action: showSettings)
-        } else if let warning = monitor.codexListenerWarning {
-            if monitor.codexPluginInstallation == .missing {
-                assistantWarning(warning, button: .Menu.menuActionSettings, action: showSettings)
-            } else if monitor.codexPluginInstallation != .disabled,
-                      monitor.codexListenerHealth == .desktopClosed || monitor.codexListenerHealth == .dispatchBlocked {
-                assistantWarning(warning, button: .Menu.menuAssistantOpenCodex) {
-                    Task { await monitor.openCodexForListener() }
-                }
-            } else {
-                assistantWarning(warning, button: monitor.codexPluginInstallation == .disabled
-                                 ? .Menu.menuAssistantPluginEnable : .Menu.menuAssistantPluginSetup) {
-                    Task { await openCodexPlugin() }
-                }
-            }
-        } else if monitor.desktopHandoffError {
-            assistantWarning(.Menu.menuAssistantOpenError, button: .Menu.menuActionSettings, action: showSettings)
-        }
-        if setupOpenFailed {
-            Text(.Menu.menuAssistantSetupOpenFailed).font(.caption).foregroundStyle(.orange).padding(.horizontal, 14)
+            assistantWarning(monitor.assistantDependencyWarning ?? .Menu.menuAssistantUnavailable(String(localized: assistant.displayName)),
+                             button: .Settings.settingsAssistantSetupAction) { dependencySetup = assistant }
         }
     }
 
@@ -260,8 +264,8 @@ struct TodoListView: View {
                     let open = items.filter { $0.section != .draftMergeRequests }
                     let drafts = items.filter { $0.section == .draftMergeRequests }
                     // What the assistant prepared and only you can send comes first.
-                    let ready = open.filter(\.needsConfirmation)
-                    let other = open.filter { !$0.needsConfirmation }
+                    let ready = open.filter { $0.needsConfirmation && !$0.requiresDiscussionRecheck }
+                    let other = open.filter { !$0.needsConfirmation || $0.requiresDiscussionRecheck }
                     if !ready.isEmpty {
                         groupHeader(.Menu.menuConfirmSection, symbol: "checkmark.seal", tint: .green)
                         attentionCards(ready)
@@ -318,6 +322,9 @@ struct TodoListView: View {
 
     private func attentionActions(_ item: MergeRequestAttentionMonitor.Item) -> some View {
         VStack(alignment: .leading, spacing: 5) {
+            AssistantContextMenu(mergeRequestURL: item.url, title: item.title,
+                                 workspace: monitor.settings.automation.assistantWorkspace)
+            ReReviewControls(item: item, monitor: monitor.attention)
             InboxAttentionActions(item: item, feedbackAction: monitor.attentionFeedbackAction(for: item),
                                   onFeedback: { Task { await monitor.runAttentionFeedback(for: item) } },
                                   onPipeline: { monitor.confirmPipelineHandoff(for: item.id) },
@@ -364,104 +371,7 @@ struct TodoListView: View {
     }
 
     private func assistantHandoffRow(_ handoff: AssistantAutomationRunner.Handoff) -> some View {
-        let usesRelay = AssistantAutomationRunner.usesRelay(handoff, settings: monitor.settings)
-        let claimed = CodexDesktopRelay.hasClaim(handoff.id)
-        let canRequest = CodexDesktopRelay.canRequestDispatch(handoff, settings: monitor.settings) && !claimed
-        return VStack(alignment: .leading, spacing: 5) {
-            Text(handoff.title).font(.subheadline.weight(.semibold)).lineLimit(2)
-            if handoff.relayComplete == true {
-                Text(.Menu.menuAssistantChatCreated)
-            } else if claimed {
-                Text(.Menu.menuAssistantListenerClaimed)
-            } else if canRequest && handoff.openedAt != nil {
-                Text(.Menu.menuAssistantDraftAlreadyOpened)
-            } else if usesRelay && handoff.openedAt == nil {
-                Text(.Menu.menuAssistantListenerPending)
-            } else if canRequest {
-                Text(.Menu.menuAssistantDispatchAvailable)
-            } else if handoff.chatID != nil {
-                Text(.Menu.menuAssistantPastePrompt)
-            } else {
-                Text(.Menu.menuAssistantSendPrompt)
-            }
-            HStack {
-                if canRequest {
-                    Button {
-                        monitor.requestCodexDispatch(handoff.id)
-                    } label: {
-                        Text(.Menu.menuAssistantSendViaPlugin)
-                    }
-                    .buttonStyle(.borderedProminent)
-                    if !usesRelay {
-                        Menu {
-                            manualHandoffActions(handoff)
-                        } label: {
-                            Text(.Menu.menuAssistantManualOptions)
-                        }
-                    }
-                } else if handoff.relayComplete == true || (!usesRelay && !claimed) {
-                    manualHandoffActions(handoff)
-                } else if !claimed {
-                    Button {
-                        Task { await monitor.openCodexForListener() }
-                    } label: {
-                        Text(.Menu.menuAssistantLaunchCodex)
-                    }
-                    .disabled(!monitor.availableAssistants.contains(.codex))
-                }
-
-                Spacer(minLength: 0)
-                Button {
-                    monitor.dismissAssistantHandoff(handoff.id)
-                } label: {
-                    Text(.Menu.menuAssistantClear)
-                }
-                .help(Text(.Menu.menuAssistantClearHelp))
-            }
-            .buttonStyle(.bordered)
-            .controlSize(.small)
-        }
-        .mrRowContentPadding()
-        .frame(maxWidth: .infinity, alignment: .leading)
-        .background(Color.primary.opacity(0.045), in: RoundedRectangle(cornerRadius: 7))
-    }
-
-    @ViewBuilder
-    private func manualHandoffActions(_ handoff: AssistantAutomationRunner.Handoff) -> some View {
-        Button {
-            Task { await monitor.openAssistantHandoff(handoff.id) }
-        } label: {
-            if handoff.key.assistant == .codex {
-                Text(handoff.chatID == nil ? .Menu.menuAssistantOpenCodexDraft : .Menu.menuAssistantOpenCodexChat)
-            } else {
-                Text(handoff.chatID == nil ? .Menu.menuAssistantOpenClaude : .Menu.menuAssistantContinueClaude)
-            }
-        }
-        .disabled(!monitor.availableAssistants.contains(handoff.key.assistant))
-        Button {
-            AssistantAutomationRunner.copyPrompt(handoff.prompt)
-        } label: {
-            Text(.Menu.menuAssistantCopyPrompt)
-        }
-    }
-
-    private func openCodexPlugin() async {
-        setupOpenFailed = false
-        do {
-            guard let url = try await CodexPluginInstaller.setupURL() else {
-                showSettings()
-                return
-            }
-            guard let app = AssistantAutomationRunner.desktopApplication(.codex) else {
-                setupOpenFailed = true
-                return
-            }
-            let configuration = NSWorkspace.OpenConfiguration()
-            configuration.activates = true
-            _ = try await NSWorkspace.shared.open([url], withApplicationAt: app, configuration: configuration)
-        } catch {
-            setupOpenFailed = true
-        }
+        AssistantJobRow(handoff: handoff, monitor: monitor)
     }
 
     private func showSettings() {

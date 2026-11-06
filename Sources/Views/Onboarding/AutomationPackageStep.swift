@@ -4,7 +4,6 @@ struct AutomationPackageStep: View {
     let monitor: TodoMonitorService
     @Binding var assistant: AutomationAssistant
     @Binding var selection: AutomationPackageChoice?
-    @Binding var enableCodexRelay: Bool
 
     var body: some View {
         ScrollView {
@@ -24,18 +23,13 @@ struct AutomationPackageStep: View {
                     .foregroundStyle(.secondary)
                 AutomationAssistantPicker(
                     assistant: $assistant, available: monitor.availableAssistants,
-                    onRefresh: monitor.refreshAvailableAssistants
+                    onRefresh: monitor.refreshAvailableAssistants, requireCLI: true,
+                    statuses: monitor.assistantDependencies.statuses
                 )
                 AutomationPackagePicker(
                     selection: $selection, canUseRecommended: monitor.availableAssistants.contains(assistant)
                 )
-                if selection == .recommended, assistant == .codex, monitor.availableAssistants.contains(.codex) {
-                    CodexPluginControls()
-                    Toggle(isOn: $enableCodexRelay) {
-                        Text(.Settings.settingsAutomationCodexRelay)
-                    }
-                    .toggleStyle(.checkbox)
-                }
+
             } else {
                 Text(.Onboarding.onboardingAutomationAlreadyConfigured)
                     .foregroundStyle(.secondary)

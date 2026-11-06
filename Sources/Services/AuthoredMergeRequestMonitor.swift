@@ -13,6 +13,7 @@ final class AuthoredMergeRequestMonitor {
     private let settings: SettingsManager
     private let glab: GlabService
     private let notifications: NotificationService
+    private let canAutomate: @MainActor (AutomationAssistant) async -> Bool
     private var isVisible = false
     private var wasWatchingWorkflow = false
     private var lastAccount: Account?
@@ -32,10 +33,14 @@ final class AuthoredMergeRequestMonitor {
         let username: String
     }
 
-    init(settings: SettingsManager, glab: GlabService, notifications: NotificationService) {
+    init(settings: SettingsManager, glab: GlabService, notifications: NotificationService,
+         canAutomate: @escaping @MainActor (AutomationAssistant) async -> Bool = {
+             await AssistantCLI.detect($0, requireCLI: true).isReady
+         }) {
         self.settings = settings
         self.glab = glab
         self.notifications = notifications
+        self.canAutomate = canAutomate
         workflow = MergeWorkflowAutomation(settings: settings, glab: glab, notifications: notifications)
     }
 
@@ -117,15 +122,22 @@ final class AuthoredMergeRequestMonitor {
                isCurrent(account), settings.automation.permitsAutoMerge(project: project),
                settings.automation.scope.permits(request, host: host, username: account.username),
                !AssistantAutomationRunner.isWorking(on: work),
-               !settings.assistantHandoffs.contains(where: { $0.key.work == work && $0.key.username == user.username }) {
+               !hasUnfinishedAssistantWork(on: work, username: user.username) {
+                let configuration = settings.automation
+                guard await canAutomate(configuration.assistant), !Task.isCancelled,
+                      isCurrent(account), settings.automation == configuration else {
+                    results.append(status)
+                    continue
+                }
                 do {
                     try await glab.mergeMergeRequest(
                         projectID: request.projectID, iid: request.iid, headSHA: sha, host: host, expectedUser: user,
                         shouldProceed: {
-                            self.isCurrent(account) && self.settings.automation.permitsAutoMerge(project: project)
+                            self.isCurrent(account) && self.settings.automation == configuration
+                                && self.settings.automation.permitsAutoMerge(project: project)
                                 && self.settings.automation.scope.permits(request, host: host, username: account.username)
                                 && !AssistantAutomationRunner.isWorking(on: work)
-                                && !self.settings.assistantHandoffs.contains { $0.key.work == work && $0.key.username == user.username }
+                                && !self.hasUnfinishedAssistantWork(on: work, username: user.username)
                         }
                     )
                     continue
@@ -151,6 +163,10 @@ final class AuthoredMergeRequestMonitor {
             workflow.observe(results.map(\.request), host: host, user: user)
         }
         wasWatchingWorkflow = isWatchingWorkflow
+    }
+
+    private func hasUnfinishedAssistantWork(on work: AssistantAutomationRunner.MergeRequestWork, username: String) -> Bool {
+        AssistantJobExecution.hasUnfinishedWork(in: settings.assistantHandoffs, for: work, username: username)
     }
 
     private func evaluate(
@@ -224,7 +240,9 @@ final class AuthoredMergeRequestMonitor {
             guard !settings.conflictReceipts.contains(receipt) else { return }
             let automation = settings.automation
             let work = AssistantAutomationRunner.MergeRequestWork(host: host, projectID: request.projectID, iid: request.iid)
-            guard !AssistantAutomationRunner.isWorking(on: work) else { return }
+            guard await canAutomate(automation.assistant), !Task.isCancelled,
+                  isCurrent(account), settings.automation == automation,
+                  !AssistantAutomationRunner.isWorking(on: work) else { return }
             // Persist before the agent runs. A failed or interrupted turn may already have pushed.
             settings.conflictReceipts = settings.conflictReceipts.filter {
                 !$0.matches(request, host: host, userID: user.id)
@@ -239,7 +257,8 @@ final class AuthoredMergeRequestMonitor {
                     let allowPush = automation.permitsConflictPush(project: request.webURL.gitLabProjectPath)
                     let evidence = await glab.mergeWorkflowEvidence(projectID: request.projectID, iid: request.iid, host: host)
                     let stackPosition = await glab.stackPosition(for: work)
-                    guard self.isCurrent(account), settings.automation == automation else { return }
+                    guard await canAutomate(automation.assistant), !Task.isCancelled,
+                          self.isCurrent(account), settings.automation == automation else { throw CancellationError() }
                     try await AssistantAutomationRunner.launch(
                         automation.assistant, title: conflictTitle(request),
                         stackPosition: stackPosition,

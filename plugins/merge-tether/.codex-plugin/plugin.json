@@ -1,6 +1,6 @@
 {
   "name": "merge-tether",
-  "version": "0.1.19",
+  "version": "0.1.20",
   "description": "Deliver MergeTether GitLab work to native Codex chats.",
   "requires_local_executor": true,
   "skills": "./skills/",

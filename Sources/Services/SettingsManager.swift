@@ -5,6 +5,8 @@ import Observation
 @Observable
 final class SettingsManager {
     private let defaults: UserDefaults
+    @ObservationIgnored private var lastSavedAutomation: AutomationSettings?
+    @ObservationIgnored var onAutomationChanged: ((AutomationSettings) -> Void)?
 
     var refreshInterval: RefreshInterval
     var unreadReminderInterval: UnreadReminderInterval
@@ -19,6 +21,7 @@ final class SettingsManager {
     var lastMenuSection: String?
     /// Managed MRs where the user turned off automatic approval.
     var autoApproveOptOuts: Set<MRAutomationScope.Target>
+    var ignoredMergeRequests: Set<MRAutomationScope.Target>
     var automation: AutomationSettings
     var automationReceipts: Set<TodoAutomationReceipt>
     var automationAttemptReceipts: Set<TodoAutomationReceipt>
@@ -29,6 +32,8 @@ final class SettingsManager {
     var assistantHandoffs: [AssistantAutomationRunner.Handoff]
     var assistantChats: [AssistantAutomationRunner.ChatKey: String]
     var workflowActivity: [MergeWorkflowActivityEntry]
+    var mrActionIntents: [MRTodoIntent]
+    var routedMRTodoReceipts: Set<MRTodoRouteReceipt>
 
     init(defaults: UserDefaults = .standard) {
         self.defaults = defaults
@@ -50,6 +55,10 @@ final class SettingsManager {
             .flatMap { try? JSONDecoder().decode([AssistantAutomationRunner.ChatKey: String].self, from: $0) } ?? [:]
         workflowActivity = defaults.data(forKey: Key.workflowActivity)
             .flatMap { try? JSONDecoder().decode([MergeWorkflowActivityEntry].self, from: $0) } ?? []
+        mrActionIntents = defaults.data(forKey: Key.mrActionIntents)
+            .flatMap { try? JSONDecoder().decode([MRTodoIntent].self, from: $0) } ?? []
+        routedMRTodoReceipts = defaults.data(forKey: Key.routedMRTodoReceipts)
+            .flatMap { try? JSONDecoder().decode(Set<MRTodoRouteReceipt>.self, from: $0) } ?? []
         conflictReceipts = defaults.data(forKey: Key.conflictReceipts)
             .flatMap { try? JSONDecoder().decode(Set<MergeConflictReceipt>.self, from: $0) }
             ?? []
@@ -74,6 +83,8 @@ final class SettingsManager {
             : nil
 
         self.lastMenuSection = defaults.string(forKey: Key.lastMenuSection)
+        self.ignoredMergeRequests = defaults.data(forKey: Key.ignoredMergeRequests)
+            .flatMap { try? JSONDecoder().decode(Set<MRAutomationScope.Target>.self, from: $0) } ?? []
         self.autoApproveOptOuts = defaults.data(forKey: Key.autoApproveOptOuts)
             .flatMap { try? JSONDecoder().decode(Set<MRAutomationScope.Target>.self, from: $0) } ?? []
 
@@ -90,9 +101,12 @@ final class SettingsManager {
         } else {
             self.lastSeenTodoIDs = []
         }
+        lastSavedAutomation = automation
     }
 
     func save() {
+        let previousAutomation = lastSavedAutomation ?? automation
+        lastSavedAutomation = automation
         if let data = try? JSONEncoder().encode(automation) {
             defaults.set(data, forKey: Key.automation)
         }
@@ -114,6 +128,8 @@ final class SettingsManager {
         if let data = try? JSONEncoder().encode(workflowActivity) {
             defaults.set(data, forKey: Key.workflowActivity)
         }
+        if let data = try? JSONEncoder().encode(mrActionIntents) { defaults.set(data, forKey: Key.mrActionIntents) }
+        if let data = try? JSONEncoder().encode(routedMRTodoReceipts) { defaults.set(data, forKey: Key.routedMRTodoReceipts) }
         if let data = try? JSONEncoder().encode(conflictReceipts) {
             defaults.set(data, forKey: Key.conflictReceipts)
         }
@@ -147,6 +163,9 @@ final class SettingsManager {
         } else {
             defaults.removeObject(forKey: Key.lastMenuOpenedAt)
         }
+        if let data = try? JSONEncoder().encode(ignoredMergeRequests) {
+            defaults.set(data, forKey: Key.ignoredMergeRequests)
+        }
         if let data = try? JSONEncoder().encode(autoApproveOptOuts) {
             defaults.set(data, forKey: Key.autoApproveOptOuts)
         }
@@ -155,6 +174,7 @@ final class SettingsManager {
         } else {
             defaults.removeObject(forKey: Key.lastMenuSection)
         }
+        if previousAutomation != automation { onAutomationChanged?(previousAutomation) }
     }
 
     var isFirstLaunch: Bool {
@@ -188,6 +208,8 @@ final class SettingsManager {
         static let assistantHandoffs = "assistantHandoffs"
         static let assistantChats = "assistantChats"
         static let workflowActivity = "workflowActivity"
+        static let mrActionIntents = "mrActionIntents"
+        static let routedMRTodoReceipts = "routedMRTodoReceipts"
         static let refreshInterval = "refreshInterval"
         static let unreadReminderInterval = "unreadReminderInterval"
         static let unreadReminderSound = "unreadReminderSound"
@@ -201,5 +223,6 @@ final class SettingsManager {
         static let lastMenuOpenedAt = "lastMenuOpenedAt"
         static let lastMenuSection = "lastMenuSection"
         static let autoApproveOptOuts = "autoApproveOptOuts"
+        static let ignoredMergeRequests = "ignoredMergeRequests"
     }
 }

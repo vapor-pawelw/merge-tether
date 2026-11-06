@@ -91,46 +91,43 @@ struct TodoAutomationTests {
         let directory = FileManager.default.temporaryDirectory.appending(path: UUID().uuidString)
         defer { try? FileManager.default.removeItem(at: directory) }
         let settings = SettingsManager(defaults: defaults)
-        let automation = TodoAutomationService()
+        let coordinator = AssistantJobCoordinator(execute: { _, _ in
+            .init(result: .init(status: .blocked, summary: "Fixture has no remote write permission"), output: "")
+        })
+        let automation = TodoAutomationService(canAutomate: { _ in true }, jobCoordinator: coordinator)
         settings.automation.allowFollowUpPush = pushAllowed
 
         let acknowledge = try await automation.prepareToAcknowledge(
             todo, event: .authorFeedback, host: "gitlab.example.org", username: "me",
             settings: settings, glab: GlabService(), manual: true, isPending: { true }
         )
-        #expect(acknowledge)
+        #expect(!acknowledge)
         let handoff = try #require(settings.assistantHandoffs.first)
         #expect(handoff.title == "[MT] cards-api !1220 (Own)")
         #expect(handoff.key.access == .gitLabRead)
         #expect(handoff.openedAt == nil)
-        #expect(handoff.feedbackTodos == nil)
-        #expect(SettingsManager(defaults: defaults).pendingTodoAcknowledgements == [
-            .init(host: "gitlab.example.org", username: "me", todo: todo.feedbackIdentity)
-        ])
-        settings.automation.codexRelayEnabled = true
-        CodexDesktopRelay.synchronize(settings: settings, host: "gitlab.example.org", username: "me", directory: directory)
-        let jobURL = directory.appending(path: "jobs/\(handoff.id.uuidString.lowercased()).json")
-        struct Job: Decodable { let prompt: String; let repository: String? }
-        let job = try JSONDecoder().decode(Job.self, from: Data(contentsOf: jobURL))
-        #expect(job.repository == "cards-api")
-        let prompt = job.prompt
-        #expect(prompt.contains("`read_merge_request` tool"))
+        #expect(handoff.feedbackTodos == [todo.feedbackIdentity])
+        #expect(handoff.manual == true)
+        #expect(SettingsManager(defaults: defaults).pendingTodoAcknowledgements.isEmpty)
+        let prompt = handoff.prompt
+        #expect(prompt.contains("glab"))
+        #expect(!prompt.contains("read_merge_request"))
         #expect(handoff.followUpPushAllowed == pushAllowed)
         if pushAllowed {
             #expect(prompt.contains("without a separate push prompt"))
-            #expect(prompt.contains("Mandatory author follow-up order, even without installed MR skills"))
-            #expect(prompt.contains("author_follow_up_status"))
-            #expect(prompt.contains("verify_author_follow_up"))
+            #expect(prompt.contains("Mandatory author follow-up order"))
+            #expect(prompt.contains(" status "))
+            #expect(prompt.contains(" verify "))
             #expect(prompt.contains("For human or uncertain feedback, leave drafts private"))
-            #expect(prompt.contains("record_author_follow_up_drafts"))
-            #expect(prompt.contains("headSHA"))
-            #expect(prompt.contains("runID `\(handoff.id.uuidString.lowercased())`"))
+            #expect(prompt.contains(" seal "))
+            #expect(prompt.contains("--head-sha <tested-pushed-sha>"))
+            #expect(prompt.contains("--run-id \(handoff.id.uuidString.lowercased())"))
             #expect(prompt.contains("private `draft_notes` endpoint"))
             #expect(prompt.contains("Never substitute a published note or a chat-only draft"))
         } else {
             #expect(prompt.contains("Automatic author-follow-up push is OFF"))
             #expect(prompt.contains("do not push, save author-follow-up response drafts, or publish anything"))
-            #expect(!prompt.contains("verify_author_follow_up"))
+            #expect(!prompt.contains("--evidence-file"))
             #expect(!prompt.contains("save replies as GitLab drafts"))
         }
         #expect(prompt.hasPrefix("\(todo.targetURL.absoluteString)\n\n"))
@@ -142,6 +139,128 @@ struct TodoAutomationTests {
         #expect(prompt.contains("Use the fallback below only where no applicable skill or explicit workflow covers the step."))
         #expect(prompt.contains("only the indicated feedback"))
         #expect(prompt.contains("Summarize what you did or found"))
+        let deadline = ContinuousClock.now + .seconds(5)
+        while coordinator.isWorking(on: handoff.key.work), ContinuousClock.now < deadline {
+            try await Task.sleep(for: .milliseconds(10))
+        }
+        #expect(settings.assistantHandoffs.first?.execution?.state == .blocked)
+        #expect(settings.assistantHandoffs.first?.deliveredFeedbackTodos.isEmpty == true)
+        #expect(settings.pendingTodoAcknowledgements.isEmpty)
+    }
+
+    @MainActor
+    @Test(arguments: [true, false])
+    func reviewAcknowledgementWaitsForSuccessfulExecution(manual: Bool) async throws {
+        let todo = try makeTodo(action: "review_requested", author: "anna")
+        let name = "GitLabTodosTests-\(UUID())"
+        let defaults = try #require(UserDefaults(suiteName: name))
+        defer { defaults.removePersistentDomain(forName: name) }
+        let settings = SettingsManager(defaults: defaults)
+        settings.automation.reviewRequested.isEnabled = true
+        settings.automation.reviewRequested.markDoneOnSuccess = !manual
+        let coordinator = AssistantJobCoordinator(execute: { _, _ in
+            .init(result: .init(status: .succeeded, summary: "Fixture review completed"), output: "")
+        })
+        let service = TodoAutomationService(canAutomate: { _ in true }, jobCoordinator: coordinator)
+        #expect(try await !service.prepareToAcknowledge(todo, event: .reviewRequested,
+            host: "gitlab.example.org", username: "me", settings: settings, glab: GlabService(),
+            manual: manual, isPending: { true }))
+        #expect(settings.pendingTodoAcknowledgements.isEmpty)
+        let handoff = try #require(settings.assistantHandoffs.first)
+        #expect(handoff.feedbackTodos == [todo.feedbackIdentity])
+        let deadline = ContinuousClock.now + .seconds(5)
+        while coordinator.isWorking(on: handoff.key.work), ContinuousClock.now < deadline {
+            try await Task.sleep(for: .milliseconds(10))
+        }
+        #expect(settings.assistantHandoffs.first?.deliveredFeedbackTodos == [todo.feedbackIdentity])
+    }
+
+    @MainActor
+    @Test func queuedManualAssistantTaskDoesNotAcknowledgeTodo() async throws {
+        let todo = try makeTodo(action: "review_requested", author: "anna")
+        let name = "GitLabTodosTests-\(UUID())"
+        let defaults = try #require(UserDefaults(suiteName: name))
+        defer { defaults.removePersistentDomain(forName: name) }
+        let settings = SettingsManager(defaults: defaults)
+        let service = TodoAutomationService(canAutomate: { _ in false })
+        settings.automationReceipts.insert(.init(host: "gitlab.example.org", username: "me", todoID: todo.id))
+        #expect(try await !service.prepareToAcknowledge(todo, event: .reviewRequested,
+            host: "gitlab.example.org", username: "me", settings: settings, glab: GlabService(),
+            manual: true, isPending: { true }))
+        #expect(settings.pendingTodoAcknowledgements.isEmpty)
+    }
+
+    @MainActor
+    @Test func automaticShellRequiresCLIWhileManualShellCanRun() async throws {
+        let todo = try makeTodo(action: "review_requested", author: "anna")
+        let name = "GitLabTodosTests-\(UUID())"
+        let defaults = try #require(UserDefaults(suiteName: name))
+        defer { defaults.removePersistentDomain(forName: name) }
+        let settings = SettingsManager(defaults: defaults)
+        settings.automation.reviewRequested.isEnabled = true
+        settings.automation.reviewRequested.runner = .shell
+        settings.automation.reviewRequested.projects = "bank/cards-api"
+        settings.automation.reviewRequested.command = "exit 0"
+        let service = TodoAutomationService(canAutomate: { _ in false })
+        #expect(try await !service.prepareToAcknowledge(todo, event: .reviewRequested,
+            host: "gitlab.example.org", username: "me", settings: settings, glab: GlabService(), isPending: { true }))
+        #expect(settings.automationReceipts.isEmpty && settings.automationAttemptReceipts.isEmpty)
+        #expect(try await service.prepareToAcknowledge(todo, event: .reviewRequested,
+            host: "gitlab.example.org", username: "me", settings: settings, glab: GlabService(),
+            manual: true, isPending: { true }))
+    }
+
+    @MainActor @Test(arguments: [true, false])
+    func policyCancellationStopsARunningShellWithoutAcknowledgingTodo(manual: Bool) async throws {
+        let todo = try makeTodo(action: "review_requested", author: "anna")
+        let suite = "CancelShell.\(UUID())"
+        let defaults = try #require(UserDefaults(suiteName: suite))
+        defer { defaults.removePersistentDomain(forName: suite) }
+        let folder = FileManager.default.temporaryDirectory.appending(path: UUID().uuidString)
+        try FileManager.default.createDirectory(at: folder, withIntermediateDirectories: false)
+        defer { try? FileManager.default.removeItem(at: folder) }
+        let marker = folder.appending(path: "started")
+        let settings = SettingsManager(defaults: defaults)
+        settings.automation.reviewRequested.isEnabled = true
+        settings.automation.reviewRequested.runner = .shell
+        settings.automation.reviewRequested.projects = "bank/cards-api"
+        settings.automation.reviewRequested.command = "touch '\(marker.path)'; sleep 30"
+        let service = TodoAutomationService(canAutomate: { _ in true })
+        let worker = Task {
+            try await service.prepareToAcknowledge(todo, event: .reviewRequested,
+                host: "gitlab.example.org", username: "me", settings: settings, glab: GlabService(),
+                manual: manual, isPending: { true })
+        }
+        defer { worker.cancel() }
+        let startDeadline = ContinuousClock.now + .seconds(5)
+        while !FileManager.default.fileExists(atPath: marker.path), ContinuousClock.now < startDeadline {
+            try await Task.sleep(for: .milliseconds(10))
+        }
+        try #require(FileManager.default.fileExists(atPath: marker.path))
+        var scope = settings.automation.scope
+        scope[.init(host: "gitlab.example.org", username: "me", projectID: 1, iid: 99)] = .paused
+        service.cancelRunningScripts(outsideScope: scope)
+        try await Task.sleep(for: .milliseconds(100))
+        #expect(service.actionState(for: todo, host: "gitlab.example.org", username: "me",
+                                    settings: settings, available: []) == .running)
+        scope[.init(host: "gitlab.example.org", username: "me", projectID: 1, iid: 1220)] = .paused
+        service.cancelRunningScripts(outsideScope: scope)
+        if manual {
+            try await Task.sleep(for: .milliseconds(100))
+            #expect(service.actionState(for: todo, host: "gitlab.example.org", username: "me",
+                                        settings: settings, available: []) == .running)
+        }
+        service.cancelRunningScripts()
+        let stopDeadline = ContinuousClock.now + .seconds(2)
+        while service.actionState(for: todo, host: "gitlab.example.org", username: "me",
+                                  settings: settings, available: []) == .running, ContinuousClock.now < stopDeadline {
+            try await Task.sleep(for: .milliseconds(10))
+        }
+        #expect(service.actionState(for: todo, host: "gitlab.example.org", username: "me",
+                                    settings: settings, available: []) == .failed)
+        #expect(settings.automationReceipts.isEmpty && settings.pendingTodoAcknowledgements.isEmpty)
+        worker.cancel()
+        _ = try? await worker.value
     }
 
     @MainActor
@@ -154,7 +273,7 @@ struct TodoAutomationTests {
         defer { defaults.removePersistentDomain(forName: name) }
         let settings = SettingsManager(defaults: defaults)
         let glab = GlabService()
-        let automation = TodoAutomationService()
+        let automation = TodoAutomationService(canAutomate: { _ in true })
 
         settings.automation.reviewRequested.isEnabled = true
         settings.automation.reviewRequested.markDoneOnSuccess = true
@@ -191,40 +310,49 @@ struct TodoAutomationTests {
     }
 
     @MainActor
-    @Test("polling retries a failed GitLab acknowledgement without repeating the script")
-    func acknowledgesAfterShellSuccess() async throws {
+    @Test("legacy shell rules do not automatically run or consume MR proposals")
+    func legacyShellRulePreservesMRProposalWithoutRunning() async throws {
         let todo = try makeTodo(action: "review_requested", author: "anna")
         let folder = FileManager.default.temporaryDirectory.appending(path: UUID().uuidString)
         try FileManager.default.createDirectory(at: folder, withIntermediateDirectories: false)
         defer { try? FileManager.default.removeItem(at: folder) }
-
         let encoder = JSONEncoder()
         encoder.dateEncodingStrategy = .iso8601
         try encoder.encode([todo]).write(to: folder.appending(path: "inbox.json"))
+        let request = """
+        {"project_id":1,"iid":1220,"author":{"id":3,"username":"anna","name":"Anna White"},
+         "title":"Review","web_url":"https://gitlab.example.org/bank/cards-api/-/merge_requests/1220",
+         "state":"opened","draft":false,"sha":"aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+         "source_project_id":1,"source_branch":"feature","target_project_id":1,"target_branch":"main",
+         "labels":[],"has_conflicts":false}
+        """
+        try request.write(to: folder.appending(path: "mr.json"), atomically: true, encoding: .utf8)
         let glab = folder.appending(path: "glab")
         try Data("""
             #!/bin/sh
             set -eu
             cd "$(dirname "$0")"
             case "$*" in
-                'config get host') echo gitlab.example.org ;;
-                'auth status') echo 'Logged in to gitlab.example.org as me' >&2 ;;
+                'config get host') echo gitlab.example.org; exit 0 ;;
+                'auth status') echo 'Logged in to gitlab.example.org as me' >&2; exit 0 ;;
                 'api --paginate /todos?per_page=100&state=pending --hostname gitlab.example.org')
-                    if [ -e acknowledged ]; then echo '[]'; else cat inbox.json; fi ;;
+                    cat inbox.json; exit 0 ;;
                 'api --method POST /todos/42/mark_as_done --hostname gitlab.example.org')
-                    if [ ! -e attempted ]; then
-                        touch attempted
-                        exit 1
-                    fi
-                    touch acknowledged ;;
+                    touch acknowledged; echo '{}'; exit 0 ;;
+            esac
+            case "$2" in
+                /user) echo '{"id":1,"username":"me"}' ;;
+                /merge_requests?scope=created_by_me*) echo '[]' ;;
+                /merge_requests?scope=all*) printf '['; cat mr.json; printf ']' ;;
+                /projects/1/merge_requests/1220) cat mr.json ;;
+                */draft_notes*|*/discussions*|*/reviewers*) echo '[]' ;;
                 *) exit 100 ;;
             esac
             """.utf8).write(to: glab)
         try FileManager.default.setAttributes([.posixPermissions: 0o700], ofItemAtPath: glab.path)
-
-        let name = "GitLabTodosTests-\(UUID())"
-        let defaults = try #require(UserDefaults(suiteName: name))
-        defer { defaults.removePersistentDomain(forName: name) }
+        let suite = "LegacyScriptMonitor.\(UUID())"
+        let defaults = try #require(UserDefaults(suiteName: suite))
+        defer { defaults.removePersistentDomain(forName: suite) }
         let settings = SettingsManager(defaults: defaults)
         settings.glabPath = glab
         settings.onboardingCompleted = true
@@ -235,25 +363,25 @@ struct TodoAutomationTests {
         settings.automation.reviewRequested.projects = "bank/cards-api"
         let actionLog = folder.appending(path: "action.log")
         settings.automation.reviewRequested.command = "echo run >> '\(actionLog.path)'"
-
-        let monitor = TodoMonitorService(settings: settings)
+        let monitor = TodoMonitorService(settings: settings, automation: TodoAutomationService(canAutomate: { _ in true }))
         defer { monitor.stopTimer() }
-        let clock = ContinuousClock()
-        let firstDeadline = clock.now + .seconds(5)
-        while monitor.lastError == nil, clock.now < firstDeadline {
+        let deadline = ContinuousClock.now + .seconds(5)
+        while monitor.lastRefresh == nil || monitor.isLoading, ContinuousClock.now < deadline {
             try await Task.sleep(for: .milliseconds(20))
         }
-        try #require(monitor.lastError != nil)
-        #expect(monitor.visibleTodos.map(\.id) == [42])
-
+        try #require(monitor.lastRefresh != nil && !monitor.isLoading)
         await monitor.refreshNow()
-        let secondDeadline = clock.now + .seconds(5)
-        while !monitor.allTodos.isEmpty, clock.now < secondDeadline {
-            try await Task.sleep(for: .milliseconds(20))
-        }
-        #expect(monitor.visibleTodos.isEmpty)
-        #expect(FileManager.default.fileExists(atPath: folder.appending(path: "acknowledged").path))
-        #expect(try String(contentsOf: actionLog, encoding: .utf8) == "run\n")
+        #expect(monitor.lastError == nil)
+        #expect(monitor.visibleTodos.map(\.id) == [42])
+        #expect(settings.mrActionIntents.isEmpty)
+        #expect(settings.routedMRTodoReceipts.isEmpty)
+        #expect(settings.assistantHandoffs.isEmpty)
+        #expect(!FileManager.default.fileExists(atPath: actionLog.path))
+        #expect(!FileManager.default.fileExists(atPath: folder.appending(path: "acknowledged").path))
+        let board = MergeRequestBoardSnapshot(own: monitor.ownMergeRequestItems, reviewed: monitor.reviewedMergeRequestItems,
+            todos: monitor.visibleTodos, attention: monitor.attentionItems, handoffs: [],
+            host: "gitlab.example.org", username: "me")
+        #expect(board.proposals.contains { $0.todos.map(\.id) == [42] })
     }
 
     @MainActor
@@ -265,7 +393,7 @@ struct TodoAutomationTests {
         let defaults = try #require(UserDefaults(suiteName: name))
         defer { defaults.removePersistentDomain(forName: name) }
         let settings = SettingsManager(defaults: defaults)
-        let service = TodoAutomationService()
+        let service = TodoAutomationService(canAutomate: { _ in true })
         let glab = GlabService()
         settings.automation.reviewRequested.runner = .shell
         settings.automation.reviewRequested.projects = "bank/cards-api"
@@ -322,7 +450,7 @@ struct TodoAutomationTests {
         let settings = SettingsManager(defaults: defaults)
         let glab = GlabService()
         glab.glabPath = executable
-        let service = TodoAutomationService()
+        let service = TodoAutomationService(canAutomate: { _ in true })
         settings.automation.reviewRequested.runner = .shell
         settings.automation.reviewRequested.projects = "bank/cards-api"
         settings.automation.reviewRequested.command = "mkdir '\(folder.path)/launched-once'"

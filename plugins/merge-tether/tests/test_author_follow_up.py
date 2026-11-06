@@ -24,7 +24,9 @@ class AuthorFollowUpTest(unittest.TestCase):
         self.mr = {"project_id": 1, "iid": 2, "state": "opened", "author": {"id": 3},
                    "sha": self.head, "source_project_id": 4, "source_branch": "fix/test"}
         self.drafts = [{"id": 12, "author_id": 3, "note": "Local-only completion"}]
-        self.evidence = json.dumps([{"path": "Tests/A.swift", "sha256": hashlib.sha256(self.content).hexdigest()}])
+        self.discussions = []
+        self.evidence = json.dumps({"discussionFingerprint": hashlib.sha256(b"").hexdigest(),
+                                   "files": [{"path": "Tests/A.swift", "sha256": hashlib.sha256(self.content).hexdigest()}]})
         self.verifier = AuthorFollowUpVerifier(self.root, self.read)
 
     def save_run(self):
@@ -42,6 +44,8 @@ class AuthorFollowUpTest(unittest.TestCase):
             return {"file_path": "Tests/A.swift", "encoding": "base64", "content": base64.b64encode(self.content).decode()}
         if endpoint == "/projects/1/merge_requests/2/draft_notes?per_page=100&page=1":
             return self.drafts
+        if endpoint == "/projects/1/merge_requests/2/discussions?per_page=100&page=1":
+            return self.discussions
         self.fail(endpoint)
 
     def verify(self):
@@ -74,7 +78,58 @@ class AuthorFollowUpTest(unittest.TestCase):
         self.assertEqual(receipt["drafts"], [{"id": 13, "bodySHA256": hashlib.sha256(self.drafts[-1]["note"].encode()).hexdigest()}])
         self.assertEqual(receipt["sourceProjectID"], 4)
         self.assertEqual(receipt["headSHA"], self.head)
+        self.assertEqual(receipt.get("discussionFingerprint"), hashlib.sha256(b"").hexdigest())
         self.assertTrue((self.root / "follow-up-verifications/gitlab.example.org/1-2-me.json").exists())
+
+    def test_new_comment_between_verification_and_sealing_requires_recheck(self):
+        proof = self.verify()
+        self.drafts.append({"id": 13, "author_id": 3, "note": "Verified fix"})
+        self.discussions = [{"notes": [{"id": 40, "author": {"id": 8}, "body": "New concern", "system": False}]}]
+        with self.assertRaises(ValueError):
+            self.verifier.seal("gitlab.example.org", "1", "2", proof["verificationID"], "[13]")
+
+    def test_comment_arriving_during_implementation_requires_assessment_before_verification(self):
+        self.discussions = [{"notes": [{"id": 40, "author": {"id": 8}, "body": "New concern", "system": False}]}]
+        with self.assertRaises(ValueError):
+            self.verify()
+
+    def test_rechecking_after_failed_seal_requires_explicitly_refreshed_drafts(self):
+        proof = self.verify()
+        self.drafts.append({"id": 13, "author_id": 3, "note": "Original reply"})
+        self.discussions = [{"notes": [{"id": 40, "author": {"id": 8}, "body": "New concern", "system": False}]}]
+        with self.assertRaises(ValueError):
+            self.verifier.seal("gitlab.example.org", "1", "2", proof["verificationID"], "[13]")
+        evidence = json.loads(self.evidence)
+        evidence["discussionFingerprint"] = self.verifier.discussion_fingerprint("gitlab.example.org", "1", "2")
+        self.evidence = json.dumps(evidence)
+        proof = self.verify()
+        self.drafts[-1]["note"] = "Reply refreshed after assessing the new concern"
+        self.assertTrue(self.verifier.seal("gitlab.example.org", "1", "2", proof["verificationID"], "[13]")["sealed"])
+
+    def test_discussion_evidence_ignores_resolution_but_detects_edited_text(self):
+        self.discussions = [{"notes": [{"id": 40, "author": {"id": 8}, "body": "Please fix this", "system": False,
+                                       "resolved": False}]}]
+        before = self.verifier.discussion_fingerprint("gitlab.example.org", "1", "2")
+        self.discussions[0]["notes"][0]["resolved"] = True
+        self.discussions[0]["notes"].append({"id": 41, "system": True, "body": "Resolved"})
+        self.assertEqual(before, self.verifier.discussion_fingerprint("gitlab.example.org", "1", "2"))
+        self.discussions[0]["notes"][0]["body"] = "Edited concern"
+        self.assertNotEqual(before, self.verifier.discussion_fingerprint("gitlab.example.org", "1", "2"))
+
+    def test_fingerprint_matches_the_swift_unicode_fixture(self):
+        self.discussions = [{"notes": [{"id": 40, "author": {"id": 8}, "body": "Zażółć gęślą jaźń 🧵\nCheck this", "system": False}]}]
+        self.assertEqual(self.verifier.discussion_fingerprint("gitlab.example.org", "1", "2"),
+                         "820aa6b58b9b1848a9f2c75f526a2057b5cf98f1f7b52acae2bbead69a588a4a")
+
+    def test_resolution_only_change_does_not_prevent_sealing(self):
+        self.discussions = [{"notes": [{"id": 40, "author": {"id": 8}, "body": "Concern", "system": False, "resolved": False}]}]
+        evidence = json.loads(self.evidence)
+        evidence["discussionFingerprint"] = self.verifier.status("gitlab.example.org", "1", "2", self.run["runID"])["discussionFingerprint"]
+        self.evidence = json.dumps(evidence)
+        proof = self.verify()
+        self.drafts.append({"id": 13, "author_id": 3, "note": "Verified reply"})
+        self.discussions[0]["notes"][0]["resolved"] = True
+        self.assertTrue(self.verifier.seal("gitlab.example.org", "1", "2", proof["verificationID"], "[13]")["sealed"])
 
     def test_current_head_run_and_permission_are_checked_again_at_sealing(self):
         for change in ("head", "run", "permission"):

@@ -54,19 +54,37 @@ import Testing
             let url = FollowUpVerificationStore.recordURL(kind: "follow-up-verifications", work: work, username: "me", in: folder)
             try FileManager.default.createDirectory(at: url.deletingLastPathComponent(), withIntermediateDirectories: true)
             try JSONEncoder().encode(receipt).write(to: url)
+            try bindFollowUpDiscussions()
         }
 
         func log(_ name: String) -> String {
             (try? String(contentsOf: folder.appending(path: name), encoding: .utf8)) ?? ""
         }
 
+        func bindFollowUpDiscussions() throws {
+            let url = folder.appending(path: "follow-up-verifications/gitlab.example.org/1-2-me.json")
+            var receipt = try #require(JSONSerialization.jsonObject(with: Data(contentsOf: url)) as? [String: Any])
+            let discussions = try JSONDecoder().decode([GitLabMergeRequestDiscussion].self,
+                from: Data(contentsOf: folder.appending(path: "discussions.json")))
+            receipt["discussionFingerprint"] = ReviewVerdict.fingerprint(discussions)
+            try JSONSerialization.data(withJSONObject: receipt).write(to: url)
+        }
+
         func poll() async throws {
             monitor.refresh(host: "gitlab.example.org", username: "me", todos: [])
             let deadline = ContinuousClock.now + .seconds(5)
-            while monitor.isLoading, ContinuousClock.now < deadline {
+            while monitor.isLoading || monitor.isVerifyingReReview, ContinuousClock.now < deadline {
                 try await Task.sleep(for: .milliseconds(20))
             }
             try #require(!monitor.isLoading && !monitor.hasError)
+        }
+
+        func settleVerification() async throws {
+            let deadline = ContinuousClock.now + .seconds(5)
+            while monitor.isVerifyingReReview, ContinuousClock.now < deadline {
+                try await Task.sleep(for: .milliseconds(20))
+            }
+            try #require(!monitor.isVerifyingReReview)
         }
 
         func cleanUp() {
@@ -133,8 +151,23 @@ import Testing
                 */draft_notes*)
                     if [ -f fail-next-draft-read ]; then rm fail-next-draft-read; exit 1; fi
                     cat drafts.json ;;
+                */raw_diffs) echo "verified diff fixture" ;;
                 */reviewers*) cat reviewers.json ;;
                 */discussions*)
+                    if [ -f fail-discussion-read ]; then exit 1; fi
+                    if [ -f edit-on-this-discussion ]; then
+                        rm edit-on-this-discussion
+                        /usr/bin/python3 -c 'import json; p="drafts.json"; a=json.load(open(p)); [d.update(note="/merge") for d in a if d["id"]==11]; json.dump(a,open(p,"w"))'
+                    fi
+                    if [ -f edit-after-next-discussion ]; then mv edit-after-next-discussion edit-on-this-discussion; fi
+                    if [ -f capture-one-discussion ]; then
+                        rm capture-one-discussion
+                        cp discussions.json captured-discussions.json
+                        touch discussion-captured
+                        while [ ! -f release-discussion ]; do sleep 0.02; done
+                        cat captured-discussions.json
+                        exit 0
+                    fi
                     if [ -f change-during-discussions ]; then
                         /usr/bin/python3 -c 'import json; p="drafts.json"; a=json.load(open(p)); [d.update(note="Edited while checking") for d in a if d["id"]==12]; json.dump(a,open(p,"w"))'
                     fi
@@ -168,7 +201,21 @@ import Testing
         glab.currentUsername = "me"
         let monitor = MergeRequestAttentionMonitor(
             glab: glab, settings: settings, verdictDirectory: folder.appending(path: "verdicts"),
-            aiAssessmentDirectory: folder.appending(path: "ai-assessments"), followUpDirectory: folder
+            aiAssessmentDirectory: folder.appending(path: "ai-assessments"), followUpDirectory: folder,
+            canAutomate: { _ in !FileManager.default.fileExists(atPath: folder.appending(path: "assistant-unavailable").path) },
+            verifyReReview: { input, _, _ in
+                let log = folder.appending(path: "verification.log")
+                let previous = (try? Data(contentsOf: log)) ?? Data()
+                try (previous + Data("verified\n".utf8)).write(to: log)
+                if FileManager.default.fileExists(atPath: folder.appending(path: "fail-verification").path) {
+                    throw ReReviewVerifier.VerificationError.failed
+                }
+                return ReReviewAssessment(notes: input.discussions.flatMap(\.notes).filter {
+                    $0.system != true && $0.author?.id != input.authorID
+                }.compactMap { note in
+                    note.id.map { .init(noteID: $0, state: .addressed, reason: "Verified fixture correction") }
+                })
+            }
         )
         return Harness(folder: folder, defaults: defaults, suite: suite, settings: settings, monitor: monitor)
     }
@@ -209,6 +256,177 @@ import Testing
     private let othersThread = #"""
         [{"notes":[{"id":40,"author":{"id":8},"system":false,"body":"Please check this","resolvable":true,"resolved":false}]}]
         """#
+
+    @Test func pendingDraftsLeaveReadyWhenDiscussionContentChanges() async throws {
+        let harness = try makeHarness(assistantWorked: true)
+        defer { harness.cleanUp() }
+        try harness.write("drafts.json", draftJSON)
+        try harness.recordVerdict("objections", head: head)
+        try await harness.poll()
+        #expect(harness.monitor.currentItems.first?.section == .unpublishedComments)
+
+        try harness.write("discussions.json", othersThread)
+        try await harness.poll()
+        let stale = try #require(harness.monitor.currentItems.first)
+        #expect(stale.section == .open)
+        #expect(stale.drafts.count == 2)
+
+        // A new completed review of the same head can make the drafts ready again.
+        try harness.recordVerdict("objections", head: head)
+        try await harness.poll()
+        #expect(harness.monitor.currentItems.first?.section == .unpublishedComments)
+    }
+
+    @Test func visibleInboxRechecksCommentsEvenWhenDraftsHaveNotChanged() async throws {
+        let harness = try makeHarness(assistantWorked: true)
+        defer { harness.cleanUp() }
+        try harness.write("drafts.json", draftJSON)
+        try harness.recordVerdict("objections", head: head)
+        try await harness.poll()
+        #expect(harness.monitor.currentItems.first?.section == .unpublishedComments)
+        try harness.write("discussions.json", othersThread)
+        await harness.monitor.refreshPendingDrafts()
+        #expect(harness.monitor.currentItems.first?.section == .open)
+        #expect(harness.monitor.currentOpenItems.first?.section == .open)
+    }
+
+    @Test(arguments: [false, true])
+    func draftsWithoutCurrentDiscussionEvidenceRemainAvailableOutsideReady(authored: Bool) async throws {
+        let harness = try makeHarness(assistantWorked: true, authored: authored)
+        defer { harness.cleanUp() }
+        try harness.write("drafts.json", draftJSON)
+        try await harness.poll()
+        let item = try #require(harness.monitor.currentItems.first)
+        #expect(item.section == .open)
+        #expect(item.needsConfirmation && item.drafts.count == 2)
+    }
+
+    @Test func authorRepliesNeedCurrentDiscussionEvidence() async throws {
+        let harness = try makeHarness(assistantWorked: true, authored: true)
+        defer { harness.cleanUp() }
+        harness.settings.automation.publishAIRepliesWithoutConfirmation = false
+        try harness.write("drafts.json", draftJSON)
+        try harness.verifyFollowUpDrafts()
+        try harness.bindFollowUpDiscussions()
+        try await harness.poll()
+        #expect(harness.monitor.currentItems.first?.section == .unpublishedComments)
+
+        try harness.write("discussions.json", #"[{"notes":[{"id":50,"author":{"id":8},"body":"Another question","system":false,"resolvable":false}]}]"#)
+        await harness.monitor.refreshPendingDrafts()
+        #expect(harness.monitor.currentItems.first?.section == .open)
+        #expect(harness.monitor.currentItems.first?.drafts.count == 2)
+    }
+
+    @Test func quickRefreshInvalidatesManualApprovalAfterNewComment() async throws {
+        let harness = try makeHarness(assistantWorked: true)
+        defer { harness.cleanUp() }
+        harness.settings.automation.autoApproveEnabled = false
+        try harness.recordVerdict("no_objections", head: head)
+        try await harness.poll()
+        #expect(harness.monitor.currentItems.first?.canApprove == true)
+        try harness.write("discussions.json", othersThread)
+        await harness.monitor.refreshPendingDrafts()
+        #expect(harness.monitor.currentItems.first?.canApprove != true)
+        #expect(harness.log("approve.log").isEmpty)
+    }
+
+    @Test(arguments: ["fail-next-draft-read", "fail-discussion-read"])
+    func failedQuickCheckKeepsDraftsOutsideReady(failure: String) async throws {
+        let harness = try makeHarness(assistantWorked: true)
+        defer { harness.cleanUp() }
+        try harness.write("drafts.json", draftJSON)
+        try harness.recordVerdict("objections", head: head)
+        try await harness.poll()
+        #expect(harness.monitor.currentItems.first?.section == .unpublishedComments)
+        try harness.write(failure, "yes")
+        await harness.monitor.refreshPendingDrafts()
+        #expect(harness.monitor.currentItems.first?.section == .open)
+        #expect(harness.monitor.currentItems.first?.drafts.count == 2)
+    }
+
+    @Test func editedCommentsInvalidateDraftReadinessButResolutionChangesDoNot() async throws {
+        let harness = try makeHarness(assistantWorked: true)
+        defer { harness.cleanUp() }
+        try harness.write("drafts.json", draftJSON)
+        try harness.write("discussions.json", othersThread)
+        try harness.recordVerdict("objections", head: head)
+        try await harness.poll()
+        #expect(harness.monitor.currentItems.first?.section == .unpublishedComments)
+        try harness.write("discussions.json", othersThread.replacingOccurrences(of: "\"resolved\":false", with: "\"resolved\":true"))
+        await harness.monitor.refreshPendingDrafts()
+        #expect(harness.monitor.currentItems.first?.section == .unpublishedComments)
+        try harness.write("discussions.json", othersThread.replacingOccurrences(of: "Please check this", with: "Edited request"))
+        await harness.monitor.refreshPendingDrafts()
+        #expect(harness.monitor.currentItems.first?.section == .open)
+    }
+
+    @Test func quickRefreshChecksTheLiveHeadInsteadOfTheListSnapshot() async throws {
+        let harness = try makeHarness(assistantWorked: true)
+        defer { harness.cleanUp() }
+        try harness.write("drafts.json", draftJSON)
+        try harness.recordVerdict("objections", head: head)
+        try await harness.poll()
+        #expect(harness.monitor.currentItems.first?.section == .unpublishedComments)
+        try harness.write("request.json", harness.log("request.json").replacingOccurrences(of: head, with: String(repeating: "f", count: 40)))
+        await harness.monitor.refreshPendingDrafts()
+        #expect(harness.monitor.currentItems.first?.section == .open)
+    }
+
+    @Test func delayedQuickCheckCannotOverwriteANewerFullPoll() async throws {
+        let harness = try makeHarness(assistantWorked: true)
+        defer { harness.cleanUp() }
+        try harness.write("drafts.json", draftJSON)
+        try harness.recordVerdict("objections", head: head)
+        try await harness.poll()
+        try harness.write("capture-one-discussion", "yes")
+        let quickCheck = Task { await harness.monitor.refreshPendingDrafts() }
+        defer { try? harness.write("release-discussion", "yes") }
+        let deadline = ContinuousClock.now + .seconds(5)
+        while !FileManager.default.fileExists(atPath: harness.folder.appending(path: "discussion-captured").path),
+              ContinuousClock.now < deadline {
+            try await Task.sleep(for: .milliseconds(20))
+        }
+        try #require(FileManager.default.fileExists(atPath: harness.folder.appending(path: "discussion-captured").path))
+        try harness.write("discussions.json", othersThread)
+        try await harness.poll()
+        #expect(harness.monitor.currentItems.first?.section == .open)
+        try harness.write("release-discussion", "yes")
+        await quickCheck.value
+        #expect(harness.monitor.currentItems.first?.section == .open)
+    }
+
+    @Test(arguments: [false, true])
+    func automaticPublicationRejectsDraftsAfterNewComment(authored: Bool) async throws {
+        let harness = try makeHarness(assistantWorked: true, authored: authored)
+        defer { harness.cleanUp() }
+        harness.settings.automation.publishDraftsWithoutConfirmation = true
+        harness.settings.automation.publishAIRepliesWithoutConfirmation = false
+        try harness.write("drafts.json", draftJSON)
+        if authored { try harness.verifyFollowUpDrafts() }
+        else { try harness.recordVerdict("objections", head: head) }
+        try await harness.poll()
+        #expect(harness.log("selected.log").isEmpty)
+        try harness.write("discussions.json", othersThread)
+        try await harness.poll()
+        #expect(harness.log("selected.log").isEmpty)
+        #expect(harness.monitor.currentItems.first?.drafts.count == 2)
+    }
+
+    @Test func automaticPublicationRechecksTheExactDraftAfterDiscussionCheck() async throws {
+        let harness = try makeHarness(assistantWorked: true)
+        defer { harness.cleanUp() }
+        harness.settings.automation.publishDraftsWithoutConfirmation = true
+        harness.settings.automation.publishAIRepliesWithoutConfirmation = false
+        try harness.write("drafts.json", #"[{"id":11,"author_id":3,"note":"Checked finding"}]"#)
+        try harness.recordVerdict("objections", head: head)
+        try await harness.poll()
+        // The full poll reads discussions once; the final publication check reads
+        // them again, after its earlier draft read. The ID stays the same.
+        try harness.write("edit-after-next-discussion", "yes")
+        try await harness.poll()
+        #expect(harness.log("selected.log").isEmpty)
+        #expect(harness.log("drafts.json").contains("/merge"))
+    }
 
     @Test func manualApprovalNeedsANoObjectionsVerdictForTheCurrentHead() async throws {
         let harness = try makeHarness(assistantWorked: true)
@@ -295,6 +513,46 @@ import Testing
         #expect(harness.monitor.currentItems.first?.canApprove == true)
     }
 
+    @Test func unavailableCLIBlocksAutomaticPublicationButKeepsManualPublication() async throws {
+        let harness = try makeHarness(assistantWorked: true)
+        defer { harness.cleanUp() }
+        harness.settings.automation.publishDraftsWithoutConfirmation = true
+        try harness.write("assistant-unavailable", "yes")
+        try harness.write("drafts.json", draftJSON)
+        try harness.recordVerdict("objections", head: head)
+        try await harness.poll()
+        try await harness.poll()
+        #expect(harness.log("publish.log").isEmpty)
+        #expect(harness.monitor.currentItems.first?.drafts.count == 2)
+
+        await harness.monitor.publishDrafts(of: .init(projectID: 1, iid: 2))
+        #expect(!harness.log("publish.log").isEmpty)
+    }
+
+    @Test func unavailableCLIBlocksAutomaticAIReplyPublication() async throws {
+        let harness = try makeHarness(assistantWorked: true)
+        defer { harness.cleanUp() }
+        try harness.write("assistant-unavailable", "yes")
+        try harness.write("drafts.json", draftJSON)
+        try harness.write("discussions.json", duoDiscussion)
+        try harness.recordVerdict("objections", head: head)
+        try await harness.poll()
+        try await harness.poll()
+        #expect(harness.log("selected.log").isEmpty)
+        #expect(harness.monitor.currentItems.first?.draftCount == 2)
+    }
+
+    @Test func unavailableCLIBlocksAutomaticApprovalButKeepsManualApproval() async throws {
+        let harness = try makeHarness(assistantWorked: true)
+        defer { harness.cleanUp() }
+        try harness.write("assistant-unavailable", "yes")
+        try harness.recordVerdict("no_objections", head: head)
+        try await harness.poll()
+        #expect(harness.log("approve.log").isEmpty)
+        await harness.monitor.approve(.init(projectID: 1, iid: 2))
+        #expect(!harness.log("approve.log").isEmpty)
+    }
+
     @Test func automaticPublishingIsOffByDefaultAndWaitsForSettledDrafts() async throws {
         #expect(AutomationSettings().publishDraftsWithoutConfirmation == false)
 
@@ -309,6 +567,7 @@ import Testing
         defer { harness.cleanUp() }
         harness.settings.automation.publishDraftsWithoutConfirmation = true
         try harness.write("drafts.json", draftJSON)
+        try harness.recordVerdict("objections", head: head)
         try await harness.poll()
         #expect(harness.log("publish.log").isEmpty)
         try harness.write("drafts.json", draftJSON.replacingOccurrences(of: "looks fixed", with: "looks fixed now"))
@@ -325,6 +584,7 @@ import Testing
         defer { harness.cleanUp() }
         try harness.write("drafts.json", draftJSON)
         try harness.write("discussions.json", duoDiscussion)
+        try harness.recordVerdict("objections", head: head)
         try await harness.poll()
         #expect(harness.log("selected.log").isEmpty)
         try await harness.poll()
@@ -343,6 +603,7 @@ import Testing
         try harness.write("drafts.json", draftJSON)
         let human = duoDiscussion.replacingOccurrences(of: "GitLabDuo", with: "alice")
         try harness.write("discussions.json", human)
+        try harness.recordVerdict("objections", head: head)
         try await harness.poll()
         try await harness.poll()
         #expect(harness.log("selected.log").isEmpty)
@@ -361,6 +622,7 @@ import Testing
         try harness.write("drafts.json", draftJSON)
         try harness.write("discussions.json", duoDiscussion)
         harness.settings.automation.publishAIRepliesWithoutConfirmation = false
+        try harness.recordVerdict("objections", head: head)
         try await harness.poll()
         try await harness.poll()
         #expect(harness.log("selected.log").isEmpty)
@@ -380,6 +642,7 @@ import Testing
         try harness.write("drafts.json", draftJSON)
         try harness.write("discussions.json", duoDiscussion)
         try harness.write("fail-publish", "yes")
+        try harness.recordVerdict("objections", head: head)
         try await harness.poll()
         try await harness.poll()
         #expect(harness.monitor.currentItems.first?.draftCount == 2)
@@ -402,6 +665,7 @@ import Testing
         defer { harness.cleanUp() }
         try harness.write("drafts.json", draftJSON)
         try harness.write("discussions.json", duoDiscussion)
+        try harness.recordVerdict("objections", head: head)
         try await harness.poll()
         try harness.write("change-during-discussions", "yes")
         try await harness.poll()
@@ -414,6 +678,7 @@ import Testing
         defer { harness.cleanUp() }
         try harness.write("drafts.json", draftJSON)
         try harness.write("discussions.json", duoDiscussion)
+        try harness.recordVerdict("objections", head: head)
         try await harness.poll()
         try await harness.poll()
         #expect(harness.log("selected.log").isEmpty)
@@ -426,6 +691,7 @@ import Testing
         harness.settings.automation.publishDraftsWithoutConfirmation = true
         try harness.write("drafts.json", draftJSON)
         try harness.write("discussions.json", duoDiscussion)
+        try harness.recordVerdict("objections", head: head)
         try await harness.poll()
         try await harness.poll()
         #expect(harness.log("publish.log").isEmpty)
@@ -439,6 +705,7 @@ import Testing
         defer { harness.cleanUp() }
         try harness.write("drafts.json", draftJSON.replacingOccurrences(of: "Thanks, looks fixed.", with: "/submit_review approve"))
         try harness.write("discussions.json", duoDiscussion)
+        try harness.recordVerdict("objections", head: head)
         try await harness.poll()
         try await harness.poll()
         #expect(harness.log("selected.log").isEmpty)
@@ -452,8 +719,106 @@ import Testing
         try harness.write("drafts.json", draftJSON)
         try harness.write("reviewers.json", #"[{"user":{"id":8},"state":"reviewed"}]"#)
         try harness.write("duo.json", #"{"id":8,"username":"reviewer","bot":false,"state":"active"}"#)
-        try harness.write("discussions.json", #"[{"id":"abc","notes":[{"id":40,"author":{"id":8},"system":false,"resolvable":true,"resolved":false}]}]"#)
-        try harness.write("published-discussions.json", #"[{"id":"abc","notes":[{"id":40,"author":{"id":8},"system":false,"resolvable":true,"resolved":false},{"id":41,"author":{"id":3},"system":false}]}]"#)
+        try harness.write("discussions.json", #"[{"id":"abc","notes":[{"id":40,"author":{"id":8},"body":"Review feedback","system":false,"resolvable":true,"resolved":false}]}]"#)
+        try harness.write("published-discussions.json", #"[{"id":"abc","notes":[{"id":40,"author":{"id":8},"body":"Review feedback","system":false,"resolvable":true,"resolved":false},{"id":41,"author":{"id":3},"body":"Verified correction","system":false}]}]"#)
+    }
+
+
+    @Test(arguments: [AssistantJobExecution.State.succeeded, .queued, .running, .blocked, .failed, .cancelled, .interrupted])
+    func onlyCompletedHeadlessFeedbackStartsReReviewWithoutPublicationBaseline(state: AssistantJobExecution.State) async throws {
+        let harness = try makeHarness(assistantWorked: false, authored: true)
+        defer { harness.cleanUp() }
+        try prepareAuthoredFeedback(harness)
+        try harness.write("drafts.json", "[]")
+        try harness.write("discussions.json", harness.log("published-discussions.json"))
+        let work = AssistantAutomationRunner.MergeRequestWork(host: host, projectID: 1, iid: 2)
+        let key = AssistantAutomationRunner.ChatKey(assistant: .codex, work: work, username: "me", workspace: "", access: .gitLabRead)
+        harness.settings.assistantHandoffs = [.init(id: UUID(), key: key, title: "Follow up", prompt: "", createdAt: Date(),
+            allowsPush: false, feedbackNoteIDs: [40], execution: .init(state: state))]
+
+        try await harness.poll()
+
+        #expect(harness.log("re-review.log") == (state == .succeeded ? "requested\n" : ""))
+        #expect(harness.log("publish.log").isEmpty && harness.log("selected.log").isEmpty)
+    }
+
+    @Test func legacyGUIReceiptIsNotCompletionProofForAutomaticReReview() async throws {
+        let harness = try makeHarness(assistantWorked: false, authored: true)
+        defer { harness.cleanUp() }
+        try prepareAuthoredFeedback(harness)
+        try harness.write("drafts.json", "[]")
+        try harness.write("discussions.json", harness.log("published-discussions.json"))
+        let work = AssistantAutomationRunner.MergeRequestWork(host: host, projectID: 1, iid: 2)
+        let key = AssistantAutomationRunner.ChatKey(assistant: .codex, work: work, username: "me", workspace: "", access: .gitLabRead)
+        harness.settings.assistantHandoffs = [.init(id: UUID(), key: key, title: "Legacy", prompt: "", createdAt: Date(),
+            allowsPush: false, relayComplete: true, openedAt: Date(), feedbackNoteIDs: [40])]
+
+        try await harness.poll()
+
+        #expect(harness.log("re-review.log").isEmpty)
+        #expect(harness.log("verification.log").isEmpty)
+    }
+
+    @Test func disablingVerificationWaitsForExplicitConfirmationAndRejectsChangedDiscussions() async throws {
+        let harness = try makeHarness(assistantWorked: true, authored: true)
+        defer { harness.cleanUp() }
+        try prepareAuthoredFeedback(harness)
+        harness.settings.automation.autoVerifyReReview = false
+        try await harness.poll()
+        try harness.write("drafts.json", "[]")
+        try harness.write("discussions.json", harness.log("published-discussions.json"))
+        try await harness.poll()
+        let item = try #require(harness.monitor.currentOpenItems.first)
+        #expect(item.canConfirmReReview)
+        #expect(harness.log("verification.log").isEmpty && harness.log("re-review.log").isEmpty)
+        let fingerprint = try #require(item.reReviewFingerprint)
+        let previous = harness.log("discussions.json")
+        try harness.write("discussions.json", previous.replacingOccurrences(of: "Review feedback", with: "Edited feedback"))
+        await harness.monitor.confirmReReview(item.id, head: head, fingerprint: fingerprint)
+        #expect(harness.log("re-review.log").isEmpty)
+        #expect(harness.monitor.confirmationStates[item.id] == .changed)
+        try await harness.poll()
+        let current = try #require(harness.monitor.currentOpenItems.first)
+        await harness.monitor.confirmReReview(item.id, head: head, fingerprint: try #require(current.reReviewFingerprint))
+        #expect(harness.log("re-review.log") == "requested\n")
+        await harness.monitor.confirmReReview(item.id, head: head, fingerprint: fingerprint)
+        #expect(harness.log("re-review.log") == "requested\n")
+    }
+
+    @Test func failedVerificationIsVisibleCachedAndCanBeRetriedWithoutPublishingAnything() async throws {
+        let harness = try makeHarness(assistantWorked: true, authored: true)
+        defer { harness.cleanUp() }
+        try prepareAuthoredFeedback(harness)
+        try await harness.poll()
+        try harness.write("fail-verification", "yes")
+        try harness.write("drafts.json", "[]")
+        try harness.write("discussions.json", harness.log("published-discussions.json"))
+        try await harness.poll()
+        let item = try #require(harness.monitor.currentOpenItems.first)
+        #expect(item.reReviewReadiness == .failed && item.canConfirmReReview)
+        #expect(harness.log("re-review.log").isEmpty)
+        try await harness.poll()
+        #expect(harness.log("verification.log") == "verified\n")
+        try FileManager.default.removeItem(at: harness.folder.appending(path: "fail-verification"))
+        await harness.monitor.retryReReview(item.id)
+        try await harness.settleVerification()
+        #expect(harness.log("re-review.log") == "requested\n")
+        #expect(harness.log("publish.log").isEmpty && harness.log("selected.log").isEmpty)
+    }
+    @Test func unavailableCLIBlocksAutomaticReReviewButKeepsManualConfirmation() async throws {
+        let harness = try makeHarness(assistantWorked: true, authored: true)
+        defer { harness.cleanUp() }
+        try prepareAuthoredFeedback(harness)
+        try harness.write("assistant-unavailable", "yes")
+        try await harness.poll()
+        await harness.monitor.publishDrafts(of: .init(projectID: 1, iid: 2))
+        try await harness.settleVerification()
+        #expect(harness.log("re-review.log").isEmpty)
+        let item = try #require(harness.monitor.currentOpenItems.first)
+        #expect(item.reReviewReadiness == .unavailable && item.canConfirmReReview)
+        await harness.monitor.confirmReReview(item.id, head: head,
+                                              fingerprint: try #require(item.reReviewFingerprint))
+        #expect(harness.log("re-review.log") == "requested\n")
     }
 
     @Test func publishButtonImmediatelyRequestsEligibleReReview() async throws {
@@ -463,8 +828,10 @@ import Testing
         try await harness.poll()
         #expect(harness.log("re-review.log").isEmpty)
         await harness.monitor.publishDrafts(of: .init(projectID: 1, iid: 2))
+        try await harness.settleVerification()
         #expect(harness.log("re-review.log") == "requested\n")
         #expect(harness.monitor.currentOpenItems.first?.draftCount == 0)
+        #expect(harness.monitor.currentOpenItems.first?.reReviewReadiness == nil)
         try await harness.poll()
         #expect(harness.log("re-review.log") == "requested\n")
     }
@@ -477,6 +844,7 @@ import Testing
         try harness.write("drafts.json", "[]")
         try harness.write("discussions.json", harness.log("published-discussions.json"))
         await harness.monitor.refreshPendingDrafts()
+        try await harness.settleVerification()
         #expect(harness.log("re-review.log") == "requested\n")
         #expect(harness.monitor.currentOpenItems.first?.draftCount == 0)
     }
@@ -495,6 +863,7 @@ import Testing
         try #require(!harness.log("user-check.log").isEmpty)
         try await harness.poll()
         await publisher.value
+        try await harness.settleVerification()
         #expect(harness.log("re-review.log") == "requested\n")
     }
 
@@ -503,6 +872,7 @@ import Testing
         defer { harness.cleanUp() }
         harness.settings.automation.publishDraftsWithoutConfirmation = true
         try harness.write("drafts.json", draftJSON)
+        try harness.recordVerdict("objections", head: head)
         try await harness.poll()
         try harness.write("inject-unseen-draft", "yes")
         try await harness.poll()
@@ -517,8 +887,8 @@ import Testing
         try prepareAuthoredFeedback(harness)
         try harness.write("drafts.json", #"[{"id":12,"author_id":3,"note":"Fixed","discussion_id":"abc"}]"#)
         try harness.assess(noteID: 40, body: "AI finding")
-        try harness.verifyFollowUpDrafts()
         try harness.write("discussions.json", #"[{"id":"abc","notes":[{"id":40,"author":{"id":8},"body":"AI finding","system":false,"resolvable":true,"resolved":false}]}]"#)
+        try harness.verifyFollowUpDrafts()
         try await harness.poll()
         try await harness.poll()
         #expect(harness.log("re-review.log") == "requested\n")
@@ -530,6 +900,7 @@ import Testing
         defer { harness.cleanUp() }
         harness.settings.automation.publishDraftsWithoutConfirmation = true
         try harness.write("drafts.json", draftJSON.replacingOccurrences(of: "Handle nil here.", with: "/merge"))
+        try harness.recordVerdict("objections", head: head)
         try await harness.poll()
         try await harness.poll()
         #expect(harness.log("selected.log").contains("/draft_notes/12/publish"))

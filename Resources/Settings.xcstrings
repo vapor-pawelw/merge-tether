@@ -84,7 +84,7 @@
         "en": {
           "stringUnit": {
             "state": "translated",
-            "value": "Folder for tasks that need project tools, like resolving conflicts. Leave empty to use the assistant's default."
+            "value": "Starting folder for manually opened assistant conversations. Automated tasks always use isolated per-run workspaces."
           }
         }
       }
@@ -150,7 +150,7 @@
         "en": {
           "stringUnit": {
             "state": "translated",
-            "value": "Applied to reviews and re-reviews dispatched through the Codex plugin."
+            "value": "Applied to review and re-review tasks run by Codex CLI."
           }
         }
       }
@@ -161,7 +161,7 @@
         "en": {
           "stringUnit": {
             "state": "translated",
-            "value": "Choose the review model directly in Claude Desktop."
+            "value": "Review tasks use the model configured in Claude CLI."
           }
         }
       }
@@ -221,270 +221,6 @@
         }
       }
     },
-    "settings.codexPlugin.title": {
-      "extractionState": "manual",
-      "localizations": {
-        "en": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "MergeTether plugin for Codex"
-          }
-        }
-      }
-    },
-    "settings.codexPlugin.checking": {
-      "extractionState": "manual",
-      "localizations": {
-        "en": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "Checking for the MergeTether plugin…"
-          }
-        }
-      }
-    },
-    "settings.codexPlugin.installing": {
-      "extractionState": "manual",
-      "localizations": {
-        "en": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "Installing the bundled plugin…"
-          }
-        }
-      }
-    },
-    "settings.codexPlugin.install": {
-      "extractionState": "manual",
-      "localizations": {
-        "en": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "Install MergeTether Plugin"
-          }
-        }
-      }
-    },
-    "settings.codexPlugin.recheck": {
-      "extractionState": "manual",
-      "localizations": {
-        "en": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "Check Again"
-          }
-        }
-      }
-    },
-    "settings.codexPlugin.missing": {
-      "extractionState": "manual",
-      "localizations": {
-        "en": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "Install the included plugin to set up automatic Codex chats without copying a prompt."
-          }
-        }
-      }
-    },
-    "settings.codexPlugin.disabled": {
-      "extractionState": "manual",
-      "localizations": {
-        "en": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "The plugin is installed but disabled. Enable it in Codex → Plugins."
-          }
-        }
-      }
-    },
-    "settings.codexPlugin.enabled": {
-      "extractionState": "manual",
-      "localizations": {
-        "en": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "The plugin is enabled. In Codex, go to Plugins → MergeTether → Setup and confirm the schedule. If the plugin is not visible, reopen Codex."
-          }
-        }
-      }
-    },
-    "settings.codexPlugin.detectionFailed": {
-      "extractionState": "manual",
-      "localizations": {
-        "en": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "Could not check installed plugins. Make sure Codex is up to date and try again."
-          }
-        }
-      }
-    },
-    "settings.codexPlugin.pythonRequired": {
-      "extractionState": "manual",
-      "localizations": {
-        "en": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "The plugin needs Python 3 from Xcode or the macOS Command Line Tools."
-          }
-        }
-      }
-    },
-    "settings.codexPlugin.installFailed": {
-      "extractionState": "manual",
-      "localizations": {
-        "en": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "Could not install the MergeTether plugin. Check that Codex is up to date and try again."
-          }
-        }
-      }
-    },
-    "settings.codexPlugin.openListener": {
-      "extractionState": "manual",
-      "localizations": {
-        "en": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "Open Listener"
-          }
-        }
-      }
-    },
-    "settings.codexPlugin.openFailed": {
-      "extractionState": "manual",
-      "localizations": {
-        "en": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "Could not open Codex. Open it from Applications."
-          }
-        }
-      }
-    },
-    "settings.codexPlugin.listening": {
-      "extractionState": "manual",
-      "localizations": {
-        "en": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "Codex checked the queue within the last 15 minutes."
-          }
-        }
-      }
-    },
-    "settings.codexPlugin.manualSetup": {
-      "extractionState": "manual",
-      "localizations": {
-        "en": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "Manual Setup"
-          }
-        }
-      }
-    },
-    "settings.automation.codexTemplate": {
-      "extractionState": "manual",
-      "localizations": {
-        "en": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "Use a verified permission template for new chats (beta)"
-          }
-        }
-      }
-    },
-    "settings.automation.codexTemplateHelp": {
-      "extractionState": "manual",
-      "localizations": {
-        "en": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "New Codex chats inherit the verified template’s access settings. Existing chats keep their own settings. MergeTether does not change Codex permissions."
-          }
-        }
-      }
-    },
-    "settings.automation.codexTemplateMissing": {
-      "extractionState": "manual",
-      "localizations": {
-        "en": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "No verified template yet. Open Setup Chat in the MergeTether plugin to prepare one. Until then, new chats open normally and may ask for tool approval."
-          }
-        }
-      }
-    },
-    "settings.automation.codexTemplateOpen": {
-      "extractionState": "manual",
-      "localizations": {
-        "en": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "Open verified template chat"
-          }
-        }
-      }
-    },
-    "settings.automation.codexTemplateReset": {
-      "extractionState": "manual",
-      "localizations": {
-        "en": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "Reset template"
-          }
-        }
-      }
-    },
-    "settings.automation.codexTemplateResetHelp": {
-      "extractionState": "manual",
-      "localizations": {
-        "en": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "Forgets MergeTether’s saved template link so Setup can register another chat. Keeps existing chats, queued work and Codex permissions unchanged."
-          }
-        }
-      }
-    },
-    "settings.automation.codexTemplateResetFailed": {
-      "extractionState": "manual",
-      "localizations": {
-        "en": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "Could not reset the saved template. Check access to MergeTether’s local queue and try again."
-          }
-        }
-      }
-    },
-    "settings.automation.codexRelay": {
-      "extractionState": "manual",
-      "localizations": {
-        "en": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "Use a Codex listener for automatic GUI chats"
-          }
-        }
-      }
-    },
-    "settings.automation.codexRelayHelp": {
-      "extractionState": "manual",
-      "localizations": {
-        "en": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "Codex review and follow-up tasks use glab to read their merge request. Set up the listener in the MergeTether plugin. Codex tool approvals still apply."
-          }
-        }
-      }
-    },
     "settings.automation.assistant.lastCheck.%@": {
       "extractionState": "manual",
       "localizations": {
@@ -502,7 +238,7 @@
         "en": {
           "stringUnit": {
             "state": "translated",
-            "value": "Detected"
+            "value": "CLI ready"
           }
         }
       }
@@ -513,7 +249,7 @@
         "en": {
           "stringUnit": {
             "state": "translated",
-            "value": "Not detected"
+            "value": "CLI not ready"
           }
         }
       }
@@ -525,28 +261,6 @@
           "stringUnit": {
             "state": "translated",
             "value": "Enable recommended automation"
-          }
-        }
-      }
-    },
-    "settings.automation.reuseChats": {
-      "extractionState": "manual",
-      "localizations": {
-        "en": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "Reuse the assistant chat for each merge request"
-          }
-        }
-      }
-    },
-    "settings.automation.reuseChats.help": {
-      "extractionState": "manual",
-      "localizations": {
-        "en": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "The Codex listener sends follow-ups to the same chat for each merge request and account. Conflict tasks allowed to push stay separate."
           }
         }
       }
@@ -579,7 +293,7 @@
         "en": {
           "stringUnit": {
             "state": "translated",
-            "value": "Assistant rules match all projects when blank. Shell scripts require exact project paths."
+            "value": "CLI handlers match all projects when blank. Use repository paths to limit their scope."
           }
         }
       }
@@ -634,7 +348,7 @@
         "en": {
           "stringUnit": {
             "state": "translated",
-            "value": "Claude Desktop"
+            "value": "Claude CLI"
           }
         }
       }
@@ -645,7 +359,7 @@
         "en": {
           "stringUnit": {
             "state": "translated",
-            "value": "Codex Desktop"
+            "value": "Codex CLI"
           }
         }
       }
@@ -667,7 +381,7 @@
         "en": {
           "stringUnit": {
             "state": "translated",
-            "value": "Allow tools from my assistant profile"
+            "value": "Allow tasks requiring project tool permission"
           }
         }
       }
@@ -678,7 +392,7 @@
         "en": {
           "stringUnit": {
             "state": "translated",
-            "value": "Controls the prompt and working folder. The desktop assistant still uses its own permission settings."
+            "value": "Grant the project tool permission for listed repositories, including eligible conflict tasks. Other assistant tasks can still use tools allowed by their CLI sandbox. Automated work stays in an isolated per-run workspace."
           }
         }
       }
@@ -777,7 +491,7 @@
         "en": {
           "stringUnit": {
             "state": "translated",
-            "value": "Opens a prepared Code draft in Claude Desktop. Review and send it there to save the session."
+            "value": "Runs tasks locally through signed-in Claude CLI. Progress and results stay in MergeTether."
           }
         }
       }
@@ -788,7 +502,7 @@
         "en": {
           "stringUnit": {
             "state": "translated",
-            "value": "Opens a prepared draft in Codex Desktop. Send it there to create the chat, or set up the Codex listener."
+            "value": "Runs tasks locally through signed-in Codex CLI. Progress and results stay in MergeTether."
           }
         }
       }
@@ -854,7 +568,7 @@
         "en": {
           "stringUnit": {
             "state": "translated",
-            "value": "Queues a conflict task for the selected desktop assistant. Pushing to a source branch requires separate permission and a listed project."
+            "value": "Prepares a conflict-resolution task through the selected CLI. Pushing to a source branch requires separate permission and a listed project."
           }
         }
       }
@@ -898,7 +612,7 @@
         "en": {
           "stringUnit": {
             "state": "translated",
-            "value": "Enabled assistant rules need a task title and instructions. Enabled shell rules need a command."
+            "value": "Enabled CLI handlers need a task title and instructions. Legacy scripts cannot run as MR automation."
           }
         }
       }
@@ -920,7 +634,7 @@
         "en": {
           "stringUnit": {
             "state": "translated",
-            "value": "GitLab to-dos are marked done after a successful configured script or confirmed Codex delivery of a feedback task. Opening a draft keeps the to-do pending."
+            "value": "A recognized MR event is marked read after its action is saved durably. Action progress and completion are tracked separately on the MR."
           }
         }
       }
@@ -1063,7 +777,7 @@
         "en": {
           "stringUnit": {
             "state": "translated",
-            "value": "Selected assistant"
+            "value": "Selected assistant CLI"
           }
         }
       }
@@ -1074,7 +788,7 @@
         "en": {
           "stringUnit": {
             "state": "translated",
-            "value": "Shell command"
+            "value": "Legacy script (unsupported)"
           }
         }
       }
@@ -1173,7 +887,7 @@
         "en": {
           "stringUnit": {
             "state": "translated",
-            "value": "Prepare in assistant"
+            "value": "Run with assistant CLI"
           }
         }
       }
@@ -1217,7 +931,7 @@
         "en": {
           "stringUnit": {
             "state": "translated",
-            "value": "Preview records what would run in Workflow Activity. Notify sends a notification. Prepare adds a task to the desktop assistant queue."
+            "value": "Preview records what would run in Activity. Notify sends a notification. Prepare runs a task through the selected CLI."
           }
         }
       }
@@ -1338,7 +1052,7 @@
         "en": {
           "stringUnit": {
             "state": "translated",
-            "value": "Starting folder (optional)"
+            "value": "Manual assistant starting folder (optional)"
           }
         }
       }
@@ -1800,7 +1514,7 @@
         "en": {
           "stringUnit": {
             "state": "translated",
-            "value": "Everything else that reaches other people waits in Inbox until you confirm it."
+            "value": "Everything else that reaches other people waits on the MR card until you confirm it."
           }
         }
       }
@@ -1812,105 +1526,6 @@
           "stringUnit": {
             "state": "translated",
             "value": "Approve merge requests automatically"
-          }
-        }
-      }
-    },
-    "settings.claudePlugin.title": {
-      "extractionState": "manual",
-      "localizations": {
-        "en": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "Claude Code plugin"
-          }
-        }
-      }
-    },
-    "settings.claudePlugin.install": {
-      "extractionState": "manual",
-      "localizations": {
-        "en": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "Install MergeTether plugin"
-          }
-        }
-      }
-    },
-    "settings.claudePlugin.installing": {
-      "extractionState": "manual",
-      "localizations": {
-        "en": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "Installing the plugin in Claude Code…"
-          }
-        }
-      }
-    },
-    "settings.claudePlugin.missing": {
-      "extractionState": "manual",
-      "localizations": {
-        "en": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "Not installed. Without it, Claude can’t link its session to the merge request or record review verdicts with MergeTether’s tools."
-          }
-        }
-      }
-    },
-    "settings.claudePlugin.disabled": {
-      "extractionState": "manual",
-      "localizations": {
-        "en": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "Installed but disabled in Claude Code. Enable “merge-tether” in Claude Code’s plugin settings."
-          }
-        }
-      }
-    },
-    "settings.claudePlugin.enabled": {
-      "extractionState": "manual",
-      "localizations": {
-        "en": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "Installed. New Claude Code sessions get MergeTether’s tools."
-          }
-        }
-      }
-    },
-    "settings.claudePlugin.unavailable": {
-      "extractionState": "manual",
-      "localizations": {
-        "en": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "Claude Code’s command-line tool wasn’t found, so the plugin can’t be checked."
-          }
-        }
-      }
-    },
-    "settings.claudePlugin.installFailed": {
-      "extractionState": "manual",
-      "localizations": {
-        "en": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "Couldn’t install the plugin. Check that Claude Code is signed in, then try again."
-          }
-        }
-      }
-    },
-    "settings.claudePlugin.help": {
-      "extractionState": "manual",
-      "localizations": {
-        "en": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "Each merge request gets one Claude session. Claude doesn't let other apps send prompts, so you press Send on the first task; later tasks reopen the session with the prompt ready to paste."
           }
         }
       }
@@ -1954,7 +1569,7 @@
         "en": {
           "stringUnit": {
             "state": "translated",
-            "value": "It commits and pushes tested fixes for reviewers' feedback to your branch. Off: fixes stay in the assistant chat."
+            "value": "It commits and pushes tested fixes for reviewers’ feedback to your branch. Off: proposed fixes stay in the task result."
           }
         }
       }
@@ -2009,7 +1624,7 @@
         "en": {
           "stringUnit": {
             "state": "translated",
-            "value": "Once the assistant has no objections to the latest commit and every discussion is resolved. You can turn this off for a single MR in Merge Requests → Reviewed."
+            "value": "Once the assistant has no objections to the latest commit and every discussion is resolved. You can turn this off for a single MR on its Reviewing card."
           }
         }
       }
@@ -2020,7 +1635,7 @@
         "en": {
           "stringUnit": {
             "state": "translated",
-            "value": "Off: the assistant's comments wait in Inbox for you. On: they're published as soon as the assistant finishes writing them."
+            "value": "Off: the assistant's comments wait on the MR card for you. On: they're published as soon as the assistant finishes writing them."
           }
         }
       }
@@ -2043,6 +1658,226 @@
           "stringUnit": {
             "state": "translated",
             "value": "Checkpoints"
+          }
+        }
+      }
+    },
+    "settings.assistant.setup.title": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Set up %@"
+          }
+        }
+      }
+    },
+    "settings.assistant.setup.body": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Automation requires a working, signed-in CLI. Your current choice stays unchanged until verification succeeds."
+          }
+        }
+      }
+    },
+    "settings.assistant.setup.checking": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Checking requirements…"
+          }
+        }
+      }
+    },
+    "settings.assistant.setup.install": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Install or update CLI"
+          }
+        }
+      }
+    },
+    "settings.assistant.setup.installHelp": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Install the command-line tool using the provider’s official installer. Then sign in if requested."
+          }
+        }
+      }
+    },
+    "settings.assistant.setup.signIn": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Sign in using Terminal"
+          }
+        }
+      }
+    },
+    "settings.assistant.setup.signInHelp": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Complete sign-in in Terminal, then return here and check again."
+          }
+        }
+      }
+    },
+    "settings.assistant.setup.failed": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Setup did not finish. Your previous choice is unchanged. Retry or cancel."
+          }
+        }
+      }
+    },
+    "settings.assistant.setup.cancel": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Cancel"
+          }
+        }
+      }
+    },
+    "settings.assistant.setup.recheck": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Check again"
+          }
+        }
+      }
+    },
+    "settings.assistant.setup.action": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Set up assistant"
+          }
+        }
+      }
+    },
+    "settings.assistant.status.ready": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "%@ is ready."
+          }
+        }
+      }
+    },
+    "settings.assistant.status.cli": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "%@ is missing. Assistant automation is unavailable until the CLI is installed."
+          }
+        }
+      }
+    },
+    "settings.assistant.status.invalid": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "%@ cannot run or needs an update. Assistant automation is unavailable."
+          }
+        }
+      }
+    },
+    "settings.assistant.status.login": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "%@ needs sign-in. Assistant automation is unavailable."
+          }
+        }
+      }
+    },
+    "settings.verification.title": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Re-review verification"
+          }
+        }
+      }
+    },
+    "settings.verification.enabled": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Verify feedback automatically before requesting re-review"
+          }
+        }
+      }
+    },
+    "settings.verification.help": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Use the selected assistant’s signed-in CLI to assess comments and the current diff. Missing evidence or a failed check leaves an action on the MR. When off, confirm readiness manually; CLI installation and sign-in are not required."
+          }
+        }
+      }
+    },
+    "settings.verification.model": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Verification model"
+          }
+        }
+      }
+    },
+    "settings.automation.runner.legacyHelp": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "This saved script is retained for reference. MR automation no longer runs scripts or substitutes AI for them. Choose the assistant CLI to enable this handler."
           }
         }
       }

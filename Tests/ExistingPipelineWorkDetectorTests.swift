@@ -72,4 +72,24 @@ struct ExistingPipelineWorkDetectorTests {
     private func key(pipelineID: Int) -> ExistingPipelineWorkDetector.Key {
         .init(host: "gitlab.example.org", projectID: 42, mergeRequestIID: 7, pipelineID: pipelineID)
     }
+    @Test("explicit retry owns a fresh reservation that an old terminal run cannot release")
+    func explicitRetryHasDistinctOwnership() throws {
+        let root = temporaryDirectory()
+        defer { try? FileManager.default.removeItem(at: root) }
+        let detector = ExistingPipelineWorkDetector(directory: root)
+        let firstClaim = try detector.registerRun(for: key(pipelineID: 12))
+        let original = try #require(firstClaim)
+        #expect(try detector.registerRun(for: key(pipelineID: 12), explicitRetry: true) == nil)
+        try detector.finishHandoff(for: original)
+        #expect(try detector.registerRun(for: key(pipelineID: 12)) == nil)
+        let retryClaim = try detector.registerRun(for: key(pipelineID: 12), explicitRetry: true)
+        let retry = try #require(retryClaim)
+        #expect(retry.reservationID != original.reservationID)
+        try detector.finishHandoff(for: original)
+        #expect(FileManager.default.fileExists(atPath: try detector.externalRegistrationURL(for: retry).path))
+        try detector.finishHandoff(for: retry)
+        #expect(!FileManager.default.fileExists(atPath: try detector.externalRegistrationURL(for: retry).path))
+        #expect(detector.status(for: retry) == .registered)
+    }
+
 }

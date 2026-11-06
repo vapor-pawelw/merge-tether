@@ -219,6 +219,9 @@ struct MergeRequestsView: View {
             } else {
                 MergeRequestSummary(item: item)
             }
+            ReReviewControls(item: item, monitor: monitor.attention)
+                .padding(.horizontal, 12)
+                .padding(.bottom, item.reReviewReadiness == nil ? 0 : 10)
             assistantDetails(item)
                 .padding(.horizontal, 12)
                 .padding(.bottom, 10)

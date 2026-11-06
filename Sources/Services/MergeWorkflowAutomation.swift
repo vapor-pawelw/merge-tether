@@ -14,6 +14,7 @@ struct MergeWorkflowActivityEntry: Codable, Identifiable {
     var state: MergeWorkflowActivityState
     var summary: String?
     var chatURL: URL?
+    var assistantJobID: UUID?
 }
 
 @MainActor
@@ -49,6 +50,37 @@ final class MergeWorkflowAutomation {
             if entry.state == .queued || entry.state == .running { entry.state = .skipped }
             return entry
         }
+        synchronizeAssistantJobs()
+    }
+
+    /// A CLI result completes workflow activity only when its linked run finished.
+    /// Historical desktop deliveries have no execution evidence and remain history.
+    func synchronizeAssistantJobs() {
+        var changed = false
+        for index in history.indices {
+            if let updated = settings.workflowActivity.first(where: { $0.id == history[index].id }),
+               updated.assistantJobID != history[index].assistantJobID {
+                history[index].assistantJobID = updated.assistantJobID
+                changed = true
+            }
+            guard let id = history[index].assistantJobID,
+                  let job = settings.assistantHandoffs.first(where: { $0.id == id }),
+                  let execution = job.execution else { continue }
+            let state: MergeWorkflowActivityState = switch execution.state {
+            case .queued: .waitingForAssistant
+            case .running: .running
+            case .succeeded: .completed
+            case .blocked, .failed, .interrupted: .failed
+            case .cancelled: .skipped
+            }
+            let summary = execution.summary ?? execution.error
+            if history[index].state != state || history[index].summary != summary {
+                history[index].state = state
+                history[index].summary = summary
+                changed = true
+            }
+        }
+        if changed { saveHistory() }
     }
 
     func observe(_ authored: [GitLabMergeRequest], host: String, user: GitLabAuthenticatedUser) {
@@ -189,11 +221,11 @@ final class MergeWorkflowAutomation {
                   latest.headPipeline?.status == "failed"
             else { throw CancellationError() }
 
-            guard try detector.registerHandoff(for: key) else {
+            guard let ownedReservation = try detector.registerRun(for: key) else {
                 update(entry.id, .alreadyRegistered)
                 return
             }
-            handoff = key
+            handoff = ownedReservation
         }
         defer {
             if let handoff { try? detector.finishHandoff(for: handoff) }
@@ -258,7 +290,7 @@ final class MergeWorkflowAutomation {
         }
         let isolation = mrWorkflow == .followUp ? "\n\n\(AssistantAutomationRunner.isolatedFixInstructions)" : ""
         let suppliedEvidence = readsInCodex ? "" : "\n\n<gitlab-evidence>\n" + evidence + "\n</gitlab-evidence>"
-        try await AssistantAutomationRunner.launch(
+        let job = try await AssistantAutomationRunner.launch(
             settingsBeforeLaunch.assistant,
             title: "\(repository) !\(latest.iid) (\(latest.author.assistantTitleName(viewerUsername: entry.user.username)))",
             stackPosition: stackPosition,
@@ -269,9 +301,15 @@ final class MergeWorkflowAutomation {
             work: workKey(entry), username: entry.user.username, settings: settings, pipelineReservation: handoff,
             feedbackNoteIDs: feedbackIDs, isReview: event.kind == .reviewUpdate, mrWorkflow: mrWorkflow
         )
-        // The reservation covers the queued desktop task until the user dismisses it.
+        // Transfer this owned reservation to the CLI run; terminal completion
+        // releases it through the monitor callback rather than user dismissal.
         handoff = nil
-        update(entry.id, .waitingForAssistant)
+        if let index = history.firstIndex(where: { $0.id == entry.id }) {
+            history[index].assistantJobID = job.id
+            history[index].state = .waitingForAssistant
+            saveHistory()
+        }
+        synchronizeAssistantJobs()
     }
 
     private func configuredRule(for event: MergeWorkflowEvent) -> MergeWorkflowRule? {

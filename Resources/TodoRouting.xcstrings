@@ -1,0 +1,50 @@
+{
+  "sourceLanguage": "en",
+  "strings": {
+    "todoRouting.missingRun": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "The associated run is unavailable. Check the merge request before trying again."
+          }
+        }
+      }
+    },
+    "todoRouting.needsRecheck": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "This action needs a fresh check against the current merge request."
+          }
+        }
+      }
+    },
+    "todoRouting.previousAttempt": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "This event has an earlier attempt. Check its result before starting another run."
+          }
+        }
+      }
+    },
+    "todoRouting.shellUnsupported": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "This action uses a configured shell command. Run it explicitly outside automatic MR handling or switch the action to a CLI assistant."
+          }
+        }
+      }
+    }
+  },
+  "version": "1.0"
+}

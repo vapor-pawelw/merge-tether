@@ -21,7 +21,9 @@ open GitLabTodos.xcworkspace
 
 ## Running
 
-Build and run the `GitLabTodos` scheme from Xcode. The app has `LSUIElement = true` and will appear as a menu bar item only — no Dock icon, no main window.
+Build and run the `GitLabTodos` scheme from Xcode. MergeTether is a regular Dock application with a resizable main window. Closing the window keeps background monitoring active until the app is quit. The release bundle identifier and legacy target/scheme names remain unchanged.
+
+Manual GitLab management requires authenticated `glab`. Assistant automation additionally requires a compatible, signed-in Codex CLI or Claude CLI. Desktop assistant applications and their listener/plugin setup are not prerequisites.
 
 ## Command-line build
 
@@ -37,9 +39,9 @@ xcodebuild \
 
 The built `.app` bundle lives under the Xcode DerivedData path printed at the end of the build.
 
-## If macOS blocks an otherwise enabled menu bar item
+## Local installation identity
 
-On macOS Tahoe, Control Center can block a bundle identifier even while the Menu Bar settings toggle is enabled. Look for `Moving host to blocked list` in the Control Center log before treating this as an app layout bug. If the same binary works under a fresh identifier, a local Debug build can use a separate `PRODUCT_BUNDLE_IDENTIFIER` supplied to the build command. Preserve the installed local identifier on later rebuilds and migrate the app's preferences once, excluding `NSStatusItem` keys. The release bundle identifier stays stable.
+A development installation may use a separate `PRODUCT_BUNDLE_IDENTIFIER` supplied to the build command. Preserve that identifier on later rebuilds so preferences and permissions stay attached to the same installation. Keep the release identifier unchanged. Old menu-bar placement preferences are no longer used by the main-window app.
 
 ## Running tests
 
@@ -57,12 +59,14 @@ xcodebuild \
 rm -rf "$test_home"
 ```
 
-Tests use Swift Testing. Relay/helper tests run without live GitLab writes:
+Tests use Swift Testing. The standalone proof helpers have separate tests that run without live GitLab writes:
 
 ```bash
-cd plugins/merge-tether
-PYTHONDONTWRITEBYTECODE=1 python3 -m unittest discover -s tests
+PYTHONDONTWRITEBYTECODE=1 PYTHONPATH=Helpers/Automation \
+  python3 -m unittest discover -s Tests/AutomationHelpers
 ```
+
+The app packages `Helpers/Automation` as `Contents/Resources/Automation`, containing `evidence.py` and `author_follow_up.py`. They provide read-only GitLab verification and local proof records independently of desktop plugins or MCP setup. Historical plugin sources and tests remain under `plugins/merge-tether` for compatibility, but that package is no longer bundled or required for app setup.
 
 Remove scratch Derived Data and generated projects after validation. Preserve a
 runnable app only when requested. Local debug rebuilds must retain the installed

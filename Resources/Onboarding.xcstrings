@@ -18,7 +18,7 @@
         "en" : {
           "stringUnit" : {
             "state" : "translated",
-            "value" : "Choose whether MergeTether should automatically prepare work in a locally installed assistant."
+            "value" : "Choose whether MergeTether should automate MR work through a signed-in Codex or Claude CLI. You can also continue with manual actions only."
           }
         }
       }
@@ -172,7 +172,7 @@
         "en" : {
           "stringUnit" : {
             "state" : "translated",
-            "value" : "MergeTether will start watching your inbox now. You can tweak refresh cadence and notifications in Settings."
+            "value" : "MergeTether will start watching your merge requests and inbox. Review automation results and pending decisions in the main window."
           }
         }
       }

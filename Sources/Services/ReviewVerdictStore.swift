@@ -21,7 +21,14 @@ struct ReviewVerdict: Codable, Equatable, Sendable {
         head: String, discussions: [GitLabMergeRequestDiscussion] = [],
         reviewerID: Int? = nil, publishedDrafts: Set<String> = []
     ) -> Bool {
-        guard version == 1 && verdict == .noObjections && headSHA == head,
+        verdict == .noObjections && covers(head: head, discussions: discussions,
+            reviewerID: reviewerID, publishedDrafts: publishedDrafts)
+    }
+
+    /// Both outcomes prove the review ran; approval additionally requires no objections.
+    func covers(head: String, discussions: [GitLabMergeRequestDiscussion],
+                reviewerID: Int? = nil, publishedDrafts: Set<String> = []) -> Bool {
+        guard version == 1 && headSHA == head,
               Self.fingerprint(discussions) != nil else { return false }
         // Older receipts remain valid only when there is no discussion content to miss.
         guard let recorded = discussionFingerprint else {
@@ -59,8 +66,8 @@ struct ReviewVerdict: Codable, Equatable, Sendable {
     }
 }
 
-/// Verdicts are written by the assistant: the Codex plugin's `record_review_verdict` tool,
-/// or the shell fallback in the review instructions. They live next to the relay queue.
+/// Verdicts are written by the standalone evidence helper after fresh GitLab reads.
+/// Their existing storage location is preserved for upgrade compatibility.
 enum ReviewVerdictStore {
     nonisolated static let directory = URL.homeDirectory
         .appending(path: "Library/Application Support/com.vaporpw.GitLabTodos/Codex Desktop Relay/verdicts",
@@ -107,10 +114,10 @@ enum ReviewVerdictStore {
 
     /// Added to every review prompt so MergeTether knows when a review of a given head is finished.
     nonisolated static func recordingInstructions(host: String, projectID: Int, iid: Int) -> String {
-        let helper = Bundle.main.resourceURL?.appending(path: "merge-tether/relay.py").path ?? "<MergeTether.app>/Contents/Resources/merge-tether/relay.py"
+        let helper = Bundle.main.resourceURL?.appending(path: "Automation/evidence.py").path ?? "<MergeTether.app>/Contents/Resources/Automation/evidence.py"
         let command = "'" + helper.replacingOccurrences(of: "'", with: "'\\''") + "'"
         return """
-            When your review of the current head and all current discussions is finished and every warranted draft is saved, record your verdict for that exact head SHA: `no_objections` if you have no open findings, otherwise `objections`. MergeTether approves on my behalf only after a current `no_objections` verdict, with no pending drafts and every discussion resolved. A new comment or edited discussion invalidates the verdict even without a new commit. Record a new verdict after every re-review. Use `record_review_verdict` with host `\(host)`, projectID `\(projectID)`, iid `\(iid)`, headSHA and verdict; it binds the current GitLab discussion content automatically. Its success response must include `discussionFingerprint`; an older tool response without it needs the helper fallback. If that tool is unavailable or returns no fingerprint, run `python3 \(command) record-verdict \(host) \(projectID) \(iid) <HEAD_SHA> <VERDICT>` with placeholders filled in. Do not hand-write a receipt without discussion evidence.
+            When your review of the current head and all current discussions is finished and every warranted draft is saved, record your verdict for that exact head SHA: `no_objections` if you have no open findings, otherwise `objections`. MergeTether approves on my behalf only after a current `no_objections` verdict, with no pending drafts and every discussion resolved. A new comment or edited discussion invalidates the verdict even without a new commit. Record a new verdict after every re-review. Run the bundled standalone helper `/usr/bin/python3 -B \(command) record-verdict \(host) \(projectID) \(iid) <HEAD_SHA> <VERDICT>` with placeholders filled in. It reads GitLab using the signed-in glab account, rechecks the MR head and binds the current discussion content. Its success response must include `discussionFingerprint`. No assistant plugin or MCP tool is needed. Do not hand-write a receipt without discussion evidence.
             """
     }
 }

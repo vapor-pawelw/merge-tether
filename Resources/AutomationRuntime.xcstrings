@@ -1,0 +1,50 @@
+{
+  "sourceLanguage": "en",
+  "strings": {
+    "runtime.desktopUnavailable": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "The selected assistant's desktop app is unavailable."
+          }
+        }
+      }
+    },
+    "runtime.cannotBuildLink": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "MergeTether could not open the assistant."
+          }
+        }
+      }
+    },
+    "runtime.alreadyActive": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "An assistant job is already active for this merge request."
+          }
+        }
+      }
+    },
+    "runtime.legacyJob": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "This legacy desktop task is retained as history. Start a fresh action from the merge request."
+          }
+        }
+      }
+    }
+  },
+  "version": "1.0"
+}

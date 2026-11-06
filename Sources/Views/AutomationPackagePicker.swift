@@ -36,7 +36,10 @@ struct AutomationAssistantPicker: View {
     @Binding var assistant: AutomationAssistant
     let available: Set<AutomationAssistant>
     let onRefresh: () -> Void
+    var requireCLI = true
+    var statuses: [AutomationAssistant: AssistantDependencyStatus] = [:]
     @State private var lastCheck: Date?
+    @State private var setupCandidate: AutomationAssistant?
 
     var body: some View {
         VStack(alignment: .leading, spacing: 8) {
@@ -44,7 +47,10 @@ struct AutomationAssistantPicker: View {
                 HStack {
                     Text(candidate.displayName)
                     Spacer()
-                    if available.contains(candidate) {
+                    if let status = statuses[candidate], !status.isReady {
+                        Text(status.message(for: candidate)).foregroundStyle(.orange)
+                            .fixedSize(horizontal: false, vertical: true)
+                    } else if available.contains(candidate) {
                         Label(.Settings.settingsAutomationAssistantDetected, systemImage: "checkmark.circle")
                             .foregroundStyle(.green)
                     } else {
@@ -55,11 +61,10 @@ struct AutomationAssistantPicker: View {
                 .font(.caption)
             }
 
-            Picker(selection: $assistant) {
+            Picker(selection: Binding(get: { assistant }, set: { setupCandidate = $0 })) {
                 ForEach(AutomationAssistant.allCases, id: \.self) { candidate in
                     Text(candidate.displayName)
                         .tag(candidate)
-                        .disabled(!available.contains(candidate))
                 }
             } label: {
                 Text(.Settings.settingsAutomationAssistantPicker)
@@ -69,6 +74,7 @@ struct AutomationAssistantPicker: View {
                 Button(action: check) {
                     Text(.Settings.settingsAutomationPackageRecheck)
                 }
+                Button { setupCandidate = assistant } label: { Text(.Settings.settingsAssistantSetupAction) }
                 if let lastCheck {
                     Text(.Settings.settingsAutomationAssistantLastCheck(lastCheck.formatted(date: .omitted, time: .standard)))
                         .font(.caption)
@@ -77,6 +83,12 @@ struct AutomationAssistantPicker: View {
             }
         }
         .onAppear(perform: check)
+        .sheet(item: $setupCandidate) { candidate in
+            AssistantSetupView(assistant: candidate, requireCLI: true) {
+                assistant = candidate
+                check()
+            }
+        }
     }
 
     private func check() {

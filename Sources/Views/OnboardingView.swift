@@ -7,7 +7,8 @@ struct OnboardingView: View {
     @State private var step: Step = .glabInstall
     @State private var automationChoice: AutomationPackageChoice?
     @State private var assistant: AutomationAssistant
-    @State private var enableCodexRelay = false
+    @State private var pendingAutomation: AutomationSettings?
+    @State private var showingAssistantSetup = false
 
     init(monitor: TodoMonitorService) {
         self.monitor = monitor
@@ -51,14 +52,20 @@ struct OnboardingView: View {
                 LaunchAtLoginStep(monitor: monitor)
             case .automation:
                 AutomationPackageStep(
-                    monitor: monitor, assistant: $assistant, selection: $automationChoice,
-                    enableCodexRelay: $enableCodexRelay
+                    monitor: monitor, assistant: $assistant, selection: $automationChoice
                 )
             case .done:
                 OnboardingDoneStep()
             }
         }
         .frame(minWidth: 560, minHeight: 440)
+        .sheet(isPresented: $showingAssistantSetup) {
+            if let pendingAutomation {
+                AssistantSetupView(assistant: pendingAutomation.assistant, requireCLI: true) {
+                    complete(automation: pendingAutomation)
+                }
+            }
+        }
     }
 
     private var canContinue: Bool {
@@ -87,12 +94,21 @@ struct OnboardingView: View {
     }
 
     private func finish() {
+        var updated = monitor.settings.automation
         if monitor.settings.automation.packageDecision == .undecided, let automationChoice {
-            automationChoice.apply(to: &monitor.settings.automation, assistant: assistant)
-            if automationChoice == .recommended, assistant == .codex, enableCodexRelay {
-                monitor.settings.automation.codexRelayEnabled = true
+            automationChoice.apply(to: &updated, assistant: assistant)
+
+            if automationChoice == .recommended {
+                pendingAutomation = updated
+                showingAssistantSetup = true
+                return
             }
         }
+        complete(automation: updated)
+    }
+
+    private func complete(automation: AutomationSettings) {
+        monitor.settings.automation = automation
         monitor.settings.onboardingCompleted = true
         monitor.settings.save()
         monitor.start()

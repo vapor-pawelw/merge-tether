@@ -55,6 +55,18 @@ struct SettingsManagerTests {
         #expect(reloaded.glabPath?.path == "/opt/homebrew/bin/glab")
     }
 
+    @Test func ignoredMRsPersistPerHostAccountProjectAndNumber() {
+        let defaults = makeDefaults()
+        let settings = SettingsManager(defaults: defaults)
+        let ignored = MRAutomationScope.Target(host: "gitlab.example.org", username: "me", projectID: 7, iid: 42)
+        settings.ignoredMergeRequests.insert(ignored)
+        settings.save()
+        let reloaded = SettingsManager(defaults: defaults)
+        #expect(reloaded.ignoredMergeRequests == [ignored])
+        #expect(!reloaded.ignoredMergeRequests.contains(.init(host: "other.example.org", username: "me", projectID: 7, iid: 42)))
+        #expect(!reloaded.ignoredMergeRequests.contains(.init(host: "gitlab.example.org", username: "other", projectID: 7, iid: 42)))
+    }
+
     @Test("clearing optional fields removes them from defaults")
     func clearsOptionals() {
         let defaults = makeDefaults()
@@ -81,4 +93,70 @@ struct SettingsManagerTests {
         let reloaded = SettingsManager(defaults: defaults)
         #expect(reloaded.isFirstLaunch == false)
     }
+    @MainActor @Test func explicitPolicySavesNotifySynchronouslyWithoutReentrantDuplicates() throws {
+        let suite = "SettingsPolicyCallback.\(UUID())"
+        let defaults = try #require(UserDefaults(suiteName: suite))
+        defer { defaults.removePersistentDomain(forName: suite) }
+        let settings = SettingsManager(defaults: defaults)
+        let previous = settings.automation
+        var callbacks: [AutomationSettings] = []
+        settings.onAutomationChanged = { old in
+            callbacks.append(old)
+            #expect(SettingsManager(defaults: defaults).automation == settings.automation)
+            settings.save()
+        }
+        settings.notificationsEnabled.toggle()
+        settings.save()
+        #expect(callbacks.isEmpty)
+        settings.automation.allowFollowUpPush.toggle()
+        #expect(callbacks.isEmpty)
+        settings.save()
+        #expect(callbacks == [previous])
+
+        let beforeScopeChange = settings.automation
+        settings.automation.scope.mode = .selected
+        settings.save()
+        #expect(callbacks == [previous, beforeScopeChange])
+        settings.onAutomationChanged = nil
+    }
+
+    @Test func scopeSaveCancelsOnlyItsPausedAutomaticJob() async throws {
+        let suite = "ScopeCancellation.\(UUID())"
+        let defaults = try #require(UserDefaults(suiteName: suite))
+        defer { defaults.removePersistentDomain(forName: suite) }
+        let settings = SettingsManager(defaults: defaults)
+        settings.glabPath = URL(fileURLWithPath: "/usr/bin/false")
+        let coordinator = AssistantJobCoordinator(maximumConcurrentJobs: 3, execute: { _, _ in
+            try await Task.sleep(for: .seconds(30))
+            return .init(result: .init(status: .succeeded, summary: "Fixture"), output: "")
+        })
+        let monitor = TodoMonitorService(settings: settings, cancelPolicyJob: { id, _ in coordinator.cancel(id) })
+        defer { monitor.stopTimer() }
+        let host = "scope.example.org"
+        let jobs = [1, 2, 3].map { iid in
+            AssistantAutomationRunner.Handoff(id: UUID(), key: .init(assistant: .codex,
+                work: .init(host: host, projectID: 1, iid: iid), username: "me", workspace: "", access: .gitLabRead),
+                title: "Fixture", prompt: "", createdAt: Date(), allowsPush: false,
+                execution: .init(state: .queued), manual: iid == 3)
+        }
+        settings.assistantHandoffs = jobs
+        for job in jobs { #expect(coordinator.schedule(job, settings: settings)) }
+        settings.automation.scope[.init(host: host, username: "me", projectID: 1, iid: 99)] = .paused
+        settings.save()
+        try await Task.sleep(for: .milliseconds(100))
+        #expect(settings.assistantHandoffs.allSatisfy { $0.execution?.state.isActive == true })
+        settings.automation.scope[.init(host: host, username: "me", projectID: 1, iid: 1)] = .paused
+        settings.automation.scope[.init(host: host, username: "me", projectID: 1, iid: 3)] = .paused
+        settings.save()
+        try await Task.sleep(for: .milliseconds(100))
+        #expect(settings.assistantHandoffs[0].execution?.state == .cancelled)
+        #expect(settings.assistantHandoffs[1].execution?.state.isActive == true)
+        #expect(settings.assistantHandoffs[2].execution?.state.isActive == true)
+        for job in jobs { coordinator.cancel(job.id) }
+        let deadline = ContinuousClock.now + .seconds(2)
+        while jobs.contains(where: { coordinator.isRunning($0.id) }), ContinuousClock.now < deadline {
+            try await Task.sleep(for: .milliseconds(10))
+        }
+    }
+
 }

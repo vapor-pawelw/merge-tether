@@ -45,6 +45,26 @@ struct MergeRequestBrowserSnapshotTests {
         #expect(result.reviewed.map(\.id.iid) == [3])
     }
 
+    @MainActor @Test func removingReviewedMRPersistsLocallyAndExplicitReaddRestoresIt() throws {
+        let suite = "ReviewedMRRemoval.\(UUID())"
+        let defaults = try #require(UserDefaults(suiteName: suite))
+        defer { defaults.removePersistentDomain(forName: suite) }
+        let settings = SettingsManager(defaults: defaults)
+        let target = MRAutomationScope.Target(host: host, username: "me", projectID: 1, iid: 2)
+        let items = try [item(request(1)), item(request(2, username: "alice")), item(request(3, username: "bob"))]
+        settings.automation.scope[target] = .paused
+        settings.save()
+        var result = MergeRequestBrowserSnapshot(openItems: items, authored: [], host: host, username: "me",
+            scope: SettingsManager(defaults: defaults).automation.scope)
+        #expect(result.own.map(\.id.iid) == [1])
+        #expect(result.reviewed.map(\.id.iid) == [3])
+        settings.automation.scope[target] = .active
+        settings.save()
+        result = .init(openItems: items, authored: [], host: host, username: "me",
+            scope: SettingsManager(defaults: defaults).automation.scope)
+        #expect(Set(result.reviewed.map(\.id.iid)) == [2, 3])
+    }
+
     @Test func ownUsesVerifiedApprovalsToPutReadyFirstAndDraftsLast() throws {
         let waiting = try request(1, title: "A waiting for approval")
         let ready = try request(2, title: "Z ready")

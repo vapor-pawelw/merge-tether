@@ -7,6 +7,7 @@ struct ExistingPipelineWorkDetector: Sendable {
         let projectID: Int
         let mergeRequestIID: Int
         let pipelineID: Int
+        var reservationID: UUID?
     }
 
     enum Status: Equatable {
@@ -54,6 +55,18 @@ struct ExistingPipelineWorkDetector: Sendable {
     /// Call after the user confirms this handoff. The MR reservation and the
     /// pipeline receipt are stored before launching the assistant.
     func registerHandoff(for key: Key) throws -> Bool {
+        try registerHandoff(for: key, explicitRetry: false)
+    }
+
+    /// New CLI runs receive an ownership token. An explicit retry may reuse the
+    /// immutable pipeline receipt, but must acquire a new exclusive MR claim.
+    func registerRun(for key: Key, explicitRetry: Bool = false) throws -> Key? {
+        var owned = key
+        owned.reservationID = UUID()
+        return try registerHandoff(for: owned, explicitRetry: explicitRetry) ? owned : nil
+    }
+
+    private func registerHandoff(for key: Key, explicitRetry: Bool) throws -> Bool {
         let active = try externalRegistrationURL(for: key)
         try FileManager.default.createDirectory(
             at: active.deletingLastPathComponent(),
@@ -73,7 +86,12 @@ struct ExistingPipelineWorkDetector: Sendable {
         }
         guard try createExclusiveDirectory(owner) else { throw ClaimError.ownershipConflict }
         hasOwner = true
-        retained = try createExclusiveDirectory(receiptURL(for: key, active: active))
+        let receipt = receiptURL(for: key, active: active)
+        retained = try createExclusiveDirectory(receipt)
+        if !retained, explicitRetry {
+            let values = try receipt.resourceValues(forKeys: [.isDirectoryKey, .isSymbolicLinkKey])
+            retained = values.isDirectory == true && values.isSymbolicLink != true
+        }
         return retained
     }
 
@@ -86,7 +104,8 @@ struct ExistingPipelineWorkDetector: Sendable {
     }
 
     private func ownerURL(for key: Key, active: URL) -> URL {
-        active.appending(path: "handoff-\(key.pipelineID)", directoryHint: .isDirectory)
+        let suffix = key.reservationID.map { "-" + $0.uuidString.lowercased() } ?? ""
+        return active.appending(path: "handoff-\(key.pipelineID)\(suffix)", directoryHint: .isDirectory)
     }
 
     private func receiptURL(for key: Key, active: URL) -> URL {

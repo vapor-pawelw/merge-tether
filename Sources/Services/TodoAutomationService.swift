@@ -10,6 +10,34 @@ final class TodoAutomationService {
 
     private var running: Set<TodoAutomationReceipt> = []
     private var ineligible: Set<TodoAutomationReceipt> = []
+    private struct RunningScript {
+        let task: Task<ProcessRunner.Output, Error>
+        let work: AssistantAutomationRunner.MergeRequestWork
+        let username: String
+        let manual: Bool
+    }
+    private var scriptTasks: [UUID: RunningScript] = [:]
+
+    func cancelRunningScripts(outsideScope scope: MRAutomationScope? = nil) {
+        for script in scriptTasks.values {
+            if let scope {
+                let target = MRAutomationScope.Target(host: script.work.host, username: script.username,
+                    projectID: script.work.projectID, iid: script.work.iid)
+                guard !script.manual, !scope.resolve(target).active else { continue }
+            }
+            script.task.cancel()
+        }
+    }
+
+    private let canAutomate: @MainActor (AutomationAssistant) async -> Bool
+    private let jobCoordinator: AssistantJobCoordinator?
+
+    init(canAutomate: @escaping @MainActor (AutomationAssistant) async -> Bool = {
+        await AssistantCLI.detect($0, requireCLI: true).isReady
+    }, jobCoordinator: AssistantJobCoordinator? = nil) {
+        self.canAutomate = canAutomate
+        self.jobCoordinator = jobCoordinator
+    }
 
     private struct Invocation: Equatable {
         let rule: AutomationRule
@@ -80,11 +108,11 @@ final class TodoAutomationService {
         guard manual || settings.automation.scope.resolve(target).active else { return false }
         let manualAcknowledgement = TodoActionAcknowledgement(host: host, username: username, todo: todo.feedbackIdentity)
         if settings.automationReceipts.contains(key) {
-            if manual {
+            if manual && rule.runner == .shell {
                 settings.pendingTodoAcknowledgements.insert(manualAcknowledgement)
                 settings.save()
             }
-            return manual || (rule.runner == .shell && rule.markDoneOnSuccess)
+            return rule.runner == .shell && (manual || rule.markDoneOnSuccess)
         }
         guard !settings.automationAttemptReceipts.contains(key), !ineligible.contains(key) else { return false }
 
@@ -118,7 +146,7 @@ final class TodoAutomationService {
         let work = AssistantAutomationRunner.MergeRequestWork(host: host, projectID: todo.project.id, iid: iid)
         guard assistant == nil || !AssistantAutomationRunner.isWorking(on: work) else { return false }
         let context = TodoAutomationContext(todo: todo, event: event, author: author, iid: iid)
-        let acknowledgement = assistant != nil && !manual && rule.markDoneOnSuccess ? todo.feedbackIdentity : nil
+        let acknowledgement = assistant != nil && (manual || rule.markDoneOnSuccess) ? todo.feedbackIdentity : nil
         var noteIDs = todo.linkedNoteID.map { [$0] } ?? []
         if assistant != nil, event == .authorFeedback, noteIDs.isEmpty,
            let discussions = try? await glab.fetchMergeRequestDiscussions(projectID: work.projectID, iid: iid, host: host) {
@@ -139,23 +167,29 @@ final class TodoAutomationService {
                   && settings.automation.permitsAssistantTools(project: project) == invocation.allowTools),
               assistant == nil || !AssistantAutomationRunner.isWorking(on: work)
         else { return false }
+        if assistant == nil, !manual {
+            let configuration = settings.automation
+            guard await canAutomate(configuration.assistant), !Task.isCancelled,
+                  settings.automation == configuration, isPending(),
+                  settings.automation.scope.resolve(target).active else { return false }
+        }
         // Mark a side effect as attempted only after evidence and account checks.
         settings.automationAttemptReceipts.insert(key)
         settings.save()
         if assistant == nil || event != .authorFeedback || noteIDs.isEmpty || !AssistantAutomationRunner.attachFeedbackTodo(
             acknowledgement, noteIDs: noteIDs, work: work, username: username, settings: settings
         ) {
-            try await Self.run(
+            try await run(
                 context, invocation: invocation, work: work, stackPosition: stackPosition, evidence: evidence,
                 username: username, settings: settings, manual: manual,
                 feedbackNoteIDs: event == .authorFeedback ? noteIDs : [], feedbackTodo: acknowledgement
             )
         }
         settings.automationReceipts.insert(key)
-        if manual { settings.pendingTodoAcknowledgements.insert(manualAcknowledgement) }
+        if manual && assistant == nil { settings.pendingTodoAcknowledgements.insert(manualAcknowledgement) }
         settings.save()
         let currentRule = settings.automation[event]
-        return manual || (rule.runner == .shell && currentRule.isEnabled && currentRule.markDoneOnSuccess)
+        return assistant == nil && (manual || (currentRule.isEnabled && currentRule.markDoneOnSuccess))
     }
 
     func prepareFeedback(
@@ -185,7 +219,7 @@ final class TodoAutomationService {
         guard shouldProceed(), settings.automation == configuration,
               AssistantAutomationRunner.unhandledFeedback(ids, work: work, username: username, settings: settings) == ids.sorted()
         else { return }
-        try await Self.run(
+        try await run(
             .init(request: request, feedback: feedback),
             invocation: invocation,
             work: work, stackPosition: stackPosition, evidence: evidence, username: username, settings: settings, manual: manual,
@@ -193,7 +227,7 @@ final class TodoAutomationService {
         )
     }
 
-    private static func run(
+    private func run(
         _ context: TodoAutomationContext,
         invocation: Invocation,
         work: AssistantAutomationRunner.MergeRequestWork,
@@ -232,20 +266,31 @@ final class TodoAutomationService {
                 prompt: prompt,
                 workspace: invocation.workspace,
                 access: invocation.access,
-                work: work, username: username, settings: settings, showChat: manual,
+                work: work, username: username, settings: settings,
                 feedbackNoteIDs: feedbackNoteIDs, feedbackTodo: feedbackTodo,
                 isReview: context.event == .reviewRequested,
-                mrWorkflow: context.event == .authorFeedback ? .followUp : .review
+                mrWorkflow: context.event == .authorFeedback ? .followUp : .review,
+                manual: manual, jobCoordinator: jobCoordinator
             )
         } else {
             var environment = AssistantAutomationRunner.environment
             environment.merge(context.environment(taskTitle: title)) { _, value in value }
-            let output = try await ProcessRunner.run(
-                URL(fileURLWithPath: "/bin/zsh"),
-                arguments: ["-c", rule.command],
-                environment: environment,
-                timeout: 300
-            )
+            let scriptEnvironment = environment
+            let id = UUID()
+            let task = Task {
+                try await ProcessRunner.run(
+                    URL(fileURLWithPath: "/bin/zsh"), arguments: ["-c", rule.command],
+                    environment: scriptEnvironment, timeout: 300
+                )
+            }
+            scriptTasks[id] = RunningScript(task: task, work: work, username: username, manual: manual)
+            defer { scriptTasks[id] = nil }
+            let output = try await withTaskCancellationHandler {
+                try await task.value
+            } onCancel: {
+                task.cancel()
+            }
+            try Task.checkCancellation()
             guard output.exitCode == 0 else { throw ScriptError.nonZeroExit(output.exitCode) }
         }
     }

@@ -18,13 +18,23 @@ enum ProcessRunner {
         arguments: [String] = [],
         environment: [String: String],
         currentDirectory: URL? = nil,
-        timeout: TimeInterval = 30
+        timeout: TimeInterval = 30,
+        input: Data? = nil
     ) async throws -> Output {
         let process = Process()
         process.executableURL = executable
         process.arguments = arguments
         process.environment = environment
         process.currentDirectoryURL = currentDirectory
+        process.standardInput = FileHandle.nullDevice
+        if let input {
+            let file = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
+            guard FileManager.default.createFile(atPath: file.path, contents: input, attributes: [.posixPermissions: 0o600]) else {
+                throw RunError.launchFailed("Could not prepare process input")
+            }
+            defer { try? FileManager.default.removeItem(at: file) }
+            process.standardInput = try FileHandle(forReadingFrom: file)
+        }
 
         let outputCollector: ProcessOutputCollector
         do {
@@ -35,12 +45,14 @@ enum ProcessRunner {
         process.standardOutput = outputCollector.stdout.writer
         process.standardError = outputCollector.stderr.writer
         let state = ProcessRunState()
+        let tree = OwnedProcessTree()
 
         return try await withTaskCancellationHandler {
             try await withCheckedThrowingContinuation { (cont: CheckedContinuation<Output, Error>) in
                 process.terminationHandler = { finished in
                     guard let reason = state.finish() else { return }
                     finished.terminationHandler = nil
+                    tree.finish()
 
                     switch reason {
                     case .completed:
@@ -62,6 +74,7 @@ enum ProcessRunner {
 
                 do {
                     try process.run()
+                    tree.start(process.processIdentifier)
 
                     let timeoutTask = Task.detached {
                         try? await Task.sleep(
@@ -69,14 +82,14 @@ enum ProcessRunner {
                         )
                         guard !Task.isCancelled else { return }
                         if state.request(.timedOut) {
-                            stop(process)
+                            stop(process, tree: tree)
                         }
                     }
                     state.setTimeoutTask(timeoutTask)
 
                     if Task.isCancelled {
                         _ = state.request(.cancelled)
-                        stop(process)
+                        stop(process, tree: tree)
                     }
                 } catch {
                     process.terminationHandler = nil
@@ -87,26 +100,18 @@ enum ProcessRunner {
             }
         } onCancel: {
             if state.request(.cancelled) {
-                stop(process)
+                stop(process, tree: tree)
             }
         }
     }
 
-    private static func stop(_ process: Process) {
-        guard process.isRunning else { return }
-
-        let processIdentifier = process.processIdentifier
-        process.terminate()
-
-        // `terminate()` only sends SIGTERM. Escalate so a child that ignores
-        // it cannot outlive a timed-out or cancelled request indefinitely.
-        Task.detached {
-            try? await Task.sleep(nanoseconds: 500_000_000)
-            if process.isRunning {
-                _ = Darwin.kill(processIdentifier, SIGKILL)
-            }
-        }
+    private static func stop(_ process: Process, tree: OwnedProcessTree) {
+        tree.terminate()
+        // A process that exited before the tracker could read its identity has
+        // no live tracked root; Foundation still owns its unreaped child here.
+        if process.isRunning { _ = Darwin.kill(process.processIdentifier, SIGKILL) }
     }
+
 }
 
 private final class ProcessRunState: @unchecked Sendable {

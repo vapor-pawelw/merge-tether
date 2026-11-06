@@ -84,13 +84,39 @@ class AuthorFollowUpVerifier:
     def status(self, host, projectID, iid, runID):
         _, run, mr, _ = self.context(host, projectID, iid, runID)
         return {"pushAllowed": True, "runID": run["runID"], "headSHA": mr["sha"],
+                "discussionFingerprint": self.discussion_fingerprint(host, projectID, iid),
                 "sourceProjectID": mr["source_project_id"], "sourceBranch": mr["source_branch"]}
+
+    def discussion_fingerprint(self, host, projectID, iid):
+        # Match ReviewVerdict.fingerprint: resolution flags and system events are irrelevant.
+        notes = []
+        for page in range(1, 101):
+            batch = self.read(host, f"/projects/{projectID}/merge_requests/{iid}/discussions?per_page=100&page={page}")
+            if not isinstance(batch, list): raise ValueError("Invalid discussion response")
+            for discussion in batch:
+                if not isinstance(discussion, dict) or not isinstance(discussion.get("notes"), list):
+                    raise ValueError("Incomplete discussion data")
+                for note in discussion["notes"]:
+                    if not isinstance(note, dict): raise ValueError("Incomplete comment data")
+                    if note.get("system") is True: continue
+                    author = note.get("author")
+                    if (type(note.get("id")) is not int or note["id"] <= 0 or not isinstance(author, dict) or
+                            type(author.get("id")) is not int or author["id"] <= 0 or not isinstance(note.get("body"), str)):
+                        raise ValueError("Incomplete comment identity or text")
+                    notes.append((note["id"], author["id"], digest(note["body"])))
+            if len(batch) < 100:
+                return digest("".join(f"{note}:{author}:{body}\n" for note, author, body in sorted(notes)))
+        raise ValueError("Too many discussions to verify safely")
 
     def verify(self, host, projectID, iid, runID, headSHA, filesJSON):
         if not isinstance(headSHA, str) or not re.fullmatch(r"[0-9a-f]{40}|[0-9a-f]{64}", headSHA):
             raise ValueError("Expected the exact tested commit SHA")
         if not isinstance(filesJSON, str) or len(filesJSON) > 50000: raise ValueError("Invalid file evidence")
-        files = json.loads(filesJSON)
+        evidence = json.loads(filesJSON)
+        if (not isinstance(evidence, dict) or not isinstance(evidence.get("discussionFingerprint"), str) or
+                not re.fullmatch(r"[0-9a-f]{64}", evidence["discussionFingerprint"])):
+            raise ValueError("Supply the discussionFingerprint you assessed and a files array")
+        files = evidence.get("files")
         if not isinstance(files, list) or not 1 <= len(files) <= 20: raise ValueError("Supply 1–20 verified source/test files")
         user, run, mr, key = self.context(host, projectID, iid, runID)
         if mr.get("sha") != headSHA: raise ValueError("The tested local commit is not the remote MR HEAD")
@@ -113,6 +139,9 @@ class AuthorFollowUpVerifier:
             if hashlib.sha256(content).hexdigest() != checksum:
                 raise ValueError("The claimed fix is absent from the remote source file")
         before = self.drafts(host, projectID, iid, user["id"])
+        fingerprint = self.discussion_fingerprint(host, projectID, iid)
+        if fingerprint != evidence["discussionFingerprint"]:
+            raise ValueError("Discussion content changed since your assessment; re-read all feedback before verifying")
         _, current_run, current_mr, _ = self.context(host, projectID, iid, runID)
         if current_run != run or current_mr.get("sha") != headSHA or current_mr.get("source_project_id") != source or current_mr.get("source_branch") != mr["source_branch"]:
             raise ValueError("Follow-up context changed during verification")
@@ -128,6 +157,7 @@ class AuthorFollowUpVerifier:
         proof = {"version": 1, "sealed": False, "verificationID": str(uuid.uuid4()), "runID": run["runID"],
                  "host": host, "projectID": int(projectID), "iid": int(iid), "username": user["username"], "userID": user["id"],
                  "headSHA": headSHA, "sourceProjectID": source, "sourceBranch": mr["source_branch"], "files": files,
+                 "discussionFingerprint": fingerprint,
                  "baselineDrafts": [{"id": d["id"], "bodySHA256": digest(d["note"])} for d in before
                                     if previously_sealed.get(d["id"]) != digest(d["note"])]}
         with self.local_lock():
@@ -155,6 +185,8 @@ class AuthorFollowUpVerifier:
             if baseline.get(draftID) == checksum:
                 raise ValueError("Legacy or user-created drafts cannot be automatically adopted; verify and refresh claims after remote proof")
             sealed.append({"id": draftID, "bodySHA256": checksum})
+        if self.discussion_fingerprint(host, projectID, iid) != proof.get("discussionFingerprint"):
+            raise ValueError("Discussion content changed; re-read all feedback, retain its new author_follow_up_status fingerprint, verify again, then edit or recreate every unsealed draft from this attempt before sealing")
         _, live_run, live_mr, _ = self.context(host, projectID, iid, run["runID"])
         if live_run != run or live_mr.get("sha") != proof["headSHA"]:
             raise ValueError("Context changed while sealing drafts")
@@ -177,7 +209,8 @@ def main():
     parser.add_argument("--iid", required=True)
     parser.add_argument("--run-id")
     parser.add_argument("--head-sha")
-    parser.add_argument("--evidence-file", type=Path)
+    parser.add_argument("--evidence-file", type=Path,
+                        help="JSON object {discussionFingerprint,files:[{path,sha256}]} for the discussion snapshot you assessed")
     parser.add_argument("--verification-id")
     parser.add_argument("--draft-ids", help="JSON array, e.g. [12,13]")
     args = parser.parse_args()

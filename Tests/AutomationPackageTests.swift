@@ -179,8 +179,11 @@ struct AutomationPackageTests {
         let url = try #require(URL(string: "https://gitlab.example.org/group/repo/-/merge_requests/2"))
         for publishAll in [false, true] {
             settings.automation.publishDraftsWithoutConfirmation = publishAll
+            let coordinator = AssistantJobCoordinator(execute: { _, _ in
+                .init(result: .init(status: .succeeded, summary: "Fixture review"), output: "")
+            })
             let handoff = try await AssistantAutomationRunner.launch(.codex, title: "Review", mergeRequestURL: url, prompt: "Review", workspace: "", access: .gitLabRead,
-                work: work, username: "me", settings: settings, mrWorkflow: .review)
+                work: work, username: "me", settings: settings, mrWorkflow: .review, jobCoordinator: coordinator)
             if publishAll {
                 #expect(handoff.prompt.contains("Publish comments without confirmation is ON"))
                 #expect(!handoff.prompt.contains("For human or uncertain feedback, leave drafts private"))

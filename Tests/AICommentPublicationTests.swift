@@ -43,6 +43,15 @@ struct AICommentPublicationTests {
             from: Data(draftJSON.replacingOccurrences(of: "\"abc\"", with: "null").utf8))
         #expect(try !eligible(note, draft: general))
     }
+    @Test func assessmentInstructionsUseDirectContentBoundEvidenceWithoutPluginTools() {
+        let instructions = AICommentAssessmentStore.recordingInstructions(host: "gitlab.example.org", projectID: 1, iid: 2)
+        #expect(instructions.contains("exact UTF-8 source body"))
+        #expect(instructions.contains("atomically write"))
+        #expect(instructions.contains("1-2-<noteID>.json"))
+        #expect(!instructions.contains("record_ai_comment_assessment"))
+        #expect(!instructions.contains("read_merge_request"))
+    }
+
     @Test func slashCommandsEvenInsideCodeFencesAreNotAutomaticallyPublished() throws {
         let body = #"{"id":1,"author_id":3,"note":"Fixed.\n```\n/merge\n```","discussion_id":"abc"}"#
         let draft = try JSONDecoder().decode(GitLabDraftNote.self, from: Data(body.utf8))

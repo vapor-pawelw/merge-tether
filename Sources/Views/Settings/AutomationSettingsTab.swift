@@ -12,15 +12,15 @@ struct AutomationSettingsTab: View {
     @State private var confirmRecommendedReset = false
     @State private var isChoosingWorkspace = false
     @State private var showTemplates = false
-    @State private var templateSetupFailed = false
-    @State private var openingTemplateSetup = false
-    @State private var codexTemplateURL: URL?
-    @State private var templateResetFailed = false
+    @State private var setupAction: SetupAction?
+    private enum SetupAction: String, Identifiable {
+        case enableVerification, apply
+        var id: String { rawValue }
+    }
 
     init(monitor: TodoMonitorService) {
         self.monitor = monitor
         _draft = State(initialValue: monitor.settings.automation)
-        _codexTemplateURL = State(initialValue: CodexDesktopRelay.templateURL())
     }
 
     var body: some View {
@@ -42,8 +42,11 @@ struct AutomationSettingsTab: View {
         .onChange(of: settings.automation.scope) { _, current in
             draft.scope = current
         }
-        .onReceive(NotificationCenter.default.publisher(for: NSApplication.didBecomeActiveNotification)) { _ in
-            codexTemplateURL = CodexDesktopRelay.templateURL()
+        .sheet(item: $setupAction) { action in
+            AssistantSetupView(assistant: draft.assistant, requireCLI: true) {
+                if action == .enableVerification { draft.autoVerifyReReview = true }
+                else { applyDraft() }
+            }
         }
     }
 
@@ -92,9 +95,10 @@ struct AutomationSettingsTab: View {
                     Spacer(minLength: 0)
 
                     Button {
-                        settings.automation = draft.preservingScope(from: settings.automation)
-                        settings.save()
-                        monitor.refreshAssistantRelay()
+                        if draft.usesAssistant || draft.autoReReviewEnabled || draft.autoMergeEnabled
+                            || draft.autoApproveEnabled || draft.publishDraftsWithoutConfirmation
+                            || draft.publishAIRepliesWithoutConfirmation { setupAction = .apply }
+                        else { applyDraft() }
                     } label: {
                         Text(.Settings.settingsAutomationApply)
                     }
@@ -112,6 +116,11 @@ struct AutomationSettingsTab: View {
         case .reviewRequested: $draft.reviewRequested
         case .authorFeedback: $draft.authorFeedback
         }
+    }
+
+    private func applyDraft() {
+        settings.automation = draft.preservingScope(from: settings.automation)
+        settings.save()
     }
 
     private var hasIncompleteRule: Bool {
@@ -207,7 +216,8 @@ struct AutomationSettingsTab: View {
         Section {
             AutomationAssistantPicker(
                 assistant: $draft.assistant, available: monitor.availableAssistants,
-                onRefresh: monitor.refreshAvailableAssistants
+                onRefresh: monitor.refreshAvailableAssistants, requireCLI: true,
+                statuses: monitor.assistantDependencies.statuses
             )
         } header: {
             Text(.Settings.settingsAutomationPageAssistant)
@@ -218,6 +228,26 @@ struct AutomationSettingsTab: View {
                 .font(.caption)
                 .foregroundStyle(.secondary)
         }
+
+        Section {
+            Toggle(isOn: Binding(get: { draft.autoVerifyReReview }, set: { enabled in
+                if enabled { setupAction = .enableVerification }
+                else { draft.autoVerifyReReview = false }
+            })) { Text(.Settings.settingsVerificationEnabled) }
+                .toggleStyle(.checkbox)
+            Text(.Settings.settingsVerificationHelp).font(.caption).foregroundStyle(.secondary)
+            if draft.assistant == .codex {
+                Picker(selection: $draft.codexVerificationModel) {
+                    ForEach(CodexReviewModel.allCases, id: \.self) { Text(verbatim: $0.name).tag($0) }
+                } label: { Text(.Settings.settingsVerificationModel) }
+                .disabled(!draft.autoVerifyReReview)
+            } else {
+                Picker(selection: $draft.claudeVerificationModel) {
+                    ForEach(ClaudeVerificationModel.allCases, id: \.self) { Text(verbatim: $0.name).tag($0) }
+                } label: { Text(.Settings.settingsVerificationModel) }
+                .disabled(!draft.autoVerifyReReview)
+            }
+        } header: { Text(.Settings.settingsVerificationTitle) }
 
         Section {
             if draft.assistant == .codex {
@@ -247,117 +277,6 @@ struct AutomationSettingsTab: View {
             Text(.Settings.settingsAutomationReviewModel)
         }
 
-        if draft.assistant == .codex {
-            Section {
-                if monitor.availableAssistants.contains(.codex) { CodexPluginControls() }
-                Toggle(isOn: $draft.codexRelayEnabled) {
-                    Text(.Settings.settingsAutomationCodexRelay)
-                }
-                .toggleStyle(.checkbox)
-
-                if settings.automation.codexRelayEnabled {
-                    if let warning = monitor.codexListenerWarning {
-                        Label { Text(warning) } icon: { Image(systemName: "exclamationmark.triangle") }
-                            .font(.caption)
-                            .foregroundStyle(.orange)
-                    } else if monitor.codexListenerHealth == .listening {
-                        Label { Text(.Settings.settingsCodexPluginListening) } icon: { Image(systemName: "checkmark.circle") }
-                            .font(.caption)
-                            .foregroundStyle(.secondary)
-                    }
-                }
-                Text(.Settings.settingsAutomationCodexRelayHelp)
-                    .font(.caption)
-                    .foregroundStyle(.secondary)
-                Toggle(isOn: $draft.codexUseTemplate) {
-                    Text(.Settings.settingsAutomationCodexTemplate)
-                }
-                .toggleStyle(.checkbox)
-                Text(.Settings.settingsAutomationCodexTemplateHelp)
-                    .font(.caption)
-                    .foregroundStyle(.secondary)
-                if draft.codexUseTemplate {
-                    if let url = codexTemplateURL {
-                        HStack {
-                            Link(destination: url) { Text(.Settings.settingsAutomationCodexTemplateOpen) }
-                            resetTemplateButton
-                        }
-                    } else {
-                        Text(.Settings.settingsAutomationCodexTemplateMissing)
-                            .font(.caption)
-                            .foregroundStyle(.secondary)
-                        Button {
-                            Task { await openTemplateSetup() }
-                        } label: { Text(.Menu.menuAssistantPluginSetup) }
-                        .disabled(openingTemplateSetup)
-                        resetTemplateButton
-                    }
-                    if templateSetupFailed {
-                        Text(.Menu.menuAssistantSetupOpenFailed).font(.caption).foregroundStyle(.orange)
-                    }
-                    if templateResetFailed {
-                        Text(.Settings.settingsAutomationCodexTemplateResetFailed)
-                            .font(.caption).foregroundStyle(.orange)
-                    }
-                }
-            } header: {
-                Text(.Settings.settingsCodexPluginTitle)
-            }
-        } else if monitor.availableAssistants.contains(.claude) {
-            Section {
-                ClaudePluginControls()
-            } header: {
-                Text(.Settings.settingsClaudePluginTitle)
-            } footer: {
-                Text(.Settings.settingsClaudePluginHelp)
-                    .font(.caption)
-                    .foregroundStyle(.secondary)
-            }
-        }
-
-        Section {
-            Toggle(isOn: $draft.reuseAssistantChats) {
-                Text(.Settings.settingsAutomationReuseChats)
-            }
-            .toggleStyle(.checkbox)
-        } footer: {
-            Text(.Settings.settingsAutomationReuseChatsHelp)
-                .font(.caption)
-                .foregroundStyle(.secondary)
-        }
-    }
-
-    private var resetTemplateButton: some View {
-        Button {
-            do {
-                try CodexDesktopRelay.resetTemplate()
-                codexTemplateURL = nil
-                templateResetFailed = false
-                templateSetupFailed = false
-            } catch {
-                templateResetFailed = true
-            }
-        } label: { Text(.Settings.settingsAutomationCodexTemplateReset) }
-        .help(Text(.Settings.settingsAutomationCodexTemplateResetHelp))
-    }
-
-    private func openTemplateSetup() async {
-        openingTemplateSetup = true
-        templateSetupFailed = false
-        defer { openingTemplateSetup = false }
-        do {
-            guard let url = try await CodexPluginInstaller.setupURL(),
-                  let app = AssistantAutomationRunner.desktopApplication(.codex)
-            else {
-                templateSetupFailed = true
-                return
-            }
-            let configuration = NSWorkspace.OpenConfiguration()
-            configuration.activates = true
-            _ = try await NSWorkspace.shared.open([url], withApplicationAt: app, configuration: configuration)
-        } catch {
-            templateSetupFailed = true
-        }
     }
 
     @ViewBuilder
@@ -400,17 +319,6 @@ struct AutomationSettingsTab: View {
                 .foregroundStyle(.secondary)
         }
 
-        if draft.assistant == .codex {
-            Section {
-                Button {
-                    AssistantAutomationRunner.copyPrompt(CodexDesktopRelay.setupPrompt)
-                } label: {
-                    Text(.Menu.menuAssistantCopyListener)
-                }
-            } header: {
-                Text(.Settings.settingsCodexPluginManualSetup)
-            }
-        }
     }
 
     private var todoFields: some View {
@@ -428,12 +336,14 @@ struct AutomationSettingsTab: View {
                 Text(.Settings.settingsAutomationEnable)
             }
             .toggleStyle(.checkbox)
+            .disabled(rule.wrappedValue.runner == .shell)
 
             Picker(selection: rule.runner) {
                 Text(.Settings.settingsAutomationRunnerAssistant)
                     .tag(AutomationRunner.assistant)
-                Text(.Settings.settingsAutomationRunnerShell)
-                    .tag(AutomationRunner.shell)
+                if rule.wrappedValue.runner == .shell {
+                    Text(.Settings.settingsAutomationRunnerShell).tag(AutomationRunner.shell)
+                }
             } label: {
                 Text(.Settings.settingsAutomationRunner)
             }
@@ -443,10 +353,10 @@ struct AutomationSettingsTab: View {
             }
             .autocorrectionDisabled()
 
-            Toggle(isOn: rule.markDoneOnSuccess) {
-                Text(.Settings.settingsAutomationMarkDone)
+            if rule.wrappedValue.runner == .shell {
+                Text(.Settings.settingsAutomationRunnerLegacyHelp)
+                    .font(.caption).foregroundStyle(.orange)
             }
-            .toggleStyle(.checkbox)
         } header: {
             Text(.Settings.settingsAutomationTodoSection)
         } footer: {
@@ -552,23 +462,15 @@ struct AutomationSettingsTab: View {
                 }
                 .lineLimit(5...8)
             } else {
-                TextField(text: rule.command, axis: .vertical) {
-                    Text(.Settings.settingsAutomationCommand)
-                }
-                .autocorrectionDisabled()
-                .font(.body.monospaced())
-                .lineLimit(3...6)
+                Text(.Settings.settingsAutomationCommand).font(.caption.weight(.semibold))
+                Text(verbatim: rule.wrappedValue.command)
+                    .font(.body.monospaced()).textSelection(.enabled)
+                    .frame(maxWidth: .infinity, alignment: .leading)
+                Text(.Settings.settingsAutomationRunnerLegacyHelp)
+                    .font(.caption).foregroundStyle(.secondary)
             }
             VStack(alignment: .leading, spacing: 6) {
                 Text(.Settings.settingsAutomationTemplateHelp)
-
-                if rule.wrappedValue.runner == .shell {
-                    Text(.Settings.settingsAutomationCommandHelp)
-                    Text(.Settings.settingsAutomationCommandExample)
-                        .fontDesign(.monospaced)
-                    Text(.Settings.settingsAutomationCommandVariables)
-                        .fontDesign(.monospaced)
-                }
             }
             .font(.caption)
             .foregroundStyle(.secondary)

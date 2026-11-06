@@ -4,9 +4,9 @@
 
 # MergeTether
 
-**Your GitLab inbox and merge requests, together in the macOS menu bar.**
+**A native macOS command center for your GitLab merge requests.**
 
-Triage reviews, see what blocks a merge, and hand routine follow-ups to Codex or Claude — with control over each automation.
+Triage reviews, see what blocks a merge, and run routine follow-ups through Codex or Claude CLI — with progress, results and decisions in one window.
 
 [![macOS 14+](https://img.shields.io/badge/macOS-14%2B-black?logo=apple)](#get-started)
 [![License: MIT](https://img.shields.io/badge/License-MIT-blue)](LICENSE)
@@ -15,15 +15,17 @@ Triage reviews, see what blocks a merge, and hand routine follow-ups to Codex or
 
 ## A desk for your merge requests
 
-- **Inbox:** GitLab to-dos and additional actions requiring your attention, without repeating the same reason. Comments and approvals waiting for your OK come first under **Ready for your OK**. Preview and publish drafts, confirm handoffs, or open the MR. Draft MRs stay at the bottom.
-- **Merge Requests → Own:** all your open MRs, their merge readiness and blockers, and existing Codex or Claude chat links.
-- **Merge Requests → Reviewed:** managed open MRs by other authors, with status, chat links and a per-MR **Approve automatically** switch. Add an MR by URL, or by its number and repository, to include it in automation.
-- **Merge Requests → Activity:** what automation did on its own: workflow events, prepared tasks and pipeline handoffs.
-- **Settings → Automation → Scope:** automate all relevant discovered MRs, selected repositories, individual MRs, or a mixture. Pause items without losing their assistant chats. Delivery and workflow history live here too.
+MergeTether opens a resizable main window and appears in the Dock. Its board keeps your work in three columns:
 
-The menu-bar count includes to-dos and additional actions requiring you, including assistant setup or manual delivery. Routine queued and delivered events do not increase it. A delivery receipt confirms that the chat received work; it does not mean the assistant finished it.
+- **My merge requests:** your open MRs, with blockers, drafts, to-dos and follow-up actions directly on each card.
+- **Reviewing:** MRs you review, with review, publication and approval actions beside the relevant MR.
+- **Other items:** unmatched GitLab to-dos and work outside the current MR set. Add an MR to bring its work onto the board.
 
-Polling, notifications, reminders and launch at login are configurable. A failed GitLab request keeps the previous inbox usable.
+Recognized GitLab to-dos update an MR’s durable action and are then marked read. Unknown events stay in Other; new foreign MRs can be added and handled or ignored, and matching enabled automation adopts them automatically. Agent completion remains a separate state.
+
+Cards requiring attention rise to the top of their column. Open a card for its full details and execution history. **Activity** shows workflow events and assistant results. **Settings → Automation → Scope** controls automation globally, by repository or by MR without losing history.
+
+Polling, notifications, reminders and launch at login are configurable. Monitoring continues while the app is running, including when its window is closed. A failed GitLab request keeps the previous inbox usable.
 
 ## Get started
 
@@ -34,7 +36,7 @@ brew install glab
 glab auth login
 ```
 
-Build the current development version using [the build guide](docs/building.md), then launch MergeTether. Onboarding checks GitLab access, detects Codex and Claude separately, and offers an optional assistant package. You can keep an inbox-only setup and change your choice later.
+Build the current development version using [the build guide](docs/building.md), then launch MergeTether. Onboarding checks GitLab access and offers optional automation. All assistant automation requires a compatible, signed-in **Codex CLI or Claude CLI**. Their desktop applications are optional. You can keep manual inbox/MR management and change your choice later.
 
 **Release status:** this README describes the current development tree. Check [Releases](https://github.com/vapor-pawelw/merge-tether/releases) for the features in a published binary. The earlier inbox-only GitLab Todos release is [v1.1.0](https://github.com/vapor-pawelw/merge-tether/releases/tag/v1.1.0), with source on [`legacy/gitlab-todos`](https://github.com/vapor-pawelw/merge-tether/tree/legacy/gitlab-todos). Its Homebrew cask remains `vapor-pawelw/tap/gitlab-todos` for compatibility; installing that cask does not build unreleased features.
 
@@ -52,19 +54,17 @@ Choose your assistant, scope and rules in **Settings → Automation**. Installed
 | Approval | Approve a reviewed commit only after a no-objections verdict, no pending drafts and resolved discussions. |
 | Merge | Optional; checks ownership, approvals, threads, pipeline and the source commit. Off by default. |
 
-**Know the recommended defaults.** After opting in to the assistant package, follow-up pushes, resolution of your own verified review findings, eligible AI-feedback reply publication and automatic approval are enabled. Publishing every comment, automatic merge and conflict-resolution pushes remain separate choices. Each rule can be changed; opting out disables assistant/script automations.
+**Know the recommended defaults.** After opting in to the assistant package, follow-up pushes, resolution of your own verified review findings, eligible AI-feedback reply publication and automatic approval are enabled. Publishing every comment, automatic merge and conflict-resolution pushes remain separate choices. Each rule can be changed; opting out disables assistant automation. Saved legacy shell rules remain available for reference but do not run as MR automation; choose the assistant CLI to migrate them.
 
-**Local fixes are not delivered fixes.** With follow-up push off, pending or failed, that run stays in chat and does not create completion drafts. Automatic publication on your own MRs requires a fresh, sealed verification tied to the account, run, source branch, remote file hashes and exact draft bodies. Old local-only drafts are retained privately rather than silently trusted.
+**Local fixes are not delivered fixes.** With follow-up push off, pending or failed, the proposal stays in the task result and does not create completion drafts. Automatic publication on your own MRs requires a fresh, sealed verification tied to the account, run, source branch, remote file hashes and exact draft bodies. Old local-only drafts are retained privately rather than silently trusted.
 
-**AI-feedback publication is selective.** Verified GitLab Duo comments qualify; comments posted by people require a very-high-confidence AI-origin assessment bound to their current content. This is a heuristic. Uncertain cases remain private, and neither discussion resolution nor slash quick actions are automatically published. You can explicitly publish pending drafts from Inbox.
+**AI-feedback publication is selective.** Verified GitLab Duo comments qualify; comments posted by people require a very-high-confidence AI-origin assessment bound to their current content. This is a heuristic. Uncertain cases remain private, and neither discussion resolution nor slash quick actions are automatically published. You can explicitly publish pending drafts from the MR card.
 
-| Integration | Codex Desktop | Claude Desktop |
-| --- | --- | --- |
-| New chats | Local listener dispatches persistent GUI chats | Prefilled Code draft; you press Send |
-| Reuse | Same MR chat, grouped by repository | Linked session, with follow-up prompt copied for pasting |
-| Local tools | Bundled plugin and read-only verification helper | Bundled Claude Code plugin and the same helper |
+Tasks run headlessly through the selected CLI. MergeTether stores their lifecycle, output and errors locally. A completed agent process is distinct from verified remote changes, review evidence or a passing pipeline. Failed and interrupted runs remain inspectable and require a deliberate retry; uncertain work is not silently replayed after a restart. Legacy desktop handoffs are retained without automatic replay.
 
-The listener's health and missing setup appear in Inbox. Closing an assistant keeps queued work on your Mac. Assistant tool permissions still apply. See [all permissions, defaults and limits](docs/automation.md).
+Assistant setup checks CLI compatibility and sign-in before accepting your choice. It offers CLI installation and sign-in in Terminal; cancelling keeps the previous selection. Turning off automatic re-review verification does not remove the CLI requirement for assistant automation. CLI execution permissions still apply. No desktop listener, scheduled dispatcher, plugin installation or permission-template setup is required.
+
+You can also choose an installed desktop assistant or CLI from an MR’s manual action menu. These actions are optional, explicitly selected destinations; opening one does not enable automatic desktop dispatch or establish that its work completed. See [all permissions, defaults and limits](docs/automation.md).
 
 ## Privacy
 

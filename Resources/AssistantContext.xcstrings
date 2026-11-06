@@ -1,0 +1,116 @@
+{
+  "sourceLanguage": "en",
+  "strings": {
+    "assistant.context.open": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Open with assistant\u2026"
+          }
+        }
+      }
+    },
+    "assistant.context.codexApp": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Codex app"
+          }
+        }
+      }
+    },
+    "assistant.context.claudeDesktop": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Claude Desktop"
+          }
+        }
+      }
+    },
+    "assistant.context.codexCLI": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Codex CLI in Terminal"
+          }
+        }
+      }
+    },
+    "assistant.context.claudeCLI": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Claude CLI in Terminal"
+          }
+        }
+      }
+    },
+    "assistant.context.none": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "No assistant app or CLI detected"
+          }
+        }
+      }
+    },
+    "assistant.context.copy": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Copy MR context"
+          }
+        }
+      }
+    },
+    "assistant.context.failed": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Could not open the assistant. Check that it is installed and try again."
+          }
+        }
+      }
+    },
+    "assistant.context.ok": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "OK"
+          }
+        }
+      }
+    },
+    "assistant.context.help": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Start a separate manual conversation with this MR\u2019s context. Automatic work stays in MergeTether."
+          }
+        }
+      }
+    }
+  },
+  "version": "1.0"
+}

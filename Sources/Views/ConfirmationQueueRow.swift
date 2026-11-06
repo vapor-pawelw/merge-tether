@@ -56,6 +56,10 @@ struct ConfirmationQueueRow<AdditionalActions: View>: View {
                 Text(.Menu.menuConfirmRemoteVerificationRequired)
                     .foregroundStyle(.orange)
             }
+            if item.requiresDiscussionRecheck {
+                Text(.Menu.menuConfirmDiscussionRecheckRequired)
+                    .foregroundStyle(.orange)
+            }
             statusLine
 
             HStack(spacing: 8) {

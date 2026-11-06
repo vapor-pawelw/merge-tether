@@ -18,14 +18,16 @@ final class GitLabTodosAppDelegate: NSObject, NSApplicationDelegate {
     let monitor = TodoMonitorService()
     let avatarCache = AvatarCache()
     let updates = UpdateService()
-    private var statusItemController: MenuBarStatusItemController?
-
     func applicationDidFinishLaunching(_ notification: Notification) {
-        statusItemController = MenuBarStatusItemController(
-            monitor: monitor,
-            updates: updates,
-            avatarCache: avatarCache
-        )
+        NSApplication.shared.setActivationPolicy(.regular)
+    }
+
+    func applicationWillTerminate(_ notification: Notification) {
+        monitor.prepareForTermination()
+    }
+
+    func applicationShouldTerminateAfterLastWindowClosed(_ sender: NSApplication) -> Bool {
+        false
     }
 }
 
@@ -33,6 +35,18 @@ struct GitLabTodosApp: App {
     @NSApplicationDelegateAdaptor(GitLabTodosAppDelegate.self) private var appDelegate
 
     var body: some Scene {
+        Window(String(localized: .CommandCenter.commandCenterTitle), id: "main") {
+            CommandCenterView(monitor: appDelegate.monitor, updates: appDelegate.updates)
+                .environment(\.avatarCache, appDelegate.avatarCache)
+        }
+        .defaultSize(width: 1280, height: 820)
+        .windowResizability(.contentMinSize)
+        .commands {
+            CommandGroup(replacing: .newItem) {
+                OpenMainWindowButton()
+            }
+        }
+
         Settings {
             SettingsView(monitor: appDelegate.monitor)
         }
@@ -47,5 +61,14 @@ struct GitLabTodosApp: App {
             WhatsNewView(updates: appDelegate.updates)
         }
         .windowResizability(.contentSize)
+    }
+}
+
+private struct OpenMainWindowButton: View {
+    @Environment(\.openWindow) private var openWindow
+
+    var body: some View {
+        Button { openWindow(id: "main") } label: { Text(.CommandCenter.commandCenterTitle) }
+            .keyboardShortcut("0", modifiers: .command)
     }
 }

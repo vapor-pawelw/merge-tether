@@ -21,7 +21,7 @@ struct CodexPermissionTemplateTests {
     }
 
     @Test(arguments: [true, false])
-    func dispatchCarriesThePreferenceWithoutReplacingAnExistingChat(useTemplate: Bool) throws {
+    func retiredDispatchPreservesTemplatePreferenceAndExistingChatWithoutPublishing(useTemplate: Bool) throws {
         let folder = FileManager.default.temporaryDirectory.appending(path: UUID().uuidString)
         let suite = "CodexPermissionTemplateTests-\(UUID())"
         let defaults = try #require(UserDefaults(suiteName: suite))
@@ -38,15 +38,22 @@ struct CodexPermissionTemplateTests {
         let thread = UUID().uuidString
         settings.assistantChats[key] = thread
         let handoff = AssistantAutomationRunner.Handoff(id: UUID(), key: key,
-            title: "[MT] repo !42", prompt: "Review this MR.", createdAt: Date(), allowsPush: false)
+            title: "[MT] repo !42", prompt: "Review this MR.", createdAt: Date(), allowsPush: false,
+            execution: .init(state: .queued))
+        settings.assistantHandoffs = [handoff]
 
         CodexDesktopRelay.publish(handoff, settings: settings, directory: folder)
 
         let job = folder.appending(path: "jobs/\(handoff.id.uuidString.lowercased()).json")
-        let fields = try #require(JSONSerialization.jsonObject(with: Data(contentsOf: job)) as? [String: Any])
-        #expect(fields["useTemplate"] as? Bool == useTemplate)
-        #expect(fields["threadID"] as? String == thread)
-        #expect(fields["reuse"] as? Bool == true)
+        #expect(!FileManager.default.fileExists(atPath: job.path))
+        #expect(!handoff.supportsCodexRelay)
+        #expect(!AssistantAutomationRunner.usesRelay(handoff, settings: settings))
+        #expect(settings.assistantChats[key] == thread)
+        #expect(settings.assistantHandoffs.first?.execution?.state == .queued)
+        #expect(try encodedSettings(settings.automation)["codexUseTemplate"] as? Bool == useTemplate)
+        let restored = try JSONDecoder().decode(AssistantAutomationRunner.Handoff.self, from: JSONEncoder().encode(handoff))
+        #expect(restored.execution?.state == .queued)
+        #expect(restored.key == key)
     }
 
     @Test func templateLinkRequiresTheSupportedManifestAndARealThreadID() throws {

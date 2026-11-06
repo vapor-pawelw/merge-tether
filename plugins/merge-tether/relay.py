@@ -647,7 +647,7 @@ TOOLS = [
          "Author worker only: check current run permission and source branch before editing and immediately before a push. If disabled or superseded, stop with a chat-only report. Reads only.",
          ("host", "projectID", "iid", "runID")),
     tool("verify_author_follow_up",
-         "Author worker only, not the dispatcher. Before saving fix replies, verify the tested/pushed MR HEAD and SHA256 of its remote source/test files. Reads GitLab only. Returns a one-use verificationID; fails when follow-up push is off or code is absent remotely.",
+         "Author worker only, not the dispatcher. Before saving fix replies, verify the tested/pushed MR HEAD, the discussion snapshot you assessed, and SHA256 of its remote source/test files. filesJSON is an object {discussionFingerprint,files:[{path,sha256}]}; retain the fingerprint from author_follow_up_status for the discussions you actually assessed. Reads GitLab only. Returns a one-use verificationID; fails when follow-up push is off or code is absent remotely.",
          ("host", "projectID", "iid", "runID", "headSHA", "filesJSON")),
     tool("record_author_follow_up_drafts",
          "Author worker only. After remote verification and saving/re-reading new or refreshed private drafts, bind their exact IDs/bodies to the verified run and head. Unchanged legacy/user-created drafts cannot be adopted. Never publishes anything.",

@@ -126,10 +126,10 @@ struct AuthoredMergeRequestStatusTests {
             try await Task.sleep(for: .milliseconds(20))
         }
         try #require(!monitor.isLoading && !monitor.hasError)
-        // MR 5's fetched discussion is unresolved despite its optimistic list status.
-        // Verified discussion evidence keeps it in the same blocker tier as MR 4.
-        #expect(monitor.currentItems.map(\.id.iid) == [4, 5, 2, 3, 1])
-        #expect(monitor.currentItems.map(\.section) == [.open, .open, .open, .unpublishedComments, .draftMergeRequests])
+        // Drafts without current completion evidence stay outside Ready. Within open
+        // work, MR 3 is mergeable; MR 5's live discussion puts it beside MR 4.
+        #expect(monitor.currentItems.map(\.id.iid) == [3, 4, 5, 2, 1])
+        #expect(monitor.currentItems.map(\.section) == [.open, .open, .open, .open, .draftMergeRequests])
     }
 
     @MainActor
@@ -177,6 +177,7 @@ struct AuthoredMergeRequestStatusTests {
         try FileManager.default.setAttributes([.posixPermissions: 0o700], ofItemAtPath: executable.path)
         let settings = SettingsManager(defaults: defaults)
         settings.automation.autoReReviewEnabled = true
+        settings.automation.autoVerifyReReview = false
         let glab = GlabService()
         glab.glabPath = executable
         glab.resolvedHost = "gitlab.example.org"
@@ -191,12 +192,12 @@ struct AuthoredMergeRequestStatusTests {
             try #require(!monitor.isLoading && !monitor.hasError)
         }
         let discussion = """
-            {"notes":[{"id":10,"author":{"id":7},"system":false},
-            {"id":11,"author":{"id":8},"system":false}]}
+            {"notes":[{"id":10,"author":{"id":7},"body":"First feedback","system":false},
+            {"id":11,"author":{"id":8},"body":"Second feedback","system":false}]}
             """
         let sent = folder.appending(path: "sent")
         try write("drafts.json", #"[{"author_id":3}]"#)
-        let answered = discussion.replacingOccurrences(of: "]}", with: #",{"id":12,"author":{"id":3},"system":false}]}"#)
+        let answered = discussion.replacingOccurrences(of: "]}", with: #",{"id":12,"author":{"id":3},"body":"Verified fixes","system":false}]}"#)
         try write("discussions.json", "[\(answered)]")
         try await poll()
         #expect(monitor.currentItems.first?.draftCount == 1)
@@ -217,11 +218,14 @@ struct AuthoredMergeRequestStatusTests {
         try write("discussions.json", "[\(answered)]")
         try await poll()
         try await poll()
+        #expect(!FileManager.default.fileExists(atPath: sent.path))
+        let item = try #require(monitor.currentOpenItems.first)
+        let fingerprint = try #require(item.reReviewFingerprint)
+        await monitor.confirmReReview(item.id, head: try #require(item.mergeRequest?.sha), fingerprint: fingerprint)
         #expect(try String(contentsOf: sent, encoding: .utf8) == "alice\nbob\n")
-        let report = try JSONSerialization.jsonObject(with: Data(contentsOf: folder.appending(path: "mr-status.json")))
-        let entries = (report as? [String: Any])?["mergeRequests"] as? [[String: Any]]
-        #expect(entries?.first?["iid"] as? Int == 2)
-        #expect(entries?.first?["unpublishedComments"] as? Int == 0)
+        #expect(monitor.currentOpenItems.first?.id.iid == 2)
+        #expect(monitor.currentOpenItems.first?.draftCount == 0)
+        #expect(!FileManager.default.fileExists(atPath: folder.appending(path: "mr-status.json").path))
     }
 
     @MainActor
@@ -270,7 +274,10 @@ struct AuthoredMergeRequestStatusTests {
         glab.glabPath = executable
         glab.resolvedHost = "gitlab.example.org"
         glab.currentUsername = "me"
-        let monitor = AuthoredMergeRequestMonitor(settings: settings, glab: glab, notifications: NotificationService())
+        @MainActor final class Availability { var ready = false }
+        let availability = Availability()
+        let monitor = AuthoredMergeRequestMonitor(settings: settings, glab: glab, notifications: NotificationService(),
+                                                  canAutomate: { _ in availability.ready })
         let merged = folder.appending(path: "merged")
 
         try await refresh(monitor)
@@ -278,6 +285,22 @@ struct AuthoredMergeRequestStatusTests {
         #expect(!FileManager.default.fileExists(atPath: merged.path))
 
         try Data().write(to: folder.appending(path: "resolve"))
+        try await refresh(monitor)
+        #expect(!FileManager.default.fileExists(atPath: merged.path))
+        #expect(monitor.requests.count == 1)
+
+        availability.ready = true
+        let key = AssistantAutomationRunner.ChatKey(assistant: .codex,
+            work: .init(host: "gitlab.example.org", projectID: 1, iid: 2),
+            username: "me", workspace: "", access: .gitLabRead)
+        let job = AssistantAutomationRunner.Handoff(id: UUID(), key: key, title: "Review", prompt: "",
+            createdAt: Date(), allowsPush: false, execution: .init(state: .running))
+        settings.assistantHandoffs.append(job)
+        try await refresh(monitor)
+        #expect(!FileManager.default.fileExists(atPath: merged.path))
+        #expect(monitor.requests.count == 1)
+
+        settings.assistantHandoffs[0].execution?.state = .succeeded
         try await refresh(monitor)
         #expect(!monitor.hasError)
         #expect(monitor.requests.isEmpty)

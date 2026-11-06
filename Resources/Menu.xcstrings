@@ -1827,6 +1827,17 @@
         }
       }
     },
+    "menu.confirm.discussionRecheckRequired": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "These drafts have no completed check covering the current commit and discussions. Review them in GitLab before publishing, or have the assistant prepare a current result."
+          }
+        }
+      }
+    },
     "menu.confirm.remoteVerificationRequired": {
       "extractionState": "manual",
       "localizations": {
@@ -2164,6 +2175,116 @@
           "stringUnit": {
             "state": "translated",
             "value": "Not in the current open MR list"
+          }
+        }
+      }
+    },
+    "menu.reReview.checking": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Checking whether feedback is ready for re-review…"
+          }
+        }
+      }
+    },
+    "menu.reReview.manual": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Confirm that feedback is ready for re-review."
+          }
+        }
+      }
+    },
+    "menu.reReview.unavailable": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Automatic verification is unavailable. Set up the assistant, or confirm readiness manually."
+          }
+        }
+      }
+    },
+    "menu.reReview.failed": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Could not verify feedback. Retry, or confirm readiness manually."
+          }
+        }
+      }
+    },
+    "menu.reReview.blocked": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Re-review is waiting for the following feedback:"
+          }
+        }
+      }
+    },
+    "menu.reReview.confirm": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Confirm readiness and request re-review"
+          }
+        }
+      }
+    },
+    "menu.reReview.confirmMessage": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "I confirm that the feedback has been addressed or explained and is ready for another review. MergeTether will notify the relevant reviewers after checking the current MR again."
+          }
+        }
+      }
+    },
+    "menu.reReview.retry": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Verify again"
+          }
+        }
+      }
+    },
+    "menu.reReview.note": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Comment #%lld"
+          }
+        }
+      }
+    },
+    "menu.reReview.changed": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "The MR changed. Check its current feedback before confirming again."
           }
         }
       }

@@ -22,7 +22,7 @@ let project = Project(
             bundleId: "com.vaporpw.GitLabTodos",
             deploymentTargets: .macOS("14.0"),
             infoPlist: .extendingDefault(with: [
-                "LSUIElement": .boolean(true),
+                "LSUIElement": .boolean(false),
                 "CFBundleDisplayName": .string("MergeTether"),
                 "CFBundleName": .string("MergeTether"),
                 "CFBundleShortVersionString": .string("0.1.0"),
@@ -33,7 +33,7 @@ let project = Project(
             resources: [
                 "Resources/**",
                 "CHANGELOG.md",
-                .folderReference(path: "plugins/merge-tether"),
+                .folderReference(path: "Helpers/Automation"),
             ]
         ),
         .target(

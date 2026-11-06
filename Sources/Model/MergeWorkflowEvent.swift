@@ -34,17 +34,17 @@ struct GitLabMergeRequestReviewer: Decodable, Sendable {
     }
 }
 
-struct GitLabWorkflowUser: Decodable, Sendable {
+struct GitLabWorkflowUser: Codable, Sendable {
     let id: Int
     let username: String?
     let name: String?
 }
 
-struct GitLabMergeRequestDiscussion: Decodable, Sendable {
+struct GitLabMergeRequestDiscussion: Codable, Sendable {
     var id: String? = nil
     let notes: [Note]
 
-    struct Note: Decodable, Sendable {
+    struct Note: Codable, Sendable {
         let id: Int?
         let author: GitLabWorkflowUser?
         let system: Bool?
@@ -99,7 +99,7 @@ struct ReReviewFeedback: Sendable {
                     if latestReply > id { latestPublishedReplyID = max(latestPublishedReplyID, latestReply) }
                     addressedNotes.insert(id)
                     addressedByReviewer[reviewer] = max(addressedByReviewer[reviewer] ?? 0, id)
-                } else if note.resolved != true {
+                } else if note.resolvable == true && note.resolved != true {
                     hasUnansweredFeedback = true
                 }
             }

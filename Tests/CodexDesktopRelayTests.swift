@@ -118,7 +118,7 @@ struct CodexDesktopRelayTests {
     }
 
     @MainActor
-    @Test func relayOnlyPublishesForTheCurrentAccountAndRecordsConfirmedGUIChats() throws {
+    @Test func retiredRelayPreservesConfirmedLegacyHistoryWithoutPublishingNewGUIJobs() throws {
         let folder = FileManager.default.temporaryDirectory.appending(path: UUID().uuidString)
         defer { try? FileManager.default.removeItem(at: folder) }
         let suite = "GitLabTodosTests-\(UUID())"
@@ -147,12 +147,13 @@ struct CodexDesktopRelayTests {
         CodexDesktopRelay.synchronize(settings: settings, host: key.work.host, username: "other", directory: folder)
         #expect(!FileManager.default.fileExists(atPath: job.path))
         CodexDesktopRelay.synchronize(settings: settings, host: key.work.host, username: key.username, directory: folder)
-        #expect(FileManager.default.fileExists(atPath: job.path))
-        let jobFields = try #require(JSONSerialization.jsonObject(with: Data(contentsOf: job)) as? [String: Any])
-        #expect(jobFields["model"] as? String == "gpt-6.1-sol")
-        #expect(jobFields["thinking"] as? String == "high")
+        #expect(!FileManager.default.fileExists(atPath: job.path))
+        #expect(!handoff.supportsCodexRelay)
+        #expect(settings.assistantHandoffs.first?.reviewModel == .sol)
+        #expect(settings.assistantHandoffs.first?.reviewThinking == .high)
 
         let receipt = folder.appending(path: "receipts/\(filename)")
+        try FileManager.default.createDirectory(at: receipt.deletingLastPathComponent(), withIntermediateDirectories: true)
         let thread = UUID().uuidString
         try Data(#"{"version":1,"jobID":"\#(UUID())","threadID":"\#(thread)"}"#.utf8).write(to: receipt)
         CodexDesktopRelay.synchronize(settings: settings, host: key.work.host, username: key.username, directory: folder)
@@ -164,7 +165,7 @@ struct CodexDesktopRelayTests {
         CodexDesktopRelay.synchronize(settings: settings, host: key.work.host, username: key.username, directory: folder)
         #expect(settings.assistantHandoffs.first?.relayComplete == true)
         #expect(settings.assistantChats[key] == thread)
-        #expect(settings.assistantHandoffs.flatMap(\.deliveredFeedbackTodos) == [feedbackTodo])
+        #expect(settings.assistantHandoffs.flatMap(\.deliveredFeedbackTodos).isEmpty)
         #expect(!FileManager.default.fileExists(atPath: job.path))
 
         var openedDraft = AssistantAutomationRunner.Handoff(
@@ -179,9 +180,12 @@ struct CodexDesktopRelayTests {
 
         settings.automation.codexRelayEnabled = false
         CodexDesktopRelay.requestDispatch(openedDraft.id, settings: settings, directory: folder)
-        #expect(settings.assistantHandoffs.last?.openedAt == nil)
-        #expect(FileManager.default.fileExists(atPath: draftJob.path))
+        #expect(settings.assistantHandoffs.last?.openedAt == openedDraft.openedAt)
+        #expect(!FileManager.default.fileExists(atPath: draftJob.path))
+        #expect(!CodexDesktopRelay.canRequestDispatch(openedDraft, settings: settings))
         CodexDesktopRelay.synchronize(settings: settings, host: key.work.host, username: key.username, directory: folder)
-        #expect(FileManager.default.fileExists(atPath: draftJob.path))
+        #expect(!FileManager.default.fileExists(atPath: draftJob.path))
+        #expect(settings.assistantChats[key] == thread)
+        #expect(settings.assistantHandoffs.count == 2)
     }
 }
