@@ -3,6 +3,15 @@ import SwiftUI
 
 enum CommandCenterMRDetailSection: Hashable {
     case overview, drafts, assistantRuns, feedback
+
+    var title: LocalizedStringResource {
+        switch self {
+        case .overview: .CommandCenter.commandCenterOverview
+        case .drafts: .CommandCenter.commandCenterConfirmations
+        case .assistantRuns: .AssistantJobs.assistantJobsTitle
+        case .feedback: .CommandCenter.commandCenterFeedback
+        }
+    }
 }
 
 struct CommandCenterMRDetail: View {

@@ -91,9 +91,12 @@ struct IntegrationSettingsTab: View {
         case .wrongDefaultHost(let hosts):
             Text(.Settings.settingsIntegrationAuthWrongHost(hosts.map(\.host).joined(separator: ", ")))
                 .foregroundStyle(.orange)
-        case .notAuthenticated, .unknown:
+        case .notAuthenticated:
             Text(.Settings.settingsIntegrationAuthNotAuthenticated)
                 .foregroundStyle(.red)
+        case .unknown:
+            Text(.Settings.settingsIntegrationAuthUnverified)
+                .foregroundStyle(.secondary)
         }
     }
 }

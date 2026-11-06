@@ -40,7 +40,7 @@
         "en" : {
           "stringUnit" : {
             "state" : "translated",
-            "value" : "Run the command below in Terminal, then come back and press Re-check."
+            "value" : "If you haven’t signed in, run this command in Terminal, then choose Re-check."
           }
         }
       }
@@ -84,7 +84,7 @@
         "en" : {
           "stringUnit" : {
             "state" : "translated",
-            "value" : "Sign in to GitLab"
+            "value" : "GitLab sign-in"
           }
         }
       }
@@ -205,7 +205,7 @@
         "en" : {
           "stringUnit" : {
             "state" : "translated",
-            "value" : "MergeTether uses glab, the official GitLab CLI, to read your to-do inbox. Install it with Homebrew and press Re-check."
+            "value" : "MergeTether uses glab, the GitLab CLI, to manage merge requests and read your to-dos. Install it with Homebrew, then choose Re-check."
           }
         }
       }
@@ -393,6 +393,28 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "Set up MergeTether"
+          }
+        }
+      }
+    },
+    "onboarding.windowTitle" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Setup"
+          }
+        }
+      }
+    },
+    "onboarding.auth.unverified" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Sign-in has not been verified. Choose Re-check to check the current account."
           }
         }
       }

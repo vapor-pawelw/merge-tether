@@ -51,8 +51,10 @@ struct GlabAuthStep: View {
             authenticatedBody
         case .wrongDefaultHost(let hosts):
             wrongHostBody(hosts: hosts)
-        case .notAuthenticated, .unknown:
+        case .notAuthenticated:
             notAuthenticatedBody
+        case .unknown:
+            Text(.Onboarding.onboardingAuthUnverified).foregroundStyle(.secondary)
         }
     }
 

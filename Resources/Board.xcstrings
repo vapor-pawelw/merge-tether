@@ -206,7 +206,7 @@
         "en": {
           "stringUnit": {
             "state": "translated",
-            "value": "Remove this merge request from your Reviewing list and pause its automation. Its GitLab notifications stay available under Other items."
+            "value": "Remove this MR from Reviewing, stop its active assistant runs and pause its automation. Its GitLab assignments and drafts are kept. You can add it again manually."
           }
         }
       }
@@ -426,7 +426,7 @@
         "en": {
           "stringUnit": {
             "state": "translated",
-            "value": "View blockers"
+            "value": "Review checks…"
           }
         }
       }

@@ -18,7 +18,7 @@
         "en": {
           "stringUnit": {
             "state": "translated",
-            "value": "Run results are separate from verified GitLab actions. Review drafts and confirmations on the MR card."
+            "value": "A completed run may still have pending drafts or decisions. Open the MR to review them."
           }
         }
       }

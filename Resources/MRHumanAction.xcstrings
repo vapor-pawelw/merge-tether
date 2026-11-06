@@ -63,7 +63,7 @@
         "en": {
           "stringUnit": {
             "state": "translated",
-            "value": "An assistant CLI is required to handle this MR."
+            "value": "Set up the selected assistant CLI to continue automation."
           }
         }
       }
@@ -294,7 +294,7 @@
         "en": {
           "stringUnit": {
             "state": "translated",
-            "value": "Confirm review"
+            "value": "Review readiness…"
           }
         }
       }
@@ -305,7 +305,7 @@
         "en": {
           "stringUnit": {
             "state": "translated",
-            "value": "Review approval"
+            "value": "Review approval…"
           }
         }
       }
@@ -316,7 +316,7 @@
         "en": {
           "stringUnit": {
             "state": "translated",
-            "value": "Confirm handoff"
+            "value": "Review handoff…"
           }
         }
       }
@@ -327,7 +327,7 @@
         "en": {
           "stringUnit": {
             "state": "translated",
-            "value": "Review merge"
+            "value": "Review merge…"
           }
         }
       }

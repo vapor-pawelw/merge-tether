@@ -46,7 +46,7 @@ private struct MergeWorkflowActivityRow: View {
             }
 
             Link(destination: entry.event.mergeRequest.webURL) {
-                Text("!\(entry.event.mergeRequest.iid) \(entry.event.mergeRequest.title)")
+                Text(verbatim: "!\(entry.event.mergeRequest.iid) \(entry.event.mergeRequest.title)")
                     .lineLimit(2)
             }
             .help(Text(.Menu.menuActionOpenInBrowser))

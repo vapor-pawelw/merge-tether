@@ -64,11 +64,11 @@ struct CommandCenterBoardView: View {
         .sheet(item: $selected) { selection in
             VStack(spacing: 0) {
                 HStack {
-                    Text(.CommandCenter.commandCenterOverview).font(.headline)
+                    Text(selection.section.title).font(.headline)
                     Spacer()
                     Button { selected = nil } label: { Image(systemName: "xmark") }
                         .keyboardShortcut(.cancelAction)
-                        .accessibilityLabel(Text(.Menu.menuScopeCancel))
+                        .accessibilityLabel(Text(.CommandCenter.commandCenterClose))
                 }
                 .padding(16)
                 Divider()

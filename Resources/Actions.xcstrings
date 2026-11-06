@@ -271,7 +271,7 @@
         "en" : {
           "stringUnit" : {
             "state" : "translated",
-            "value" : "Could not merge."
+            "value" : "This merge request cannot be merged."
           }
         }
       }

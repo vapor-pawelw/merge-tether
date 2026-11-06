@@ -271,7 +271,7 @@
         "en": {
           "stringUnit": {
             "state": "translated",
-            "value": "Paste an accessible open GitLab merge request URL, or enter its number and choose a repository."
+            "value": "Paste an open GitLab MR link, or enter its number and choose a repository. Adding it enables automation for this MR under your current rules."
           }
         }
       }
@@ -293,7 +293,7 @@
         "en": {
           "stringUnit": {
             "state": "translated",
-            "value": "Connect GitLab to get started"
+            "value": "GitLab account unavailable"
           }
         }
       }
@@ -514,6 +514,28 @@
           "stringUnit": {
             "state": "translated",
             "value": "Review this merge request with the selected CLI and prepare private draft findings."
+          }
+        }
+      }
+    },
+    "commandCenter.close": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Close"
+          }
+        }
+      }
+    },
+    "commandCenter.confirmations": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Review and confirm"
           }
         }
       }

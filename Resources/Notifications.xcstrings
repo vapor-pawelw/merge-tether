@@ -18,7 +18,7 @@
         "en": {
           "stringUnit": {
             "state": "translated",
-            "value": "A failed pipeline is waiting for your handoff in Workflow Activity."
+            "value": "Pipeline work needs your ownership decision. Open the MR in MergeTether."
           }
         }
       }
@@ -29,7 +29,7 @@
         "en": {
           "stringUnit": {
             "state": "translated",
-            "value": "A monitored merge request changed. See Workflow Activity for details."
+            "value": "A monitored merge request changed. Open MergeTether for details."
           }
         }
       }
@@ -62,7 +62,7 @@
         "en": {
           "stringUnit": {
             "state": "translated",
-            "value": "Open the menu bar app to review them."
+            "value": "Open MergeTether to review them."
           }
         }
       }
@@ -84,7 +84,7 @@
         "en": {
           "stringUnit": {
             "state": "translated",
-            "value": "Open the menu bar app to stop reminders."
+            "value": "Open MergeTether to review pending items."
           }
         }
       }

@@ -40,7 +40,7 @@
         "en": {
           "stringUnit": {
             "state": "translated",
-            "value": "Automate every merge request you're involved in, or only selected repositories and MRs. A choice for a single MR overrides its repository."
+            "value": "Automate all eligible merge requests or only selected repositories and MRs. An MR setting overrides its repository."
           }
         }
       }
@@ -84,7 +84,7 @@
         "en": {
           "stringUnit": {
             "state": "translated",
-            "value": "Starting folder for manually opened assistant conversations. Automated tasks always use isolated per-run workspaces."
+            "value": "Starting folder for assistant conversations you open in Terminal. Automated tasks use separate workspaces for each run."
           }
         }
       }
@@ -95,7 +95,7 @@
         "en": {
           "stringUnit": {
             "state": "translated",
-            "value": "Customize title, prompt or command"
+            "value": "Customize task title and instructions"
           }
         }
       }
@@ -117,7 +117,7 @@
         "en": {
           "stringUnit": {
             "state": "translated",
-            "value": "When the assistant has addressed someone's feedback on your MR and its replies are published, ask that person to review again. GitLab may reset their earlier approval."
+            "value": "After feedback is verified as addressed and replies are published, ask reviewers who haven’t accepted it to review again. GitLab may reset an earlier approval."
           }
         }
       }
@@ -150,7 +150,7 @@
         "en": {
           "stringUnit": {
             "state": "translated",
-            "value": "Applied to review and re-review tasks run by Codex CLI."
+            "value": "Used when Codex reviews an MR or reviews new commits. Feedback checks use the separate verification model."
           }
         }
       }
@@ -337,7 +337,7 @@
         "en": {
           "stringUnit": {
             "state": "translated",
-            "value": "Apply Changes to activate your settings."
+            "value": "Apply Changes saves automation settings. Scope changes are saved immediately."
           }
         }
       }
@@ -425,7 +425,7 @@
         "en": {
           "stringUnit": {
             "state": "translated",
-            "value": "Open My Merge Requests to load the list. Enabled actions run in the background at the refresh interval set in General."
+            "value": "Your open merge requests are checked in the background at the refresh interval set in General. Open the main window to review their status and actions."
           }
         }
       }
@@ -458,7 +458,7 @@
         "en": {
           "stringUnit": {
             "state": "translated",
-            "value": "Merge your MR once it's approved, discussions are resolved and the pipeline passes. The project must require approvals and resolved discussions."
+            "value": "Merge your eligible MRs after approvals, resolved discussions, a passing pipeline and verified reviewer expectations. The project must enforce approvals and resolved discussions."
           }
         }
       }
@@ -535,7 +535,7 @@
         "en": {
           "stringUnit": {
             "state": "translated",
-            "value": "Runs with your macOS account permissions using zsh. Exit with code 0 once the task has been handed off. GitLab details are available as environment variables."
+            "value": "Saved scripts are retained for reference. MR automation runs through the selected assistant CLI."
           }
         }
       }
@@ -568,7 +568,7 @@
         "en": {
           "stringUnit": {
             "state": "translated",
-            "value": "Prepares a conflict-resolution task through the selected CLI. Pushing to a source branch requires separate permission and a listed project."
+            "value": "Prepares a conflict-resolution task through the selected CLI. Pushing a fix requires project tool access, conflict-push permission and a listed project."
           }
         }
       }
@@ -656,7 +656,7 @@
         "en": {
           "stringUnit": {
             "state": "translated",
-            "value": "Recommended automation enables reviews, follow-ups, CI diagnoses, and re-review after AI follow-ups. You can adjust each rule before saving."
+            "value": "Recommended enables reviews, follow-ups, CI workflows and re-review. It allows verified follow-up pushes, AI-reply publication, approvals and thread resolution. Publishing all comments, automatic merge and conflict pushes remain off."
           }
         }
       }
@@ -700,7 +700,7 @@
         "en": {
           "stringUnit": {
             "state": "translated",
-            "value": "Replaces automation rules with the recommended settings for the selected assistant. Apply Changes to save."
+            "value": "Restores recommended rules and permissions for the selected CLI. Automation scope and your manual starting folder are kept. Apply Changes to save."
           }
         }
       }
@@ -898,7 +898,7 @@
         "en": {
           "stringUnit": {
             "state": "translated",
-            "value": "Send notification"
+            "value": "Track event"
           }
         }
       }
@@ -931,7 +931,7 @@
         "en": {
           "stringUnit": {
             "state": "translated",
-            "value": "Preview records what would run in Activity. Notify alerts you when work still needs your attention. Prepare runs a task through the selected CLI."
+            "value": "Preview and Track event record events in Activity without starting work. Run with assistant CLI starts a task. System notifications follow the General setting and alert you only to new work needing your attention."
           }
         }
       }
@@ -986,7 +986,7 @@
         "en": {
           "stringUnit": {
             "state": "translated",
-            "value": "Allow one infrastructure retry after handoff (listed projects only)"
+            "value": "Allow one infrastructure retry (listed projects only)"
           }
         }
       }
@@ -1052,7 +1052,7 @@
         "en": {
           "stringUnit": {
             "state": "translated",
-            "value": "Manual assistant starting folder (optional)"
+            "value": "Manual CLI starting folder (optional)"
           }
         }
       }
@@ -1129,7 +1129,7 @@
         "en": {
           "stringUnit": {
             "state": "translated",
-            "value": "Check for new to-dos"
+            "value": "Check GitLab for updates"
           }
         }
       }
@@ -1228,7 +1228,7 @@
         "en": {
           "stringUnit": {
             "state": "translated",
-            "value": "MergeTether shells out to glab to read your GitLab to-dos. It uses glab's default host and stored credentials."
+            "value": "MergeTether uses glab’s default host and signed-in account to read merge requests and to-dos and perform the GitLab actions you enable."
           }
         }
       }
@@ -1316,7 +1316,7 @@
         "en": {
           "stringUnit": {
             "state": "translated",
-            "value": "Integration"
+            "value": "GitLab"
           }
         }
       }
@@ -1514,7 +1514,7 @@
         "en": {
           "stringUnit": {
             "state": "translated",
-            "value": "Everything else that reaches other people waits on the MR card until you confirm it."
+            "value": "These permissions control publishing, approvals and follow-up pushes. Other enabled rules can request reviews or resolve verified threads."
           }
         }
       }
@@ -1547,7 +1547,7 @@
         "en": {
           "stringUnit": {
             "state": "translated",
-            "value": "Only replies to GitLab Duo and to comments the assistant is very confident were AI-written. Anything uncertain waits for you."
+            "value": "Only checked replies to GitLab Duo or to comments assessed with very high confidence as AI-written. Current MR and draft evidence must also be verified; uncertain replies wait for you."
           }
         }
       }
@@ -1569,7 +1569,7 @@
         "en": {
           "stringUnit": {
             "state": "translated",
-            "value": "It commits and pushes tested fixes for reviewers’ feedback to your branch. Off: proposed fixes stay in the task result."
+            "value": "Allow tested fixes to be committed and pushed to your MR’s source branch. Off: proposed fixes stay in the run result for you to deliver."
           }
         }
       }
@@ -1635,7 +1635,7 @@
         "en": {
           "stringUnit": {
             "state": "translated",
-            "value": "Off: the assistant's comments wait on the MR card for you. On: they're published as soon as the assistant finishes writing them."
+            "value": "On: publish verified drafts after they remain unchanged across two refreshes and current checks pass. Off: review them on the MR card; the separate AI-reply option can still publish eligible replies."
           }
         }
       }
@@ -1712,7 +1712,7 @@
         "en": {
           "stringUnit": {
             "state": "translated",
-            "value": "Install the command-line tool using the provider’s official installer. Then sign in if requested."
+            "value": "Use the button below to run the provider’s CLI installer, then sign in if needed."
           }
         }
       }
@@ -1855,7 +1855,7 @@
         "en": {
           "stringUnit": {
             "state": "translated",
-            "value": "Use the selected assistant’s signed-in CLI to assess comments and the current diff. Missing evidence or a failed check leaves an action on the MR. When off, confirm readiness manually; CLI installation and sign-in are not required."
+            "value": "Assess comments and the current diff with the selected CLI before requesting re-review. When off or a check is inconclusive, confirm readiness manually. Other assistant automation still requires a signed-in CLI."
           }
         }
       }
@@ -1911,6 +1911,17 @@
           "stringUnit": {
             "state": "translated",
             "value": "System notifications are enabled."
+          }
+        }
+      }
+    },
+    "settings.integration.auth.unverified": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Sign-in not verified"
           }
         }
       }

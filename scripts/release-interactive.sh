@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 # Promote CHANGELOG Unreleased notes into a dated version section, create and
-# push a signed tag, then (when configured) watch the Release workflow and
+# push an annotated tag, then (when configured) watch the Release workflow and
 # verify the GitHub release + Homebrew tap.
 #
 # Env vars:

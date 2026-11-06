@@ -20,7 +20,7 @@ corresponding sections across instruction-file pairs. Neither result justifies
 replacing executable checks with prose. The remote-proof publication gate is
 therefore enforced by code and tests as well as documented in prompts.
 
-Sources checked on 5 November 2026:
+Sources checked on 6 November 2026:
 
 - [Do Context Files Help Coding Agents?](https://arxiv.org/abs/2607.27250), 28 July 2026 — controlled two-agent ablation; limited task/repository sample.
 - [Toward an Evidence-Based Template for Agent Instruction Files](https://arxiv.org/abs/2611.02383), 2 November 2026 — adoption, divergence and maintenance across formats.

@@ -227,7 +227,7 @@
         "en": {
           "stringUnit": {
             "state": "translated",
-            "value": "Enable automation for a repository or an individual MR from a GitLab To-Do or My MRs."
+            "value": "Add a repository or MR here, or enable automation from an MR’s menu on the board."
           }
         }
       }
@@ -238,7 +238,7 @@
         "en": {
           "stringUnit": {
             "state": "translated",
-            "value": "Open Codex chat"
+            "value": "Open previous Codex chat"
           }
         }
       }
@@ -590,7 +590,7 @@
         "en": {
           "stringUnit": {
             "state": "translated",
-            "value": "Prepared in Assistant tasks"
+            "value": "Recorded for assistant handling"
           }
         }
       }
@@ -601,7 +601,7 @@
         "en": {
           "stringUnit": {
             "state": "translated",
-            "value": "Prepared for desktop assistant"
+            "value": "Waiting for the assistant run"
           }
         }
       }
@@ -623,7 +623,7 @@
         "en": {
           "stringUnit": {
             "state": "translated",
-            "value": "Prepare review"
+            "value": "Run review"
           }
         }
       }
@@ -634,7 +634,7 @@
         "en": {
           "stringUnit": {
             "state": "translated",
-            "value": "Prepare follow-up"
+            "value": "Handle feedback"
           }
         }
       }
@@ -678,7 +678,7 @@
         "en": {
           "stringUnit": {
             "state": "translated",
-            "value": "Action did not complete. Check the assistant or script before repeating it."
+            "value": "The action did not finish. Review its result before trying again."
           }
         }
       }
@@ -777,7 +777,7 @@
         "en": {
           "stringUnit": {
             "state": "translated",
-            "value": "Open Codex chat"
+            "value": "Open linked assistant chat"
           }
         }
       }
@@ -788,7 +788,7 @@
         "en": {
           "stringUnit": {
             "state": "translated",
-            "value": "Previews, notifications and assistant runs appear here."
+            "value": "MR events, automation decisions and results appear here."
           }
         }
       }
@@ -1382,7 +1382,7 @@
         "en": {
           "stringUnit": {
             "state": "translated",
-            "value": "Couldn't fetch to-dos: %@"
+            "value": "GitLab request failed: %@"
           }
         }
       }
@@ -1657,7 +1657,7 @@
         "en": {
           "stringUnit": {
             "state": "translated",
-            "value": "The assistant found nothing blocking and you have no open threads. Approve this commit?"
+            "value": "The assistant has no objections to this commit, and your review threads are resolved. Approve it?"
           }
         }
       }
@@ -1668,7 +1668,7 @@
         "en": {
           "stringUnit": {
             "state": "translated",
-            "value": "Show comments"
+            "value": "Comments"
           }
         }
       }
@@ -1679,7 +1679,7 @@
         "en": {
           "stringUnit": {
             "state": "translated",
-            "value": "Publish all"
+            "value": "Publish comments"
           }
         }
       }
@@ -1822,7 +1822,7 @@
         "en": {
           "stringUnit": {
             "state": "translated",
-            "value": "Open Claude session"
+            "value": "Open previous Claude session"
           }
         }
       }
@@ -1833,7 +1833,7 @@
         "en": {
           "stringUnit": {
             "state": "translated",
-            "value": "These drafts have no completed check covering the current commit and discussions. Review them in GitLab before publishing, or have the assistant prepare a current result."
+            "value": "These drafts have no completed check for the current commit and discussions. Review the comments below or in GitLab before publishing."
           }
         }
       }
@@ -1844,7 +1844,7 @@
         "en": {
           "stringUnit": {
             "state": "translated",
-            "value": "Not published automatically yet: the fixes these replies describe aren't verified on GitLab. You can still publish them yourself."
+            "value": "Automatic publication is paused: the fixes described in these replies are not verified on GitLab. Review them before publishing manually."
           }
         }
       }

@@ -7,7 +7,7 @@ struct AuthoredMergeRequestRow: View {
         Link(destination: status.request.webURL) {
             HStack(alignment: .top, spacing: 10) {
                 VStack(alignment: .leading, spacing: 4) {
-                    Text("!\(status.request.iid)")
+                    Text(verbatim: "!\(status.request.iid)")
                         .font(.caption.monospacedDigit())
                         .foregroundStyle(.secondary)
 

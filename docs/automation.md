@@ -7,7 +7,7 @@ MergeTether is a local MR command center. Manual GitLab management works without
 **When you are the reviewer**
 
 1. A review request arrives. The selected CLI reviews the current MR and saves warranted findings as private GitLab drafts.
-2. Drafts wait on the relevant MR card. Preview them, then **Publish comments**, or edit them in GitLab.
+2. Drafts wait on the relevant MR card. Open **Review comments**, inspect the expanded draft preview and publish the reviewed set, or edit it in GitLab.
 3. New commits or author replies trigger a new re-review task. The first poll establishes a baseline; later events are deduplicated across restarts.
 4. With **Resolve my verified findings during re-review** enabled, the assistant checks each concern against the current remote head and resolves only threads whose first non-system note belongs to you. Unaddressed or uncertain concerns stay open with private draft replies. Turning the option off leaves resolution to you.
 5. Automatic approval requires a current no-objections verdict, no pending drafts and every discussion resolved, in addition to your automation scope and CLI readiness.
@@ -30,7 +30,7 @@ The CLI requirement applies even when automatic re-review verification is off. D
 
 Codex review and re-review tasks use the configured review model and reasoning setting. Other Codex tasks use the CLI’s configured model. Claude full tasks use the model configured in Claude CLI. The lightweight re-review readiness assessment has its own model setting.
 
-The optional starting folder applies to manually opened assistant conversations. Automated jobs always run in isolated per-run workspaces. The project-tool permission applies to tasks that explicitly require it; other tasks can still use tools permitted by the selected CLI sandbox.
+The optional starting folder applies to manually opened CLI sessions. Desktop destinations receive the MR prompt without a starting folder. Automated jobs always run in isolated per-run workspaces. The project-tool permission applies to tasks that explicitly require it; other tasks can still use tools permitted by the selected CLI sandbox.
 
 CLI execution permissions still apply. Headless execution cannot answer an interactive permission prompt; a denied action or missing dependency must remain visible as a failed or blocked task. MergeTether does not change the provider’s private settings or silently grant broader permissions.
 
@@ -40,13 +40,13 @@ MergeTether persists task instructions and execution state locally, including ou
 
 Failed, cancelled and interrupted work stays inspectable. A deliberate retry creates another execution attempt; restarting the app does not silently replay a task that may already have changed GitLab. If a retry is needed, inspect any remote effects first.
 
-Old GUI handoffs and links remain decodable for migration, but are not automatically replayed. The current app does not create desktop assistant chats, append messages, synchronize chat titles, install desktop plugins, monitor listener heartbeats or register permission templates. Previously configured external listeners are outside the app’s control; inspect and disable those schedules separately before using headless automation for the same MRs.
+Old GUI handoffs and links remain decodable for migration, but are not automatically replayed. Automation does not create desktop assistant chats, append messages, synchronize chat titles, install desktop plugins, monitor listener heartbeats or register permission templates. Explicit manual desktop actions remain available. Previously configured external listeners are outside the app’s control; inspect and disable those schedules separately before using headless automation for the same MRs.
 
 The app bundles standalone proof helpers under `Contents/Resources/Automation`: `evidence.py` and `author_follow_up.py`. They read GitLab state and store local evidence without an installed plugin, MCP configuration or listener. Historical sources under `plugins/merge-tether` are retained for compatibility tests and are not packaged in the app.
 
 ## Optional manual assistant actions
 
-An MR’s manual action menu offers the installed assistant destinations detected on the Mac, including desktop applications and CLIs. Choose a destination explicitly when you want to investigate interactively. This does not switch the automation provider or enable automatic desktop dispatch.
+An MR’s **…** menu offers the installed assistant destinations detected on the Mac, including desktop applications and CLIs, plus **Copy MR context**. Desktop actions pass the MR prompt through a deep link; if it is too long, the app copies it and opens the destination for pasting. CLI actions open Terminal with the prompt. These actions do not switch the automation provider or enable automatic desktop dispatch, and MergeTether does not manage the external conversation.
 
 Opening an external destination is not proof that its work completed. A manual session must coordinate ownership before fixing a pipeline already being handled elsewhere. MergeTether’s remote-evidence and publication rules still apply to drafts eligible for automatic publication.
 
@@ -54,13 +54,13 @@ Opening an external destination is not proof that its work completed. A manual s
 
 To-dos are incoming events. A recognized update for an MR already on the board updates its action state and is acknowledged after that state is persisted. The card shows the resulting action, rather than a separate to-do row. The action and any running or failed agent task remain visible after the GitLab to-do disappears.
 
-A new foreign MR is proposed in **Other** with **Add and handle** or **Ignore this MR**. With matching enabled automation, active scope and a ready selected CLI, eligible MRs are adopted and handled automatically. Explicitly ignored or paused MRs are not silently re-adopted. Manual re-addition restores an ignored MR.
+A new foreign MR is proposed in **Other items** with **Add and handle** or **Ignore this MR**. With matching enabled automation, active scope and a ready selected CLI, eligible MRs are adopted and handled automatically. Explicitly ignored or paused MRs are not silently re-adopted. Manual re-addition restores an ignored MR.
 
-Events that cannot be classified safely remain in **Other** for manual reading; they are never acknowledged as understood. Marking a routed event read does not prove a review finished, a fix was pushed or a draft can be published. Those outcomes keep their separate execution and remote-evidence checks.
+Events that cannot be classified safely remain in **Other items** for manual reading; they are never acknowledged as understood. Marking a routed event read does not prove a review finished, a fix was pushed or a draft can be published. Those outcomes keep their separate execution and remote-evidence checks.
 
 ## The recommended package
 
-The optional recommended package watches failed pipelines, new commits after review, author replies, merge blocker changes, merged stack dependencies and overdue reviews. Each rule can be off, preview-only, notify-only or run with the selected CLI. Notify mode records events and follows the human-attention policy below; automatically handled or informational updates stay quiet. Repository, target branch and label filters constrain it.
+The optional recommended package watches failed pipelines, new commits after review, author replies, merge blocker changes, merged stack dependencies and overdue reviews. Configure these in **Settings → Automation → MR Events**. Choose **Off**, **Log a preview**, **Track event** or **Run with assistant CLI** for each rule. The two passive modes record activity without starting an assistant task; neither guarantees a system notification. Notifications follow the human-attention policy below. Repository, target branch and label filters constrain the rules.
 
 The package enables follow-up push, verified resolution of your own review findings, selective AI-feedback reply publication and automatic approval. Publishing every comment, automatic merge and conflict-resolution pushes are separate settings. Opting out disables the assistant package; manual MR management remains available.
 
@@ -68,7 +68,7 @@ Manage global scope and repository/MR overrides in **Settings → Automation →
 
 ## Attention and notifications
 
-The menu-bar indicator is neutral when there is no human action waiting and amber when the board needs your attention. System notifications are optional and focus on work requiring a human decision; automatically handled updates do not create routine notification noise. Repeated polls do not repeat the same alert, and legacy periodic unread reminders are no longer delivered.
+The menu-bar indicator is neutral when there is no human action waiting and amber when the board needs your attention. Running automation and read-only verification show progress; waiting only for a reviewer remains neutral. Each attention card explains the required decision and opens the relevant comments, run result or MR details. System notifications are optional and focus on new human actions; automatically handled updates do not create routine notification noise. Repeated polls do not repeat the same alert, and legacy periodic unread reminders are no longer delivered.
 
 Use **Enable notifications** in the main window, onboarding or **Settings → General** to request macOS permission. The system prompt requires your choice. If permission was denied, use **Open System Settings**; returning to the app refreshes the displayed permission state. The app notification toggle and macOS authorization are separate controls.
 
@@ -76,16 +76,16 @@ Use **Enable notifications** in the main window, onboarding or **Settings → Ge
 
 **Settings → Automation → Checkpoints** contains publication, approval and follow-up push settings.
 
-- **Publish comments without confirmation** is off by default. When enabled, the app waits until drafts stop changing across two refreshes and verifies current evidence before sending them. GitLab cannot identify which assistant created a draft, so this can include your own pending drafts on MRs the assistant worked on.
+- **Publish comments without asking me** is off by default. When enabled, the app waits until drafts stop changing across two refreshes and verifies current evidence before sending them. GitLab cannot identify which assistant created a draft, so this can include your own pending drafts on MRs the assistant worked on.
 - **Automatically publish replies to AI feedback** is on by default, preserving an earlier opt-out. Verified GitLab Duo comments qualify directly. Human-posted comments require a very-high-confidence AI-origin assessment tied to the source note ID and exact body hash. This is a heuristic; uncertain cases remain private. Edited comments and new human follow-ups require new assessments.
 - Automatic publication rejects slash-command lines and `resolve_discussion`. It publishes checked draft IDs individually, after another read. Unrelated or changed drafts remain private.
-- **Publish comments** on an MR card explicitly publishes the previewed set only if it is unchanged. Publishing in GitLab is also supported; the board refreshes pending confirmations while it is open.
+- **Review comments** on an MR card opens its draft preview. Explicit publication sends the previewed set only if it is unchanged. Publishing in GitLab is also supported; the board refreshes pending confirmations while it is open.
 
-**Ready for your OK** requires a check covering the current MR head and discussion content. New or edited comments invalidate it; resolution-only changes preserve it. Failed or missing checks keep drafts visible outside Ready. Explicit manual publication remains available.
+Draft readiness requires a check covering the current MR head and discussion content. New or edited comments invalidate it; resolution-only changes preserve it. Failed or missing checks leave the drafts visible with an explanation that they need review. Explicit manual publication remains available from the MR details.
 
 ## Remote proof for author follow-ups
 
-**Push verified follow-up fixes to my MR branches** is enabled by the recommended package and is independent of conflict-push permission. Turning it off is preserved across restarts. Installed MR skills can refine the work, but are not required for this sequence.
+**Let the assistant push fixes to my merge requests** is enabled by the recommended package and is independent of conflict-push permission. Turning it off is preserved across restarts. Installed MR skills can refine the work, but are not required for this sequence.
 
 The worker runs the bundled `author_follow_up.py status` command at the start and immediately before pushing. Only an explicit author-follow-up run carries that permission; review, legacy and conflict tasks cannot inherit it. Before drafting it runs `author_follow_up.py verify` with the run ID, tested/pushed commit and an evidence file containing the assessed discussion fingerprint and SHA-256 hashes of committed source/test files. The verifier reads the authenticated user, owned MR, source branch and remote file contents.
 
@@ -109,19 +109,21 @@ When verification fails or is unavailable, the MR shows the reason and **Verify 
 
 **Settings → Automation → Checkpoints → Resolve addressed feedback after reviewer acceptance** defaults to on for new and migrated settings. Explicitly disabling it is preserved. It applies only to your own open, non-draft MRs within the enabled automation scope and requires the signed-in selected CLI.
 
+This switch controls automatic thread resolution. Turning it off still permits semantic verification and configured author follow-ups; it does not remove the feedback check required for automatic merge.
+
 The verifier checks the current diff and every external comment, including general comments and conditions in other threads. A reviewer's current approval is consent to close their verified addressed threads; it is never proof that their requests were fulfilled. An advance approval such as “approved, but still do X” remains blocked until the request is implemented or substantively answered with a justified explanation. Warranted work enters the configured author-follow-up workflow, with its existing push and publication permissions.
 
 A later explicit acceptance comment by the same reviewer can also provide consent. It may be a general summary covering several findings. The verifier must tie it to the current code and concerns; the app checks the cited note's author and chronology. Generic thanks, another person's approval, stale acceptance and account-specific exceptions do not qualify. Every actionable participant in a thread must be satisfied, and missing evidence prevents resolution.
 
 Before each resolution the app rechecks the live account, owned MR, source head, entire discussion text, current approvals, drafts, settings and scope. Pending replies must be published first. The MR detail shows remaining corrections or explanations, unpublished replies, verification failures and reviewers whose acceptance is missing. A reviewer who has already accepted is not asked to review the same unchanged feedback again.
 
-Each automatic follow-up attempt records the reviewer note ID and content revision. An assistant reply or new commit alone cannot replay that attempt; edited or new reviewer feedback can start new work, and explicit manual retries remain available. Large sets are handled in bounded batches. Stale live evidence triggers a fresh poll; actual verification/API failures remain visible for deliberate retry rather than automatically repeating uncertain remote work.
+Each automatic follow-up attempt records the reviewer note ID and content revision separately from visible job history. An assistant reply, new commit or cleared history alone cannot replay that attempt; edited or new reviewer feedback can start new work, and explicit manual retries remain available. Large sets are handled in bounded batches. Stale live evidence triggers a fresh poll; actual verification/API failures remain visible for deliberate retry rather than automatically repeating uncertain remote work.
 
 Automatic merge also requires a fresh complete semantic assessment when external feedback exists. A remaining condition in a general comment blocks it even when GitLab's approval rules are satisfied and every resolvable thread is closed. Turning off thread resolution does not bypass this merge check.
 
 ## Automatic approval
 
-**Approve automatically** is enabled by the recommended package. Approval requires:
+**Approve merge requests automatically** is enabled by the recommended package. Approval requires:
 
 - a no-objections verdict for the current MR head and discussion content;
 - no pending drafts;

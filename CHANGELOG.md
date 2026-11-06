@@ -16,10 +16,10 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 - Offer installed desktop assistants and CLIs as optional, manually selected MR destinations.
 - Verify re-review readiness with independent Luna/Haiku defaults, comment-specific blockers and content-bound manual confirmation when automatic verification is off or unavailable.
 - Offer CLI compatibility/sign-in checks, installation and Terminal login during assistant setup; preserve the prior selection on cancellation.
-- Turn recognized GitLab to-dos into durable MR actions, acknowledge routed events, and keep unknown events or new-MR proposals in Other. Support explicit Add/Ignore and automatic adoption within enabled scope.
+- Turn recognized GitLab to-dos into durable MR actions, acknowledge routed events, and keep unknown events or new-MR proposals in Other items. Support explicit Add/Ignore and automatic adoption within enabled scope.
 - Keep checked drafts, approvals, blockers and agent results on their MR cards and promote cards requiring attention.
-- Browse Own and Reviewed MRs, add individual reviewed MRs by URL or repository/number, and control automatic approval per MR.
-- Configure automation globally, per repository or per MR, with workflow preview, notification and execution modes.
+- Browse My merge requests and Reviewing, add individual reviewed MRs by URL or repository/number, and control automatic approval per MR.
+- Configure automation globally, per repository or per MR, with workflow preview, event tracking and CLI execution modes.
 
 ### Changed
 
@@ -37,14 +37,16 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 
 ### Fixed
 
+- Align documentation and interface wording with the MR board, CLI automation, current checkpoints and manual review actions.
+- Recheck GitLab authentication on refresh after a startup connection failure.
 - Explain the specific human action on each attention card and open pending comments or a stopped run directly, replacing generic blocker labels.
 - Keep automatic processing and reviewer waits neutral, share human-attention decisions across cards and the menu bar, and require complete verifier output with a bounded read-only retry.
 - Keep draft MRs at the bottom of Reviewing even when they have pending actions.
 - Keep Activity and assistant history in the main window, removing the nested tabs from Automation Scope settings.
 
-- Keep draft confirmations outside Ready when the current MR head or discussion content has not been checked. Refresh visible Inbox confirmations without waiting for the regular poll.
+- Keep drafts marked as needing review when the current MR head or discussion content has not been checked. Refresh visible MR confirmations without waiting for the regular poll.
 - Invalidate review verdicts after new or edited discussion text, while retaining them for resolution-only changes.
-- Keep previous MR catalogs and clickable Inbox content when a GitLab source fails.
+- Keep previous MR catalogs and clickable board content when a GitLab source fails.
 - Preserve private user-created drafts and require checked draft IDs for automatic publication.
 - Align wrapped MR titles, avatars, metadata and action controls, and avoid a SwiftUI lazy-layout loop in MR lists.
 - Coordinate failed pipeline ownership and isolated follow-up work to avoid duplicate fixes.

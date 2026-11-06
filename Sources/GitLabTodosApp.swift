@@ -65,12 +65,12 @@ struct GitLabTodosApp: App {
         }
         .windowResizability(.contentMinSize)
 
-        Window("Setup", id: "onboarding") {
+        Window(String(localized: .Onboarding.onboardingWindowTitle), id: "onboarding") {
             OnboardingView(monitor: appDelegate.monitor)
         }
         .windowResizability(.contentSize)
 
-        Window("What's New", id: "whats-new") {
+        Window(String(localized: .Menu.whatsNewTitle), id: "whats-new") {
             WhatsNewView(updates: appDelegate.updates)
         }
         .windowResizability(.contentSize)

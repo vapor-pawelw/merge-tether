@@ -1,6 +1,6 @@
 <div align="center">
 
-<img src="docs/images/mergetether-icon.png" alt="MergeTether — hand-painted connected branches" width="128"/>
+<img src="docs/images/mergetether-icon.png" alt="MergeTether — painted-style connected branches" width="128"/>
 
 # MergeTether
 
@@ -21,9 +21,11 @@ MergeTether opens a resizable main window and appears in the Dock. Its board kee
 - **Reviewing:** MRs you review, with review, publication and approval actions beside the relevant MR.
 - **Other items:** unmatched GitLab to-dos and work outside the current MR set. Add an MR to bring its work onto the board.
 
-Recognized GitLab to-dos update an MR’s durable action and are then marked read. Unknown events stay in Other; new foreign MRs can be added and handled or ignored, and matching enabled automation adopts them automatically. Agent completion remains a separate state.
+Recognized GitLab to-dos update an MR’s durable action and are then marked read. Unknown events stay in Other items; new foreign MRs can be added and handled or ignored, and matching enabled automation adopts them automatically. Agent completion remains a separate state.
 
 Cards requiring attention rise to the top of their column; draft MRs stay at the bottom of Reviewing. Open a card for its full details and execution history. **Activity** shows workflow events and assistant results. **Settings → Automation → Scope** controls automation globally, by repository or by MR without losing history.
+
+Use **Add merge request…** to add a reviewed MR by URL or repository and number. **Remove from my list** on a reviewed MR keeps it out of automatic adoption until you explicitly add it again.
 
 Attention means a human action is required. Automatic work and verification show progress without an attention marker; waiting for a reviewer stays neutral. Cards, the menu-bar indicator and notifications use the same decision.
 Each attention card explains what needs you and offers a matching action. Pending comments open expanded for review; stopped automation opens its run result with the actual cause.
@@ -64,13 +66,13 @@ Choose your assistant, scope and rules in **Settings → Automation**. Installed
 
 **Local fixes are not delivered fixes.** With follow-up push off, pending or failed, the proposal stays in the task result and does not create completion drafts. Automatic publication on your own MRs requires a fresh, sealed verification tied to the account, run, source branch, remote file hashes and exact draft bodies. Old local-only drafts are retained privately rather than silently trusted.
 
-**AI-feedback publication is selective.** Verified GitLab Duo comments qualify; comments posted by people require a very-high-confidence AI-origin assessment bound to their current content. This is a heuristic. Uncertain cases remain private, and neither discussion resolution nor slash quick actions are automatically published. You can explicitly publish pending drafts from the MR card.
+**AI-feedback publication is selective.** Verified GitLab Duo comments qualify; comments posted by people require a very-high-confidence AI-origin assessment bound to their current content. This is a heuristic. Uncertain cases remain private, and neither discussion-resolution commands nor slash quick actions are automatically published. Review pending drafts in the MR details before explicitly publishing them.
 
 Tasks run headlessly through the selected CLI. MergeTether stores their lifecycle, output and errors locally. A completed agent process is distinct from verified remote changes, review evidence or a passing pipeline. Failed and interrupted runs remain inspectable and require a deliberate retry; uncertain work is not silently replayed after a restart. Legacy desktop handoffs are retained without automatic replay.
 
 Assistant setup checks CLI compatibility and sign-in before accepting your choice. It offers CLI installation and sign-in in Terminal; cancelling keeps the previous selection. Turning off automatic re-review verification does not remove the CLI requirement for assistant automation. CLI execution permissions still apply. No desktop listener, scheduled dispatcher, plugin installation or permission-template setup is required.
 
-You can also choose an installed desktop assistant or CLI from an MR’s manual action menu. These actions are optional, explicitly selected destinations; opening one does not enable automatic desktop dispatch or establish that its work completed. See [all permissions, defaults and limits](docs/automation.md).
+You can also choose an installed desktop assistant or CLI from an MR’s **…** menu. MergeTether passes an MR context prompt through a desktop deep link or opens the CLI in Terminal; very long desktop prompts are copied for pasting instead. These actions do not enable automatic desktop dispatch or track the resulting conversation. See [all permissions, defaults and limits](docs/automation.md).
 
 ## Privacy
 

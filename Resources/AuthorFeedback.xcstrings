@@ -60,9 +60,21 @@
       "extractionState": "manual",
       "localizations": {
         "en": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "Publish %lld pending replies before closing threads."
+          "variations": {
+            "plural": {
+              "one": {
+                "stringUnit": {
+                  "state": "translated",
+                  "value": "Publish %lld pending reply before closing threads."
+                }
+              },
+              "other": {
+                "stringUnit": {
+                  "state": "translated",
+                  "value": "Publish %lld pending replies before closing threads."
+                }
+              }
+            }
           }
         }
       }
@@ -117,7 +129,7 @@
         "en": {
           "stringUnit": {
             "state": "translated",
-            "value": "Verified and accepted; closing the thread."
+            "value": "Verified and accepted; ready to close the thread."
           }
         }
       }

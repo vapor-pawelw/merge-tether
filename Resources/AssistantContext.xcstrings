@@ -7,7 +7,7 @@
         "en": {
           "stringUnit": {
             "state": "translated",
-            "value": "Open with assistant\u2026"
+            "value": "Open with assistant…"
           }
         }
       }
@@ -106,7 +106,7 @@
         "en": {
           "stringUnit": {
             "state": "translated",
-            "value": "Start a separate manual conversation with this MR\u2019s context. Automatic work stays in MergeTether."
+            "value": "Open a separate conversation with this MR’s context. MergeTether does not track that conversation."
           }
         }
       }

@@ -28,7 +28,7 @@ Manual GitLab management requires authenticated `glab`. Assistant automation add
 ## Command-line build
 
 ```bash
-tuist generate --no-open
+mise exec -- tuist generate --no-open
 xcodebuild \
   -project GitLabTodos.xcodeproj \
   -scheme GitLabTodos \
@@ -41,7 +41,9 @@ The built `.app` bundle lives under the Xcode DerivedData path printed at the en
 
 ## Local installation identity
 
-A development installation may use a separate `PRODUCT_BUNDLE_IDENTIFIER` supplied to the build command. Preserve that identifier on later rebuilds so preferences and permissions stay attached to the same installation. Keep the release identifier unchanged. Old menu-bar placement preferences are no longer used by the main-window app.
+A development installation may use a separate `PRODUCT_BUNDLE_IDENTIFIER` supplied to the build command. Preserve that identifier on later rebuilds so preferences and permissions stay attached to the same installation. Keep the release identifier unchanged. The main window replaces the old popover; the menu bar now provides an attention indicator and app actions.
+
+`scripts/rebuild-and-relaunch.sh` regenerates, builds and launches a Debug app from its build directory. It stops processes matching the legacy executable name and uses the project’s default bundle identifier; it is not an installer for an existing custom-identifier app. Use an explicit build and copy step when preserving such an installation.
 
 ## Running tests
 
@@ -74,4 +76,6 @@ identifier to keep that installation's preferences and permissions.
 
 ## Release builds
 
-A release build script lives at `scripts/build-release.sh`. It invokes `xcodebuild archive`, exports the unsigned `.app`, and packages it into a DMG and a ZIP under `release/`. Releases are tag-driven: pushing a version tag triggers the release workflow. Only tag a release when explicitly requested.
+A release build script lives at `scripts/build-release.sh`. Run it through the pinned toolchain with `mise exec -- bash scripts/build-release.sh [version]`. It generates the project, runs an unsigned Release `clean build`, and packages the `.app` into a DMG and ZIP with SHA-256 files under `release/`. Without a version argument it reads `CFBundleShortVersionString` from `Project.swift`. It replaces and then removes the repository’s scratch `build/` directory.
+
+Releases are tag-driven: pushing a `v*` tag triggers the Release workflow. `scripts/release-interactive.sh` promotes Unreleased notes and pushes their commit and an annotated tag; it is a publication command, not a local build helper. Only publish or tag a release when explicitly requested. Legacy `GitLabTodos` artifact names remain in use.

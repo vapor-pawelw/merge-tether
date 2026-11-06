@@ -1,6 +1,6 @@
 import SwiftUI
 
-/// One merge request waiting in Ready for your OK: drafts to publish or an approval to give.
+/// Pending draft publication or approval in an MR’s details.
 struct ConfirmationQueueRow<AdditionalActions: View>: View {
     let item: MergeRequestAttentionMonitor.Item
     let state: MergeRequestAttentionMonitor.ConfirmationState?

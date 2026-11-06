@@ -7,7 +7,7 @@ built-in image-generation tool and then resized for the macOS app-icon catalog.
 
 - Master used by the README: [mergetether-icon.png](../images/mergetether-icon.png)
 - App sizes: [AppIcon.appiconset](../../Resources/Assets.xcassets/AppIcon.appiconset)
-- The menu-bar status glyph stays monochrome for small-size readability.
+- The menu-bar status glyph is drawn as a small vector: neutral in the system menu-bar color, or amber when a human action is waiting. Its shape follows the connected branches of the app icon.
 
 The selected generation/edit prompt:
 
