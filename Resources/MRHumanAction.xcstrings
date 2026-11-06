@@ -1,0 +1,435 @@
+{
+  "sourceLanguage": "en",
+  "version": "1.0",
+  "strings": {
+    "mrHumanAction.blockedRun": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "The assistant stopped before finishing. Review the run result."
+          }
+        }
+      }
+    },
+    "mrHumanAction.interruptedRun": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "The previous run was interrupted. Review it before continuing."
+          }
+        }
+      }
+    },
+    "mrHumanAction.publication.%lld": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "%1$lld comments need your review before publication."
+          }
+        }
+      }
+    },
+    "mrHumanAction.uncheckedDrafts.%lld": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "%1$lld drafts are not covered by current checks. Review them before publishing."
+          }
+        }
+      }
+    },
+    "mrHumanAction.verificationFailure": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Reviewer feedback could not be checked. Run verification again."
+          }
+        }
+      }
+    },
+    "mrHumanAction.setupAssistant": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "An assistant CLI is required to handle this MR."
+          }
+        }
+      }
+    },
+    "mrHumanAction.reviewDecision": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Review is ready for your confirmation."
+          }
+        }
+      }
+    },
+    "mrHumanAction.approval": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "This MR is ready for your approval."
+          }
+        }
+      }
+    },
+    "mrHumanAction.pipelineHandoff": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Pipeline work needs your ownership decision."
+          }
+        }
+      }
+    },
+    "mrHumanAction.merge": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "This MR is ready for your merge decision."
+          }
+        }
+      }
+    },
+    "mrHumanAction.feedback": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Reviewer feedback still needs a correction or an answer."
+          }
+        }
+      }
+    },
+    "mrHumanAction.discussion": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "An unresolved discussion needs your response."
+          }
+        }
+      }
+    },
+    "mrHumanAction.reviewIntent": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Review has been requested for this MR."
+          }
+        }
+      }
+    },
+    "mrHumanAction.followUpIntent": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Reviewer feedback needs a follow-up."
+          }
+        }
+      }
+    },
+    "mrHumanAction.pipelineIntent": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Pipeline failure needs investigation."
+          }
+        }
+      }
+    },
+    "mrHumanAction.conflictIntent": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Merge conflicts need to be addressed."
+          }
+        }
+      }
+    },
+    "mrHumanAction.refreshIntent": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "An MR update needs to be checked."
+          }
+        }
+      }
+    },
+    "mrHumanAction.reviewFailed": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "The requested review did not finish. Review or retry it."
+          }
+        }
+      }
+    },
+    "mrHumanAction.followUpFailed": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "The feedback follow-up did not finish. Review or retry it."
+          }
+        }
+      }
+    },
+    "mrHumanAction.pipelineFailed": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Pipeline investigation did not finish. Review or retry it."
+          }
+        }
+      }
+    },
+    "mrHumanAction.conflictFailed": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Conflict resolution did not finish. Review or retry it."
+          }
+        }
+      }
+    },
+    "mrHumanAction.refreshFailed": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "The MR update could not be checked. Try again."
+          }
+        }
+      }
+    },
+    "mrHumanAction.action.reviewRun": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "View run result"
+          }
+        }
+      }
+    },
+    "mrHumanAction.action.reviewDrafts": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Review comments"
+          }
+        }
+      }
+    },
+    "mrHumanAction.action.verifyFeedback": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Verify again"
+          }
+        }
+      }
+    },
+    "mrHumanAction.action.setupAssistant": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Open settings"
+          }
+        }
+      }
+    },
+    "mrHumanAction.action.reviewDecision": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Confirm review"
+          }
+        }
+      }
+    },
+    "mrHumanAction.action.reviewApproval": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Review approval"
+          }
+        }
+      }
+    },
+    "mrHumanAction.action.reviewHandoff": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Confirm handoff"
+          }
+        }
+      }
+    },
+    "mrHumanAction.action.reviewMerge": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Review merge"
+          }
+        }
+      }
+    },
+    "mrHumanAction.action.handleFeedback": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Handle feedback"
+          }
+        }
+      }
+    },
+    "mrHumanAction.action.retryIntent": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Try again"
+          }
+        }
+      }
+    },
+    "mrHumanAction.action.reviewFeedback": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Review feedback"
+          }
+        }
+      }
+    },
+    "mrHumanAction.publicationSingle": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "1 comment needs your review before publication."
+          }
+        }
+      }
+    },
+    "mrHumanAction.uncheckedDraftSingle": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "1 draft is not covered by current checks. Review it before publishing."
+          }
+        }
+      }
+    },
+    "mrHumanAction.action.reviewIssue": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Review issue"
+          }
+        }
+      }
+    },
+    "mrHumanAction.currentCheckMissing": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "A current verification is missing. Review the checks before continuing."
+          }
+        }
+      }
+    },
+    "mrHumanAction.lastActionFailed": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "GitLab did not confirm the last action. Review its current state before trying again."
+          }
+        }
+      }
+    },
+    "mrHumanAction.previousHeadRun": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "The MR changed after a previous run stopped. Review that run before restarting it."
+          }
+        }
+      }
+    }
+  }
+}

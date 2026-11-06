@@ -57,8 +57,15 @@ struct AssistantJobRow: View {
                 Text(stateLabel).font(.caption.weight(.medium))
             }
             if let execution = handoff.execution {
-                if let summary = execution.summary { Text(verbatim: summary).textSelection(.enabled) }
-                if let error = execution.error { Text(verbatim: error).foregroundStyle(.orange).textSelection(.enabled) }
+                if let blocker = execution.attentionExplanation {
+                    Text(verbatim: blocker).foregroundStyle(.orange).textSelection(.enabled)
+                }
+                if let summary = execution.summary, summary != execution.attentionExplanation {
+                    Text(verbatim: summary).textSelection(.enabled)
+                }
+                if let error = execution.error, error != execution.attentionExplanation {
+                    Text(verbatim: error).foregroundStyle(.orange).textSelection(.enabled)
+                }
                 if let output = execution.output, !output.isEmpty {
                     DisclosureGroup {
                         Text(verbatim: output).font(.caption.monospaced()).textSelection(.enabled)

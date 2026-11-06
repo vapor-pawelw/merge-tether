@@ -59,6 +59,8 @@ final class AssistantJobCoordinator {
                 self.update(handoff.id, settings: settings) {
                     $0.state = outcome.result.status == .succeeded ? .succeeded : .blocked
                     $0.summary = String(outcome.result.summary.prefix(32_000))
+                    $0.blocker = outcome.result.status == .blocked
+                        ? outcome.result.blocker.map { String(GlabService.redactWorkflowEvidence($0).prefix(300)) } : nil
                     $0.output = String(outcome.output.prefix(262_144))
                     $0.finishedAt = Date()
                 }

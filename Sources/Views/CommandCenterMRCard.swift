@@ -5,6 +5,7 @@ struct CommandCenterMRCard: View {
     let row: MergeRequestBoardSnapshot.Row
     let monitor: TodoMonitorService
     var allowsRemoval = false
+    var onAttention: ((CommandCenterMRDetailSection) -> Void)? = nil
     let onDetails: () -> Void
     @State private var isStarting = false
     @State private var confirmRemoval = false
@@ -14,11 +15,21 @@ struct CommandCenterMRCard: View {
     private var busy: Bool {
         let state = monitor.attention.confirmationStates[item.id]
         return state == .publishing || state == .approving || item.authorFeedbackStatus?.phase == .checking
+            || item.reReviewReadiness == .checking
     }
     private var nextIntent: MRTodoIntent? {
         row.intents.first { $0.state == .failed } ?? row.intents.first { $0.state == .pending }
     }
     private var needsCLI: Bool { !monitor.availableAssistants.contains(monitor.settings.automation.assistant) }
+    private var humanAction: MRHumanAction? {
+        let target = monitor.scopeTarget(projectID: item.id.projectID, iid: item.id.iid, url: item.url)
+        let automatic = target.map {
+            item.draftIDsHandledAutomatically(automation: monitor.settings.automation, target: $0,
+                assistantPreparing: !needsCLI || monitor.assistantDependencies.isChecking)
+        } ?? []
+        return MRHumanAction(row: row, assistantReady: !needsCLI,
+            confirmationState: monitor.attention.confirmationStates[item.id], automaticallyPublishedDraftIDs: automatic)
+    }
 
     var body: some View {
         VStack(alignment: .leading, spacing: 9) {
@@ -48,6 +59,17 @@ struct CommandCenterMRCard: View {
                             .help(Text(.Board.boardCompactMoreStatuses(chips.count - 3)))
                     }
                 }
+            }
+            if let action = humanAction {
+                Group {
+                    if let detail = action.detail, !detail.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
+                        Text(verbatim: detail)
+                    } else {
+                        Text(action.message)
+                    }
+                }
+                .font(.caption).foregroundStyle(.secondary)
+                .lineLimit(3).fixedSize(horizontal: false, vertical: true)
             }
             HStack(spacing: 8) {
                 if let job = row.latestJob, job.execution?.state.isActive == true {
@@ -84,6 +106,8 @@ struct CommandCenterMRCard: View {
         } else if let job = row.latestJob, job.execution?.state.isActive == true {
             Button(role: .destructive) { monitor.cancelAssistantJob(job.id) } label: { Text(.AssistantJobs.assistantJobsStop) }
                 .buttonStyle(.plain)
+        } else if let action = humanAction {
+            humanActionButton(action)
         } else if item.awaitingRemoteVerification || item.requiresDiscussionRecheck
                     || monitor.attention.confirmationStates[item.id] == .changed {
             primary(.Board.boardCompactReviewChecks, action: onDetails)
@@ -124,6 +148,45 @@ struct CommandCenterMRCard: View {
                 }
             }
         }
+    }
+
+    @ViewBuilder
+    private func humanActionButton(_ action: MRHumanAction) -> some View {
+        switch action.action {
+        case .reviewRun:
+            primary(action.actionLabel) { openAttention(.assistantRuns) }
+        case .reviewDrafts, .reviewApproval:
+            primary(action.actionLabel) { openAttention(.drafts) }
+        case .verifyFeedback:
+            primary(action.actionLabel) { monitor.attention.retryAuthorFeedback(item.id) }
+        case .setupAssistant:
+            primary(action.actionLabel) { openSettings() }
+        case .reviewDecision, .reviewFeedback:
+            primary(action.actionLabel) { openAttention(.feedback) }
+        case .reviewHandoff, .reviewMerge, .reviewIssue:
+            primary(action.actionLabel) { openAttention(.overview) }
+        case .handleFeedback:
+            primary(action.actionLabel) {
+                start {
+                    if let status = item.authorFeedbackStatus, !status.followUpNoteIDs.isEmpty,
+                       let request = item.authoredRequest {
+                        await monitor.runVerifiedAuthorFeedback(request: request, noteIDs: status.followUpNoteIDs,
+                                                               fingerprint: status.fingerprint)
+                    } else { await monitor.runAttentionFeedback(for: item) }
+                }
+            }
+        case .retryIntent:
+            if let intent = nextIntent {
+                primary(action.actionLabel) { start { await monitor.runMRTodoIntent(id: intent.id) } }
+            } else {
+                primary(action.actionLabel) { openAttention(.overview) }
+            }
+        }
+    }
+
+    private func openAttention(_ section: CommandCenterMRDetailSection) {
+        if let onAttention { onAttention(section) }
+        else { onDetails() }
     }
 
     private func primary(_ title: LocalizedStringResource, enabled: Bool = true, action: @escaping () -> Void) -> some View {
@@ -189,7 +252,7 @@ struct CommandCenterMRCard: View {
         if let intent = nextIntent, intent.kind != .refresh, needsCLI {
             result.append(.init(title: .Board.boardCompactCliRequired, symbol: "terminal", tint: .orange))
         }
-        if item.awaitingRemoteVerification || item.requiresDiscussionRecheck {
+        if humanAction == nil && (item.awaitingRemoteVerification || item.requiresDiscussionRecheck) {
             result.append(.init(title: .Board.boardCompactVerification, symbol: "shield.lefthalf.filled", tint: .orange))
         }
         if monitor.attention.confirmationStates[item.id] == .failed || monitor.attention.confirmationStates[item.id] == .changed {
@@ -198,7 +261,7 @@ struct CommandCenterMRCard: View {
         if let job = row.latestJob {
             if job.execution?.state.isActive == true {
                 result.append(.init(title: .Board.boardCompactWorking, symbol: "arrow.triangle.2.circlepath", tint: .blue))
-            } else if MergeRequestBoardSnapshot.Row.jobNeedsAttention(job.execution?.state) {
+            } else if humanAction == nil && MergeRequestBoardSnapshot.Row.jobNeedsAttention(job.execution?.state) {
                 result.append(.init(title: .Board.boardCompactBlocked, symbol: "exclamationmark.circle", tint: .orange))
             }
         }

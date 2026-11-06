@@ -1,10 +1,27 @@
 import AppKit
 import SwiftUI
 
+enum CommandCenterMRDetailSection: Hashable {
+    case overview, drafts, assistantRuns, feedback
+}
+
 struct CommandCenterMRDetail: View {
     let item: MergeRequestAttentionMonitor.Item
     let monitor: TodoMonitorService
+    var initialSection: CommandCenterMRDetailSection = .overview
     @State private var isStartingReview = false
+
+    private enum Anchor: Hashable { case overview, drafts, assistantRuns, feedbackStatus, comments, automation }
+
+    private var initialAnchor: Anchor {
+        switch initialSection {
+        case .overview: .overview
+        case .drafts: item.needsConfirmation ? .drafts : .overview
+        case .assistantRuns: work != nil ? .assistantRuns : .overview
+        case .feedback:
+            item.canConfirmReReview ? .automation : item.authorFeedbackStatus != nil ? .feedbackStatus : .comments
+        }
+    }
 
     private var target: MRAutomationScope.Target? {
         monitor.scopeTarget(projectID: item.id.projectID, iid: item.id.iid, url: item.url)
@@ -16,92 +33,104 @@ struct CommandCenterMRDetail: View {
     }
 
     var body: some View {
-        ScrollView {
-            VStack(alignment: .leading, spacing: 24) {
-                header
-                AuthorFeedbackView(item: item, monitor: monitor)
-                if item.needsConfirmation {
-                    ConfirmationQueueRow(
-                        item: item, state: monitor.attention.confirmationStates[item.id],
-                        onPublish: { Task { await monitor.attention.publishDrafts(of: item.id) } },
-                        onApprove: { Task { await monitor.attention.approve(item.id) } },
-                        onOpen: { NSWorkspace.shared.open(item.url) }, additionalActions: EmptyView()
-                    )
-                }
-                GroupBox {
-                    VStack(alignment: .leading, spacing: 10) {
-                        if let request = item.mergeRequest {
-                            metadata(.CommandCenter.commandCenterAuthor, value: "@\(request.author.username)")
-                            metadata(.CommandCenter.commandCenterSource, value: request.sourceBranch)
-                            metadata(.CommandCenter.commandCenterTarget, value: request.targetBranch)
-                            if let sha = request.sha { metadata(.CommandCenter.commandCenterCommit, value: sha, monospaced: true) }
-                            metadata(.CommandCenter.commandCenterMergeState,
-                                     value: request.detailedMergeStatus?.replacingOccurrences(of: "_", with: " ")
-                                        ?? String(localized: .CommandCenter.commandCenterStatusUnavailable))
-                            metadata(.CommandCenter.commandCenterPipeline,
-                                     value: request.headPipeline?.status.replacingOccurrences(of: "_", with: " ")
-                                        ?? String(localized: .CommandCenter.commandCenterNoPipeline))
-                        }
-                        statusReasons
+        ScrollViewReader { proxy in
+            ScrollView {
+                VStack(alignment: .leading, spacing: 24) {
+                    header.id(Anchor.overview)
+                    AuthorFeedbackView(item: item, monitor: monitor)
+                        .id(Anchor.feedbackStatus)
+                    if item.needsConfirmation {
+                        ConfirmationQueueRow(
+                            item: item, state: monitor.attention.confirmationStates[item.id],
+                            onPublish: { Task { await monitor.attention.publishDrafts(of: item.id) } },
+                            onApprove: { Task { await monitor.attention.approve(item.id) } },
+                            onOpen: { NSWorkspace.shared.open(item.url) }, initiallyExpanded: initialSection == .drafts,
+                            additionalActions: EmptyView()
+                        )
+                        .id(Anchor.drafts)
                     }
-                    .frame(maxWidth: .infinity, alignment: .leading)
-                    .padding(8)
-                } label: { Text(.CommandCenter.commandCenterOverview).font(.headline) }
+                    GroupBox {
+                        VStack(alignment: .leading, spacing: 10) {
+                            if let request = item.mergeRequest {
+                                metadata(.CommandCenter.commandCenterAuthor, value: "@\(request.author.username)")
+                                metadata(.CommandCenter.commandCenterSource, value: request.sourceBranch)
+                                metadata(.CommandCenter.commandCenterTarget, value: request.targetBranch)
+                                if let sha = request.sha { metadata(.CommandCenter.commandCenterCommit, value: sha, monospaced: true) }
+                                metadata(.CommandCenter.commandCenterMergeState,
+                                         value: request.detailedMergeStatus?.replacingOccurrences(of: "_", with: " ")
+                                            ?? String(localized: .CommandCenter.commandCenterStatusUnavailable))
+                                metadata(.CommandCenter.commandCenterPipeline,
+                                         value: request.headPipeline?.status.replacingOccurrences(of: "_", with: " ")
+                                            ?? String(localized: .CommandCenter.commandCenterNoPipeline))
+                            }
+                            statusReasons
+                        }
+                        .frame(maxWidth: .infinity, alignment: .leading)
+                        .padding(8)
+                    } label: { Text(.CommandCenter.commandCenterOverview).font(.headline) }
 
-                GroupBox {
-                    VStack(alignment: .leading, spacing: 12) {
-                        BoardMRIntentActions(row: .init(item: item, latestJob: nil,
-                            intents: monitor.mrTodoIntents(for: item)), monitor: monitor)
-                        if !item.isAuthored && !monitor.mrTodoIntents(for: item).contains(where: { $0.kind == .review }) {
-                            Button {
-                                isStartingReview = true
-                                Task {
-                                    defer { isStartingReview = false }
-                                    await monitor.runReview(for: item)
+                    GroupBox {
+                        VStack(alignment: .leading, spacing: 12) {
+                            BoardMRIntentActions(row: .init(item: item, latestJob: nil,
+                                intents: monitor.mrTodoIntents(for: item)), monitor: monitor)
+                            if !item.isAuthored && !monitor.mrTodoIntents(for: item).contains(where: { $0.kind == .review }) {
+                                Button {
+                                    isStartingReview = true
+                                    Task {
+                                        defer { isStartingReview = false }
+                                        await monitor.runReview(for: item)
+                                    }
+                                } label: {
+                                    Label {
+                                        Text(isStartingReview ? .CommandCenter.commandCenterReviewStarting : .CommandCenter.commandCenterReviewRun)
+                                    } icon: { Image(systemName: "text.magnifyingglass") }
                                 }
-                            } label: {
-                                Label {
-                                    Text(isStartingReview ? .CommandCenter.commandCenterReviewStarting : .CommandCenter.commandCenterReviewRun)
-                                } icon: { Image(systemName: "text.magnifyingglass") }
+                                .buttonStyle(.borderedProminent)
+                                .disabled(isStartingReview || !monitor.canRunReview(for: item))
+                                .help(Text(.CommandCenter.commandCenterReviewHelp))
                             }
-                            .buttonStyle(.borderedProminent)
-                            .disabled(isStartingReview || !monitor.canRunReview(for: item))
-                            .help(Text(.CommandCenter.commandCenterReviewHelp))
-                        }
-                        if let error = monitor.assistantJobActionError {
-                            Text(verbatim: error).font(.caption).foregroundStyle(.orange)
-                        }
-                        if let target {
-                            MRAutomationScopeMenu(settings: monitor.settings, target: target,
-                                                  projectPath: item.url.gitLabProjectPath)
-                            if !item.isAuthored, monitor.settings.automation.autoApproveEnabled {
-                                Toggle(isOn: approvalBinding(target)) {
-                                    Text(.CommandCenter.commandCenterAutoApprove)
+                            if let error = monitor.assistantJobActionError {
+                                Text(verbatim: error).font(.caption).foregroundStyle(.orange)
+                            }
+                            if let target {
+                                MRAutomationScopeMenu(settings: monitor.settings, target: target,
+                                                      projectPath: item.url.gitLabProjectPath)
+                                if !item.isAuthored, monitor.settings.automation.autoApproveEnabled {
+                                    Toggle(isOn: approvalBinding(target)) {
+                                        Text(.CommandCenter.commandCenterAutoApprove)
+                                    }
+                                    .toggleStyle(.checkbox)
+                                    .help(Text(.Menu.menuScopeAutoApproveHelp))
                                 }
-                                .toggleStyle(.checkbox)
-                                .help(Text(.Menu.menuScopeAutoApproveHelp))
                             }
+                            ReReviewControls(item: item, monitor: monitor.attention)
+                            InboxAttentionActions(item: item, feedbackAction: monitor.attentionFeedbackAction(for: item),
+                                onFeedback: { Task { await monitor.runAttentionFeedback(for: item) } },
+                                onPipeline: { monitor.confirmPipelineHandoff(for: item.id) },
+                                onMerge: { NSWorkspace.shared.open(item.url) })
                         }
-                        ReReviewControls(item: item, monitor: monitor.attention)
-                        InboxAttentionActions(item: item, feedbackAction: monitor.attentionFeedbackAction(for: item),
-                            onFeedback: { Task { await monitor.runAttentionFeedback(for: item) } },
-                            onPipeline: { monitor.confirmPipelineHandoff(for: item.id) },
-                            onMerge: { NSWorkspace.shared.open(item.url) })
+                        .frame(maxWidth: .infinity, alignment: .leading)
+                        .padding(8)
+                    } label: { Text(.CommandCenter.commandCenterAutomation).font(.headline) }
+                    .id(Anchor.automation)
+
+                    feedback.id(Anchor.comments)
+                    if let work {
+                        AssistantJobHistoryView(monitor: monitor, work: work, embedded: true)
+                            .id(Anchor.assistantRuns)
                     }
-                    .frame(maxWidth: .infinity, alignment: .leading)
-                    .padding(8)
-                } label: { Text(.CommandCenter.commandCenterAutomation).font(.headline) }
-
-                feedback
-                if let work {
-                    AssistantJobHistoryView(monitor: monitor, work: work, embedded: true)
+                    workflowActivity
                 }
-                workflowActivity
+                .padding(24)
+                .frame(maxWidth: .infinity, alignment: .leading)
             }
-            .padding(24)
-            .frame(maxWidth: .infinity, alignment: .leading)
+            .background(.background)
+            .task(id: initialSection) {
+                guard initialSection != .overview else { return }
+                await Task.yield()
+                proxy.scrollTo(initialAnchor, anchor: .top)
+            }
         }
-        .background(.background)
     }
 
     private var header: some View {

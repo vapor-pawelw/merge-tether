@@ -8,6 +8,7 @@ struct ConfirmationQueueRow<AdditionalActions: View>: View {
     let onApprove: () -> Void
     let onOpen: () -> Void
     var onManage: (() -> Void)? = nil
+    var initiallyExpanded = false
     let additionalActions: AdditionalActions
 
     @State private var showsComments = false
@@ -90,6 +91,7 @@ struct ConfirmationQueueRow<AdditionalActions: View>: View {
         .frame(maxWidth: .infinity, alignment: .leading)
         .background(Color.accentColor.opacity(0.07), in: RoundedRectangle(cornerRadius: 7))
         .overlay(RoundedRectangle(cornerRadius: 7).stroke(Color.accentColor.opacity(0.18), lineWidth: 0.5))
+        .onAppear { if initiallyExpanded { showsComments = true } }
     }
 
     @ViewBuilder

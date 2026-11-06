@@ -3,6 +3,28 @@ import Testing
 @testable import GitLabTodos
 
 @Suite struct AssistantJobExecutionTests {
+    @Test func blockedRunsShowTheCauseInsteadOfTheCompletedWork() {
+        let summary = "[Open MR](https://gitlab.example.org/g/p/-/merge_requests/2)\n\nBoth fixes are already present.\n\nTests could not start because temporary file creation was denied."
+        let legacy = AssistantJobExecution(state: .blocked, summary: summary)
+        #expect(legacy.attentionExplanation == "Tests could not start because temporary file creation was denied.")
+        var explicit = legacy
+        explicit.blocker = "The test runner cannot create temporary files."
+        #expect(explicit.attentionExplanation == "The test runner cannot create temporary files.")
+        explicit.state = .succeeded
+        #expect(explicit.attentionExplanation == nil)
+    }
+
+    @Test func legacyResultsAndConcreteBlockersBothDecode() throws {
+        let old = try AssistantJobResult.codex(Data(#"{"status":"blocked","summary":"Missing evidence"}"#.utf8))
+        #expect(old.blocker == nil)
+        let current = try AssistantJobResult.codex(Data(#"{"status":"blocked","summary":"Code checked","blocker":"The test runner cannot start."}"#.utf8))
+        #expect(current.blocker == "The test runner cannot start.")
+    }
+
+    @Test func legacyAttentionReasonsRedactCredentials() {
+        let execution = AssistantJobExecution(state: .blocked, summary: "Work checked.\n\nCommand failed with token=glpat-synthetic123456789")
+        #expect(execution.attentionExplanation?.contains("glpat-synthetic123456789") == false)
+    }
     @Test func runningAndQueuedJobsBecomeInterruptedAfterRestart() {
         #expect(AssistantJobExecution(state: .running).recoverAfterRestart().state == .interrupted)
         #expect(AssistantJobExecution(state: .queued).recoverAfterRestart().state == .interrupted)

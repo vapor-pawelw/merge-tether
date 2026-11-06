@@ -2,7 +2,12 @@ import SwiftUI
 
 struct CommandCenterBoardView: View {
     let monitor: TodoMonitorService
-    @State private var selected: MergeRequestAttentionMonitor.Item?
+    private struct Selection: Identifiable {
+        let item: MergeRequestAttentionMonitor.Item
+        let section: CommandCenterMRDetailSection
+        var id: MergeRequestAttentionMonitor.Item.ID { item.id }
+    }
+    @State private var selected: Selection?
 
     private var snapshot: MergeRequestBoardSnapshot {
         let own = monitor.ownMergeRequestItems
@@ -56,7 +61,7 @@ struct CommandCenterBoardView: View {
         }
         .padding(14)
         .background(Color(nsColor: .windowBackgroundColor))
-        .sheet(item: $selected) { item in
+        .sheet(item: $selected) { selection in
             VStack(spacing: 0) {
                 HStack {
                     Text(.CommandCenter.commandCenterOverview).font(.headline)
@@ -67,8 +72,8 @@ struct CommandCenterBoardView: View {
                 }
                 .padding(16)
                 Divider()
-                CommandCenterMRDetail(item: current(item), monitor: monitor)
-                    .id(item.id)
+                CommandCenterMRDetail(item: current(selection.item), monitor: monitor, initialSection: selection.section)
+                    .id(selection.id)
             }
             .frame(minWidth: 700, idealWidth: 820, minHeight: 600, idealHeight: 780)
         }
@@ -85,7 +90,11 @@ struct CommandCenterBoardView: View {
     }
 
     private func card(_ row: MergeRequestBoardSnapshot.Row, removable: Bool = false) -> some View {
-        CommandCenterMRCard(row: row, monitor: monitor, allowsRemoval: removable) { selected = row.item }
+        CommandCenterMRCard(row: row, monitor: monitor, allowsRemoval: removable, onAttention: { section in
+            selected = Selection(item: row.item, section: section)
+        }, onDetails: {
+            selected = Selection(item: row.item, section: .overview)
+        })
     }
 
     private func lane<Content: View>(title: LocalizedStringResource, symbol: String, count: Int,

@@ -655,12 +655,9 @@ final class TodoMonitorService {
             func add(_ reason: UserAttentionSnapshot.Reason, _ token: String, automatic: Bool = false) {
                 actions.append(.init(reason: reason, token: token, automatic: automatic))
             }
-            let publishingMode: String? = settings.automation.publishDraftsWithoutConfirmation ? "all"
-                : (settings.automation.publishAIRepliesWithoutConfirmation ? "ai" : nil)
-            let honorsAutomaticDrafts = preparing && publishingMode != nil && item.automaticDraftPublishingMode == publishingMode
-                && settings.automation.scope.resolve(target).active
-                && (!item.isAuthored || settings.automation.allowFollowUpPush)
-            let drafts = item.drafts.filter { !honorsAutomaticDrafts || !item.automaticDraftIDs.contains($0.id ?? -1) }
+            let automaticDrafts = item.draftIDsHandledAutomatically(automation: settings.automation,
+                target: target, assistantPreparing: preparing)
+            let drafts = item.drafts.filter { !automaticDrafts.contains($0.id ?? -1) }
             for draft in drafts { add(.drafts, "\(draft.id ?? -1):" + UserAttentionSnapshot.digest(draft.note ?? "")) }
             if item.draftCount > 0 && item.drafts.isEmpty { add(.drafts, "unread-drafts") }
             if item.canApprove || (item.autoApproveReady && !preparing) { add(.approval, item.mergeRequest?.sha ?? "approval") }

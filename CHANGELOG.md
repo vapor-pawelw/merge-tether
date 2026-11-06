@@ -37,6 +37,7 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 
 ### Fixed
 
+- Explain the specific human action on each attention card and open pending comments or a stopped run directly, replacing generic blocker labels.
 - Keep automatic processing and reviewer waits neutral, share human-attention decisions across cards and the menu bar, and require complete verifier output with a bounded read-only retry.
 - Keep draft MRs at the bottom of Reviewing even when they have pending actions.
 - Keep Activity and assistant history in the main window, removing the nested tabs from Automation Scope settings.

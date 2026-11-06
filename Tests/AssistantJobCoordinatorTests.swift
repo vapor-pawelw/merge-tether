@@ -57,7 +57,7 @@ import Testing
         let pending = job()
         settings.assistantHandoffs = [pending]
         let coordinator = AssistantJobCoordinator(execute: { _, _ in
-            .init(result: .init(status: .blocked, summary: "Missing evidence"), output: "Diagnostic")
+            .init(result: .init(status: .blocked, summary: "Missing evidence", blocker: "The test runner cannot start."), output: "Diagnostic")
         })
         var callbackState: AssistantJobExecution.State?
         coordinator.onFinished = { callbackState = $0.execution?.state }
@@ -66,6 +66,7 @@ import Testing
         let result = try #require(settings.assistantHandoffs.first)
         #expect(result.execution?.state == .blocked)
         #expect(result.execution?.summary == "Missing evidence")
+        #expect(result.execution?.blocker == "The test runner cannot start.")
         #expect(result.execution?.output == "Diagnostic")
         #expect(result.deliveredFeedbackTodos.isEmpty)
         #expect(callbackState == .blocked)

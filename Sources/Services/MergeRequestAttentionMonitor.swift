@@ -56,6 +56,15 @@ final class MergeRequestAttentionMonitor {
 
         var authoredRequest: GitLabMergeRequest? { isAuthored ? mergeRequest : nil }
 
+        func draftIDsHandledAutomatically(automation: AutomationSettings, target: MRAutomationScope.Target,
+                                          assistantPreparing: Bool) -> Set<Int> {
+            let mode: String? = automation.publishDraftsWithoutConfirmation ? "all"
+                : (automation.publishAIRepliesWithoutConfirmation ? "ai" : nil)
+            guard assistantPreparing, mode != nil, automaticDraftPublishingMode == mode,
+                  automation.scope.resolve(target).active, !isAuthored || automation.allowFollowUpPush else { return [] }
+            return automaticDraftIDs
+        }
+
         func presentingVerifiedAuthorFeedback() -> Self {
             var visible = self
             guard isAuthored, let status = authorFeedbackStatus,
