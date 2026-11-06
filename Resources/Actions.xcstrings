@@ -1,6 +1,17 @@
 {
   "sourceLanguage" : "en",
   "strings" : {
+    "action.assistant.title.own" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Own"
+          }
+        }
+      }
+    },
     "action.added_approvers.%@" : {
       "extractionState" : "manual",
       "localizations" : {

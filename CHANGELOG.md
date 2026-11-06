@@ -18,6 +18,8 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 
 ### Changed
 
+- Identify assistant MR chats consistently by the MR author's abbreviated name, or Own for your merge requests, across reviews, workflow events and conflicts.
+
 - Synchronize existing Codex MR chats with one state tag: Draft, Closed or Merged, clearing it when an MR becomes open and ready. Preserve chat names and locations, and recheck reviewed and reopened MRs as well as authored MRs.
 
 - Format listener MR reports as linked tables with readable statuses and a separate queue summary. Mark draft MRs consistently with a DRAFT badge and muted title, and keep the MR tab selector stationary when Add MR appears.

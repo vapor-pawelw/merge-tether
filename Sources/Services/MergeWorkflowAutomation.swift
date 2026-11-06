@@ -260,7 +260,7 @@ final class MergeWorkflowAutomation {
         let suppliedEvidence = readsInCodex ? "" : "\n\n<gitlab-evidence>\n" + evidence + "\n</gitlab-evidence>"
         try await AssistantAutomationRunner.launch(
             settingsBeforeLaunch.assistant,
-            title: "\(repository) !\(latest.iid) (\(latest.author.username == entry.user.username ? "Me" : event.kind.taskName))",
+            title: "\(repository) !\(latest.iid) (\(latest.author.assistantTitleName(viewerUsername: entry.user.username)))",
             stackPosition: stackPosition,
             mergeRequestURL: latest.webURL,
             prompt: context + isolation + suppliedEvidence,

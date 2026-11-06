@@ -208,7 +208,7 @@ final class TodoAutomationService {
         let rule = invocation.rule
         let titleTemplate = rule.titleTemplate.trimmingCharacters(in: .whitespacesAndNewlines)
         let title = context.render(titleTemplate.isEmpty ? "{repo} !{iid} ({author})" : titleTemplate,
-                                   titleAuthor: context.event == .authorFeedback && invocation.assistant != nil ? "Me" : nil)
+                                   titleAuthor: context.author.assistantTitleName(viewerUsername: username))
         if let assistant = invocation.assistant {
             let scope = feedbackNoteIDs.isEmpty ? "" : "\n\nFocus on GitLab note IDs: \(feedbackNoteIDs.map(String.init).joined(separator: ", "))."
             let task = switch context.event {

@@ -100,7 +100,7 @@ struct TodoAutomationTests {
         )
         #expect(acknowledge)
         let handoff = try #require(settings.assistantHandoffs.first)
-        #expect(handoff.title == "[MT] cards-api !1220 (Me)")
+        #expect(handoff.title == "[MT] cards-api !1220 (Own)")
         #expect(handoff.key.access == .gitLabRead)
         #expect(handoff.openedAt == nil)
         #expect(handoff.feedbackTodos == nil)

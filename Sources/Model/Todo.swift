@@ -31,6 +31,17 @@ struct Todo: Identifiable, Codable, Hashable, Sendable {
         let name: String
         let avatarURL: URL?
 
+        var shortName: String {
+            let names = name.split(whereSeparator: \.isWhitespace)
+            guard let firstName = names.first else { return username }
+            guard names.count > 1, let lastInitial = names.last?.first else { return String(firstName) }
+            return "\(firstName) \(lastInitial)"
+        }
+
+        func assistantTitleName(viewerUsername: String) -> String {
+            username == viewerUsername ? String(localized: .Actions.actionAssistantTitleOwn) : shortName
+        }
+
         enum CodingKeys: String, CodingKey {
             case id
             case username

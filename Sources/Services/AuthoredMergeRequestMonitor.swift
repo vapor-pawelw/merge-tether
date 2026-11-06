@@ -265,7 +265,7 @@ final class AuthoredMergeRequestMonitor {
     private func conflictTitle(_ request: GitLabMergeRequest) -> String {
         let path = request.webURL.path.components(separatedBy: "/-/merge_requests/").first ?? ""
         let repo = path.split(separator: "/").last.map(String.init) ?? "project \(request.projectID)"
-        return "\(repo) !\(request.iid) (Me)"
+        return "\(repo) !\(request.iid) (\(request.author.assistantTitleName(viewerUsername: request.author.username)))"
     }
 
     private func conflictPrompt(

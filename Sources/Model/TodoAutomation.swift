@@ -441,18 +441,11 @@ struct TodoAutomationContext {
         project.split(separator: "/").last.map(String.init) ?? project
     }
 
-    private var shortAuthor: String {
-        let names = author.name.split(whereSeparator: \.isWhitespace)
-        guard let firstName = names.first else { return author.username }
-        guard names.count > 1, let lastInitial = names.last?.first else { return String(firstName) }
-        return "\(firstName) \(lastInitial)"
-    }
-
     func render(_ template: String, titleAuthor: String? = nil) -> String {
         let values = [
             "{repo}": repository,
             "{iid}": String(iid),
-            "{author}": titleAuthor ?? shortAuthor,
+            "{author}": titleAuthor ?? author.shortName,
             "{url}": url.absoluteString,
             "{actor}": actorName,
             "{actorUsername}": actorUsername,

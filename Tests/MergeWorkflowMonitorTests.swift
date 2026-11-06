@@ -15,7 +15,7 @@ struct MergeWorkflowMonitorTests {
         #expect(MergeRequestStackSnapshot(requests: [leaf, middle], defaultBranch: "main").positions
             == [2: "1/2", 3: "2/2"])
         #expect(MergeRequestStackSnapshot(requests: [leaf], defaultBranch: "main").positions.isEmpty)
-        #expect(MergeRequestStackSnapshot.title("[MT] repo !3 (Me)", iid: 3, position: "2/2") == "[MT] repo !3 2/2 (Me)")
+        #expect(MergeRequestStackSnapshot.title("[MT] repo !3 (Own)", iid: 3, position: "2/2") == "[MT] repo !3 2/2 (Own)")
     }
 
     @Test func discoversNewEventsOnceAcrossPollsAndAppRestart() async throws {
