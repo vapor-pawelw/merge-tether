@@ -20,6 +20,9 @@ final class MergeRequestAttentionMonitor {
         var draftCount = 0
         /// The current user's unpublished drafts, shown in Ready for your OK.
         var drafts: [GitLabDraftNote] = []
+        /// Exact drafts covered by automatic publication, including the stability wait.
+        var automaticDraftIDs: Set<Int> = []
+        var automaticDraftPublishingMode: String?
         var replyRecipients: [String: String] = [:]
         var awaitingRemoteVerification = false
         /// Drafts remain accessible, but cannot be advertised as ready without current evidence.
@@ -159,7 +162,8 @@ final class MergeRequestAttentionMonitor {
     private var terminalCatalogRequests: Set<Item.ID> = []
     private(set) var isLoading = false
     private(set) var hasError = false
-    private(set) var hasCurrentOwnListing = false
+    private var hasOwnListing = false
+    var hasCurrentOwnListing: Bool { hasOwnListing && account.map(isCurrent) == true }
     private let glab: GlabService
     private let settings: SettingsManager?
     private let reportDirectory: URL?
@@ -245,7 +249,7 @@ final class MergeRequestAttentionMonitor {
             terminalCatalogRequests = []
             recentTodos = []
             hasError = false
-            hasCurrentOwnListing = false
+            hasOwnListing = false
             confirmationStates = [:]
             previousDrafts = [:]
             publishedDrafts = [:]
@@ -412,7 +416,7 @@ final class MergeRequestAttentionMonitor {
         for start in stride(from: 0, to: ordered.count, by: 4) {
             guard isCurrent(account) else { return }
             let batch = ordered[start..<min(start + 4, ordered.count)]
-            await withTaskGroup(of: (Item, Bool, ReReviewFeedback?).self) { group in
+            await withTaskGroup(of: (Item, Bool, ReReviewFeedback?, [GitLabMergeRequestDiscussion]?).self) { group in
                 for item in batch {
                     let approvedHead = approvedHeads[item.id]
                     let failedHead = failedApprovalHeads[item.id]
@@ -496,10 +500,10 @@ final class MergeRequestAttentionMonitor {
                             }
                         }
                         let feedback = discussions.map { ReReviewFeedback(discussions: $0, authorID: user.id) }
-                        return (updated, draftCount != nil && (!(item.isAuthored || hasDrafts) || discussions != nil), feedback)
+                        return (updated, draftCount != nil && (!(item.isAuthored || hasDrafts) || discussions != nil), feedback, discussions)
                     }
                 }
-                for await (var item, success, feedback) in group {
+                for await (var item, success, feedback, discussions) in group {
                     let work = AssistantAutomationRunner.MergeRequestWork(host: host, projectID: item.id.projectID, iid: item.id.iid)
                     if item.isAuthored, agentWorks.contains(work), let settings {
                         let run = FollowUpVerificationStore.latestRun(for: work, username: user.username, settings: settings)
@@ -509,6 +513,27 @@ final class MergeRequestAttentionMonitor {
                             guard let run, let receipt, let request = item.mergeRequest else { return true }
                             return !receipt.covers(draft, request: request, host: host, user: user, runID: run.id)
                         })
+                    }
+                    item.automaticDraftIDs = []
+                    item.automaticDraftPublishingMode = nil
+                    if success, let settings, let request = item.mergeRequest,
+                       agentWorks.contains(work), settings.automation.scope.permits(request, host: host, username: user.username),
+                       !item.awaitingRemoteVerification, !item.requiresDiscussionRecheck {
+                        if settings.automation.publishDraftsWithoutConfirmation {
+                            item.automaticDraftPublishingMode = "all"
+                            item.automaticDraftIDs = Set(item.drafts.filter(AICommentAssessmentStore.safeForAutomaticPublication).compactMap(\.id))
+                        } else if settings.automation.publishAIRepliesWithoutConfirmation, let discussions {
+                            var duoIDs: Set<Int> = []
+                            let possible = Set(discussions.flatMap(\.notes).filter {
+                                $0.author?.username?.lowercased() == "gitlabduo"
+                            }.compactMap { $0.author?.id })
+                            for userID in possible where (try? await glab.isGitLabDuo(userID: userID, host: host)) == true { duoIDs.insert(userID) }
+                            item.automaticDraftPublishingMode = "ai"
+                            item.automaticDraftIDs = Set(item.drafts.filter {
+                                AICommentAssessmentStore.eligible($0, discussions: discussions, userID: user.id,
+                                    duoUserIDs: duoIDs, host: host, projectID: item.id.projectID, iid: item.id.iid, in: aiAssessmentDirectory)
+                            }.compactMap(\.id))
+                        }
                     }
                     if success, let feedback, let request = item.authoredRequest {
                         await requestReReviewsIfReady(for: request, feedback: feedback, draftCount: item.draftCount,
@@ -542,7 +567,7 @@ final class MergeRequestAttentionMonitor {
         }
         items = Item.ordered(results.filter(\.needsAttention))
         hasError = failed || explicitFetchFailed
-        hasCurrentOwnListing = owned != nil
+        hasOwnListing = owned != nil
         let openIDs = Set((listed + explicit).filter { $0.state == "opened" }.map {
             Item.ID(projectID: $0.projectID, iid: $0.iid)
         })
@@ -1276,5 +1301,18 @@ final class MergeRequestAttentionMonitor {
             settings.reReviewDraftBaselines.removeValue(forKey: target)
             settings.save()
         }
+    }
+}
+
+extension MergeRequestAttentionMonitor.Item {
+    /// A row missing from the filtered list has no manual reasons; its catalog
+    /// fallback must not restore work already owned by automation.
+    func presentingHumanAttention(filtered: Self?, unfiltered: Self?, assistantReady: Bool) -> Self {
+        if assistantReady {
+            return filtered ?? Self(id: id, title: title, url: url, mergeRequest: mergeRequest, isAuthored: isAuthored)
+        }
+        var manual = unfiltered ?? self
+        manual.needsMerge = manual.needsMerge || filtered?.needsMerge == true
+        return manual
     }
 }

@@ -20,6 +20,7 @@ final class GitLabTodosAppDelegate: NSObject, NSApplicationDelegate {
     let updates = UpdateService()
     func applicationDidFinishLaunching(_ notification: Notification) {
         NSApplication.shared.setActivationPolicy(.regular)
+        monitor.notifications.onOpenMainWindow = { MainWindowPresentation.show() }
     }
 
     func applicationWillTerminate(_ notification: Notification) {
@@ -28,6 +29,11 @@ final class GitLabTodosAppDelegate: NSObject, NSApplicationDelegate {
 
     func applicationShouldTerminateAfterLastWindowClosed(_ sender: NSApplication) -> Bool {
         false
+    }
+
+    func applicationShouldHandleReopen(_ sender: NSApplication, hasVisibleWindows flag: Bool) -> Bool {
+        MainWindowPresentation.show()
+        return false
     }
 }
 
@@ -46,6 +52,13 @@ struct GitLabTodosApp: App {
                 OpenMainWindowButton()
             }
         }
+
+        MenuBarExtra {
+            MenuBarStatusMenu(monitor: appDelegate.monitor)
+        } label: {
+            MenuBarStatusLabel(monitor: appDelegate.monitor)
+        }
+        .menuBarExtraStyle(.menu)
 
         Settings {
             SettingsView(monitor: appDelegate.monitor)

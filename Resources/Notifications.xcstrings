@@ -1,138 +1,171 @@
 {
-  "sourceLanguage" : "en",
-  "strings" : {
-    "notifications.workflow.title" : {
-      "extractionState" : "manual",
-      "localizations" : {
-        "en" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "Merge request workflow"
+  "sourceLanguage": "en",
+  "strings": {
+    "notifications.workflow.title": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Merge request workflow"
           }
         }
       }
     },
-    "notifications.workflow.handoff" : {
-      "extractionState" : "manual",
-      "localizations" : {
-        "en" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "A failed pipeline is waiting for your handoff in Workflow Activity."
+    "notifications.workflow.handoff": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "A failed pipeline is waiting for your handoff in Workflow Activity."
           }
         }
       }
     },
-    "notifications.workflow.update" : {
-      "extractionState" : "manual",
-      "localizations" : {
-        "en" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "A monitored merge request changed. See Workflow Activity for details."
+    "notifications.workflow.update": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "A monitored merge request changed. See Workflow Activity for details."
           }
         }
       }
     },
-    "notifications.mergeRequest.discussionsTitle" : {
-      "extractionState" : "manual",
-      "localizations" : {
-        "en" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "Merge request has open discussions"
+    "notifications.mergeRequest.discussionsTitle": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Merge request has open discussions"
           }
         }
       }
     },
-    "notifications.mergeRequest.discussionsBody" : {
-      "extractionState" : "manual",
-      "localizations" : {
-        "en" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "Resolve the open discussions in GitLab before automatic merge."
+    "notifications.mergeRequest.discussionsBody": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Resolve the open discussions in GitLab before automatic merge."
           }
         }
       }
     },
-    "notifications.batch.body" : {
-      "extractionState" : "manual",
-      "localizations" : {
-        "en" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "Open the menu bar app to review them."
+    "notifications.batch.body": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Open the menu bar app to review them."
           }
         }
       }
     },
-    "notifications.batch.title.%lld" : {
-      "extractionState" : "manual",
-      "localizations" : {
-        "en" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "%lld new GitLab to-dos"
+    "notifications.batch.title.%lld": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "%lld new GitLab to-dos"
           }
         }
       }
     },
-    "notifications.reminder.body" : {
-      "extractionState" : "manual",
-      "localizations" : {
-        "en" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "Open the menu bar app to stop reminders."
+    "notifications.reminder.body": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Open the menu bar app to stop reminders."
           }
         }
       }
     },
-    "notifications.reminder.title.%lld" : {
-      "extractionState" : "manual",
-      "localizations" : {
-        "en" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "%lld unread GitLab to-dos"
+    "notifications.reminder.title.%lld": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "%lld unread GitLab to-dos"
           }
         }
       }
     },
-    "notifications.single.title" : {
-      "extractionState" : "manual",
-      "localizations" : {
-        "en" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "New GitLab to-do"
+    "notifications.single.title": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "New GitLab to-do"
           }
         }
       }
     },
-    "notifications.autoApproved.title" : {
-      "extractionState" : "manual",
-      "localizations" : {
-        "en" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "Approved automatically"
+    "notifications.autoApproved.title": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Approved automatically"
           }
         }
       }
     },
-    "notifications.autoApproved.body" : {
-      "extractionState" : "manual",
-      "localizations" : {
-        "en" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "The assistant had no objections and every discussion is resolved."
+    "notifications.autoApproved.body": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "The assistant had no objections and every discussion is resolved."
+          }
+        }
+      }
+    },
+    "notifications.attention.title": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Work needs your attention"
+          }
+        }
+      }
+    },
+    "notifications.attention.batchTitle.%lld": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "%lld items need your attention"
+          }
+        }
+      }
+    },
+    "notifications.attention.body": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Open MergeTether to review the pending actions."
           }
         }
       }
     }
   },
-  "version" : "1.0"
+  "version": "1.0"
 }

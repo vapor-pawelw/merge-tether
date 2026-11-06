@@ -138,9 +138,6 @@ final class MergeWorkflowAutomation {
             else { continue }
 
             update(entry.id, .awaitingPipelineHandoff)
-            if settings.notificationsEnabled {
-                notifications.deliverWorkflowEvent(entry.event, requiresHandoff: true)
-            }
         }
     }
 
@@ -155,7 +152,7 @@ final class MergeWorkflowAutomation {
         switch rule.mode {
         case .off: return
         case .preview: entry.state = .preview
-        case .notify: entry.state = .notified
+        case .notify: entry.state = .preview
         case .assistant:
             if event.kind == .pipelineFailure {
                 if let key = pipelineKey(entry) {
@@ -176,9 +173,6 @@ final class MergeWorkflowAutomation {
             history.remove(at: index)
         }
         saveHistory()
-        if settings.notificationsEnabled, entry.state == .notified || entry.state == .awaitingPipelineHandoff {
-            notifications.deliverWorkflowEvent(event, requiresHandoff: entry.state == .awaitingPipelineHandoff)
-        }
     }
 
     private func startNext() {

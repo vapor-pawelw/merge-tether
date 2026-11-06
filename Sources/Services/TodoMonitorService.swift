@@ -31,6 +31,10 @@ final class TodoMonitorService {
     static let undoWindow: Duration = .seconds(4)
     private var acknowledgedDuringFetch: Set<Int> = []
     private var inboxHost: String?
+    private var inboxUsername: String?
+    @ObservationIgnored private var attentionNotificationTask: Task<Void, Never>?
+    @ObservationIgnored private var attentionNotificationGeneration = UUID()
+    @ObservationIgnored private var attentionNotificationLedger = UserAttentionNotificationLedger()
     private var isAutomating = false
     private let automation: TodoAutomationService
     @ObservationIgnored private lazy var mrTodoRouter = MergeRequestTodoRouter(settings: settings, glab: glab, canAutomate: { [weak self] in
@@ -92,8 +96,57 @@ final class TodoMonitorService {
         settings.onAutomationChanged = { [weak self] previous in
             self?.automationConfigurationChanged(previous: previous)
         }
+        observeUserAttentionChanges()
         Task { [weak self] in
             await self?.bootstrap()
+        }
+    }
+
+    private func observeUserAttentionChanges() {
+        withObservationTracking {
+            _ = userAttention
+            _ = settings.notificationsEnabled
+            _ = freshUserAttention
+            _ = glab.resolvedHost
+            _ = glab.currentUsername
+        } onChange: { [weak self] in
+            Task { @MainActor [weak self] in
+                self?.observeUserAttentionChanges()
+                self?.scheduleUserAttentionNotifications()
+            }
+        }
+    }
+
+    private var userAttentionAccount: String? {
+        guard let host = glab.resolvedHost, let username = glab.currentUsername else { return nil }
+        return host + "/" + username
+    }
+
+    private var freshUserAttention: Bool {
+        hasCompletedFirstFetch && inboxHost == glab.resolvedHost && inboxUsername == glab.currentUsername
+            && lastError == nil && !isLoading && !assistantDependencies.isChecking && !attention.isLoading && !attention.hasError
+            && attention.hasCurrentOwnListing && !authoredMergeRequests.isLoading && !authoredMergeRequests.hasError
+    }
+
+    private func scheduleUserAttentionNotifications() {
+        let previous = attentionNotificationTask
+        previous?.cancel()
+        let generation = UUID()
+        attentionNotificationGeneration = generation
+        attentionNotificationTask = Task { [weak self] in
+            // An OS submission may finish after cancellation. Record its result
+            // before selecting the next batch, so two refreshes cannot race it.
+            await previous?.value
+            do { try await Task.sleep(for: .milliseconds(800)) } catch { return }
+            guard let self, !Task.isCancelled else { return }
+            let account = userAttentionAccount
+            let status = await notifications.currentAuthorizationStatus()
+            guard !Task.isCancelled, attentionNotificationGeneration == generation, userAttentionAccount == account else { return }
+            let items = attentionNotificationLedger.update(userAttention, account: account, fresh: freshUserAttention,
+                allowed: settings.notificationsEnabled && NotificationService.permitsDelivery(status))
+            guard !Task.isCancelled, userAttentionAccount == account, freshUserAttention else { return }
+            let delivered = await notifications.deliverHumanAttention(items, enabled: settings.notificationsEnabled)
+            attentionNotificationLedger.acknowledge(delivered, account: account)
         }
     }
 
@@ -481,7 +534,8 @@ final class TodoMonitorService {
                 else { continue }
                 let id = MergeRequestAttentionMonitor.Item.ID(projectID: request.projectID, iid: request.iid)
                 guard (items.first(where: { $0.id == id })?.draftCount ?? 0) == 0 else { continue }
-                let automatic = status.mayAutoMerge && settings.automation.permitsAutoMerge(project: request.webURL.gitLabProjectPath)
+                let automatic = (availableAssistants.contains(settings.automation.assistant) || assistantDependencies.isChecking)
+                    && status.mayAutoMerge && settings.automation.permitsAutoMerge(project: request.webURL.gitLabProjectPath)
                     && settings.automation.scope.permits(request, host: host, username: username)
                     && !AssistantJobExecution.hasUnfinishedWork(in: settings.assistantHandoffs,
                         for: .init(host: host, projectID: id.projectID, iid: id.iid), username: username)
@@ -577,6 +631,113 @@ final class TodoMonitorService {
     func checkCodexListener(force: Bool = false, now: Date = Date()) {}
     var codexListenerWarning: LocalizedStringResource? { nil }
 
+    /// Shared semantic projection for the menu indicator and native notifications.
+    var userAttention: UserAttentionSnapshot {
+        guard let host = glab.resolvedHost, let username = glab.currentUsername else { return .empty }
+        let ready = availableAssistants.contains(settings.automation.assistant)
+        let preparing = ready || assistantDependencies.isChecking
+        let board = MergeRequestBoardSnapshot(own: ownMergeRequestItems, reviewed: reviewedMergeRequestItems,
+            todos: inboxHost == host && inboxUsername == username ? visibleTodos : [], attention: attentionItems, handoffs: settings.assistantHandoffs,
+            host: host, username: username, intents: currentMRTodoIntents, routedTodoIDs: routedMRTodoIDs,
+            ignoredTargets: settings.ignoredMergeRequests)
+        var candidates: [UserAttentionSnapshot.Candidate] = []
+        func key(_ project: Int, _ iid: Int) -> String { "\(host)/\(username)/mr/\(project)/\(iid)" }
+        func eventToken(_ todo: Todo) -> String {
+            "\(todo.id):\(todo.updatedAt?.timeIntervalSince1970 ?? todo.createdAt.timeIntervalSince1970):" + UserAttentionSnapshot.digest(todo.body + todo.displayTitle)
+        }
+        for row in board.own + board.reviewed {
+            let target = MRAutomationScope.Target(host: host, username: username, projectID: row.id.projectID, iid: row.id.iid)
+            guard !settings.ignoredMergeRequests.contains(target) else { continue }
+            let item = row.item.presentingHumanAttention(
+                filtered: attentionItems.first { $0.id == row.id },
+                unfiltered: attention.currentItems.first { $0.id == row.id },
+                assistantReady: preparing)
+            let state = attention.confirmationStates[row.id]
+            let busy = row.latestJob?.execution?.state.isActive == true || state == .publishing || state == .approving
+            var actions: [UserAttentionSnapshot.Action] = []
+            func add(_ reason: UserAttentionSnapshot.Reason, _ token: String, automatic: Bool = false) {
+                actions.append(.init(reason: reason, token: token, automatic: automatic))
+            }
+            let publishingMode: String? = settings.automation.publishDraftsWithoutConfirmation ? "all"
+                : (settings.automation.publishAIRepliesWithoutConfirmation ? "ai" : nil)
+            let honorsAutomaticDrafts = preparing && publishingMode != nil && item.automaticDraftPublishingMode == publishingMode
+                && settings.automation.scope.resolve(target).active
+                && (!item.isAuthored || settings.automation.allowFollowUpPush)
+            let drafts = item.drafts.filter { !honorsAutomaticDrafts || !item.automaticDraftIDs.contains($0.id ?? -1) }
+            for draft in drafts { add(.drafts, "\(draft.id ?? -1):" + UserAttentionSnapshot.digest(draft.note ?? "")) }
+            if item.draftCount > 0 && item.drafts.isEmpty { add(.drafts, "unread-drafts") }
+            if item.canApprove || (item.autoApproveReady && !preparing) { add(.approval, item.mergeRequest?.sha ?? "approval") }
+            if item.needsPipelineHandoff { add(.pipelineHandoff, String(item.mergeRequest?.headPipeline?.id ?? 0)) }
+            if item.failedPipeline && !item.needsPipelineHandoff { add(.pipeline, String(item.mergeRequest?.headPipeline?.id ?? 0)) }
+            if item.hasConflict { add(.conflict, item.mergeRequest?.sha ?? "conflict") }
+            if item.needsMerge { add(.merge, item.mergeRequest?.sha ?? "merge") }
+            for note in item.feedback { add(.discussion, "\(note.id ?? 0):" + UserAttentionSnapshot.digest(note.body ?? "")) }
+            if item.needsDiscussion && item.feedback.isEmpty { add(.discussion, item.reReviewFingerprint ?? "open-discussions") }
+            if item.needsChanges { add(.discussion, "changes-requested") }
+            if item.requiresDiscussionRecheck && item.reReviewReadiness != .checking { add(.review, item.mergeRequest?.sha ?? "recheck") }
+            if item.canConfirmReReview || item.reReviewUnconfirmed { add(.reviewConfirmation, item.reReviewFingerprint ?? "confirm") }
+            switch item.reReviewReadiness {
+            case .manual, .unavailable, .failed: add(.reviewConfirmation, "verification-needs-input")
+            case .blocked(let blockers), .uncertain(let blockers):
+                for blocker in blockers { add(.discussion, "\(blocker.noteID):" + UserAttentionSnapshot.digest(blocker.reason)) }
+            default: break
+            }
+            if state == .failed || state == .changed { add(.failedWork, "confirmation-\(String(describing: state))") }
+            if let job = row.latestJob, let execution = job.execution,
+               [.failed, .blocked, .interrupted].contains(execution.state),
+               !row.intents.contains(where: { $0.jobID == job.id && $0.state == .completed }) {
+                add(.failedWork, job.id.uuidString + ":" + execution.state.rawValue)
+            }
+            for intent in row.intents where intent.state != .completed && intent.state != .running {
+                if intent.state == .failed {
+                    add(.failedWork, intent.id.uuidString + ":" + (intent.jobID?.uuidString ?? "") + ":" + UserAttentionSnapshot.digest(intent.error ?? ""))
+                } else {
+                    let automatic = attentionIntentIsAutomatic(intent, ready: preparing)
+                    if intent.sourceEvents.isEmpty { add(.review, intent.id.uuidString, automatic: automatic) }
+                    for event in intent.sourceEvents {
+                        add(.review, "\(event.id):\(event.updatedAt?.timeIntervalSince1970 ?? event.createdAt.timeIntervalSince1970)", automatic: automatic)
+                    }
+                }
+            }
+            candidates.append(.init(id: key(row.id.projectID, row.id.iid), title: row.item.title,
+                subtitle: row.item.url.gitLabProjectPath, actions: actions, working: busy))
+        }
+        for proposal in board.proposals {
+            guard !(isLoading && !proposal.todos.isEmpty) else { continue }
+            let tokens = proposal.todos.map(eventToken)
+            let actions = tokens.isEmpty ? [UserAttentionSnapshot.Action(reason: .proposal, token: "adopt")]
+                : tokens.map { UserAttentionSnapshot.Action(reason: .proposal, token: $0) }
+            candidates.append(.init(id: key(proposal.target.projectID, proposal.target.iid ?? 0),
+                title: proposal.title, subtitle: proposal.url.gitLabProjectPath, actions: actions))
+        }
+        for todo in board.otherTodos {
+            if isLoading && MRTodoIntent.kind(for: todo, username: username) != nil { continue }
+            let id = todo.targetType == .mergeRequest && todo.target.iid != nil
+                ? key(todo.project.id, todo.target.iid!) : "\(host)/\(username)/todo/\(todo.id)"
+            candidates.append(.init(id: id, title: todo.displayTitle, subtitle: todo.project.pathWithNamespace,
+                actions: [.init(reason: .otherEvent, token: eventToken(todo))]))
+        }
+        return UserAttentionSnapshot(candidates: candidates)
+    }
+
+    private func attentionIntentIsAutomatic(_ intent: MRTodoIntent, ready: Bool) -> Bool {
+        let configuration = settings.automation
+        guard ready, configuration.packageDecision != .disabled, configuration.scope.resolve(intent.target).active,
+              !settings.ignoredMergeRequests.contains(intent.target), intent.request.state == "opened", intent.request.draft != true else { return false }
+        let project = intent.request.webURL.gitLabProjectPath
+        switch intent.kind {
+        case .review:
+            let rule = configuration.reviewRequested
+            return rule.isEnabled && rule.runner == .assistant && rule.isConfigured && rule.includes(project: project)
+        case .followUp:
+            let rule = configuration.authorFeedback
+            let workflow = configuration.workflowRules[.newDiscussion]
+            return rule.runner == .assistant && rule.isConfigured && rule.includes(project: project)
+                && (rule.isEnabled || (workflow.mode == .assistant && workflow.includes(intent.request)))
+        default: return false
+        }
+    }
+
     var attentionCount: Int { inbox.attention.count + standaloneManualAssistantGroups.count + (hasAssistantAction ? 1 : 0) }
     var badgeCount: Int { inbox.count + standaloneManualAssistantGroups.count + (hasAssistantAction ? 1 : 0) }
 
@@ -620,45 +781,12 @@ final class TodoMonitorService {
         stopUnreadReminderTimer()
     }
 
-    func restartUnreadReminderTimer() {
-        guard settings.notificationsEnabled,
-              hasUnseenTodos,
-              let interval = settings.unreadReminderInterval.seconds
-        else {
-            stopUnreadReminderTimer()
-            return
-        }
-
-        // Refreshes can happen more often than reminders. Keep an active
-        // reminder's deadline unless the reminder interval changed.
-        guard unreadReminderTimer?.timeInterval != interval else { return }
-        stopUnreadReminderTimer()
-        unreadReminderTimer = Timer.scheduledTimer(withTimeInterval: interval, repeats: true) { [weak self] _ in
-            Task { @MainActor in
-                self?.sendUnreadReminderIfNeeded()
-            }
-        }
-    }
+    /// Retained for settings compatibility; periodic raw-to-do reminders are retired.
+    func restartUnreadReminderTimer() { stopUnreadReminderTimer() }
 
     private func stopUnreadReminderTimer() {
         unreadReminderTimer?.invalidate()
         unreadReminderTimer = nil
-    }
-
-    private func sendUnreadReminderIfNeeded() {
-        guard settings.notificationsEnabled,
-              hasUnseenTodos,
-              settings.unreadReminderInterval.seconds != nil
-        else {
-            stopUnreadReminderTimer()
-            return
-        }
-
-        notifications.deliverUnreadReminder(
-            todoCount: visibleTodos.count,
-            dashboardURL: dashboardURL,
-            sound: settings.unreadReminderSound
-        )
     }
 
     // MARK: - Commands
@@ -674,11 +802,13 @@ final class TodoMonitorService {
             isLoading = false
             acknowledgedDuringFetch.removeAll()
             lastRefresh = Date()
+            scheduleUserAttentionNotifications()
         }
 
         let username = glab.currentUsername
         let host = username == nil ? nil : glab.resolvedHost
         let result = await glab.fetchTodos(host: host)
+        guard glab.currentUsername == username, username == nil || glab.resolvedHost == host else { return }
         switch result {
         case .success(let fetched):
             let fetchedFiltered = fetched.filter { !acknowledgedDuringFetch.contains($0.id) }
@@ -686,6 +816,7 @@ final class TodoMonitorService {
             glab.resolveHostFromTodos(fetchedFiltered)
             settings.resolvedHost = glab.resolvedHost
             inboxHost = host
+            inboxUsername = username
 
             if let failedAutomationTodoID, !fetchedIDs.contains(failedAutomationTodoID) {
                 self.failedAutomationTodoID = nil
@@ -693,19 +824,6 @@ final class TodoMonitorService {
 
             if let host, let username, !isAutomating {
                 automation.prune(fetchedIDs: fetchedIDs, host: host, username: username, settings: settings)
-            }
-
-            let newIDs = TodoDiff.newIDs(
-                fetched: fetchedFiltered,
-                lastSeen: settings.lastSeenTodoIDs,
-                isFirstFetch: !hasCompletedFirstFetch
-            )
-
-            if settings.notificationsEnabled && !newIDs.isEmpty {
-                let newTodos = fetchedFiltered.filter {
-                    newIDs.contains($0.id) && !optimisticallyDone.contains($0.id)
-                }
-                notifications.deliver(newTodos: newTodos, dashboardURL: glab.dashboardTodosURL)
             }
 
             settings.lastSeenTodoIDs = fetchedIDs

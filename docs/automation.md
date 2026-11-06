@@ -60,11 +60,17 @@ Events that cannot be classified safely remain in **Other** for manual reading; 
 
 ## The recommended package
 
-The optional recommended package watches failed pipelines, new commits after review, author replies, merge blocker changes, merged stack dependencies and overdue reviews. Each rule can be off, preview-only, notify-only or run with the selected CLI. Repository, target branch and label filters constrain it.
+The optional recommended package watches failed pipelines, new commits after review, author replies, merge blocker changes, merged stack dependencies and overdue reviews. Each rule can be off, preview-only, notify-only or run with the selected CLI. Notify mode records events and follows the human-attention policy below; automatically handled or informational updates stay quiet. Repository, target branch and label filters constrain it.
 
 The package enables follow-up push, verified resolution of your own review findings, selective AI-feedback reply publication and automatic approval. Publishing every comment, automatic merge and conflict-resolution pushes are separate settings. Opting out disables the assistant package; manual MR management remains available.
 
 Manage global scope and repository/MR overrides in **Settings → Automation → Scope**. Scope changes save immediately. Other automation pages use **Apply Changes**, preserving scope edits made in the meantime. Paused and closed MR overrides remain editable.
+
+## Attention and notifications
+
+The menu-bar indicator is neutral when there is no human action waiting and amber when the board needs your attention. System notifications are optional and focus on work requiring a human decision; automatically handled updates do not create routine notification noise. Repeated polls do not repeat the same alert, and legacy periodic unread reminders are no longer delivered.
+
+Use **Enable notifications** in the main window, onboarding or **Settings → General** to request macOS permission. The system prompt requires your choice. If permission was denied, use **Open System Settings**; returning to the app refreshes the displayed permission state. The app notification toggle and macOS authorization are separate controls.
 
 ## The human checkpoint
 

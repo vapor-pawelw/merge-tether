@@ -931,7 +931,7 @@
         "en": {
           "stringUnit": {
             "state": "translated",
-            "value": "Preview records what would run in Activity. Notify sends a notification. Prepare runs a task through the selected CLI."
+            "value": "Preview records what would run in Activity. Notify alerts you when work still needs your attention. Prepare runs a task through the selected CLI."
           }
         }
       }
@@ -1118,7 +1118,7 @@
         "en": {
           "stringUnit": {
             "state": "translated",
-            "value": "Show notifications for new to-dos"
+            "value": "Notify me when work needs my attention"
           }
         }
       }
@@ -1878,6 +1878,39 @@
           "stringUnit": {
             "state": "translated",
             "value": "This saved script is retained for reference. MR automation no longer runs scripts or substitutes AI for them. Choose the assistant CLI to enable this handler."
+          }
+        }
+      }
+    },
+    "settings.general.notifications.permission.prompt": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Allow system notifications for work that needs your attention."
+          }
+        }
+      }
+    },
+    "settings.general.notifications.permission.enable": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Enable notifications"
+          }
+        }
+      }
+    },
+    "settings.general.notifications.permission.enabled": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "System notifications are enabled."
           }
         }
       }

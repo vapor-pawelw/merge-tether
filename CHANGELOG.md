@@ -8,6 +8,8 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 
 ### Added
 
+- Show a neutral or amber menu-bar attention indicator and notify about work needing a human decision, with in-app notification permission controls.
+
 - Open MergeTether as a regular macOS Dock application with a resizable three-column MR board, direct card actions and detailed MR views.
 - Run assistant tasks headlessly through authenticated Codex CLI or Claude CLI, with local execution history, output, failure reporting and deliberate retries.
 - Offer installed desktop assistants and CLIs as optional, manually selected MR destinations.
@@ -33,6 +35,8 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 - Refresh public documentation and use the retro painted-style MergeTether icon.
 
 ### Fixed
+
+- Keep Activity and assistant history in the main window, removing the nested tabs from Automation Scope settings.
 
 - Keep draft confirmations outside Ready when the current MR head or discussion content has not been checked. Refresh visible Inbox confirmations without waiting for the regular poll.
 - Invalidate review verdicts after new or edited discussion text, while retaining them for resolution-only changes.

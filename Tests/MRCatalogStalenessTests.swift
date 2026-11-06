@@ -13,6 +13,15 @@ struct MRCatalogStalenessTests {
         #expect(item.needsAttention)
     }
 
+    @Test func switchingAccountInvalidatesCatalogFreshnessBeforeAnotherPoll() async throws {
+        let h = try harness()
+        defer { h.cleanUp() }
+        try await h.poll()
+        #expect(h.monitor.hasCurrentOwnListing)
+        h.glab.currentUsername = "another-user"
+        #expect(!h.monitor.hasCurrentOwnListing)
+    }
+
     @MainActor
     private struct Harness {
         let folder: URL

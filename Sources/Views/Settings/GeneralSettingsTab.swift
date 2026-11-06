@@ -1,3 +1,4 @@
+import AppKit
 import SwiftUI
 import UserNotifications
 
@@ -5,7 +6,6 @@ struct GeneralSettingsTab: View {
     @Bindable var monitor: TodoMonitorService
 
     @State private var launchAtLogin: Bool = LaunchAtLoginService.isEnabled
-    @State private var notificationStatus: UNAuthorizationStatus = .notDetermined
 
     var body: some View {
         Form {
@@ -45,40 +45,10 @@ struct GeneralSettingsTab: View {
                     Text(.Settings.settingsGeneralNotificationsToggle)
                 }
 
-                Picker(selection: unreadReminderIntervalBinding) {
-                    ForEach(UnreadReminderInterval.allCases) { interval in
-                        Text(interval.displayLabel)
-                            .tag(interval)
-                    }
-                } label: {
-                    Text(.Settings.settingsGeneralNotificationsReminderPicker)
-                }
-                .disabled(!monitor.settings.notificationsEnabled)
-
-                Picker(selection: unreadReminderSoundBinding) {
-                    ForEach(ReminderSound.allCases) { sound in
-                        reminderSoundLabel(sound)
-                            .tag(sound)
-                    }
-                } label: {
-                    Text(.Settings.settingsGeneralNotificationsReminderSoundPicker)
-                }
-                .disabled(!monitor.settings.notificationsEnabled)
-
-                if notificationStatus == .denied {
-                    VStack(alignment: .leading, spacing: 6) {
-                        Text(.Settings.settingsGeneralNotificationsFooterDenied)
-                            .font(.caption)
-                            .foregroundStyle(.secondary)
-                        Button {
-                            if let url = URL(string: "x-apple.systempreferences:com.apple.preference.notifications") {
-                                NSWorkspace.shared.open(url)
-                            }
-                        } label: {
-                            Text(.Settings.settingsGeneralNotificationsOpenSystemSettings)
-                        }
-                    }
-                }
+                NotificationPermissionView(
+                    notifications: monitor.notifications,
+                    enabled: monitor.settings.notificationsEnabled
+                )
             } header: {
                 Text(.Settings.settingsGeneralNotificationsSection)
             }
@@ -86,7 +56,6 @@ struct GeneralSettingsTab: View {
         .formStyle(.grouped)
         .task {
             launchAtLogin = LaunchAtLoginService.isEnabled
-            notificationStatus = await UNUserNotificationCenter.current().notificationSettings().authorizationStatus
         }
     }
 
@@ -112,33 +81,91 @@ struct GeneralSettingsTab: View {
         )
     }
 
-    private var unreadReminderIntervalBinding: Binding<UnreadReminderInterval> {
-        Binding(
-            get: { monitor.settings.unreadReminderInterval },
-            set: { newValue in
-                monitor.settings.unreadReminderInterval = newValue
-                monitor.settings.save()
-                monitor.restartUnreadReminderTimer()
-            }
-        )
-    }
+}
 
-    private var unreadReminderSoundBinding: Binding<ReminderSound> {
-        Binding(
-            get: { monitor.settings.unreadReminderSound },
-            set: { newValue in
-                monitor.settings.unreadReminderSound = newValue
-                monitor.settings.save()
-            }
-        )
-    }
+/// The system prompt is shown only after an explicit user action.
+struct NotificationPermissionView: View {
+    let notifications: NotificationService
+    let enabled: Bool
+    var showAuthorizedStatus = false
 
-    @ViewBuilder
-    private func reminderSoundLabel(_ sound: ReminderSound) -> some View {
-        if sound == .off {
-            Text(.Settings.settingsReminderSoundOff)
-        } else {
-            Text(sound.rawValue)
+    @State private var status: UNAuthorizationStatus?
+    @State private var requesting = false
+
+    var body: some View {
+        Group {
+            if enabled {
+                switch status {
+                case nil:
+                    ProgressView()
+                        .controlSize(.small)
+                        .accessibilityLabel(Text(.Settings.settingsGeneralNotificationsSection))
+                case .notDetermined:
+                    permissionPrompt
+                case .denied:
+                    deniedPrompt
+                case .authorized, .provisional, .ephemeral:
+                    if showAuthorizedStatus {
+                        Label {
+                            Text(.Settings.settingsGeneralNotificationsPermissionEnabled)
+                        } icon: {
+                            Image(systemName: "checkmark.circle.fill")
+                                .foregroundStyle(.green)
+                        }
+                    }
+                default:
+                    EmptyView()
+                }
+            }
         }
+        .task(id: enabled) {
+            await refreshStatus()
+        }
+        .onReceive(NotificationCenter.default.publisher(for: NSApplication.didBecomeActiveNotification)) { _ in
+            Task { await refreshStatus() }
+        }
+    }
+
+    private var permissionPrompt: some View {
+        HStack(spacing: 12) {
+            Label {
+                Text(.Settings.settingsGeneralNotificationsPermissionPrompt)
+                    .font(.callout)
+            } icon: {
+                Image(systemName: "bell.badge")
+            }
+            Spacer(minLength: 4)
+            Button {
+                requesting = true
+                Task {
+                    await notifications.requestPermission()
+                    await refreshStatus()
+                    requesting = false
+                }
+            } label: {
+                Text(.Settings.settingsGeneralNotificationsPermissionEnable)
+            }
+            .disabled(requesting)
+        }
+    }
+
+    private var deniedPrompt: some View {
+        HStack(spacing: 12) {
+            Text(.Settings.settingsGeneralNotificationsFooterDenied)
+                .font(.callout)
+                .foregroundStyle(.secondary)
+            Spacer(minLength: 4)
+            Button {
+                if let url = URL(string: "x-apple.systempreferences:com.apple.preference.notifications") {
+                    NSWorkspace.shared.open(url)
+                }
+            } label: {
+                Text(.Settings.settingsGeneralNotificationsOpenSystemSettings)
+            }
+        }
+    }
+
+    private func refreshStatus() async {
+        status = await notifications.currentAuthorizationStatus()
     }
 }

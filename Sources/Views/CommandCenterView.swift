@@ -12,6 +12,9 @@ struct CommandCenterView: View {
     var body: some View {
         VStack(spacing: 0) {
             statusBanners
+            NotificationPermissionView(notifications: monitor.notifications,
+                                       enabled: monitor.settings.notificationsEnabled)
+                .padding(.horizontal, 18)
             if showActivity {
                 VSplitView {
                     AssistantJobHistoryView(monitor: monitor).frame(minHeight: 250)
@@ -62,6 +65,7 @@ struct CommandCenterView: View {
             monitor.refreshAvailableAssistants()
         }
         .onAppear {
+            MainWindowPresentation.openWindow = { openWindow(id: "main") }
             monitor.authoredMergeRequests.setVisible(true)
             monitor.markMenuOpened()
         }

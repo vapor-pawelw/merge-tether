@@ -293,7 +293,7 @@
         "en" : {
           "stringUnit" : {
             "state" : "translated",
-            "value" : "Get a banner the moment someone assigns you a merge request, mentions you, or requests a review."
+            "value" : "Get a system notification when work needs your decision. Updates handled automatically stay quiet."
           }
         }
       }
