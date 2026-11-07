@@ -13,7 +13,6 @@ final class MergeRequestTodoRouter {
     private let cancelJob: @MainActor (UUID, SettingsManager) -> Void
     private var processing = false
     private var launching: Set<UUID> = []
-    private var manualRuns: Set<UUID> = []
     private(set) var acknowledgementError: GlabError?
     var onAcceptedIntent: (@MainActor (MRTodoIntent) -> Void)?
     var followUpAssessment: (@MainActor (GitLabMergeRequest, [GitLabMergeRequestDiscussion]) -> ReReviewAssessment?)?
@@ -135,17 +134,16 @@ final class MergeRequestTodoRouter {
         defer { launching.remove(id) }
         guard !Task.isCancelled, let original = settings.mrActionIntents.first(where: { $0.id == id }), original.state != .completed,
               let iid = original.target.iid, isCurrent(original.target.host, original.target.username) else { return }
+        let origin: MRAutomationEvent.Origin = manual ? .manual : .automatic
         if manual {
-            manualRuns.insert(id)
             settings.recordAutomationEvent(target: original.target, action: .retry, origin: .manual, state: .requested,
                 intentID: id, jobID: original.jobID)
         }
-        defer { manualRuns.remove(id) }
         let work = AssistantAutomationRunner.MergeRequestWork(host: original.target.host, projectID: original.target.projectID, iid: iid)
         if original.kind == .review || original.kind == .followUp {
             let rule = original.kind == .review ? settings.automation.reviewRequested : settings.automation.authorFeedback
             guard rule.runner == .assistant else {
-                update(id) { $0.state = .failed; $0.error = String(localized: .TodoRouting.todoRoutingShellUnsupported) }
+                update(id, origin: origin) { $0.state = .failed; $0.error = String(localized: .TodoRouting.todoRoutingShellUnsupported) }
                 return
             }
         }
@@ -156,7 +154,7 @@ final class MergeRequestTodoRouter {
                 && !original.sourceEvents.isEmpty
                 && original.sourceEvents.allSatisfy { job.feedbackTodos?.contains($0) == true }
         }) {
-            update(id) { $0.jobID = existing.id; $0.state = .running; $0.error = nil }
+            update(id, origin: origin) { $0.jobID = existing.id; $0.state = .running; $0.error = nil }
             return
         }
         if !manual, original.sourceEvents.contains(where: { event in
@@ -167,7 +165,7 @@ final class MergeRequestTodoRouter {
                         && job.feedbackTodos?.contains(event) == true
                 }
         }) {
-            update(id) { $0.state = .failed; $0.error = String(localized: .TodoRouting.todoRoutingPreviousAttempt) }
+            update(id, origin: origin) { $0.state = .failed; $0.error = String(localized: .TodoRouting.todoRoutingPreviousAttempt) }
             return
         }
         if !manual, let previous = settings.assistantHandoffs.last(where: { job in
@@ -175,7 +173,7 @@ final class MergeRequestTodoRouter {
                 && job.execution != nil && job.execution?.state.isActive == false && job.execution?.state != .succeeded
                 && !original.sourceEvents.isEmpty && original.sourceEvents.allSatisfy { job.feedbackTodos?.contains($0) == true }
         }) {
-            update(id) { $0.jobID = previous.id; $0.state = .failed; $0.error = String(localized: .TodoRouting.todoRoutingPreviousAttempt) }
+            update(id, origin: origin) { $0.jobID = previous.id; $0.state = .failed; $0.error = String(localized: .TodoRouting.todoRoutingPreviousAttempt) }
             return
         }
         if AssistantAutomationRunner.isWorking(on: work) || settings.assistantHandoffs.contains(where: {
@@ -221,16 +219,16 @@ final class MergeRequestTodoRouter {
                   invocationConfiguration.preservingScope(from: settings.automation) == settings.automation,
                   manual || shouldRunAutomatically(original.kind, request: request, target: original.target) else {
                 cancelJob(jobID, settings)
-                update(id) { $0.jobID = jobID; $0.state = .failed; $0.error = String(localized: .TodoRouting.todoRoutingNeedsRecheck) }
+                update(id, origin: origin) { $0.jobID = jobID; $0.state = .failed; $0.error = String(localized: .TodoRouting.todoRoutingNeedsRecheck) }
                 return
             }
-            update(id) { $0.request = request; $0.headSHA = head; $0.jobID = jobID; $0.state = .running; $0.error = nil }
+            update(id, origin: origin) { $0.request = request; $0.headSHA = head; $0.jobID = jobID; $0.state = .running; $0.error = nil }
             if manual {
                 settings.recordAutomationEvent(target: original.target, action: .retry, origin: .manual, state: .queued,
                     intentID: id, jobID: jobID, relatedJobID: original.jobID)
             }
         } catch {
-            update(id) { $0.state = .failed; $0.error = String(describing: error) }
+            update(id, origin: origin) { $0.state = .failed; $0.error = String(describing: error) }
         }
     }
 
@@ -255,7 +253,7 @@ final class MergeRequestTodoRouter {
     func dismiss(_ id: UUID) {
         guard let intent = settings.mrActionIntents.first(where: { $0.id == id }),
               isCurrent(intent.target.host, intent.target.username) else { return }
-        update(id) { $0.state = .completed; $0.error = nil }
+        update(id, origin: .manual) { $0.state = .completed; $0.error = nil }
     }
 
     private func classify(_ todo: Todo, request: GitLabMergeRequest, user: GitLabAuthenticatedUser,
@@ -571,30 +569,37 @@ final class MergeRequestTodoRouter {
         return owned
     }
 
-    private func update(_ id: UUID, _ mutate: (inout MRTodoIntent) -> Void) {
+    // Origin describes this transition's trigger; background reconciliation is automatic.
+    private func update(_ id: UUID, origin: MRAutomationEvent.Origin? = nil, _ mutate: (inout MRTodoIntent) -> Void) {
         guard let index = settings.mrActionIntents.firstIndex(where: { $0.id == id }) else { return }
         let previous = settings.mrActionIntents[index]
         mutate(&settings.mrActionIntents[index])
         let current = settings.mrActionIntents[index]
+        let changed = previous.state != current.state || previous.error != current.error || previous.jobID != current.jobID
         // Preserve a historical application rejection even when fresh evidence repairs it.
         if previous.state == .failed, current.state != .failed || current.error != previous.error || current.jobID != previous.jobID {
             recordIntentEvent(previous, state: .failed)
         }
-        if current.state == .failed { recordIntentEvent(current, state: .failed, now: Date()) }
-        if previous.state != current.state || previous.error != current.error || previous.jobID != current.jobID {
-            if current.state == .completed { recordIntentEvent(current, state: .completed, now: Date()) }
+        if current.state == .failed {
+            recordIntentEvent(current, state: .failed, origin: origin ?? (changed ? .automatic : nil),
+                now: origin != nil || changed ? Date() : nil)
+        }
+        if changed {
+            if current.state == .completed { recordIntentEvent(current, state: .completed, origin: origin ?? .automatic, now: Date()) }
         }
         settings.mrActionIntents[index].updatedAt = Date()
         settings.save()
     }
 
-    private func recordIntentEvent(_ intent: MRTodoIntent, state: MRAutomationEvent.State, now: Date? = nil) {
+    private func recordIntentEvent(_ intent: MRTodoIntent, state: MRAutomationEvent.State,
+                                   origin: MRAutomationEvent.Origin? = nil, now: Date? = nil) {
         guard let action = MRAutomationEvent.Action(rawValue: intent.kind.rawValue),
               !settings.automationEvents.contains(where: { $0.target == intent.target && $0.intentID == intent.id
                   && $0.jobID == intent.jobID && $0.state == state
+                  && (origin == nil || $0.origin == origin)
                   && $0.message == intent.error.map(GlabService.redactWorkflowEvidence) }) else { return }
-        let manual = manualRuns.contains(intent.id) || intent.jobID.flatMap { id in settings.assistantHandoffs.first { $0.id == id } }?.manual == true
-        settings.recordAutomationEvent(target: intent.target, action: action, origin: manual ? .manual : .automatic,
+        // Historical capture keeps an existing trigger; new transitions supply their own origin.
+        settings.recordAutomationEvent(target: intent.target, action: action, origin: origin ?? .automatic,
             state: state, message: intent.error, intentID: intent.id, jobID: intent.jobID, now: now ?? intent.updatedAt)
     }
     private func isCurrent(_ host: String, _ username: String) -> Bool {

@@ -5,6 +5,7 @@ import Testing
 @MainActor
 @Suite struct MergeRequestTodoRoutingTests {
     private final class Readiness { var ready = false }
+    private enum LaunchFailure: Error { case rejected }
     private final class ProbeGate {
         var entered = false
         private var released = false
@@ -122,6 +123,108 @@ import Testing
         #expect(retained.count == 1)
         #expect(retained.first?.message == previous)
         #expect(retained.first?.jobID == f.settings.mrActionIntents[0].jobID)
+    }
+
+    @Test(arguments: [AssistantJobExecution.State.succeeded, .failed])
+    func backgroundStatusChangesAreAutomaticEvenWhenTheWorkerWasStartedManually(state: AssistantJobExecution.State) async throws {
+        let f = try fixture(owned: true); defer { f.cleanup() }
+        try completedFollowUp(f)
+        f.settings.assistantHandoffs[0].manual = true
+        if state == .failed { f.settings.assistantHandoffs[0].execution = .init(state: .failed, error: "The worker failed.") }
+        let router = MergeRequestTodoRouter(settings: f.settings, glab: f.glab, canAutomate: { false }, proofDirectory: f.root.appending(path: "proofs"))
+        router.followUpAssessment = { _, _ in .init(notes: [.init(noteID: 42, state: .addressed, reason: "Current feedback verified.")]) }
+        await router.refreshCompletionEvidence(host: target.host, username: target.username)
+        let result = try #require(f.settings.automationEvents.first { $0.action == .followUp })
+        #expect(result.state == (state == .succeeded ? .completed : .failed))
+        #expect(result.origin == .automatic)
+        #expect(SettingsManager(defaults: f.defaults).assistantHandoffs[0].manual == true)
+    }
+
+    @Test func reconciliationKeepsExistingHistoryAndDoesNotRelabelOldManualEvents() async throws {
+        let f = try fixture(owned: true); defer { f.cleanup() }
+        try completedFollowUp(f)
+        f.settings.assistantHandoffs[0].manual = true
+        f.settings.mrActionIntents[0].state = .failed
+        f.settings.mrActionIntents[0].error = "Earlier application failure."
+        let intent = f.settings.mrActionIntents[0]
+        f.settings.recordAutomationEvent(target: target, action: .followUp, origin: .manual, state: .failed,
+            message: intent.error, intentID: intent.id, jobID: intent.jobID)
+        let historical = try #require(f.settings.automationEvents.first)
+        let router = MergeRequestTodoRouter(settings: f.settings, glab: f.glab, canAutomate: { false }, proofDirectory: f.root.appending(path: "proofs"))
+        router.followUpAssessment = { _, _ in .init(notes: [.init(noteID: 42, state: .addressed, reason: "Current feedback verified.")]) }
+        await router.refreshCompletionEvidence(host: target.host, username: target.username)
+        #expect(f.settings.automationEvents.first { $0.id == historical.id } == historical)
+        #expect(f.settings.automationEvents.filter { $0.state == .failed }.count == 1)
+        #expect(f.settings.automationEvents.first { $0.state == .completed }?.origin == .automatic)
+    }
+
+    @Test func anExplicitRetryFailureStillRecordsTheUsersManualTrigger() async throws {
+        let f = try fixture(owned: true); defer { f.cleanup() }
+        try completedFollowUp(f)
+        let router = MergeRequestTodoRouter(settings: f.settings, glab: f.glab, canAutomate: { true }, launcher: { _, manual in
+            #expect(manual)
+            throw LaunchFailure.rejected
+        })
+        await router.run(f.settings.mrActionIntents[0].id, manual: true)
+        #expect(f.settings.automationEvents.first { $0.action == .retry && $0.state == .requested }?.origin == .manual)
+        #expect(f.settings.automationEvents.first { $0.action == .followUp && $0.state == .failed }?.origin == .manual)
+    }
+
+    @Test func aManualFailureIsNotDeduplicatedAgainstAnEarlierAutomaticFailureWithTheSameReason() async throws {
+        let f = try fixture(owned: true); defer { f.cleanup() }
+        try completedFollowUp(f)
+        f.settings.assistantHandoffs[0].execution = .init(state: .failed, error: "rejected")
+        f.settings.mrActionIntents[0].state = .failed
+        f.settings.mrActionIntents[0].error = "rejected"
+        let intent = f.settings.mrActionIntents[0]
+        f.settings.recordAutomationEvent(target: target, action: .followUp, origin: .automatic, state: .failed,
+            message: "rejected", intentID: intent.id, jobID: intent.jobID)
+        let router = MergeRequestTodoRouter(settings: f.settings, glab: f.glab, canAutomate: { true }, launcher: { _, _ in
+            throw LaunchFailure.rejected
+        })
+        await router.run(intent.id, manual: true)
+        await router.refreshCompletionEvidence(host: target.host, username: target.username)
+        await router.refreshCompletionEvidence(host: target.host, username: target.username)
+        let failures = f.settings.automationEvents.filter { $0.action == .followUp && $0.state == .failed }
+        #expect(failures.count == 2)
+        #expect(failures.filter { $0.origin == .manual }.count == 1)
+        #expect(failures.filter { $0.origin == .automatic }.count == 1)
+    }
+
+    @Test func unchangedBackgroundObservationDoesNotDuplicateAnExistingManualFailureAsAutomatic() async throws {
+        let f = try fixture(owned: true); defer { f.cleanup() }
+        try completedFollowUp(f)
+        f.settings.assistantHandoffs[0].execution = .init(state: .failed, error: "Existing failure")
+        f.settings.mrActionIntents[0].state = .failed
+        f.settings.mrActionIntents[0].error = "Existing failure"
+        let intent = f.settings.mrActionIntents[0]
+        f.settings.recordAutomationEvent(target: target, action: .followUp, origin: .manual, state: .failed,
+            message: intent.error, intentID: intent.id, jobID: intent.jobID)
+        let original = try #require(f.settings.automationEvents.first)
+        let router = MergeRequestTodoRouter(settings: f.settings, glab: f.glab, canAutomate: { false })
+        await router.refreshCompletionEvidence(host: target.host, username: target.username)
+        await router.refreshCompletionEvidence(host: target.host, username: target.username)
+        #expect(f.settings.automationEvents == [original])
+        #expect(f.settings.mrActionIntents[0].state == .failed)
+    }
+
+    @Test func aConcurrentManualRetryDoesNotMakeAnAutomaticReconciliationManual() async throws {
+        let f = try fixture(owned: true); defer { f.cleanup() }
+        try completedFollowUp(f)
+        let gate = ProbeGate()
+        let router = MergeRequestTodoRouter(settings: f.settings, glab: f.glab, canAutomate: { await gate.wait() }, proofDirectory: f.root.appending(path: "proofs"))
+        router.followUpAssessment = { _, _ in .init(notes: [.init(noteID: 42, state: .addressed, reason: "Current feedback verified.")]) }
+        let intentID = f.settings.mrActionIntents[0].id
+        let retry = Task { await router.run(intentID, manual: true) }
+        defer { gate.release(); retry.cancel() }
+        let deadline = ContinuousClock.now + .seconds(3)
+        while !gate.entered, ContinuousClock.now < deadline { try await Task.sleep(for: .milliseconds(10)) }
+        #expect(gate.entered)
+        await router.refreshCompletionEvidence(host: target.host, username: target.username)
+        #expect(f.settings.automationEvents.first { $0.state == .completed }?.origin == .automatic)
+        #expect(f.settings.automationEvents.first { $0.action == .retry }?.origin == .manual)
+        gate.release()
+        await retry.value
     }
 
     @Test func blockedVerificationCannotBeClearedByANoWorkAssessment() async throws {
