@@ -208,6 +208,97 @@ struct DraftProofRecoveryTests {
         #expect(FollowUpVerificationStore.recoveryOrigins(work: fixture.work, username: "me", settings: fixture.settings, in: fixture.folder).isEmpty)
     }
 
+    @Test(arguments: [DraftProofRecoveryVerifier.Assessment.State.valid, .uncertain])
+    func aSuccessfulExplicitManualRetryOnlyUnlocksFreshIndependentClaimVerification(_ claim: DraftProofRecoveryVerifier.Assessment.State) async throws {
+        let f = try Fixture()
+        defer { f.clean() }
+        let (stopped, replacement) = f.addManualRetry()
+        // Neither the retry's success nor the historical source hashes establish
+        // truth at a later head. The ordinary read-only verifier must check it.
+        f.snapshot.request = try f.request(head: String(repeating: "b", count: 40))
+        f.snapshot.branchHead = f.snapshot.request.sha!
+        f.live = f.snapshot
+        f.remoteHash = AICommentAssessmentStore.digest("current source and regression tests")
+        f.claimState = claim
+
+        #expect(FollowUpVerificationStore.recoveryOrigins(work: f.work, username: "me", settings: f.settings, in: f.folder) == [f.proof])
+        #expect(f.receipts().isEmpty)
+        let coordinator = f.coordinator()
+        coordinator.schedule(snapshot: f.snapshot, origin: f.proof, configuration: f.settings.automation)
+        try await f.settle(coordinator)
+
+        #expect(f.assessments == 1)
+        #expect(f.receipts().isEmpty == (claim != .valid))
+        if claim == .valid {
+            let recovered = try #require(f.receipts().first)
+            #expect(recovered.headSHA == f.snapshot.request.sha)
+            #expect(recovered.files == [.init(path: "Sources/Fixed.swift", sha256: f.remoteHash)])
+        }
+        #expect(f.settings.assistantHandoffs.count == 3)
+        #expect(f.settings.assistantHandoffs.first { $0.id == stopped.id }?.execution?.state == .blocked)
+        #expect(f.settings.assistantHandoffs.first { $0.id == replacement.id }?.execution?.state == .succeeded)
+        #expect(f.snapshot.drafts.map(\.note) == ["Fixed"])
+    }
+
+    @Test(arguments: ["noLink", "wrongOld", "automaticEvent", "failedEvent", "eventTarget", "task", "notes", "emptyNotes", "head", "key", "workflow", "url", "permissions", "failed", "active", "cancelled", "unknown", "newerFailure"])
+    func aManualRetryCannotHideAnUnrelatedOrUnfinishedSupersedingTask(_ change: String) throws {
+        let f = try Fixture()
+        defer { f.clean() }
+        var (stopped, replacement) = f.addManualRetry()
+        switch change {
+        case "noLink": f.settings.automationEvents = []
+        case "wrongOld": f.settings.automationEvents[0].relatedJobID = UUID()
+        case "automaticEvent", "failedEvent", "eventTarget":
+            f.settings.automationEvents = []
+            f.settings.recordAutomationEvent(target: .init(host: f.work.host, username: change == "eventTarget" ? "other" : "me", projectID: 1, iid: 2),
+                action: .retry, origin: change == "automaticEvent" ? .automatic : .manual,
+                state: change == "failedEvent" ? .failed : .queued, jobID: replacement.id, relatedJobID: stopped.id)
+        case "task": replacement.taskPrompt = "A different task"
+        case "notes": replacement.feedbackNoteIDs = [999]
+        case "emptyNotes": stopped.feedbackNoteIDs = []; replacement.feedbackNoteIDs = []
+        case "head": replacement.expectedHeadSHA = String(repeating: "b", count: 40)
+        case "key":
+            replacement = .init(id: replacement.id,
+                key: .init(assistant: .claude, work: f.work, username: "me", workspace: "", access: .gitLabRead),
+                title: replacement.title, prompt: replacement.prompt, createdAt: replacement.createdAt,
+                allowsPush: replacement.allowsPush, feedbackNoteIDs: replacement.feedbackNoteIDs,
+                followUpPushAllowed: true, execution: replacement.execution, taskPrompt: replacement.taskPrompt,
+                mergeRequestURL: replacement.mergeRequestURL, workflow: .followUp, manual: true, expectedHeadSHA: replacement.expectedHeadSHA)
+        case "workflow": replacement.workflow = .review
+        case "url": replacement.mergeRequestURL = URL(string: "https://gitlab.example.org/group/other/-/merge_requests/2")
+        case "permissions": replacement.followUpPushAllowed = false
+        case "failed": replacement.execution?.state = .failed
+        case "active": replacement.execution?.state = .running
+        case "cancelled": replacement.execution?.state = .cancelled
+        case "unknown": replacement.execution = nil
+        default: break
+        }
+        f.settings.assistantHandoffs = [f.settings.assistantHandoffs[0], stopped, replacement]
+        if change == "newerFailure" {
+            f.settings.assistantHandoffs.append(.init(id: UUID(), key: stopped.key, title: "Newer relevant failure", prompt: "",
+                createdAt: replacement.createdAt.addingTimeInterval(1), allowsPush: false, feedbackNoteIDs: [10],
+                followUpPushAllowed: true, execution: .init(state: .failed)))
+        }
+        #expect(FollowUpVerificationStore.recoveryOrigins(work: f.work, username: "me", settings: f.settings, in: f.folder).isEmpty)
+        #expect(f.receipts().isEmpty)
+    }
+
+    @Test func evenAnExactSuccessfulManualRetryCannotAdoptAUserEditedDraft() async throws {
+        let f = try Fixture()
+        defer { f.clean() }
+        _ = f.addManualRetry()
+        let original = f.snapshot.drafts[0]
+        f.snapshot.drafts[0] = .init(id: original.id, authorID: original.authorID, note: "User edited this reply",
+            discussionID: original.discussionID, position: original.position)
+        f.live = f.snapshot
+        #expect(FollowUpVerificationStore.recoveryOrigins(work: f.work, username: "me", settings: f.settings, in: f.folder) == [f.proof])
+        let coordinator = f.coordinator()
+        coordinator.schedule(snapshot: f.snapshot, origin: f.proof, configuration: f.settings.automation)
+        try await f.settle(coordinator)
+        #expect(f.assessments == 0 && f.receipts().isEmpty)
+        #expect(f.snapshot.drafts[0].note == "User edited this reply")
+    }
+
     @Test func failedAttemptIsBoundedAcrossPollsAndRestartsButNewContextGetsOneAssessment() async throws {
         let fixture = try Fixture()
         defer { fixture.clean() }
@@ -800,6 +891,21 @@ struct DraftProofRecoveryTests {
         }
         func receipts() -> [FollowUpVerification] {
             FollowUpVerificationStore.contextReceipts(work: work, username: "me", settings: settings, in: folder)
+        }
+        func addManualRetry() -> (AssistantAutomationRunner.Handoff, AssistantAutomationRunner.Handoff) {
+            let origin = settings.assistantHandoffs[0]
+            let stopped = AssistantAutomationRunner.Handoff(id: UUID(), key: origin.key, title: "Stopped follow-up", prompt: "",
+                createdAt: origin.createdAt.addingTimeInterval(1), allowsPush: false, feedbackNoteIDs: [11],
+                followUpPushAllowed: true, execution: .init(state: .blocked), taskPrompt: "Fix only reviewer note 11",
+                mergeRequestURL: snapshot.request.webURL, workflow: .followUp, manual: false, expectedHeadSHA: proof.headSHA)
+            let replacement = AssistantAutomationRunner.Handoff(id: UUID(), key: stopped.key, title: stopped.title, prompt: stopped.prompt,
+                createdAt: stopped.createdAt.addingTimeInterval(1), allowsPush: stopped.allowsPush, feedbackNoteIDs: stopped.feedbackNoteIDs,
+                followUpPushAllowed: true, execution: .init(state: .succeeded), taskPrompt: stopped.taskPrompt,
+                mergeRequestURL: stopped.mergeRequestURL, workflow: stopped.workflow, manual: true, expectedHeadSHA: stopped.expectedHeadSHA)
+            settings.assistantHandoffs += [stopped, replacement]
+            settings.recordAutomationEvent(target: .init(host: work.host, username: "me", projectID: 1, iid: 2),
+                action: .retry, origin: .manual, state: .queued, jobID: replacement.id, relatedJobID: stopped.id)
+            return (stopped, replacement)
         }
         func publishKnownA() {
             snapshot.discussions = [.init(id: "thread", notes: snapshot.discussions[0].notes + [.init(id: 20,

@@ -86,6 +86,8 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 
 ### Fixed
 
+- Recheck known reply drafts after a failed follow-up was superseded by its recorded successful manual retry, retaining fresh claim verification and publication filters.
+
 - Reconcile obsolete pipeline failures against current GitLab status and refresh stale retries without suggesting an unrelated CLI problem.
 
 - Automatically reverify existing app-created reply drafts after a new MR commit, bind successful checks to the current source, and publish only replies allowed by the current publication policy.

@@ -265,6 +265,8 @@ extension FollowUpVerificationStore {
                   !runs.contains(where: { later in
                       later.createdAt > origin.createdAt && later.execution?.state != .succeeded
                           && !hasSuccessfulEnvironmentReplacement(for: later, runs: runs, headSHA: proof.headSHA)
+                          && !hasSuccessfulManualReplacement(for: later, runs: runs,
+                              events: settings.automationEvents, headSHA: proof.headSHA)
                   }) else { continue }
             if path.deletingLastPathComponent().standardizedFileURL == archive.standardizedFileURL,
                UUID(uuidString: path.deletingPathExtension().lastPathComponent) != proof.verificationID { continue }
@@ -284,6 +286,38 @@ extension FollowUpVerificationStore {
                 && replacement.execution?.state == .succeeded && replacement.followUpPushAllowed == true
                 && replacement.expectedHeadSHA == headSHA && replacement.key.work == stopped.key.work
                 && replacement.key.username == stopped.key.username && replacement.key.assistant == stopped.key.assistant
+        }
+    }
+
+    /// Explicit retry lineage can retire a failed task's recovery fence, but never
+    /// make its predecessor's claims true. Only recoveryOrigins uses this exception;
+    /// the independent current-source verifier must still create publication proof.
+    private static func hasSuccessfulManualReplacement(for stopped: AssistantAutomationRunner.Handoff,
+                                                       runs: [AssistantAutomationRunner.Handoff],
+                                                       events: [MRAutomationEvent], headSHA: String) -> Bool {
+        guard stopped.execution?.state == .blocked || stopped.execution?.state == .failed,
+              stopped.workflow == .followUp, stopped.followUpPushAllowed == true,
+              stopped.expectedHeadSHA == headSHA,
+              let task = stopped.taskPrompt, !task.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty,
+              let notes = stopped.feedbackNoteIDs, !notes.isEmpty, notes.allSatisfy({ $0 > 0 }),
+              Set(notes).count == notes.count,
+              let url = stopped.mergeRequestURL, url.isGitLabMergeRequest(host: stopped.key.work.host, iid: stopped.key.work.iid),
+              stopped.reviewModel == nil, stopped.pipelineReservation == nil else { return false }
+        let target = MRAutomationScope.Target(host: stopped.key.work.host, username: stopped.key.username,
+            projectID: stopped.key.work.projectID, iid: stopped.key.work.iid)
+        return runs.contains { replacement in
+            replacement.createdAt > stopped.createdAt && replacement.execution?.state == .succeeded
+                && replacement.manual == true && replacement.key == stopped.key
+                && replacement.workflow == stopped.workflow && replacement.taskPrompt == task
+                && replacement.expectedHeadSHA == stopped.expectedHeadSHA && replacement.mergeRequestURL == url
+                && replacement.allowsPush == stopped.allowsPush && replacement.followUpPushAllowed == stopped.followUpPushAllowed
+                && replacement.reviewModel == nil && replacement.pipelineReservation == nil
+                && Set(replacement.feedbackNoteIDs ?? []) == Set(notes)
+                && Set(replacement.feedbackTodos ?? []) == Set(stopped.feedbackTodos ?? [])
+                && events.contains { event in
+                    event.target == target && event.action == .retry && event.origin == .manual && event.state == .queued
+                        && event.relatedJobID == stopped.id && event.jobID == replacement.id
+                }
         }
     }
 
