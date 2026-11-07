@@ -26,6 +26,56 @@ struct AICommentOriginTests {
             evidence: "Several specific content and context signals support substantial AI assistance.") })
     }
 
+    @Test(arguments: ["high", "very_high", "uncertain", "manual_high", "manual_very_high", "unknown_high"])
+    func highConfidenceQualifiesOnlyAnAIClassificationForTheExactBody(_ variant: String) throws {
+        let directory = try folder(); defer { try? FileManager.default.removeItem(at: directory) }
+        let source = note()
+        let classification = variant.hasPrefix("manual_") ? "manual_likely"
+            : variant.hasPrefix("unknown_") ? "uncertain" : "ai_assisted"
+        let confidence = variant.replacingOccurrences(of: "manual_", with: "").replacingOccurrences(of: "unknown_", with: "")
+        let record = AICommentAssessment(version: 2, host: target.host, projectID: 7, iid: 13, noteID: 10,
+            bodySHA256: AICommentAssessmentStore.digest(source.body!), confidence: confidence,
+            evidence: "Combined content signals assessed for this exact comment.", classification: classification)
+        let path = AICommentAssessmentStore.fileURL(host: target.host, projectID: 7, iid: 13, noteID: 10, in: directory)
+        try FileManager.default.createDirectory(at: path.deletingLastPathComponent(), withIntermediateDirectories: true)
+        try JSONEncoder().encode(record).write(to: path)
+        let expected = variant == "high" || variant == "very_high"
+        #expect(AICommentAssessmentStore.isAI(source, host: target.host, projectID: 7, iid: 13, in: directory) == expected)
+        #expect(!AICommentAssessmentStore.isAI(note(body: "Edited source"), host: target.host, projectID: 7, iid: 13, in: directory))
+    }
+
+    @Test(arguments: ["manual_likely", "uncertain"])
+    func earlierCriteriaResultsAreReassessedOnce(_ classification: String) async throws {
+        let directory = try folder(); defer { try? FileManager.default.removeItem(at: directory) }
+        let source = note()
+        let old = AICommentAssessment(version: 2, host: target.host, projectID: 7, iid: 13, noteID: 10,
+            bodySHA256: AICommentAssessmentStore.digest(source.body!), confidence: "uncertain",
+            evidence: "Previous criteria did not consider combined signals.", classification: classification,
+            provider: AutomationAssistant.codex.rawValue, model: "cheap")
+        let path = AICommentAssessmentStore.fileURL(host: target.host, projectID: 7, iid: 13, noteID: 10, in: directory)
+        try FileManager.default.createDirectory(at: path.deletingLastPathComponent(), withIntermediateDirectories: true)
+        try JSONEncoder().encode(old).write(to: path)
+        var calls = 0
+        let assess: AICommentOriginCoordinator.Assess = { _, notes, _, _ in
+            calls += 1
+            return .init(notes: notes.map { .init(noteID: $0.id!, classification: .aiAssisted, confidence: .high,
+                evidence: "Precise cross-code references with consistent formatting and polished language.") })
+        }
+        let coordinator = AICommentOriginCoordinator(directory: directory, assess: assess,
+            fetchCurrent: { _ in [source] }, isCurrent: { _, _, _ in true })
+        coordinator.schedule(target: target, notes: [source], assistant: .codex, model: "cheap")
+        await settle(coordinator)
+        #expect(calls == 1)
+        #expect(AICommentAssessmentStore.isAI(source, host: target.host, projectID: 7, iid: 13, in: directory))
+        let saved = try #require(JSONSerialization.jsonObject(with: Data(contentsOf: path)) as? [String: Any])
+        #expect(saved["criteriaVersion"] as? Int == 3)
+        let restarted = AICommentOriginCoordinator(directory: directory, assess: assess,
+            fetchCurrent: { _ in [source] }, isCurrent: { _, _, _ in true })
+        restarted.schedule(target: target, notes: [source], assistant: .codex, model: "cheap")
+        await settle(restarted)
+        #expect(calls == 1)
+    }
+
     @Test func legacyEvidenceArraysNormalizeWithoutTreatingHumanAccountAsNegative() throws {
         let directory = try folder(); defer { try? FileManager.default.removeItem(at: directory) }
         let note = note()

@@ -194,7 +194,7 @@
         "en": {
           "stringUnit": {
             "state": "translated",
-            "value": "An AI badge means a verified agent identity or a very-high-confidence assessment that this comment was written with AI assistance. A person’s comment can qualify. No badge does not mean it was written manually."
+            "value": "An AI badge means a verified agent identity or a high-confidence assessment that this comment was written with AI assistance. A person’s comment can qualify. No badge does not mean it was written manually."
           }
         }
       }
@@ -216,7 +216,7 @@
         "en": {
           "stringUnit": {
             "state": "translated",
-            "value": "Assessed as written with AI assistance with very high confidence for this exact comment. This does not approve its content or independently allow publication."
+            "value": "Assessed as written with AI assistance with high or very high confidence for this exact comment. This does not approve its content or independently allow publication."
           }
         }
       }

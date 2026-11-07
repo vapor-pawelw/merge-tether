@@ -32,7 +32,7 @@ final class AICommentOriginCoordinator {
     }
 
     private func key(_ request: Request, _ note: Note) -> String {
-        "\(request.target.host)/\(request.target.username)/\(request.target.projectID)/\(request.target.iid ?? 0)/\(note.id ?? 0)/\(AICommentAssessmentStore.digest(note.body ?? ""))/\(request.assistant.rawValue)/\(request.model)/2"
+        "\(request.target.host)/\(request.target.username)/\(request.target.projectID)/\(request.target.iid ?? 0)/\(note.id ?? 0)/\(AICommentAssessmentStore.digest(note.body ?? ""))/\(request.assistant.rawValue)/\(request.model)/\(AICommentOriginAssessor.criteriaVersion)"
     }
 
     func schedule(target: MRAutomationScope.Target, notes: [Note], assistant: AutomationAssistant, model: String) {
@@ -43,8 +43,9 @@ final class AICommentOriginCoordinator {
         let uncovered = notes.filter { note in
             guard attempted[key(candidate, note)] == nil else { return false }
             if let record = AICommentAssessmentStore.result(for: note, host: target.host, projectID: target.projectID, iid: target.iid!, in: directory) {
-                if record.classification == "ai_assisted", record.confidence == "very_high" { return false }
-                if record.provider == assistant.rawValue && record.model == model { return false }
+                if record.qualifiesAsAI { return false }
+                if record.provider == assistant.rawValue && record.model == model
+                    && record.criteriaVersion == AICommentOriginAssessor.criteriaVersion { return false }
             }
             return true
         }

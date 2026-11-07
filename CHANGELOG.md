@@ -17,7 +17,7 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 
 - Let the lightweight verifier read live MR evidence through Codex CLI or Claude CLI tools while keeping GitLab actions in the app's policy checks.
 - Show MR authors with compact avatars on Reviewing and proposal cards, explain proposal sources, and show factual review participation and reply context.
-- Browse complete discussion threads with inline private drafts in Review and confirm, including AI badges for verified agent identities or very-high-confidence current-comment assessments.
+- Browse complete discussion threads with inline private drafts in Review and confirm, including AI badges for verified agent identities or high-confidence current-comment assessments.
 - Proactively assess AI assistance in source-comment text through the lightweight verification model, including human-posted feedback; keep likely manual and uncertain results private and bind assessments to current comment bodies.
 - Offer Full automation, With checkpoints and Manual only profiles with separate scope and publication controls; preserve existing settings until explicitly changed.
 - Add optional publication conditions for repositories, MR authors, source-comment authors and current AI evidence, combined with AND, plus individual resets to profile defaults.
@@ -53,13 +53,15 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 - Keep agent task results and user decisions in MergeTether; allow manual GitLab operations without an AI dependency.
 - Keep follow-up push permission separate from conflict pushes. Verify the current account, remote head, committed file contents, discussion text and exact draft bodies before automatically publishing author-follow-up replies.
 - Re-review author replies even without a new commit. Resolve only your own findings after verification when enabled.
-- Publish eligible replies to verified GitLab Duo feedback or very-high-confidence AI comments selectively; keep uncertain replies private and reject automatic quick actions.
+- Publish eligible replies to verified GitLab Duo feedback or high-confidence AI comments selectively; keep uncertain replies private and reject automatic quick actions.
 - Request another review only after relevant feedback is addressed and unpublished replies no longer block it. Bind manual confirmation to current content.
 - Organize automation settings by checkpoints, agent, scope and workflow; save scope immediately without later agent changes overwriting it.
 - Preserve the release bundle identifier, macOS 14 minimum and legacy GitLabTodos target/cask names.
 - Refresh public documentation and use the retro painted-style MergeTether icon.
 
 ### Fixed
+
+- Calibrate AI-assisted review detection using combined content and style signals, accept high confidence, and re-assess cached nonqualifying results when criteria change.
 
 - Retain sealed publication evidence across successor runs, revalidate each draft against its original authorized run, and keep likely manual or unclassified sources private under AI-only publication.
 

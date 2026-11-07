@@ -19,7 +19,7 @@ import Testing
         func finish(ai: Bool) {
             let assessment = AICommentOriginAssessment(notes: notes.compactMap { note in note.id.map {
                 .init(noteID: $0, classification: ai ? .aiAssisted : .uncertain,
-                    confidence: ai ? .veryHigh : .uncertain, evidence: ai ? "Verified fixture AI provenance." : "Insufficient source provenance.")
+                    confidence: ai ? .high : .uncertain, evidence: ai ? "Verified fixture AI provenance." : "Insufficient source provenance.")
             } })
             result = assessment
             continuation?.resume(returning: assessment)

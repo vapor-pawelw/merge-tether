@@ -30,7 +30,7 @@ struct MRDiscussionSnapshotTests {
         #expect(snapshot.standaloneDrafts == drafts)
     }
 
-    @Test func onlyCurrentVeryHighConfidenceEvidenceCanLabelANote() throws {
+    @Test func onlyCurrentQualifyingConfidenceEvidenceCanLabelANote() throws {
         let folder = FileManager.default.temporaryDirectory.appending(path: UUID().uuidString)
         try FileManager.default.createDirectory(at: folder, withIntermediateDirectories: false)
         defer { try? FileManager.default.removeItem(at: folder) }

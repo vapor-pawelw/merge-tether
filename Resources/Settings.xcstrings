@@ -1558,7 +1558,7 @@
         "en": {
           "stringUnit": {
             "state": "translated",
-            "value": "Only checked replies to GitLab Duo or to comments assessed with very high confidence as AI-assisted. Current MR and draft evidence must also be verified; uncertain replies wait for you."
+            "value": "Only checked replies to GitLab Duo or to comments assessed with high or very high confidence as AI-assisted. Current MR and draft evidence must also be verified; uncertain replies wait for you."
           }
         }
       }
@@ -2042,7 +2042,7 @@
         "en": {
           "stringUnit": {
             "state": "translated",
-            "value": "Automatically publish checked replies to verified AI comments or comments assessed as AI-assisted with very high confidence. Likely manual or uncertain comments and new standalone comments stay private. Optional restrictions can narrow this further."
+            "value": "Automatically publish checked replies to verified AI comments or comments assessed as AI-assisted with high or very high confidence. Likely manual or uncertain comments and new standalone comments stay private. Optional restrictions can narrow this further."
           }
         }
       }
