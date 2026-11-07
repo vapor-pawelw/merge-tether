@@ -56,6 +56,26 @@ public struct RemoteCardText: Codable, Equatable, Sendable {
     }
 }
 
+/// Optional read-only metadata so older paired installations keep decoding snapshots.
+public struct RemoteMRPredecessor: Codable, Equatable, Sendable {
+    public var reference: String
+    public var title: String
+    public var url: URL
+    public var isCurrent: Bool
+    public init(reference: String, title: String, url: URL, isCurrent: Bool = true) {
+        self.reference = reference; self.title = title; self.url = url; self.isCurrent = isCurrent
+    }
+}
+
+public struct RemoteMRDependencies: Codable, Equatable, Sendable {
+    public var stackPosition: String?
+    public var predecessors: [RemoteMRPredecessor]
+    public var notice: String?
+    public init(stackPosition: String? = nil, predecessors: [RemoteMRPredecessor] = [], notice: String? = nil) {
+        self.stackPosition = stackPosition; self.predecessors = predecessors; self.notice = notice
+    }
+}
+
 public struct RemoteCard: Codable, Equatable, Identifiable, Sendable {
     public var id: String
     public var title: String
@@ -70,12 +90,13 @@ public struct RemoteCard: Codable, Equatable, Identifiable, Sendable {
     public var mergeRequestIID: Int?
     public var primaryCTA: RemoteCardCTA?
     public var presentation: RemoteCardText?
+    public var dependencies: RemoteMRDependencies?
     public init(id: String, title: String, project: String, url: URL?, head: String? = nil,
                 detail: String = "", drafts: [RemoteDraft] = [], actions: [RemoteAction] = [],
-                needsAttention: Bool? = nil, mergeRequestIID: Int? = nil, primaryCTA: RemoteCardCTA? = nil, presentation: RemoteCardText? = nil) {
+                needsAttention: Bool? = nil, mergeRequestIID: Int? = nil, primaryCTA: RemoteCardCTA? = nil, presentation: RemoteCardText? = nil, dependencies: RemoteMRDependencies? = nil) {
         self.id = id; self.title = title; self.project = project; self.url = url; self.head = head
         self.detail = detail; self.drafts = drafts; self.actions = actions
-        self.needsAttention = needsAttention; self.mergeRequestIID = mergeRequestIID; self.primaryCTA = primaryCTA; self.presentation = presentation
+        self.needsAttention = needsAttention; self.mergeRequestIID = mergeRequestIID; self.primaryCTA = primaryCTA; self.presentation = presentation; self.dependencies = dependencies
     }
 }
 

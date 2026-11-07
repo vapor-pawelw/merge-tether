@@ -20,6 +20,12 @@ struct BoardMRProposalCard: View {
         ProposalMRContext(proposal: proposal, fetchedRequest: authorLoader.request(for: proposal))
     }
 
+    @ViewBuilder private var dependencyRow: some View {
+        if let dependencies = proposal.item?.dependencies, dependencies.hasPresentation {
+            MRDependencyRow(summary: dependencies, projectID: proposal.target.projectID).transition(.opacity)
+        }
+    }
+
     private var authorTaskID: String {
         "\(proposal.target.host)/\(proposal.target.username)/\(proposal.target.projectID)/\(proposal.target.iid ?? 0)/\(proposal.url)|\(monitor.glab.resolvedHost ?? "")/\(monitor.glab.currentUsername ?? "")"
     }
@@ -44,6 +50,7 @@ struct BoardMRProposalCard: View {
                 .buttonStyle(.plain)
                 moreMenu
             }
+            dependencyRow
             reasons
             HStack {
                 Button {
@@ -93,6 +100,7 @@ struct BoardMRProposalCard: View {
             BoardItemDetailSheet {
                 metadataHeader
                 Text(verbatim: proposal.title).font(.title3).textSelection(.enabled)
+                dependencyRow
                 Text(verbatim: proposal.url.gitLabProjectPath).foregroundStyle(.secondary)
                 ForEach(context.reasons) { value in
                     VStack(alignment: .leading, spacing: 6) {

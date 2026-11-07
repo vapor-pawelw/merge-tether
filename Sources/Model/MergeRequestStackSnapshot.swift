@@ -1,10 +1,14 @@
 import Foundation
 
 struct MergeRequestStackSnapshot: Sendable {
+    let requests: [GitLabMergeRequest]
+    let defaultBranch: String
     let openIIDs: Set<Int>
     let positions: [Int: String]
 
     init(requests: [GitLabMergeRequest], defaultBranch: String) {
+        self.requests = requests
+        self.defaultBranch = defaultBranch
         let open = requests.filter { $0.state == "opened" }
         openIIDs = Set(open.map(\.iid))
         let byBranch = Dictionary(grouping: open, by: \.sourceBranch)

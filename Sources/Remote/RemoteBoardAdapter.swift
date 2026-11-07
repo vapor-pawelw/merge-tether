@@ -13,6 +13,11 @@ import MergeTetherRemote
         var card = RemoteCard(id: "mr:\(item.id.projectID):\(item.id.iid)", title: item.title,
             project: item.url.gitLabProjectPath, url: item.url,
             head: item.mergeRequest?.sha, detail: detail(item), drafts: drafts)
+        if let dependencies = item.dependencies, dependencies.hasPresentation {
+            card.dependencies = .init(stackPosition: dependencies.stackPosition,
+                predecessors: dependencies.predecessors.map { .init(reference: $0.reference(relativeTo: item.id.projectID),
+                    title: $0.title, url: $0.url, isCurrent: $0.isCurrent) }, notice: dependencies.notice)
+        }
         var kinds = extraActions
         if item.mergeRequest?.sha != nil {
             if item.draftCount == drafts.count, !drafts.isEmpty, !item.requiresDiscussionRecheck,

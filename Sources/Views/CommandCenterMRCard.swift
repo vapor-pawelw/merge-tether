@@ -47,6 +47,9 @@ private struct CommandCenterMRCardContent: View {
                 .help(Text(verbatim: "\(item.title)\n\(item.url.gitLabProjectPath)\n") + Text(.Board.boardDetails))
                 moreMenu
             }
+            if let dependencies = item.dependencies, dependencies.hasPresentation {
+                MRDependencyRow(summary: dependencies, projectID: item.id.projectID).transition(.opacity)
+            }
             if humanAction != nil {
                 Text(verbatim: presentation.message).help(Text(verbatim: presentation.message))
                     .font(.callout).foregroundStyle(.orange)

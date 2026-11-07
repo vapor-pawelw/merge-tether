@@ -59,6 +59,8 @@ final class MergeRequestAttentionMonitor {
         /// Informational participation from complete discussions; nil means not loaded.
         var reviewingActivity: ReviewingActivity?
         var reviewingProgress: ReviewingProgress?
+        /// Canonical read-only stack/dependency metadata, separate from merge permissions.
+        var dependencies: MergeRequestDependencySummary?
 
         var authoredRequest: GitLabMergeRequest? { isAuthored ? mergeRequest : nil }
 
@@ -210,6 +212,9 @@ final class MergeRequestAttentionMonitor {
     /// Commits GitLab refused to auto-approve; retried only after a new commit or a manual approval.
     private var failedApprovalHeads: [Item.ID: String] = [:]
     private var openItems: [Item] = []
+    @ObservationIgnored private let dependencyLoader = MRDependencyLoader()
+    @ObservationIgnored private var dependencyTask: Task<Void, Never>?
+    private var dependencyRevision: UInt64?
     /// Historical chats remain recorded after their MR closes. Recheck them only
     /// after an open listing makes them current again, or after an account change.
     private var terminalCatalogRequests: Set<Item.ID> = []
@@ -377,6 +382,7 @@ final class MergeRequestAttentionMonitor {
 
     private func presentAuthorFeedback(_ original: Item) -> Item {
         var item = original
+        if dependencyRevision != glab.accountRevision { item.dependencies = nil }
         let status = authorFeedbackCoordinator?.status(projectID: item.id.projectID, iid: item.id.iid)
         item.authorFeedbackStatus = status
         if let account, isCurrent(account) {
@@ -421,6 +427,8 @@ final class MergeRequestAttentionMonitor {
             return
         }
         if self.account != account {
+            dependencyTask?.cancel()
+            dependencyRevision = nil
             authorFeedbackCoordinator?.cancel()
             draftProofRecoveryCoordinator?.cancel()
             aiOriginCoordinator.cancel()
@@ -816,6 +824,14 @@ final class MergeRequestAttentionMonitor {
             results[index].draftCount = results[index].drafts.count
             if results[index].drafts.isEmpty { results[index].requiresDiscussionRecheck = false }
         }
+        if dependencyRevision == revision {
+            for index in results.indices {
+                guard let request = results[index].mergeRequest,
+                      let previous = previousCatalog[results[index].id], let old = previous.mergeRequest,
+                      MergeRequestDependencySummary.Context(request) == MergeRequestDependencySummary.Context(old) else { continue }
+                results[index].dependencies = previous.dependencies
+            }
+        }
         items = Item.ordered(results.filter(\.needsAttention))
         hasError = failed || explicitFetchFailed
         hasOwnListing = owned != nil
@@ -840,7 +856,50 @@ final class MergeRequestAttentionMonitor {
                 onAutoApproved?(request)
             }
         }
+        scheduleDependencyRefresh(account: account, revision: revision)
+    }
 
+    /// The inbox is published before optional dependency reads. A cancelled predecessor
+    /// drains before its replacement so slow subprocesses cannot multiply concurrency.
+    private func scheduleDependencyRefresh(account: Account, revision: UInt64) {
+        let previous = dependencyTask
+        previous?.cancel()
+        let requests = (openItems + items).compactMap(\.mergeRequest).filter { $0.state == "opened" }
+        let contexts = Dictionary(requests.map { (Item.ID(projectID: $0.projectID, iid: $0.iid),
+            MergeRequestDependencySummary.Context($0)) }, uniquingKeysWith: { first, _ in first })
+        let projectCount = Set(requests.map(\.projectID)).count
+        let waves = max(1, max((projectCount + 2) / 3, (contexts.count + 11) / 12))
+        let generation = refreshGeneration
+        dependencyTask = Task { [weak self] in
+            await previous?.value
+            guard let self, !Task.isCancelled, isCurrent(account), revision == glab.accountRevision,
+                  generation == refreshGeneration else { return }
+            // Drain this finite catalog in bounded waves instead of waiting for another timer poll.
+            // Keep the base catalog visible and publish metadata once all initial sources were attempted.
+            var summaries: [Item.ID: MergeRequestDependencySummary] = [:]
+            for _ in 0..<waves {
+                guard !Task.isCancelled, isCurrent(account), revision == glab.accountRevision,
+                      generation == refreshGeneration else { return }
+                summaries = await dependencyLoader.refresh(requests: requests, glab: glab, host: account.host)
+                guard !Task.isCancelled, isCurrent(account), revision == glab.accountRevision,
+                      generation == refreshGeneration else { return }
+                await Task.yield()
+            }
+            guard !Task.isCancelled, isCurrent(account), revision == glab.accountRevision,
+                  generation == refreshGeneration else { return }
+            dependencyRevision = revision
+            for index in openItems.indices {
+                guard let request = openItems[index].mergeRequest,
+                      contexts[openItems[index].id] == MergeRequestDependencySummary.Context(request) else { continue }
+                openItems[index].dependencies = summaries[openItems[index].id]
+            }
+            for index in items.indices {
+                guard let request = items[index].mergeRequest,
+                      contexts[items[index].id] == MergeRequestDependencySummary.Context(request) else { continue }
+                items[index].dependencies = summaries[items[index].id]
+            }
+            onRefreshed?()
+        }
     }
 
     // MARK: - Ready for your OK

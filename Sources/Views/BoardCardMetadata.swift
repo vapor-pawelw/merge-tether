@@ -79,3 +79,67 @@ struct BoardCardAuthor: View {
         .accessibilityLabel(accessibilityLabel)
     }
 }
+
+/// One wrapping text flow keeps each canonical predecessor link together with its stack position.
+struct MRDependencyRow: View {
+    let summary: MergeRequestDependencySummary
+    let projectID: Int
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 3) {
+            if !description.characters.isEmpty {
+                Text(description).font(.caption).foregroundStyle(.secondary)
+                    .fixedSize(horizontal: false, vertical: true)
+                    .help(tooltip)
+            }
+            if let notice = summary.notice {
+                Text(verbatim: notice).font(.caption2).foregroundStyle(.secondary)
+                    .fixedSize(horizontal: false, vertical: true)
+            }
+        }
+    }
+
+    private var tooltip: Text {
+        let references = summary.predecessors.map { "\($0.title)\n\($0.url.gitLabProjectPath)" }.joined(separator: "\n")
+        if summary.stackPosition != nil {
+            return Text(.MRDependencies.mrDependenciesPositionHelp) + Text(verbatim: references.isEmpty ? "" : "\n" + references)
+        }
+        return Text(verbatim: references)
+    }
+
+    private var description: AttributedString {
+        var text = AttributedString()
+        if let position = summary.stackPosition {
+            text = AttributedString(String(localized: .MRDependencies.mrDependenciesStackPosition(position)))
+        }
+        if !summary.predecessors.isEmpty {
+            if summary.stackPosition != nil { text += AttributedString(" · ") }
+            text += AttributedString(String(localized: .MRDependencies.mrDependenciesAfter) + " ")
+            for (index, predecessor) in summary.predecessors.enumerated() {
+                if index > 0 { text += AttributedString(", ") }
+                var reference = predecessor.reference(relativeTo: projectID)
+                if !predecessor.isCurrent { reference += " (\(String(localized: .MRDependencies.mrDependenciesLastKnown)))" }
+                var link = AttributedString(reference)
+                link.link = predecessor.url
+                text += link
+            }
+        }
+        return text
+    }
+}
+
+extension MergeRequestDependencySummary {
+    var hasPresentation: Bool { stackPosition != nil || !predecessors.isEmpty || !issues.isEmpty }
+
+    var notice: String? {
+        var messages: [LocalizedStringResource] = []
+        if issues.contains(.dependenciesUnavailable) { messages.append(.MRDependencies.mrDependenciesUnavailable) }
+        else if issues.contains(.hiddenDependency) { messages.append(.MRDependencies.mrDependenciesHidden) }
+        if issues.contains(.stackUnavailable), !issues.contains(.dependenciesUnavailable) {
+            messages.append(.MRDependencies.mrDependenciesStackUnavailable)
+        }
+        if issues.contains(.stackAmbiguous) { messages.append(.MRDependencies.mrDependenciesStackAmbiguous) }
+        else if issues.contains(.stackIncomplete) { messages.append(.MRDependencies.mrDependenciesStackIncomplete) }
+        return messages.isEmpty ? nil : messages.map { String(localized: $0) }.joined(separator: " · ")
+    }
+}

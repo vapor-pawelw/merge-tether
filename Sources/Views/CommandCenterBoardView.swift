@@ -25,19 +25,22 @@ struct CommandCenterBoardView: View {
         let otherCards = board.otherCards(jobs: monitor.assistantHandoffs, host: account?.host, username: account?.username,
             pinnedCards: monitor.settings.boardPins)
         HStack(alignment: .top, spacing: 18) {
-            lane(title: .Board.boardLaneOwn, symbol: "arrow.triangle.pull", cardIDs: board.own.map(\.id)) {
+            lane(title: .Board.boardLaneOwn, symbol: "arrow.triangle.pull", cardIDs: board.own.map(\.id), dependencies: board.own.map { $0.item.dependencies }) {
                 if board.own.isEmpty {
                     empty(.Board.boardEmptyOwnTitle, message: .Board.boardLaneOwnEmpty, symbol: "arrow.triangle.pull")
                 }
                 ForEach(board.own) { row in card(row) }
             }
-            lane(title: .Board.boardLaneReviewing, symbol: "text.magnifyingglass", cardIDs: board.reviewed.map(\.id)) {
+            lane(title: .Board.boardLaneReviewing, symbol: "text.magnifyingglass", cardIDs: board.reviewed.map(\.id), dependencies: board.reviewed.map { $0.item.dependencies }) {
                 if board.reviewed.isEmpty {
                     empty(.Board.boardEmptyReviewingTitle, message: .Board.boardLaneReviewingEmpty, symbol: "text.magnifyingglass")
                 }
                 ForEach(board.reviewed) { row in card(row, removable: true) }
             }
-            lane(title: .Board.boardLaneOther, symbol: "tray", cardIDs: otherCards.map(\.id)) {
+            lane(title: .Board.boardLaneOther, symbol: "tray", cardIDs: otherCards.map(\.id), dependencies: otherCards.map {
+                if case .proposal(let proposal) = $0.content { return proposal.item?.dependencies }
+                return nil
+            }) {
                 if otherCards.isEmpty {
                     empty(.Board.boardEmptyOtherTitle, message: .Board.boardLaneOtherEmpty, symbol: "checkmark")
                 }
@@ -105,7 +108,7 @@ struct CommandCenterBoardView: View {
     }
 
     private func lane<Content: View, ID: Hashable>(title: LocalizedStringResource, symbol: String, cardIDs: [ID],
-                                     @ViewBuilder content: () -> Content) -> some View {
+                                     dependencies: [MergeRequestDependencySummary?] = [], @ViewBuilder content: () -> Content) -> some View {
         VStack(spacing: 0) {
             HStack {
                 Label { Text(title) } icon: { Image(systemName: symbol) }
@@ -121,6 +124,7 @@ struct CommandCenterBoardView: View {
                     .padding(.vertical, 10).padding(.horizontal, 1)
                     .opacity(dimUnverifiedContent && !cardIDs.isEmpty ? 0.55 : 1)
                     .animation(reduceMotion ? nil : .spring(duration: 0.28, bounce: 0.12), value: cardIDs)
+                    .animation(reduceMotion ? nil : .spring(duration: 0.28, bounce: 0.12), value: dependencies)
             }
         }
         .frame(minWidth: 320, maxWidth: .infinity, maxHeight: .infinity)

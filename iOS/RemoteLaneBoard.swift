@@ -29,6 +29,7 @@ struct RemoteLaneBoard: View {
 }
 
 private struct RemoteLaneView: View {
+    @Environment(\.accessibilityReduceMotion) private var reduceMotion
     let lane: RemoteLane
     let onOpen: (RemoteCard) -> Void
 
@@ -50,6 +51,7 @@ private struct RemoteLaneView: View {
                         RemoteCardView(card: card, onOpen: { onOpen(card) })
                     }
                 }
+                .animation(reduceMotion ? nil : .spring(duration: 0.28, bounce: 0.12), value: lane.cards.map(\.dependencies))
             }
         }
         .padding(14)

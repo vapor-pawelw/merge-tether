@@ -92,6 +92,10 @@ struct MergeRequestBoardSnapshot {
             let valid = host.map { original.url.isGitLabMergeRequest(host: $0, iid: original.id.iid) } == true
             var item = attention.first { sameMergeRequest($0, original) } ?? original
             if item.mergeRequest == nil { item.mergeRequest = original.mergeRequest }
+            if let request = original.mergeRequest, let displayed = item.mergeRequest,
+               MergeRequestDependencySummary.Context(request) == MergeRequestDependencySummary.Context(displayed) {
+                item.dependencies = original.dependencies ?? item.dependencies
+            }
             item.isAuthored = original.isAuthored || username.map { original.mergeRequest?.author.username == $0 } == true
             item = item.presentingVerifiedAuthorFeedback()
             let latest = handoffs.filter {

@@ -299,19 +299,20 @@ extension GlabService {
     }
 
     func fetchMergeRequestDependencies(projectID: Int, iid: Int, host: String) async throws -> [GitLabMergeRequest] {
+        try await fetchMergeRequestDependencySnapshot(projectID: projectID, iid: iid, host: host).requests
+    }
+
+    /// A dependency without its nested MR is inaccessible, rather than absent.
+    func fetchMergeRequestDependencySnapshot(projectID: Int, iid: Int, host: String) async throws -> GitLabMRDependencySnapshot {
         struct Dependency: Decodable {
             let blockingMergeRequest: GitLabMergeRequest?
-
-            enum CodingKeys: String, CodingKey {
-                case blockingMergeRequest = "blocking_merge_request"
-            }
+            enum CodingKeys: String, CodingKey { case blockingMergeRequest = "blocking_merge_request" }
         }
-
         let dependencies: [Dependency] = try await fetchMergeRequestPages(
-            "/projects/\(projectID)/merge_requests/\(iid)/blocks?per_page=100",
-            host: host
+            "/projects/\(projectID)/merge_requests/\(iid)/blocks?per_page=100", host: host
         )
-        return dependencies.compactMap(\.blockingMergeRequest)
+        return .init(requests: dependencies.compactMap(\.blockingMergeRequest),
+                     hasHiddenDependency: dependencies.contains { $0.blockingMergeRequest == nil })
     }
 
     func fetchProjectDefaultBranch(projectID: Int, host: String) async throws -> String? {

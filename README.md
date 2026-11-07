@@ -49,6 +49,8 @@ Build the current development version using [the build guide](docs/building.md),
 
 **Release status:** this README describes the current development tree. Check [Releases](https://github.com/vapor-pawelw/merge-tether/releases) for the features in a published binary. The earlier inbox-only GitLab Todos release is [v1.1.0](https://github.com/vapor-pawelw/merge-tether/releases/tag/v1.1.0), with source on [`legacy/gitlab-todos`](https://github.com/vapor-pawelw/merge-tether/tree/legacy/gitlab-todos). Its Homebrew cask remains `vapor-pawelw/tap/gitlab-todos` for compatibility; installing that cask does not build unreleased features.
 
+Cards combine open GitLab prerequisites and branch-stack relationships into one dependency line, with links to MRs that must merge first. A position such as **Stack 2/3** appears only for a complete, unambiguous linear stack. Incomplete or inaccessible metadata is marked explicitly, and a prerequisite mentioned by both sources appears once. The same read-only information is available in the iOS companion; it does not change automation permissions.
+
 ## Optional agent workflows
 
 Choose a profile, coding agent and scope in **Settings → Automation**. Installed MR skills refine the work; MergeTether also supplies default instructions when no MR skill is installed.

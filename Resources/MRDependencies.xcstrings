@@ -1,0 +1,105 @@
+{
+  "sourceLanguage": "en",
+  "strings": {
+    "mr.dependencies.after": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Merge after"
+          }
+        }
+      }
+    },
+    "mr.dependencies.lastKnown": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "last known"
+          }
+        }
+      }
+    },
+    "mr.dependencies.unavailable": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Dependencies could not be fully checked"
+          }
+        }
+      }
+    },
+    "mr.dependencies.hidden": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "A GitLab dependency is not accessible"
+          }
+        }
+      }
+    },
+    "mr.dependencies.stackUnavailable": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Stack order could not be checked"
+          }
+        }
+      }
+    },
+    "mr.dependencies.stackIncomplete": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Stack order is incomplete"
+          }
+        }
+      }
+    },
+    "mr.dependencies.stackAmbiguous": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Stack order is ambiguous"
+          }
+        }
+      }
+    },
+    "mr.dependencies.positionHelp": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Position in the verified merge order"
+          }
+        }
+      }
+    },
+    "mr.dependencies.stackPosition": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Stack %@"
+          }
+        }
+      }
+    }
+  },
+  "version": "1.0"
+}

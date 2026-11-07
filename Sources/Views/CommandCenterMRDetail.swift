@@ -195,6 +195,9 @@ private struct CommandCenterMRDetailContent: View {
             }
             .font(.subheadline).foregroundStyle(.secondary)
             Text(verbatim: item.title).font(.title2.weight(.semibold)).textSelection(.enabled)
+            if let dependencies = item.dependencies, dependencies.hasPresentation {
+                MRDependencyRow(summary: dependencies, projectID: item.id.projectID)
+            }
             HStack {
                 Label {
                     Text(needsHumanAttention ? .CommandCenter.commandCenterStatusAttention

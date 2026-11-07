@@ -81,9 +81,11 @@ struct RemoteCardView: View {
     var body: some View {
         VStack(alignment: .leading, spacing: 8) {
             if let onOpen {
-                Button(action: onOpen) { content }.buttonStyle(.plain)
+                Button(action: onOpen) { header }.buttonStyle(.plain)
                     .accessibilityIdentifier("remote.card.\(card.id)")
-            } else { content }
+            } else { header }
+            if let dependencies = card.dependencies { RemoteMRDependencyRow(dependencies: dependencies) }
+            content
             if !expanded, let onOpen {
                 HStack {
                     if let secondary = card.presentation?.secondaryCTA {
@@ -107,7 +109,7 @@ struct RemoteCardView: View {
             }
         }
     }
-    private var content: some View {
+    private var header: some View {
         VStack(alignment: .leading, spacing: 8) {
             HStack(alignment: .firstTextBaseline) {
                 if let author = card.presentation?.author { Text(verbatim: author).lineLimit(1) }
@@ -117,6 +119,10 @@ struct RemoteCardView: View {
                 if let iid = card.mergeRequestIID { Text(verbatim: "!\(iid)") }
             }.font(.caption).foregroundStyle(.secondary)
             title
+        }.frame(maxWidth: .infinity, alignment: .leading)
+    }
+    private var content: some View {
+        VStack(alignment: .leading, spacing: 8) {
             if !card.detail.isEmpty {
                 HStack(alignment: .firstTextBaseline, spacing: 5) {
                     if card.needsAttention == true { Image(systemName: "exclamationmark.circle.fill").accessibilityHidden(true) }
@@ -148,6 +154,41 @@ struct RemoteCardView: View {
         let repositoryText = Text(verbatim: repository).font(.caption).foregroundStyle(.tint)
         return (titleText + Text(verbatim: repository.isEmpty ? "" : "  ") + repositoryText)
             .lineLimit(expanded ? nil : 2).fixedSize(horizontal: false, vertical: true)
+    }
+}
+
+private struct RemoteMRDependencyRow: View {
+    let dependencies: RemoteMRDependencies
+    var body: some View {
+        VStack(alignment: .leading, spacing: 3) {
+            if !description.characters.isEmpty {
+                Text(description).font(.caption).foregroundStyle(.secondary)
+                    .fixedSize(horizontal: false, vertical: true)
+            }
+            if let notice = dependencies.notice {
+                Text(verbatim: notice).font(.caption2).foregroundStyle(.secondary)
+                    .fixedSize(horizontal: false, vertical: true)
+            }
+        }
+    }
+    private var description: AttributedString {
+        var text = AttributedString()
+        if let position = dependencies.stackPosition {
+            text = AttributedString(String(localized: .MRDependencies.mrDependenciesStackPosition(position)))
+        }
+        if !dependencies.predecessors.isEmpty {
+            if dependencies.stackPosition != nil { text += AttributedString(" · ") }
+            text += AttributedString(String(localized: .MRDependencies.mrDependenciesAfter) + " ")
+            for (index, predecessor) in dependencies.predecessors.enumerated() {
+                if index > 0 { text += AttributedString(", ") }
+                var reference = predecessor.reference
+                if !predecessor.isCurrent { reference += " (\(String(localized: .MRDependencies.mrDependenciesLastKnown)))" }
+                var link = AttributedString(reference)
+                link.link = predecessor.url
+                text += link
+            }
+        }
+        return text
     }
 }
 
