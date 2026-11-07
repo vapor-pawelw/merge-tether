@@ -89,9 +89,6 @@ struct CommandCenterBoardView: View {
         case .proposal(let proposal): BoardMRProposalCard(proposal: proposal, monitor: monitor)
         case .todo(let todo):
             BoardTodoRow(todo: todo, monitor: monitor)
-                .padding(10)
-                .frame(maxWidth: .infinity, alignment: .leading)
-                .background(Color(nsColor: .controlBackgroundColor), in: RoundedRectangle(cornerRadius: 8))
         case .job(let job): BoardCompactJobCard(handoff: job, monitor: monitor)
         }
     }

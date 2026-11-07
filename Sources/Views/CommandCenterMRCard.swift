@@ -45,9 +45,6 @@ private struct CommandCenterMRCardContent: View {
                 }
                 .buttonStyle(.plain)
                 .help(Text(verbatim: "\(item.title)\n\(item.url.gitLabProjectPath)\n") + Text(.Board.boardDetails))
-                BoardPinButton(pin: .mergeRequest(host: monitor.glab.resolvedHost,
-                    username: monitor.glab.currentUsername, projectID: item.id.projectID, iid: item.id.iid),
-                    settings: monitor.settings)
                 moreMenu
             }
             if humanAction != nil {
@@ -94,7 +91,7 @@ private struct CommandCenterMRCardContent: View {
         .controlSize(.small)
         .padding(12)
         .frame(maxWidth: .infinity, alignment: .leading)
-        .background(Color(nsColor: .controlBackgroundColor), in: RoundedRectangle(cornerRadius: 8))
+        .boardCardInteraction(onDetails: onDetails)
         .overlay(RoundedRectangle(cornerRadius: 8).stroke(Color.secondary.opacity(0.12), lineWidth: 0.5))
         .overlay(alignment: .leading) {
             if humanAction != nil {
@@ -119,6 +116,9 @@ private struct CommandCenterMRCardContent: View {
             Spacer(minLength: 4)
             if item.section == .draftMergeRequests { BoardDraftBadge() }
             BoardMRIdentifier(iid: item.id.iid)
+            BoardPinButton(pin: .mergeRequest(host: monitor.glab.resolvedHost,
+                username: monitor.glab.currentUsername, projectID: item.id.projectID, iid: item.id.iid),
+                settings: monitor.settings)
         }
     }
 
@@ -281,12 +281,13 @@ struct BoardStatusChip: View {
 struct BoardTodoRow: View {
     let todo: Todo
     let monitor: TodoMonitorService
+    @State private var showingDetails = false
 
     var body: some View {
         VStack(alignment: .leading, spacing: 8) {
             metadataHeader
             HStack(alignment: .top, spacing: 6) {
-                Link(destination: todo.targetURL) {
+                Button { showingDetails = true } label: {
                     ActionDescriptionText(todo: todo, currentUsername: monitor.glab.currentUsername,
                         repositoryPath: todo.project.pathWithNamespace)
                         .font(.callout).foregroundStyle(.primary)
@@ -296,8 +297,6 @@ struct BoardTodoRow: View {
                 }
                 .buttonStyle(.plain)
                 .help(Text(verbatim: "\(todo.displayTitle)\n\(todo.project.pathWithNamespace)"))
-                BoardPinButton(pin: .todo(host: monitor.glab.resolvedHost,
-                    username: monitor.glab.currentUsername, id: todo.id), settings: monitor.settings)
                 moreMenu
             }
             if let title = todo.target.title ?? (todo.body.isEmpty ? nil : todo.body), !title.isEmpty {
@@ -318,6 +317,25 @@ struct BoardTodoRow: View {
             .font(.caption)
         }
         .controlSize(.small)
+        .padding(10)
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .boardCardInteraction { showingDetails = true }
+        .sheet(isPresented: $showingDetails) {
+            BoardItemDetailSheet {
+                metadataHeader
+                ActionDescriptionText(todo: todo, currentUsername: monitor.glab.currentUsername)
+                    .font(.title3).foregroundStyle(.primary)
+                Text(verbatim: todo.displayTitle).font(.headline).textSelection(.enabled)
+                Text(verbatim: todo.project.pathWithNamespace).foregroundStyle(.secondary)
+                Text(todo.createdAt, format: .dateTime)
+                if !todo.body.isEmpty, todo.body != todo.displayTitle {
+                    Text(verbatim: todo.body).textSelection(.enabled)
+                }
+                Link(destination: todo.targetURL) {
+                    Label { Text(.Board.boardEventOpen) } icon: { Image(systemName: "arrow.up.right.square") }
+                }
+            }
+        }
     }
 
     private var metadataHeader: some View {
@@ -332,11 +350,16 @@ struct BoardTodoRow: View {
             } else if !todo.relativeIdentifier.isEmpty {
                 Text(verbatim: todo.relativeIdentifier).font(.caption).foregroundStyle(.secondary)
             }
+            BoardPinButton(pin: .todo(host: monitor.glab.resolvedHost,
+                username: monitor.glab.currentUsername, id: todo.id), settings: monitor.settings)
         }
     }
 
     private var moreMenu: some View {
         Menu {
+            Button { showingDetails = true } label: {
+                Label { Text(.Board.boardDetails) } icon: { Image(systemName: "rectangle.expand.vertical") }
+            }
             Link(destination: todo.targetURL) {
                 Label { Text(.Board.boardEventOpen) } icon: { Image(systemName: "arrow.up.right.square") }
             }

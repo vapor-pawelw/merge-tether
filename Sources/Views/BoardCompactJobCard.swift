@@ -3,7 +3,7 @@ import SwiftUI
 struct BoardCompactJobCard: View {
     let handoff: AssistantAutomationRunner.Handoff
     let monitor: TodoMonitorService
-    @State private var isShowingRun = false
+    @State private var showingDetails = false
 
     private var repositoryPath: String {
         handoff.mergeRequestURL?.gitLabProjectPath ?? handoff.repository ?? ""
@@ -14,10 +14,10 @@ struct BoardCompactJobCard: View {
             metadataHeader
             HStack(alignment: .top, spacing: 6) {
                 BoardCardTitle(title: handoff.title, repositoryPath: repositoryPath)
-                BoardPinButton(pin: .mergeRequest(host: handoff.key.work.host,
-                    username: handoff.key.username, projectID: handoff.key.work.projectID, iid: handoff.key.work.iid),
-                    settings: monitor.settings)
                 Menu {
+                    Button { showingDetails = true } label: {
+                        Label { Text(.Board.boardDetails) } icon: { Image(systemName: "rectangle.expand.vertical") }
+                    }
                     if let url = handoff.mergeRequestURL {
                         Link(destination: url) {
                             Label { Text(.CommandCenter.commandCenterOpenGitLab) } icon: { Image(systemName: "arrow.up.right.square") }
@@ -29,17 +29,24 @@ struct BoardCompactJobCard: View {
                 .menuStyle(.borderlessButton).menuIndicator(.hidden).fixedSize()
                 .frame(width: 24, height: 24)
                 .accessibilityLabel(Text(.CommandCenter.commandCenterActions))
-                .disabled(handoff.mergeRequestURL == nil)
             }
             BoardJobStatusActions(handoff: handoff, monitor: monitor)
-            DisclosureGroup(isExpanded: $isShowingRun) {
-                if isShowingRun { AssistantJobRow(handoff: handoff, monitor: monitor) }
-            } label: { Text(.MRHumanAction.mrHumanActionActionReviewRun).foregroundStyle(.secondary) }
-            .font(.caption)
+            Button { showingDetails = true } label: {
+                Text(.MRHumanAction.mrHumanActionActionReviewRun)
+            }
+            .buttonStyle(.plain).font(.caption).foregroundStyle(.secondary)
         }
         .padding(12).controlSize(.small)
         .frame(maxWidth: .infinity, alignment: .leading)
-        .background(Color(nsColor: .controlBackgroundColor), in: RoundedRectangle(cornerRadius: 8))
+        .boardCardInteraction { showingDetails = true }
+        .sheet(isPresented: $showingDetails) {
+            BoardItemDetailSheet {
+                metadataHeader
+                Text(verbatim: handoff.title).font(.title3).textSelection(.enabled)
+                Text(verbatim: repositoryPath).foregroundStyle(.secondary)
+                AssistantJobRow(handoff: handoff, monitor: monitor)
+            }
+        }
     }
 
     private var metadataHeader: some View {
@@ -49,6 +56,9 @@ struct BoardCompactJobCard: View {
             Text(handoff.createdAt, style: .relative)
             Spacer(minLength: 4)
             BoardMRIdentifier(iid: handoff.key.work.iid)
+            BoardPinButton(pin: .mergeRequest(host: handoff.key.work.host,
+                username: handoff.key.username, projectID: handoff.key.work.projectID, iid: handoff.key.work.iid),
+                settings: monitor.settings)
         }
         .font(.caption).foregroundStyle(.secondary)
     }

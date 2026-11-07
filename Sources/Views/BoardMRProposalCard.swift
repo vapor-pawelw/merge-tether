@@ -7,7 +7,7 @@ struct BoardMRProposalCard: View {
     @State private var isWorking = false
     @State private var failed = false
     @State private var confirmIgnore = false
-    @State private var isShowingRun = false
+    @State private var showingDetails = false
     @State private var authorLoader: ProposalAuthorLoader
 
     init(proposal: MergeRequestBoardSnapshot.Proposal, monitor: TodoMonitorService) {
@@ -28,12 +28,10 @@ struct BoardMRProposalCard: View {
         VStack(alignment: .leading, spacing: 9) {
             metadataHeader
             HStack(alignment: .top) {
-                Link(destination: proposal.url) {
+                Button { showingDetails = true } label: {
                     BoardCardTitle(title: proposal.title, repositoryPath: proposal.url.gitLabProjectPath)
                 }
                 .buttonStyle(.plain)
-                BoardPinButton(pin: .mergeRequest(host: proposal.target.host, username: proposal.target.username,
-                    projectID: proposal.target.projectID, iid: proposal.target.iid ?? 0), settings: monitor.settings)
                 moreMenu
             }
             reasons
@@ -78,9 +76,29 @@ struct BoardMRProposalCard: View {
         } message: { Text(.Board.boardProposalIgnoreExplanation) }
         .controlSize(.small)
         .padding(12).frame(maxWidth: .infinity, alignment: .leading)
-        .background(Color(nsColor: .controlBackgroundColor), in: RoundedRectangle(cornerRadius: 8))
+        .boardCardInteraction { showingDetails = true }
         .overlay(RoundedRectangle(cornerRadius: 8).stroke(.secondary.opacity(0.12), lineWidth: 0.5))
         .task(id: authorTaskID) { await authorLoader.load(proposal) }
+        .sheet(isPresented: $showingDetails) {
+            BoardItemDetailSheet {
+                metadataHeader
+                Text(verbatim: proposal.title).font(.title3).textSelection(.enabled)
+                Text(verbatim: proposal.url.gitLabProjectPath).foregroundStyle(.secondary)
+                ForEach(context.reasons) { value in
+                    VStack(alignment: .leading, spacing: 6) {
+                        reason(value)
+                        if case .event(let todo) = value {
+                            if !todo.body.isEmpty { Text(verbatim: todo.body).textSelection(.enabled) }
+                            Text(todo.createdAt, format: .dateTime).font(.caption).foregroundStyle(.secondary)
+                        }
+                    }
+                }
+                Link(destination: proposal.url) {
+                    Label { Text(.CommandCenter.commandCenterOpenGitLab) } icon: { Image(systemName: "arrow.up.right.square") }
+                }
+                if let job = proposal.latestJob { AssistantJobRow(handoff: job, monitor: monitor) }
+            }
+        }
     }
 
     private var metadataHeader: some View {
@@ -92,11 +110,16 @@ struct BoardMRProposalCard: View {
                 BoardDraftBadge()
             }
             if let iid = proposal.target.iid { BoardMRIdentifier(iid: iid) }
+            BoardPinButton(pin: .mergeRequest(host: proposal.target.host, username: proposal.target.username,
+                projectID: proposal.target.projectID, iid: proposal.target.iid ?? 0), settings: monitor.settings)
         }
     }
 
     private var moreMenu: some View {
         Menu {
+            Button { showingDetails = true } label: {
+                Label { Text(.Board.boardDetails) } icon: { Image(systemName: "rectangle.expand.vertical") }
+            }
             Link(destination: proposal.url) {
                 Label { Text(.CommandCenter.commandCenterOpenGitLab) } icon: { Image(systemName: "arrow.up.right.square") }
             }
@@ -125,10 +148,10 @@ struct BoardMRProposalCard: View {
     private var runResult: some View {
         if let job = proposal.latestJob {
             BoardJobStatusActions(handoff: job, monitor: monitor)
-            DisclosureGroup(isExpanded: $isShowingRun) {
-                if isShowingRun { AssistantJobRow(handoff: job, monitor: monitor) }
-            } label: { Text(.MRHumanAction.mrHumanActionActionReviewRun).foregroundStyle(.secondary) }
-            .font(.caption)
+            Button { showingDetails = true } label: {
+                Text(.MRHumanAction.mrHumanActionActionReviewRun)
+            }
+            .buttonStyle(.plain).font(.caption).foregroundStyle(.secondary)
         }
     }
 

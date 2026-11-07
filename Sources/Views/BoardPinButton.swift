@@ -13,12 +13,15 @@ struct BoardPinButton: View {
             if isPinned { settings.boardPins.remove(pin) } else { settings.boardPins.insert(pin) }
             settings.save()
         } label: {
-            BoardCardActionIcon(systemName: isPinned ? "pin.fill" : "pin")
+            Image(systemName: isPinned ? "pin.fill" : "pin")
+                .font(.system(size: 10, weight: .medium))
                 .foregroundStyle(isPinned ? Color.accentColor : Color.secondary)
+                .frame(width: 16, height: 16)
+                .contentShape(Rectangle())
         }
         .buttonStyle(.plain)
-        .disabled(pin == nil)
         .help(Text(title))
         .accessibilityLabel(Text(title))
+        .disabled(pin == nil)
     }
 }

@@ -172,7 +172,7 @@
         "en": {
           "stringUnit": {
             "state": "translated",
-            "value": "Active"
+            "value": "Automation enabled"
           }
         }
       }
@@ -183,7 +183,7 @@
         "en": {
           "stringUnit": {
             "state": "translated",
-            "value": "Paused"
+            "value": "Automation paused"
           }
         }
       }

@@ -20,11 +20,8 @@ struct MRAutomationScopeMenu: View {
             }
         } label: {
             Label {
-                HStack(spacing: 3) {
-                    Text(status.active ? .Menu.menuScopeActive : .Menu.menuScopePaused)
-                    Text("·")
-                    Text(sourceLabel(status.source))
-                }
+                Text(status.active ? .Menu.menuScopeActive : .Menu.menuScopePaused)
+                    + Text(verbatim: " · ") + Text(sourceLabel(status.source))
             } icon: {
                 Image(systemName: status.active ? "bolt.circle" : "pause.circle")
             }
@@ -32,6 +29,7 @@ struct MRAutomationScopeMenu: View {
         .menuStyle(.borderlessButton)
         .fixedSize()
         .font(.caption)
+        .help(Text(sourceLabel(status.source)))
     }
 
     private func choices(for key: MRAutomationScope.Target) -> some View {
