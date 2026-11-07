@@ -130,17 +130,23 @@ struct AutomationSettingsTab: View {
         Group {
             Section {
                 VStack(alignment: .leading, spacing: 4) {
-                    Picker(selection: $draft.publicationMode) {
-                        ForEach(AutomationPublicationMode.allCases, id: \.self) { mode in
-                            Text(mode.title).tag(mode)
+                    HStack(alignment: .top) {
+                        Toggle(isOn: Binding(get: { draft.publishesAllComments },
+                                             set: { draft.setPublishAllComments($0) })) {
+                            Text(.PublicationPolicy.publicationAutomaticAll)
                         }
-                    } label: { Text(.Settings.settingsAutomationPublicationTitle) }
-                    HStack {
-                        Text(draft.publicationMode.explanation).font(.caption).foregroundStyle(.secondary)
+                        .toggleStyle(.checkbox)
                         Spacer()
                         AutomationDefaultsResetButton(preset: draft.baselinePreset) { draft.resetPublication(to: $0) }
                     }
+                    Text(.PublicationPolicy.publicationAutomaticAllHelp).font(.caption).foregroundStyle(.secondary)
                 }
+            } header: { Text(.Settings.settingsAutomationPublicationTitle) }
+            PublicationRestrictionsSettingsView(restrictions: $draft.publicationRestrictions,
+                automaticAIReplies: Binding(get: { draft.automaticAIReplies }, set: { draft.setAutomaticAIReplies($0) }),
+                publishesAllComments: draft.publishesAllComments, glab: monitor.glab, preset: draft.baselinePreset,
+                onFiltersChanged: { draft.publicationFiltersChanged() })
+            Section {
                 checkpointToggle($draft.autoApproveEnabled, .Settings.settingsAutomationCheckpointAutoApprove,
                                  help: .Settings.settingsAutomationCheckpointAutoApproveHelp, reset: .approval)
                 checkpointToggle($draft.allowFollowUpPush, .Settings.settingsAutomationFollowUpPush,
@@ -157,7 +163,6 @@ struct AutomationSettingsTab: View {
                 checkpointToggle($draft.autoResolveAcceptedFeedback, .AuthorFeedback.authorFeedbackSetting,
                                  help: .AuthorFeedback.authorFeedbackSettingHelp, reset: .acceptedFeedbackResolution)
             }
-            PublicationRestrictionsSettingsView(restrictions: $draft.publicationRestrictions, glab: monitor.glab)
         }
     }
 

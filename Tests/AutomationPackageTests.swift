@@ -120,7 +120,7 @@ struct AutomationPackageTests {
         settings.applyPreset(.checkpoints, for: .codex)
         #expect(settings.packageDecision == .enabled && settings.reviewRequested.isEnabled && settings.authorFeedback.isEnabled)
         #expect(settings.conflictTasksEnabled && settings.autoVerifyReReview)
-        #expect(settings.publicationMode == .manual && !settings.autoApproveEnabled && !settings.autoMergeEnabled)
+        #expect(settings.publicationMode == .aiReplies && !settings.autoApproveEnabled && !settings.autoMergeEnabled)
         #expect(!settings.allowFollowUpPush && !settings.allowConflictPush)
         #expect(!settings.autoResolveOwnReviewThreads && !settings.autoResolveAcceptedFeedback)
     }
@@ -333,9 +333,9 @@ struct AutomationPackageTests {
                 work: work, username: "me", settings: settings, mrWorkflow: .review, jobCoordinator: coordinator)
             if publishAll {
                 #expect(handoff.prompt.contains("Publish comments without confirmation is ON"))
-                #expect(!handoff.prompt.contains("For human or uncertain feedback, leave drafts private"))
+                #expect(!handoff.prompt.contains("For likely manual, unclassified or uncertain source comments, leave drafts private"))
             } else {
-                #expect(handoff.prompt.contains("For human or uncertain feedback, leave drafts private"))
+                #expect(handoff.prompt.contains("For likely manual, unclassified or uncertain source comments, leave drafts private"))
                 #expect(handoff.prompt.contains("ask for approval"))
             }
         }

@@ -119,8 +119,8 @@ enum AutomationPreset: String, CaseIterable, Codable, Hashable, Sendable {
     }
 }
 
-enum AutomationPublicationMode: String, CaseIterable, Hashable, Sendable {
-    case all, aiReplies, manual
+enum AutomationPublicationMode: String, CaseIterable, Codable, Hashable, Sendable {
+    case all, filtered, aiReplies, manual
 }
 
 struct AutomationSettings: Codable, Equatable, Sendable {
@@ -139,15 +139,28 @@ struct AutomationSettings: Codable, Equatable, Sendable {
     var autoMergeEnabled = false
     var autoReReviewEnabled = false
     /// Stored publication flags stay compatible; the selected profile determines new defaults.
-    var publishDraftsWithoutConfirmation = false
+    var publishDraftsWithoutConfirmation = false {
+        didSet { publicationPolicyMode = nil }
+    }
+    /// Explicit modes distinguish unconditional publication from legacy filtered flags.
+    private var publicationPolicyMode: AutomationPublicationMode?
 
     var publicationMode: AutomationPublicationMode {
-        get { publishDraftsWithoutConfirmation ? .all : publishAIRepliesWithoutConfirmation ? .aiReplies : .manual }
+        get {
+            if let publicationPolicyMode { return publicationPolicyMode }
+            if publishDraftsWithoutConfirmation {
+                return publicationRestrictions.hasConditions ? .filtered : .all
+            }
+            return publishAIRepliesWithoutConfirmation ? .aiReplies : .manual
+        }
         set {
             switch newValue {
             case .all:
                 publishDraftsWithoutConfirmation = true
                 publishAIRepliesWithoutConfirmation = true
+            case .filtered:
+                publishDraftsWithoutConfirmation = true
+                publishAIRepliesWithoutConfirmation = false
             case .aiReplies:
                 publishDraftsWithoutConfirmation = false
                 publishAIRepliesWithoutConfirmation = true
@@ -155,16 +168,27 @@ struct AutomationSettings: Codable, Equatable, Sendable {
                 publishDraftsWithoutConfirmation = false
                 publishAIRepliesWithoutConfirmation = false
             }
+            publicationPolicyMode = newValue
         }
     }
 
     /// Whether any of these drafts could be published without the user's confirmation.
     /// The AI-feedback rule only ever covers replies in existing threads.
     func publishesAutomatically(any drafts: [GitLabDraftNote]) -> Bool {
-        publishDraftsWithoutConfirmation || (publishAIRepliesWithoutConfirmation && drafts.contains { $0.discussionID != nil })
+        switch publicationMode {
+        case .all: true
+        case .filtered:
+            publicationRestrictions.hasConditions
+                && (!(publicationRestrictions.requireAI || !publicationRestrictions.sourceCommentAuthors.isEmpty)
+                    || drafts.contains { $0.discussionID != nil })
+        case .aiReplies: drafts.contains { $0.discussionID != nil }
+        case .manual: false
+        }
     }
     /// Publishes only verified replies to AI feedback; general findings still wait for confirmation.
-    var publishAIRepliesWithoutConfirmation = true
+    var publishAIRepliesWithoutConfirmation = true {
+        didSet { publicationPolicyMode = nil }
+    }
     /// On by default: approve once the assistant has no objections and every discussion is resolved.
     var autoApproveEnabled = true
     var autoResolveOwnReviewThreads = true
@@ -307,6 +331,11 @@ struct AutomationSettings: Codable, Equatable, Sendable {
             if MergeWorkflowRule.projectPaths(autoMergeProjects).isEmpty { autoMergeEnabled = false }
         }
         projectPermissionsVersion = 1
+        publicationPolicyMode = try values.decodeIfPresent(AutomationPublicationMode.self, forKey: .publicationPolicyMode)
+        if publicationPolicyMode == nil, publicationMode == .filtered {
+            // Removing a legacy condition must not revive the old publish-all flag.
+            publicationPolicyMode = .filtered
+        }
     }
 
     private enum CodingKeys: String, CodingKey {
@@ -315,7 +344,7 @@ struct AutomationSettings: Codable, Equatable, Sendable {
         case autoMergeProjects, allowConflictPush, allowFollowUpPush, conflictPushProjects, autoReReviewEnabled, publishDraftsWithoutConfirmation, publishAIRepliesWithoutConfirmation, autoApproveEnabled, autoResolveOwnReviewThreads
         case codexReviewModel, codexReviewThinking, assistantDefaultsVersion, scope
         case autoVerifyReReview, codexVerificationModel, claudeVerificationModel
-        case autoResolveAcceptedFeedback, publicationRestrictions, baselinePreset, projectPermissionsVersion
+        case autoResolveAcceptedFeedback, publicationRestrictions, publicationPolicyMode, baselinePreset, projectPermissionsVersion
     }
 
     private enum RuleMigrationKeys: String, CodingKey { case isEnabled, markDoneOnSuccess }
@@ -335,7 +364,7 @@ struct AutomationSettings: Codable, Equatable, Sendable {
             for trigger in MergeWorkflowTrigger.allCases { workflowRules[trigger].mode = .assistant }
         case .checkpoints:
             applyRecommended(for: assistant)
-            publicationMode = .manual
+            publicationMode = .aiReplies
             autoApproveEnabled = false
             allowFollowUpPush = false
             autoResolveOwnReviewThreads = false
@@ -345,7 +374,7 @@ struct AutomationSettings: Codable, Equatable, Sendable {
             disableAssistantPackage()
         }
         baselinePreset = preset
-        publicationRestrictions = .init()
+        publicationRestrictions = .defaults(for: preset)
     }
 
     mutating func applyRecommended(for assistant: AutomationAssistant) {

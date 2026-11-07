@@ -72,6 +72,7 @@ struct ConfirmationQueueRow<AdditionalActions: View>: View {
             HStack(spacing: 8) {
                 if !item.drafts.isEmpty {
                     Button(action: onPublish) { Text(.Menu.menuConfirmPublish) }
+                        .help(Text(.Menu.menuConfirmPublishHelp))
                         .buttonStyle(.borderedProminent)
                 } else if item.canApprove {
                     Button(action: onApprove) { Text(.Menu.menuConfirmApprove) }

@@ -118,7 +118,7 @@ struct TodoAutomationTests {
             #expect(prompt.contains("Mandatory author follow-up order"))
             #expect(prompt.contains(" status "))
             #expect(prompt.contains(" verify "))
-            #expect(prompt.contains("For human or uncertain feedback, leave drafts private"))
+            #expect(prompt.contains("For likely manual, unclassified or uncertain source comments, leave drafts private"))
             #expect(prompt.contains(" seal "))
             #expect(prompt.contains("--head-sha <tested-pushed-sha>"))
             #expect(prompt.contains("--run-id \(handoff.id.uuidString.lowercased())"))

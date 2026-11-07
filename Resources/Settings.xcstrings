@@ -1558,7 +1558,7 @@
         "en": {
           "stringUnit": {
             "state": "translated",
-            "value": "Only checked replies to GitLab Duo or to comments assessed with very high confidence as AI-written. Current MR and draft evidence must also be verified; uncertain replies wait for you."
+            "value": "Only checked replies to GitLab Duo or to comments assessed with very high confidence as AI-assisted. Current MR and draft evidence must also be verified; uncertain replies wait for you."
           }
         }
       }
@@ -1965,7 +1965,7 @@
         "en": {
           "stringUnit": {
             "state": "translated",
-            "value": "Run reviews, diagnoses and local fix proposals automatically. Review findings stay private; proposed fixes stay in run results for manual delivery. Publishing, pushes, approvals, merges and thread resolution are manual. Readiness verification and re-review requests stay on."
+            "value": "Run reviews, diagnoses and local fix proposals automatically. Publish checked replies to likely AI-assisted comments; other comments await confirmation. Pushes, approvals, merges and thread resolution are manual. Readiness verification and re-review requests stay on."
           }
         }
       }
@@ -2042,7 +2042,7 @@
         "en": {
           "stringUnit": {
             "state": "translated",
-            "value": "Automatically publish checked replies to verified AI comments or comments assessed as AI-written with very high confidence. Human or uncertain feedback and new standalone comments stay private. Optional restrictions can narrow this further."
+            "value": "Automatically publish checked replies to verified AI comments or comments assessed as AI-assisted with very high confidence. Likely manual or uncertain comments and new standalone comments stay private. Optional restrictions can narrow this further."
           }
         }
       }

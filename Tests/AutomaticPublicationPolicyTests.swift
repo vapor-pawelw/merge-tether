@@ -38,50 +38,50 @@ struct AutomaticPublicationPolicyTests {
         restrictions.sourceCommentAuthors = [identity(8)]
         restrictions.requireAI = true
         let notes = [note(40, author: 8)]
-        #expect(try allows(.init(mode: .all, restrictions: restrictions), notes: notes, ai: [40]))
-        #expect(try !allows(.init(mode: .all, restrictions: restrictions), notes: notes))
+        #expect(try allows(.init(mode: .filtered, restrictions: restrictions), notes: notes, ai: [40]))
+        #expect(try !allows(.init(mode: .filtered, restrictions: restrictions), notes: notes))
         restrictions.mergeRequestAuthors = [identity(99)]
-        #expect(try !allows(.init(mode: .all, restrictions: restrictions), notes: notes, ai: [40]))
+        #expect(try !allows(.init(mode: .filtered, restrictions: restrictions), notes: notes, ai: [40]))
         restrictions.mergeRequestAuthors = [identity(7)]
         restrictions.repositories = [identity(99)]
-        #expect(try !allows(.init(mode: .all, restrictions: restrictions), notes: notes, ai: [40]))
+        #expect(try !allows(.init(mode: .filtered, restrictions: restrictions), notes: notes, ai: [40]))
     }
 
     @Test func sameNumericIdentityOnAnotherHostCannotGrantPublication() throws {
         let restrictions = AutomaticPublicationRestrictions(mergeRequestAuthors: [identity(7, host: "other.example")])
-        #expect(try !allows(.init(mode: .all, restrictions: restrictions), reply: false))
+        #expect(try !allows(.init(mode: .filtered, restrictions: restrictions), reply: false))
     }
 
     @Test func labelsNeverGrantIdentityPermissionsAndRenamesDoNotRevokeStableIDs() throws {
         let correct = AutomaticPublicationRestrictions(mergeRequestAuthors: [identity(7, label: "Old name")])
-        #expect(try allows(.init(mode: .all, restrictions: correct), reply: false))
+        #expect(try allows(.init(mode: .filtered, restrictions: correct), reply: false))
         let impostor = AutomaticPublicationRestrictions(mergeRequestAuthors: [identity(99, label: "alice")])
-        #expect(try !allows(.init(mode: .all, restrictions: impostor), reply: false))
+        #expect(try !allows(.init(mode: .filtered, restrictions: impostor), reply: false))
     }
 
     @Test func allExternalAuthorsSinceOurLastReplyMustQualify() throws {
         let restrictions = AutomaticPublicationRestrictions(sourceCommentAuthors: [identity(8)])
-        let policy = AutomaticPublicationPolicy(mode: .all, restrictions: restrictions)
+        let policy = AutomaticPublicationPolicy(mode: .filtered, restrictions: restrictions)
         #expect(try !allows(policy, notes: [note(40, author: 8), note(41, author: 9)]))
         #expect(try allows(policy, notes: [note(40, author: 9), note(41, author: 3), note(42, author: 8)]))
         #expect(try !allows(policy, notes: [note(40, author: 8), note(41, author: 3)]))
     }
 
     @Test func rootDraftsCannotMatchSourceOrAIRestrictions() throws {
-        #expect(try !allows(.init(mode: .all, restrictions: .init(sourceCommentAuthors: [identity(8)])), reply: false))
-        #expect(try !allows(.init(mode: .all, restrictions: .init(requireAI: true)), reply: false))
+        #expect(try !allows(.init(mode: .filtered, restrictions: .init(sourceCommentAuthors: [identity(8)])), reply: false))
+        #expect(try !allows(.init(mode: .filtered, restrictions: .init(requireAI: true)), reply: false))
         #expect(try !allows(.init(mode: .aiReplies, restrictions: .init()), reply: false))
     }
 
     @Test func unknownSourcesAndIncompleteIdentityFailClosed() throws {
-        let policy = AutomaticPublicationPolicy(mode: .all, restrictions: .init(sourceCommentAuthors: [identity(8)]))
+        let policy = AutomaticPublicationPolicy(mode: .filtered, restrictions: .init(sourceCommentAuthors: [identity(8)]))
         #expect(try !allows(policy))
         #expect(try !allows(policy, notes: [note(40, author: 8), note(nil, author: nil)]))
     }
 
     @Test func aiOnlyAndExplicitAIRestrictionHaveIdenticalSourceRequirements() throws {
         let mode = AutomaticPublicationPolicy(mode: .aiReplies, restrictions: .init())
-        let explicit = AutomaticPublicationPolicy(mode: .all, restrictions: .init(requireAI: true))
+        let explicit = AutomaticPublicationPolicy(mode: .filtered, restrictions: .init(requireAI: true))
         let notes = [note(40, author: 8), note(41, author: 9)]
         for policy in [mode, explicit] {
             #expect(try !allows(policy, notes: notes, ai: [40]))
@@ -95,37 +95,205 @@ struct AutomaticPublicationPolicyTests {
         #expect(try !allows(policy, reply: false, authorID: 99))
     }
 
-    @Test func legacySettingsPreservePolicyAndHaveNoInventedBaseline() throws {
-        let loaded = try JSONDecoder().decode(AutomationSettings.self, from: Data(#"{"publishDraftsWithoutConfirmation":false,"publishAIRepliesWithoutConfirmation":true}"#.utf8))
-        #expect(loaded.baselinePreset == nil)
-        #expect(loaded.publicationMode == .aiReplies && loaded.publicationRestrictions == .init())
+    @Test func allModeIgnoresEveryOptionalFilterButRetainsOwnershipAndQuickActionChecks() throws {
+        let restrictions = AutomaticPublicationRestrictions(repositories: [identity(99)], mergeRequestAuthors: [identity(99)],
+                                                            sourceCommentAuthors: [identity(99)], requireAI: true)
+        let policy = AutomaticPublicationPolicy(mode: .all, restrictions: restrictions)
+        #expect(try allows(policy, reply: false))
+        #expect(try allows(policy, notes: [note(40, author: 8)]))
+        #expect(!policy.requiresAI)
+        #expect(try !allows(policy, reply: false, body: "/merge"))
+        #expect(try !allows(policy, reply: false, authorID: 99))
     }
 
-    @Test func choosingPresetRecordsResetBaselineAndClearsAdvancedRestrictions() throws {
-        var settings = AutomationSettings()
-        settings.publicationRestrictions.requireAI = true
-        settings.applyPreset(.checkpoints, for: .codex)
-        #expect(settings.baselinePreset == .checkpoints && settings.publicationRestrictions == .init())
-        let loaded = try JSONDecoder().decode(AutomationSettings.self, from: JSONEncoder().encode(settings))
-        #expect(loaded.baselinePreset == .checkpoints)
+    @Test func filteredModeWithoutAnyConditionFailsClosed() throws {
+        #expect(try !allows(.init(mode: .filtered, restrictions: .init()), reply: false))
+        #expect(try !allows(.init(mode: .filtered, restrictions: .init()), notes: [note(40, author: 8)]))
     }
 
-    @Test func resettingOneOptionDoesNotApplyTheWholePresetOrEraseOtherCustomization() {
+    @Test func presetDefaultsSelectAllForFullAIForCheckpointsAndManualForManual() {
+        for preset in AutomationPreset.allCases {
+            var settings = AutomationSettings()
+            settings.applyPreset(preset, for: .codex)
+            #expect(settings.publishesAllComments == (preset == .full))
+            #expect(settings.automaticAIReplies == (preset != .manual))
+            #expect(settings.publicationMode == (preset == .full ? .all : preset == .checkpoints ? .aiReplies : .manual))
+            #expect(settings.publicationRestrictions == .defaults(for: preset))
+        }
+        #expect(AutomaticPublicationRestrictions.defaults(for: .full) == .init(requireAI: true))
+        #expect(AutomaticPublicationRestrictions.defaults(for: .checkpoints) == .init(requireAI: true))
+        #expect(AutomaticPublicationRestrictions.defaults(for: .manual) == .init())
+        #expect(AutomaticPublicationRestrictions.defaults(for: nil) == .init())
+    }
+
+    @Test func disablingAllRestoresDormantAIChoiceAndIdentityConditions() throws {
         var settings = AutomationSettings()
         settings.applyPreset(.full, for: .codex)
-        settings.publicationMode = .manual
+        settings.publicationRestrictions.repositories = [identity(1)]
+        settings.setPublishAllComments(false)
+        #expect(settings.publicationMode == .aiReplies && settings.automaticAIReplies)
+        #expect(try !allows(settings.automaticPublicationPolicy, reply: false))
+        #expect(try allows(settings.automaticPublicationPolicy, notes: [note(40, author: 8)], ai: [40]))
+        settings.setAutomaticAIReplies(false)
+        #expect(settings.publicationMode == .filtered)
+        #expect(try allows(settings.automaticPublicationPolicy, reply: false))
+        settings.setPublishAllComments(true)
+        #expect(settings.publishesAllComments && !settings.automaticAIReplies)
+        settings.setPublishAllComments(false)
+        #expect(settings.publicationMode == .filtered && !settings.automaticAIReplies)
+    }
+
+    @Test(arguments: [false, true])
+    func togglingAllPreservesEffectiveAIReplyChoiceWithoutStoredAICondition(legacy: Bool) throws {
+        var settings: AutomationSettings
+        if legacy {
+            settings = try JSONDecoder().decode(AutomationSettings.self, from: Data(
+                #"{"publishDraftsWithoutConfirmation":false,"publishAIRepliesWithoutConfirmation":true}"#.utf8))
+        } else {
+            settings = AutomationSettings()
+            settings.publicationMode = .aiReplies
+        }
+        #expect(settings.automaticAIReplies && !settings.publicationRestrictions.requireAI)
+        settings.setPublishAllComments(true)
+        #expect(settings.publishesAllComments && settings.automaticAIReplies)
+        settings.setPublishAllComments(false)
+        #expect(settings.publicationMode == .aiReplies && settings.automaticAIReplies)
+    }
+
+    @Test func changingAIOrRemovingTheLastIdentityConditionCannotGrantPublishAll() {
+        var settings = AutomationSettings()
+        settings.applyPreset(.manual, for: .codex)
+        settings.setAutomaticAIReplies(true)
+        #expect(settings.publicationMode == .aiReplies && settings.needsAIAssessment)
+        settings.setAutomaticAIReplies(false)
+        #expect(settings.publicationMode == .manual && !settings.needsAIAssessment)
+        settings.publicationRestrictions.repositories = [identity(1)]
+        settings.publicationFiltersChanged()
+        #expect(settings.publicationMode == .filtered)
+        settings.publicationRestrictions.repositories = []
+        settings.publicationFiltersChanged()
+        #expect(settings.publicationMode == .manual && !settings.publishesAllComments)
+    }
+
+    @Test func legacySettingsPreserveAllFilteredAIAndExplicitManualMeanings() throws {
+        let restrictions = AutomaticPublicationRestrictions(repositories: [identity(1)])
+        for mode in [AutomationPublicationMode.all, .filtered, .aiReplies, .manual] {
+            let values: [String: Any] = [
+                "publishDraftsWithoutConfirmation": mode == .all || mode == .filtered,
+                "publishAIRepliesWithoutConfirmation": mode != .manual,
+                "publicationRestrictions": try JSONSerialization.jsonObject(with: JSONEncoder().encode(mode == .all ? AutomaticPublicationRestrictions() : restrictions))
+            ]
+            let loaded = try JSONDecoder().decode(AutomationSettings.self, from: JSONSerialization.data(withJSONObject: values))
+            #expect(loaded.publicationMode == mode)
+            #expect(loaded.baselinePreset == nil)
+            #expect(try JSONDecoder().decode(AutomationSettings.self, from: JSONEncoder().encode(loaded)) == loaded)
+        }
+    }
+
+    @Test func disablingLegacyAIOnlyConditionNeverEnablesUnconditionalPublication() throws {
+        var settings = try JSONDecoder().decode(AutomationSettings.self, from: Data(
+            #"{"publishDraftsWithoutConfirmation":true,"publishAIRepliesWithoutConfirmation":true,"publicationRestrictions":{"repositories":[],"mergeRequestAuthors":[],"sourceCommentAuthors":[],"requireAI":true}}"#.utf8))
+        #expect(settings.publicationMode == .filtered && settings.automaticAIReplies)
+        settings.setAutomaticAIReplies(false)
+        #expect(settings.publicationMode == .manual && !settings.publishesAllComments)
+        #expect(try !allows(settings.automaticPublicationPolicy, reply: false))
+    }
+
+    @Test func removingLegacyLastFilterOrResettingConditionsNeverEnablesPublishAll() throws {
+        let json = #"{"publishDraftsWithoutConfirmation":true,"publicationRestrictions":{"repositories":[{"host":"gitlab.example.test","entityID":1,"label":"Repo"}],"mergeRequestAuthors":[],"sourceCommentAuthors":[],"requireAI":false}}"#
+        var settings = try JSONDecoder().decode(AutomationSettings.self, from: Data(json.utf8))
+        var reset = settings
+        settings.publicationRestrictions.repositories = []
+        settings.publicationFiltersChanged()
+        #expect(settings.publicationMode == .manual && !settings.publishesAllComments)
+        reset.resetPublicationRestrictions()
+        #expect(reset.publicationMode == .manual && !reset.publishesAllComments)
+    }
+
+    @Test func resettingLegacyAllConditionsPreservesUnconditionalPublication() throws {
+        var settings = try JSONDecoder().decode(AutomationSettings.self, from: Data(
+            #"{"baselinePreset":"full","publishDraftsWithoutConfirmation":true,"publishAIRepliesWithoutConfirmation":false}"#.utf8))
+        #expect(settings.publishesAllComments && !settings.automaticAIReplies)
+        settings.resetPublicationRestrictions()
+        #expect(settings.publicationMode == .all && settings.publishesAllComments)
+        #expect(settings.automaticAIReplies && settings.publicationRestrictions == .defaults(for: .full))
+        #expect(try allows(settings.automaticPublicationPolicy, reply: false))
+    }
+
+    @Test func savedExplicitAllIgnoresRetainedFiltersAfterReload() throws {
+        var settings = AutomationSettings()
+        settings.publicationRestrictions = .init(repositories: [identity(99)], requireAI: true)
+        settings.publicationMode = .all
+        let loaded = try JSONDecoder().decode(AutomationSettings.self, from: JSONEncoder().encode(settings))
+        #expect(loaded == settings && loaded.publicationMode == .all)
+        #expect(try allows(loaded.automaticPublicationPolicy, reply: false))
+    }
+
+    @Test func automaticDraftHintUsesCanonicalModeRatherThanCompatibilityFlags() throws {
+        var settings = AutomationSettings()
+        settings.publicationMode = .filtered
+        #expect(try !settings.publishesAutomatically(any: [draft(reply: false)]))
+        settings.publicationRestrictions.repositories = [identity(1)]
+        #expect(try settings.publishesAutomatically(any: [draft(reply: false)]))
+        settings.setAutomaticAIReplies(true)
+        #expect(try !settings.publishesAutomatically(any: [draft(reply: false)]))
+        #expect(try settings.publishesAutomatically(any: [draft()]))
+        settings.publicationMode = .all
+        #expect(!settings.needsAIAssessment)
+        #expect(try settings.publishesAutomatically(any: [draft(reply: false)]))
+    }
+
+    @Test func directLegacyBooleanChangesStillUpdateCanonicalMode() {
+        var settings = AutomationSettings()
+        settings.publicationMode = .all
+        settings.publishDraftsWithoutConfirmation = false
+        settings.publishAIRepliesWithoutConfirmation = false
+        #expect(settings.publicationMode == .manual)
+        settings.publicationRestrictions.repositories = [identity(1)]
+        settings.publishDraftsWithoutConfirmation = true
+        #expect(settings.publicationMode == .filtered)
+    }
+
+    @Test func resettingPublicationOptionsPreservesOtherPermissionsScopeAndCustomInstructions() {
+        var settings = AutomationSettings()
+        settings.applyPreset(.full, for: .claude)
+        settings.setAutomaticAIReplies(false)
+        settings.setPublishAllComments(false)
+        settings.publicationRestrictions.repositories = [identity(1)]
+        settings.publicationFiltersChanged()
         settings.autoApproveEnabled = false
         settings.allowFollowUpPush = false
-        settings.publicationRestrictions.requireAI = true
         settings.scope.mode = .selected
-        settings.resetCheckpoint(.approval, to: .full)
-        #expect(settings.autoApproveEnabled)
-        #expect(!settings.allowFollowUpPush && settings.publicationMode == .manual)
-        #expect(settings.scope.mode == .selected && settings.publicationRestrictions.requireAI)
+        settings.authorFeedback.promptTemplate = "Custom instructions"
+        var expected = settings
+        expected.setPublishAllComments(true)
         settings.resetPublication(to: .full)
-        #expect(settings.publicationMode == .all && !settings.allowFollowUpPush)
-        #expect(settings.publicationRestrictions.requireAI)
+        #expect(settings == expected && !settings.automaticAIReplies)
+        expected.publicationRestrictions = .init(requireAI: true)
         settings.resetPublicationRestrictions()
-        #expect(settings.publicationRestrictions == .init() && settings.scope.mode == .selected)
+        #expect(settings == expected && settings.publishesAllComments && settings.automaticAIReplies)
+        settings.resetPublication(to: .checkpoints)
+        #expect(settings.publicationMode == .aiReplies && !settings.autoApproveEnabled && !settings.allowFollowUpPush)
+        #expect(settings.scope.mode == .selected && settings.authorFeedback.promptTemplate == "Custom instructions")
+    }
+
+    @Test(arguments: [AutomationPreset.full, .checkpoints, .manual])
+    func resettingConditionsRestoresBaselineWithoutChangingGlobalAll(preset: AutomationPreset) {
+        var settings = AutomationSettings()
+        settings.applyPreset(preset, for: .codex)
+        settings.publicationRestrictions = .init(repositories: [identity(1)], requireAI: preset == .manual)
+        settings.resetPublicationRestrictions()
+        #expect(settings.publicationRestrictions == .defaults(for: preset))
+        #expect(settings.publishesAllComments == (preset == .full))
+        #expect(settings.automaticAIReplies == (preset != .manual))
+    }
+
+    @Test func legacyConditionResetUsesUnrestrictedDefaultsAndKeepsNoInventedBaseline() {
+        var settings = AutomationSettings()
+        settings.publicationMode = .filtered
+        settings.publicationRestrictions = .init(repositories: [identity(1)])
+        settings.resetPublicationRestrictions()
+        #expect(settings.publicationRestrictions == .init())
+        #expect(settings.publicationMode == .manual && settings.baselinePreset == nil)
     }
 }

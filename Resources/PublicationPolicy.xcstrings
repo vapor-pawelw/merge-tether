@@ -19,7 +19,7 @@
         "en": {
           "stringUnit": {
             "state": "translated",
-            "value": "All selected conditions must match. Empty lists add no restriction. Conditions only narrow the publication mode; unmatched or uncertain comments stay as private drafts."
+            "value": "All active conditions must match. With no conditions, comments stay as private drafts."
           }
         }
       }
@@ -57,24 +57,13 @@
         }
       }
     },
-    "publication.requireAI": {
-      "extractionState": "manual",
-      "localizations": {
-        "en": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "Require verified or very-high-confidence AI feedback"
-          }
-        }
-      }
-    },
     "publication.sourceHelp": {
       "extractionState": "manual",
       "localizations": {
         "en": {
           "stringUnit": {
             "state": "translated",
-            "value": "Source conditions apply to every external comment since your last published reply. New findings without a source comment stay private when a source or AI condition is active."
+            "value": "Author filters apply to every comment since your last published reply."
           }
         }
       }
@@ -96,7 +85,7 @@
         "en": {
           "stringUnit": {
             "state": "translated",
-            "value": "Reset all publication conditions"
+            "value": "Reset publication filters"
           }
         }
       }
@@ -107,7 +96,7 @@
         "en": {
           "stringUnit": {
             "state": "translated",
-            "value": "Restore this condition to its unrestricted preset default."
+            "value": "Restore this filter to the selected profile’s defaults."
           }
         }
       }
@@ -240,6 +229,105 @@
           "stringUnit": {
             "state": "translated",
             "value": "Choose a profile to reset only this setting. Other settings stay as configured."
+          }
+        }
+      }
+    },
+    "publication.onlyAiReplies": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Automatically publish replies to likely AI-assisted comments"
+          }
+        }
+      }
+    },
+    "publication.aiRepliesHelp": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Assessment concerns how the comment was written, including AI assistance used by a person. Replies to likely manual or uncertain comments stay private."
+          }
+        }
+      }
+    },
+    "publication.automaticAll": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Automatically publish all comments"
+          }
+        }
+      }
+    },
+    "publication.automaticAllHelp": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Publish every eligible checked comment without confirmation, regardless of the filters below."
+          }
+        }
+      }
+    },
+    "publication.filtersIgnored": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "All comments are published automatically. The filters below are inactive."
+          }
+        }
+      }
+    },
+    "publication.automationOnlyHelp": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "These settings apply only to automation. The manual Publish all action ignores these filters."
+          }
+        }
+      }
+    },
+    "publication.filtered": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Matching filters"
+          }
+        }
+      }
+    },
+    "publication.filteredHelp": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Automatically publish comments matching every selected filter. Other comments stay as private drafts."
+          }
+        }
+      }
+    },
+    "publication.filtersInactive": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Inactive"
           }
         }
       }

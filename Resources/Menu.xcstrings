@@ -1679,7 +1679,7 @@
         "en": {
           "stringUnit": {
             "state": "translated",
-            "value": "Publish comments"
+            "value": "Publish all comments"
           }
         }
       }
@@ -2285,6 +2285,17 @@
           "stringUnit": {
             "state": "translated",
             "value": "The MR changed. Check its current feedback before confirming again."
+          }
+        }
+      }
+    },
+    "menu.confirm.publishHelp": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Publish every comment shown in this review. Automatic publication filters do not apply."
           }
         }
       }

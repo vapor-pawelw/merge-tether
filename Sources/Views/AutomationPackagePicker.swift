@@ -27,6 +27,7 @@ extension AutomationPublicationMode {
     var title: LocalizedStringResource {
         switch self {
         case .all: .Settings.settingsAutomationPublicationAll
+        case .filtered: .PublicationPolicy.publicationFiltered
         case .aiReplies: .Settings.settingsAutomationPublicationAiReplies
         case .manual: .Settings.settingsAutomationPublicationManual
         }
@@ -34,6 +35,7 @@ extension AutomationPublicationMode {
     var explanation: LocalizedStringResource {
         switch self {
         case .all: .Settings.settingsAutomationPublicationAllHelp
+        case .filtered: .PublicationPolicy.publicationFilteredHelp
         case .aiReplies: .Settings.settingsAutomationPublicationAiRepliesHelp
         case .manual: .Settings.settingsAutomationPublicationManualHelp
         }
