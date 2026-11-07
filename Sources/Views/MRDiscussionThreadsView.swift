@@ -1,7 +1,7 @@
 import Foundation
 import SwiftUI
 
-/// Read-only conversation context. Publication stays in the existing confirmation controls.
+/// Conversation context with optional draft selection. Publication stays in the confirmation controls.
 struct MRDiscussionThreadsView: View {
     let snapshot: MRDiscussionSnapshot
     let mergeRequestURL: URL
@@ -10,6 +10,8 @@ struct MRDiscussionThreadsView: View {
     let hasError: Bool
     let hasLoaded: Bool
     var expandPendingDrafts = false
+    var selection: Binding<DraftPublicationSelection>? = nil
+    var selectionDisabled = false
     let onRefresh: () -> Void
 
     private var pendingThreads: [MRDiscussionSnapshot.Thread] { snapshot.threads.filter { !$0.drafts.isEmpty } }
@@ -42,7 +44,8 @@ struct MRDiscussionThreadsView: View {
                          : hasLoaded || hasError ? .MRDiscussions.mrDiscussionsUnmatchedReply
                          : .MRDiscussions.mrDiscussionsReplyDraft)
                         .font(.caption.weight(.medium)).foregroundStyle(.secondary)
-                    MRDiscussionDraftView(draft: draft, username: currentUsername)
+                    MRDiscussionDraftView(draft: draft, username: currentUsername,
+                        selection: selection, selectionDisabled: selectionDisabled)
                 }
                 .padding(12)
                 .frame(maxWidth: .infinity, alignment: .leading)
@@ -58,7 +61,8 @@ struct MRDiscussionThreadsView: View {
 
     private func threadView(_ thread: MRDiscussionSnapshot.Thread) -> some View {
         MRDiscussionThreadView(thread: thread, mergeRequestURL: mergeRequestURL,
-                               currentUsername: currentUsername, initiallyExpanded: expandPendingDrafts && !thread.drafts.isEmpty)
+                               currentUsername: currentUsername, initiallyExpanded: expandPendingDrafts && !thread.drafts.isEmpty,
+                               selection: selection, selectionDisabled: selectionDisabled)
     }
 }
 
@@ -67,6 +71,8 @@ private struct MRDiscussionThreadView: View {
     let mergeRequestURL: URL
     let currentUsername: String?
     let initiallyExpanded: Bool
+    let selection: Binding<DraftPublicationSelection>?
+    let selectionDisabled: Bool
     @State private var isExpanded = false
 
     private var comments: [GitLabMergeRequestDiscussion.Note] { thread.notes.filter { $0.system != true } }
@@ -87,7 +93,8 @@ private struct MRDiscussionThreadView: View {
                                              mergeRequestURL: mergeRequestURL, threadLocation: thread.location)
                     }
                     ForEach(Array(thread.drafts.enumerated()), id: \.offset) { _, draft in
-                        MRDiscussionDraftView(draft: draft, username: currentUsername, threadLocation: thread.location)
+                        MRDiscussionDraftView(draft: draft, username: currentUsername, threadLocation: thread.location,
+                            selection: selection, selectionDisabled: selectionDisabled)
                     }
                 }
                 .padding(.top, 10)
@@ -180,10 +187,15 @@ private struct MRDiscussionDraftView: View {
     let draft: GitLabDraftNote
     let username: String?
     var threadLocation: String? = nil
+    var selection: Binding<DraftPublicationSelection>? = nil
+    var selectionDisabled = false
 
     var body: some View {
         VStack(alignment: .leading, spacing: 7) {
             HStack(spacing: 8) {
+                if let selection {
+                    DraftPublicationCheckbox(draft: draft, selection: selection, disabled: selectionDisabled)
+                }
                 if let username { Text(verbatim: "@\(username)").fontWeight(.medium) }
                 else { Text(.MRDiscussions.mrDiscussionsYou).fontWeight(.medium) }
                 Text(.MRDiscussions.mrDiscussionsPrivateDraft).foregroundStyle(Color.accentColor)

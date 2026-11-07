@@ -11,11 +11,15 @@ struct ConfirmationQueueRow<AdditionalActions: View>: View {
     var initiallyExpanded = false
     var showDraftPreview = true
     var showHeader = true
+    var selection: Binding<DraftPublicationSelection>? = nil
+    var onPublishSelected: (([GitLabDraftNote]) -> Void)? = nil
     let additionalActions: AdditionalActions
 
     @State private var showsComments = false
+    @State private var localSelection = DraftPublicationSelection()
 
     private var isBusy: Bool { state == .publishing || state == .approving }
+    private var draftSelection: Binding<DraftPublicationSelection> { selection ?? $localSelection }
 
     var body: some View {
         VStack(alignment: .leading, spacing: 6) {
@@ -71,9 +75,21 @@ struct ConfirmationQueueRow<AdditionalActions: View>: View {
 
             HStack(spacing: 8) {
                 if !item.drafts.isEmpty {
-                    Button(action: onPublish) { Text(.Menu.menuConfirmPublish) }
-                        .help(Text(.Menu.menuConfirmPublishHelp))
+                    let selected = draftSelection.wrappedValue.selectedDrafts(from: item.drafts)
+                    if let onPublishSelected, !selected.isEmpty {
+                        Button { onPublishSelected(selected) } label: {
+                            Text(.DraftPublication.draftPublicationPublishSelected(selected.count))
+                        }
+                        .help(Text(.DraftPublication.draftPublicationPublishSelectedHelp))
                         .buttonStyle(.borderedProminent)
+                        Button(action: onPublish) { Text(.Menu.menuConfirmPublish) }
+                            .help(Text(.Menu.menuConfirmPublishHelp))
+                            .buttonStyle(.bordered)
+                    } else {
+                        Button(action: onPublish) { Text(.Menu.menuConfirmPublish) }
+                            .help(Text(.Menu.menuConfirmPublishHelp))
+                            .buttonStyle(.borderedProminent)
+                    }
                 } else if item.canApprove {
                     Button(action: onApprove) { Text(.Menu.menuConfirmApprove) }
                         .buttonStyle(.borderedProminent)
@@ -99,6 +115,8 @@ struct ConfirmationQueueRow<AdditionalActions: View>: View {
         .background(Color.accentColor.opacity(0.07), in: RoundedRectangle(cornerRadius: 7))
         .overlay(RoundedRectangle(cornerRadius: 7).stroke(Color.accentColor.opacity(0.18), lineWidth: 0.5))
         .onAppear { if initiallyExpanded { showsComments = true } }
+        .onChange(of: item.drafts) { _, drafts in draftSelection.wrappedValue.reconcile(with: drafts) }
+        .onChange(of: item.id) { _, _ in draftSelection.wrappedValue = DraftPublicationSelection() }
     }
 
     @ViewBuilder
@@ -118,6 +136,15 @@ struct ConfirmationQueueRow<AdditionalActions: View>: View {
     }
 
     private func draftPreview(_ draft: GitLabDraftNote) -> some View {
+        HStack(alignment: .top, spacing: 8) {
+            if onPublishSelected != nil {
+                DraftPublicationCheckbox(draft: draft, selection: draftSelection, disabled: isBusy)
+            }
+            draftContent(draft)
+        }
+    }
+
+    private func draftContent(_ draft: GitLabDraftNote) -> some View {
         VStack(alignment: .leading, spacing: 2) {
             if let threadID = draft.discussionID {
                 if let recipients = item.replyRecipients[threadID] {

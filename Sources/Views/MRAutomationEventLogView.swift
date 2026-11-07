@@ -3,24 +3,37 @@ import SwiftUI
 struct MRAutomationEventLogView: View {
     let target: MRAutomationScope.Target?
     let monitor: TodoMonitorService
-    @State private var expanded = false
-    @State private var showAll = false
+    let initiallyExpanded: Bool
+    let initiallyExpandedJobID: UUID?
+    @State private var expanded: Bool
+    @State private var showAll: Bool
+
+    init(target: MRAutomationScope.Target?, monitor: TodoMonitorService, initiallyExpanded: Bool = false,
+         initiallyExpandedJobID: UUID? = nil) {
+        self.target = target; self.monitor = monitor
+        self.initiallyExpanded = initiallyExpanded; self.initiallyExpandedJobID = initiallyExpandedJobID
+        _expanded = State(initialValue: initiallyExpanded || initiallyExpandedJobID != nil)
+        _showAll = State(initialValue: initiallyExpandedJobID != nil)
+    }
 
     var body: some View {
         DisclosureGroup(isExpanded: $expanded) {
             if expanded {
-                let entries = target.map {
+                let history = target.map {
                     MRAutomationHistory(target: $0, handoffs: monitor.assistantHandoffs,
                         workflows: monitor.authoredMergeRequests.workflow.entries,
-                        events: monitor.settings.automationEvents).entries
-                } ?? []
+                        events: monitor.settings.automationEvents)
+                }
+                let entries = history?.entries ?? []
                 VStack(alignment: .leading, spacing: 12) {
                     Text(.AutomationHistory.automationHistoryExplanation).font(.caption).foregroundStyle(.secondary)
                     if entries.isEmpty {
                         Text(.AutomationHistory.automationHistoryEmpty).foregroundStyle(.secondary)
                     }
                     ForEach(showAll ? entries : Array(entries.prefix(8))) { entry in
-                        MRAutomationEventLogRow(entry: entry)
+                        MRAutomationEventLogRow(entry: entry, runs: history?.associatedRuns(for: entry) ?? [],
+                            monitor: monitor, initiallyExpandedJobID: initiallyExpandedJobID)
+                            .id(entry.id)
                         Divider()
                     }
                     if entries.count > 8 {
@@ -33,26 +46,43 @@ struct MRAutomationEventLogView: View {
                 .padding(.top, 12)
             }
         } label: { Text(.AutomationHistory.automationHistoryTitle).font(.headline) }
+        .onChange(of: initiallyExpanded) { _, value in if value { expanded = true } }
+        .onChange(of: initiallyExpandedJobID) { _, id in
+            if id != nil { expanded = true; showAll = true }
+        }
     }
 }
 
 private struct MRAutomationEventLogRow: View {
     let entry: MRAutomationHistory.Entry
-    @State private var detailsExpanded = false
+    let runs: [AssistantAutomationRunner.Handoff]
+    let monitor: TodoMonitorService
+    let initiallyExpandedJobID: UUID?
+    @State private var detailsExpanded: Bool
+
+    init(entry: MRAutomationHistory.Entry, runs: [AssistantAutomationRunner.Handoff], monitor: TodoMonitorService,
+         initiallyExpandedJobID: UUID?) {
+        self.entry = entry; self.runs = runs; self.monitor = monitor
+        self.initiallyExpandedJobID = initiallyExpandedJobID
+        if case .job(let job, _) = entry.source {
+            _detailsExpanded = State(initialValue: job.id == initiallyExpandedJobID)
+        } else { _detailsExpanded = State(initialValue: false) }
+    }
 
     var body: some View {
         VStack(alignment: .leading, spacing: 6) {
             HStack(alignment: .firstTextBaseline) {
                 Text(title).fontWeight(.medium)
+                if entry.isAutomatic {
+                    Image(systemName: "gearshape").font(.caption).foregroundStyle(.secondary)
+                        .help(Text(.AutomationHistory.automationHistoryOriginAutomatic))
+                        .accessibilityLabel(Text(.AutomationHistory.automationHistoryOriginAutomatic))
+                }
                 Spacer(minLength: 8)
                 Text(entry.createdAt, format: .dateTime.year().month().day().hour().minute().second())
                     .font(.caption).foregroundStyle(.secondary).monospacedDigit()
             }
-            HStack(spacing: 8) {
-                Text(stateLabel).foregroundStyle(needsAttention ? .orange : .secondary)
-                Text(origin).foregroundStyle(.secondary)
-            }
-            .font(.caption)
+            Text(stateLabel).foregroundStyle(needsAttention ? .orange : .secondary).font(.caption)
             if let summary {
                 Text(verbatim: String(summary.prefix(280)))
                     .foregroundStyle(needsAttention ? .orange : .secondary)
@@ -60,11 +90,17 @@ private struct MRAutomationEventLogRow: View {
             }
             DisclosureGroup(isExpanded: $detailsExpanded) {
                 if detailsExpanded { details.padding(.top, 6) }
-            } label: { Text(.AutomationHistory.automationHistoryDetails) }
+            } label: {
+                if case .job = entry.source { Text(.AutomationHistory.automationHistoryViewRun) }
+                else { Text(.AutomationHistory.automationHistoryDetails) }
+            }
             .font(.caption)
         }
         .font(.subheadline)
         .frame(maxWidth: .infinity, alignment: .leading)
+        .onChange(of: initiallyExpandedJobID) { _, id in
+            if case .job(let job, _) = entry.source, job.id == id { detailsExpanded = true }
+        }
     }
 
     private var title: LocalizedStringResource {
@@ -156,17 +192,12 @@ private struct MRAutomationEventLogRow: View {
         VStack(alignment: .leading, spacing: 8) {
             switch entry.source {
             case .job(let job, _):
-                raw(.AutomationHistory.automationHistoryTask, job.title)
+                AssistantJobRow(handoff: job, monitor: monitor)
                 raw(.AutomationHistory.automationHistoryRunID, job.id.uuidString)
-                raw(.AutomationHistory.automationHistoryAgent, String(localized: job.key.assistant.displayName))
                 timestamp(.AutomationHistory.automationHistoryQueuedAt, job.createdAt)
                 if let execution = job.execution {
                     timestamp(.AutomationHistory.automationHistoryStartedAt, execution.startedAt)
                     timestamp(.AutomationHistory.automationHistoryFinishedAt, execution.finishedAt)
-                    raw(.AutomationHistory.automationHistoryBlocker, execution.blocker)
-                    raw(.AutomationHistory.automationHistoryError, execution.error)
-                    raw(.AutomationHistory.automationHistorySummary, execution.summary)
-                    raw(.AssistantJobs.assistantJobsTranscript, execution.output)
                 }
                 raw(.AutomationHistory.automationHistoryHead, job.expectedHeadSHA)
             case .workflow(let workflow):
@@ -180,6 +211,10 @@ private struct MRAutomationEventLogRow: View {
                 raw(.AutomationHistory.automationHistoryIntentID, event.intentID?.uuidString)
                 raw(.AutomationHistory.automationHistoryRunID, event.jobID?.uuidString)
                 raw(.AutomationHistory.automationHistoryPreviousRunID, event.relatedJobID?.uuidString)
+            }
+            raw(.AutomationHistory.automationHistoryOrigin, String(localized: origin))
+            if case .job = entry.source {} else {
+                ForEach(runs) { job in MRAutomationLinkedRun(job: job, monitor: monitor) }
             }
         }
         .frame(maxWidth: .infinity, alignment: .leading)
@@ -201,6 +236,24 @@ private struct MRAutomationEventLogRow: View {
             HStack {
                 Text(label).fontWeight(.medium)
                 Text(value, format: .dateTime.year().month().day().hour().minute().second()).monospacedDigit()
+            }
+        }
+    }
+}
+
+private struct MRAutomationLinkedRun: View {
+    let job: AssistantAutomationRunner.Handoff
+    let monitor: TodoMonitorService
+    @State private var expanded = false
+
+    var body: some View {
+        DisclosureGroup(isExpanded: $expanded) {
+            if expanded { AssistantJobRow(handoff: job, monitor: monitor).padding(.top, 6) }
+        } label: {
+            HStack {
+                Text(.AutomationHistory.automationHistoryViewRun)
+                Text(job.createdAt, format: .dateTime.year().month().day().hour().minute().second())
+                    .foregroundStyle(.secondary).monospacedDigit()
             }
         }
     }

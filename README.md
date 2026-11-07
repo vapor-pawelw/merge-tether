@@ -23,13 +23,13 @@ MergeTether opens a resizable main window and appears in the Dock. Its board kee
 
 Recognized GitLab to-dos update an MR’s durable action and are then marked read. Unknown events stay in Other items; new foreign MRs can be added and handled or ignored, and matching enabled automation adopts them automatically. Agent completion remains a separate state. Optional brief in-app banners announce automatically accepted events; Settings → General controls them, independently of system notifications.
 
-Open **Review and confirm** to read complete discussion threads alongside private drafts. An **AI** badge marks verified agent identities or a high-confidence assessment tied to the current comment; a comment without the badge may be likely manual, uncertain or unassessed.
+Open **Review and confirm** to read complete discussion threads alongside private drafts. Select individual drafts with checkboxes to **Publish selected**, or use **Publish all comments**. Selection is cleared for changed or removed drafts; manual publication does not depend on automation or AI-origin filters. An **AI** badge marks verified agent identities or a high-confidence assessment tied to the current comment; a comment without the badge may be likely manual, uncertain or unassessed.
 
 Pin any card to keep it at the top of its column; pins are saved for your account. Within pinned and unpinned groups, cards requiring attention rise to the top and draft MRs stay at the bottom of Reviewing. Insertions, removals and reordering animate naturally and respect macOS Reduce Motion. Hover over the short repository name for its full path, or open a card for full repository details and execution history. **Activity** shows workflow events and agent results. **Settings → Automation → Scope** controls automation globally, by repository or by MR without losing history.
 
 Use **Add merge request…** to add a reviewed MR by URL or repository and number. **Remove from my list** on a reviewed MR keeps it out of automatic adoption until you explicitly add it again.
 
-Attention means a human action is required. Automatic work and verification show progress without an attention marker; waiting for a reviewer stays neutral. Cards, the menu-bar indicator and notifications use the same decision.
+Attention means a human action is required. Automatic work and verification show progress without an attention marker; waiting for a reviewer stays neutral and never creates reminder comments. Cards, the menu-bar indicator and notifications use the same decision.
 Each attention card explains what needs you and offers a matching action. Pending comments open expanded for review; stopped automation offers a direct retry, with its previous result and actual cause still available.
 
 The menu-bar icon stays neutral while work is handled automatically and turns amber when something needs your attention. Optional macOS notifications bring those decisions to you without announcing every automatically handled update. Enable notification permission inside the app; if macOS has denied it, the app links to System Settings.

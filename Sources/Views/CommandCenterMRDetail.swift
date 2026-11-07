@@ -8,7 +8,7 @@ enum CommandCenterMRDetailSection: Hashable {
         switch self {
         case .overview: .CommandCenter.commandCenterOverview
         case .drafts: .CommandCenter.commandCenterConfirmations
-        case .assistantRuns: .AssistantJobs.assistantJobsTitle
+        case .assistantRuns: .AutomationHistory.automationHistoryTitle
         case .feedback: .CommandCenter.commandCenterFeedback
         }
     }
@@ -40,18 +40,20 @@ private struct CommandCenterMRDetailContent: View {
     let needsHumanAttention: Bool
     @Environment(\.openSettings) private var openSettings
     @State private var isStartingReview = false
+    @State private var reviewStartError: String?
     @State private var isRetrying = false
     @State private var retryError: String?
     @State private var discussionStore = MRDiscussionStore()
+    @State private var draftSelection = DraftPublicationSelection()
     @State private var detailsExpanded = false
-    @State private var automationExpanded = false
     @State private var feedbackExpanded = false
-    @State private var runsExpanded = false
-    @State private var showAllRuns = false
+    @State private var historyExpanded = false
+    @State private var focusedJobID: UUID?
+    @State private var historyNavigationID = UUID()
     @State private var pendingInitialAnchor: Anchor?
     @State private var initialDiscussionAttemptFinished = false
 
-    private enum Anchor: Hashable { case overview, drafts, comments, details, automation, feedbackStatus, assistantRuns }
+    private enum Anchor: Hashable { case overview, drafts, comments, details, actions, feedbackStatus, assistantRuns }
 
     private var target: MRAutomationScope.Target? {
         monitor.scopeTarget(projectID: item.id.projectID, iid: item.id.iid, url: item.url)
@@ -65,8 +67,8 @@ private struct CommandCenterMRDetailContent: View {
         return value
     }
     private var jobs: [AssistantAutomationRunner.Handoff] {
-        guard let work else { return [] }
-        return monitor.assistantHandoffs.filter { $0.key.work == work }.sorted { $0.createdAt > $1.createdAt }
+        guard let work, let target else { return [] }
+        return monitor.assistantHandoffs.filter { $0.key.work == work && $0.key.username == target.username && !$0.isObsoleteReminder }.sorted { $0.createdAt > $1.createdAt }
     }
     private var humanAction: MRHumanAction? {
         let ready = monitor.availableAssistants.contains(monitor.settings.automation.assistant)
@@ -97,16 +99,18 @@ private struct CommandCenterMRDetailContent: View {
                 VStack(alignment: .leading, spacing: 20) {
                     header.id(Anchor.overview)
                     if showsDecisions { nextStep(proxy: proxy).id(Anchor.drafts) }
+                    supplementaryActions.id(Anchor.actions)
                     discussionThreads.id(Anchor.comments)
                     details.id(Anchor.details)
-                    automation.id(Anchor.automation)
-                    MRAutomationEventLogView(target: target, monitor: monitor)
-                    agentRuns.id(Anchor.assistantRuns)
+                    MRAutomationEventLogView(target: target, monitor: monitor,
+                        initiallyExpanded: historyExpanded, initiallyExpandedJobID: focusedJobID)
+                        .id(historyNavigationID).id(Anchor.assistantRuns)
                 }
                 .padding(24)
                 .frame(maxWidth: .infinity, alignment: .leading)
             }
             .background(.background)
+            .safeAreaInset(edge: .bottom, spacing: 0) { selectedPublicationActions }
             .task(id: initialSection) {
                 pendingInitialAnchor = nil
                 if needsHumanAttention && item.authorFeedbackStatus?.needsAttention == true { feedbackExpanded = true }
@@ -115,15 +119,15 @@ private struct CommandCenterMRDetailContent: View {
                 case .drafts:
                     pendingInitialAnchor = .drafts
                 case .assistantRuns:
-                    runsExpanded = true
+                    historyExpanded = true
+                    focusedJobID = jobs.first?.id
+                    historyNavigationID = UUID()
                     pendingInitialAnchor = .assistantRuns
                 case .feedback:
                     if item.canConfirmReReview {
-                        if !showsDecisions { automationExpanded = true }
-                        pendingInitialAnchor = showsDecisions ? .drafts : .automation
+                        pendingInitialAnchor = showsDecisions ? .drafts : .actions
                     } else if item.authorFeedbackStatus != nil {
                         feedbackExpanded = true
-                        if !showsDecisions { automationExpanded = true }
                         pendingInitialAnchor = .feedbackStatus
                     } else { pendingInitialAnchor = .comments }
                 }
@@ -152,6 +156,11 @@ private struct CommandCenterMRDetailContent: View {
                 if old == .publishing && current != .publishing { refreshDiscussions() }
             }
             .onChange(of: jobs.first?.id) { _, _ in retryError = nil }
+            .onChange(of: item.drafts) { _, drafts in draftSelection.reconcile(with: drafts) }
+            .onChange(of: discussionTarget) { _, _ in
+                draftSelection = DraftPublicationSelection()
+                reviewStartError = nil
+            }
             .onChange(of: needsHumanAttention) { _, required in
                 if required && item.authorFeedbackStatus?.needsAttention == true { feedbackExpanded = true }
             }
@@ -164,7 +173,11 @@ private struct CommandCenterMRDetailContent: View {
         await Task.yield()
         await Task.yield()
         guard !Task.isCancelled else { return }
-        proxy.scrollTo(anchor, anchor: .top)
+        if anchor == .assistantRuns, let focusedJobID {
+            proxy.scrollTo("job/\(focusedJobID)", anchor: .top)
+        } else {
+            proxy.scrollTo(anchor, anchor: .top)
+        }
     }
 
     private var header: some View {
@@ -242,13 +255,13 @@ private struct CommandCenterMRDetailContent: View {
                             .disabled(isRetrying || job.execution?.state.isActive != false
                                       || !monitor.availableAssistants.contains(job.key.assistant)
                                       || AssistantAutomationRunner.isWorking(on: job.key.work))
-                            Button { runsExpanded = true; Task { await scroll(to: .assistantRuns, proxy: proxy) } } label: {
+                            Button { openHistory(proxy: proxy) } label: {
                                 Text(.MRHumanAction.mrHumanActionActionReviewRun)
                             }
                             .buttonStyle(.plain)
                         }
                     } else if action.action == .reviewRun {
-                        Button { runsExpanded = true; Task { await scroll(to: .assistantRuns, proxy: proxy) } } label: {
+                        Button { openHistory(proxy: proxy) } label: {
                             Text(action.actionLabel)
                         }
                     } else if action.action == .setupAssistant {
@@ -273,11 +286,42 @@ private struct CommandCenterMRDetailContent: View {
     }
 
     private var confirmationControls: some View {
-        ConfirmationQueueRow(item: item, state: monitor.attention.confirmationStates[item.id],
+        let publishSelected: (([GitLabDraftNote]) -> Void)? = discussionTarget.map { target in
+            { selected in Task { await monitor.attention.publishDrafts(selected, for: target) } }
+        }
+        return ConfirmationQueueRow(item: item, state: monitor.attention.confirmationStates[item.id],
             onPublish: { Task { await monitor.attention.publishDrafts(of: item.id) } },
             onApprove: { Task { await monitor.attention.approve(item.id) } },
             onOpen: { NSWorkspace.shared.open(item.url) }, initiallyExpanded: initialSection == .drafts,
-            showDraftPreview: false, showHeader: false, additionalActions: EmptyView())
+            showDraftPreview: false, showHeader: false, selection: $draftSelection,
+            onPublishSelected: publishSelected, additionalActions: EmptyView())
+    }
+
+    @ViewBuilder
+    private var selectedPublicationActions: some View {
+        let selected = draftSelection.selectedDrafts(from: item.drafts)
+        if !selected.isEmpty, let target = discussionTarget {
+            let state = monitor.attention.confirmationStates[item.id]
+            let busy = state == .publishing || state == .approving
+            HStack(spacing: 12) {
+                Button { draftSelection = DraftPublicationSelection() } label: {
+                    Text(.DraftPublication.draftPublicationClearSelection)
+                }
+                .buttonStyle(.borderless)
+                Spacer()
+                if busy { ProgressView().controlSize(.small) }
+                Button { Task { await monitor.attention.publishDrafts(selected, for: target) } } label: {
+                    Text(.DraftPublication.draftPublicationPublishSelected(selected.count))
+                }
+                .help(Text(.DraftPublication.draftPublicationPublishSelectedHelp))
+                .buttonStyle(.borderedProminent)
+            }
+            .controlSize(.small)
+            .padding(.horizontal, 24).padding(.vertical, 12)
+            .frame(maxWidth: .infinity)
+            .background(.bar)
+            .disabled(busy)
+        }
     }
 
     private var decisionActions: some View {
@@ -325,54 +369,41 @@ private struct CommandCenterMRDetailContent: View {
         } label: { Text(.CommandCenter.commandCenterDetails).font(.headline) }
     }
 
-    private var automation: some View {
-        DisclosureGroup(isExpanded: $automationExpanded) {
-            if automationExpanded {
-                VStack(alignment: .leading, spacing: 12) {
-                    if !showsDecisions {
-                        if item.needsConfirmation { confirmationControls }
-                        decisionActions
-                        if item.authorFeedbackStatus != nil { feedbackCheck.id(Anchor.feedbackStatus) }
-                    }
-                    if !item.isAuthored && !monitor.mrTodoIntents(for: item).contains(where: { $0.kind == .review }) {
-                        Button {
-                            isStartingReview = true
-                            Task { defer { isStartingReview = false }; await monitor.runReview(for: item) }
-                        } label: {
-                            Label { Text(isStartingReview ? .CommandCenter.commandCenterReviewStarting : .CommandCenter.commandCenterReviewRun) }
-                                icon: { Image(systemName: "text.magnifyingglass") }
-                        }
-                        .disabled(isStartingReview || !monitor.canRunReview(for: item))
-                        .help(Text(.CommandCenter.commandCenterReviewHelp))
-                    }
-                    if let error = monitor.assistantJobActionError {
-                        Text(verbatim: error).font(.caption).foregroundStyle(.orange)
-                    }
+    @ViewBuilder
+    private var supplementaryActions: some View {
+        if !showsDecisions {
+            if item.needsConfirmation { confirmationControls }
+            decisionActions
+            if item.authorFeedbackStatus != nil { feedbackCheck.id(Anchor.feedbackStatus) }
+        }
+        if !item.isAuthored && !monitor.mrTodoIntents(for: item).contains(where: { $0.kind == .review }) {
+            Button {
+                isStartingReview = true
+                reviewStartError = nil
+                let expectedTarget = discussionTarget
+                Task {
+                    defer { isStartingReview = false }
+                    await monitor.runReview(for: item)
+                    if discussionTarget == expectedTarget { reviewStartError = monitor.assistantJobActionError }
                 }
-                .controlSize(.small).padding(.top, 12)
+            } label: {
+                Label { Text(isStartingReview ? .CommandCenter.commandCenterReviewStarting : .CommandCenter.commandCenterReviewRun) }
+                    icon: { Image(systemName: "text.magnifyingglass") }
             }
-        } label: { Text(.CommandCenter.commandCenterAutomation).font(.headline) }
+            .controlSize(.small)
+            .disabled(isStartingReview || !monitor.canRunReview(for: item))
+            .help(Text(.CommandCenter.commandCenterReviewHelp))
+        }
+        if let reviewStartError {
+            Text(verbatim: reviewStartError).font(.caption).foregroundStyle(.orange)
+        }
     }
 
-    private var agentRuns: some View {
-        DisclosureGroup(isExpanded: $runsExpanded) {
-            if runsExpanded {
-                VStack(alignment: .leading, spacing: 12) {
-                    if jobs.isEmpty { Text(.AssistantJobs.assistantJobsEmpty).foregroundStyle(.secondary) }
-                    ForEach(showAllRuns ? jobs : Array(jobs.prefix(1))) { job in AssistantJobRow(handoff: job, monitor: monitor) }
-                    if jobs.count > 1 {
-                        Button { showAllRuns.toggle() } label: {
-                            Text(showAllRuns ? .CommandCenter.commandCenterShowLess : .CommandCenter.commandCenterShowAll)
-                        }
-                        .buttonStyle(.link)
-                    }
-                }
-                .padding(.top, 12)
-            }
-        } label: {
-            Text(.CommandCenter.commandCenterAgentRunsCount(jobs.count)).font(.headline)
-                .help(Text(.AssistantJobs.assistantJobsExplanation))
-        }
+    private func openHistory(proxy: ScrollViewProxy) {
+        historyExpanded = true
+        focusedJobID = jobs.first?.id
+        historyNavigationID = UUID()
+        Task { await scroll(to: .assistantRuns, proxy: proxy) }
     }
 
     private func metadata(_ label: LocalizedStringResource, value: String, monospaced: Bool = false) -> some View {
@@ -405,7 +436,11 @@ private struct CommandCenterMRDetailContent: View {
         return MRDiscussionThreadsView(snapshot: snapshot, mergeRequestURL: item.url,
             currentUsername: monitor.glab.currentUsername, isLoading: current && discussionStore.isLoading,
             hasError: current && discussionStore.hasError, hasLoaded: current && discussionStore.hasLoaded,
-            expandPendingDrafts: initialSection == .drafts, onRefresh: refreshDiscussions)
+            expandPendingDrafts: initialSection == .drafts,
+            selection: item.needsConfirmation && current ? $draftSelection : nil,
+            selectionDisabled: monitor.attention.confirmationStates[item.id] == .publishing
+                || monitor.attention.confirmationStates[item.id] == .approving,
+            onRefresh: refreshDiscussions)
     }
 
     private func refreshDiscussions() {

@@ -330,6 +330,28 @@
           }
         }
       }
+    },
+    "automationHistory.viewRun": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "View agent run"
+          }
+        }
+      }
+    },
+    "automationHistory.origin": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Origin"
+          }
+        }
+      }
     }
   },
   "version": "1.0"

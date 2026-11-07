@@ -304,12 +304,16 @@ struct TodoListView: View {
     private func attentionCards(_ items: [MergeRequestAttentionMonitor.Item]) -> some View {
         ForEach(items) { item in
             if item.needsConfirmation {
+                let publishSelected: (([GitLabDraftNote]) -> Void)? = publicationTarget(for: item).map { target in
+                    { selected in Task { await monitor.attention.publishDrafts(selected, for: target) } }
+                }
                 ConfirmationQueueRow(
                     item: item, state: monitor.attention.confirmationStates[item.id],
                     onPublish: { Task { await monitor.attention.publishDrafts(of: item.id) } },
                     onApprove: { Task { await monitor.attention.approve(item.id) } },
                     onOpen: { NSWorkspace.shared.open(item.url); dismissMenuBarExtra() },
-                    onManage: manageAction(for: item), additionalActions: attentionActions(item)
+                    onManage: manageAction(for: item), onPublishSelected: publishSelected,
+                    additionalActions: attentionActions(item)
                 )
             } else {
                 AttentionRow(item: item, onManage: manageAction(for: item), onOpen: {
@@ -318,6 +322,12 @@ struct TodoListView: View {
                 }, additionalActions: attentionActions(item))
             }
         }
+    }
+
+    private func publicationTarget(for item: MergeRequestAttentionMonitor.Item) -> MRDiscussionTarget? {
+        guard let host = monitor.glab.resolvedHost, let username = monitor.glab.currentUsername,
+              item.url.isGitLabMergeRequest(host: host, iid: item.id.iid) else { return nil }
+        return .init(host: host, username: username, projectID: item.id.projectID, iid: item.id.iid, url: item.url)
     }
 
     private func attentionActions(_ item: MergeRequestAttentionMonitor.Item) -> some View {

@@ -967,6 +967,91 @@ final class MergeRequestAttentionMonitor {
         }
     }
 
+    /// Explicit publication binds the reviewed bodies and account, independently of automation policy.
+    func publishDrafts(_ selected: [GitLabDraftNote], for target: MRDiscussionTarget) async {
+        let id = Item.ID(projectID: target.projectID, iid: target.iid)
+        guard let account, isCurrent(account), let user, user.id > 0,
+              account.host == target.host, account.username == target.username,
+              target.projectID > 0, target.iid > 0,
+              target.url.isGitLabMergeRequest(host: target.host, iid: target.iid),
+              let item = items.first(where: { $0.id == id }) ?? openItems.first(where: { $0.id == id }),
+              item.url == target.url, !isConfirming(id) else { return }
+        guard !selected.isEmpty, selected.allSatisfy({
+            ($0.id ?? 0) > 0 && $0.authorID == user.id && !($0.note ?? "").trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+        }), Set(selected.compactMap(\.id)).count == selected.count,
+              selected.allSatisfy({ draft in item.drafts.filter { $0.id == draft.id } == [draft] }) else {
+            confirmationStates[id] = .changed
+            return
+        }
+        let generation = accountGeneration
+        func currentContext() -> Bool { generation == accountGeneration && isCurrent(account) }
+        func display(_ drafts: [GitLabDraftNote]) {
+            let visible = drafts.filter { publishedDrafts[id]?.contains($0) != true }
+            updateItem(id) { $0.drafts = visible; $0.draftCount = visible.count }
+        }
+        confirmationStates[id] = .publishing
+        defer { if currentContext(), confirmationStates[id] == .publishing { confirmationStates[id] = nil } }
+        var remaining = selected
+        var publishedAny = false
+        var attemptedWrite = false
+        do {
+            for draft in selected {
+                try Task.checkCancellation()
+                async let liveUser = glab.fetchAuthenticatedUser(host: account.host, expectedUsername: account.username)
+                async let liveMR = glab.fetchMergeRequest(projectID: id.projectID, iid: id.iid, host: account.host)
+                let (authenticated, request) = try await (liveUser, liveMR)
+                guard currentContext() else { return }
+                guard authenticated == user else { throw GlabError.notAuthenticated }
+                guard request.projectID == target.projectID, request.iid == target.iid, request.webURL == target.url else {
+                    confirmationStates[id] = .changed
+                    break
+                }
+                let current = try await glab.fetchOwnDraftNotes(projectID: id.projectID, iid: id.iid,
+                    host: account.host, userID: user.id)
+                guard currentContext() else { return }
+                display(current)
+                // A changed later selection must stop the first write too. Unselected changes are unrelated.
+                guard remaining.allSatisfy({ expected in current.filter { $0.id == expected.id } == [expected] }),
+                      let draftID = draft.id else {
+                    confirmationStates[id] = .changed
+                    break
+                }
+                try Task.checkCancellation()
+                attemptedWrite = true
+                try await glab.publishDraftNote(projectID: id.projectID, iid: id.iid, draftID: draftID, host: account.host)
+                attemptedWrite = false
+                guard currentContext() else { return }
+                publishedAny = true
+                remaining.removeAll { $0.id == draftID }
+                publishedDrafts[id, default: []].append(draft)
+                display(current)
+            }
+        } catch {
+            if currentContext() { confirmationStates[id] = .failed }
+            Log.monitor.error("Could not publish selected drafts: \(String(describing: error), privacy: .private)")
+        }
+        guard currentContext(), publishedAny || attemptedWrite else { return }
+        var authenticatedForRefresh = false
+        do {
+            let authenticated = try await glab.fetchAuthenticatedUser(host: account.host, expectedUsername: account.username)
+            guard currentContext() else { return }
+            guard authenticated == user else { throw GlabError.notAuthenticated }
+            authenticatedForRefresh = true
+            let current = try await glab.fetchOwnDraftNotes(projectID: id.projectID, iid: id.iid,
+                host: account.host, userID: user.id)
+            guard currentContext() else { return }
+            display(current)
+        } catch {
+            if currentContext(), confirmationStates[id] == .publishing { confirmationStates[id] = .failed }
+            Log.monitor.error("Could not refresh selected draft publication: \(String(describing: error), privacy: .private)")
+        }
+        guard currentContext() else { return }
+        previousDrafts[id] = nil
+        if publishedAny, authenticatedForRefresh {
+            await refreshReReviewAfterPublication(id, account: account, user: user)
+        }
+    }
+
     func publishDrafts(of id: Item.ID, automatic: Bool = false, checkedDraftIDs: Set<Int> = []) async {
         guard !automatic || !checkedDraftIDs.isEmpty else { return }
         guard let account, isCurrent(account), let user,

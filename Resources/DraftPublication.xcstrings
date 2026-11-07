@@ -1,0 +1,50 @@
+{
+  "sourceLanguage": "en",
+  "strings": {
+    "draftPublication.select": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Select draft for publication"
+          }
+        }
+      }
+    },
+    "draftPublication.publishSelected.%lld": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Publish selected (%lld)"
+          }
+        }
+      }
+    },
+    "draftPublication.publishSelectedHelp": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Publish only the selected draft versions. Automatic publication filters do not apply."
+          }
+        }
+      }
+    },
+    "draftPublication.clearSelection": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Clear selection"
+          }
+        }
+      }
+    }
+  },
+  "version": "1.0"
+}

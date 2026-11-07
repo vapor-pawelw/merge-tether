@@ -29,8 +29,32 @@ struct MRAutomationHistory {
         let id: String
         let createdAt: Date
         let source: Source
+
+        var isAutomatic: Bool {
+            switch source {
+            case .job(let job, _): job.manual == false
+            case .workflow: true
+            case .event(let event): event.origin == .automatic
+            }
+        }
     }
     let entries: [Entry]
+
+    func associatedRuns(for entry: Entry) -> [AssistantAutomationRunner.Handoff] {
+        let ids: [UUID]
+        switch entry.source {
+        case .job(let job, _): ids = [job.id]
+        case .workflow(let workflow): ids = [workflow.assistantJobID].compactMap { $0 }
+        case .event(let event): ids = [event.jobID, event.relatedJobID].compactMap { $0 }
+        }
+        var result: [AssistantAutomationRunner.Handoff] = []
+        for id in ids where !result.contains(where: { $0.id == id }) {
+            for candidate in entries {
+                if case .job(let job, _) = candidate.source, job.id == id { result.append(job); break }
+            }
+        }
+        return result
+    }
 
     init(target: MRAutomationScope.Target, handoffs: [AssistantAutomationRunner.Handoff],
          workflows: [MergeWorkflowActivityEntry], events: [MRAutomationEvent]) {

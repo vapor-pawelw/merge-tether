@@ -82,4 +82,48 @@ struct MRAutomationHistoryTests {
             message: "Already running", now: start.addingTimeInterval(2_000))
         #expect(SettingsManager(defaults: defaults).automationEvents.count == 1_000)
     }
+
+    @Test func linkedWorkflowAndRetryResolveOlderScopedRunsBeyondTheVisiblePrefix() throws {
+        let old = job(at: start)
+        let latest = job(at: start.addingTimeInterval(30))
+        var linkedWorkflow = try workflow()
+        linkedWorkflow.assistantJobID = old.id
+        let retry = MRAutomationEvent(id: UUID(), target: target, createdAt: start.addingTimeInterval(31),
+            action: .retry, origin: .manual, state: .queued, message: nil, jobID: latest.id, relatedJobID: old.id)
+        let history = MRAutomationHistory(target: target,
+            handoffs: [old, latest] + (1...12).map { job(at: start.addingTimeInterval(Double($0))) },
+            workflows: [linkedWorkflow], events: [retry])
+        let workflowEntry = try #require(history.entries.first { if case .workflow = $0.source { true } else { false } })
+        let retryEntry = try #require(history.entries.first { if case .event = $0.source { true } else { false } })
+        #expect(!history.entries.prefix(8).contains { $0.id == "job/\(old.id)" })
+        #expect(history.associatedRuns(for: workflowEntry).map(\.id) == [old.id])
+        #expect(history.associatedRuns(for: retryEntry).map(\.id) == [latest.id, old.id])
+    }
+
+    @Test func linkedIdentifiersCannotExposeAnotherAccountHostProjectOrMergeRequest() {
+        let excluded = [job(username: "another", at: start), job(host: "other.example.test", at: start),
+                        job(projectID: 99, at: start), job(iid: 99, at: start)]
+        let events = excluded.map { MRAutomationEvent(id: UUID(), target: target, createdAt: start,
+            action: .retry, origin: .manual, state: .failed, message: nil, jobID: $0.id, relatedJobID: $0.id) }
+        let history = MRAutomationHistory(target: target, handoffs: excluded, workflows: [], events: events)
+        #expect(history.entries.count == excluded.count)
+        #expect(history.entries.allSatisfy { history.associatedRuns(for: $0).isEmpty })
+    }
+
+    @Test func automaticIconReflectsOnlyKnownLaunchOrRecordedOrigin() throws {
+        var automaticJob = job(at: start)
+        automaticJob.manual = false
+        var manualJob = job(at: start.addingTimeInterval(1))
+        manualJob.manual = true
+        let unknownJob = job(at: start.addingTimeInterval(2))
+        let automaticEvent = MRAutomationEvent(id: UUID(), target: target, createdAt: start,
+            action: .followUp, origin: .automatic, state: .completed, message: nil)
+        let manualEvent = MRAutomationEvent(id: UUID(), target: target, createdAt: start,
+            action: .retry, origin: .manual, state: .queued, message: nil)
+        let workflow = try workflow()
+        let history = MRAutomationHistory(target: target, handoffs: [automaticJob, manualJob, unknownJob],
+            workflows: [workflow], events: [automaticEvent, manualEvent])
+        let automaticIDs = Set(history.entries.filter(\.isAutomatic).map(\.id))
+        #expect(automaticIDs == ["job/\(automaticJob.id)", "event/\(automaticEvent.id)", "workflow/\(workflow.id)"])
+    }
 }

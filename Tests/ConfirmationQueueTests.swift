@@ -33,6 +33,7 @@ import Testing
         let defaults: UserDefaults
         let suite: String
         let settings: SettingsManager
+        let glab: GlabService
         let monitor: MergeRequestAttentionMonitor
 
         func write(_ name: String, _ text: String) throws {
@@ -168,10 +169,13 @@ import Testing
                     echo '{"data":{"mergeRequestReviewerRereview":{"mergeRequest":{"iid":"2"},"errors":[]}}}' ;;
                 */draft_notes/*/publish)
                     if [ -f fail-publish ]; then exit 1; fi
-                    echo "$*" >> selected.log
                     draft="${2%/publish}"
                     draft="${draft##*/}"
+                    if [ -f fail-publish-id ] && [ "$(cat fail-publish-id)" = "$draft" ]; then exit 1; fi
+                    echo "$*" >> selected.log
                     /usr/bin/python3 -c 'import json,sys; p="drafts.json"; a=json.load(open(p)); json.dump([d for d in a if d["id"]!=int(sys.argv[1])],open(p,"w"))' "$draft"
+                    if [ -f after-selected-publish.json ]; then cp after-selected-publish.json drafts.json; rm after-selected-publish.json; fi
+                    if [ -f user-after-selected-publish.json ]; then cp user-after-selected-publish.json live-user.json; rm user-after-selected-publish.json; fi
                     if [ -f inject-unseen-draft ]; then
                         /usr/bin/python3 -c 'import json; p="drafts.json"; a=json.load(open(p)); a=[d for d in a if d["id"]!=99]; a.append(dict(id=99,author_id=3,note="/merge")); json.dump(a,open(p,"w"))'
                     fi
@@ -194,6 +198,11 @@ import Testing
                     user="${2##*/}"
                     printf '{"id":%s,"username":"reviewer%s","bot":false,"state":"active"}' "$user" "$user" ;;
                 */draft_notes*)
+                    if [ -f pause-selected-read ]; then
+                        touch selected-read-entered
+                        attempts=0
+                        while [ ! -f release-selected-read ] && [ "$attempts" -lt 500 ]; do sleep 0.01; attempts=$((attempts + 1)); done
+                    fi
                     if [ -f proof-file-read ]; then touch proof-draft-read; fi
                     if [ -f fail-next-draft-read ]; then rm fail-next-draft-read; exit 1; fi
                     cat drafts.json ;;
@@ -276,7 +285,7 @@ import Testing
                 } })
             }
         )
-        return Harness(folder: folder, defaults: defaults, suite: suite, settings: settings, monitor: monitor)
+        return Harness(folder: folder, defaults: defaults, suite: suite, settings: settings, glab: glab, monitor: monitor)
     }
 
     private let draftJSON = #"""
@@ -285,6 +294,162 @@ import Testing
          {"id":12,"author_id":3,"note":"Thanks, looks fixed.","discussion_id":"abc","position":null},
          {"id":13,"author_id":8,"note":"Someone else's draft","discussion_id":null,"position":null}]
         """#
+
+    private var manualTarget: MRDiscussionTarget {
+        .init(host: host, username: "me", projectID: 1, iid: 2,
+              url: URL(string: "https://gitlab.example.org/g/p/-/merge_requests/2")!)
+    }
+
+    private let manualDrafts = #"[{"id":11,"author_id":3,"note":"First selected comment"},{"id":12,"author_id":3,"note":"Keep this private","discussion_id":"human"},{"id":14,"author_id":3,"note":"Second selected comment"},{"id":13,"author_id":8,"note":"Another account's draft"}]"#
+
+    private func manualHarness(authored: Bool = false) async throws -> Harness {
+        let harness = try makeHarness(assistantWorked: false, authored: authored)
+        harness.settings.automation.packageDecision = .disabled
+        harness.settings.automation.publicationMode = .manual
+        harness.settings.automation.autoReReviewEnabled = false
+        harness.settings.automation.scope.mode = .selected
+        try harness.write("assistant-unavailable", "yes")
+        try harness.write("drafts.json", manualDrafts)
+        try await harness.poll()
+        return harness
+    }
+
+    private func manualSelection(_ harness: Harness) throws -> [GitLabDraftNote] {
+        let drafts = try #require(harness.monitor.currentOpenItems.first?.drafts)
+        return try [11, 14].map { id in try #require(drafts.first { $0.id == id }) }
+    }
+
+    @Test(arguments: [false, true])
+    func selectedManualDraftsPublishOnlyTheReviewedSubsetWithoutAutomationOrCLI(authored: Bool) async throws {
+        let harness = try await manualHarness(authored: authored); defer { harness.cleanUp() }
+        let selected = try manualSelection(harness)
+        await harness.monitor.publishDrafts(selected, for: manualTarget)
+        #expect(harness.log("selected.log").contains("/draft_notes/11/publish"))
+        #expect(harness.log("selected.log").contains("/draft_notes/14/publish"))
+        #expect(!harness.log("selected.log").contains("/draft_notes/12/publish"))
+        #expect(harness.log("publish.log").isEmpty)
+        #expect(harness.monitor.currentOpenItems.first?.drafts.compactMap(\.id) == [12])
+        #expect(harness.log("drafts.json").contains("Another account's draft"))
+        #expect(harness.monitor.confirmationStates[.init(projectID: 1, iid: 2)] == nil)
+    }
+
+    @Test(arguments: ["body", "deleted", "position", "discussion", "resolve"])
+    func anySelectedDraftChangeAbortsBeforePublishingEvenAnUnchangedFirstDraft(change: String) async throws {
+        let harness = try await manualHarness(); defer { harness.cleanUp() }
+        let selected = try manualSelection(harness)
+        var drafts = try #require(JSONSerialization.jsonObject(with: Data(harness.log("drafts.json").utf8)) as? [[String: Any]])
+        if change == "deleted" { drafts.removeAll { $0["id"] as? Int == 14 } }
+        else if let index = drafts.firstIndex(where: { $0["id"] as? Int == 14 }) {
+            if change == "body" { drafts[index]["note"] = "Changed selected body" }
+            if change == "discussion" { drafts[index]["discussion_id"] = "changed-thread" }
+            if change == "resolve" { drafts[index]["resolve_discussion"] = true }
+            if change == "position" { drafts[index]["position"] = ["new_path": "Changed.swift", "new_line": 9] }
+        }
+        try JSONSerialization.data(withJSONObject: drafts).write(to: harness.folder.appending(path: "drafts.json"))
+        await harness.monitor.publishDrafts(selected, for: manualTarget)
+        #expect(harness.log("selected.log").isEmpty && harness.log("publish.log").isEmpty)
+        #expect(harness.monitor.confirmationStates[.init(projectID: 1, iid: 2)] == .changed)
+        #expect(harness.monitor.currentOpenItems.first?.draftCount == (change == "deleted" ? 2 : 3))
+    }
+
+    @Test(arguments: ["edit", "add"])
+    func unrelatedDraftChangesDoNotBroadenOrBlockTheReviewedSelection(change: String) async throws {
+        let harness = try await manualHarness(); defer { harness.cleanUp() }
+        let selected = try manualSelection(harness)
+        let updated = change == "edit" ? manualDrafts.replacingOccurrences(of: "Keep this private", with: "Changed private comment")
+            : manualDrafts.replacingOccurrences(of: "]", with: #",{"id":15,"author_id":3,"note":"A newly added private comment"}]"#)
+        try harness.write("drafts.json", updated)
+        await harness.monitor.publishDrafts(selected, for: manualTarget)
+        #expect(harness.log("selected.log").split(separator: "\n").count == 2)
+        #expect(!harness.log("selected.log").contains("/draft_notes/15/publish"))
+        #expect(harness.log("publish.log").isEmpty)
+        #expect(harness.monitor.currentOpenItems.first?.draftCount == (change == "add" ? 2 : 1))
+    }
+
+    @Test(arguments: ["empty", "duplicate", "missingID", "zeroID", "negativeID", "foreign", "missingBody", "blankBody"])
+    func invalidManualSelectionCannotPublishAnything(invalid: String) async throws {
+        let harness = try await manualHarness(); defer { harness.cleanUp() }
+        let original = try manualSelection(harness)
+        let selected: [GitLabDraftNote]
+        if invalid == "empty" { selected = [] }
+        else if invalid == "duplicate" { selected = [original[0], original[0]] }
+        else {
+            var item: [String: Any] = ["id": 11, "author_id": 3, "note": "First selected comment"]
+            if invalid == "missingID" { item.removeValue(forKey: "id") }
+            if invalid == "zeroID" { item["id"] = 0 }
+            if invalid == "negativeID" { item["id"] = -1 }
+            if invalid == "foreign" { item["author_id"] = 8 }
+            if invalid == "missingBody" { item.removeValue(forKey: "note") }
+            if invalid == "blankBody" { item["note"] = " \n " }
+            selected = try JSONDecoder().decode([GitLabDraftNote].self, from: JSONSerialization.data(withJSONObject: [item]))
+        }
+        await harness.monitor.publishDrafts(selected, for: manualTarget)
+        #expect(harness.log("selected.log").isEmpty && harness.log("publish.log").isEmpty)
+        #expect(harness.monitor.currentOpenItems.first?.draftCount == 3)
+    }
+
+    @Test(arguments: ["host", "username", "project", "iid", "url"])
+    func selectedDraftPublicationIsBoundToTheReviewedMergeRequestAndAccount(change: String) async throws {
+        let harness = try await manualHarness(); defer { harness.cleanUp() }
+        let selected = try manualSelection(harness)
+        let target = MRDiscussionTarget(host: change == "host" ? "another.example.org" : host,
+            username: change == "username" ? "another" : "me", projectID: change == "project" ? 99 : 1,
+            iid: change == "iid" ? 99 : 2,
+            url: change == "url" ? URL(string: "https://gitlab.example.org/wrong/project/-/merge_requests/2")! : manualTarget.url)
+        await harness.monitor.publishDrafts(selected, for: target)
+        #expect(harness.log("selected.log").isEmpty && harness.log("publish.log").isEmpty)
+        #expect(harness.monitor.currentOpenItems.first?.draftCount == 3)
+    }
+
+    @Test(arguments: ["failure", "changed", "account"])
+    func partialManualPublicationPreservesRemainingDraftsAndStopsBeforeAnyUnsafeNextWrite(stop: String) async throws {
+        let harness = try await manualHarness(authored: true); defer { harness.cleanUp() }
+        let selected = try manualSelection(harness)
+        if stop == "failure" { try harness.write("fail-publish-id", "14") }
+        if stop == "changed" {
+            try harness.write("after-selected-publish.json", manualDrafts.replacingOccurrences(of: "Second selected comment", with: "Edited after first publish")
+                .replacingOccurrences(of: #"{"id":11,"author_id":3,"note":"First selected comment"},"#, with: ""))
+        }
+        if stop == "account" { try harness.write("user-after-selected-publish.json", #"{"id":4,"username":"another"}"#) }
+        await harness.monitor.publishDrafts(selected, for: manualTarget)
+        #expect(harness.log("selected.log").contains("/draft_notes/11/publish"))
+        #expect(!harness.log("selected.log").contains("/draft_notes/14/publish"))
+        #expect(harness.log("publish.log").isEmpty)
+        #expect(harness.monitor.currentOpenItems.first?.drafts.compactMap(\.id) == [12, 14])
+        #expect(harness.monitor.confirmationStates[.init(projectID: 1, iid: 2)] == (stop == "changed" ? .changed : .failed))
+    }
+
+    @Test func liveAuthenticatedUserMismatchStopsSelectedPublicationBeforeTheFirstWrite() async throws {
+        let harness = try await manualHarness(); defer { harness.cleanUp() }
+        let selected = try manualSelection(harness)
+        try harness.write("live-user.json", #"{"id":4,"username":"me"}"#)
+        await harness.monitor.publishDrafts(selected, for: manualTarget)
+        #expect(harness.log("selected.log").isEmpty && harness.log("publish.log").isEmpty)
+        #expect(harness.monitor.confirmationStates[.init(projectID: 1, iid: 2)] == .failed)
+    }
+
+    @Test func accountSwitchDuringSelectedDraftReadCannotPublishOrChangeTheNewAccountsConfirmation() async throws {
+        let harness = try await manualHarness(); defer { harness.cleanUp() }
+        let selected = try manualSelection(harness)
+        try harness.write("pause-selected-read", "yes")
+        let target = manualTarget
+        let task = Task { await harness.monitor.publishDrafts(selected, for: target) }
+        defer { task.cancel(); try? harness.write("release-selected-read", "yes") }
+        let deadline = ContinuousClock.now + .seconds(3)
+        while !FileManager.default.fileExists(atPath: harness.folder.appending(path: "selected-read-entered").path), ContinuousClock.now < deadline {
+            try await Task.sleep(for: .milliseconds(10))
+        }
+        try #require(FileManager.default.fileExists(atPath: harness.folder.appending(path: "selected-read-entered").path))
+        harness.glab.currentUsername = "another"
+        try harness.write("live-user.json", #"{"id":4,"username":"another"}"#)
+        harness.monitor.refresh(host: host, username: "another", todos: [])
+        try harness.write("release-selected-read", "yes")
+        await task.value
+        let refreshDeadline = ContinuousClock.now + .seconds(5)
+        while harness.monitor.isLoading, ContinuousClock.now < refreshDeadline { try await Task.sleep(for: .milliseconds(10)) }
+        #expect(harness.log("selected.log").isEmpty && harness.log("publish.log").isEmpty)
+        #expect(harness.monitor.confirmationStates[.init(projectID: 1, iid: 2)] == nil)
+    }
 
     @Test func reviewingProgressSeparatesStaleEvidenceFromOtherReviewersOpenThreads() async throws {
         let harness = try makeHarness(assistantWorked: false)

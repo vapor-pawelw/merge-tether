@@ -40,6 +40,9 @@ struct AssistantJobRow: View {
     let handoff: AssistantAutomationRunner.Handoff
     let monitor: TodoMonitorService
     @State private var isRetrying = false
+    @State private var promptExpanded = false
+    @State private var transcriptExpanded = false
+    @State private var retryError: String?
 
     var body: some View {
         VStack(alignment: .leading, spacing: 9) {
@@ -56,33 +59,51 @@ struct AssistantJobRow: View {
                 if handoff.execution?.state.isActive == true { ProgressView().controlSize(.small) }
                 Text(stateLabel).font(.caption.weight(.medium))
             }
+            DisclosureGroup(isExpanded: $promptExpanded) {
+                if promptExpanded {
+                    Text(verbatim: GlabService.redactWorkflowEvidence(handoff.prompt))
+                        .font(.caption.monospaced()).textSelection(.enabled)
+                        .frame(maxWidth: .infinity, alignment: .leading)
+                }
+            } label: { Text(.AssistantJobs.assistantJobsPrompt) }
             if let execution = handoff.execution {
                 if let blocker = execution.attentionExplanation {
                     Text(verbatim: blocker).foregroundStyle(.orange).textSelection(.enabled)
                 }
                 if let summary = execution.summary, summary != execution.attentionExplanation {
-                    Text(verbatim: summary).textSelection(.enabled)
+                    Text(verbatim: GlabService.redactWorkflowEvidence(summary)).textSelection(.enabled)
                 }
                 if let error = execution.error, error != execution.attentionExplanation {
-                    Text(verbatim: error).foregroundStyle(.orange).textSelection(.enabled)
+                    Text(verbatim: GlabService.redactWorkflowEvidence(error)).foregroundStyle(.orange).textSelection(.enabled)
                 }
                 if let output = execution.output, !output.isEmpty {
-                    DisclosureGroup {
-                        Text(verbatim: output).font(.caption.monospaced()).textSelection(.enabled)
-                            .frame(maxWidth: .infinity, alignment: .leading)
+                    DisclosureGroup(isExpanded: $transcriptExpanded) {
+                        if transcriptExpanded {
+                            Text(verbatim: GlabService.redactWorkflowEvidence(output)).font(.caption.monospaced()).textSelection(.enabled)
+                                .frame(maxWidth: .infinity, alignment: .leading)
+                        }
                     } label: { Text(.AssistantJobs.assistantJobsTranscript) }
                 }
-                HStack {
+            } else {
+                Text(.AssistantJobs.assistantJobsLegacyExplanation).font(.caption).foregroundStyle(.secondary)
+            }
+            if let retryError {
+                Text(verbatim: GlabService.redactWorkflowEvidence(retryError)).foregroundStyle(.orange).textSelection(.enabled)
+            }
+            HStack {
+                if let execution = handoff.execution {
                     if execution.state.isActive {
                         Button(role: .destructive) { monitor.cancelAssistantJob(handoff.id) } label: {
                             Text(.AssistantJobs.assistantJobsStop)
                         }
-                    } else if execution.state != .succeeded {
+                    } else if execution.state != .succeeded && !handoff.isObsoleteReminder {
                         Button {
                             isRetrying = true
+                            retryError = nil
                             Task {
                                 defer { isRetrying = false }
                                 await monitor.retryAssistantJob(handoff.id)
+                                retryError = monitor.assistantJobActionError
                             }
                         } label: { Text(.AssistantJobs.assistantJobsRetry) }
                         .disabled(isRetrying || !monitor.availableAssistants.contains(handoff.key.assistant)
@@ -93,14 +114,12 @@ struct AssistantJobRow: View {
                             NSWorkspace.shared.activateFileViewerSelecting([URL(fileURLWithPath: path)])
                         } label: { Text(.AssistantJobs.assistantJobsFiles) }
                     }
-                    Button { AssistantAutomationRunner.copyPrompt(handoff.prompt) } label: {
-                        Text(.AssistantJobs.assistantJobsCopy)
-                    }
                 }
-                .controlSize(.small)
-            } else {
-                Text(.AssistantJobs.assistantJobsLegacyExplanation).font(.caption).foregroundStyle(.secondary)
+                Button { AssistantAutomationRunner.copyPrompt(handoff.prompt) } label: {
+                    Text(.AssistantJobs.assistantJobsCopy)
+                }
             }
+            .controlSize(.small)
         }
         .font(.callout)
         .padding(14)
