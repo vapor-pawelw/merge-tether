@@ -47,9 +47,7 @@ private struct CommandCenterMRDetailContent: View {
     @State private var automationExpanded = false
     @State private var feedbackExpanded = false
     @State private var runsExpanded = false
-    @State private var activityExpanded = false
     @State private var showAllRuns = false
-    @State private var showAllActivity = false
     @State private var pendingInitialAnchor: Anchor?
     @State private var initialDiscussionAttemptFinished = false
 
@@ -92,12 +90,6 @@ private struct CommandCenterMRDetailContent: View {
               item.url.isGitLabMergeRequest(host: host, iid: item.id.iid) else { return nil }
         return .init(host: host, username: username, projectID: item.id.projectID, iid: item.id.iid, url: item.url)
     }
-    private var workflowEntries: [MergeWorkflowActivityEntry] {
-        monitor.authoredMergeRequests.workflow.entries.filter {
-            $0.event.mergeRequest.projectID == item.id.projectID && $0.event.mergeRequest.iid == item.id.iid
-                && $0.event.mergeRequest.webURL == item.url
-        }
-    }
 
     var body: some View {
         ScrollViewReader { proxy in
@@ -108,8 +100,8 @@ private struct CommandCenterMRDetailContent: View {
                     discussionThreads.id(Anchor.comments)
                     details.id(Anchor.details)
                     automation.id(Anchor.automation)
+                    MRAutomationEventLogView(target: target, monitor: monitor)
                     agentRuns.id(Anchor.assistantRuns)
-                    recentActivity
                 }
                 .padding(24)
                 .frame(maxWidth: .infinity, alignment: .leading)
@@ -381,35 +373,6 @@ private struct CommandCenterMRDetailContent: View {
             Text(.CommandCenter.commandCenterAgentRunsCount(jobs.count)).font(.headline)
                 .help(Text(.AssistantJobs.assistantJobsExplanation))
         }
-    }
-
-    private var recentActivity: some View {
-        DisclosureGroup(isExpanded: $activityExpanded) {
-            if activityExpanded {
-                VStack(alignment: .leading, spacing: 12) {
-                    if workflowEntries.isEmpty { Text(.CommandCenter.commandCenterActivityEmpty).foregroundStyle(.secondary) }
-                    ForEach(showAllActivity ? workflowEntries : Array(workflowEntries.prefix(3))) { entry in
-                        VStack(alignment: .leading, spacing: 5) {
-                            HStack {
-                                Text(entry.event.kind.displayLabel).font(.subheadline.weight(.medium))
-                                Spacer()
-                                Text(entry.createdAt, style: .relative).font(.caption).foregroundStyle(.secondary)
-                            }
-                            Text(verbatim: entry.summary ?? entry.event.context)
-                                .font(.subheadline).foregroundStyle(.secondary).textSelection(.enabled)
-                        }
-                        Divider()
-                    }
-                    if workflowEntries.count > 3 {
-                        Button { showAllActivity.toggle() } label: {
-                            Text(showAllActivity ? .CommandCenter.commandCenterShowLess : .CommandCenter.commandCenterShowAll)
-                        }
-                        .buttonStyle(.link)
-                    }
-                }
-                .padding(.top, 12)
-            }
-        } label: { Text(.CommandCenter.commandCenterActivity).font(.headline) }
     }
 
     private func metadata(_ label: LocalizedStringResource, value: String, monospaced: Bool = false) -> some View {

@@ -56,6 +56,14 @@ final class TodoMonitorService {
             guard let self, self.manualAdoptions[intent.target, default: 0] == 0 else { return }
             autoHandledEventBanners.receive(intent, enabled: settings.autoHandledEventBannersEnabled)
         }
+        router.followUpAssessment = { [weak self] request, discussions in
+            guard let fingerprint = ReviewVerdict.fingerprint(discussions) else { return nil }
+            return self?.attention.authorFeedbackCoordinator?.assessment(for: request, fingerprint: fingerprint)
+        }
+        router.followUpVerificationPending = { [weak self] request, discussions in
+            guard let fingerprint = ReviewVerdict.fingerprint(discussions) else { return false }
+            return self?.attention.authorFeedbackCoordinator?.isChecking(for: request, fingerprint: fingerprint) == true
+        }
         return router
     }()
     private let cancelPolicyJob: @MainActor (UUID, SettingsManager) -> Void
@@ -94,6 +102,10 @@ final class TodoMonitorService {
         }
         attention.onAuthorFeedbackNeedsWork = { [weak self] request, notes, fingerprint in
             await self?.runVerifiedAuthorFeedback(request: request, noteIDs: notes, fingerprint: fingerprint, manual: false)
+        }
+        attention.onAuthorFeedbackChecked = { [weak self] in
+            guard let self, let host = self.glab.resolvedHost, let username = self.glab.currentUsername else { return }
+            Task { await self.mrTodoRouter.refreshCompletionEvidence(host: host, username: username) }
         }
         assistantDependencies.onRecovered = { [weak self] assistant in
             guard let self, self.settings.automation.autoVerifyReReview,
@@ -707,6 +719,7 @@ final class TodoMonitorService {
             let state = attention.confirmationStates[row.id]
             let conflictProcessing = row.item.mergeRequest.map { automaticConflictIsProcessing(for: $0) } ?? false
             let busy = row.latestJob?.execution?.state.isActive == true || state == .publishing || state == .approving
+                || row.item.aiOriginChecking
                 || row.item.authorFeedbackStatus?.phase == .checking
                 || conflictProcessing
                 || (!row.item.isAuthored && reviewingContext(for: row).isAutomaticProcessing)
@@ -1097,14 +1110,21 @@ final class TodoMonitorService {
     }
 
     func retryAssistantJob(_ id: UUID) async {
-        guard assistantHandoffs.contains(where: { $0.id == id }) else { return }
+        guard let job = assistantHandoffs.first(where: { $0.id == id }) else { return }
+        let target = MRAutomationScope.Target(host: job.key.work.host, username: job.key.username,
+            projectID: job.key.work.projectID, iid: job.key.work.iid)
+        settings.recordAutomationEvent(target: target, action: .retry, origin: .manual, state: .requested, jobID: id)
         assistantJobActionError = nil
         do {
             let replacement = try await AssistantAutomationRunner.retry(id, settings: settings)
             mrTodoRouter.rebindJob(oldID: id, replacement: replacement)
             authoredMergeRequests.workflow.synchronizeAssistantJobs()
+            settings.recordAutomationEvent(target: target, action: .retry, origin: .manual, state: .queued,
+                jobID: replacement.id, relatedJobID: id)
         } catch {
             assistantJobActionError = String(localized: .AssistantJobs.assistantJobsActionFailed)
+            settings.recordAutomationEvent(target: target, action: .retry, origin: .manual, state: .failed,
+                message: String(describing: error), jobID: id)
             Log.monitor.error("Could not retry assistant job: \(String(describing: error), privacy: .private)")
         }
     }

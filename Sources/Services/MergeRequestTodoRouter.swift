@@ -13,8 +13,17 @@ final class MergeRequestTodoRouter {
     private let cancelJob: @MainActor (UUID, SettingsManager) -> Void
     private var processing = false
     private var launching: Set<UUID> = []
+    private var manualRuns: Set<UUID> = []
     private(set) var acknowledgementError: GlabError?
     var onAcceptedIntent: (@MainActor (MRTodoIntent) -> Void)?
+    var followUpAssessment: (@MainActor (GitLabMergeRequest, [GitLabMergeRequestDiscussion]) -> ReReviewAssessment?)?
+    var followUpVerificationPending: (@MainActor (GitLabMergeRequest, [GitLabMergeRequestDiscussion]) -> Bool)?
+
+    /// Reconcile app evidence without receiving events, starting workers or writing to GitLab.
+    func refreshCompletionEvidence(host: String, username: String) async {
+        guard !Task.isCancelled, isCurrent(host, username) else { return }
+        await synchronize(host: host, username: username, cachedRequests: [:])
+    }
 
     init(settings: SettingsManager, glab: GlabService,
          canAutomate: @escaping @MainActor () async -> Bool, launcher: Launcher? = nil,
@@ -126,6 +135,12 @@ final class MergeRequestTodoRouter {
         defer { launching.remove(id) }
         guard !Task.isCancelled, let original = settings.mrActionIntents.first(where: { $0.id == id }), original.state != .completed,
               let iid = original.target.iid, isCurrent(original.target.host, original.target.username) else { return }
+        if manual {
+            manualRuns.insert(id)
+            settings.recordAutomationEvent(target: original.target, action: .retry, origin: .manual, state: .requested,
+                intentID: id, jobID: original.jobID)
+        }
+        defer { manualRuns.remove(id) }
         let work = AssistantAutomationRunner.MergeRequestWork(host: original.target.host, projectID: original.target.projectID, iid: iid)
         if original.kind == .review || original.kind == .followUp {
             let rule = original.kind == .review ? settings.automation.reviewRequested : settings.automation.authorFeedback
@@ -165,9 +180,22 @@ final class MergeRequestTodoRouter {
         }
         if AssistantAutomationRunner.isWorking(on: work) || settings.assistantHandoffs.contains(where: {
             $0.key.work == work && $0.key.username == original.target.username && $0.execution?.state.isActive == true
-        }) { return }
+        }) {
+            if manual {
+                settings.recordAutomationEvent(target: original.target, action: .retry, origin: .manual, state: .blocked,
+                    message: String(localized: .AutomationRuntime.runtimeAlreadyActive), intentID: id, jobID: original.jobID)
+            }
+            return
+        }
         let invocationConfiguration = settings.automation
-        guard await canAutomate(), manual || shouldRunAutomatically(original.kind, request: original.request, target: original.target) else { return }
+        guard await canAutomate() else {
+            if manual {
+                settings.recordAutomationEvent(target: original.target, action: .retry, origin: .manual, state: .blocked,
+                    message: String(localized: .TodoRouting.todoRoutingAssistantUnavailable), intentID: id, jobID: original.jobID)
+            }
+            return
+        }
+        guard manual || shouldRunAutomatically(original.kind, request: original.request, target: original.target) else { return }
         do {
             let request = try await glab.fetchMergeRequest(projectID: original.target.projectID, iid: iid, host: original.target.host)
             guard invocationConfiguration.preservingScope(from: settings.automation) == settings.automation,
@@ -175,7 +203,13 @@ final class MergeRequestTodoRouter {
                   request.projectID == original.target.projectID, request.iid == iid,
                   request.webURL.isGitLabMergeRequest(host: original.target.host, iid: iid),
                   let head = request.sha, !settings.ignoredMergeRequests.contains(original.target),
-                  manual || shouldRunAutomatically(original.kind, request: request, target: original.target) else { return }
+                  manual || shouldRunAutomatically(original.kind, request: request, target: original.target) else {
+                if manual {
+                    settings.recordAutomationEvent(target: original.target, action: .retry, origin: .manual, state: .blocked,
+                        message: String(localized: .TodoRouting.todoRoutingNeedsRecheck), intentID: id, jobID: original.jobID)
+                }
+                return
+            }
             var current = original
             current.request = request
             current.headSHA = head
@@ -191,6 +225,10 @@ final class MergeRequestTodoRouter {
                 return
             }
             update(id) { $0.request = request; $0.headSHA = head; $0.jobID = jobID; $0.state = .running; $0.error = nil }
+            if manual {
+                settings.recordAutomationEvent(target: original.target, action: .retry, origin: .manual, state: .queued,
+                    intentID: id, jobID: jobID, relatedJobID: original.jobID)
+            }
         } catch {
             update(id) { $0.state = .failed; $0.error = String(describing: error) }
         }
@@ -203,6 +241,7 @@ final class MergeRequestTodoRouter {
             guard original.jobID == oldID, original.state != .completed,
                   original.target.host == replacement.key.work.host, original.target.username == replacement.key.username,
                   original.target.projectID == replacement.key.work.projectID, original.target.iid == replacement.key.work.iid else { continue }
+            if original.state == .failed { recordIntentEvent(original, state: .failed) }
             settings.mrActionIntents[index].jobID = replacement.id
             settings.mrActionIntents[index].headSHA = replacement.expectedHeadSHA ?? original.headSHA
             settings.mrActionIntents[index].state = replacement.execution?.state.isActive == true ? .running : .failed
@@ -354,6 +393,7 @@ final class MergeRequestTodoRouter {
             } catch { continue }
             guard isCurrent(host, username), request.projectID == original.target.projectID, request.iid == iid,
                   request.webURL.isGitLabMergeRequest(host: host, iid: iid) else { continue }
+            guard matchesCompletionSnapshot(original, job: job) else { continue }
             let resolvedByState = request.state != "opened"
                 || (original.kind == .pipeline && request.headPipeline?.status == "success" && request.headPipeline?.sha == request.sha)
                 || (original.kind == .conflict && request.hasConflicts == false)
@@ -364,22 +404,47 @@ final class MergeRequestTodoRouter {
             }
             if let execution = job?.execution, execution.state.isActive { continue }
             if let execution = job?.execution, [.failed, .blocked, .interrupted, .cancelled].contains(execution.state) {
-                update(original.id) { $0.state = .failed; $0.error = execution.error ?? execution.summary }
+                update(original.id) { $0.state = .failed; $0.error = execution.attentionExplanation ?? execution.error ?? execution.summary }
                 continue
             }
             var sameReviewedHead = false
             if original.kind == .review, let job, job.execution?.state == .succeeded, job.expectedHeadSHA == request.sha {
                 sameReviewedHead = await reviewMatches(job, request: request)
             }
-            let provedFollowUp = original.kind == .followUp && job?.execution?.state == .succeeded
+            var provedFollowUp = original.kind == .followUp && job?.execution?.state == .succeeded
                 && job.map { followUpMatches($0, request: request) } == true
+            var checkingFollowUp = false
+            if original.kind == .followUp, job?.execution?.state == .succeeded, !provedFollowUp {
+                switch await followUpNeedsNoWork(original, request: request) {
+                case .proved: provedFollowUp = true
+                case .checking: checkingFollowUp = true
+                case .unverified: break
+                }
+            }
             guard isCurrent(host, username) else { return }
+            // A retry, cancellation or dismissal may replace this intent while evidence is read.
+            // The old worker's result must not finish or fail the replacement attempt.
+            guard matchesCompletionSnapshot(original, job: job) else { continue }
             if sameReviewedHead || provedFollowUp {
                 update(original.id) { $0.state = .completed; $0.error = nil }
+            } else if checkingFollowUp {
+                update(original.id) { $0.state = .running; $0.error = nil }
             } else if job?.execution?.state == .succeeded {
-                update(original.id) { $0.state = .failed; $0.error = String(localized: .TodoRouting.todoRoutingNeedsRecheck) }
+                update(original.id) {
+                    $0.state = .failed
+                    $0.error = String(localized: original.kind == .followUp
+                        ? .TodoRouting.todoRoutingFollowUpNeedsEvidence : .TodoRouting.todoRoutingNeedsRecheck)
+                }
             }
         }
+    }
+
+    private func matchesCompletionSnapshot(_ original: MRTodoIntent, job: AssistantAutomationRunner.Handoff?) -> Bool {
+        guard let current = settings.mrActionIntents.first(where: { $0.id == original.id }),
+              current.jobID == original.jobID, current.headSHA == original.headSHA,
+              current.noteIDs == original.noteIDs, current.state == original.state else { return false }
+        let currentJob = original.jobID.flatMap { id in settings.assistantHandoffs.first { $0.id == id } }
+        return currentJob?.id == job?.id && currentJob?.execution?.state == job?.execution?.state
     }
 
     private func reviewMatches(_ job: AssistantAutomationRunner.Handoff, request: GitLabMergeRequest) async -> Bool {
@@ -401,6 +466,42 @@ final class MergeRequestTodoRouter {
         guard let proof = FollowUpVerificationStore.receipt(work: job.key.work, username: job.key.username,
                                                           in: proofDirectory.deletingLastPathComponent()) else { return false }
         return proof.sealed && proof.runID == job.id && proof.headSHA == request.sha
+    }
+
+    /// Finishing a no-op action needs current independent evidence, but no publication receipt.
+    /// This changes only the local intent; drafts keep their separate remote-proof gate.
+    private enum FollowUpCompletion { case proved, checking, unverified }
+
+    private func followUpNeedsNoWork(_ intent: MRTodoIntent, request: GitLabMergeRequest) async -> FollowUpCompletion {
+        guard let iid = intent.target.iid, request.author.username == intent.target.username,
+              let head = request.sha, !head.isEmpty,
+              let discussions = try? await glab.fetchMergeRequestDiscussions(projectID: request.projectID, iid: iid, host: intent.target.host),
+              let fingerprint = ReviewVerdict.fingerprint(discussions) else { return .unverified }
+        guard let assessment = followUpAssessment?(request, discussions) else {
+            return followUpVerificationPending?(request, discussions) == true ? .checking : .unverified
+        }
+        guard (try? assessment.reviewers(in: discussions, authorID: request.author.id)) != nil else { return .unverified }
+        let assessed = Dictionary(uniqueKeysWithValues: assessment.notes.map { ($0.noteID, $0.state) })
+        let selected = intent.noteIDs.isEmpty ? Set(assessed.keys) : intent.noteIDs
+        guard !selected.isEmpty, assessment.notes.allSatisfy({ $0.state == .addressed || $0.state == .informational }),
+              selected.allSatisfy({ assessed[$0] == .addressed || assessed[$0] == .informational }) else { return .unverified }
+        for thread in discussions {
+            for note in thread.notes where note.id.map(selected.contains) == true && assessed[note.id ?? 0] == .addressed {
+                // Current code may address a concern while an explanation is still owed.
+                if note.resolvable == true, note.resolved == false,
+                   !thread.notes.contains(where: { $0.system == false && $0.author?.id == request.author.id && ($0.id ?? 0) > (note.id ?? 0) }) {
+                    return .unverified
+                }
+            }
+        }
+        guard let live = try? await glab.fetchMergeRequest(projectID: request.projectID, iid: iid, host: intent.target.host),
+              let liveDiscussions = try? await glab.fetchMergeRequestDiscussions(projectID: request.projectID, iid: iid, host: intent.target.host),
+              isCurrent(intent.target.host, intent.target.username),
+              live.projectID == request.projectID, live.iid == request.iid, live.webURL == request.webURL,
+              live.author == request.author, live.state == "opened", live.draft == false, live.sha == head,
+              live.semanticContextFingerprint == request.semanticContextFingerprint,
+              ReviewVerdict.fingerprint(liveDiscussions) == fingerprint else { return .unverified }
+        return .proved
     }
 
     /// Uses the original event context for actor/URL placeholders and the current
@@ -472,7 +573,29 @@ final class MergeRequestTodoRouter {
 
     private func update(_ id: UUID, _ mutate: (inout MRTodoIntent) -> Void) {
         guard let index = settings.mrActionIntents.firstIndex(where: { $0.id == id }) else { return }
-        mutate(&settings.mrActionIntents[index]); settings.mrActionIntents[index].updatedAt = Date(); settings.save()
+        let previous = settings.mrActionIntents[index]
+        mutate(&settings.mrActionIntents[index])
+        let current = settings.mrActionIntents[index]
+        // Preserve a historical application rejection even when fresh evidence repairs it.
+        if previous.state == .failed, current.state != .failed || current.error != previous.error || current.jobID != previous.jobID {
+            recordIntentEvent(previous, state: .failed)
+        }
+        if current.state == .failed { recordIntentEvent(current, state: .failed, now: Date()) }
+        if previous.state != current.state || previous.error != current.error || previous.jobID != current.jobID {
+            if current.state == .completed { recordIntentEvent(current, state: .completed, now: Date()) }
+        }
+        settings.mrActionIntents[index].updatedAt = Date()
+        settings.save()
+    }
+
+    private func recordIntentEvent(_ intent: MRTodoIntent, state: MRAutomationEvent.State, now: Date? = nil) {
+        guard let action = MRAutomationEvent.Action(rawValue: intent.kind.rawValue),
+              !settings.automationEvents.contains(where: { $0.target == intent.target && $0.intentID == intent.id
+                  && $0.jobID == intent.jobID && $0.state == state
+                  && $0.message == intent.error.map(GlabService.redactWorkflowEvidence) }) else { return }
+        let manual = manualRuns.contains(intent.id) || intent.jobID.flatMap { id in settings.assistantHandoffs.first { $0.id == id } }?.manual == true
+        settings.recordAutomationEvent(target: intent.target, action: action, origin: manual ? .manual : .automatic,
+            state: state, message: intent.error, intentID: intent.id, jobID: intent.jobID, now: now ?? intent.updatedAt)
     }
     private func isCurrent(_ host: String, _ username: String) -> Bool {
         glab.resolvedHost == host && glab.currentUsername == username

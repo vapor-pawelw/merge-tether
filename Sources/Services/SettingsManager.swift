@@ -34,6 +34,7 @@ final class SettingsManager {
     var assistantHandoffs: [AssistantAutomationRunner.Handoff]
     var assistantChats: [AssistantAutomationRunner.ChatKey: String]
     var workflowActivity: [MergeWorkflowActivityEntry]
+    var automationEvents: [MRAutomationEvent]
     var mrActionIntents: [MRTodoIntent]
     var routedMRTodoReceipts: Set<MRTodoRouteReceipt>
     var boardPins: Set<BoardCardPin>
@@ -60,6 +61,8 @@ final class SettingsManager {
             .flatMap { try? JSONDecoder().decode([AssistantAutomationRunner.ChatKey: String].self, from: $0) } ?? [:]
         workflowActivity = defaults.data(forKey: Key.workflowActivity)
             .flatMap { try? JSONDecoder().decode([MergeWorkflowActivityEntry].self, from: $0) } ?? []
+        automationEvents = defaults.data(forKey: Key.automationEvents)
+            .flatMap { try? JSONDecoder().decode([MRAutomationEvent].self, from: $0) } ?? []
         mrActionIntents = defaults.data(forKey: Key.mrActionIntents)
             .flatMap { try? JSONDecoder().decode([MRTodoIntent].self, from: $0) } ?? []
         routedMRTodoReceipts = defaults.data(forKey: Key.routedMRTodoReceipts)
@@ -146,6 +149,7 @@ final class SettingsManager {
         if let data = try? JSONEncoder().encode(workflowActivity) {
             defaults.set(data, forKey: Key.workflowActivity)
         }
+        if let data = try? JSONEncoder().encode(automationEvents) { defaults.set(data, forKey: Key.automationEvents) }
         if let data = try? JSONEncoder().encode(mrActionIntents) { defaults.set(data, forKey: Key.mrActionIntents) }
         if let data = try? JSONEncoder().encode(routedMRTodoReceipts) { defaults.set(data, forKey: Key.routedMRTodoReceipts) }
         if let data = try? JSONEncoder().encode(boardPins) { defaults.set(data, forKey: Key.boardPins) }
@@ -231,6 +235,7 @@ final class SettingsManager {
         static let assistantHandoffs = "assistantHandoffs"
         static let assistantChats = "assistantChats"
         static let workflowActivity = "workflowActivity"
+        static let automationEvents = "automationEvents"
         static let mrActionIntents = "mrActionIntents"
         static let routedMRTodoReceipts = "routedMRTodoReceipts"
         static let refreshInterval = "refreshInterval"

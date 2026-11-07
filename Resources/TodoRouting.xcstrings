@@ -1,6 +1,28 @@
 {
   "sourceLanguage": "en",
   "strings": {
+    "todoRouting.assistantUnavailable": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "The selected coding agent CLI is unavailable or not signed in. Check the agent setup before retrying."
+          }
+        }
+      }
+    },
+    "todoRouting.followUpNeedsEvidence": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "The worker finished, but current feedback evidence is missing or work remains. Check the latest feedback verification; a run result alone does not prove completion."
+          }
+        }
+      }
+    },
     "todoRouting.missingRun": {
       "extractionState": "manual",
       "localizations": {

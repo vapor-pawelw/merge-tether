@@ -67,6 +67,12 @@ final class AuthorFeedbackCoordinator {
         return cache[.init(host: host, username: username, projectID: request.projectID, iid: request.iid)]?.1
     }
 
+    func isChecking(for request: GitLabMergeRequest, fingerprint: String) -> Bool {
+        guard let status = status(projectID: request.projectID, iid: request.iid) else { return false }
+        return status.phase == .checking && status.head == request.sha && status.fingerprint == fingerprint
+            && status.semanticContextFingerprint == request.semanticContextFingerprint
+    }
+
     func refresh(request: GitLabMergeRequest, discussions: [GitLabMergeRequestDiscussion], drafts: Int,
                  host: String, user: GitLabAuthenticatedUser) {
         let target = MRAutomationScope.Target(host: host, username: user.username, projectID: request.projectID, iid: request.iid)

@@ -4,6 +4,43 @@ import Testing
 
 @MainActor
 struct AuthorFeedbackCoordinatorTests {
+    @Test func checkingIsBoundToTheCurrentHeadDiscussionAndSemanticContext() async throws {
+        try await withFixture { fixture in
+            fixture.settings.automation.autoResolveAcceptedFeedback = false
+            fixture.settings.automation.authorFeedback.isEnabled = true
+            let coordinator = fixture.coordinator()
+            let request = try JSONDecoder().decode(GitLabMergeRequest.self, from: Data(Fixture.request.utf8))
+            let fingerprint = try #require(ReviewVerdict.fingerprint(fixture.discussions()))
+            try fixture.start(coordinator)
+            #expect(coordinator.isChecking(for: request, fingerprint: fingerprint))
+            #expect(!coordinator.isChecking(for: request, fingerprint: "changed discussions"))
+            for changed in [Fixture.request.replacingOccurrences(of: Fixture.sha, with: String(repeating: "b", count: 40)),
+                            Fixture.request.replacingOccurrences(of: "Example MR", with: "Changed requirements")] {
+                let edited = try JSONDecoder().decode(GitLabMergeRequest.self, from: Data(changed.utf8))
+                #expect(!coordinator.isChecking(for: edited, fingerprint: fingerprint))
+            }
+            try await fixture.run(coordinator)
+            #expect(!coordinator.isChecking(for: request, fingerprint: fingerprint))
+        }
+    }
+
+    @Test func completedFeedbackVerificationNotifiesTheMRCompletionConsumer() async throws {
+        try await withFixture { fixture in
+            fixture.settings.automation.autoResolveAcceptedFeedback = false
+            fixture.settings.automation.authorFeedback.isEnabled = true
+            let monitor = MergeRequestAttentionMonitor(glab: fixture.glab, settings: fixture.settings,
+                reportDirectory: nil, canAutomate: { _ in true }, verifyReReview: { _, _, _ in
+                    .init(notes: [.init(noteID: 10, state: .addressed, reason: "Current code and existing reply verified.")])
+                })
+            var checked = 0
+            monitor.onAuthorFeedbackChecked = { checked += 1 }
+            monitor.refresh(host: Fixture.host, username: "me", todos: [])
+            let coordinator = try #require(monitor.authorFeedbackCoordinator)
+            try await fixture.run(coordinator)
+            #expect(checked == 1)
+        }
+    }
+
     @Test func passesCurrentMergeRequestDescriptionToSemanticVerification() async throws {
         try await withFixture { fixture in
             let request = Fixture.request.replacingOccurrences(of: "\"title\":\"Example MR\"",

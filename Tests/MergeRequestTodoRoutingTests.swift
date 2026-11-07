@@ -44,7 +44,16 @@ import Testing
         case "$2" in
           /user) printf '%s' '{"id":1,"username":"me"}' ;;
           */discussions*) cat "$root/discussions" ;;
-          */merge_requests/11) cat "$root/mr" ;;
+          */merge_requests/11)
+            if [ -f "$root/pause-mr" ]; then
+              touch "$root/mr-entered"
+              attempts=0
+              while [ ! -f "$root/release-mr" ] && [ "$attempts" -lt 500 ]; do
+                sleep 0.01
+                attempts=$((attempts + 1))
+              done
+            fi
+            cat "$root/mr" ;;
           *) exit 2 ;;
         esac
         """
@@ -67,6 +76,185 @@ import Testing
     }
 
     private var target: MRAutomationScope.Target { .init(host: "gitlab.example.test", username: "me", projectID: 7, iid: 11) }
+
+    private func completedFollowUp(_ fixture: Fixture, withReply: Bool = true) throws {
+        let request = try JSONDecoder().decode(GitLabMergeRequest.self, from: Data(contentsOf: fixture.root.appending(path: "mr")))
+        let jobID = UUID()
+        fixture.settings.assistantHandoffs.append(.init(id: jobID,
+            key: .init(assistant: .codex, work: .init(host: target.host, projectID: 7, iid: 11),
+                       username: "me", workspace: "", access: .configuredTools), title: "Follow up", prompt: "Follow up",
+            createdAt: Date(), allowsPush: false, feedbackNoteIDs: [42],
+            execution: .init(state: .succeeded, summary: "Already addressed; no duplicate reply needed."),
+            workflow: .followUp, expectedHeadSHA: request.sha))
+        fixture.settings.mrActionIntents.append(.init(id: UUID(), target: target, kind: .followUp, state: .running,
+            todoIDs: [], noteIDs: [42], sourceEvents: [], request: request, headSHA: request.sha!, jobID: jobID, updatedAt: Date()))
+        let reply = withReply ? #",{"id":43,"author":{"id":1,"username":"me"},"system":false,"body":"Fixed with source and test evidence."}"# : ""
+        try (#"[{"id":"d","notes":[{"id":42,"author":{"id":2,"username":"other"},"system":false,"resolvable":true,"resolved":false,"body":"Please fix this."}"#
+            + reply + "]}]").write(to: fixture.root.appending(path: "discussions"), atomically: true, encoding: .utf8)
+    }
+
+    @Test("An independently verified no-op follow-up completes without a draft publication receipt",
+          arguments: [ReReviewAssessment.Note.State.addressed, .informational])
+    func verifiedNoOpFollowUpCompletes(state: ReReviewAssessment.Note.State) async throws {
+        let f = try fixture(owned: true); defer { f.cleanup() }
+        try completedFollowUp(f, withReply: state != .informational)
+        let router = MergeRequestTodoRouter(settings: f.settings, glab: f.glab, canAutomate: { false }, proofDirectory: f.root.appending(path: "proofs"))
+        router.followUpAssessment = { _, _ in .init(notes: [.init(noteID: 42, state: state, reason: "Verified against current code and discussion.")]) }
+        _ = await router.process([], host: target.host, username: target.username, managed: [target])
+        #expect(f.settings.mrActionIntents[0].state == .completed)
+        #expect(f.settings.mrActionIntents[0].error == nil)
+        #expect(SettingsManager(defaults: f.defaults).mrActionIntents[0].state == .completed)
+        #expect(!FileManager.default.fileExists(atPath: f.root.appending(path: "proofs").path))
+    }
+
+    @Test func recoveredNoOpKeepsThePreviousApplicationFailureInHistory() async throws {
+        let f = try fixture(owned: true); defer { f.cleanup() }
+        try completedFollowUp(f)
+        let previous = "This action needs a fresh check against the current merge request."
+        f.settings.mrActionIntents[0].state = .failed
+        f.settings.mrActionIntents[0].error = previous
+        let router = MergeRequestTodoRouter(settings: f.settings, glab: f.glab, canAutomate: { false }, proofDirectory: f.root.appending(path: "proofs"))
+        router.followUpAssessment = { _, _ in .init(notes: [.init(noteID: 42, state: .addressed, reason: "Existing reply and code verified.")]) }
+        _ = await router.process([], host: target.host, username: target.username, managed: [target])
+        _ = await router.process([], host: target.host, username: target.username, managed: [target])
+        #expect(f.settings.mrActionIntents[0].state == .completed)
+        let retained = SettingsManager(defaults: f.defaults).automationEvents.filter { $0.intentID == f.settings.mrActionIntents[0].id && $0.state == .failed }
+        #expect(retained.count == 1)
+        #expect(retained.first?.message == previous)
+        #expect(retained.first?.jobID == f.settings.mrActionIntents[0].jobID)
+    }
+
+    @Test func blockedVerificationCannotBeClearedByANoWorkAssessment() async throws {
+        let f = try fixture(owned: true); defer { f.cleanup() }
+        try completedFollowUp(f)
+        f.settings.assistantHandoffs[0].execution = .init(state: .blocked, blocker: "Temporary-file creation was denied during tests.")
+        let router = MergeRequestTodoRouter(settings: f.settings, glab: f.glab, canAutomate: { false }, proofDirectory: f.root.appending(path: "proofs"))
+        router.followUpAssessment = { _, _ in .init(notes: [.init(noteID: 42, state: .addressed, reason: "Current code appears addressed.")]) }
+        _ = await router.process([], host: target.host, username: target.username, managed: [target])
+        #expect(f.settings.mrActionIntents[0].state == .failed)
+        #expect(f.settings.mrActionIntents[0].error == "Temporary-file creation was denied during tests.")
+    }
+
+    @Test func coldStartWaitsForCurrentVerificationThenReconcilesWithoutAnotherWorkerOrManualRefresh() async throws {
+        let f = try fixture(owned: true); defer { f.cleanup() }
+        try completedFollowUp(f)
+        let verification = Readiness()
+        verification.ready = true
+        let router = MergeRequestTodoRouter(settings: f.settings, glab: f.glab, canAutomate: { false }, proofDirectory: f.root.appending(path: "proofs"))
+        router.followUpVerificationPending = { _, _ in verification.ready }
+        router.followUpAssessment = { _, _ in verification.ready ? nil : .init(notes: [.init(noteID: 42, state: .addressed, reason: "Current code and published response verified.")]) }
+        _ = await router.process([], host: target.host, username: target.username, managed: [target])
+        #expect(f.settings.mrActionIntents[0].state == .running)
+        #expect(f.settings.mrActionIntents[0].error == nil)
+        #expect(!f.settings.automationEvents.contains { $0.state == .failed })
+        verification.ready = false
+        await router.refreshCompletionEvidence(host: target.host, username: target.username)
+        #expect(f.settings.mrActionIntents[0].state == .completed)
+        #expect(f.settings.assistantHandoffs.count == 1)
+    }
+
+    @Test func completionRefreshDoesNotConsumeEvidenceForAnotherAccount() async throws {
+        let f = try fixture(owned: true); defer { f.cleanup() }
+        try completedFollowUp(f)
+        let router = MergeRequestTodoRouter(settings: f.settings, glab: f.glab, canAutomate: { false })
+        router.followUpAssessment = { _, _ in .init(notes: [.init(noteID: 42, state: .addressed, reason: "Verified.")]) }
+        await router.refreshCompletionEvidence(host: target.host, username: "another")
+        #expect(f.settings.mrActionIntents[0].state == .running)
+        #expect(f.settings.automationEvents.isEmpty)
+    }
+
+    @Test("An early failed or missing old worker cannot overwrite a retry during the live MR read",
+          arguments: ["failed", "blocked", "missing", "sameIDAppeared", "closedMR"])
+    func replacingAWorkerWhileCompletionRefreshReadsTheMRPreservesTheReplacement(scenario: String) async throws {
+        let f = try fixture(owned: true); defer { f.cleanup() }
+        try completedFollowUp(f)
+        if scenario == "missing" || scenario == "sameIDAppeared" { f.settings.assistantHandoffs.removeAll() }
+        else { f.settings.assistantHandoffs[0].execution = .init(state: scenario == "blocked" ? .blocked : .failed, error: "Old worker stopped.") }
+        if scenario == "closedMR" {
+            let file = f.root.appending(path: "mr")
+            let text = try String(contentsOf: file, encoding: .utf8)
+            try text.replacingOccurrences(of: #""state":"opened""#, with: #""state":"closed""#)
+                .write(to: file, atomically: true, encoding: .utf8)
+        }
+        try Data().write(to: f.root.appending(path: "pause-mr"))
+        let router = MergeRequestTodoRouter(settings: f.settings, glab: f.glab, canAutomate: { false })
+        let task = Task { await router.refreshCompletionEvidence(host: target.host, username: target.username) }
+        defer { task.cancel(); try? Data().write(to: f.root.appending(path: "release-mr")) }
+        let deadline = ContinuousClock.now + .seconds(3)
+        while !FileManager.default.fileExists(atPath: f.root.appending(path: "mr-entered").path), ContinuousClock.now < deadline {
+            try await Task.sleep(for: .milliseconds(10))
+        }
+        try #require(FileManager.default.fileExists(atPath: f.root.appending(path: "mr-entered").path))
+        let replacementID: UUID
+        if scenario == "sameIDAppeared" { replacementID = try #require(f.settings.mrActionIntents[0].jobID) }
+        else { replacementID = UUID() }
+        let replacementHead = scenario == "sameIDAppeared" ? f.settings.mrActionIntents[0].headSHA : String(repeating: "b", count: 40)
+        f.settings.assistantHandoffs.append(.init(id: replacementID,
+            key: .init(assistant: .codex, work: .init(host: target.host, projectID: 7, iid: 11),
+                username: "me", workspace: "", access: .configuredTools), title: "Retry", prompt: "Retry",
+            createdAt: Date(), allowsPush: false, execution: .init(state: .running),
+            workflow: .followUp, expectedHeadSHA: replacementHead))
+        f.settings.mrActionIntents[0].jobID = replacementID
+        f.settings.mrActionIntents[0].headSHA = replacementHead
+        f.settings.mrActionIntents[0].state = .running
+        f.settings.mrActionIntents[0].error = nil
+        try Data().write(to: f.root.appending(path: "release-mr"))
+        await task.value
+        #expect(f.settings.mrActionIntents[0].jobID == replacementID)
+        #expect(f.settings.mrActionIntents[0].headSHA == replacementHead)
+        #expect(f.settings.mrActionIntents[0].state == .running)
+        #expect(f.settings.mrActionIntents[0].error == nil)
+        #expect(f.settings.automationEvents.isEmpty)
+    }
+
+    @Test("A successful worker cannot substitute for complete current no-work evidence",
+          arguments: ["blocking", "uncertain", "missingAssessment", "missingNote", "missingReply", "newExpectation", "newHead", "newContext", "editedDiscussion", "wrongAccount", "replacementRun"])
+    func unverifiedNoOpFollowUpRemainsFailed(scenario: String) async throws {
+        let f = try fixture(owned: true); defer { f.cleanup() }
+        try completedFollowUp(f, withReply: scenario != "missingReply")
+        let router = MergeRequestTodoRouter(settings: f.settings, glab: f.glab, canAutomate: { false }, proofDirectory: f.root.appending(path: "proofs"))
+        router.followUpAssessment = { _, _ in
+            if scenario == "missingAssessment" { return nil }
+            var notes: [ReReviewAssessment.Note] = [.init(noteID: 42,
+                state: scenario == "blocking" ? .blocking : scenario == "uncertain" ? .uncertain : .addressed,
+                reason: "Current evidence.")]
+            if scenario == "missingNote" { notes = [] }
+            if scenario == "newExpectation" {
+                let file = f.root.appending(path: "discussions")
+                let text = try! String(contentsOf: file, encoding: .utf8)
+                try! text.replacingOccurrences(of: "]}]", with: #",{"id":44,"author":{"id":2,"username":"other"},"system":false,"body":"Also fix the new case."}]}]"#)
+                    .write(to: file, atomically: true, encoding: .utf8)
+            }
+            if scenario == "newHead" || scenario == "newContext" {
+                let file = f.root.appending(path: "mr")
+                let text = try! String(contentsOf: file, encoding: .utf8)
+                try! text.replacingOccurrences(of: scenario == "newHead" ? String(repeating: "a", count: 40) : "Example MR",
+                    with: scenario == "newHead" ? String(repeating: "b", count: 40) : "Changed expectations")
+                    .write(to: file, atomically: true, encoding: .utf8)
+            }
+            if scenario == "editedDiscussion" {
+                let file = f.root.appending(path: "discussions")
+                let text = try! String(contentsOf: file, encoding: .utf8)
+                try! text.replacingOccurrences(of: "Please fix this.", with: "Please fix a different case.")
+                    .write(to: file, atomically: true, encoding: .utf8)
+            }
+            if scenario == "wrongAccount" { f.glab.currentUsername = "another" }
+            if scenario == "replacementRun" {
+                let replacementID = UUID()
+                var replacement = f.settings.assistantHandoffs[0]
+                replacement = .init(id: replacementID, key: replacement.key, title: replacement.title,
+                    prompt: replacement.prompt, createdAt: Date(), allowsPush: false,
+                    execution: .init(state: .running), workflow: .followUp, expectedHeadSHA: replacement.expectedHeadSHA)
+                f.settings.assistantHandoffs.append(replacement)
+                f.settings.mrActionIntents[0].jobID = replacementID
+                f.settings.mrActionIntents[0].state = .running
+            }
+            return .init(notes: notes)
+        }
+        _ = await router.process([], host: target.host, username: target.username, managed: [target])
+        #expect(f.settings.mrActionIntents[0].state != .completed)
+        if scenario == "replacementRun" { #expect(f.settings.mrActionIntents[0].state == .running) }
+    }
     private func todo(_ id: Int = 10, action: ActionName = .reviewRequested, linked: Bool = false,
                       suffix: String = "", url: URL? = nil) -> Todo {
         .init(id: id, actionName: action, targetType: .mergeRequest,

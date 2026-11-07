@@ -9,8 +9,8 @@ struct MergeWorkflowActivityEntry: Codable, Identifiable {
     let id: String
     let event: MergeWorkflowEvent
     let createdAt: Date
-    fileprivate let host: String
-    fileprivate let user: GitLabAuthenticatedUser
+    let host: String
+    let user: GitLabAuthenticatedUser
     var state: MergeWorkflowActivityState
     var summary: String?
     var chatURL: URL?
