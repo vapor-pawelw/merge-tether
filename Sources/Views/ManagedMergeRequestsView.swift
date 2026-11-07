@@ -133,7 +133,14 @@ struct ManagedMergeRequestsView: View {
                             if let event = monitor.authoredMergeRequests.workflow.entries.first(where: {
                                 $0.event.mergeRequest.projectID == row.item.id.projectID && $0.event.mergeRequest.iid == row.item.id.iid
                             }) {
-                                Text(event.event.kind.displayLabel).font(.caption).foregroundStyle(.secondary)
+                                VStack(alignment: .leading, spacing: 2) {
+                                    HStack(alignment: .firstTextBaseline, spacing: 4) {
+                                        Text(.Menu.menuScopeLatestRecordedEvent)
+                                        Text(event.event.kind.displayLabel)
+                                    }
+                                    Text(event.createdAt, format: .dateTime.year().month().day().hour().minute().second())
+                                }
+                                .font(.caption).foregroundStyle(.secondary)
                             }
                             HStack {
                                 MRAutomationScopeMenu(settings: monitor.settings, target: row.target,

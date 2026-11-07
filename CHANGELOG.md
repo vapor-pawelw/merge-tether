@@ -75,6 +75,8 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 
 ### Fixed
 
+- Avoid requesting replies or coding follow-ups for informational review comments.
+- Label the latest recorded Scope event with its timestamp so historical triggers do not read as current MR status.
 - Reduce repeated work when updating the menu-bar attention indicator.
 - Keep active verification in progress and prevent reconciled historical failures from replacing current draft actions on Mac or iPhone.
 - Keep rejected reply checks stable across restarts and partial publication, and retain owed author replies on Draft MR cards.

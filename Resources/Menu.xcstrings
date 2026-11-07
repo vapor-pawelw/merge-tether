@@ -67,6 +67,17 @@
         }
       }
     },
+    "menu.scope.latestRecordedEvent": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Latest recorded event:"
+          }
+        }
+      }
+    },
     "menu.scope.reReviewRequested": {
       "extractionState": "manual",
       "localizations": {

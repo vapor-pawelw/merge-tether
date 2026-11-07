@@ -27,6 +27,18 @@ struct ReReviewAssessment: Codable, Sendable {
         })
     }
 
+    /// The thread root anchors presentation, while each owed note remains the worker's scope.
+    func missingPublishedRepliesByThread(in discussions: [GitLabMergeRequestDiscussion], authorID: Int) -> [Int: Set<Int>] {
+        let owed = missingPublishedReplyNoteIDs(in: discussions, authorID: authorID)
+        var threads: [Int: Set<Int>] = [:]
+        for discussion in discussions {
+            guard let rootID = discussion.notes.first?.id else { continue }
+            let scoped = Set(discussion.notes.compactMap(\.id)).intersection(owed)
+            if !scoped.isEmpty { threads[rootID, default: []].formUnion(scoped) }
+        }
+        return threads
+    }
+
     enum ValidationError: Error { case incompleteEvidence }
     func reviewers(in discussions: [GitLabMergeRequestDiscussion], authorID: Int) throws -> [Int: Int] {
         let external = discussions.flatMap(\.notes).filter { $0.system != true && $0.author?.id != authorID }

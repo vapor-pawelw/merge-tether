@@ -4,6 +4,103 @@ import Testing
 
 @MainActor
 struct AuthorFeedbackCoordinatorTests {
+    @Test(arguments: [7, 8], ["readyMissing", "readyPublished", "draftMissing", "draftPublished", "pendingDraftMissing"])
+    func addressedChildKeepsThreadReplyIndicatorAndDispatchesItsExactNote(childAuthorID: Int, scenario: String) async throws {
+        try await withFixture { fixture in
+            let draft = scenario.hasPrefix("draft")
+            let published = scenario.hasSuffix("Published")
+            let pendingDrafts = scenario == "pendingDraftMissing" ? 1 : 0
+            let readOnly = draft || pendingDrafts > 0
+            let requestJSON = Fixture.request.replacingOccurrences(of: "\"draft\":false", with: "\"draft\":\(draft)")
+            try fixture.write("request.json", requestJSON)
+            try fixture.write("approvals.json", #"{"approved_by":[]}"#)
+            if pendingDrafts > 0 {
+                try fixture.write("drafts.json", #"[{"id":30,"author_id":3,"note":"An unrelated private reply"}]"#)
+            }
+            let authorReply = published ? #",{"id":30,"author":{"id":3,"username":"me"},"system":false,"body":"The scoped correction is verified.","resolvable":true,"resolved":false}"# : ""
+            try fixture.write("discussions.json", #"[{"id":"thread-a","notes":[{"id":10,"author":{"id":7,"username":"alice"},"system":false,"body":"Positive acknowledgement","resolvable":true,"resolved":false},{"id":20,"author":{"id":\#(childAuthorID),"username":"reviewer"},"system":false,"body":"Please also rename X","resolvable":true,"resolved":false}\#(authorReply)]}]"#)
+            let coordinator = fixture.coordinator(assessment: .init(notes: [
+                .init(noteID: 10, state: .informational, reason: "The root requests no action"),
+                .init(noteID: 20, state: .addressed, reason: "The child correction is verified")
+            ]))
+            var requested: Set<Int> = []
+            coordinator.onNeedsWork = { _, notes, _ in requested = notes }
+            try await fixture.run(coordinator, requestJSON: requestJSON, drafts: pendingDrafts)
+            let status = try #require(coordinator.status(projectID: 1, iid: 2))
+            #expect(status.replyNoteIDs == (published ? [] : [10]))
+            let expectedWork: Set<Int> = !readOnly && !published ? [20] : []
+            #expect(status.followUpNoteIDs == expectedWork && requested == expectedWork)
+            #expect(status.phase == (pendingDrafts > 0 ? .waitingPublication : .complete))
+            #expect(status.needsAttention == !published)
+            if !readOnly { #expect(status.findings.first?.state == .waitingAcceptance) }
+            #expect(status.findings.allSatisfy { !$0.canResolve })
+            #expect(!fixture.resolved)
+            let request = try JSONDecoder().decode(GitLabMergeRequest.self, from: Data(requestJSON.utf8))
+            let discussions = try fixture.discussions()
+            var item = MergeRequestAttentionMonitor.Item(id: .init(projectID: 1, iid: 2), title: request.title,
+                url: request.webURL, needsDiscussion: true, mergeRequest: request, isAuthored: true,
+                feedback: discussions.flatMap(\.notes).filter { $0.author?.id != 3 })
+            item.observedDiscussionFingerprint = ReviewVerdict.fingerprint(discussions)
+            item.authorFeedbackStatus = status
+            let visible = item.presentingVerifiedAuthorFeedback()
+            #expect(visible.feedback.contains { $0.id == 20 } == !published)
+        }
+    }
+
+    @Test(arguments: [ReReviewAssessment.Note.State.informational, .addressed])
+    func openRootRequiresAnAuthorReplyOnlyForAddressedActionableFeedback(state: ReReviewAssessment.Note.State) async throws {
+        try await withFixture { fixture in
+            try fixture.write("approvals.json", #"{"approved_by":[]}"#)
+            try fixture.write("discussions.json", #"[{"id":"thread-a","notes":[{"id":10,"author":{"id":7,"username":"alice"},"system":false,"body":"Scoped feedback","resolvable":true,"resolved":false}]}]"#)
+            let coordinator = fixture.coordinator(assessment: .init(notes: [
+                .init(noteID: 10, state: state, reason: "Current scoped feedback assessment")
+            ]))
+            var requested: Set<Int> = []
+            coordinator.onNeedsWork = { _, notes, _ in requested = notes }
+            try await fixture.run(coordinator)
+            let status = try #require(coordinator.status(projectID: 1, iid: 2))
+            let requiresReply = state == .addressed
+            #expect(status.phase == .complete)
+            #expect(status.replyNoteIDs == (requiresReply ? [10] : []))
+            #expect(status.followUpNoteIDs == (requiresReply ? [10] : []))
+            #expect(requested == (requiresReply ? [10] : []))
+            #expect(status.findings.first?.state == .waitingAcceptance)
+            #expect(status.findings.allSatisfy { !$0.canResolve })
+            #expect(!fixture.resolved)
+            let request = try JSONDecoder().decode(GitLabMergeRequest.self, from: Data(Fixture.request.utf8))
+            var item = MergeRequestAttentionMonitor.Item(id: .init(projectID: 1, iid: 2), title: request.title,
+                url: request.webURL, needsDiscussion: true, mergeRequest: request, isAuthored: true,
+                feedback: [try #require(fixture.discussions().first?.notes.first)])
+            item.observedDiscussionFingerprint = ReviewVerdict.fingerprint(try fixture.discussions())
+            item.authorFeedbackStatus = status
+            let row = MergeRequestBoardSnapshot.Row(item: item.presentingVerifiedAuthorFeedback(), latestJob: nil, intents: [])
+            #expect(row.needsAttention == requiresReply)
+            #expect((MRHumanAction(row: row, assistantReady: true)?.action == .handleFeedback) == requiresReply)
+        }
+    }
+
+    @Test(arguments: [ReReviewAssessment.Note.State.blocking, .uncertain])
+    func informationalRootDoesNotHideAnActionableChild(state: ReReviewAssessment.Note.State) async throws {
+        try await withFixture { fixture in
+            try fixture.write("approvals.json", #"{"approved_by":[]}"#)
+            try fixture.write("discussions.json", #"[{"id":"thread-a","notes":[{"id":10,"author":{"id":7,"username":"alice"},"system":false,"body":"Positive acknowledgement","resolvable":true,"resolved":false},{"id":20,"author":{"id":8,"username":"bob"},"system":false,"body":"One correction still needs work","resolvable":false}]}]"#)
+            let coordinator = fixture.coordinator(assessment: .init(notes: [
+                .init(noteID: 10, state: .informational, reason: "No action requested"),
+                .init(noteID: 20, state: state, reason: "Remaining expectation needs work or verification")
+            ]))
+            var requested: Set<Int> = []
+            coordinator.onNeedsWork = { _, notes, _ in requested = notes }
+            try await fixture.run(coordinator)
+            let status = try #require(coordinator.status(projectID: 1, iid: 2))
+            #expect(status.replyNoteIDs.isEmpty)
+            #expect(status.followUpNoteIDs == [20] && requested == [20])
+            #expect(status.needsAttention)
+            #expect(status.findings.first?.state == .needsChanges)
+            #expect(status.findings.allSatisfy { !$0.canResolve })
+            #expect(!fixture.resolved)
+        }
+    }
+
     @Test(arguments: ["missingReply", "publishedReply", "resolved", "informational"])
     func draftAssessmentKeepsAnOwedPublishedReplyVisibleWithoutDispatchingWork(scenario: String) async throws {
         try await withFixture { fixture in

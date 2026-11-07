@@ -205,11 +205,13 @@ final class AuthorFeedbackCoordinator {
             let (threads, user, drafts) = try await (liveThreads, liveUser, liveDrafts)
             guard isCurrent(input), user == input.user, drafts == input.drafts,
                   ReviewVerdict.fingerprint(threads) == input.fingerprint else { throw CancellationError() }
+            let repliesByThread = assessment.missingPublishedRepliesByThread(in: threads, authorID: input.user.id)
+            let owedNotes = Set(repliesByThread.values.flatMap { $0 })
             let completed = AuthorFeedbackStatus(head: request.sha ?? "", fingerprint: input.fingerprint,
                 semanticContextFingerprint: request.semanticContextFingerprint,
                 phase: drafts > 0 ? .waitingPublication : .complete, pendingDraftCount: drafts,
-                replyNoteIDs: assessment.missingPublishedReplyNoteIDs(in: threads, authorID: input.user.id),
-                addressedNoteIDs: Set(assessment.notes.filter { $0.state == .addressed || $0.state == .informational }.map(\.noteID)))
+                replyNoteIDs: Set(repliesByThread.keys),
+                addressedNoteIDs: Set(assessment.notes.filter { $0.state == .addressed || $0.state == .informational }.map(\.noteID)).subtracting(owedNotes))
             let changed = statuses[input.target] != completed
             statuses[input.target] = completed
             if changed { onRemoteChange?() }
@@ -264,19 +266,20 @@ final class AuthorFeedbackCoordinator {
         var followUp = Set(assessment.notes.filter {
             outstanding.contains($0.noteID) && ($0.state == .blocking || $0.state == .uncertain)
         }.map(\.noteID))
-        var missingReplies: Set<Int> = []
-        for finding in findings where finding.state == .waitingAcceptance {
-            guard let thread = threads.first(where: { $0.id == finding.discussionID }),
-                  !thread.notes.contains(where: { $0.author?.id == input.user.id && ($0.id ?? 0) > finding.id }) else { continue }
-            missingReplies.insert(finding.id)
+        let repliesByThread = assessment.missingPublishedRepliesByThread(in: threads, authorID: input.user.id)
+        let missingReplies = Set(findings.filter {
+            $0.state == .waitingAcceptance && repliesByThread[$0.id] != nil
+        }.map(\.id))
+        let owedNotes = missingReplies.reduce(into: Set<Int>()) { notes, rootID in
+            notes.formUnion(repliesByThread[rootID] ?? [])
         }
-        followUp.formUnion(missingReplies)
+        followUp.formUnion(owedNotes)
         if !followUp.isEmpty, isCurrent(input) { await onNeedsWork?(request, followUp, input.fingerprint) }
         guard isCurrent(input) else { throw CancellationError() }
         let completed = AuthorFeedbackStatus(head: request.sha ?? "", fingerprint: input.fingerprint,
             semanticContextFingerprint: request.semanticContextFingerprint, phase: .complete,
             findings: findings, acceptedReviewerIDs: accepted, followUpNoteIDs: followUp, replyNoteIDs: missingReplies,
-            addressedNoteIDs: Set(assessment.notes.filter { $0.state == .addressed || $0.state == .informational }.map(\.noteID)))
+            addressedNoteIDs: Set(assessment.notes.filter { $0.state == .addressed || $0.state == .informational }.map(\.noteID)).subtracting(owedNotes))
         let updated = statuses[input.target] != completed
         statuses[input.target] = completed
         if changed || updated { onRemoteChange?() }
