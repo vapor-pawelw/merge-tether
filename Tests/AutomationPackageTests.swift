@@ -3,6 +3,23 @@ import Testing
 @testable import GitLabTodos
 
 struct AutomationPackageTests {
+    @Test(arguments: [AutomationPreset.full, .checkpoints, .manual])
+    func pipelineOwnershipPermissionFollowsProfileAndPersists(preset: AutomationPreset) throws {
+        var settings = AutomationSettings()
+        settings.applyPreset(preset, for: .codex)
+        let encoded = try #require(JSONSerialization.jsonObject(with: JSONEncoder().encode(settings)) as? [String: Any])
+        #expect(encoded["autoClaimPipelineFailures"] as? Bool == (preset == .full))
+        let migrated = try JSONDecoder().decode(AutomationSettings.self,
+            from: Data("{\"baselinePreset\":\"\(preset.rawValue)\",\"assistantDefaultsVersion\":1}".utf8))
+        let migrationJSON = try #require(JSONSerialization.jsonObject(with: JSONEncoder().encode(migrated)) as? [String: Any])
+        #expect(migrationJSON["autoClaimPipelineFailures"] as? Bool == (preset == .full))
+        let customized = try JSONDecoder().decode(AutomationSettings.self,
+            from: Data(#"{"baselinePreset":"full","autoClaimPipelineFailures":false,"allowFollowUpPush":false}"#.utf8))
+        let explicitJSON = try #require(JSONSerialization.jsonObject(with: JSONEncoder().encode(customized)) as? [String: Any])
+        #expect(explicitJSON["autoClaimPipelineFailures"] as? Bool == false)
+        #expect(!customized.allowFollowUpPush)
+    }
+
     @Test func selectedScopeMixesRepositoriesAndMRsAndKeepsExplicitPauses() throws {
         let first = MRAutomationScope.Target(host: "gitlab.example.test", username: "me", projectID: 1, iid: 42)
         let sibling = MRAutomationScope.Target(host: first.host, username: first.username, projectID: 1, iid: 43)

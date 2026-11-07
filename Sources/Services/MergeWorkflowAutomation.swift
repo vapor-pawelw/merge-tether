@@ -36,6 +36,32 @@ final class MergeWorkflowAutomation {
     private let monitor = MergeWorkflowMonitor()
     private var work: Task<Void, Never>?
     private var polling = false
+    private var confirmedPipelineHandoffs: Set<String> = []
+    @ObservationIgnored var onRemoteChange: (() -> Void)?
+
+    func isAutomaticallyProcessingPipeline(_ request: GitLabMergeRequest) -> Bool {
+        guard let host = glab.resolvedHost, let username = glab.currentUsername else { return false }
+        // A confirmed request can precede GitLab's next MR-detail response.
+        // Keep that gap neutral even if a to-do route requested the pipeline.
+        if settings.pipelineRefreshAttempts.contains(where: {
+            $0.createdPipelineID != nil && $0.target.host == host && $0.target.username == username
+                && $0.userID == request.author.id && $0.target.projectID == request.projectID && $0.target.iid == request.iid
+                && $0.oldPipelineID == request.headPipeline?.id && $0.sourceSHA == request.sha
+                && $0.sourceProjectID == request.sourceProjectID && $0.sourceBranch == request.sourceBranch
+                && $0.targetProjectID == request.targetProjectID && $0.targetBranch == request.targetBranch
+        }) { return true }
+        return entries.contains { entry in
+            guard entry.event.kind == .pipelineFailure, entry.event.mergeRequest.projectID == request.projectID,
+                  entry.event.mergeRequest.iid == request.iid, entry.event.mergeRequest.sha == request.sha else { return false }
+            switch entry.state {
+            case .queued, .running, .waitingForAssistant: return true
+            case .alreadyRegistered:
+                guard let key = pipelineKey(entry) else { return false }
+                return detector.hasActiveReservation(for: key) || AssistantAutomationRunner.isWorking(on: workKey(entry))
+            default: return false
+            }
+        }
+    }
 
     init(
         settings: SettingsManager, glab: GlabService, notifications: NotificationService,
@@ -153,18 +179,17 @@ final class MergeWorkflowAutomation {
             update(id, .alreadyRegistered)
             return
         }
+        confirmedPipelineHandoffs.insert(id)
         update(id, .queued)
         startNext()
     }
 
     private func reconsiderRegisteredPipelines() {
-        for entry in entries where entry.state == .alreadyRegistered {
-            guard let key = pipelineKey(entry), detector.status(for: key) == .unverified,
-                  !AssistantAutomationRunner.isWorking(on: workKey(entry)),
+        for entry in entries where entry.state == .alreadyRegistered || entry.state == .awaitingPipelineHandoff {
+            guard let key = pipelineKey(entry),
                   configuredRule(for: entry.event)?.mode == .assistant
             else { continue }
-
-            update(entry.id, .awaitingPipelineHandoff)
+            update(entry.id, pipelineDisposition(entry, key: key))
         }
     }
 
@@ -183,8 +208,7 @@ final class MergeWorkflowAutomation {
         case .assistant:
             if event.kind == .pipelineFailure {
                 if let key = pipelineKey(entry) {
-                    entry.state = detector.status(for: key) == .registered || AssistantAutomationRunner.isWorking(on: workKey(entry))
-                        ? .alreadyRegistered : .awaitingPipelineHandoff
+                    entry.state = pipelineDisposition(entry, key: key)
                 } else {
                     entry.state = .skipped
                 }
@@ -220,8 +244,15 @@ final class MergeWorkflowAutomation {
                     try await execute(next)
                 } catch is CancellationError {
                     update(next.id, .skipped)
+                } catch PipelineRefreshError.ownershipReserved {
+                    update(next.id, .alreadyRegistered)
                 } catch {
                     update(next.id, .failed)
+                    if let error = error as? PipelineRefreshError,
+                       let index = history.firstIndex(where: { $0.id == next.id }) {
+                        history[index].summary = error.errorDescription
+                        saveHistory()
+                    }
                     Log.monitor.error("Merge workflow execution failed: \(String(describing: error), privacy: .private)")
                 }
             }
@@ -246,9 +277,20 @@ final class MergeWorkflowAutomation {
         if event.kind == .pipelineFailure {
             guard let key = pipelineKey(entry), latest.author.id == entry.user.id,
                   !AssistantAutomationRunner.isWorking(on: workKey(entry)),
-                  latest.headPipeline?.id == key.pipelineID, latest.headPipeline?.sha == latest.sha,
+                  latest.headPipeline?.id == key.pipelineID,
                   latest.headPipeline?.status == "failed"
             else { throw CancellationError() }
+            if settings.automation.autoClaimPipelineFailures {
+                if try await glab.refreshStaleFailedPipeline(for: latest, host: entry.host, expectedUser: entry.user,
+                    settings: settings, detector: detector, shouldProceed: { self.shouldProceed(entry) }) {
+                    update(entry.id, .completed)
+                    onRemoteChange?()
+                    return
+                }
+            } else {
+                _ = try await glab.verifiedFailedPipeline(for: latest, host: entry.host, expectedUser: entry.user)
+            }
+            guard shouldProceed(entry) else { throw CancellationError() }
 
             guard let ownedReservation = try detector.registerRun(for: key) else {
                 update(entry.id, .alreadyRegistered)
@@ -292,6 +334,11 @@ final class MergeWorkflowAutomation {
               configuredRule(for: event)?.includes(current) == true,
               shouldProceed(entry), settings.automation == settingsBeforeLaunch
         else { throw CancellationError() }
+        if event.kind == .pipelineFailure {
+            guard current.headPipeline?.id == event.pipelineID else { throw CancellationError() }
+            _ = try await glab.verifiedFailedPipeline(for: current, host: entry.host, expectedUser: entry.user)
+            guard shouldProceed(entry), settings.automation == settingsBeforeLaunch else { throw CancellationError() }
+        }
         if !feedbackIDs.isEmpty, feedbackIDs != AssistantAutomationRunner.unhandledFeedback(
             feedbackIDs, work: workKey(entry), username: entry.user.username, settings: settings
         ) { throw CancellationError() }
@@ -381,6 +428,16 @@ final class MergeWorkflowAutomation {
         )
     }
 
+    private func pipelineDisposition(
+        _ entry: MergeWorkflowActivityEntry, key: ExistingPipelineWorkDetector.Key
+    ) -> MergeWorkflowActivityState {
+        if detector.hasActiveReservation(for: key) || AssistantAutomationRunner.isWorking(on: workKey(entry)) {
+            return .alreadyRegistered
+        }
+        if settings.automation.autoClaimPipelineFailures { return .queued }
+        return detector.status(for: key) == .registered ? .alreadyRegistered : .awaitingPipelineHandoff
+    }
+
     private func isCurrent(host: String, user: GitLabAuthenticatedUser) -> Bool {
         glab.resolvedHost == host && glab.currentUsername == user.username
     }
@@ -388,6 +445,8 @@ final class MergeWorkflowAutomation {
     private func shouldProceed(_ entry: MergeWorkflowActivityEntry) -> Bool {
         entry.event.kind != .reviewWaiting && isCurrent(host: entry.host, user: entry.user)
             && configuredRule(for: entry.event)?.mode == .assistant
+            && (entry.event.kind != .pipelineFailure || settings.automation.autoClaimPipelineFailures
+                || confirmedPipelineHandoffs.contains(entry.id))
     }
 
     private func update(_ id: String, _ state: MergeWorkflowActivityState) {
@@ -418,7 +477,7 @@ private extension MergeWorkflowTrigger {
     var instructions: String {
         switch self {
         case .pipelineFailure:
-            "Diagnose the pipeline failure. Separate infrastructure failures from code failures. Prepare a scoped fix and a verification plan when the evidence supports one."
+            "Diagnose the pipeline failure and separate infrastructure failures from code failures. Implement and verify warranted in-scope fixes. When follow-up push is enabled, commit and push tested corrections, then re-fetch the remote HEAD and verify source content before saving completion drafts. With push off, pending or failed, keep the result in chat."
         case .reviewUpdate:
             "Re-review the changes since my previous review. Check which of my existing findings still apply to the new head. Prepare private reply drafts."
         case .newDiscussion:

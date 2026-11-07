@@ -39,9 +39,10 @@ struct GitLabMergeRequest: Codable, Sendable {
         let projectID: Int?
         let status: String
         let sha: String?
+        var ref: String? = nil
 
         enum CodingKeys: String, CodingKey {
-            case id, status, sha
+            case id, status, sha, ref
             case projectID = "project_id"
         }
     }

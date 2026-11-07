@@ -151,6 +151,8 @@ struct AutomationSettingsTab: View {
                                  help: .Settings.settingsAutomationCheckpointAutoApproveHelp, reset: .approval)
                 checkpointToggle($draft.allowFollowUpPush, .Settings.settingsAutomationFollowUpPush,
                                  help: .Settings.settingsAutomationFollowUpPushHelp, reset: .followUpPush)
+                checkpointToggle($draft.autoClaimPipelineFailures, .Settings.settingsAutomationPipelineOwnership,
+                                 help: .Settings.settingsAutomationPipelineOwnershipHelp, reset: .pipelineOwnership)
             } header: {
                 Text(.Settings.settingsAutomationCheckpointSection)
             } footer: {

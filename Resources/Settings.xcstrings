@@ -2101,6 +2101,28 @@
           }
         }
       }
+    },
+    "settings.automation.pipelineOwnership": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Automatically claim failed pipeline work"
+          }
+        }
+      }
+    },
+    "settings.automation.pipelineOwnershipHelp": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Check existing reservations and atomically claim unowned failures on your MRs. Turn off to confirm each handoff. Pipeline evidence and push permissions are checked separately."
+          }
+        }
+      }
     }
   },
   "version": "1.0"

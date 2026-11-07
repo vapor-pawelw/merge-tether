@@ -27,6 +27,7 @@ final class SettingsManager {
     var automationReceipts: Set<TodoAutomationReceipt>
     var automationAttemptReceipts: Set<TodoAutomationReceipt>
     var authorFeedbackAttempts: Set<AuthorFeedbackAttempt>
+    var pipelineRefreshAttempts: Set<PipelineRefreshAttempt>
     var pendingTodoAcknowledgements: Set<TodoActionAcknowledgement>
     var conflictReceipts: Set<MergeConflictReceipt>
     var reReviewReceipts: [ReReviewReceipt.Key: ReReviewReceipt]
@@ -53,6 +54,8 @@ final class SettingsManager {
             .flatMap { try? JSONDecoder().decode(Set<TodoAutomationReceipt>.self, from: $0) } ?? []
         authorFeedbackAttempts = defaults.data(forKey: Key.authorFeedbackAttempts)
             .flatMap { try? JSONDecoder().decode(Set<AuthorFeedbackAttempt>.self, from: $0) } ?? []
+        pipelineRefreshAttempts = defaults.data(forKey: Key.pipelineRefreshAttempts)
+            .flatMap { try? JSONDecoder().decode(Set<PipelineRefreshAttempt>.self, from: $0) } ?? []
         pendingTodoAcknowledgements = defaults.data(forKey: Key.pendingTodoAcknowledgements)
             .flatMap { try? JSONDecoder().decode(Set<TodoActionAcknowledgement>.self, from: $0) } ?? []
         assistantHandoffs = defaults.data(forKey: Key.assistantHandoffs)
@@ -137,6 +140,9 @@ final class SettingsManager {
         if let data = try? JSONEncoder().encode(authorFeedbackAttempts) {
             defaults.set(data, forKey: Key.authorFeedbackAttempts)
         }
+        if let data = try? JSONEncoder().encode(pipelineRefreshAttempts) {
+            defaults.set(data, forKey: Key.pipelineRefreshAttempts)
+        }
         if let data = try? JSONEncoder().encode(pendingTodoAcknowledgements) {
             defaults.set(data, forKey: Key.pendingTodoAcknowledgements)
         }
@@ -201,6 +207,21 @@ final class SettingsManager {
         if previousAutomation != automation { onAutomationChanged?(previousAutomation) }
     }
 
+    /// A non-idempotent CI request must not outrun its replay guard on disk.
+    func savePipelineRefreshAttempt(_ attempt: PipelineRefreshAttempt) -> Bool {
+        pipelineRefreshAttempts.insert(attempt)
+        save()
+        return defaults.synchronize()
+    }
+
+    func saveEnvironmentRecoveryAttempt(_ id: UUID) -> Bool {
+        guard let index = assistantHandoffs.firstIndex(where: { $0.id == id }),
+              assistantHandoffs[index].environmentRecoveryAttempted != true else { return false }
+        assistantHandoffs[index].environmentRecoveryAttempted = true
+        save()
+        return defaults.synchronize()
+    }
+
     var isFirstLaunch: Bool {
         !defaults.bool(forKey: Key.hasLaunchedBefore)
     }
@@ -227,6 +248,7 @@ final class SettingsManager {
         static let automationReceipts = "automationReceipts"
         static let automationAttemptReceipts = "automationAttemptReceipts"
         static let authorFeedbackAttempts = "authorFeedbackAttempts"
+        static let pipelineRefreshAttempts = "pipelineRefreshAttempts"
         static let pendingTodoAcknowledgements = "pendingTodoAcknowledgements"
         static let boardPins = "boardPins"
         static let conflictReceipts = "conflictReceipts"

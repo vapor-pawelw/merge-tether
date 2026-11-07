@@ -4,6 +4,37 @@ import Testing
 
 @MainActor
 struct MergeWorkflowMonitorTests {
+    @Test func existingFailedPipelineIsDiscoveredOnFirstPollAndNotReplayedAfterRestart() async throws {
+        let directory = FileManager.default.temporaryDirectory.appending(path: UUID().uuidString)
+        try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
+        defer { try? FileManager.default.removeItem(at: directory) }
+        let suite = "MergeWorkflowColdPipeline.\(UUID())"
+        let defaults = try #require(UserDefaults(suiteName: suite))
+        defer { defaults.removePersistentDomain(forName: suite) }
+        let executable = directory.appending(path: "glab")
+        try write("""
+        #!/bin/sh
+        case "$2" in
+          */pipelines/310/jobs*) printf '%s' '[{"id":42,"status":"failed","allow_failure":false,"failure_reason":"script_failure"}]' ;;
+          *) exit 20 ;;
+        esac
+        """, to: executable)
+        try FileManager.default.setAttributes([.posixPermissions: 0o700], ofItemAtPath: executable.path)
+        let glab = GlabService()
+        glab.glabPath = executable
+        let failed = try JSONDecoder().decode(GitLabMergeRequest.self,
+            from: Data(mergeRequest(11, sha: String(repeating: "a", count: 40), pipeline: "failed").utf8))
+        var events: [MergeWorkflowEvent] = []
+        for _ in 0..<2 {
+            let monitor = MergeWorkflowMonitor(defaults: defaults)
+            await monitor.poll(glab: glab, host: "gitlab.example.test", user: .init(id: 1, username: "owner"),
+                               authored: [failed], enabled: [.pipelineFailure], reviewSLA: 7_200) { events.append($0) }
+        }
+        #expect(events.count == 1)
+        #expect(events.first?.pipelineID == 310)
+        #expect(events.first?.jobID == 42)
+    }
+
     @Test func staleCurrentHeadVerdictSchedulesOneReviewPerDiscussionRevision() async throws {
         let fixture = try FreshnessFixture(request: mergeRequest(13, sha: String(repeating: "a", count: 40), author: 2))
         defer { fixture.cleanUp() }

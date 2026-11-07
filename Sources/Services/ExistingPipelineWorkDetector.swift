@@ -36,6 +36,13 @@ struct ExistingPipelineWorkDetector: Sendable {
         return .unverified
     }
 
+    /// Finished pipeline receipts prevent repeating workers but do not mean
+    /// that another task still holds the MR's exclusive reservation.
+    func hasActiveReservation(for key: Key) -> Bool {
+        guard let active = try? externalRegistrationURL(for: key) else { return true }
+        return FileManager.default.fileExists(atPath: active.path)
+    }
+
     /// An external task may create this directory exclusively before beginning
     /// work and remove it with rmdir after finishing. It covers the whole MR.
     func externalRegistrationURL(for key: Key) throws -> URL {

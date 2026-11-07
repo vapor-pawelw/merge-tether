@@ -71,6 +71,7 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 
 ### Fixed
 
+- Let Full automation claim unowned failed pipelines, validate merged-result commits against source and target parents, and request fresh CI when the target has advanced.
 - Keep reviewer waiting local: never create reminder comments or drafts, migrate legacy agent rules, and retire queued reminder jobs.
 - Attribute background reconciliation to automation independently of how an earlier worker was launched.
 

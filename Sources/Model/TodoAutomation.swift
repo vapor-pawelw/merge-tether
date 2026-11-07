@@ -198,6 +198,8 @@ struct AutomationSettings: Codable, Equatable, Sendable {
     var allowConflictPush = false
     /// Independent of conflict resolution: author follow-ups may push verified in-scope corrections.
     var allowFollowUpPush = true
+    /// Claim unreserved failed-pipeline work automatically; independent of push permission.
+    var autoClaimPipelineFailures = false
     var conflictPushProjects = ""
     var allowAssistantTools = false
     var assistantToolProjects = ""
@@ -257,6 +259,8 @@ struct AutomationSettings: Codable, Equatable, Sendable {
         let legacy = try decoder.container(keyedBy: LegacyKeys.self)
         publicationRestrictions = try values.decodeIfPresent(AutomaticPublicationRestrictions.self, forKey: .publicationRestrictions) ?? .init()
         baselinePreset = try values.decodeIfPresent(AutomationPreset.self, forKey: .baselinePreset)
+        autoClaimPipelineFailures = try values.decodeIfPresent(Bool.self, forKey: .autoClaimPipelineFailures)
+            ?? (baselinePreset == .full)
         projectPermissionsVersion = try values.decodeIfPresent(Int.self, forKey: .projectPermissionsVersion) ?? 0
         autoVerifyReReview = try values.decodeIfPresent(Bool.self, forKey: .autoVerifyReReview) ?? true
         codexVerificationModel = (try? values.decode(CodexReviewModel.self, forKey: .codexVerificationModel)) ?? .luna
@@ -344,7 +348,7 @@ struct AutomationSettings: Codable, Equatable, Sendable {
         case autoMergeProjects, allowConflictPush, allowFollowUpPush, conflictPushProjects, autoReReviewEnabled, publishDraftsWithoutConfirmation, publishAIRepliesWithoutConfirmation, autoApproveEnabled, autoResolveOwnReviewThreads
         case codexReviewModel, codexReviewThinking, assistantDefaultsVersion, scope
         case autoVerifyReReview, codexVerificationModel, claudeVerificationModel
-        case autoResolveAcceptedFeedback, publicationRestrictions, publicationPolicyMode, baselinePreset, projectPermissionsVersion
+        case autoResolveAcceptedFeedback, publicationRestrictions, publicationPolicyMode, baselinePreset, projectPermissionsVersion, autoClaimPipelineFailures
     }
 
     private enum RuleMigrationKeys: String, CodingKey { case isEnabled, markDoneOnSuccess }
@@ -361,6 +365,7 @@ struct AutomationSettings: Codable, Equatable, Sendable {
             autoMergeEnabled = true
             allowAssistantTools = true
             allowConflictPush = true
+            autoClaimPipelineFailures = true
             for trigger in MergeWorkflowTrigger.allCases {
                 workflowRules[trigger].mode = trigger == .reviewWaiting ? .notify : .assistant
             }
@@ -431,6 +436,7 @@ struct AutomationSettings: Codable, Equatable, Sendable {
         conflictTasksEnabled = false
         allowConflictPush = false
         allowFollowUpPush = false
+        autoClaimPipelineFailures = false
         autoVerifyReReview = false
         reviewRequested.isEnabled = false
         authorFeedback.isEnabled = false
@@ -443,6 +449,8 @@ struct AutomationSettings: Codable, Equatable, Sendable {
         conflictTasksEnabled || [reviewRequested, authorFeedback].contains { $0.isEnabled && $0.runner == .assistant }
             || workflowRules.enabled.contains { workflowRules[$0].mode == .assistant }
     }
+
+    var canClassifyIncomingNotices: Bool { packageDecision != .disabled && usesAssistant }
 
     func preservingScope(from current: Self) -> Self {
         var updated = self

@@ -3,6 +3,21 @@ import Testing
 @testable import GitLabTodos
 
 struct AssistantJobInvocationTests {
+    @Test func childProcessesHaveAWritablePrivateTemporaryDirectoryEvenWithSpaces() async throws {
+        let folder = FileManager.default.temporaryDirectory.appending(path: "Worker files \(UUID())")
+        defer { try? FileManager.default.removeItem(at: folder) }
+        let invocation = AssistantJobInvocation(workspace: folder, evidenceRoot: folder.appending(path: "evidence"))
+        try invocation.prepareEvidenceDirectories()
+        let environment = invocation.childEnvironment(["HOME": NSHomeDirectory(), "PATH": "/usr/bin:/bin"])
+        #expect(environment["TMPDIR"] == invocation.temporaryDirectory.path)
+        #expect(environment["JAVA_TOOL_OPTIONS"]?.contains("-Djava.io.tmpdir=") == true)
+        let child = try await ProcessRunner.run(URL(fileURLWithPath: "/bin/sh"),
+            arguments: ["-c", "test -n \"$TMPDIR\" && printf writable > \"$TMPDIR/probe\""],
+            environment: environment, currentDirectory: folder, timeout: 5)
+        #expect(child.exitCode == 0)
+        #expect(try String(contentsOf: invocation.temporaryDirectory.appending(path: "probe"), encoding: .utf8) == "writable")
+    }
+
     private let policy = AssistantJobInvocation(workspace: URL(fileURLWithPath: "/tmp/run"),
         evidenceRoot: URL(fileURLWithPath: "/tmp/evidence"))
 

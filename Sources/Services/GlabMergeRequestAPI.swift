@@ -423,7 +423,7 @@ extension GlabService {
         }
     }
 
-    private static func isFullGitSHA(_ sha: String) -> Bool {
+    static func isFullGitSHA(_ sha: String) -> Bool {
         (sha.utf8.count == 40 || sha.utf8.count == 64) && sha.utf8.allSatisfy {
             (48...57).contains($0) || (65...70).contains($0) || (97...102).contains($0)
         }

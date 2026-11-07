@@ -187,22 +187,18 @@ final class MergeWorkflowMonitor {
             return nil
         }
         guard let id = pipeline.id, id > 0, let projectID = pipeline.projectID, projectID > 0 else { return nil }
-        guard let seen = snapshot.failedPipelineIDs else {
-            snapshot.failedPipelineIDs = [id]
-            return nil
-        }
+        let seen = snapshot.failedPipelineIDs ?? []
         guard !seen.contains(id),
               let jobs = try? await observation.glab.fetchPipelineFailedJobs(
                 projectID: projectID, pipelineID: id, host: observation.account.host
               ) else { return nil }
 
-        snapshot.failedPipelineIDs?.insert(id)
+        snapshot.failedPipelineIDs = seen.union([id])
         let failed = jobs.filter { $0.status == "failed" && $0.id > 0 }
         let hardFailures = failed.filter { $0.allowFailure != true }
         let onlyFailure = hardFailures.count == 1 ? hardFailures.first : nil
         let infrastructure = onlyFailure?.allowFailure == false
             && onlyFailure?.failureReason == "runner_system_failure"
-            && request.sourceProjectID == projectID && request.sha != nil && request.sha == pipeline.sha
         let visibleReasons: Set<String> = [
             "runner_system_failure", "script_failure", "job_execution_timeout", "stuck_or_timeout_failure",
             "api_failure", "scheduler_failure", "data_integrity_failure", "unknown_failure"

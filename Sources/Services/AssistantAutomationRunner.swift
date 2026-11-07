@@ -101,6 +101,8 @@ enum AssistantAutomationRunner {
         var operationalExecution: AssistantJobExecution? { isObsoleteReminder ? nil : execution }
         var resolvesOwnThreads: Bool?
         var manual: Bool?
+        var environmentRecoveryAttempted: Bool?
+        var environmentRecoveryOf: UUID?
         var expectedHeadSHA: String?
         var configurationSnapshot: AutomationSettings?
 
@@ -351,9 +353,11 @@ enum AssistantAutomationRunner {
                                                           iid: handoff.key.work.iid, host: handoff.key.work.host)
             guard request.state == "opened", request.author.id == user.id,
                   request.headPipeline?.id == prior.pipelineID, request.headPipeline?.status == "failed",
-                  request.headPipeline?.sha == request.sha, request.sha != nil else {
+                  prior.host == handoff.key.work.host, prior.projectID == request.projectID,
+                  prior.mergeRequestIID == request.iid else {
                 throw AssistantJobExecutor.ExecutionError.inactiveMergeRequest
             }
+            _ = try await glab.verifiedFailedPipeline(for: request, host: handoff.key.work.host, expectedUser: user)
             guard let owned = try ExistingPipelineWorkDetector().registerRun(for: prior, explicitRetry: true) else {
                 throw HandoffError.executionUnavailable
             }

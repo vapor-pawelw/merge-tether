@@ -1,0 +1,61 @@
+{
+  "sourceLanguage": "en",
+  "strings": {
+    "pipeline.handling": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Handling CI"
+          }
+        }
+      }
+    },
+    "pipeline.refresh.alreadyAttempted": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "A current-target pipeline was already requested for this source and target. Inspect GitLab before retrying an uncertain request."
+          }
+        }
+      }
+    },
+    "pipeline.refresh.ownershipReserved": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Another task already owns this MR’s pipeline work."
+          }
+        }
+      }
+    },
+    "pipeline.refresh.unconfirmedResponse": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "The pipeline request was sent, but its current source and target could not be confirmed. Inspect GitLab before retrying."
+          }
+        }
+      }
+    },
+    "pipeline.refresh.persistenceUnavailable": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "The pipeline request was not sent because its durable attempt record could not be saved."
+          }
+        }
+      }
+    }
+  },
+  "version": "1.0"
+}

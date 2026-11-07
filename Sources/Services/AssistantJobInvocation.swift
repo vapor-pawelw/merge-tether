@@ -13,6 +13,18 @@ struct AssistantJobInvocation {
 
     var schemaURL: URL { workspace.appending(path: "schema.json") }
     var resultURL: URL { workspace.appending(path: "result.json") }
+    var temporaryDirectory: URL { workspace.appending(path: "tmp", directoryHint: .isDirectory) }
+    func childEnvironment(_ base: [String: String]) -> [String: String] {
+        var environment = base
+        for key in ["TMPDIR", "TMP", "TEMP"] { environment[key] = temporaryDirectory.path }
+        // Java on macOS does not derive java.io.tmpdir from TMPDIR. Quotes are
+        // parsed by the JVM itself and preserve Application Support paths.
+        let javaTemporaryDirectory = temporaryDirectory.path.replacingOccurrences(of: "\\", with: "\\\\")
+            .replacingOccurrences(of: "\"", with: "\\\"")
+        environment["JAVA_TOOL_OPTIONS"] = [base["JAVA_TOOL_OPTIONS"], "-Djava.io.tmpdir=\"\(javaTemporaryDirectory)\""]
+            .compactMap { $0 }.joined(separator: " ")
+        return environment
+    }
     var claudeTools: String { "default" }
     var claudeSettings: String { #"{"sandbox":{"enabled":false}}"# }
 
@@ -34,7 +46,7 @@ struct AssistantJobInvocation {
     }
 
     func prepareEvidenceDirectories() throws {
-        for directory in helperEvidenceDirectories {
+        for directory in helperEvidenceDirectories + [temporaryDirectory] {
             try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true,
                                                    attributes: [.posixPermissions: 0o700])
         }

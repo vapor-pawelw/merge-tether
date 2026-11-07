@@ -29,8 +29,9 @@ enum AssistantJobExecutor {
         }
         if let reservation = handoff.pipelineReservation {
             guard request.author.id == user.id, request.headPipeline?.id == reservation.pipelineID,
-                  request.headPipeline?.status == "failed", request.headPipeline?.sha == request.sha,
-                  request.sha != nil else { throw ExecutionError.inactiveMergeRequest }
+                  reservation.host == handoff.key.work.host, reservation.projectID == request.projectID,
+                  reservation.mergeRequestIID == request.iid else { throw ExecutionError.inactiveMergeRequest }
+            _ = try await glab.verifiedFailedPipeline(for: request, host: handoff.key.work.host, expectedUser: user)
         }
         try validateConfiguration(handoff, automation: settings.automation)
         try validateIgnoredTarget(handoff, ignored: settings.ignoredMergeRequests)
@@ -60,6 +61,9 @@ enum AssistantJobExecutor {
 
             This is a headless MergeTether run. Do not open desktop apps, create GUI chats, or request interactive input.
             Keep working files and isolated Git worktrees beneath this run's working directory. Never modify another checkout.
+            A writable private temporary directory is supplied in TMPDIR, TMP and TEMP, and in JAVA_TOOL_OPTIONS
+            as java.io.tmpdir. Preserve that JVM option when invoking Maven or Gradle; if a wrapper overrides it,
+            pass -Djava.io.tmpdir with TMPDIR explicitly. Do not disable tests to work around temporary-file failures.
             This is an empty scratch directory, not an existing repository. If you need source code, read the live source project
             (project ID \(request.sourceProjectID ?? request.projectID)) with glab, obtain its clone URL, and clone it beneath this directory.
             Fetch the exact current MR head \(request.sha ?? "(read from live MR)") without updating other local branches.
@@ -84,7 +88,7 @@ enum AssistantJobExecutor {
         if handoff.key.assistant == .codex {
             try Data(AssistantJobResult.schema.utf8).write(to: invocation.schemaURL, options: .atomic)
             let arguments = invocation.codexArguments(model: handoff.reviewModel, thinking: handoff.reviewThinking)
-            output = try await ProcessRunner.run(executable, arguments: arguments, environment: environment,
+            output = try await ProcessRunner.run(executable, arguments: arguments, environment: invocation.childEnvironment(environment),
                                                   currentDirectory: folder, timeout: 1_800, input: input)
             capturedOutput = output
             guard output.exitCode == 0 else { throw CLIProcessError(exitCode: output.exitCode, diagnostic: output.stderr) }
@@ -93,7 +97,7 @@ enum AssistantJobExecutor {
             result = try AssistantJobResult.codex(data)
         } else {
             let arguments = invocation.claudeArguments
-            output = try await ProcessRunner.run(executable, arguments: arguments, environment: environment,
+            output = try await ProcessRunner.run(executable, arguments: arguments, environment: invocation.childEnvironment(environment),
                                                   currentDirectory: folder, timeout: 1_800, input: input)
             capturedOutput = output
             guard output.exitCode == 0 else { throw CLIProcessError(exitCode: output.exitCode, diagnostic: output.stderr) }
