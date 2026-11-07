@@ -739,6 +739,72 @@
           }
         }
       }
+    },
+    "board.empty.own.title": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "No open merge requests"
+          }
+        }
+      }
+    },
+    "board.empty.reviewing.title": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Nothing to review"
+          }
+        }
+      }
+    },
+    "board.empty.other.title": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "All caught up"
+          }
+        }
+      }
+    },
+    "board.empty.loading.title": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Loading merge requests…"
+          }
+        }
+      }
+    },
+    "board.empty.unavailable.title": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Not loaded yet"
+          }
+        }
+      }
+    },
+    "board.empty.unavailable.description": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Choose Refresh to load this column."
+          }
+        }
+      }
     }
   }
 }

@@ -33,7 +33,7 @@ struct CommandCenterView: View {
                         .frame(minHeight: 180)
                 }
             } else {
-                CommandCenterBoardView(monitor: monitor, dimUnverifiedContent: initialRefresh != .current)
+                CommandCenterBoardView(monitor: monitor, refreshState: initialRefresh)
                     .id("\(monitor.glab.resolvedHost ?? "")|\(monitor.glab.currentUsername ?? "")")
             }
             if let todo = monitor.undoableTodo { undoBanner(todo) }

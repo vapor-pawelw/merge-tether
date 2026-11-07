@@ -24,6 +24,16 @@ struct BoardMRProposalCard: View {
         "\(proposal.target.host)/\(proposal.target.username)/\(proposal.target.projectID)/\(proposal.target.iid ?? 0)/\(proposal.url)|\(monitor.glab.resolvedHost ?? "")/\(monitor.glab.currentUsername ?? "")"
     }
 
+    private var isDraft: Bool {
+        if let item = proposal.item { return item.section == .draftMergeRequests }
+        if let draft = authorLoader.request(for: proposal)?.draft { return draft }
+        return proposal.todos.contains(where: \.isDraft)
+            || proposal.intents.contains {
+                $0.target == proposal.target && ProposalMRContext.matches($0.request, proposal: proposal)
+                    && $0.request.draft == true
+            }
+    }
+
     var body: some View {
         VStack(alignment: .leading, spacing: 9) {
             metadataHeader
@@ -76,8 +86,8 @@ struct BoardMRProposalCard: View {
         } message: { Text(.Board.boardProposalIgnoreExplanation) }
         .controlSize(.small)
         .padding(12).frame(maxWidth: .infinity, alignment: .leading)
-        .boardCardInteraction { showingDetails = true }
         .overlay(RoundedRectangle(cornerRadius: 8).stroke(.secondary.opacity(0.12), lineWidth: 0.5))
+        .boardCardInteraction(isDraft: isDraft) { showingDetails = true }
         .task(id: authorTaskID) { await authorLoader.load(proposal) }
         .sheet(isPresented: $showingDetails) {
             BoardItemDetailSheet {
@@ -106,7 +116,7 @@ struct BoardMRProposalCard: View {
             author
             Spacer(minLength: 4)
             BoardStatusChip(title: .Board.boardCompactProposal, symbol: "plus.circle")
-            if proposal.item?.section == .draftMergeRequests || proposal.todos.contains(where: \.isDraft) {
+            if isDraft {
                 BoardDraftBadge()
             }
             if let iid = proposal.target.iid { BoardMRIdentifier(iid: iid) }

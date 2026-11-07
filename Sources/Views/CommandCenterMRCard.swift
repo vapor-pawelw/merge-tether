@@ -91,7 +91,6 @@ private struct CommandCenterMRCardContent: View {
         .controlSize(.small)
         .padding(12)
         .frame(maxWidth: .infinity, alignment: .leading)
-        .boardCardInteraction(onDetails: onDetails)
         .overlay(RoundedRectangle(cornerRadius: 8).stroke(Color.secondary.opacity(0.12), lineWidth: 0.5))
         .overlay(alignment: .leading) {
             if humanAction != nil {
@@ -99,6 +98,7 @@ private struct CommandCenterMRCardContent: View {
                     .padding(.vertical, 10)
             }
         }
+        .boardCardInteraction(isDraft: item.section == .draftMergeRequests, onDetails: onDetails)
         .confirmationDialog(Text(.Board.boardRemove), isPresented: $confirmRemoval, titleVisibility: .visible) {
             Button(role: .destructive) { monitor.removeReviewedMergeRequest(item) } label: { Text(.Board.boardRemove) }
         } message: { Text(.Board.boardRemoveExplanation) }
@@ -319,7 +319,7 @@ struct BoardTodoRow: View {
         .controlSize(.small)
         .padding(10)
         .frame(maxWidth: .infinity, alignment: .leading)
-        .boardCardInteraction { showingDetails = true }
+        .boardCardInteraction(isDraft: todo.isDraft) { showingDetails = true }
         .sheet(isPresented: $showingDetails) {
             BoardItemDetailSheet {
                 metadataHeader

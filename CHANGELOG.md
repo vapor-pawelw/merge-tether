@@ -49,6 +49,8 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 
 ### Changed
 
+- Give empty lanes a centered icon and clear title, distinguish first-load placeholders from empty lists, and dim entire Draft cards consistently.
+
 - Open card details by clicking anywhere on a board card, highlight cards on hover, show compact pin controls beside MR numbers and clarify whether automation is enabled or paused.
 
 - Keep one MR automation history with expandable prompts, responses and linked runs; mark automatic events with a title icon and remove empty Automation sections.

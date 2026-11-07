@@ -2,7 +2,8 @@ import SwiftUI
 
 struct CommandCenterBoardView: View {
     let monitor: TodoMonitorService
-    var dimUnverifiedContent = false
+    var refreshState: BoardRefreshState = .current
+    private var dimUnverifiedContent: Bool { refreshState != .current }
     private struct Selection: Identifiable {
         let item: MergeRequestAttentionMonitor.Item
         let section: CommandCenterMRDetailSection
@@ -25,15 +26,21 @@ struct CommandCenterBoardView: View {
             pinnedCards: monitor.settings.boardPins)
         HStack(alignment: .top, spacing: 18) {
             lane(title: .Board.boardLaneOwn, symbol: "arrow.triangle.pull", cardIDs: board.own.map(\.id)) {
-                if board.own.isEmpty { empty(.Board.boardLaneOwnEmpty) }
+                if board.own.isEmpty {
+                    empty(.Board.boardEmptyOwnTitle, message: .Board.boardLaneOwnEmpty, symbol: "arrow.triangle.pull")
+                }
                 ForEach(board.own) { row in card(row) }
             }
             lane(title: .Board.boardLaneReviewing, symbol: "text.magnifyingglass", cardIDs: board.reviewed.map(\.id)) {
-                if board.reviewed.isEmpty { empty(.Board.boardLaneReviewingEmpty) }
+                if board.reviewed.isEmpty {
+                    empty(.Board.boardEmptyReviewingTitle, message: .Board.boardLaneReviewingEmpty, symbol: "text.magnifyingglass")
+                }
                 ForEach(board.reviewed) { row in card(row, removable: true) }
             }
             lane(title: .Board.boardLaneOther, symbol: "tray", cardIDs: otherCards.map(\.id)) {
-                if otherCards.isEmpty { empty(.Board.boardLaneOtherEmpty) }
+                if otherCards.isEmpty {
+                    empty(.Board.boardEmptyOtherTitle, message: .Board.boardLaneOtherEmpty, symbol: "checkmark")
+                }
                 ForEach(otherCards) { entry in
                     otherCard(entry).transition(cardTransition)
                 }
@@ -112,7 +119,7 @@ struct CommandCenterBoardView: View {
                 VStack(alignment: .leading, spacing: 10, content: content)
                     .frame(maxWidth: .infinity, alignment: .leading)
                     .padding(.vertical, 10).padding(.horizontal, 1)
-                    .opacity(dimUnverifiedContent ? 0.55 : 1)
+                    .opacity(dimUnverifiedContent && !cardIDs.isEmpty ? 0.55 : 1)
                     .animation(reduceMotion ? nil : .spring(duration: 0.28, bounce: 0.12), value: cardIDs)
             }
         }
@@ -120,9 +127,32 @@ struct CommandCenterBoardView: View {
 
     }
 
-    private func empty(_ title: LocalizedStringResource) -> some View {
-        Text(title).font(.subheadline).foregroundStyle(.secondary).padding(.vertical, 24)
-            .frame(maxWidth: .infinity, alignment: .leading)
-            .transition(cardTransition)
+    private func empty(_ title: LocalizedStringResource, message: LocalizedStringResource, symbol: String) -> some View {
+        VStack(spacing: 12) {
+            if refreshState == .syncing {
+                ProgressView().controlSize(.small)
+            } else {
+                ZStack {
+                    Circle().fill(Color.secondary.opacity(0.08)).frame(width: 44, height: 44)
+                    Image(systemName: refreshState == .unavailable ? "arrow.clockwise" : symbol)
+                        .font(.system(size: 18, weight: .regular))
+                        .foregroundStyle(.secondary).accessibilityHidden(true)
+                }
+            }
+            VStack(spacing: 6) {
+                Text(refreshState == .syncing ? .Board.boardEmptyLoadingTitle
+                     : refreshState == .unavailable ? .Board.boardEmptyUnavailableTitle : title)
+                    .font(.callout.weight(.medium)).foregroundStyle(.primary)
+                if refreshState != .syncing {
+                    Text(refreshState == .unavailable ? .Board.boardEmptyUnavailableDescription : message)
+                        .font(.caption).foregroundStyle(.secondary)
+                        .multilineTextAlignment(.center).fixedSize(horizontal: false, vertical: true)
+                }
+            }
+            .multilineTextAlignment(.center)
+        }
+        .padding(.horizontal, 24).padding(.vertical, 48)
+        .frame(maxWidth: .infinity, minHeight: 210)
+        .transition(cardTransition)
     }
 }
