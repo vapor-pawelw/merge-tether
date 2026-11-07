@@ -9,6 +9,8 @@ macOS GitLab inbox and MR automation. Read [README.md](README.md) for behavior,
 - Preserve the release bundle identifier, minimum macOS version, and legacy
   `GitLabTodos` target/cask names unless the task explicitly changes compatibility.
   A local installation may use a different identifier; preserve its settings on rebuild.
+  Paired local installations also need a stable certificate-backed signing identity;
+  ad hoc rebuilds invalidate Keychain’s remembered approval.
 - Tuist owns the generated Xcode project. Use the version pinned in `mise.toml`;
   regenerate deliberately after project-graph changes. Do not commit generated projects.
 - Keep dependencies in-tree and the app unsandboxed: authenticated `glab` is a subprocess.

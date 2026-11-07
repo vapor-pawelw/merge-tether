@@ -43,6 +43,8 @@ The built `.app` bundle lives under the Xcode DerivedData path printed at the en
 
 A development installation may use a separate `PRODUCT_BUNDLE_IDENTIFIER` supplied to the build command. Preserve that identifier on later rebuilds so preferences and permissions stay attached to the same installation. Keep the release identifier unchanged. The main window replaces the old popover; the menu bar now provides an attention indicator and app actions.
 
+For a local installation paired with iOS, also keep a consistent certificate-backed signing identity, such as Apple Development, across rebuilds. An ad hoc signature uses a changing code hash as its designated requirement, so Keychain’s Always Allow does not carry across changed builds. Switching from an ad hoc build to a certificate-signed build can require one new Keychain approval; keep the existing pairing and its Keychain access controls.
+
 `scripts/rebuild-and-relaunch.sh` regenerates, builds and launches a Debug app from its build directory. It stops processes matching the legacy executable name and uses the project’s default bundle identifier; it is not an installer for an existing custom-identifier app. Use an explicit build and copy step when preserving such an installation.
 
 ## Running tests
