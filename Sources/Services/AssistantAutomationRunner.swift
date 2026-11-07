@@ -25,10 +25,13 @@ enum AssistantAutomationRunner {
                 Get my explicit approval before publishing comments, approving, requesting changes, merging, or resolving someone else's discussion. Discussion ownership and the configured resolution permission below constrain any installed skill.
                 """
             if self == .followUp {
+                let scope = """
+                    Stay within the assigned task: the indicated incoming reviewer feedback or the separately assigned failed-pipeline diagnosis and fix. Verify only the related corrections and replies. Do not perform a fresh general code review of my own MR or create unrelated findings. Do not create merge requests. Informational notes and accepted feedback require no change or reply. Check existing published replies and private drafts for duplicates before drafting. Preserve unrelated and user-created drafts; an uncertain draft must not stop independent incoming feedback.
+                    """
                 guard allowFollowUpPush else {
-                    return "Automatic author-follow-up push is OFF for this run. You may inspect and prepare local changes in isolation, but do not push, save author-follow-up response drafts, or publish anything for this run. Report pending corrections in the run result only. This setting is separate from permission to push conflict resolutions."
+                    return scope + "\nAutomatic author-follow-up push is OFF for this run. You may inspect and prepare local changes in isolation, but do not push, save author-follow-up response drafts, or publish anything for this run. Report pending corrections in the run result only. This setting is separate from permission to push conflict resolutions."
                 }
-                return drafts + """
+                return scope + "\n" + drafts + """
 
                     Automatic author-follow-up push is ON. You are explicitly authorized to commit and push tested, in-scope fixes to this MR's verified remote source branch from an isolated detached worktree, without altering any other local checkout or local branch ref. A remote push is part of this task, without a separate push prompt; isolation is not a ban on pushing. Do not save completion drafts before the push and remote content verification succeed. Re-fetch the MR with glab and confirm it is open and authored by the authenticated user. Work in an isolated worktree, run proportionate checks, and use an explicit refspec to the verified source repository and branch. Follow the installed MR skill for stacked fixes, remote head verification and refreshing affected drafts after the push. Honor any explicit review-only or local-only instruction. Report any failure to safely push as a blocker.
                     """
@@ -222,7 +225,8 @@ enum AssistantAutomationRunner {
 
         let headSHA: String?
         if jobCoordinator == nil || configurationSnapshot != nil {
-            headSHA = try await freshRequest(work: work, username: username, settings: settings).sha
+            headSHA = try await freshRequest(work: work, username: username, settings: settings,
+                isReview: isReview || mrWorkflow == .review).sha
             guard let headSHA, !headSHA.isEmpty else { throw AssistantJobExecutor.ExecutionError.inactiveMergeRequest }
             if let expectedHeadSHA, expectedHeadSHA != headSHA { throw AssistantJobExecutor.ExecutionError.headChanged }
         } else { headSHA = expectedHeadSHA }
@@ -401,7 +405,8 @@ enum AssistantAutomationRunner {
         return expectedHeadSHA.map { "Expected head: \($0)\n\n" + task } ?? task
     }
 
-    private static func freshRequest(work: MergeRequestWork, username: String, settings: SettingsManager) async throws -> GitLabMergeRequest {
+    private static func freshRequest(work: MergeRequestWork, username: String, settings: SettingsManager,
+                                     isReview: Bool) async throws -> GitLabMergeRequest {
         let glab = GlabService()
         if let executable = settings.glabPath { glab.glabPath = executable }
         else { glab.glabPath = await OnboardingDetector.findGlabExecutable() }
@@ -409,9 +414,10 @@ enum AssistantAutomationRunner {
               glab.resolvedHost == work.host, glab.currentUsername == username else {
             throw AssistantJobExecutor.ExecutionError.wrongAccount
         }
-        _ = try await glab.fetchAuthenticatedUser(host: work.host, expectedUsername: username)
+        let user = try await glab.fetchAuthenticatedUser(host: work.host, expectedUsername: username)
         let request = try await glab.fetchMergeRequest(projectID: work.projectID, iid: work.iid, host: work.host)
         guard request.state == "opened" else { throw AssistantJobExecutor.ExecutionError.inactiveMergeRequest }
+        try AssistantJobExecutor.validateReviewOwnership(isReview: isReview, authorID: request.author.id, userID: user.id)
         return request
     }
 

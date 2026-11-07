@@ -14,7 +14,7 @@ MergeTether is a local MR command center. Manual GitLab management works without
 
 **When you are the author**
 
-1. Review feedback arrives. The agent implements warranted fixes in an isolated worktree, tests, commits and pushes when follow-up push is enabled. It is instructed to keep work inside its run directory and leave other checkouts alone; this is a workflow rule, not a filesystem sandbox.
+1. Review feedback arrives. The agent handles existing incoming reviewer comments and verifies the relevant fixes and replies; it does not perform a fresh general review of your own MR or create merge requests. It implements warranted fixes in an isolated worktree, tests, commits and pushes when follow-up push is enabled. It is instructed to keep work inside its run directory and leave other checkouts alone; this is a workflow rule, not a filesystem sandbox.
 2. Before saving completion replies, the worker re-fetches the MR HEAD and verifies the remote source/test content. With push off, pending or failed, the proposal stays in the task result and no completion drafts are created.
 3. Verified replies wait on the relevant MR card or qualify for the selected publication rule. MergeTether requests another review only when feedback is ready and unpublished replies no longer block it.
 4. Failed pipelines and conflicts can become separate tasks. Full automation checks existing reservations and atomically claims unowned pipeline failures. With checkpoints, ownership waits for your confirmation; the permission is adjustable separately.
@@ -28,7 +28,7 @@ When a current-head review verdict no longer covers the discussion text, the wor
 
 An MR has local task history. A process reporting success does not prove that a fix reached GitLab, a review remains current or a pipeline passed.
 
-Pending drafts do not prevent a read-only check of existing feedback. A historical unbound follow-up can close once its own current requirements are addressed and required replies are published, even while unrelated drafts or feedback remain. This assessment does not run fixes, push, resolve threads or merge Drafts.
+Pending drafts do not prevent a read-only check of existing feedback or configured follow-up work for independent incoming comments. A private reply prevents duplicate follow-up in its own discussion; unrelated and user-created drafts remain unchanged. Draft MRs stay read-only, and any pending draft still prevents automatic discussion resolution and re-review requests. A historical unbound follow-up can close once its own current requirements are addressed and required replies are published, even while unrelated drafts or feedback remain. The assessment itself never fixes code, pushes or publishes replies.
 
 Incoming mentions without a known action may receive a read-only semantic assessment using the selected lightweight model. Only a proven informational event is acknowledged automatically, after a fresh account, MR and discussion check. Ambiguous or actionable notices stay available to read. Handled-event banners follow the existing optional banner preference.
 

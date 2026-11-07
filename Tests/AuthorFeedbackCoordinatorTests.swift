@@ -4,6 +4,35 @@ import Testing
 
 @MainActor
 struct AuthorFeedbackCoordinatorTests {
+    @Test(arguments: [ReReviewAssessment.Note.State.blocking, .uncertain, .addressed])
+    func unrelatedPrivateDraftDoesNotSuppressIncomingFeedback(state: ReReviewAssessment.Note.State) async throws {
+        try await withFixture { fixture in
+            // given
+            try fixture.write("approvals.json", #"{"approved_by":[]}"#)
+            try fixture.write("drafts.json", #"[{"id":30,"author_id":3,"discussion_id":"thread-a","note":"An uncertain earlier reply"}]"#)
+            let incoming = Fixture.condition.replacingOccurrences(of: "\"resolvable\":false", with: "\"resolvable\":true,\"resolved\":false")
+            try fixture.write("discussions.json", "[\(Fixture.thread),\(incoming)]")
+            let coordinator = fixture.coordinator(assessment: .init(notes: [
+                .init(noteID: 10, state: .uncertain, reason: "Earlier reply still needs evidence"),
+                .init(noteID: 20, state: state, reason: "Independent incoming feedback needs a follow-up")
+            ]))
+            var requested: Set<Int> = []
+            coordinator.onNeedsWork = { _, notes, _ in requested = notes }
+
+            // when
+            try await fixture.run(coordinator, drafts: 1)
+
+            // then
+            let status = try #require(coordinator.status(projectID: 1, iid: 2))
+            #expect(requested == [20])
+            #expect(status.followUpNoteIDs == [20])
+            #expect(status.phase == .waitingPublication && status.pendingDraftCount == 1)
+            #expect(!fixture.resolved)
+            #expect(try Data(contentsOf: fixture.directory.appending(path: "drafts.json"))
+                == Data(#"[{"id":30,"author_id":3,"discussion_id":"thread-a","note":"An uncertain earlier reply"}]"#.utf8))
+        }
+    }
+
     @Test(arguments: [7, 8], ["readyMissing", "readyPublished", "draftMissing", "draftPublished", "pendingDraftMissing"])
     func addressedChildKeepsThreadReplyIndicatorAndDispatchesItsExactNote(childAuthorID: Int, scenario: String) async throws {
         try await withFixture { fixture in
@@ -15,7 +44,7 @@ struct AuthorFeedbackCoordinatorTests {
             try fixture.write("request.json", requestJSON)
             try fixture.write("approvals.json", #"{"approved_by":[]}"#)
             if pendingDrafts > 0 {
-                try fixture.write("drafts.json", #"[{"id":30,"author_id":3,"note":"An unrelated private reply"}]"#)
+                try fixture.write("drafts.json", #"[{"id":30,"author_id":3,"discussion_id":"thread-a","note":"A private reply in the assessed thread"}]"#)
             }
             let authorReply = published ? #",{"id":30,"author":{"id":3,"username":"me"},"system":false,"body":"The scoped correction is verified.","resolvable":true,"resolved":false}"# : ""
             try fixture.write("discussions.json", #"[{"id":"thread-a","notes":[{"id":10,"author":{"id":7,"username":"alice"},"system":false,"body":"Positive acknowledgement","resolvable":true,"resolved":false},{"id":20,"author":{"id":\#(childAuthorID),"username":"reviewer"},"system":false,"body":"Please also rename X","resolvable":true,"resolved":false}\#(authorReply)]}]"#)
@@ -136,9 +165,9 @@ struct AuthorFeedbackCoordinatorTests {
     }
 
     @Test(arguments: [ReReviewAssessment.Note.State.addressed, .blocking])
-    func pendingDraftsPermitReadOnlyAssessmentWithoutDispatchOrResolution(state: ReReviewAssessment.Note.State) async throws {
+    func pendingReplyInTheSameThreadPreventsDuplicateDispatchAndResolution(state: ReReviewAssessment.Note.State) async throws {
         try await withFixture { fixture in
-            try fixture.write("drafts.json", #"[{"id":30,"author_id":3,"note":"Unrelated private reply"}]"#)
+            try fixture.write("drafts.json", #"[{"id":30,"author_id":3,"discussion_id":"thread-a","note":"A private reply in the assessed thread"}]"#)
             let coordinator = fixture.coordinator(assessment: .init(notes: [
                 .init(noteID: 10, state: state, reason: "Current scoped feedback assessed")
             ]))

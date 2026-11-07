@@ -197,19 +197,26 @@ final class AuthorFeedbackCoordinator {
               current.state == "opened", current.draft == request.draft, current.author.id == input.user.id,
               current.webURL == request.webURL else { throw CancellationError() }
         if input.readOnly {
-            // Private drafts and author readiness constrain actions, not reading
-            // whether an earlier, independently delivered follow-up is complete.
+            // Drafts block resolution and their own thread's duplicate follow-up,
+            // while independent incoming feedback can still receive scoped work.
             async let liveThreads = glab.fetchMergeRequestDiscussions(projectID: request.projectID, iid: request.iid, host: host)
             async let liveUser = glab.fetchAuthenticatedUser(host: host, expectedUsername: input.user.username)
-            async let liveDrafts = glab.fetchOwnDraftNoteCount(projectID: request.projectID, iid: request.iid, host: host, userID: input.user.id)
+            async let liveDrafts = glab.fetchOwnDraftNotes(projectID: request.projectID, iid: request.iid, host: host, userID: input.user.id)
             let (threads, user, drafts) = try await (liveThreads, liveUser, liveDrafts)
-            guard isCurrent(input), user == input.user, drafts == input.drafts,
+            guard isCurrent(input), user == input.user, drafts.count == input.drafts,
                   ReviewVerdict.fingerprint(threads) == input.fingerprint else { throw CancellationError() }
             let repliesByThread = assessment.missingPublishedRepliesByThread(in: threads, authorID: input.user.id)
             let owedNotes = Set(repliesByThread.values.flatMap { $0 })
+            let draftedThreads = Set(drafts.compactMap(\.discussionID))
+            let draftedNotes = Set(threads.filter { $0.id.map(draftedThreads.contains) == true }.flatMap(\.notes).compactMap(\.id))
+            let actionable = Set(assessment.notes.filter { $0.state == .blocking || $0.state == .uncertain }.map(\.noteID))
+            let followUp = request.draft == false ? actionable.union(owedNotes).subtracting(draftedNotes) : []
+            if !followUp.isEmpty { await onNeedsWork?(request, followUp, input.fingerprint) }
+            guard isCurrent(input) else { throw CancellationError() }
             let completed = AuthorFeedbackStatus(head: request.sha ?? "", fingerprint: input.fingerprint,
                 semanticContextFingerprint: request.semanticContextFingerprint,
-                phase: drafts > 0 ? .waitingPublication : .complete, pendingDraftCount: drafts,
+                phase: drafts.isEmpty ? .complete : .waitingPublication, pendingDraftCount: drafts.count,
+                followUpNoteIDs: followUp,
                 replyNoteIDs: Set(repliesByThread.keys),
                 addressedNoteIDs: Set(assessment.notes.filter { $0.state == .addressed || $0.state == .informational }.map(\.noteID)).subtracting(owedNotes))
             let changed = statuses[input.target] != completed

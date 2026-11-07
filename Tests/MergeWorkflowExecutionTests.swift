@@ -381,6 +381,10 @@ import Testing
             #expect(handoff.prompt.lowercased().contains("reconcile"))
             #expect(handoff.prompt.lowercased().contains("do not replay"))
             #expect(!handoff.prompt.contains("OLD-FIX-COMMAND"))
+            #expect(handoff.workflow == .followUp && handoff.followUpPushAllowed == true)
+            #expect(handoff.prompt.contains("the separately assigned failed-pipeline diagnosis and fix"))
+            #expect(handoff.prompt.contains("Do not perform a fresh general code review of my own MR"))
+            #expect(handoff.prompt.contains("Do not create merge requests"))
             launched.append(handoff)
             while mutation == "capacity" && !releaseAssessment { try await Task.sleep(for: .milliseconds(10)) }
             return .init(result: .init(status: .blocked, summary: "Fresh assessment fixture finished.",

@@ -24,6 +24,8 @@ enum AssistantJobExecutor {
                                                       iid: handoff.key.work.iid, host: handoff.key.work.host)
         guard request.state == "opened" else { throw ExecutionError.inactiveMergeRequest }
         try validateHeadSnapshot(expected: handoff.expectedHeadSHA, actual: request.sha)
+        try validateReviewOwnership(isReview: handoff.workflow == .review || handoff.reviewModel != nil,
+            authorID: request.author.id, userID: user.id)
         if handoff.followUpPushAllowed == true {
             guard settings.automation.allowFollowUpPush, request.author.id == user.id else { throw ExecutionError.disabledPermission }
         }
@@ -129,6 +131,10 @@ enum AssistantJobExecutor {
 
     static func validateHeadSnapshot(expected: String?, actual: String?) throws {
         guard let expected, !expected.isEmpty, actual == expected else { throw ExecutionError.headChanged }
+    }
+
+    static func validateReviewOwnership(isReview: Bool, authorID: Int, userID: Int) throws {
+        guard !isReview || authorID != userID else { throw ExecutionError.disabledPermission }
     }
 
     @MainActor private static var environment: [String: String] {

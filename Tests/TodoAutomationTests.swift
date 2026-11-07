@@ -138,6 +138,9 @@ struct TodoAutomationTests {
         #expect(prompt.contains("load and follow the applicable installed MR skills"))
         #expect(prompt.contains("Use the fallback below only where no applicable skill or explicit workflow covers the step."))
         #expect(prompt.contains("only the indicated feedback"))
+        #expect(prompt.contains("Do not perform a fresh general code review of my own MR"))
+        #expect(prompt.contains("Do not create merge requests"))
+        #expect(prompt.contains("Preserve unrelated and user-created drafts"))
         #expect(prompt.contains("Summarize what you did or found"))
         let deadline = ContinuousClock.now + .seconds(5)
         while coordinator.isWorking(on: handoff.key.work), ContinuousClock.now < deadline {

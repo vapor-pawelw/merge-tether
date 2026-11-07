@@ -49,6 +49,8 @@ struct ReReviewVerifierTests {
 
         #expect(assessment.notes.first?.state == .addressed)
         let captured = try #require(JSONSerialization.jsonObject(with: Data(contentsOf: URL(fileURLWithPath: script.path + ".capture"))) as? [String: Any])
+        let instructions = try #require(captured["instructions"] as? String)
+        #expect(instructions.contains("Do not perform a fresh general code review or introduce new findings"))
         let evidence = try #require(captured["evidence"] as? [String: Any])
         let target = try #require(evidence["target"] as? [String: Any])
         #expect(target["url"] as? String == input.target?.url.absoluteString)

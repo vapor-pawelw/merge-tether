@@ -77,6 +77,9 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 
 ### Fixed
 
+- Keep independent incoming reviewer feedback moving while unrelated private replies await verification, preserving existing drafts and publication safeguards.
+- Prevent review jobs on the current user’s own merge requests, including restored runs, while retaining scoped feedback handling and failed-pipeline fixes.
+
 - Avoid requesting replies or coding follow-ups for informational review comments.
 - Label the latest recorded Scope event with its timestamp so historical triggers do not read as current MR status.
 - Reduce repeated work when updating the menu-bar attention indicator.

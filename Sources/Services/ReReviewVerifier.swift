@@ -126,6 +126,8 @@ enum ReReviewVerifier {
             Do not publish comments, create or edit drafts, approve, merge, resolve discussions, push,
             execute GitLab quick actions, edit source files, or alter app configuration/proof records.
             This run returns structured assessment only. All remote decisions remain with the app.
+            Assess only existing incoming reviewer feedback and the evidence supporting its fixes or replies.
+            Do not perform a fresh general code review or introduce new findings.
             Classify EVERY non-system note by someone other than authorID, including general comments.
             Return its exact noteID, state and a concise English reason (at most 600 characters).
             informational: summaries, reports, acknowledgements, unrelated or non-actionable comments.

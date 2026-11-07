@@ -3,6 +3,46 @@ import Testing
 @testable import GitLabTodos
 
 @Suite struct AssistantJobSnapshotTests {
+    @MainActor @Test(arguments: [true, false])
+    func ownMergeRequestCannotLaunchAReviewIncludingLegacyReviewRouting(explicitWorkflow: Bool) async throws {
+        // given
+        let directory = FileManager.default.temporaryDirectory.appending(path: UUID().uuidString)
+        try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
+        defer { try? FileManager.default.removeItem(at: directory) }
+        let suite = "OwnReviewScope.\(UUID())"
+        let defaults = try #require(UserDefaults(suiteName: suite))
+        defer { defaults.removePersistentDomain(forName: suite) }
+        let settings = SettingsManager(defaults: defaults)
+        settings.automation.applyPreset(.full, for: .codex)
+        let executable = directory.appending(path: "glab")
+        try Data("""
+            #!/bin/sh
+            case "$*" in
+              'config get host') printf '%s' 'gitlab.example.test' ;;
+              'auth status') printf '%s' 'Logged in to gitlab.example.test as me' >&2 ;;
+              'api /user '*) printf '%s' '{"id":1,"username":"me"}' ;;
+              'api /projects/7/merge_requests/11 '*) printf '%s' '{"project_id":7,"iid":11,"author":{"id":1,"username":"me","name":"Me"},"title":"Fixture","web_url":"https://gitlab.example.test/team/repo/-/merge_requests/11","state":"opened","sha":"abc","source_branch":"feature","target_branch":"main","labels":[]}' ;;
+              *) exit 20 ;;
+            esac
+            """.utf8).write(to: executable)
+        try FileManager.default.setAttributes([.posixPermissions: 0o700], ofItemAtPath: executable.path)
+        settings.glabPath = executable
+        let coordinator = AssistantJobCoordinator(execute: { _, _ in
+            .init(result: .init(status: .succeeded, summary: "Fixture worker ran"), output: "")
+        })
+
+        // when + then
+        await #expect(throws: AssistantJobExecutor.ExecutionError.disabledPermission) {
+            _ = try await AssistantAutomationRunner.launch(.codex, title: "Review",
+                mergeRequestURL: URL(string: "https://gitlab.example.test/team/repo/-/merge_requests/11")!,
+                prompt: "Review current diff", workspace: "", access: .gitLabRead,
+                work: .init(host: "gitlab.example.test", projectID: 7, iid: 11), username: "me", settings: settings,
+                isReview: true, mrWorkflow: explicitWorkflow ? .review : nil, manual: true,
+                jobCoordinator: coordinator, configurationSnapshot: settings.automation)
+        }
+        #expect(settings.assistantHandoffs.isEmpty)
+    }
+
     @MainActor @Test(arguments: ["unrelated-scope", "pause", "permission"])
     func launchRechecksCapturedAutomaticPolicyAfterFreshRequest(mutation: String) async throws {
         let root = FileManager.default.temporaryDirectory.appending(path: UUID().uuidString)
