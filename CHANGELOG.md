@@ -6,6 +6,8 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 
 ## Unreleased
 
+- Add an iOS companion MVP with the Mac board, encrypted Cloudflare relay pairing and guarded remote actions.
+
 ### Added
 
 - Add an expandable per-MR automation event log with attempt timestamps, application decisions, exact failure reasons and optional raw diagnostics.

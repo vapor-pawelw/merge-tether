@@ -393,6 +393,50 @@ import Testing
         #expect(harness.monitor.currentOpenItems.first?.drafts.isEmpty == true)
     }
 
+    @Test func remotePublicationSendsOnlyTheExactDisplayedDraftIDs() async throws {
+        let harness = try makeHarness(assistantWorked: false)
+        defer { harness.cleanUp() }
+        try harness.write("drafts.json", draftJSON)
+        try await harness.poll()
+        let item = try #require(harness.monitor.currentItems.first)
+        let result = await harness.monitor.publishRemoteDrafts(of: item.id, head: head, expectedDrafts: item.drafts)
+        #expect(result == .completed)
+        #expect(harness.log("publish.log").isEmpty)
+        #expect(harness.log("selected.log").contains("/11/publish"))
+        #expect(harness.log("selected.log").contains("/12/publish"))
+        #expect(!harness.log("selected.log").contains("/13/publish"))
+    }
+
+    @Test func remotePublicationStopsWhenAnUnseenDraftAppearsBetweenWrites() async throws {
+        let harness = try makeHarness(assistantWorked: false)
+        defer { harness.cleanUp() }
+        try harness.write("drafts.json", draftJSON)
+        try await harness.poll()
+        let item = try #require(harness.monitor.currentItems.first)
+        try harness.write("inject-unseen-draft", "")
+        let result = await harness.monitor.publishRemoteDrafts(of: item.id, head: head, expectedDrafts: item.drafts)
+        #expect(result == .partial)
+        #expect(harness.log("selected.log").contains("/11/publish"))
+        #expect(!harness.log("selected.log").contains("/12/publish"))
+        #expect(!harness.log("selected.log").contains("/99/publish"))
+    }
+
+    @Test(arguments: ["head", "draft", "quick-action", "resolve"])
+    func remotePublicationRejectsChangedOrUnsafeContent(_ change: String) async throws {
+        let harness = try makeHarness(assistantWorked: false)
+        defer { harness.cleanUp() }
+        var json = draftJSON
+        if change == "quick-action" { json = json.replacingOccurrences(of: "Handle nil here.", with: "/merge") }
+        if change == "resolve" { json = json.replacingOccurrences(of: "\"id\":11", with: "\"resolve_discussion\":true,\"id\":11") }
+        try harness.write("drafts.json", json)
+        try await harness.poll()
+        let item = try #require(harness.monitor.currentItems.first)
+        if change == "draft" { try harness.write("drafts.json", json.replacingOccurrences(of: "Handle nil here.", with: "Edited")) }
+        let result = await harness.monitor.publishRemoteDrafts(of: item.id, head: change == "head" ? "old" : head, expectedDrafts: item.drafts)
+        #expect(result == .changed)
+        #expect(harness.log("selected.log").isEmpty && harness.log("publish.log").isEmpty)
+    }
+
     private let othersThread = #"""
         [{"notes":[{"id":40,"author":{"id":8},"system":false,"body":"Please check this","resolvable":true,"resolved":false}]}]
         """#

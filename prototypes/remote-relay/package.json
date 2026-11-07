@@ -1,0 +1,22 @@
+{
+  "name": "mergetether-remote-probe",
+  "private": true,
+  "type": "module",
+  "engines": { "node": ">=22" },
+  "scripts": {
+    "setup": "node setup.mjs",
+    "dev": "wrangler dev --ip 127.0.0.1 --port 8787",
+    "test": "node --test test/*.test.mjs",
+    "host": "node host.mjs",
+    "deploy": "wrangler deploy"
+  },
+  "dependencies": { "qrcode": "1.5.4" },
+  "devDependencies": {
+    "miniflare": "4.20260730.0",
+    "wrangler": "4.158.0"
+  },
+  "overrides": {
+    "sharp": "0.35.5",
+    "undici": "7.30.1"
+  }
+}

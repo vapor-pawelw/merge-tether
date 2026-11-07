@@ -56,6 +56,9 @@ struct CommandCenterView: View {
                 .pickerStyle(.segmented).labelsHidden().fixedSize()
             }
             ToolbarItemGroup(placement: .primaryAction) {
+                Button { openWindow(id: "remote-access") } label: {
+                    Label { Text(.Remote.remotePair) } icon: { Image(systemName: "iphone") }
+                }
                 Button { showingAdd = true } label: {
                     Label { Text(.Board.boardAdd) } icon: { Image(systemName: "plus") }
                 }

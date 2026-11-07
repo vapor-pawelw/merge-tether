@@ -1,0 +1,10 @@
+{
+  "name": "mergetether-relay",
+  "main": "../../prototypes/remote-relay/worker.mjs",
+  "compatibility_date": "2026-07-30",
+  "workers_dev": true,
+  "preview_urls": false,
+  "durable_objects": { "bindings": [{ "name": "ROOMS", "class_name": "RelayRoom" }] },
+  "migrations": [{ "tag": "v1", "new_sqlite_classes": ["RelayRoom"] }],
+  "observability": { "enabled": false }
+}

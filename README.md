@@ -91,3 +91,7 @@ The hand-painted icon and its generation prompt are included in [docs/branding](
 ## License
 
 [MIT](LICENSE).
+
+## iOS companion MVP
+
+The optional iOS companion mirrors the Mac board and offers guarded actions over an encrypted outbound Cloudflare relay connection. See [pairing, deployment and limitations](docs/remote.md).

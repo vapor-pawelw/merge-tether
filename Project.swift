@@ -16,6 +16,34 @@ let project = Project(
     ),
     targets: [
         .target(
+            name: "MergeTetherRemote",
+            destinations: [.mac, .iPhone, .iPad],
+            product: .staticFramework,
+            bundleId: "com.vaporpw.MergeTetherRemote",
+            deploymentTargets: .multiplatform(iOS: "17.0", macOS: "14.0"),
+            sources: ["Packages/MergeTetherRemote/Sources/MergeTetherRemote/**"]
+        ),
+        .target(
+            name: "MergeTetheriOS",
+            destinations: [.iPhone, .iPad],
+            product: .app,
+            bundleId: "com.vaporpw.MergeTether.iOS",
+            deploymentTargets: .iOS("17.0"),
+            infoPlist: .extendingDefault(with: [
+                "CFBundleDisplayName": .string("MergeTether"),
+                "CFBundleURLTypes": .array([.dictionary([
+                    "CFBundleURLName": .string("com.vaporpw.MergeTether.pair"),
+                    "CFBundleURLSchemes": .array([.string("mergetether")]),
+                ])]),
+                "NSCameraUsageDescription": .string("Scan the pairing code shown by MergeTether on your Mac."),
+                "UILaunchScreen": .dictionary([:]),
+            ]),
+            sources: ["iOS/**/*.swift"],
+            resources: ["Resources/Remote.xcstrings", "iOS/Resources/**"],
+            dependencies: [.target(name: "MergeTetherRemote")],
+            settings: .settings(base: ["TARGETED_DEVICE_FAMILY": "1,2", "ASSETCATALOG_COMPILER_APPICON_NAME": "AppIcon"])
+        ),
+        .target(
             name: "GitLabTodos",
             destinations: [.mac],
             product: .app,
@@ -34,7 +62,8 @@ let project = Project(
                 "Resources/**",
                 "CHANGELOG.md",
                 .folderReference(path: "Helpers/Automation"),
-            ]
+            ],
+            dependencies: [.target(name: "MergeTetherRemote")]
         ),
         .target(
             name: "GitLabTodosTests",
@@ -46,6 +75,7 @@ let project = Project(
             resources: ["Tests/Fixtures/**"],
             dependencies: [
                 .target(name: "GitLabTodos"),
+                .target(name: "MergeTetherRemote"),
             ]
         ),
     ]

@@ -18,7 +18,9 @@ final class GitLabTodosAppDelegate: NSObject, NSApplicationDelegate {
     let monitor = TodoMonitorService()
     let avatarCache = AvatarCache()
     let updates = UpdateService()
+    lazy var remote = RemoteHostController(monitor: monitor)
     func applicationDidFinishLaunching(_ notification: Notification) {
+        _ = remote
         NSApplication.shared.setActivationPolicy(.regular)
         monitor.notifications.onOpenMainWindow = { MainWindowPresentation.show() }
     }
@@ -59,6 +61,11 @@ struct GitLabTodosApp: App {
             MenuBarStatusLabel(monitor: appDelegate.monitor)
         }
         .menuBarExtraStyle(.menu)
+
+        Window(Text(.Remote.remotePair), id: "remote-access") {
+            RemoteAccessView(remote: appDelegate.remote)
+        }
+        .windowResizability(.contentSize)
 
         Settings {
             SettingsView(monitor: appDelegate.monitor)

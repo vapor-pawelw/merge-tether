@@ -1198,6 +1198,55 @@ final class MergeRequestAttentionMonitor {
         _ = await performApproval(of: id, head: head, requireAllResolved: false)
     }
 
+    enum RemotePublicationResult { case completed, changed, uncertain, partial }
+
+    func publishRemoteDrafts(of id: Item.ID, head: String, expectedDrafts: [GitLabDraftNote]) async -> RemotePublicationResult {
+        guard let account, isCurrent(account), let user, !isConfirming(id),
+              !expectedDrafts.isEmpty, expectedDrafts.allSatisfy(AICommentAssessmentStore.safeForAutomaticPublication),
+              expectedDrafts.allSatisfy({ $0.id != nil && $0.authorID == user.id }),
+              Set(expectedDrafts.compactMap(\.id)).count == expectedDrafts.count,
+              items.first(where: { $0.id == id })?.drafts == expectedDrafts else { return .changed }
+        let generation = accountGeneration
+        confirmationStates[id] = .publishing
+        defer { if generation == accountGeneration, confirmationStates[id] == .publishing { confirmationStates[id] = nil } }
+        var remaining = expectedDrafts
+        var attemptedWrite = false
+        var publishedAny = false
+        do {
+            for draft in expectedDrafts {
+                async let live = glab.fetchMergeRequest(projectID: id.projectID, iid: id.iid, host: account.host)
+                async let pending = glab.fetchOwnDraftNotes(projectID: id.projectID, iid: id.iid, host: account.host, userID: user.id)
+                let (request, drafts) = try await (live, pending)
+                guard isCurrent(account), request.state == "opened", request.sha == head,
+                      drafts == remaining, let draftID = draft.id else {
+                    if isCurrent(account) { confirmationStates[id] = .changed }
+                    return publishedAny ? .partial : .changed
+                }
+                attemptedWrite = true
+                try await glab.publishDraftNote(projectID: id.projectID, iid: id.iid, draftID: draftID, host: account.host)
+                attemptedWrite = false
+                guard isCurrent(account) else { return .uncertain }
+                publishedAny = true
+                remaining.removeAll { $0 == draft }
+                publishedDrafts[id, default: []].append(draft)
+                updateItem(id) { $0.drafts = remaining; $0.draftCount = remaining.count }
+            }
+            previousDrafts[id] = nil
+            confirmationStates[id] = nil
+            await refreshReReviewAfterPublication(id, account: account, user: user)
+            return .completed
+        } catch {
+            if isCurrent(account) { confirmationStates[id] = .failed }
+            return attemptedWrite ? .uncertain : (publishedAny ? .partial : .changed)
+        }
+    }
+
+    func approveRemotely(_ id: Item.ID, expectedHead: String) async -> Bool {
+        guard let item = currentItems.first(where: { $0.id == id }), item.canApprove,
+              item.mergeRequest?.sha == expectedHead else { return false }
+        return await performApproval(of: id, head: expectedHead, requireAllResolved: false)
+    }
+
     /// Re-checks the live MR, approves at `head` and reports whether GitLab confirmed it.
     private func performApproval(of id: Item.ID, head: String, requireAllResolved: Bool) async -> Bool {
         guard let account, isCurrent(account), let user, !isConfirming(id) else { return false }

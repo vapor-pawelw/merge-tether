@@ -17,16 +17,7 @@ struct CommandCenterBoardView: View {
         return .init(host: host, username: username)
     }
 
-    private var snapshot: MergeRequestBoardSnapshot {
-        let own = monitor.ownMergeRequestItems
-        let reviewed = monitor.reviewedMergeRequestItems
-        let attention = monitor.attentionItems
-        return .init(own: own, reviewed: reviewed, todos: monitor.currentAccountTodos, attention: attention,
-              handoffs: monitor.assistantHandoffs, host: monitor.glab.resolvedHost, username: monitor.glab.currentUsername,
-              intents: monitor.currentMRTodoIntents, routedTodoIDs: monitor.routedMRTodoIDs,
-              ignoredTargets: monitor.settings.ignoredMergeRequests, humanAttention: monitor.userAttention,
-              pinnedCards: monitor.settings.boardPins)
-    }
+    private var snapshot: MergeRequestBoardSnapshot { monitor.boardSnapshot }
 
     var body: some View {
         let board = snapshot
