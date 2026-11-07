@@ -166,7 +166,7 @@ private struct DependencyStack {
         guard component.count > 1 else { return }
         let roots = component.filter { parents[$0, default: []].isEmpty }
         guard roots.count == 1, let root = roots.first,
-              component.allSatisfy({ parents[$0, default: []].count <= 1 && children[$0, default: []].count <= 1 }) else {
+              component.allSatisfy({ parents[$0, default: []].count <= 1 }) else {
             issues.insert(.stackAmbiguous)
             return
         }
@@ -176,6 +176,8 @@ private struct DependencyStack {
             issues.insert(.stackIncomplete)
             return
         }
+        // A valid branch split has clear predecessors but no single n/N position.
+        guard component.allSatisfy({ children[$0, default: []].count <= 1 }) else { return }
         var ordered: [Int] = []
         var next: Int? = root
         while let node = next, !ordered.contains(node) {

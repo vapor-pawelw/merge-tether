@@ -43,7 +43,7 @@ struct MRDependencyPresentationTests {
         #expect(summary.issues.isEmpty)
     }
 
-    @Test func incompleteAndForkedStacksDoNotInventATotal() throws {
+    @Test func incompleteStacksDoNotInventATotal() throws {
         let middle = try request(2, source: "middle", target: "missing")
         let leaf = try request(3, source: "leaf", target: "middle")
         let partial = MergeRequestDependencySummary(request: leaf,
@@ -52,16 +52,34 @@ struct MRDependencyPresentationTests {
         #expect(partial.stackPosition == nil)
         #expect(partial.predecessors.map(\.iid) == [2])
         #expect(partial.issues.contains(.stackIncomplete))
+    }
+
+    @Test func branchingStacksKeepRequiredParentsWithoutAWarningOrInventedPosition() throws {
         let base = try request(1, source: "base")
         let child = try request(2, source: "middle", target: "base")
         let sibling = try request(4, source: "sibling", target: "base")
-        for current in [base, child, sibling] {
+        let grandchild = try request(5, source: "leaf", target: "middle")
+        let expectedParents = [1: [], 2: [1], 4: [1], 5: [2]]
+        for current in [base, child, sibling, grandchild] {
             let forked = MergeRequestDependencySummary(request: current,
-                stack: .init(requests: [base, child, sibling], defaultBranch: "main"),
+                stack: .init(requests: [grandchild, sibling, base, child], defaultBranch: "main"),
                 dependencies: .init(requests: [], hasHiddenDependency: false))
             #expect(forked.stackPosition == nil)
-            #expect(forked.issues.contains(.stackAmbiguous))
+            #expect(forked.predecessors.map(\.iid) == expectedParents[current.iid])
+            #expect(forked.issues.isEmpty)
         }
+    }
+
+    @Test func branchingStacksStillReportAnUnknownBase() throws {
+        let base = try request(1, source: "base", target: "missing")
+        let child = try request(2, source: "middle", target: "base")
+        let sibling = try request(4, source: "sibling", target: "base")
+        let summary = MergeRequestDependencySummary(request: child,
+            stack: .init(requests: [base, child, sibling], defaultBranch: "main"),
+            dependencies: .init(requests: [], hasHiddenDependency: false))
+        #expect(summary.stackPosition == nil)
+        #expect(summary.predecessors.map(\.iid) == [1])
+        #expect(summary.issues.contains(.stackIncomplete))
     }
 
     @Test func ambiguousParentsAndCyclesAreUncertainRatherThanArbitrary() throws {

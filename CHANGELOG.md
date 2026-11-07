@@ -82,6 +82,8 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 
 ### Fixed
 
+- Keep normal branching MR stacks free of ambiguity warnings while retaining their merge prerequisites.
+
 - Automatically reverify existing app-created reply drafts after a new MR commit, bind successful checks to the current source, and publish only replies allowed by the current publication policy.
 
 - Let both headless coding agents recover required installed local runtimes before treating a stopped service as a blocker, with bounded readiness checks and unchanged GitLab permissions.
