@@ -361,7 +361,9 @@ struct AutomationSettings: Codable, Equatable, Sendable {
             autoMergeEnabled = true
             allowAssistantTools = true
             allowConflictPush = true
-            for trigger in MergeWorkflowTrigger.allCases { workflowRules[trigger].mode = .assistant }
+            for trigger in MergeWorkflowTrigger.allCases {
+                workflowRules[trigger].mode = trigger == .reviewWaiting ? .notify : .assistant
+            }
         case .checkpoints:
             applyRecommended(for: assistant)
             publicationMode = .aiReplies

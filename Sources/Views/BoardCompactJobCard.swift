@@ -61,10 +61,10 @@ struct BoardJobStatusActions: View {
     @State private var retrying = false
     @Environment(\.openSettings) private var openSettings
 
-    private var active: Bool { handoff.execution?.state.isActive == true }
+    private var active: Bool { handoff.operationalExecution?.state.isActive == true }
 
     var body: some View {
-        if active || MergeRequestBoardSnapshot.Row.jobNeedsAttention(handoff.execution?.state) {
+        if active || MergeRequestBoardSnapshot.Row.jobNeedsAttention(handoff.operationalExecution?.state) {
             HStack {
                 BoardStatusChip(title: active ? .Board.boardCompactWorking : .Board.boardCompactBlocked,
                     symbol: active ? "arrow.triangle.2.circlepath" : "exclamationmark.circle",

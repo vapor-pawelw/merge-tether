@@ -96,6 +96,9 @@ enum AssistantAutomationRunner {
         var taskPrompt: String?
         var mergeRequestURL: URL?
         var workflow: MRWorkflow?
+        // The persisted draftReply role was used only for the removed review-waiting reminders.
+        var isObsoleteReminder: Bool { workflow == .draftReply }
+        var operationalExecution: AssistantJobExecution? { isObsoleteReminder ? nil : execution }
         var resolvesOwnThreads: Bool?
         var manual: Bool?
         var expectedHeadSHA: String?
@@ -201,6 +204,7 @@ enum AssistantAutomationRunner {
         expectedHeadSHA: String? = nil,
         jobCoordinator: AssistantJobCoordinator? = nil
     ) async throws -> Handoff {
+        guard mrWorkflow != .draftReply else { throw AssistantJobExecutor.ExecutionError.disabledPermission }
         let executionCoordinator = jobCoordinator ?? coordinator
         guard !executionCoordinator.isWorking(on: work) else { throw HandoffError.executionUnavailable }
 
@@ -329,8 +333,9 @@ enum AssistantAutomationRunner {
     @discardableResult
     static func retry(_ id: UUID, settings: SettingsManager, expectedHeadSHA: String? = nil,
                       jobCoordinator: AssistantJobCoordinator? = nil) async throws -> Handoff {
-        guard let handoff = settings.assistantHandoffs.first(where: { $0.id == id }),
-              let execution = handoff.execution, !execution.state.isActive,
+        guard let handoff = settings.assistantHandoffs.first(where: { $0.id == id }) else { throw HandoffError.legacyJob }
+        guard !handoff.isObsoleteReminder else { throw AssistantJobExecutor.ExecutionError.disabledPermission }
+        guard let execution = handoff.execution, !execution.state.isActive,
               let taskPrompt = handoff.taskPrompt, let url = handoff.mergeRequestURL else { throw HandoffError.legacyJob }
         var reservation: ExistingPipelineWorkDetector.Key?
         if let prior = handoff.pipelineReservation {

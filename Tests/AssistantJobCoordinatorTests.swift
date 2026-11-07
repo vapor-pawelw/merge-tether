@@ -18,6 +18,28 @@ import Testing
               execution: state.map { .init(state: $0) })
     }
 
+    @Test func retiredReminderCannotBeRetriedIntoAnotherExecutableJob() async throws {
+        let (settings, name, defaults) = try fixture()
+        defer { defaults.removePersistentDomain(forName: name) }
+        var reminder = job(state: .cancelled)
+        reminder.workflow = .draftReply
+        reminder.taskPrompt = "Prepare a reminder."
+        reminder.mergeRequestURL = URL(string: "https://gitlab.example.org/g/p/-/merge_requests/2")!
+        settings.assistantHandoffs = [reminder]
+        let coordinator = AssistantJobCoordinator(execute: { _, _ in
+            Issue.record("A retired reminder must never execute")
+            return .init(result: .init(status: .succeeded, summary: "Unexpected execution"), output: "")
+        })
+        defer { coordinator.prepareForTermination(settings: settings) }
+        do {
+            _ = try await AssistantAutomationRunner.retry(reminder.id, settings: settings, jobCoordinator: coordinator)
+            Issue.record("A retired reminder must not produce a retry")
+        } catch {
+            #expect(error as? AssistantJobExecutor.ExecutionError == .disabledPermission)
+        }
+        #expect(settings.assistantHandoffs.count == 1)
+    }
+
     @Test func interruptedRecoveryPreservesLegacyAndCompletedHistory() throws {
         let (settings, name, defaults) = try fixture()
         defer { defaults.removePersistentDomain(forName: name) }

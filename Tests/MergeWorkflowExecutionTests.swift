@@ -107,4 +107,87 @@ import Testing
         for _ in 0..<100 where coordinator.isRunning(retry.id) { try await Task.sleep(for: .milliseconds(5)) }
     }
 
+
+    private func waitingEntry(jobID: UUID?, state: MergeWorkflowActivityState) throws -> MergeWorkflowActivityEntry {
+        var object = try #require(JSONSerialization.jsonObject(with: JSONEncoder().encode(entry(jobID: jobID))) as? [String: Any])
+        var event = try #require(object["event"] as? [String: Any])
+        event["kind"] = "reviewWaiting"
+        event["identity"] = "review-waiting"
+        event["context"] = "Review wait exceeded 48 hours"
+        object["id"] = "review-waiting"
+        object["event"] = event
+        object["state"] = state.rawValue
+        return try JSONDecoder().decode(MergeWorkflowActivityEntry.self, from: JSONSerialization.data(withJSONObject: object))
+    }
+
+    @Test func legacyWaitingRuleRecordsOnlyLocalActivityAndNeverQueuesAWorker() throws {
+        let suite = "MergeWorkflowExecutionTests.\(UUID())"
+        let defaults = try #require(UserDefaults(suiteName: suite))
+        defer { defaults.removePersistentDomain(forName: suite) }
+        let settings = SettingsManager(defaults: defaults)
+        settings.automation.workflowRules[.reviewWaiting].mode = .assistant
+        let glab = GlabService()
+        glab.glabPath = URL(fileURLWithPath: "/usr/bin/false")
+        glab.resolvedHost = "gitlab.example.test"
+        glab.currentUsername = "me"
+        let automation = MergeWorkflowAutomation(settings: settings, glab: glab, notifications: NotificationService())
+        let pending = try waitingEntry(jobID: nil, state: .queued)
+        automation.receive(pending.event, host: pending.host, user: pending.user)
+        #expect(automation.entries.first?.state == .preview)
+        automation.startNext()
+        #expect(automation.entries.first?.state == .preview)
+        #expect(settings.assistantHandoffs.isEmpty)
+    }
+
+    @Test(arguments: [false, true], [AssistantJobExecution.State.queued, .running, .interrupted])
+    func restoredReminderIsIdentifiedWithoutResumingItsAgent(legacyUnlabeled: Bool, state: AssistantJobExecution.State) throws {
+        let suite = "MergeWorkflowExecutionTests.\(UUID())"
+        let defaults = try #require(UserDefaults(suiteName: suite))
+        defer { defaults.removePersistentDomain(forName: suite) }
+        let settings = SettingsManager(defaults: defaults)
+        settings.automation.workflowRules[.reviewWaiting].mode = .assistant
+        let id = UUID()
+        settings.workflowActivity = [try waitingEntry(jobID: id, state: .waitingForAssistant)]
+        settings.assistantHandoffs = [.init(id: id,
+            key: .init(assistant: .codex, work: .init(host: "gitlab.example.test", projectID: 7, iid: 11),
+                       username: "me", workspace: "", access: .gitLabRead), title: "Waiting for review", prompt: "Old reminder",
+            createdAt: Date(), allowsPush: false, execution: .init(state: state), workflow: legacyUnlabeled ? nil : .draftReply)]
+        let glab = GlabService()
+        glab.resolvedHost = "gitlab.example.test"
+        glab.currentUsername = "me"
+        let automation = MergeWorkflowAutomation(settings: settings, glab: glab, notifications: NotificationService())
+        automation.startNext()
+        let mustStop = state == .queued || state == .running
+        #expect(automation.entries.first?.state == (mustStop ? .preview : .failed))
+        #expect(settings.assistantHandoffs.first?.execution?.state == (mustStop ? .cancelled : state))
+        #expect(settings.assistantHandoffs.first?.workflow == .draftReply)
+        #expect(settings.assistantHandoffs.count == 1)
+    }
+
+
+    @Test func authenticatedObservationClassifiesALegacyReminderAfterColdStart() async throws {
+        let suite = "MergeWorkflowExecutionTests.\(UUID())"
+        let defaults = try #require(UserDefaults(suiteName: suite))
+        defer { defaults.removePersistentDomain(forName: suite) }
+        let settings = SettingsManager(defaults: defaults)
+        settings.automation.workflowRules[.reviewWaiting].mode = .assistant
+        let id = UUID()
+        let pending = try waitingEntry(jobID: id, state: .waitingForAssistant)
+        settings.workflowActivity = [pending]
+        settings.assistantHandoffs = [.init(id: id,
+            key: .init(assistant: .codex, work: .init(host: "gitlab.example.test", projectID: 7, iid: 11),
+                       username: "me", workspace: "", access: .gitLabRead), title: "Waiting for review", prompt: "Old reminder",
+            createdAt: Date(), allowsPush: false, execution: .init(state: .interrupted))]
+        let glab = GlabService()
+        glab.glabPath = URL(fileURLWithPath: "/usr/bin/false")
+        let automation = MergeWorkflowAutomation(settings: settings, glab: glab, notifications: NotificationService())
+        #expect(settings.assistantHandoffs.first?.workflow == nil)
+        glab.resolvedHost = "gitlab.example.test"
+        glab.currentUsername = "me"
+        automation.observe([], host: pending.host, user: pending.user)
+        #expect(settings.assistantHandoffs.first?.workflow == .draftReply)
+        #expect(settings.assistantHandoffs.first?.execution?.state == .interrupted)
+        await Task.yield()
+    }
+
 }

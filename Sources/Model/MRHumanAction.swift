@@ -31,12 +31,12 @@ struct MRHumanAction {
           confirmationState: MergeRequestAttentionMonitor.ConfirmationState? = nil,
           automaticallyPublishedDraftIDs: Set<Int> = []) {
         let item = row.item
-        guard row.needsAttention, row.latestJob?.execution?.state.isActive != true,
+        guard row.needsAttention, row.latestJob?.operationalExecution?.state.isActive != true,
               !item.aiOriginChecking,
               item.authorFeedbackStatus?.phase != .checking, item.reReviewReadiness != .checking,
               confirmationState != .publishing, confirmationState != .approving else { return nil }
 
-        let stoppedRun = row.latestJob?.execution.flatMap {
+        let stoppedRun = row.latestJob?.operationalExecution.flatMap {
             MergeRequestBoardSnapshot.Row.jobNeedsAttention($0.state) ? $0 : nil
         }
         let previousHead = row.latestJob?.expectedHeadSHA

@@ -34,7 +34,7 @@ struct AssistantJobExecution: Codable, Equatable, Sendable {
     @MainActor
     static func hasUnfinishedWork(in handoffs: [AssistantAutomationRunner.Handoff],
                                   for work: AssistantAutomationRunner.MergeRequestWork, username: String) -> Bool {
-        let latest = handoffs.filter { $0.key.work == work && $0.key.username == username }
+        let latest = handoffs.filter { !$0.isObsoleteReminder && $0.key.work == work && $0.key.username == username }
             .max { $0.createdAt < $1.createdAt }
         guard let latest else { return false }
         guard let state = latest.execution?.state else { return true }

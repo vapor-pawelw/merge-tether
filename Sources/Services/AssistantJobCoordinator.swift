@@ -31,7 +31,8 @@ final class AssistantJobCoordinator {
 
     @discardableResult
     func schedule(_ handoff: Handoff, settings: SettingsManager) -> Bool {
-        guard !terminating, handoff.execution?.state == .queued, !isWorking(on: handoff.key.work), tasks[handoff.id] == nil else { return false }
+        guard !terminating, !handoff.isObsoleteReminder, handoff.execution?.state == .queued,
+              !isWorking(on: handoff.key.work), tasks[handoff.id] == nil else { return false }
         work[handoff.id] = handoff.key.work
         pending.append((handoff, settings))
         startPendingJobs()

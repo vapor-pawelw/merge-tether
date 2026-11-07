@@ -63,6 +63,32 @@ final class MergeWorkflowAutomation {
                 history[index].assistantJobID = updated.assistantJobID
                 changed = true
             }
+            let entry = history[index]
+            if entry.event.kind == .reviewWaiting, isCurrent(host: entry.host, user: entry.user),
+               let id = entry.assistantJobID,
+               let jobIndex = settings.assistantHandoffs.firstIndex(where: {
+                   $0.id == id && $0.key.work == workKey(entry) && $0.key.username == entry.user.username
+                       && ($0.workflow == .draftReply || $0.workflow == nil)
+               }) {
+                if settings.assistantHandoffs[jobIndex].workflow == nil {
+                    settings.assistantHandoffs[jobIndex].workflow = .draftReply
+                    changed = true
+                }
+                if let state = settings.assistantHandoffs[jobIndex].execution?.state,
+                   state.isActive || state == .cancelled {
+                    if state.isActive {
+                        AssistantAutomationRunner.cancel(id, settings: settings)
+                        if settings.assistantHandoffs[jobIndex].execution?.state.isActive == true {
+                            settings.assistantHandoffs[jobIndex].execution?.state = .cancelled
+                            settings.assistantHandoffs[jobIndex].execution?.finishedAt = Date()
+                        }
+                        changed = true
+                    }
+                    let localState: MergeWorkflowActivityState = settings.automation.workflowRules[.reviewWaiting].mode == .off ? .skipped : .preview
+                    if history[index].state != localState { history[index].state = localState; changed = true }
+                    continue
+                }
+            }
             guard let id = history[index].assistantJobID,
                   let job = settings.assistantHandoffs.first(where: { $0.id == id }),
                   let execution = job.execution else { continue }
@@ -85,6 +111,7 @@ final class MergeWorkflowAutomation {
 
     func observe(_ authored: [GitLabMergeRequest], host: String, user: GitLabAuthenticatedUser) {
         guard !polling, isCurrent(host: host, user: user) else { return }
+        synchronizeAssistantJobs()
         let rules = settings.automation.workflowRules
         for entry in entries where entry.state == .awaitingPipelineHandoff || entry.state == .alreadyRegistered {
             let original = entry.event.mergeRequest
@@ -141,7 +168,7 @@ final class MergeWorkflowAutomation {
         }
     }
 
-    private func receive(_ event: MergeWorkflowEvent, host: String, user: GitLabAuthenticatedUser) {
+    func receive(_ event: MergeWorkflowEvent, host: String, user: GitLabAuthenticatedUser) {
         guard let rule = configuredRule(for: event),
               !entries.contains(where: { $0.id == event.identity })
         else { return }
@@ -175,22 +202,30 @@ final class MergeWorkflowAutomation {
         saveHistory()
     }
 
-    private func startNext() {
-        guard work == nil, let next = entries.last(where: { $0.state == .queued }) else { return }
-        update(next.id, .running)
-        work = Task {
-            defer {
-                work = nil
-                startNext()
+    func startNext() {
+        guard work == nil else { return }
+        while let next = entries.last(where: { $0.state == .queued }) {
+            let mode = configuredRule(for: next.event)?.mode
+            guard next.event.kind != .reviewWaiting, mode == .assistant else {
+                update(next.id, mode == .notify || mode == .preview ? .preview : .skipped)
+                continue
             }
-            do {
-                try await execute(next)
-            } catch is CancellationError {
-                update(next.id, .skipped)
-            } catch {
-                update(next.id, .failed)
-                Log.monitor.error("Merge workflow execution failed: \(String(describing: error), privacy: .private)")
+            update(next.id, .running)
+            work = Task {
+                defer {
+                    work = nil
+                    startNext()
+                }
+                do {
+                    try await execute(next)
+                } catch is CancellationError {
+                    update(next.id, .skipped)
+                } catch {
+                    update(next.id, .failed)
+                    Log.monitor.error("Merge workflow execution failed: \(String(describing: error), privacy: .private)")
+                }
             }
+            return
         }
     }
 
@@ -280,7 +315,7 @@ final class MergeWorkflowAutomation {
         let mrWorkflow: AssistantAutomationRunner.MRWorkflow? = switch event.kind {
         case .reviewUpdate: .review
         case .newDiscussion, .pipelineFailure: current.author.username == entry.user.username ? .followUp : nil
-        case .reviewWaiting: .draftReply
+        case .reviewWaiting: nil
         case .blockerChange, .stackDependencyMerged: nil
         }
         let isolation = mrWorkflow == .followUp ? "\n\n\(AssistantAutomationRunner.isolatedFixInstructions)" : ""
@@ -310,7 +345,8 @@ final class MergeWorkflowAutomation {
     private func configuredRule(for event: MergeWorkflowEvent) -> MergeWorkflowRule? {
         guard let host = glab.resolvedHost, let username = glab.currentUsername,
               settings.automation.scope.permits(event.mergeRequest, host: host, username: username) else { return nil }
-        let rule = settings.automation.workflowRules[event.kind]
+        var rule = settings.automation.workflowRules[event.kind]
+        rule.mode = rule.effectiveMode(for: event.kind)
         return rule.mode != .off && rule.includes(event.mergeRequest) ? rule : nil
     }
 
@@ -350,7 +386,8 @@ final class MergeWorkflowAutomation {
     }
 
     private func shouldProceed(_ entry: MergeWorkflowActivityEntry) -> Bool {
-        isCurrent(host: entry.host, user: entry.user) && configuredRule(for: entry.event)?.mode == .assistant
+        entry.event.kind != .reviewWaiting && isCurrent(host: entry.host, user: entry.user)
+            && configuredRule(for: entry.event)?.mode == .assistant
     }
 
     private func update(_ id: String, _ state: MergeWorkflowActivityState) {
@@ -391,7 +428,7 @@ private extension MergeWorkflowTrigger {
         case .stackDependencyMerged:
             "The parent MR in this stack was merged. Identify the correct target and prepare a rebase or retarget plan, showing which diff should remain. Leave the remote target and branches for the user."
         case .reviewWaiting:
-            "Summarize what the MR is waiting for. Prepare at most one short reminder as a draft."
+            "Track review waiting locally. Do not create reminders or other GitLab comments."
         }
     }
 }

@@ -115,6 +115,64 @@ struct AutomationPackageTests {
         #expect(settings.permitsConflictPush(project: "any/repository") && settings.permitsAutoMerge(project: "any/repository"))
     }
 
+    @Test func fullPresetTracksReviewWaitingLocallyWithoutStartingAnAgent() {
+        var settings = AutomationSettings()
+        settings.applyPreset(.full, for: .codex)
+        #expect(settings.workflowRules[.reviewWaiting].mode == .notify)
+        #expect(settings.workflowRules[.reviewWaiting].waitHours == 48)
+        #expect(MergeWorkflowTrigger.allCases.filter { $0 != .reviewWaiting }
+            .allSatisfy { settings.workflowRules[$0].mode == .assistant })
+        #expect(MergeWorkflowTrigger.reviewWaiting.allowedModes == [.off, .notify])
+        #expect(MergeWorkflowTrigger.newDiscussion.allowedModes.contains(.assistant))
+    }
+
+    @Test func legacyReviewWaitingAgentRuleMigratesWithoutChangingOtherRulesOrThresholds() throws {
+        let json = #"{"assistantDefaultsVersion":1,"workflowRules":{"rules":{"reviewWaiting":{"mode":"assistant","projects":"team/repo","targetBranches":"main","requiredLabel":"review","retryInfrastructureFailure":false,"waitHours":72},"newDiscussion":{"mode":"assistant","projects":"","targetBranches":"","requiredLabel":"","retryInfrastructureFailure":false,"waitHours":48}}}}"#
+        let settings = try JSONDecoder().decode(AutomationSettings.self, from: Data(json.utf8))
+        let waiting = settings.workflowRules[.reviewWaiting]
+        #expect(waiting.mode == .notify && waiting.waitHours == 72)
+        #expect(waiting.projects == "team/repo" && waiting.targetBranches == "main" && waiting.requiredLabel == "review")
+        #expect(settings.workflowRules[.newDiscussion].mode == .assistant)
+        let encoded = try #require(JSONSerialization.jsonObject(with: JSONEncoder().encode(settings)) as? [String: Any])
+        let workflow = try #require(encoded["workflowRules"] as? [String: Any])
+        let rules = try #require(workflow["rules"] as? [String: [String: Any]])
+        #expect(rules["reviewWaiting"]?["mode"] as? String == "notify")
+    }
+
+    @MainActor @Test(arguments: ["assistant", "off"])
+    func reviewWaitingMigrationPersistsThroughNormalSettingsSave(mode: String) throws {
+        let suite = "AutomationPackageTests.\(UUID())"
+        let defaults = try #require(UserDefaults(suiteName: suite))
+        defer { defaults.removePersistentDomain(forName: suite) }
+        let rule: [String: Any] = ["mode": mode, "projects": "", "targetBranches": "", "requiredLabel": "",
+                                   "retryInfrastructureFailure": false, "waitHours": 48]
+        let legacy: [String: Any] = ["assistantDefaultsVersion": 1, "packageDecision": "disabled",
+                                     "workflowRules": ["rules": ["reviewWaiting": rule]]]
+        defaults.set(try JSONSerialization.data(withJSONObject: legacy), forKey: "automation")
+        let settings = SettingsManager(defaults: defaults)
+        #expect(settings.automation.workflowRules[.reviewWaiting].mode == (mode == "off" ? .off : .notify))
+        settings.save()
+        let saved = try #require(defaults.data(forKey: "automation"))
+        let loaded = try JSONDecoder().decode(AutomationSettings.self, from: saved)
+        #expect(loaded.workflowRules[.reviewWaiting].mode == (mode == "off" ? .off : .notify))
+        #expect(loaded.workflowRules[.reviewWaiting].waitHours == 48 && loaded.packageDecision == .disabled)
+    }
+
+    @Test func reviewWaitingCanBeDisabledButCannotRegainAgentExecution() {
+        var rules = MergeWorkflowRules()
+        rules[.reviewWaiting].mode = .assistant
+        rules[.reviewWaiting].waitHours = 96
+        #expect(rules[.reviewWaiting].mode == .notify)
+        #expect(rules[.reviewWaiting].effectiveMode(for: .reviewWaiting) == .notify)
+        rules[.reviewWaiting].mode = .off
+        #expect(rules[.reviewWaiting].mode == .off && rules[.reviewWaiting].waitHours == 96)
+        #expect(!rules.enabled.contains(.reviewWaiting))
+        var other = MergeWorkflowRule()
+        other.mode = .assistant
+        #expect(other.effectiveMode(for: .reviewWaiting) == .notify)
+        #expect(other.effectiveMode(for: .newDiscussion) == .assistant)
+    }
+
     @Test func checkpointsPresetPreparesWorkButLeavesSensitiveActionsManual() {
         var settings = AutomationSettings()
         settings.applyPreset(.checkpoints, for: .codex)
@@ -284,7 +342,7 @@ struct AutomationPackageTests {
         #expect(handoff.workflow == nil)
     }
 
-    @Test(arguments: [AssistantAutomationRunner.MRWorkflow.review, .draftReply, .followUp])
+    @Test(arguments: [AssistantAutomationRunner.MRWorkflow.review, .followUp])
     @MainActor func explicitMRWorkflowsKeepLiveToolsAndTheirRemoteActionBoundaries(
         workflow: AssistantAutomationRunner.MRWorkflow
     ) async throws {
@@ -315,6 +373,29 @@ struct AutomationPackageTests {
             #expect(handoff.followUpPushAllowed == nil)
             #expect(handoff.prompt.contains("Leave the MR branches and code unchanged"))
         }
+    }
+
+    @Test @MainActor func obsoleteReminderCannotLaunchEvenThroughAnExplicitManualRequest() async throws {
+        let suite = "RetiredReminderWorkflowPolicy.\(UUID())"
+        let defaults = try #require(UserDefaults(suiteName: suite))
+        defer { defaults.removePersistentDomain(forName: suite) }
+        let settings = SettingsManager(defaults: defaults)
+        let work = AssistantAutomationRunner.MergeRequestWork(host: "gitlab.example.test", projectID: 7, iid: 11)
+        let url = try #require(URL(string: "https://gitlab.example.test/team/repo/-/merge_requests/11"))
+        let coordinator = AssistantJobCoordinator(execute: { _, _ in
+            Issue.record("A retired reminder must not execute")
+            return .init(result: .init(status: .succeeded, summary: "Unexpected reminder"), output: "")
+        })
+        defer { coordinator.prepareForTermination(settings: settings) }
+        do {
+            _ = try await AssistantAutomationRunner.launch(.codex, title: "Old reminder", mergeRequestURL: url,
+                prompt: "Prepare an old reminder.", workspace: "", access: .gitLabRead, work: work, username: "me",
+                settings: settings, mrWorkflow: .draftReply, manual: true, jobCoordinator: coordinator)
+            Issue.record("A retired reminder must not create a new job")
+        } catch {
+            #expect(error as? AssistantJobExecutor.ExecutionError == .disabledPermission)
+        }
+        #expect(settings.assistantHandoffs.isEmpty)
     }
 
     @Test @MainActor func reviewPublicationPolicyKeepsHumanRepliesPrivateUnlessPublishAllIsOn() async throws {

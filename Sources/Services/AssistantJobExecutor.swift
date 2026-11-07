@@ -117,6 +117,7 @@ enum AssistantJobExecutor {
     }
 
     static func validateConfiguration(_ handoff: AssistantAutomationRunner.Handoff, automation: AutomationSettings) throws {
+        guard !handoff.isObsoleteReminder else { throw ExecutionError.disabledPermission }
         guard handoff.manual == true || handoff.configurationSnapshot?.preservingScope(from: automation) == automation else {
             throw ExecutionError.disabledPermission
         }

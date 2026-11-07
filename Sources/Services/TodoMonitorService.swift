@@ -381,14 +381,14 @@ final class TodoMonitorService {
 
     var manualAssistantGroups: [AssistantTaskGroup] {
         assistantGroups.filter { group in
-            guard let execution = group.handoffs.first(where: { $0.execution != nil })?.execution else { return false }
+            guard let execution = group.handoffs.first(where: { $0.operationalExecution != nil })?.operationalExecution else { return false }
             return [.failed, .blocked, .interrupted, .cancelled].contains(execution.state)
         }
     }
 
     func manualHandoff(in group: AssistantTaskGroup) -> AssistantAutomationRunner.Handoff? {
         group.handoffs.first { handoff in
-            guard let execution = handoff.execution else { return false }
+            guard let execution = handoff.operationalExecution else { return false }
             return [.failed, .blocked, .interrupted, .cancelled].contains(execution.state)
         }
     }
@@ -718,7 +718,7 @@ final class TodoMonitorService {
                 assistantReady: preparing)
             let state = attention.confirmationStates[row.id]
             let conflictProcessing = row.item.mergeRequest.map { automaticConflictIsProcessing(for: $0) } ?? false
-            let busy = row.latestJob?.execution?.state.isActive == true || state == .publishing || state == .approving
+            let busy = row.latestJob?.operationalExecution?.state.isActive == true || state == .publishing || state == .approving
                 || row.item.aiOriginChecking
                 || row.item.authorFeedbackStatus?.phase == .checking
                 || conflictProcessing
@@ -755,7 +755,7 @@ final class TodoMonitorService {
             default: break
             }
             if state == .failed || state == .changed { add(.failedWork, "confirmation-\(String(describing: state))") }
-            if let job = row.latestJob, let execution = job.execution,
+            if let job = row.latestJob, let execution = job.operationalExecution,
                [.failed, .blocked, .interrupted].contains(execution.state),
                !row.intents.contains(where: { $0.jobID == job.id && $0.state == .completed }) {
                 add(.failedWork, job.id.uuidString + ":" + execution.state.rawValue)
@@ -1110,7 +1110,7 @@ final class TodoMonitorService {
     }
 
     func retryAssistantJob(_ id: UUID) async {
-        guard let job = assistantHandoffs.first(where: { $0.id == id }) else { return }
+        guard let job = assistantHandoffs.first(where: { $0.id == id }), !job.isObsoleteReminder else { return }
         let target = MRAutomationScope.Target(host: job.key.work.host, username: job.key.username,
             projectID: job.key.work.projectID, iid: job.key.work.iid)
         settings.recordAutomationEvent(target: target, action: .retry, origin: .manual, state: .requested, jobID: id)

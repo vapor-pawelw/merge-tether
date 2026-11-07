@@ -1,6 +1,17 @@
 {
   "sourceLanguage": "en",
   "strings": {
+    "settings.automation.workflow.reviewWaitingHelp": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Track review waiting locally. This event never starts an agent or creates GitLab comments."
+          }
+        }
+      }
+    },
     "settings.automation.profilePermissionsHelp": {
       "extractionState": "manual",
       "localizations": {

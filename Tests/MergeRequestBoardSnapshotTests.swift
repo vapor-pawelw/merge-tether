@@ -26,6 +26,36 @@ struct MergeRequestBoardSnapshotTests {
                           todos: [Todo] = [], handoffs: [AssistantAutomationRunner.Handoff] = []) -> MergeRequestBoardSnapshot {
         .init(own: own, reviewed: reviewed, todos: todos, attention: [], handoffs: handoffs, host: host, username: "me")
     }
+
+    @Test func cancelledRemindersRemainHistoryWithoutOperationalAttentionOrStandaloneRetryCards() throws {
+        var reminder = job(42, state: .cancelled)
+        reminder.workflow = .draftReply
+        #expect(reminder.isObsoleteReminder)
+        #expect(reminder.execution?.state == .cancelled)
+        let board = snapshot(own: [item(42)], handoffs: [reminder])
+        let row = try #require(board.own.first)
+        #expect(!row.needsAttention)
+        #expect(row.latestJob == nil)
+        let direct = MergeRequestBoardSnapshot.Row(item: item(42), latestJob: reminder, intents: [])
+        #expect(!direct.needsAttention)
+        #expect(MRHumanAction(row: direct, assistantReady: true) == nil)
+        let orphan = snapshot(own: [], handoffs: [reminder])
+        #expect(orphan.otherCards(jobs: [reminder], host: host, username: "me", pinnedCards: []).isEmpty)
+    }
+
+    @Test func retiringANewerReminderDoesNotHideAnOlderGenuineReviewFailure() throws {
+        var reminder = job(42, state: .cancelled, at: Date(timeIntervalSince1970: 200))
+        reminder.workflow = .draftReply
+        var review = job(42, state: .failed, at: Date(timeIntervalSince1970: 100))
+        review.workflow = .review
+        let row = try #require(snapshot(own: [item(42)], handoffs: [review, reminder]).own.first)
+        #expect(row.latestJob?.id == review.id)
+        #expect(row.needsAttention)
+        var ordinaryCancellation = review
+        ordinaryCancellation.execution = .init(state: .cancelled)
+        #expect(!ordinaryCancellation.isObsoleteReminder)
+        #expect(snapshot(own: [item(42)], handoffs: [ordinaryCancellation]).own.first?.needsAttention == true)
+    }
     @Test func attentionFirstPreservesRelativeOrderAndUsesLatestJob() {
         let board = snapshot(own: [item(1), item(2, attention: true), item(3), item(4, attention: true)],
             handoffs: [job(3, state: .failed)])

@@ -9,9 +9,9 @@ struct MergeRequestBoardSnapshot {
         var id: MergeRequestAttentionMonitor.Item.ID { item.id }
         var needsAttention: Bool {
             if let humanActionRequired = item.humanActionRequired { return humanActionRequired }
-            if latestJob?.execution?.state.isActive == true || item.authorFeedbackStatus?.phase == .checking || item.aiOriginChecking { return false }
+            if latestJob?.operationalExecution?.state.isActive == true || item.authorFeedbackStatus?.phase == .checking || item.aiOriginChecking { return false }
             return item.needsAttention || intents.contains { $0.state == .pending || $0.state == .failed }
-                || Self.jobNeedsAttention(latestJob?.execution?.state)
+                || Self.jobNeedsAttention(latestJob?.operationalExecution?.state)
         }
         static func jobNeedsAttention(_ state: AssistantJobExecution.State?) -> Bool {
             switch state {
@@ -73,7 +73,7 @@ struct MergeRequestBoardSnapshot {
             item.isAuthored = original.isAuthored || username.map { original.mergeRequest?.author.username == $0 } == true
             item = item.presentingVerifiedAuthorFeedback()
             let latest = handoffs.filter {
-                valid && $0.key.work.host == host && $0.key.username == username
+                !$0.isObsoleteReminder && valid && $0.key.work.host == host && $0.key.username == username
                     && $0.key.work.projectID == item.id.projectID && $0.key.work.iid == item.id.iid
             }.max { $0.createdAt < $1.createdAt }
             let currentIntents = accountIntents.filter {
@@ -134,7 +134,7 @@ struct MergeRequestBoardSnapshot {
         for index in grouped.indices {
             let target = grouped[index].target
             grouped[index].latestJob = handoffs.filter {
-                $0.key.work.host == target.host && $0.key.username == target.username
+                !$0.isObsoleteReminder && $0.key.work.host == target.host && $0.key.username == target.username
                     && $0.key.work.projectID == target.projectID && $0.key.work.iid == target.iid
             }.max { $0.createdAt < $1.createdAt }
         }
@@ -169,7 +169,7 @@ struct MergeRequestBoardSnapshot {
             BoardCardPin.todo(host: host, username: username, id: todo.id).map { .init(id: $0, content: .todo(todo)) }
         }
         let rows = own + reviewed + otherMergeRequests
-        let latest = Dictionary(grouping: jobs.filter { $0.key.work.host == host && $0.key.username == username }, by: \.key.work)
+        let latest = Dictionary(grouping: jobs.filter { !$0.isObsoleteReminder && $0.key.work.host == host && $0.key.username == username }, by: \.key.work)
             .values.compactMap { $0.max { $0.createdAt < $1.createdAt } }
             .sorted {
                 $0.createdAt == $1.createdAt ? $0.id.uuidString < $1.id.uuidString : $0.createdAt > $1.createdAt

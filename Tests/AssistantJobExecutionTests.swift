@@ -3,6 +3,17 @@ import Testing
 @testable import GitLabTodos
 
 @Suite struct AssistantJobExecutionTests {
+    @MainActor @Test func obsoleteReminderCannotBlockCompletionButAnOlderRealFailureStillDoes() {
+        let work = AssistantAutomationRunner.MergeRequestWork(host: "gitlab.example.org", projectID: 1, iid: 2)
+        let key = AssistantAutomationRunner.ChatKey(assistant: .codex, work: work, username: "me", workspace: "", access: .gitLabRead)
+        let reminder = AssistantAutomationRunner.Handoff(id: UUID(), key: key, title: "Reminder", prompt: "", createdAt: Date(timeIntervalSince1970: 200),
+            allowsPush: false, execution: .init(state: .cancelled), workflow: .draftReply)
+        let review = AssistantAutomationRunner.Handoff(id: UUID(), key: key, title: "Review", prompt: "", createdAt: Date(timeIntervalSince1970: 100),
+            allowsPush: false, execution: .init(state: .failed), workflow: .review)
+        #expect(!AssistantJobExecution.hasUnfinishedWork(in: [reminder], for: work, username: "me"))
+        #expect(AssistantJobExecution.hasUnfinishedWork(in: [review, reminder], for: work, username: "me"))
+    }
+
     @Test func blockedRunsShowTheCauseInsteadOfTheCompletedWork() {
         let summary = "[Open MR](https://gitlab.example.org/g/p/-/merge_requests/2)\n\nBoth fixes are already present.\n\nTests could not start because temporary file creation was denied."
         let legacy = AssistantJobExecution(state: .blocked, summary: summary)

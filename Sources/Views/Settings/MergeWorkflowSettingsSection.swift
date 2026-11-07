@@ -16,10 +16,9 @@ struct MergeWorkflowSettingsSection: View {
             }
 
             Picker(selection: rule.mode) {
-                Text(.Settings.settingsAutomationWorkflowModeOff).tag(MergeWorkflowMode.off)
-                Text(.Settings.settingsAutomationWorkflowModePreview).tag(MergeWorkflowMode.preview)
-                Text(.Settings.settingsAutomationWorkflowModeNotify).tag(MergeWorkflowMode.notify)
-                Text(.Settings.settingsAutomationWorkflowModeAssistant).tag(MergeWorkflowMode.assistant)
+                ForEach(trigger.allowedModes, id: \.self) { mode in
+                    Text(mode.displayLabel).tag(mode)
+                }
             } label: {
                 Text(.Settings.settingsAutomationWorkflowMode)
             }
@@ -56,7 +55,8 @@ struct MergeWorkflowSettingsSection: View {
         } footer: {
             VStack(alignment: .leading, spacing: 4) {
                 Text(.Settings.settingsAutomationWorkflowProjectsHelp)
-                Text(.Settings.settingsAutomationWorkflowModesHelp)
+                if trigger == .reviewWaiting { Text(.Settings.settingsAutomationWorkflowReviewWaitingHelp) }
+                else { Text(.Settings.settingsAutomationWorkflowModesHelp) }
             }
             .font(.caption)
             .foregroundStyle(.secondary)
@@ -78,6 +78,18 @@ extension MergeWorkflowTrigger {
         case .blockerChange: .Settings.settingsAutomationWorkflowBlockerChange
         case .stackDependencyMerged: .Settings.settingsAutomationWorkflowStackDependencyMerged
         case .reviewWaiting: .Settings.settingsAutomationWorkflowReviewWaiting
+        }
+    }
+}
+
+
+private extension MergeWorkflowMode {
+    var displayLabel: LocalizedStringResource {
+        switch self {
+        case .off: .Settings.settingsAutomationWorkflowModeOff
+        case .preview: .Settings.settingsAutomationWorkflowModePreview
+        case .notify: .Settings.settingsAutomationWorkflowModeNotify
+        case .assistant: .Settings.settingsAutomationWorkflowModeAssistant
         }
     }
 }

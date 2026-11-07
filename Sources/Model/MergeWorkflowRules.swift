@@ -4,7 +4,7 @@ enum AutomationPackageDecision: String, Codable, Equatable, Sendable {
     case undecided, enabled, disabled
 }
 
-enum MergeWorkflowMode: String, Codable, Equatable, Sendable {
+enum MergeWorkflowMode: String, Codable, Equatable, Hashable, CaseIterable, Sendable {
     case off, preview, notify, assistant
 }
 
@@ -15,6 +15,10 @@ struct MergeWorkflowRule: Codable, Equatable, Sendable {
     var requiredLabel = ""
     var retryInfrastructureFailure = false
     var waitHours = 48
+
+    func effectiveMode(for trigger: MergeWorkflowTrigger) -> MergeWorkflowMode {
+        trigger == .reviewWaiting && mode != .off ? .notify : mode
+    }
 
     func includes(project: String) -> Bool {
         let paths = Self.projectPaths(projects)
@@ -39,9 +43,30 @@ struct MergeWorkflowRule: Codable, Equatable, Sendable {
 struct MergeWorkflowRules: Codable, Equatable, Sendable {
     private var rules: [String: MergeWorkflowRule] = [:]
 
+    init() {}
+
+    init(from decoder: Decoder) throws {
+        let values = try decoder.container(keyedBy: CodingKeys.self)
+        rules = try values.decodeIfPresent([String: MergeWorkflowRule].self, forKey: .rules) ?? [:]
+        if var waiting = rules[MergeWorkflowTrigger.reviewWaiting.rawValue] {
+            waiting.mode = waiting.effectiveMode(for: .reviewWaiting)
+            rules[MergeWorkflowTrigger.reviewWaiting.rawValue] = waiting
+        }
+    }
+
+    private enum CodingKeys: String, CodingKey { case rules }
+
     subscript(trigger: MergeWorkflowTrigger) -> MergeWorkflowRule {
-        get { rules[trigger.rawValue] ?? MergeWorkflowRule() }
-        set { rules[trigger.rawValue] = newValue }
+        get {
+            var rule = rules[trigger.rawValue] ?? MergeWorkflowRule()
+            rule.mode = rule.effectiveMode(for: trigger)
+            return rule
+        }
+        set {
+            var rule = newValue
+            rule.mode = rule.effectiveMode(for: trigger)
+            rules[trigger.rawValue] = rule
+        }
     }
 
     var enabled: Set<MergeWorkflowTrigger> {
@@ -51,4 +76,9 @@ struct MergeWorkflowRules: Codable, Equatable, Sendable {
     func hasSetting(for trigger: MergeWorkflowTrigger) -> Bool {
         rules[trigger.rawValue] != nil
     }
+}
+
+
+extension MergeWorkflowTrigger {
+    var allowedModes: [MergeWorkflowMode] { self == .reviewWaiting ? [.off, .notify] : MergeWorkflowMode.allCases }
 }
