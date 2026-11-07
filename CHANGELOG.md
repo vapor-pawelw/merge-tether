@@ -8,6 +8,8 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 
 ### Added
 
+- Add an expandable per-MR automation event log with attempt timestamps, application decisions, exact failure reasons and optional raw diagnostics.
+
 - Pin cards per account and animate card insertion, removal and reordering within each lane, respecting Reduce Motion.
 - Offer brief, optional banners for automatically accepted GitLab events, enabled by default for existing installations as well.
 
@@ -16,6 +18,7 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 - Let the lightweight verifier read live MR evidence through Codex CLI or Claude CLI tools while keeping GitLab actions in the app's policy checks.
 - Show MR authors with compact avatars on Reviewing and proposal cards, explain proposal sources, and show factual review participation and reply context.
 - Browse complete discussion threads with inline private drafts in Review and confirm, including AI badges for verified agent identities or very-high-confidence current-comment assessments.
+- Proactively assess AI assistance in source-comment text through the lightweight verification model, including human-posted feedback; keep likely manual and uncertain results private and bind assessments to current comment bodies.
 - Offer Full automation, With checkpoints and Manual only profiles with separate scope and publication controls; preserve existing settings until explicitly changed.
 - Add optional publication conditions for repositories, MR authors, source-comment authors and current AI evidence, combined with AND, plus individual resets to profile defaults.
 
@@ -34,9 +37,13 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 
 ### Changed
 
+- Use regular-weight primary card messages and move authors, badges and MR numbers above titles.
+
+- Separate publish-all automation from conditional publication, default Full automation to all checked comments and With checkpoints to AI replies, and simplify the filter fields and profile-aware resets.
+
 - Show MR authors by display name, with their account handle available on hover.
 
-- Place the repository name inline after card titles, move author information to the footer and full repository paths to hover help and details, and standardize card menus and icons.
+- Place the repository name inline after card titles, show author and MR metadata above titles and full repository paths in hover help and details, and standardize card menus and icons.
 
 - Show one main action per MR card, keep comments in a stable detail layout, and collapse metadata and run/activity history until requested.
 - Use Agent and coding agent terminology throughout the interface and documentation, with an explicit Start a conversation with an agent action for manual CLI or desktop sessions.
@@ -53,6 +60,12 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 - Refresh public documentation and use the retro painted-style MergeTether icon.
 
 ### Fixed
+
+- Retain sealed publication evidence across successor runs, revalidate each draft against its original authorized run, and keep likely manual or unclassified sources private under AI-only publication.
+
+- Complete independently verified no-work feedback follow-ups without requiring a publication receipt, reconcile them as soon as verification finishes, and keep stale results from overwriting newer retries. Retain exact application failures and retry history.
+
+- Align discussion disclosure arrows with the first header row and add space between the control and conversation text.
 
 - Explain the next step on Reviewing cards, stop presenting resolved author replies as pending work, and recheck outdated current-head review evidence once per discussion context under the configured workflow rule.
 
