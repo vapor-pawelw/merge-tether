@@ -52,7 +52,7 @@
         "en": {
           "stringUnit": {
             "state": "translated",
-            "value": "%1$lld drafts are not covered by current checks. Review them before publishing."
+            "value": "%1$lld comments still need verification before automatic publication."
           }
         }
       }
@@ -393,7 +393,7 @@
         "en": {
           "stringUnit": {
             "state": "translated",
-            "value": "1 draft is not covered by current checks. Review it before publishing."
+            "value": "1 comment still needs verification before automatic publication."
           }
         }
       }

@@ -7,6 +7,26 @@ import Testing
     private let host = "gitlab.example.org"
     private let head = "0123456789012345678901234567890123456789"
 
+    private final class OriginProbe {
+        var notes: [GitLabMergeRequestDiscussion.Note] = []
+        private var continuation: CheckedContinuation<AICommentOriginAssessment, Never>?
+        private var result: AICommentOriginAssessment?
+        func assess(_ source: [GitLabMergeRequestDiscussion.Note]) async -> AICommentOriginAssessment {
+            notes = source
+            if let result { return result }
+            return await withCheckedContinuation { continuation = $0 }
+        }
+        func finish(ai: Bool) {
+            let assessment = AICommentOriginAssessment(notes: notes.compactMap { note in note.id.map {
+                .init(noteID: $0, classification: ai ? .aiAssisted : .uncertain,
+                    confidence: ai ? .veryHigh : .uncertain, evidence: ai ? "Verified fixture AI provenance." : "Insufficient source provenance.")
+            } })
+            result = assessment
+            continuation?.resume(returning: assessment)
+            continuation = nil
+        }
+    }
+
     @MainActor
     private struct Harness {
         let folder: URL
@@ -41,7 +61,7 @@ import Testing
             let work = AssistantAutomationRunner.MergeRequestWork(host: "gitlab.example.org", projectID: 1, iid: 2)
             let key = AssistantAutomationRunner.ChatKey(assistant: .codex, work: work, username: "me", workspace: "", access: .gitLabRead)
             let run = AssistantAutomationRunner.Handoff(id: UUID(), key: key, title: "Follow up", prompt: "", createdAt: Date(), allowsPush: false,
-                                                       followUpPushAllowed: true)
+                                                       followUpPushAllowed: true, execution: .init(state: .succeeded))
             settings.assistantHandoffs.append(run)
             let raw = try #require(JSONSerialization.jsonObject(with: Data(contentsOf: folder.appending(path: "drafts.json"))) as? [[String: Any]])
             let drafts = raw.filter { $0["author_id"] as? Int == 3 }.map {
@@ -70,10 +90,10 @@ import Testing
             try JSONSerialization.data(withJSONObject: receipt).write(to: url)
         }
 
-        func poll() async throws {
+        func poll(waitForAIOrigin: Bool = true) async throws {
             monitor.refresh(host: "gitlab.example.org", username: "me", todos: [])
             let deadline = ContinuousClock.now + .seconds(5)
-            while monitor.isLoading || monitor.isVerifyingReReview, ContinuousClock.now < deadline {
+            while monitor.isLoading || monitor.isVerifyingReReview || (waitForAIOrigin && monitor.isAssessingAIOrigins), ContinuousClock.now < deadline {
                 try await Task.sleep(for: .milliseconds(20))
             }
             try #require(!monitor.isLoading && !monitor.hasError)
@@ -88,6 +108,7 @@ import Testing
         }
 
         func cleanUp() {
+            monitor.aiOriginCoordinator.cancel()
             try? FileManager.default.removeItem(at: folder)
             defaults.removePersistentDomain(forName: suite)
         }
@@ -96,7 +117,8 @@ import Testing
     /// A GitLab stub where "me" (id 3) reviews MR !2, authored by someone else (id 9).
     private func makeHarness(assistantWorked: Bool, authored: Bool = false,
                              duringAutomationCheck: (@MainActor (URL) -> Void)? = nil,
-                             assessment: ReReviewAssessment? = nil) throws -> Harness {
+                             assessment: ReReviewAssessment? = nil,
+                             assessAIOrigin: AICommentOriginCoordinator.Assess? = nil) throws -> Harness {
         let folder = FileManager.default.temporaryDirectory.appending(path: UUID().uuidString)
         try FileManager.default.createDirectory(at: folder, withIntermediateDirectories: false)
         let suite = "ConfirmationQueueTests.\(UUID())"
@@ -193,7 +215,7 @@ import Testing
                         exit 0
                     fi
                     if [ -f change-during-discussions ]; then
-                        /usr/bin/python3 -c 'import json; p="drafts.json"; a=json.load(open(p)); [d.update(note="Edited while checking") for d in a if d["id"]==12]; json.dump(a,open(p,"w"))'
+                        /usr/bin/python3 -c 'import json,os,tempfile; p="drafts.json"; a=json.load(open(p)); [d.update(note="Edited while checking") for d in a if d["id"]==12]; f=tempfile.NamedTemporaryFile(mode="w",dir=".",delete=False); json.dump(a,f); f.close(); os.replace(f.name,p)'
                     fi
                     cat discussions.json ;;
                 */approve)
@@ -247,6 +269,11 @@ import Testing
                 }.compactMap { note in
                     note.id.map { .init(noteID: $0, state: .addressed, reason: "Verified fixture correction") }
                 })
+            },
+            assessAIOrigin: assessAIOrigin ?? { _, notes, _, _ in
+                .init(notes: notes.compactMap { note in note.id.map {
+                    .init(noteID: $0, classification: .uncertain, confidence: .uncertain, evidence: "No AI provenance in this fixture.")
+                } })
             }
         )
         return Harness(folder: folder, defaults: defaults, suite: suite, settings: settings, monitor: monitor)
@@ -830,7 +857,7 @@ import Testing
     @Test func publicationRepositoryRestrictionKeepsDraftsPrivateAndNeedingHumanAction() async throws {
         let harness = try makeHarness(assistantWorked: true)
         defer { harness.cleanUp() }
-        harness.settings.automation.publicationMode = .all
+        harness.settings.automation.publicationMode = .filtered
         harness.settings.automation.publicationRestrictions.repositories = [
             .init(host: host, entityID: 99, label: "other/project")
         ]
@@ -846,7 +873,7 @@ import Testing
             target: target, assistantPreparing: true).isEmpty)
     }
 
-    @Test(arguments: [AutomationPublicationMode.all, .aiReplies])
+    @Test(arguments: [AutomationPublicationMode.filtered, .aiReplies])
     func automaticPublicationCannotExpandBeyondCheckedPreviewWhenLiveAIProofImproves(mode: AutomationPublicationMode) async throws {
         let harness = try makeHarness(assistantWorked: true)
         defer { harness.cleanUp() }
@@ -875,7 +902,7 @@ import Testing
     func excludedOwnDraftsDoNotRequireAutomaticRemoteVerification(condition: String) async throws {
         let harness = try makeHarness(assistantWorked: true, authored: true)
         defer { harness.cleanUp() }
-        harness.settings.automation.publicationMode = .all
+        harness.settings.automation.publicationMode = .filtered
         harness.settings.automation.allowFollowUpPush = false
         let excluded = PublicationIdentity(host: host, entityID: 99, label: "Excluded")
         if condition == "repository" { harness.settings.automation.publicationRestrictions.repositories = [excluded] }
@@ -896,7 +923,8 @@ import Testing
     @Test func addingAnExcludingFilterClearsStaleAutomaticVerificationWarningDuringDraftRefresh() async throws {
         let harness = try makeHarness(assistantWorked: true, authored: true)
         defer { harness.cleanUp() }
-        harness.settings.automation.publicationMode = .all
+        harness.settings.automation.publicationMode = .filtered
+        harness.settings.automation.publicationRestrictions.repositories = [.init(host: host, entityID: 1, label: "g/p")]
         harness.settings.automation.allowFollowUpPush = false
         try harness.write("drafts.json", #"[{"id":12,"author_id":3,"note":"Verified fix","discussion_id":"abc"}]"#)
         try harness.write("discussions.json", duoDiscussion)
@@ -914,7 +942,7 @@ import Testing
     @Test func authorDraftEditedToQuickActionDuringFinalAIIdentityLookupStaysPrivate() async throws {
         let harness = try makeHarness(assistantWorked: true, authored: true)
         defer { harness.cleanUp() }
-        harness.settings.automation.publicationMode = .all
+        harness.settings.automation.publicationMode = .filtered
         harness.settings.automation.publicationRestrictions.requireAI = true
         try harness.write("drafts.json", #"[{"id":12,"author_id":3,"note":"Verified fix","discussion_id":"abc"}]"#)
         try harness.write("discussions.json", duoDiscussion)
@@ -929,10 +957,10 @@ import Testing
         #expect(harness.monitor.currentOpenItems.first?.draftCount == 1)
     }
 
-    @Test func sourceAndAIRestrictionsNarrowAllModeToMatchingReplyIDsOnly() async throws {
+    @Test func sourceAndAIRestrictionsSelectMatchingReplyIDsOnly() async throws {
         let harness = try makeHarness(assistantWorked: true)
         defer { harness.cleanUp() }
-        harness.settings.automation.publicationMode = .all
+        harness.settings.automation.publicationMode = .filtered
         harness.settings.automation.publicationRestrictions = .init(
             repositories: [.init(host: host, entityID: 1, label: "g/p")],
             mergeRequestAuthors: [.init(host: host, entityID: 9, label: "@alice")],
@@ -970,7 +998,7 @@ import Testing
     @Test func finalPublicationUsesLiveMRAuthorRatherThanListSnapshot() async throws {
         let harness = try makeHarness(assistantWorked: true)
         defer { harness.cleanUp() }
-        harness.settings.automation.publicationMode = .all
+        harness.settings.automation.publicationMode = .filtered
         harness.settings.automation.publicationRestrictions.mergeRequestAuthors = [
             .init(host: host, entityID: 9, label: "@alice")
         ]
@@ -1409,6 +1437,98 @@ import Testing
         try await harness.poll()
         #expect(harness.log("selected.log").split(separator: "\n").count == 2)
         #expect(harness.monitor.currentOpenItems.first?.draftCount == 0)
+    }
+
+    private func prepareSupersededFollowUpProofs(_ harness: Harness) throws -> UUID {
+        harness.settings.automation.publicationMode = .aiReplies
+        let pending = #"[{"id":11,"author_id":3,"note":"Earlier human reply","discussion_id":"human"},{"id":12,"author_id":3,"note":"Earlier AI reply","discussion_id":"abc"}]"#
+        let newer = #"[{"id":21,"author_id":3,"note":"Latest AI reply","discussion_id":"new-ai"},{"id":22,"author_id":3,"note":"Latest human reply","discussion_id":"new-human"}]"#
+        let discussions = #"[{"id":"abc","notes":[{"id":40,"author":{"id":8,"username":"GitLabDuo"},"body":"AI finding","system":false,"resolvable":true,"resolved":false}]},{"id":"human","notes":[{"id":41,"author":{"id":9,"username":"alice"},"body":"Human finding","system":false,"resolvable":true,"resolved":false}]},{"id":"new-ai","notes":[{"id":50,"author":{"id":8,"username":"GitLabDuo"},"body":"New source finding","system":false,"resolvable":true,"resolved":false}]},{"id":"new-human","notes":[{"id":51,"author":{"id":9,"username":"alice"},"body":"New reviewer finding","system":false,"resolvable":true,"resolved":false}]}]"#
+        try harness.write("discussions.json", discussions)
+        try harness.write("drafts.json", pending)
+        try harness.verifyFollowUpDrafts()
+        let originalRun = try #require(harness.settings.assistantHandoffs.last?.id)
+        let proofURL = harness.folder.appending(path: "follow-up-verifications/gitlab.example.org/1-2-me.json")
+        let proof = try JSONDecoder().decode(FollowUpVerification.self, from: Data(contentsOf: proofURL))
+        let archive = harness.folder.appending(path: "follow-up-verifications-archive/gitlab.example.org/1-2-me/\(proof.verificationID.uuidString).json")
+        try FileManager.default.createDirectory(at: archive.deletingLastPathComponent(), withIntermediateDirectories: true)
+        try Data(contentsOf: proofURL).write(to: archive)
+        try harness.write("drafts.json", newer)
+        try harness.verifyFollowUpDrafts()
+        let sent = try JSONDecoder().decode([GitLabDraftNote].self, from: Data(newer.utf8))
+        ReviewVerdictStore.rememberDrafts(sent, host: host, projectID: 1, iid: 2, in: harness.folder.appending(path: "verdicts"))
+        var published = try #require(JSONSerialization.jsonObject(with: Data(discussions.utf8)) as? [[String: Any]])
+        for index in [2, 3] {
+            var notes = try #require(published[index]["notes"] as? [[String: Any]])
+            notes.append(["id": 50 + index, "author": ["id": 3, "username": "me"], "system": false,
+                          "body": index == 2 ? "Latest AI reply" : "Latest human reply"])
+            published[index]["notes"] = notes
+        }
+        try JSONSerialization.data(withJSONObject: published).write(to: harness.folder.appending(path: "discussions.json"))
+        try harness.write("drafts.json", pending)
+        return originalRun
+    }
+
+    @Test func laterSealedRepliesDoNotHideCurrentEarlierProofOrPublishHumanRepliesUnderAIOnly() async throws {
+        let harness = try makeHarness(assistantWorked: true, authored: true)
+        defer { harness.cleanUp() }
+        _ = try prepareSupersededFollowUpProofs(harness)
+        try await harness.poll()
+        #expect(harness.monitor.currentOpenItems.first?.requiresDiscussionRecheck == false)
+        #expect(harness.monitor.currentOpenItems.first?.awaitingRemoteVerification == false)
+        try await harness.poll()
+        #expect(harness.log("selected.log").contains("/draft_notes/12/publish"))
+        #expect(!harness.log("selected.log").contains("/draft_notes/11/publish"))
+        #expect(harness.monitor.currentOpenItems.first?.drafts.compactMap(\.id) == [11])
+        #expect(harness.monitor.currentOpenItems.first?.requiresDiscussionRecheck == false)
+    }
+
+    @Test(arguments: ["aiAssisted", "uncertain", "proofPending", "noWorker"])
+    func humanPostedSourcesAreAssessedWithoutAWorkerAndStayNeutralUntilClassificationFinishes(outcome: String) async throws {
+        let probe = OriginProbe()
+        defer { probe.finish(ai: false) }
+        let harness = try makeHarness(assistantWorked: outcome != "noWorker", authored: true,
+            assessAIOrigin: { _, notes, _, _ in await probe.assess(notes) })
+        defer { harness.cleanUp() }
+        harness.settings.automation.publicationMode = .aiReplies
+        try harness.write("drafts.json", #"[{"id":12,"author_id":3,"note":"Verified fix","discussion_id":"human"}]"#)
+        try harness.write("discussions.json", #"[{"id":"human","notes":[{"id":49,"author":{"id":9,"username":"alice"},"body":"A source comment posted by a human account.","system":false,"resolvable":true,"resolved":false}]}]"#)
+        if outcome != "proofPending" && outcome != "noWorker" { try harness.verifyFollowUpDrafts() }
+        try await harness.poll(waitForAIOrigin: false)
+        let deadline = ContinuousClock.now + .seconds(2)
+        while probe.notes.isEmpty, ContinuousClock.now < deadline { try await Task.sleep(for: .milliseconds(10)) }
+        #expect(probe.notes.compactMap(\.id) == [49])
+        let pending = try #require(harness.monitor.currentOpenItems.first)
+        #expect(pending.aiOriginChecking)
+        let row = MergeRequestBoardSnapshot.Row(item: pending, latestJob: harness.settings.assistantHandoffs.last, intents: [])
+        #expect(!row.needsAttention)
+        #expect(MRHumanAction(row: row, assistantReady: true) == nil)
+        #expect(harness.log("selected.log").isEmpty)
+        probe.finish(ai: outcome != "uncertain")
+        try await harness.poll()
+        try await harness.poll()
+        #expect(harness.monitor.currentOpenItems.first?.aiOriginChecking == false)
+        if outcome == "aiAssisted" {
+            #expect(harness.log("selected.log").contains("/draft_notes/12/publish"))
+        } else {
+            #expect(harness.log("selected.log").isEmpty)
+            #expect(harness.monitor.currentOpenItems.first?.draftCount == 1)
+        }
+    }
+
+    @Test(arguments: ["unknownOrigin", "editedBody", "editedFeedback", "remoteContent"])
+    func earlierProofStillNeedsItsOwnOriginExactDraftAndLiveEvidence(change: String) async throws {
+        let harness = try makeHarness(assistantWorked: true, authored: true)
+        defer { harness.cleanUp() }
+        let originalRun = try prepareSupersededFollowUpProofs(harness)
+        if change == "unknownOrigin" { harness.settings.assistantHandoffs.removeAll { $0.id == originalRun } }
+        if change == "editedBody" { try harness.write("drafts.json", harness.log("drafts.json").replacingOccurrences(of: "Earlier AI reply", with: "Changed claim")) }
+        if change == "editedFeedback" { try harness.write("discussions.json", harness.log("discussions.json").replacingOccurrences(of: "AI finding", with: "A new expectation")) }
+        if change == "remoteContent" { try harness.write("remote-file-content.txt", "Different remote source") }
+        try await harness.poll()
+        try await harness.poll()
+        #expect(harness.log("selected.log").isEmpty)
+        #expect(harness.monitor.currentOpenItems.first?.draftCount == 2)
     }
 
     @Test(arguments: ["content", "body", "head", "run", "duringProof"])

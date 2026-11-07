@@ -166,6 +166,13 @@ class AuthorFollowUpVerifier:
             save(self.root / "follow-up-preflight" / host / key, proof)
         return {"verificationID": proof["verificationID"], "headSHA": headSHA, "verified": True}
 
+    def archive_receipt(self, receipt, host, key):
+        identity = str(uuid.UUID(receipt["verificationID"]))
+        path = self.root / "follow-up-verifications-archive" / host / Path(key).stem / (identity + ".json")
+        if path.exists() and load(path) != receipt:
+            raise ValueError("A different sealed proof already uses this verification identity")
+        save(path, receipt)
+
     def seal(self, host, projectID, iid, verificationID, draftIDsJSON):
         verificationID = str(uuid.UUID(verificationID))
         user, run, mr, key = self.context(host, projectID, iid)
@@ -198,7 +205,21 @@ class AuthorFollowUpVerifier:
             pending = self.root / "follow-up-preflight" / host / key
             if load(pending).get("verificationID") != verificationID:
                 raise ValueError("Remote verification was superseded")
-            save(self.root / "follow-up-verifications" / host / key, receipt)
+            latest = self.root / "follow-up-verifications" / host / key
+            try:
+                prior = load(latest)
+                uuid.UUID(prior.get("verificationID", ""))
+                uuid.UUID(prior.get("runID", ""))
+            except (OSError, ValueError, TypeError, AttributeError):
+                prior = {}
+            if (prior.get("version") == 1 and prior.get("sealed") is True and
+                    prior.get("host") == host and prior.get("projectID") == int(projectID) and
+                    prior.get("iid") == int(iid) and prior.get("username") == user["username"] and
+                    prior.get("userID") == user["id"]):
+                self.archive_receipt(prior, host, key)
+            # Preserve each proof's own run, files and discussion binding before advancing latest.
+            self.archive_receipt(receipt, host, key)
+            save(latest, receipt)
             pending.unlink()
         return receipt
 

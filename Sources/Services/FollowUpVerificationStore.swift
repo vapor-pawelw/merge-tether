@@ -1,9 +1,9 @@
 import Foundation
 
 /// Content-bound evidence produced by the read-only verifier after a tested commit reached GitLab.
-struct FollowUpVerification: Codable, Sendable {
+struct FollowUpVerification: Codable, Equatable, Sendable {
     struct FileEvidence: Codable, Equatable, Sendable { let path: String; let sha256: String }
-    struct DraftEvidence: Codable, Sendable { let id: Int; let bodySHA256: String }
+    struct DraftEvidence: Codable, Equatable, Sendable { let id: Int; let bodySHA256: String }
     let version: Int
     let sealed: Bool
     let verificationID: UUID
@@ -98,6 +98,88 @@ enum FollowUpVerificationStore {
               let data = try? Data(contentsOf: url), let receipt = try? JSONDecoder().decode(FollowUpVerification.self, from: data)
         else { return nil }
         return receipt
+    }
+
+    @MainActor
+    static func publicationReceipts(work: AssistantAutomationRunner.MergeRequestWork, username: String,
+                                    settings: SettingsManager, in directory: URL = directory) -> [FollowUpVerification] {
+        guard settings.automation.allowFollowUpPush,
+              settings.automation.scope.resolve(.init(host: work.host, username: username,
+                  projectID: work.projectID, iid: work.iid)).active else { return [] }
+        return contextReceipts(work: work, username: username, settings: settings, in: directory)
+    }
+
+    @MainActor
+    static func contextReceipts(work: AssistantAutomationRunner.MergeRequestWork, username: String,
+                                settings: SettingsManager, in directory: URL = directory) -> [FollowUpVerification] {
+        let runs = settings.assistantHandoffs.filter {
+            $0.key.work == work && $0.key.username == username && $0.followUpPushAllowed != nil
+        }
+        let origins = runs.filter { origin in
+            origin.followUpPushAllowed == true && origin.execution?.state == .succeeded
+                && origin.key.assistant == settings.automation.assistant
+                && !runs.contains { $0.createdAt > origin.createdAt && $0.execution?.state != .succeeded }
+        }
+        let originIDs = Set(origins.map(\.id))
+        guard !originIDs.isEmpty else { return [] }
+        var candidates: [FollowUpVerification] = []
+        let latest = recordURL(kind: "follow-up-verifications", work: work, username: username, in: directory)
+        if let proof = readPublicationReceipt(at: latest) { candidates.append(proof) }
+        let archive = recordURL(kind: "follow-up-verifications-archive", work: work, username: username,
+                                in: directory).deletingPathExtension()
+        for path in (try? FileManager.default.contentsOfDirectory(at: archive, includingPropertiesForKeys: nil)) ?? []
+            where path.pathExtension == "json" {
+            if let proof = readPublicationReceipt(at: path),
+               UUID(uuidString: path.deletingPathExtension().lastPathComponent) == proof.verificationID {
+                candidates.append(proof)
+            }
+        }
+        // Legacy helpers returned a machine receipt in the exact app-owned run directory.
+        // Recover that receipt only for its known successful origin, never from worker prose.
+        for origin in origins {
+            let folder = directory.deletingLastPathComponent().appending(path: "Assistant Runs/\(origin.id.uuidString)")
+            guard let workingDirectory = origin.execution?.workingDirectory,
+                  URL(fileURLWithPath: workingDirectory).standardizedFileURL == folder.standardizedFileURL else { continue }
+            let artifact = folder.appending(path: "seal-receipt.json")
+            guard (try? folder.resourceValues(forKeys: [.isSymbolicLinkKey]).isSymbolicLink) != true,
+                  (try? artifact.resourceValues(forKeys: [.isSymbolicLinkKey]).isSymbolicLink) != true,
+                  let proof = readPublicationReceipt(at: artifact), proof.runID == origin.id else { continue }
+            candidates.append(proof)
+        }
+        var proofs: [UUID: FollowUpVerification] = [:]
+        var ambiguous: Set<UUID> = []
+        for proof in candidates where originIDs.contains(proof.runID) && proof.host == work.host
+            && proof.projectID == work.projectID && proof.iid == work.iid && proof.username == username {
+            if let existing = proofs[proof.verificationID], existing != proof {
+                ambiguous.insert(proof.verificationID)
+            } else { proofs[proof.verificationID] = proof }
+        }
+        return proofs.values.filter { !ambiguous.contains($0.verificationID) }
+            .sorted { $0.verificationID.uuidString < $1.verificationID.uuidString }
+    }
+
+    private nonisolated static func readPublicationReceipt(at path: URL) -> FollowUpVerification? {
+        guard let size = try? path.resourceValues(forKeys: [.fileSizeKey]).fileSize, size < 1_000_000,
+              let data = try? Data(contentsOf: path),
+              let proof = try? JSONDecoder().decode(FollowUpVerification.self, from: data),
+              proof.version == 1, proof.sealed, proof.userID > 0, proof.sourceProjectID > 0,
+              !proof.sourceBranch.isEmpty, isHex(proof.headSHA, lengths: [40, 64]),
+              proof.discussionFingerprint.map({ isHex($0, lengths: [64]) }) == true,
+              !proof.files.isEmpty, proof.files.count <= 20, !proof.drafts.isEmpty, proof.drafts.count <= 100,
+              Set(proof.files.map(\.path)).count == proof.files.count,
+              Set(proof.drafts.map(\.id)).count == proof.drafts.count,
+              proof.files.allSatisfy({ file in
+                  !file.path.isEmpty && !file.path.hasPrefix("/")
+                      && file.path.split(separator: "/", omittingEmptySubsequences: false)
+                          .allSatisfy { !$0.isEmpty && $0 != "." && $0 != ".." }
+                      && !file.path.unicodeScalars.contains { $0.value < 32 }
+                      && isHex(file.sha256, lengths: [64])
+              }), proof.drafts.allSatisfy({ $0.id > 0 && isHex($0.bodySHA256, lengths: [64]) }) else { return nil }
+        return proof
+    }
+
+    private nonisolated static func isHex(_ value: String, lengths: Set<Int>) -> Bool {
+        lengths.contains(value.utf8.count) && value.utf8.allSatisfy { (48...57).contains($0) || (97...102).contains($0) }
     }
 
     nonisolated static func recordingInstructions(work: AssistantAutomationRunner.MergeRequestWork, runID: UUID) -> String {

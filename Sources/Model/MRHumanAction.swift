@@ -32,6 +32,7 @@ struct MRHumanAction {
           automaticallyPublishedDraftIDs: Set<Int> = []) {
         let item = row.item
         guard row.needsAttention, row.latestJob?.execution?.state.isActive != true,
+              !item.aiOriginChecking,
               item.authorFeedbackStatus?.phase != .checking, item.reReviewReadiness != .checking,
               confirmationState != .publishing, confirmationState != .approving else { return nil }
 
@@ -88,7 +89,8 @@ struct MRHumanAction {
             self.init(kind: .feedback, action: .handleFeedback, message: .MRHumanAction.mrHumanActionFeedback,
                       detail: Self.feedbackDetail(item))
         } else if let intent {
-            self.init(kind: .intent, action: .retryIntent, message: Self.intentMessage(intent))
+            self.init(kind: .intent, action: .retryIntent, message: Self.intentMessage(intent),
+                      detail: intent.error.map(GlabService.redactWorkflowEvidence))
         } else if item.hasConflict {
             self.init(kind: .intent, action: .reviewIssue, message: .MRHumanAction.mrHumanActionConflictIntent)
         } else if item.failedPipeline {

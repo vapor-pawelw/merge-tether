@@ -162,6 +162,25 @@ class AuthorFollowUpTest(unittest.TestCase):
         receipt = self.verifier.seal("gitlab.example.org", "1", "2", proof["verificationID"], "[13,14]")
         self.assertEqual([d["id"] for d in receipt["drafts"]], [13, 14])
 
+    def test_sealing_a_successor_preserves_each_original_run_receipt(self):
+        proof = self.verify()
+        self.drafts.append({"id": 13, "author_id": 3, "note": "First verified reply"})
+        first = self.verifier.seal("gitlab.example.org", "1", "2", proof["verificationID"], "[13]")
+        self.run["runID"] = str(uuid.uuid4())
+        self.save_run()
+        proof = self.verify()
+        # An unchanged draft from another run still cannot be silently adopted.
+        with self.assertRaises(ValueError):
+            self.verifier.seal("gitlab.example.org", "1", "2", proof["verificationID"], "[13]")
+        self.drafts.append({"id": 14, "author_id": 3, "note": "Second verified reply"})
+        second = self.verifier.seal("gitlab.example.org", "1", "2", proof["verificationID"], "[14]")
+        archive = self.root / "follow-up-verifications-archive/gitlab.example.org/1-2-me"
+        self.assertTrue(archive.is_dir())
+        records = [json.loads(path.read_text()) for path in archive.glob("*.json")]
+        self.assertCountEqual(records, [first, second])
+        latest = json.loads((self.root / "follow-up-verifications/gitlab.example.org/1-2-me.json").read_text())
+        self.assertEqual(latest, second)
+
     def test_non_author_or_legacy_run_kind_cannot_authorize(self):
         self.run.pop("kind")
         self.save_run()

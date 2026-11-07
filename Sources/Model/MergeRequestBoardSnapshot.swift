@@ -9,7 +9,7 @@ struct MergeRequestBoardSnapshot {
         var id: MergeRequestAttentionMonitor.Item.ID { item.id }
         var needsAttention: Bool {
             if let humanActionRequired = item.humanActionRequired { return humanActionRequired }
-            if latestJob?.execution?.state.isActive == true || item.authorFeedbackStatus?.phase == .checking { return false }
+            if latestJob?.execution?.state.isActive == true || item.authorFeedbackStatus?.phase == .checking || item.aiOriginChecking { return false }
             return item.needsAttention || intents.contains { $0.state == .pending || $0.state == .failed }
                 || Self.jobNeedsAttention(latestJob?.execution?.state)
         }

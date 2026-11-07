@@ -117,6 +117,21 @@ struct MRHumanActionTests {
         #expect(action.kind == .publication && action.action == .reviewDrafts)
     }
 
+    @Test func aSuccessfulWorkerStillShowsTheApplicationsExactCompletionFailure() throws {
+        var item = item()
+        let request = try JSONDecoder().decode(GitLabMergeRequest.self, from: Data(#"{"project_id":1,"iid":2,"author":{"id":3,"username":"me","name":"Me"},"title":"Example","web_url":"https://gitlab.example.test/group/repo/-/merge_requests/2","state":"opened","draft":false,"sha":"head","source_branch":"feature","target_branch":"main","labels":[]}"#.utf8))
+        item.mergeRequest = request
+        let reason = "The worker finished, but its result is not covered by current feedback evidence."
+        let intent = MRTodoIntent(id: UUID(), target: .init(host: "gitlab.example.test", username: "me", projectID: 1, iid: 2),
+            kind: .followUp, state: .failed, todoIDs: [], noteIDs: [42], sourceEvents: [], request: request,
+            headSHA: "head", error: reason, updatedAt: Date())
+        let base = row(item, execution: .init(state: .succeeded))
+        let row = MergeRequestBoardSnapshot.Row(item: item, latestJob: base.latestJob, intents: [intent])
+        let action = try #require(MRHumanAction(row: row, assistantReady: true))
+        #expect(action.action == .retryIntent)
+        #expect(action.detail == reason)
+    }
+
     @Test func draftCountAloneProducesAConcretePublicationReason() throws {
         var item = item()
         item.draftCount = 3
@@ -141,7 +156,7 @@ struct MRHumanActionTests {
         let action = try #require(MRHumanAction(row: row(item), assistantReady: true))
         #expect(action.kind == .uncheckedDrafts)
         #expect(action.action == .reviewDrafts)
-        #expect(String(localized: action.message) == "2 drafts are not covered by current checks. Review them before publishing.")
+        #expect(String(localized: action.message) == "2 comments still need verification before automatic publication.")
     }
 
     @Test func verificationFailureHasAConcreteRetryActionWithoutInventingADetail() throws {
