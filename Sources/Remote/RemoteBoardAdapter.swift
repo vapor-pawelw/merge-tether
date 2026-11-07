@@ -43,7 +43,8 @@ import MergeTetherRemote
         let board = monitor.boardSnapshot
         let other = board.otherCards(jobs: monitor.assistantHandoffs, host: monitor.glab.resolvedHost,
             username: monitor.glab.currentUsername, pinnedCards: monitor.settings.boardPins)
-        var result = project(board: board, other: other, session: session, account: account)
+        var result = project(board: board, other: other, session: session, account: account,
+            intents: monitor.settings.mrActionIntents, conflictReceipts: monitor.settings.conflictReceipts)
         let rows = board.own + board.reviewed
         for lane in result.lanes.indices {
             for index in result.lanes[lane].cards.indices {
@@ -82,7 +83,7 @@ import MergeTetherRemote
                     card.actions = []
                     card.primaryCTA = nil
                     card.presentation = .init(repository: todo.project.pathWithNamespace.split(separator: "/").last.map(String.init) ?? "",
-                        status: String(localized: .Board.boardCompactWorking), working: true)
+                        status: String(localized: .AutomationProgress.progressNotice), working: true)
                 }
                 result.lanes[lane].cards[index] = card
             }
@@ -97,7 +98,8 @@ import MergeTetherRemote
         return result
     }
 
-    static func project(board: MergeRequestBoardSnapshot, other: [MergeRequestBoardSnapshot.OtherCard], session: UUID, account: String) -> RemoteBoard {
+    static func project(board: MergeRequestBoardSnapshot, other: [MergeRequestBoardSnapshot.OtherCard], session: UUID, account: String,
+                        intents: [MRTodoIntent] = [], conflictReceipts: Set<MergeConflictReceipt> = []) -> RemoteBoard {
         let others = other.compactMap { entry -> RemoteCard? in
             switch entry.content {
             case .proposal(let proposal):
@@ -106,7 +108,7 @@ import MergeTetherRemote
                         project: proposal.url.gitLabProjectPath, url: proposal.url)
                 card.actions = []
                 card.detail = String(localized: .Remote.remoteProposal)
-                return card
+                return jobProgress(card, job: proposal.latestJob, intents: proposal.intents + intents, conflictReceipts: conflictReceipts)
             case .todo(let todo):
                 var card = RemoteCard(id: "todo:\(todo.id)", title: todo.displayTitle, project: todo.project.nameWithNamespace,
                     url: todo.targetURL, detail: todo.body)
@@ -122,7 +124,7 @@ import MergeTetherRemote
                    let token = try? RemoteDigest.token([account, try RemoteDigest.token(job)]) {
                     card.actions = [.init(id: "job:\(job.id)", kind: .retryJob, token: token)]
                 }
-                return card
+                return jobProgress(card, job: job, intents: intents, conflictReceipts: conflictReceipts)
             }
         }
         return .init(hostSession: session, account: account, lanes: [
@@ -130,6 +132,19 @@ import MergeTetherRemote
             .init(id: .reviewed, cards: board.reviewed.map { presentation(card($0.item, account: account), row: $0, allowsRemoval: true) }),
             .init(id: .other, cards: others),
         ])
+    }
+
+    private static func jobProgress(_ original: RemoteCard, job: AssistantAutomationRunner.Handoff?,
+                                    intents: [MRTodoIntent], conflictReceipts: Set<MergeConflictReceipt>) -> RemoteCard {
+        guard let job, job.operationalExecution?.state.isActive == true else { return original }
+        var card = original
+        card.needsAttention = false
+        card.actions = []
+        card.primaryCTA = nil
+        card.mergeRequestIID = job.key.work.iid
+        card.presentation = .init(repository: card.project.split(separator: "/").last.map(String.init) ?? "",
+            status: String(localized: job.progressTitle(intents: intents, conflictReceipts: conflictReceipts)), working: true)
+        return card
     }
 
     static func presentation(_ original: RemoteCard, row: MergeRequestBoardSnapshot.Row,

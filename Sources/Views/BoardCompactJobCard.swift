@@ -79,7 +79,7 @@ struct BoardJobStatusActions: View {
         if active || (MergeRequestBoardSnapshot.Row.jobNeedsAttention(handoff.operationalExecution?.state)
             && !PipelineJobReconciliation.isObsolete(handoff, request: monitor.currentRequest(for: handoff))) {
             HStack {
-                BoardStatusChip(title: active ? .Board.boardCompactWorking : .Board.boardCompactBlocked,
+                BoardStatusChip(title: active ? handoff.progressTitle(intents: monitor.settings.mrActionIntents, conflictReceipts: monitor.settings.conflictReceipts) : .Board.boardCompactBlocked,
                     symbol: active ? "arrow.triangle.2.circlepath" : "exclamationmark.circle",
                     tint: active ? .blue : .orange)
                 Spacer(minLength: 6)

@@ -84,7 +84,6 @@ struct RemoteCardView: View {
                 Button(action: onOpen) { header }.buttonStyle(.plain)
                     .accessibilityIdentifier("remote.card.\(card.id)")
             } else { header }
-            if let dependencies = card.dependencies { RemoteMRDependencyRow(dependencies: dependencies) }
             content
             if !expanded, let onOpen {
                 HStack {
@@ -135,6 +134,7 @@ struct RemoteCardView: View {
                     Text(verbatim: status).font(.caption)
                 }.foregroundStyle(.secondary)
             }
+            if let dependencies = card.dependencies { RemoteMRDependencyRow(dependencies: dependencies) }
             if let nextStep = card.presentation?.nextStep {
                 Text(verbatim: nextStep).font(.caption).foregroundStyle(.secondary)
             }

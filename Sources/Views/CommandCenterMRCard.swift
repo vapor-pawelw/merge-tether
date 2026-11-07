@@ -47,9 +47,6 @@ private struct CommandCenterMRCardContent: View {
                 .help(Text(verbatim: "\(item.title)\n\(item.url.gitLabProjectPath)\n") + Text(.Board.boardDetails))
                 moreMenu
             }
-            if let dependencies = item.dependencies, dependencies.hasPresentation {
-                MRDependencyRow(summary: dependencies, projectID: item.id.projectID).transition(.opacity)
-            }
             if humanAction != nil {
                 Text(verbatim: presentation.message).help(Text(verbatim: presentation.message))
                     .font(.callout).foregroundStyle(.orange)
@@ -77,6 +74,9 @@ private struct CommandCenterMRCardContent: View {
                     primaryAction
                 }
                 .font(.caption).foregroundStyle(.secondary)
+            }
+            if let dependencies = item.dependencies, dependencies.hasPresentation {
+                MRDependencyRow(summary: dependencies, projectID: item.id.projectID).transition(.opacity)
             }
             if let nextStep = presentation.nextStep {
                 Text(verbatim: nextStep)
@@ -291,7 +291,7 @@ struct BoardTodoRow: View {
             HStack {
                 if monitor.isAssessingNotice(todo) {
                     ProgressView().controlSize(.small)
-                    Text(.Board.boardCompactWorking).foregroundStyle(.secondary)
+                    Text(.AutomationProgress.progressNotice).foregroundStyle(.secondary)
                 }
                 Spacer(minLength: 0)
                 GitLabRefreshButton(monitor: monitor)

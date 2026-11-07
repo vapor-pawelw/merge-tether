@@ -134,6 +134,26 @@ import MergeTetherRemote
         #expect(phone.lanes[2].cards.map(\.title) == ["Inspect old job"])
     }
 
+    @Test(arguments: [AssistantJobExecution.State.queued, .running], [false, true])
+    func activeOtherLaneJobsShareQueuedAndRunningProgress(state: AssistantJobExecution.State, proposal: Bool) throws {
+        let item = try item()
+        let target = MRAutomationScope.Target(host: "gitlab.example.org", username: "me", projectID: 1, iid: 2)
+        let job = AssistantAutomationRunner.Handoff(id: UUID(), key: .init(assistant: .codex,
+            work: .init(host: target.host, projectID: 1, iid: 2), username: "me", workspace: "", access: .gitLabRead),
+            title: "Follow-up", prompt: "", createdAt: Date(), allowsPush: false,
+            execution: .init(state: state), mergeRequestURL: item.url, workflow: .followUp)
+        let pin = try #require(BoardCardPin.mergeRequest(host: target.host, username: "me", projectID: 1, iid: 2))
+        let content: MergeRequestBoardSnapshot.OtherCard.Content = proposal
+            ? .proposal(.init(target: target, title: item.title, url: item.url, item: item, todos: [], intents: [], latestJob: job))
+            : .job(job)
+        let board = MergeRequestBoardSnapshot(own: [], reviewed: [], todos: [], attention: [], handoffs: [], host: target.host, username: "me")
+        let phone = RemoteBoardAdapter.project(board: board, other: [.init(id: pin, content: content)], session: UUID(), account: "me@host")
+        let card = try #require(phone.lanes[2].cards.first)
+        #expect(card.presentation?.status == (state == .queued ? "Queued for agent" : "Handling feedback"))
+        #expect(card.presentation?.working == true)
+        #expect(card.needsAttention == false && card.primaryCTA == nil && card.actions.isEmpty)
+    }
+
     private func projected(_ item: MergeRequestAttentionMonitor.Item,
                            jobs: [AssistantAutomationRunner.Handoff] = []) throws -> [String: Any] {
         let board = MergeRequestBoardSnapshot(own: item.isAuthored ? [item] : [], reviewed: item.isAuthored ? [] : [item], todos: [], attention: [],
@@ -293,7 +313,7 @@ import MergeTetherRemote
         let model = MRCardPresentation(row: row, reviewingContext: ReviewingContext(row: row),
             allowsRemoval: false, assistantReady: true, automaticPipelineProgress: true)
         #expect(model.busy && model.working)
-        #expect(model.status == String(localized: .Board.boardCompactWorking))
+        #expect(model.status == "Handling pipeline")
         #expect(model.actionLabel == nil)
         #expect(model.chips.map { String(localized: $0.title) }.contains(String(localized: .PipelineAutomation.pipelineHandling)))
         #expect(!model.chips.map { String(localized: $0.title) }.contains(String(localized: .Board.boardCompactPipelineFailed)))

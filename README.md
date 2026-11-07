@@ -29,7 +29,7 @@ Pin any card to keep it at the top of its column; pins are saved for your accoun
 
 Use **Add merge request…** to add a reviewed MR by URL or repository and number. **Remove from my list** on a reviewed MR keeps it out of automatic adoption until you explicitly add it again.
 
-Attention means a human action is required. Automatic work and verification show progress without an attention marker; waiting for a reviewer stays neutral and never creates reminder comments. Cards, the menu-bar indicator and notifications use the same decision.
+Attention means a human action is required. Automatic work and verification show short stage labels, such as Checking replies or Handling feedback, without an attention marker; waiting for a reviewer stays neutral and never creates reminder comments. Cards, the menu-bar indicator and notifications use the same decision.
 Each attention card explains what needs you and offers a matching action. Pending comments open expanded for review; stopped automation offers a direct retry, with its previous result and actual cause still available.
 
 The menu-bar icon stays neutral while work is handled automatically and turns amber when something needs your attention. Optional macOS notifications bring those decisions to you without announcing every automatically handled update. Enable notification permission inside the app; if macOS has denied it, the app links to System Settings.

@@ -11,6 +11,7 @@ struct MRCardPresentation {
     let confirmationState: MergeRequestAttentionMonitor.ConfirmationState?
     let automaticallyPublishedDraftIDs: Set<Int>
     let automaticConflictProgress: Bool
+    let conflictReceipts: Set<MergeConflictReceipt>
     let automaticPipelineProgress: Bool
     private var item: MergeRequestAttentionMonitor.Item { row.item }
 
@@ -18,12 +19,13 @@ struct MRCardPresentation {
          allowsRemoval: Bool, assistantReady: Bool,
          confirmationState: MergeRequestAttentionMonitor.ConfirmationState? = nil,
          automaticallyPublishedDraftIDs: Set<Int> = [], automaticConflictProgress: Bool = false,
-         automaticPipelineProgress: Bool = false) {
+         automaticPipelineProgress: Bool = false, conflictReceipts: Set<MergeConflictReceipt> = []) {
         self.row = row; self.reviewingContext = reviewingContext; self.allowsRemoval = allowsRemoval
         self.assistantReady = assistantReady; self.confirmationState = confirmationState
         self.automaticallyPublishedDraftIDs = automaticallyPublishedDraftIDs
         self.automaticConflictProgress = automaticConflictProgress
         self.automaticPipelineProgress = automaticPipelineProgress
+        self.conflictReceipts = conflictReceipts
     }
 
     init(row: MergeRequestBoardSnapshot.Row, monitor: TodoMonitorService, allowsRemoval: Bool) {
@@ -37,7 +39,8 @@ struct MRCardPresentation {
             assistantReady: ready, confirmationState: monitor.attention.confirmationStates[row.id],
             automaticallyPublishedDraftIDs: automatic,
             automaticConflictProgress: row.item.mergeRequest.map { monitor.automaticConflictIsProcessing(for: $0) } ?? false,
-            automaticPipelineProgress: row.item.mergeRequest.map { monitor.authoredMergeRequests.workflow.isAutomaticallyProcessingPipeline($0) } ?? false)
+            automaticPipelineProgress: row.item.mergeRequest.map { monitor.authoredMergeRequests.workflow.isAutomaticallyProcessingPipeline($0) } ?? false,
+            conflictReceipts: monitor.settings.conflictReceipts)
     }
 
     var busy: Bool {
@@ -68,11 +71,23 @@ struct MRCardPresentation {
     }
     var status: String? {
         if let job = row.latestJob, job.execution?.state.isActive == true {
-            return String(localized: .Board.boardCompactWorking) + " · " + String(localized: job.key.assistant.displayName)
+            return String(localized: job.progressTitle(intents: row.intents, conflictReceipts: conflictReceipts)) + " · " + String(localized: job.key.assistant.displayName)
         }
-        if item.draftProofRecoveryChecking, !row.hasIndependentStoppedWork { return String(localized: .DraftProofRecovery.draftProofRecoveryChecking) }
-        if busy { return String(localized: item.aiOriginChecking ? .MRDiscussions.mrDiscussionsAiChecking : .Board.boardCompactWorking) }
+        if busy { return String(localized: progressTitle) }
         return humanAction == nil ? neutralStatus.map { String(localized: $0) } : nil
+    }
+    private var progressTitle: LocalizedStringResource {
+        if confirmationState == .publishing { return .AutomationProgress.progressPublishing }
+        if confirmationState == .approving { return .AutomationProgress.progressApproving }
+        if item.draftProofRecoveryChecking, !row.hasIndependentStoppedWork { return .AutomationProgress.progressReplies }
+        if item.aiOriginChecking { return .AutomationProgress.progressAIAssistance }
+        if item.authorFeedbackStatus?.phase == .checking { return .AutomationProgress.progressFeedbackCheck }
+        if item.reReviewReadiness == .checking { return .AutomationProgress.progressReviewReadiness }
+        if automaticPipelineProgress { return .AutomationProgress.progressPipeline }
+        if automaticConflictProgress { return .AutomationProgress.progressConflictPreparing }
+        if allowsRemoval, reviewingContext.nextStep == .verifying { return .AutomationProgress.progressReviewCheck }
+        if allowsRemoval, reviewingContext.nextStep == .automaticReview { return .AutomationProgress.progressReviewPreparing }
+        return .AutomationProgress.progressProcessing
     }
     var nextStep: String? {
         allowsRemoval && humanAction == nil && !busy ? String(localized: reviewingContext.nextStepMessage) : nil

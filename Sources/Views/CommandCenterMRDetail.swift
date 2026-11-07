@@ -189,7 +189,9 @@ private struct CommandCenterMRDetailContent: View {
     }
 
     private var header: some View {
-        VStack(alignment: .leading, spacing: 10) {
+        let reviewing = monitor.reviewedMergeRequestItems.contains { $0.id == item.id && $0.url == item.url }
+        let progress = MRCardPresentation(row: presentationRow, monitor: monitor, allowsRemoval: reviewing)
+        return VStack(alignment: .leading, spacing: 10) {
             HStack(spacing: 8) {
                 Text(verbatim: "!\(item.id.iid)").monospacedDigit()
                 RepositoryPathText(item.url.gitLabProjectPath).lineLimit(1)
@@ -206,16 +208,21 @@ private struct CommandCenterMRDetailContent: View {
             }
             .font(.subheadline).foregroundStyle(.secondary)
             Text(verbatim: item.title).font(.title2.weight(.semibold)).textSelection(.enabled)
-            if let dependencies = item.dependencies, dependencies.hasPresentation {
-                MRDependencyRow(summary: dependencies, projectID: item.id.projectID)
-            }
             HStack {
-                Label {
-                    Text(needsHumanAttention ? .CommandCenter.commandCenterStatusAttention
-                         : item.section == .draftMergeRequests ? .CommandCenter.commandCenterStatusDraft
-                         : .CommandCenter.commandCenterStatusMonitoring)
-                } icon: { Image(systemName: needsHumanAttention ? "exclamationmark.circle" : "arrow.triangle.pull") }
-                .font(.subheadline).foregroundStyle(needsHumanAttention ? .orange : .secondary)
+                if progress.working, let status = progress.status {
+                    HStack(spacing: 6) {
+                        ProgressView().controlSize(.mini)
+                        Text(verbatim: status)
+                    }
+                    .font(.subheadline).foregroundStyle(.secondary)
+                } else {
+                    Label {
+                        Text(needsHumanAttention ? .CommandCenter.commandCenterStatusAttention
+                             : item.section == .draftMergeRequests ? .CommandCenter.commandCenterStatusDraft
+                             : .CommandCenter.commandCenterStatusMonitoring)
+                    } icon: { Image(systemName: needsHumanAttention ? "exclamationmark.circle" : "arrow.triangle.pull") }
+                    .font(.subheadline).foregroundStyle(needsHumanAttention ? .orange : .secondary)
+                }
                 Spacer()
                 GitLabRefreshButton(monitor: monitor) {
                     if let target = discussionTarget { await discussionStore.refresh(target: target, glab: monitor.glab) }
@@ -225,6 +232,9 @@ private struct CommandCenterMRDetailContent: View {
                     Label { Text(.CommandCenter.commandCenterOpenGitLab) } icon: { Image(systemName: "arrow.up.right.square") }
                 }
                 .buttonStyle(.bordered)
+            }
+            if let dependencies = item.dependencies, dependencies.hasPresentation {
+                MRDependencyRow(summary: dependencies, projectID: item.id.projectID)
             }
         }
     }
