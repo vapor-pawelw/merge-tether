@@ -9,6 +9,7 @@ import Observation
     private var pendingUntil: Date = .distantPast
     private var challengeUntil: Date = .distantPast
     private var validUntil: Date = .distantPast
+    private var connectedUntil: Date = .distantPast
     public init() {}
     public func beginRefresh(force: Bool = false, now: Date = Date()) -> UUID? {
         guard force || expected == nil || now >= challengeUntil else { return nil }
@@ -19,7 +20,11 @@ import Observation
         if pending != nil && now >= pendingUntil { disconnected() }
     }
     public func challenge(now: Date = Date()) -> UUID {
-        let value = UUID(); expected = value; challengeUntil = now.addingTimeInterval(45); return value
+        let keepConnectionVisible = expected == nil && isConnected(now: now)
+        let value = UUID(); expected = value; challengeUntil = now.addingTimeInterval(45)
+        // The response deadline may retain the status, never permission to write.
+        if keepConnectionVisible { connectedUntil = challengeUntil }
+        return value
     }
     public func receive(_ message: RemoteMessage, now: Date = Date()) {
         switch message.type {
@@ -28,6 +33,7 @@ import Observation
             self.board = board
             self.expected = nil
             validUntil = challengeUntil
+            connectedUntil = challengeUntil
         case .accepted:
             guard message.result?.id == pending?.id, pending != nil else { return }
             pendingUntil = now.addingTimeInterval(120)
@@ -39,8 +45,18 @@ import Observation
         }
     }
     public func disconnected() {
-        expected = nil; validUntil = .distantPast
+        refreshFailed()
         if let pending { result = .init(id: pending.id, status: .uncertain); self.pending = nil }
+    }
+    public func isConnected(now: Date = Date()) -> Bool { now < connectedUntil }
+    public func isRefreshing(now: Date = Date()) -> Bool { expected != nil && now < challengeUntil }
+    public func needsRefresh(now: Date = Date()) -> Bool {
+        expected == nil && now >= validUntil.addingTimeInterval(-20)
+    }
+    @discardableResult public func refreshFailed(challenge: UUID? = nil) -> Bool {
+        if let challenge, expected != challenge { return false }
+        expected = nil; validUntil = .distantPast; connectedUntil = .distantPast
+        return true
     }
     public func canAct(now: Date = Date()) -> Bool {
         now < validUntil && board?.partial == false && pending == nil && result == nil

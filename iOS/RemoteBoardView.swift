@@ -13,25 +13,7 @@ struct RemoteBoardView: View {
                     VStack(alignment: .leading, spacing: 12) {
                         connectionStatus
                         if board.partial { Text(.Remote.remotePartial).font(.caption).foregroundStyle(.orange).padding(.horizontal) }
-                        ScrollView(.horizontal) {
-                            HStack(alignment: .top, spacing: 14) {
-                                ForEach(board.lanes) { lane in
-                                    VStack(alignment: .leading, spacing: 12) {
-                                        HStack { Text(lane.id.title).font(.headline); Spacer(); Text(lane.cards.count, format: .number).foregroundStyle(.secondary) }
-                                        ScrollView {
-                                            LazyVStack(spacing: 10) {
-                                                if lane.cards.isEmpty { Text(.Remote.remoteEmpty).foregroundStyle(.secondary).padding(.top, 30) }
-                                                ForEach(lane.cards) { card in
-                                                    RemoteCardView(card: card, onOpen: { selected = card })
-                                                }
-                                            }
-                                        }
-                                    }
-                                    .padding(14).frame(width: 320)
-                                    .background(Color.secondary.opacity(0.06), in: RoundedRectangle(cornerRadius: 22))
-                                }
-                            }.padding(.horizontal).padding(.bottom)
-                        }
+                        RemoteLaneBoard(lanes: board.lanes) { selected = $0 }
                         if let updated = board.updatedAt {
                             HStack { Text(.Remote.remoteUpdated); Text(updated, style: .relative) }
                                 .font(.caption2).foregroundStyle(.secondary).padding(.horizontal).padding(.bottom, 4)
@@ -49,7 +31,7 @@ struct RemoteBoardView: View {
             .toolbar {
                 if model.paired {
                     ToolbarItem(placement: .topBarTrailing) {
-                        Button { Task { await model.refresh() } } label: { Image(systemName: "arrow.clockwise") }.accessibilityLabel(Text(.Remote.remoteRefresh))
+                        Button { Task { await model.refresh() } } label: { Image(systemName: "arrow.clockwise") }.accessibilityLabel(Text(.Remote.remoteRefresh)).accessibilityIdentifier("remote.refresh")
                     }
                     ToolbarItem(placement: .topBarLeading) {
                         Button { pairingSheet = true } label: { Image(systemName: "qrcode.viewfinder") }.accessibilityLabel(Text(.Remote.remoteReplace))
@@ -75,10 +57,19 @@ struct RemoteBoardView: View {
     }
     private var connectionStatus: some View {
         TimelineView(.periodic(from: .now, by: 1)) { context in
-            Label(model.state.canAct(now: context.date) ? .Remote.remoteConnected : .Remote.remoteOffline,
-                  systemImage: model.state.canAct(now: context.date) ? "checkmark.circle.fill" : "wifi.slash")
-                .font(.caption).foregroundStyle(model.state.canAct(now: context.date) ? .green : .secondary)
-                .padding(.horizontal).padding(.top, 8)
+            let connected = model.state.isConnected(now: context.date)
+            let refreshing = model.state.isRefreshing(now: context.date)
+            HStack(spacing: 6) {
+                Label(connected ? .Remote.remoteConnected : .Remote.remoteOffline,
+                      systemImage: connected ? "checkmark.circle.fill" : "wifi.slash")
+                    .foregroundStyle(connected ? .green : .secondary)
+                    .accessibilityIdentifier("remote.connection.status")
+                ProgressView().controlSize(.mini).frame(width: 16, height: 16)
+                    .opacity(refreshing ? 1 : 0).accessibilityHidden(!refreshing)
+                    .accessibilityLabel(Text(.Remote.remoteRefresh))
+                    .accessibilityIdentifier("remote.refresh.progress")
+            }
+            .font(.caption).padding(.horizontal).padding(.top, 8)
         }
     }
 }
@@ -176,7 +167,7 @@ struct RemoteCardDetail: View {
     var body: some View {
         NavigationStack {
             ScrollViewReader { proxy in
-                ScrollView {
+                ScrollView(showsIndicators: false) {
                     VStack(alignment: .leading, spacing: 20) {
                         RemoteCardView(card: current, expanded: true).id(headerDestination)
                         if current.primaryCTA?.destination == .setup {

@@ -29,7 +29,9 @@ organization's network policy. The Mac must remain awake and connected.
 A SQLite Durable Object routes one host and one phone per random room. Each Mac
 creates its own room, so several users can share the relay deployment. A new phone
 connection replaces the previous phone for that pairing. Native clients disconnect
-in the background and refresh every 25 seconds while foregrounded.
+in the background and refresh every 25 seconds while foregrounded, renewing sooner after a slow reply
+when needed to keep the host status current. The connection label remains stable
+during an in-flight refresh; remote writes still require an unexpired snapshot.
 
 The QR contains the relay address, an operator invitation and a random 256-bit
 pairing secret. HKDF derives directional AES-256-GCM keys; the room is a hash of the

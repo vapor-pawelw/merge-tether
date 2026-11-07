@@ -46,17 +46,22 @@ import MergeTetherRemote
         guard !isPreview, connection == nil, let pairing else { return }
         do {
             let connection = try RemoteConnection(pairing: pairing, role: .phone)
-            connection.onStatus = { [weak self] connected, fatal in
-                guard let self else { return }
+            connection.onStatus = { [weak self, weak connection] connected, fatal in
+                guard let self, let connection, self.connection === connection else { return }
                 if !connected { self.state.disconnected() }
                 self.error = fatal
                 if connected { Task { await self.refresh() } }
             }
-            connection.onMessage = { [weak self] message in
-                guard let self else { return }
+            connection.onMessage = { [weak self, weak connection] message in
+                guard let self, let connection, self.connection === connection else { return }
                 if message.type == .hostReady { await self.refresh(force: true); return }
-                if message.type == .unavailable { self.state.disconnected(); self.error = true; return }
+                if message.type == .unavailable { self.state.refreshFailed(); self.error = true; return }
                 self.state.receive(message)
+                if message.type == .snapshot, self.state.isConnected() {
+                    self.error = false
+                    // A slow reply can consume most of its lease; renew before the next timer tick.
+                    if self.state.needsRefresh() { await self.refresh() }
+                }
                 if message.type == .result { await self.refresh() }
             }
             self.connection = connection; connection.start()
@@ -69,8 +74,13 @@ import MergeTetherRemote
             state.receive(.init(type: .snapshot, challenge: state.challenge(), board: RemoteDemo.board)); return
         }
         #endif
-        guard let challenge = state.beginRefresh(force: force) else { return }
-        try? await connection?.send(.init(type: .hello, challenge: challenge))
+        let requestState = state
+        guard let connection, let challenge = requestState.beginRefresh(force: force) else { return }
+        do { try await connection.send(.init(type: .hello, challenge: challenge)) }
+        catch {
+            guard !Task.isCancelled, self.connection === connection, self.state === requestState else { return }
+            if requestState.refreshFailed(challenge: challenge) { self.error = true }
+        }
     }
     func perform(card: RemoteCard, action: RemoteAction) async {
         guard let command = state.command(card: card, action: action) else { return }
