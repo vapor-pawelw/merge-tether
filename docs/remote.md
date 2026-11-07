@@ -2,7 +2,11 @@
 
 The iOS target is `MergeTetheriOS` (iOS 17+). It shows the Mac's three board lanes,
 using the same `TodoMonitorService.boardSnapshot` as the desktop view, including
-pinned ordering, proposals and agent jobs. It has pairing, card details and actions;
+pinned ordering, proposals and agent jobs. Managed MR cards use the Mac's shared
+presentation for author, repository, attention message, status, badges and primary CTA
+labels. Orange marks the same human-action state as the Mac. Read-only CTAs open card
+details even when remote writes are unavailable; writes still require confirmation.
+It has pairing, card details and actions;
 GitLab credentials and automation settings remain on the Mac.
 
 ## Architecture decision

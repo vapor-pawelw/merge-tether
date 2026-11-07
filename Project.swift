@@ -39,7 +39,7 @@ let project = Project(
                 "UILaunchScreen": .dictionary([:]),
             ]),
             sources: ["iOS/**/*.swift"],
-            resources: ["Resources/Remote.xcstrings", "iOS/Resources/**"],
+            resources: ["Resources/Remote.xcstrings", "Resources/MRHumanAction.xcstrings", "Resources/AuthorFeedback.xcstrings", "iOS/Resources/**"],
             dependencies: [.target(name: "MergeTetherRemote")],
             settings: .settings(base: ["TARGETED_DEVICE_FAMILY": "1,2", "ASSETCATALOG_COMPILER_APPICON_NAME": "AppIcon"])
         ),

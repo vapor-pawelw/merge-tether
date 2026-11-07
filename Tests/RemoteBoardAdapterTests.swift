@@ -55,4 +55,134 @@ import MergeTetherRemote
         #expect(phone.lanes[2].cards.map(\.title) == ["Inspect old job"])
     }
 
+    private func projected(_ item: MergeRequestAttentionMonitor.Item,
+                           jobs: [AssistantAutomationRunner.Handoff] = []) throws -> [String: Any] {
+        let board = MergeRequestBoardSnapshot(own: item.isAuthored ? [item] : [], reviewed: item.isAuthored ? [] : [item], todos: [], attention: [],
+            handoffs: jobs, host: "gitlab.example.org", username: "me",
+            humanAttention: item.humanActionRequired == false ? .empty : nil)
+        let phone = RemoteBoardAdapter.project(board: board, other: [], session: UUID(), account: "me@host")
+        return try #require(JSONSerialization.jsonObject(with: JSONEncoder().encode(phone.cards[0])) as? [String: Any])
+    }
+
+    @Test func attentionAndReviewCommentsCTAReachThePhoneEvenWhenPublicationIsUnavailable() throws {
+        var item = try item()
+        item.isAuthored = true
+        item.requiresDiscussionRecheck = true
+        let card = try projected(item)
+        #expect(card["needsAttention"] as? Bool == true)
+        let cta = try #require(card["primaryCTA"] as? [String: Any])
+        #expect(cta["title"] as? String == String(localized: .MRHumanAction.mrHumanActionActionReviewDrafts))
+        #expect(cta["destination"] as? String == "drafts")
+        #expect((card["actions"] as? [Any])?.isEmpty == true)
+    }
+
+    @Test func pipelineOwnershipOffersReviewHandoffWithoutInventingAWrite() throws {
+        var item = try item()
+        item.drafts = []; item.draftCount = 0
+        item.isAuthored = true
+        item.needsPipelineHandoff = true
+        let card = try projected(item)
+        #expect(card["needsAttention"] as? Bool == true)
+        let cta = try #require(card["primaryCTA"] as? [String: Any])
+        #expect(cta["title"] as? String == String(localized: .MRHumanAction.mrHumanActionActionReviewHandoff))
+        #expect(cta["destination"] as? String == "overview")
+        #expect((card["actions"] as? [Any])?.isEmpty == true)
+    }
+
+    @Test func neutralCardPreservesTheMacAttentionDecisionDespiteDrafts() throws {
+        var item = try item()
+        item.isAuthored = true
+        item.humanActionRequired = false
+        let card = try projected(item)
+        #expect(card["needsAttention"] as? Bool == false)
+        #expect(card["primaryCTA"] == nil)
+    }
+
+    @Test func stoppedRunCarriesTheMacRetryCTAAndReason() throws {
+        var item = try item()
+        item.isAuthored = true
+        let job = AssistantAutomationRunner.Handoff(id: UUID(), key: .init(assistant: .codex,
+            work: .init(host: "gitlab.example.org", projectID: 1, iid: 2), username: "me", workspace: "", access: .gitLabRead),
+            title: "Retry fixture", prompt: "", createdAt: Date(), allowsPush: false,
+            execution: .init(state: .blocked, blocker: "Tests could not start."),
+            taskPrompt: "Review this MR", mergeRequestURL: item.url)
+        let card = try projected(item, jobs: [job])
+        #expect(card["needsAttention"] as? Bool == true)
+        #expect(card["detail"] as? String == "Tests could not start.")
+        let cta = try #require(card["primaryCTA"] as? [String: Any])
+        #expect(cta["title"] as? String == String(localized: .MRHumanAction.mrHumanActionActionRetryRun))
+        #expect(cta["destination"] as? String == "assistantRuns")
+    }
+
+    @Test func workingAndPublishingCardsKeepReadOnlyContentWithoutOfferingATask() throws {
+        var item = try item()
+        item.isAuthored = true
+        item.humanActionRequired = true
+        let row = MergeRequestBoardSnapshot.Row(item: item, latestJob: nil, intents: [])
+        let original = RemoteBoardAdapter.card(item, account: "me@host", extraActions: [.prepare])
+        #expect(!original.actions.isEmpty)
+        let working = RemoteBoardAdapter.presentation(original, row: row, busy: true)
+        #expect(working.needsAttention == false)
+        #expect(working.actions.isEmpty)
+        #expect(working.primaryCTA == nil)
+        #expect(working.drafts == original.drafts)
+        let publishing = RemoteBoardAdapter.presentation(original, row: row, confirmationState: .publishing)
+        #expect(publishing.actions.isEmpty)
+        #expect(publishing.primaryCTA == nil)
+    }
+
+    @Test func neutralReviewedCardUsesTheExactMacStatusAndNextStepTexts() throws {
+        var item = try item()
+        item.drafts = []; item.draftCount = 0
+        item.humanActionRequired = false
+        item.reviewingProgress = .waitingForOtherDiscussions
+        let card = try projected(item)
+        let texts = try #require(card["presentation"] as? [String: Any])
+        #expect(texts["status"] as? String == String(localized: .ReviewingContext.reviewingOtherThreadsOpen))
+        #expect(texts["nextStep"] as? String == String(localized: .ReviewingContext.reviewingWaitingOtherThreads))
+        #expect(card["detail"] as? String == "")
+        let cta = try #require(card["primaryCTA"] as? [String: Any])
+        #expect(cta["title"] as? String == String(localized: .ReviewingContext.reviewingViewDiscussions))
+    }
+
+    @Test(arguments: [false, true])
+    func phoneTextsAreTheMacPresentationForHumanAndNeutralCards(_ needsAttention: Bool) throws {
+        var item = try item()
+        item.isAuthored = true
+        item.humanActionRequired = needsAttention
+        let row = MergeRequestBoardSnapshot.Row(item: item, latestJob: nil, intents: [])
+        let mac = MRCardPresentation(row: row, reviewingContext: ReviewingContext(row: row),
+            allowsRemoval: false, assistantReady: true)
+        let phone = RemoteBoardAdapter.presentation(RemoteBoardAdapter.card(item, account: "me@host"), model: mac)
+        #expect(phone.detail == mac.message)
+        #expect(phone.needsAttention == (mac.humanAction != nil))
+        #expect(phone.presentation?.status == mac.status)
+        #expect(phone.presentation?.nextStep == mac.nextStep)
+        #expect(phone.presentation?.chips.map(\.title) == mac.chips.map { String(localized: $0.title) })
+        #expect(phone.primaryCTA?.title == mac.actionLabel.map { String(localized: $0) })
+    }
+
+    @Test func ownLaneDoesNotAcquireReviewedStatusFromAnAuthorsIdentity() throws {
+        var item = try item()
+        item.drafts = []; item.draftCount = 0
+        let board = MergeRequestBoardSnapshot(own: [item], reviewed: [], todos: [], attention: [],
+            handoffs: [], host: "gitlab.example.org", username: "me", humanAttention: .empty)
+        let phone = RemoteBoardAdapter.project(board: board, other: [], session: UUID(), account: "me@host")
+        let card = try #require(phone.lanes.first?.cards.first)
+        #expect(card.presentation?.status == nil)
+        #expect(card.presentation?.nextStep == nil)
+        #expect(card.primaryCTA == nil)
+    }
+
+    @Test func dependencyCheckingKeepsTheMacSetupLabelUntilTheAssistantIsReady() throws {
+        var item = try item()
+        item.drafts = []; item.draftCount = 0; item.reviewingProgress = .needsReview
+        item.humanActionRequired = false
+        let row = MergeRequestBoardSnapshot.Row(item: item, latestJob: nil, intents: [])
+        let context = ReviewingContext(row: row, assistantReady: false, assistantChecking: true)
+        #expect(context.nextStep == .runReview)
+        let model = MRCardPresentation(row: row, reviewingContext: context, allowsRemoval: true, assistantReady: false)
+        #expect(model.actionLabel.map { String(localized: $0) } == String(localized: .Board.boardCompactSetupCli))
+    }
+
 }

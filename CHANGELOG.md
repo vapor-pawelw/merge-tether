@@ -6,6 +6,8 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 
 ## Unreleased
 
+- Share Mac card text, status badges and primary CTAs with iOS, highlight attention in orange, and replace unexplained commit hashes with MR numbers.
+
 - Add an iOS companion MVP with the Mac board, encrypted Cloudflare relay pairing and guarded remote actions.
 
 ### Added

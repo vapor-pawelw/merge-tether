@@ -18,6 +18,44 @@ public struct RemoteDraft: Codable, Equatable, Identifiable, Sendable {
     public init(id: Int, body: String, context: String? = nil) { self.id = id; self.body = body; self.context = context }
 }
 
+/// A read-only destination, separate from the host-authorized write actions.
+public struct RemoteCardCTA: Codable, Equatable, Sendable {
+    public enum Destination: String, Codable, Sendable {
+        case overview, drafts, feedback, assistantRuns, setup, actions
+        public init(from decoder: Decoder) throws {
+            let value = try decoder.singleValueContainer().decode(String.self)
+            self = Self(rawValue: value) ?? .overview
+        }
+    }
+    public var title: String
+    public var destination: Destination
+    public init(title: String, destination: Destination) { self.title = title; self.destination = destination }
+}
+
+public struct RemoteCardChip: Codable, Equatable, Sendable {
+    public var title: String
+    public var symbol: String
+    public init(title: String, symbol: String) { self.title = title; self.symbol = symbol }
+}
+
+public struct RemoteCardText: Codable, Equatable, Sendable {
+    public var author: String?
+    public var repository: String
+    public var draftBadge: String?
+    public var status: String?
+    public var nextStep: String?
+    public var working: Bool
+    public var chips: [RemoteCardChip]
+    public var secondaryCTA: RemoteCardCTA?
+    public init(author: String? = nil, repository: String, draftBadge: String? = nil,
+                status: String? = nil, nextStep: String? = nil, working: Bool = false,
+                chips: [RemoteCardChip] = [], secondaryCTA: RemoteCardCTA? = nil) {
+        self.author = author; self.repository = repository; self.draftBadge = draftBadge
+        self.status = status; self.nextStep = nextStep; self.working = working
+        self.chips = chips; self.secondaryCTA = secondaryCTA
+    }
+}
+
 public struct RemoteCard: Codable, Equatable, Identifiable, Sendable {
     public var id: String
     public var title: String
@@ -27,10 +65,17 @@ public struct RemoteCard: Codable, Equatable, Identifiable, Sendable {
     public var detail: String
     public var drafts: [RemoteDraft]
     public var actions: [RemoteAction]
+    // Optional so phones can still read snapshots from an older Mac.
+    public var needsAttention: Bool?
+    public var mergeRequestIID: Int?
+    public var primaryCTA: RemoteCardCTA?
+    public var presentation: RemoteCardText?
     public init(id: String, title: String, project: String, url: URL?, head: String? = nil,
-                detail: String = "", drafts: [RemoteDraft] = [], actions: [RemoteAction] = []) {
+                detail: String = "", drafts: [RemoteDraft] = [], actions: [RemoteAction] = [],
+                needsAttention: Bool? = nil, mergeRequestIID: Int? = nil, primaryCTA: RemoteCardCTA? = nil, presentation: RemoteCardText? = nil) {
         self.id = id; self.title = title; self.project = project; self.url = url; self.head = head
         self.detail = detail; self.drafts = drafts; self.actions = actions
+        self.needsAttention = needsAttention; self.mergeRequestIID = mergeRequestIID; self.primaryCTA = primaryCTA; self.presentation = presentation
     }
 }
 

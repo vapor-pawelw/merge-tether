@@ -22,7 +22,7 @@ struct RemoteBoardView: View {
                                             LazyVStack(spacing: 10) {
                                                 if lane.cards.isEmpty { Text(.Remote.remoteEmpty).foregroundStyle(.secondary).padding(.top, 30) }
                                                 ForEach(lane.cards) { card in
-                                                    Button { selected = card } label: { RemoteCardView(card: card) }.buttonStyle(.plain)
+                                                    RemoteCardView(card: card, onOpen: { selected = card })
                                                 }
                                             }
                                         }
@@ -85,16 +85,78 @@ struct RemoteBoardView: View {
 
 struct RemoteCardView: View {
     let card: RemoteCard
+    var expanded = false
+    var onOpen: (() -> Void)?
     var body: some View {
         VStack(alignment: .leading, spacing: 8) {
-            Text(verbatim: card.project).font(.caption).foregroundStyle(.secondary)
-            Text(verbatim: card.title).font(.subheadline.weight(.semibold)).fixedSize(horizontal: false, vertical: true)
-            if !card.detail.isEmpty { Text(verbatim: card.detail).font(.caption).foregroundStyle(.secondary) }
-            if !card.drafts.isEmpty { Label(.Remote.remoteComments, systemImage: "text.bubble").font(.caption).foregroundStyle(.tint) }
-            if let head = card.head { Text(verbatim: String(head.prefix(8))).font(.caption2.monospaced()).foregroundStyle(.secondary) }
+            if let onOpen {
+                Button(action: onOpen) { content }.buttonStyle(.plain)
+                    .accessibilityIdentifier("remote.card.\(card.id)")
+            } else { content }
+            if !expanded, let onOpen {
+                HStack {
+                    if let secondary = card.presentation?.secondaryCTA {
+                        Button(action: onOpen) { Text(verbatim: secondary.title) }
+                            .font(.caption).buttonStyle(.plain).foregroundStyle(.secondary)
+                    }
+                    Spacer(minLength: 0)
+                    if let cta = card.primaryCTA {
+                        Button(action: onOpen) { Text(verbatim: cta.title) }
+                            .font(.caption.weight(.semibold)).buttonStyle(.bordered)
+                            .accessibilityIdentifier("remote.cta.\(card.id)")
+                    }
+                }
+            }
         }
         .frame(maxWidth: .infinity, alignment: .leading).padding(14)
         .background(.background, in: RoundedRectangle(cornerRadius: 14))
+        .overlay(alignment: .leading) {
+            if card.needsAttention == true {
+                RoundedRectangle(cornerRadius: 2).fill(.orange).frame(width: 4).padding(.vertical, 12)
+            }
+        }
+    }
+    private var content: some View {
+        VStack(alignment: .leading, spacing: 8) {
+            HStack(alignment: .firstTextBaseline) {
+                if let author = card.presentation?.author { Text(verbatim: author).lineLimit(1) }
+                else if card.presentation == nil { Text(verbatim: card.project).lineLimit(1) }
+                Spacer(minLength: 4)
+                if let badge = card.presentation?.draftBadge { Text(verbatim: badge).fontWeight(.semibold) }
+                if let iid = card.mergeRequestIID { Text(verbatim: "!\(iid)") }
+            }.font(.caption).foregroundStyle(.secondary)
+            title
+            if !card.detail.isEmpty {
+                HStack(alignment: .firstTextBaseline, spacing: 5) {
+                    if card.needsAttention == true { Image(systemName: "exclamationmark.circle.fill").accessibilityHidden(true) }
+                    Text(verbatim: card.detail).lineLimit(expanded ? nil : 2)
+                }.font(.caption).foregroundStyle(card.needsAttention == true ? .orange : .secondary)
+            }
+            if let status = card.presentation?.status {
+                HStack(spacing: 5) {
+                    if card.presentation?.working == true { ProgressView().controlSize(.mini) }
+                    Text(verbatim: status).font(.caption)
+                }.foregroundStyle(.secondary)
+            }
+            if let nextStep = card.presentation?.nextStep {
+                Text(verbatim: nextStep).font(.caption).foregroundStyle(.secondary)
+            }
+            if let chips = card.presentation?.chips {
+                ForEach(Array(chips.enumerated()), id: \.offset) { _, chip in
+                    Label { Text(verbatim: chip.title) } icon: { Image(systemName: chip.symbol) }
+                        .font(.caption2).foregroundStyle(.secondary)
+                }
+            } else if !card.drafts.isEmpty {
+                Label(.Remote.remoteComments, systemImage: "text.bubble").font(.caption).foregroundStyle(.tint)
+            }
+        }.frame(maxWidth: .infinity, alignment: .leading)
+    }
+    private var title: some View {
+        let titleText = Text(verbatim: card.title).font(.subheadline.weight(.semibold)).foregroundStyle(.primary)
+        let repository = card.presentation?.repository ?? ""
+        let repositoryText = Text(verbatim: repository).font(.caption).foregroundStyle(.tint)
+        return (titleText + Text(verbatim: repository.isEmpty ? "" : "  ") + repositoryText)
+            .lineLimit(expanded ? nil : 2).fixedSize(horizontal: false, vertical: true)
     }
 }
 
@@ -104,36 +166,61 @@ struct RemoteCardDetail: View {
     @State private var confirmation: RemoteAction?
     @Environment(\.dismiss) private var dismiss
     private var current: RemoteCard { model.state.board?.cards.first { $0.id == original.id } ?? original }
+    private var headerDestination: RemoteCardCTA.Destination {
+        switch current.primaryCTA?.destination {
+        case .feedback: .feedback
+        case .assistantRuns: .assistantRuns
+        default: .overview
+        }
+    }
     var body: some View {
         NavigationStack {
-            ScrollView {
-                VStack(alignment: .leading, spacing: 20) {
-                    RemoteCardView(card: current)
-                    if let url = current.url, ["https", "http"].contains(url.scheme?.lowercased() ?? "") {
-                        Link(destination: url) { Label(.Remote.remoteOpen, systemImage: "arrow.up.right.square") }
-                    }
-                    ForEach(current.drafts) { draft in
-                        VStack(alignment: .leading, spacing: 8) {
-                            if let context = draft.context { Text(verbatim: context).font(.caption.monospaced()).foregroundStyle(.secondary) }
-                            Text(verbatim: draft.body).textSelection(.enabled)
-                        }.padding().frame(maxWidth: .infinity, alignment: .leading)
-                            .background(.quaternary, in: RoundedRectangle(cornerRadius: 12))
-                    }
-                    if let result = model.state.result {
-                        Text(result.status.title).font(.callout).foregroundStyle(.secondary)
-                        Button(.Remote.remoteClose) { model.state.acknowledgeResult() }
-                    }
-                    TimelineView(.periodic(from: .now, by: 1)) { context in
-                        VStack(spacing: 12) {
-                            ForEach(current.actions) { action in
-                                Button(action.kind.title) { confirmation = action }.buttonStyle(.borderedProminent)
-                                    .disabled(!model.state.canAct(now: context.date))
-                            }
-                            if model.state.pending != nil { ProgressView(.Remote.remoteRunning) }
+            ScrollViewReader { proxy in
+                ScrollView {
+                    VStack(alignment: .leading, spacing: 20) {
+                        RemoteCardView(card: current, expanded: true).id(headerDestination)
+                        if current.primaryCTA?.destination == .setup {
+                            Text(.Remote.remoteSetupOnMac).foregroundStyle(.secondary).id(RemoteCardCTA.Destination.setup)
+                        } else if current.actions.isEmpty, let destination = current.primaryCTA?.destination,
+                                  destination != .drafts {
+                            Text(.Remote.remoteCompleteOnMac).foregroundStyle(.secondary)
                         }
+                        if let url = current.url, ["https", "http"].contains(url.scheme?.lowercased() ?? "") {
+                            Link(destination: url) { Label(.Remote.remoteOpen, systemImage: "arrow.up.right.square") }
+                        }
+                        VStack(alignment: .leading, spacing: 12) {
+                            ForEach(current.drafts) { draft in
+                                VStack(alignment: .leading, spacing: 8) {
+                                    if let context = draft.context { Text(verbatim: context).font(.caption.monospaced()).foregroundStyle(.secondary) }
+                                    Text(verbatim: draft.body).textSelection(.enabled)
+                                }.padding().frame(maxWidth: .infinity, alignment: .leading)
+                                    .background(.quaternary, in: RoundedRectangle(cornerRadius: 12))
+                            }
+                        }.id(RemoteCardCTA.Destination.drafts)
+                        if let result = model.state.result {
+                            Text(result.status.title).font(.callout).foregroundStyle(.secondary)
+                            Button(.Remote.remoteClose) { model.state.acknowledgeResult() }
+                        }
+                        TimelineView(.periodic(from: .now, by: 1)) { context in
+                            VStack(spacing: 12) {
+                                ForEach(current.actions) { action in
+                                    Button(action.kind.title) { confirmation = action }.buttonStyle(.borderedProminent)
+                                        .disabled(!model.state.canAct(now: context.date))
+                                }
+                                if model.state.pending != nil { ProgressView(.Remote.remoteRunning) }
+                            }
+                        }
+                        .id(RemoteCardCTA.Destination.actions)
+                    }.padding()
+                }
+                .task {
+                    if let destination = current.primaryCTA?.destination {
+                        proxy.scrollTo(destination, anchor: .top)
                     }
-                }.padding()
+                }
             }
+            .navigationTitle(Text(verbatim: current.title))
+            .navigationBarTitleDisplayMode(.inline)
             .toolbar { ToolbarItem(placement: .topBarTrailing) { Button(.Remote.remoteClose) { dismiss() } } }
             .alert(Text(confirmation?.kind.title ?? .Remote.remoteConfirm), isPresented: Binding(
                 get: { confirmation != nil }, set: { if !$0 { confirmation = nil } }

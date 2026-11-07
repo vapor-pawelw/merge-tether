@@ -1037,6 +1037,40 @@
           }
         }
       }
+    },
+    "remote.setupOnMac": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Complete agent setup in MergeTether on your Mac."
+          }
+        },
+        "pl": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Dokończ konfigurację agenta w MergeTether na Macu."
+          }
+        }
+      }
+    },
+    "remote.completeOnMac": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Complete this step in MergeTether on your Mac."
+          }
+        },
+        "pl": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Wykonaj ten krok w MergeTether na Macu."
+          }
+        }
+      }
     }
   },
   "version": "1.0"

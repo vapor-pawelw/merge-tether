@@ -54,15 +54,9 @@ import MergeTetherRemote
                     }
                     if item.reReviewReadiness == .failed || item.reReviewReadiness == .unavailable { extras.append(.verify) }
                     card = self.card(item, account: account, extraActions: extras, context: handoffs.map(\.id).sorted() + [(try? RemoteDigest.token(monitor.settings.automation)) ?? ""])
-                    if let human = MRHumanAction(row: row, assistantReady: monitor.availableAssistants.contains(monitor.settings.automation.assistant),
-                        confirmationState: monitor.attention.confirmationStates[item.id]) {
-                        card.detail = human.detail ?? String(localized: human.message)
-                    } else if !item.isAuthored {
-                        card.detail = String(localized: monitor.reviewingContext(for: row).nextStepMessage)
-                    }
-                    let busy = row.latestJob?.execution?.state.isActive == true || item.authorFeedbackStatus?.phase == .checking
-                        || item.reReviewReadiness == .checking || monitor.attention.confirmationStates[item.id] == .publishing
-                        || monitor.attention.confirmationStates[item.id] == .approving
+                    let presentation = MRCardPresentation(row: row, monitor: monitor, allowsRemoval: result.lanes[lane].id == .reviewed)
+                    card = self.presentation(card, model: presentation)
+                    let busy = presentation.working
                     if busy { card.actions = [] }
                     else {
                         let intent = row.intents.first { $0.state == .failed } ?? row.intents.first { $0.state == .pending }
@@ -119,10 +113,56 @@ import MergeTetherRemote
             }
         }
         return .init(hostSession: session, account: account, lanes: [
-            .init(id: .own, cards: board.own.map { card($0.item, account: account) }),
-            .init(id: .reviewed, cards: board.reviewed.map { card($0.item, account: account) }),
+            .init(id: .own, cards: board.own.map { presentation(card($0.item, account: account), row: $0, allowsRemoval: false) }),
+            .init(id: .reviewed, cards: board.reviewed.map { presentation(card($0.item, account: account), row: $0, allowsRemoval: true) }),
             .init(id: .other, cards: others),
         ])
+    }
+
+    static func presentation(_ original: RemoteCard, row: MergeRequestBoardSnapshot.Row,
+                             assistantReady: Bool = true, allowsRemoval: Bool? = nil,
+                             confirmationState: MergeRequestAttentionMonitor.ConfirmationState? = nil,
+                             automaticallyPublishedDraftIDs: Set<Int> = [],
+                             reviewing: ReviewingContext? = nil, busy: Bool = false) -> RemoteCard {
+        let model = MRCardPresentation(row: row,
+            reviewingContext: reviewing ?? ReviewingContext(row: row, assistantReady: assistantReady),
+            allowsRemoval: allowsRemoval ?? !row.item.isAuthored, assistantReady: assistantReady,
+            confirmationState: confirmationState, automaticallyPublishedDraftIDs: automaticallyPublishedDraftIDs,
+            automaticConflictProgress: busy)
+        return presentation(original, model: model)
+    }
+
+    static func presentation(_ original: RemoteCard, model: MRCardPresentation) -> RemoteCard {
+        var card = original
+        let human = model.humanAction
+        card.needsAttention = human != nil
+        card.mergeRequestIID = model.row.id.iid
+        card.detail = model.message
+        card.primaryCTA = model.actionLabel.map { label in
+            let destination: RemoteCardCTA.Destination
+            if let human { destination = human.remoteDestination }
+            else {
+                destination = switch model.reviewingContext.nextStep {
+                case .reviewComments: .drafts
+                case .viewRun: .assistantRuns
+                case .setupAgent: .setup
+                case .runReview: model.assistantReady ? .overview : .setup
+                default: .feedback
+                }
+            }
+            return .init(title: String(localized: label), destination: destination)
+        }
+        let author = ReviewingContext(row: model.row).author.map {
+            $0.name.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty ? $0.username : $0.name
+        }
+        card.presentation = .init(author: author,
+            repository: card.project.split(separator: "/").last.map(String.init) ?? card.project,
+            draftBadge: model.row.item.section == .draftMergeRequests ? String(localized: .Menu.menuMrDraftBadge) : nil,
+            status: model.status, nextStep: model.nextStep, working: model.working,
+            chips: model.chips.map { .init(title: String(localized: $0.title), symbol: $0.symbol) },
+            secondaryCTA: human?.action == .retryRun ? .init(title: String(localized: .MRHumanAction.mrHumanActionActionReviewRun), destination: .assistantRuns) : nil)
+        if model.working { card.actions = [] }
+        return card
     }
 
     private static func detail(_ item: MergeRequestAttentionMonitor.Item) -> String {
@@ -135,5 +175,18 @@ import MergeTetherRemote
         if item.needsMerge { reasons.append(.Remote.remoteMerge) }
         if item.requiresDiscussionRecheck || item.awaitingRemoteVerification { reasons.append(.Remote.remoteRecheck) }
         return reasons.map { String(localized: $0) }.joined(separator: " · ")
+    }
+}
+
+private extension MRHumanAction {
+    var remoteDestination: RemoteCardCTA.Destination {
+        switch action {
+        case .reviewDrafts: .drafts
+        case .reviewApproval: .actions
+        case .reviewRun, .retryRun: .assistantRuns
+        case .setupAssistant: .setup
+        case .reviewDecision, .reviewFeedback, .handleFeedback, .verifyFeedback: .feedback
+        case .reviewHandoff, .reviewMerge, .reviewIssue, .retryIntent: .overview
+        }
     }
 }

@@ -7,38 +7,33 @@ struct CommandCenterMRCard: View {
     var allowsRemoval = false
     var onAttention: ((CommandCenterMRDetailSection) -> Void)? = nil
     let onDetails: () -> Void
+
+    var body: some View {
+        CommandCenterMRCardContent(row: row, monitor: monitor, allowsRemoval: allowsRemoval,
+            onAttention: onAttention, onDetails: onDetails,
+            presentation: .init(row: row, monitor: monitor, allowsRemoval: allowsRemoval))
+    }
+}
+
+private struct CommandCenterMRCardContent: View {
+    let row: MergeRequestBoardSnapshot.Row
+    let monitor: TodoMonitorService
+    var allowsRemoval = false
+    var onAttention: ((CommandCenterMRDetailSection) -> Void)? = nil
+    let onDetails: () -> Void
     @State private var isStarting = false
     @State private var retryError: String?
     @State private var confirmRemoval = false
     @Environment(\.openSettings) private var openSettings
 
     private var item: MergeRequestAttentionMonitor.Item { row.item }
-    private var automaticConflictProgress: Bool {
-        item.mergeRequest.map { monitor.automaticConflictIsProcessing(for: $0) } ?? false
-    }
-    private var busy: Bool {
-        let state = monitor.attention.confirmationStates[item.id]
-        return state == .publishing || state == .approving || item.authorFeedbackStatus?.phase == .checking
-            || item.reReviewReadiness == .checking
-            || item.aiOriginChecking
-            || (allowsRemoval && reviewingContext.isAutomaticProcessing)
-            || (automaticConflictProgress && row.latestJob?.execution?.state.isActive != true)
-    }
+    let presentation: MRCardPresentation
+    private var busy: Bool { presentation.busy }
     private var nextIntent: MRTodoIntent? {
         row.intents.first { $0.state == .failed } ?? row.intents.first { $0.state == .pending }
     }
     private var needsCLI: Bool { !monitor.availableAssistants.contains(monitor.settings.automation.assistant) }
-    private var humanAction: MRHumanAction? {
-        guard row.needsAttention, !busy,
-              !(allowsRemoval && reviewingContext.nextStep == .setupAgent) else { return nil }
-        let target = monitor.scopeTarget(projectID: item.id.projectID, iid: item.id.iid, url: item.url)
-        let automatic = target.map {
-            item.draftIDsHandledAutomatically(automation: monitor.settings.automation, target: $0,
-                assistantPreparing: !needsCLI || monitor.assistantDependencies.isChecking)
-        } ?? []
-        return MRHumanAction(row: row, assistantReady: !needsCLI,
-            confirmationState: monitor.attention.confirmationStates[item.id], automaticallyPublishedDraftIDs: automatic)
-    }
+    private var humanAction: MRHumanAction? { presentation.humanAction }
 
     var body: some View {
         VStack(alignment: .leading, spacing: 9) {
@@ -55,16 +50,10 @@ struct CommandCenterMRCard: View {
                     settings: monitor.settings)
                 moreMenu
             }
-            if let action = humanAction {
-                Group {
-                    if let detail = action.detail, !detail.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
-                        Text(verbatim: detail).help(Text(verbatim: detail))
-                    } else {
-                        Text(action.message)
-                    }
-                }
-                .font(.callout).foregroundStyle(.orange)
-                .lineLimit(2).fixedSize(horizontal: false, vertical: true)
+            if humanAction != nil {
+                Text(verbatim: presentation.message).help(Text(verbatim: presentation.message))
+                    .font(.callout).foregroundStyle(.orange)
+                    .lineLimit(2).fixedSize(horizontal: false, vertical: true)
             }
             if let retryError {
                 Text(verbatim: retryError).font(.caption).foregroundStyle(.red)
@@ -72,15 +61,9 @@ struct CommandCenterMRCard: View {
             }
             if busy || row.latestJob?.execution?.state.isActive == true || humanAction != nil || neutralStatus != nil {
                 HStack(spacing: 6) {
-                    if let job = row.latestJob, job.execution?.state.isActive == true {
+                    if presentation.working {
                         ProgressView().controlSize(.mini)
-                        Text(.Board.boardCompactWorking)
-                        Text(verbatim: "·")
-                        Text(job.key.assistant.displayName)
-                    } else if busy {
-                        ProgressView().controlSize(.mini)
-                        if item.aiOriginChecking { Text(.MRDiscussions.mrDiscussionsAiChecking) }
-                        else { Text(.Board.boardCompactWorking) }
+                        if let status = presentation.status { Text(verbatim: status) }
                     } else if humanAction?.action == .retryRun {
                         Button { openAttention(.assistantRuns) } label: { Text(.MRHumanAction.mrHumanActionActionReviewRun) }
                             .buttonStyle(.plain)
@@ -94,8 +77,8 @@ struct CommandCenterMRCard: View {
                 }
                 .font(.caption).foregroundStyle(.secondary)
             }
-            if allowsRemoval, humanAction == nil, !busy {
-                Text(reviewingContext.nextStepMessage)
+            if let nextStep = presentation.nextStep {
+                Text(verbatim: nextStep)
                     .font(.subheadline).foregroundStyle(.secondary)
                     .fixedSize(horizontal: false, vertical: true)
             }
@@ -139,14 +122,8 @@ struct CommandCenterMRCard: View {
         }
     }
 
-    private var reviewingContext: ReviewingContext { monitor.reviewingContext(for: row) }
-
-    private var neutralStatus: LocalizedStringResource? {
-        if item.authorFeedbackStatus?.waitingForReviewer == true { return .AuthorFeedback.authorFeedbackWaitingChip }
-        guard allowsRemoval else { return nil }
-        let context = reviewingContext
-        return context.status == .activityUnknown ? context.presenceMessage : context.statusMessage
-    }
+    private var reviewingContext: ReviewingContext { presentation.reviewingContext }
+    private var neutralStatus: LocalizedStringResource? { presentation.neutralStatus }
 
     @ViewBuilder
     private var primaryAction: some View {
@@ -279,23 +256,8 @@ struct CommandCenterMRCard: View {
         .accessibilityLabel(Text(.CommandCenter.commandCenterActions))
     }
 
-    private struct Chip { let title: LocalizedStringResource; let symbol: String }
-    private var chips: [Chip] {
-        var result: [Chip] = []
-        if item.hasConflict || item.mergeRequest?.hasMergeConflict == true {
-            result.append(.init(title: .Board.boardCompactConflict, symbol: "arrow.triangle.branch"))
-        }
-        if item.failedPipeline || item.mergeRequest?.headPipeline?.status == "failed" {
-            result.append(.init(title: .Board.boardCompactPipelineFailed, symbol: "xmark.circle"))
-        } else if let pipeline = item.mergeRequest?.headPipeline,
-                  ["running", "pending", "created", "preparing", "waiting_for_resource"].contains(pipeline.status) {
-            result.append(.init(title: .Board.boardCompactPipelineRunning, symbol: "clock"))
-        }
-        if humanAction == nil, !busy, !allowsRemoval, max(item.draftCount, item.drafts.count) > 0 {
-            result.append(.init(title: .Board.boardCompactDrafts(max(item.draftCount, item.drafts.count)), symbol: "text.bubble"))
-        }
-        return Array(result.prefix(2))
-    }
+    private var chips: [MRCardPresentation.Chip] { presentation.chips }
+
 }
 
 struct BoardStatusChip: View {
