@@ -104,17 +104,44 @@ private struct MRDiscussionThreadView: View {
                 }
                 .font(.caption)
                 if let location = thread.location {
-                    Text(verbatim: location).font(.caption.monospaced()).foregroundStyle(.secondary).textSelection(.enabled)
+                    Text(verbatim: location).font(.caption.monospaced()).foregroundStyle(.secondary)
                 }
                 if !isExpanded, let body = comments.first?.body {
                     Text(verbatim: body).font(.subheadline).foregroundStyle(.secondary).lineLimit(2)
                 }
             }
         }
+        .disclosureGroupStyle(MRDiscussionDisclosureStyle())
         .padding(12)
         .frame(maxWidth: .infinity, alignment: .leading)
         .background(Color.secondary.opacity(0.045), in: RoundedRectangle(cornerRadius: 8))
         .onAppear { if initiallyExpanded { isExpanded = true } }
+    }
+}
+
+private struct MRDiscussionDisclosureStyle: DisclosureGroupStyle {
+    func makeBody(configuration: Configuration) -> some View {
+        VStack(alignment: .leading, spacing: 0) {
+            Button {
+                configuration.isExpanded.toggle()
+            } label: {
+                HStack(alignment: .top, spacing: 12) {
+                    Image(systemName: configuration.isExpanded ? "chevron.down" : "chevron.right")
+                        .font(.caption.weight(.semibold))
+                        .foregroundStyle(.secondary)
+                        .frame(width: 12, height: 14)
+                        .accessibilityHidden(true)
+                    configuration.label.frame(maxWidth: .infinity, alignment: .leading)
+                }
+                .contentShape(Rectangle())
+            }
+            .buttonStyle(.plain)
+            .accessibilityValue(Text(configuration.isExpanded
+                ? .MRDiscussions.mrDiscussionsExpanded : .MRDiscussions.mrDiscussionsCollapsed))
+            if configuration.isExpanded {
+                configuration.content.padding(.leading, 24)
+            }
+        }
     }
 }
 

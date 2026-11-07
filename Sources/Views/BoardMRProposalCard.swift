@@ -26,7 +26,7 @@ struct BoardMRProposalCard: View {
 
     var body: some View {
         VStack(alignment: .leading, spacing: 9) {
-            BoardStatusChip(title: .Board.boardCompactProposal, symbol: "plus.circle")
+            metadataHeader
             HStack(alignment: .top) {
                 Link(destination: proposal.url) {
                     BoardCardTitle(title: proposal.title, repositoryPath: proposal.url.gitLabProjectPath)
@@ -65,16 +65,6 @@ struct BoardMRProposalCard: View {
                     .help(Text(.Menu.menuMrAddFailed))
             }
             runResult
-            VStack(alignment: .leading, spacing: 4) {
-                HStack(spacing: 6) {
-                    author
-                    Spacer(minLength: 4)
-                    if proposal.item?.section == .draftMergeRequests || proposal.todos.contains(where: \.isDraft) {
-                        BoardDraftBadge()
-                    }
-                    if let iid = proposal.target.iid { BoardMRIdentifier(iid: iid) }
-                }
-            }
         }
         .confirmationDialog(Text(.Board.boardProposalIgnore), isPresented: $confirmIgnore, titleVisibility: .visible) {
             Button(role: .destructive) {
@@ -91,6 +81,18 @@ struct BoardMRProposalCard: View {
         .background(Color(nsColor: .controlBackgroundColor), in: RoundedRectangle(cornerRadius: 8))
         .overlay(RoundedRectangle(cornerRadius: 8).stroke(.secondary.opacity(0.12), lineWidth: 0.5))
         .task(id: authorTaskID) { await authorLoader.load(proposal) }
+    }
+
+    private var metadataHeader: some View {
+        HStack(spacing: 6) {
+            author
+            Spacer(minLength: 4)
+            BoardStatusChip(title: .Board.boardCompactProposal, symbol: "plus.circle")
+            if proposal.item?.section == .draftMergeRequests || proposal.todos.contains(where: \.isDraft) {
+                BoardDraftBadge()
+            }
+            if let iid = proposal.target.iid { BoardMRIdentifier(iid: iid) }
+        }
     }
 
     private var moreMenu: some View {
@@ -141,7 +143,7 @@ struct BoardMRProposalCard: View {
                 .help(Text(.Proposal.proposalMoreReasonsHelp))
             }
         }
-        .font(.callout.weight(.medium)).foregroundStyle(.primary)
+        .font(.callout).foregroundStyle(.primary)
     }
 
     @ViewBuilder

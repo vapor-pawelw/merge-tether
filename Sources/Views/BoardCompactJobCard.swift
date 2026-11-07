@@ -11,6 +11,7 @@ struct BoardCompactJobCard: View {
 
     var body: some View {
         VStack(alignment: .leading, spacing: 9) {
+            metadataHeader
             HStack(alignment: .top, spacing: 6) {
                 BoardCardTitle(title: handoff.title, repositoryPath: repositoryPath)
                 BoardPinButton(pin: .mergeRequest(host: handoff.key.work.host,
@@ -35,18 +36,21 @@ struct BoardCompactJobCard: View {
                 if isShowingRun { AssistantJobRow(handoff: handoff, monitor: monitor) }
             } label: { Text(.MRHumanAction.mrHumanActionActionReviewRun).foregroundStyle(.secondary) }
             .font(.caption)
-            HStack(spacing: 6) {
-                Text(handoff.key.assistant.displayName)
-                Text(verbatim: "·")
-                Text(handoff.createdAt, style: .relative)
-                Spacer(minLength: 4)
-                BoardMRIdentifier(iid: handoff.key.work.iid)
-            }
-            .font(.caption).foregroundStyle(.secondary)
         }
         .padding(12).controlSize(.small)
         .frame(maxWidth: .infinity, alignment: .leading)
         .background(Color(nsColor: .controlBackgroundColor), in: RoundedRectangle(cornerRadius: 8))
+    }
+
+    private var metadataHeader: some View {
+        HStack(spacing: 6) {
+            Text(handoff.key.assistant.displayName)
+            Text(verbatim: "·")
+            Text(handoff.createdAt, style: .relative)
+            Spacer(minLength: 4)
+            BoardMRIdentifier(iid: handoff.key.work.iid)
+        }
+        .font(.caption).foregroundStyle(.secondary)
     }
 }
 

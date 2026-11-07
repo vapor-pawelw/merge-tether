@@ -194,7 +194,7 @@
         "en": {
           "stringUnit": {
             "state": "translated",
-            "value": "An AI badge means a verified agent identity or a very-high-confidence assessment for the current comment. No badge means unclassified, not necessarily human."
+            "value": "An AI badge means a verified agent identity or a very-high-confidence assessment that this comment was written with AI assistance. A person’s comment can qualify. No badge does not mean it was written manually."
           }
         }
       }
@@ -216,7 +216,7 @@
         "en": {
           "stringUnit": {
             "state": "translated",
-            "value": "Assessed as AI-written with very high confidence for this exact comment. This does not approve the comment or change publication permissions."
+            "value": "Assessed as written with AI assistance with very high confidence for this exact comment. This does not approve its content or independently allow publication."
           }
         }
       }
@@ -251,6 +251,39 @@
           "stringUnit": {
             "state": "translated",
             "value": "Reply draft"
+          }
+        }
+      }
+    },
+    "mrDiscussions.expanded": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Expanded"
+          }
+        }
+      }
+    },
+    "mrDiscussions.collapsed": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Collapsed"
+          }
+        }
+      }
+    },
+    "mrDiscussions.aiChecking": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Assessing comments for AI assistance…"
           }
         }
       }

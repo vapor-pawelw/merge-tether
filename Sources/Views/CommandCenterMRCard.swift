@@ -20,6 +20,7 @@ struct CommandCenterMRCard: View {
         let state = monitor.attention.confirmationStates[item.id]
         return state == .publishing || state == .approving || item.authorFeedbackStatus?.phase == .checking
             || item.reReviewReadiness == .checking
+            || item.aiOriginChecking
             || (allowsRemoval && reviewingContext.isAutomaticProcessing)
             || (automaticConflictProgress && row.latestJob?.execution?.state.isActive != true)
     }
@@ -41,6 +42,7 @@ struct CommandCenterMRCard: View {
 
     var body: some View {
         VStack(alignment: .leading, spacing: 9) {
+            metadataHeader
             HStack(alignment: .top, spacing: 6) {
                 Button(action: onDetails) {
                     BoardCardTitle(title: item.title, repositoryPath: item.url.gitLabProjectPath)
@@ -61,7 +63,7 @@ struct CommandCenterMRCard: View {
                         Text(action.message)
                     }
                 }
-                .font(.callout.weight(.medium)).foregroundStyle(.orange)
+                .font(.callout).foregroundStyle(.orange)
                 .lineLimit(2).fixedSize(horizontal: false, vertical: true)
             }
             if let retryError {
@@ -77,12 +79,13 @@ struct CommandCenterMRCard: View {
                         Text(job.key.assistant.displayName)
                     } else if busy {
                         ProgressView().controlSize(.mini)
-                        Text(.Board.boardCompactWorking)
+                        if item.aiOriginChecking { Text(.MRDiscussions.mrDiscussionsAiChecking) }
+                        else { Text(.Board.boardCompactWorking) }
                     } else if humanAction?.action == .retryRun {
                         Button { openAttention(.assistantRuns) } label: { Text(.MRHumanAction.mrHumanActionActionReviewRun) }
                             .buttonStyle(.plain)
                     } else if humanAction == nil, let status = neutralStatus {
-                        Text(status).font(.callout.weight(.medium)).foregroundStyle(.primary).lineLimit(1)
+                        Text(status).font(.callout).foregroundStyle(.primary).lineLimit(1)
                             .help(Text(reviewingContext.presenceMessage)
                                   + Text(verbatim: "\n") + Text(reviewingContext.statusMessage))
                     }
@@ -91,7 +94,7 @@ struct CommandCenterMRCard: View {
                 }
                 .font(.caption).foregroundStyle(.secondary)
             }
-            if allowsRemoval, humanAction == nil {
+            if allowsRemoval, humanAction == nil, !busy {
                 Text(reviewingContext.nextStepMessage)
                     .font(.subheadline).foregroundStyle(.secondary)
                     .fixedSize(horizontal: false, vertical: true)
@@ -103,7 +106,6 @@ struct CommandCenterMRCard: View {
                     }
                 }
             }
-            footer
         }
         .onChange(of: row.latestJob?.id) { _, _ in retryError = nil }
         .controlSize(.small)
@@ -122,20 +124,18 @@ struct CommandCenterMRCard: View {
         } message: { Text(.Board.boardRemoveExplanation) }
     }
 
-    private var footer: some View {
-        VStack(alignment: .leading, spacing: 4) {
-            HStack(spacing: 6) {
-                if let author = ReviewingContext(row: row).author {
-                    BoardCardAuthor(author: author)
-                } else if allowsRemoval {
-                    AvatarView(url: nil, size: 16)
-                        .help(Text(.ReviewingContext.reviewingAuthorUnknown))
-                        .accessibilityLabel(Text(.ReviewingContext.reviewingAuthorUnknown))
-                }
-                Spacer(minLength: 4)
-                if item.section == .draftMergeRequests { BoardDraftBadge() }
-                BoardMRIdentifier(iid: item.id.iid)
+    private var metadataHeader: some View {
+        HStack(spacing: 6) {
+            if let author = ReviewingContext(row: row).author {
+                BoardCardAuthor(author: author)
+            } else if allowsRemoval {
+                AvatarView(url: nil, size: 16)
+                    .help(Text(.ReviewingContext.reviewingAuthorUnknown))
+                    .accessibilityLabel(Text(.ReviewingContext.reviewingAuthorUnknown))
             }
+            Spacer(minLength: 4)
+            if item.section == .draftMergeRequests { BoardDraftBadge() }
+            BoardMRIdentifier(iid: item.id.iid)
         }
     }
 
@@ -320,11 +320,12 @@ struct BoardTodoRow: View {
 
     var body: some View {
         VStack(alignment: .leading, spacing: 8) {
+            metadataHeader
             HStack(alignment: .top, spacing: 6) {
                 Link(destination: todo.targetURL) {
                     ActionDescriptionText(todo: todo, currentUsername: monitor.glab.currentUsername,
                         repositoryPath: todo.project.pathWithNamespace)
-                        .font(.callout.weight(.semibold)).foregroundStyle(.primary)
+                        .font(.callout).foregroundStyle(.primary)
                         .multilineTextAlignment(.leading).lineLimit(2)
                         .fixedSize(horizontal: false, vertical: true)
                         .frame(maxWidth: .infinity, alignment: .leading)
@@ -346,22 +347,23 @@ struct BoardTodoRow: View {
                     .buttonStyle(.bordered)
             }
             .font(.caption)
-            VStack(alignment: .leading, spacing: 4) {
-                HStack(spacing: 6) {
-                    BoardCardAuthor(author: todo.target.author ?? todo.author,
-                        roleLabel: todo.targetType == .mergeRequest && todo.target.author != nil
-                            ? .ReviewingContext.reviewingAuthorLabel : nil)
-                    Spacer(minLength: 4)
-                    if todo.isDraft { BoardDraftBadge() }
-                    if todo.targetType == .mergeRequest, let iid = todo.target.iid {
-                        BoardMRIdentifier(iid: iid)
-                    } else if !todo.relativeIdentifier.isEmpty {
-                        Text(verbatim: todo.relativeIdentifier).font(.caption).foregroundStyle(.secondary)
-                    }
-                }
-            }
         }
         .controlSize(.small)
+    }
+
+    private var metadataHeader: some View {
+        HStack(spacing: 6) {
+            BoardCardAuthor(author: todo.target.author ?? todo.author,
+                roleLabel: todo.targetType == .mergeRequest && todo.target.author != nil
+                    ? .ReviewingContext.reviewingAuthorLabel : nil)
+            Spacer(minLength: 4)
+            if todo.isDraft { BoardDraftBadge() }
+            if todo.targetType == .mergeRequest, let iid = todo.target.iid {
+                BoardMRIdentifier(iid: iid)
+            } else if !todo.relativeIdentifier.isEmpty {
+                Text(verbatim: todo.relativeIdentifier).font(.caption).foregroundStyle(.secondary)
+            }
+        }
     }
 
     private var moreMenu: some View {
