@@ -6,9 +6,15 @@ enum AssistantJobExecutor {
 
     @MainActor
     static func execute(_ handoff: AssistantAutomationRunner.Handoff, settings: SettingsManager) async throws -> AssistantJobCoordinator.Outcome {
+        try await execute(handoff, settings: settings, detectCLI: { await AssistantCLI.detect($0, requireCLI: true) })
+    }
+
+    @MainActor
+    static func execute(_ handoff: AssistantAutomationRunner.Handoff, settings: SettingsManager,
+                        detectCLI: @MainActor (AutomationAssistant) async -> AssistantDependencyStatus) async throws -> AssistantJobCoordinator.Outcome {
         try validateConfiguration(handoff, automation: settings.automation)
         try validateIgnoredTarget(handoff, ignored: settings.ignoredMergeRequests)
-        guard case .ready(let executable) = await AssistantCLI.detect(handoff.key.assistant, requireCLI: true) else {
+        guard case .ready(let executable) = await detectCLI(handoff.key.assistant) else {
             throw ExecutionError.cliUnavailable
         }
         try Task.checkCancellation()
@@ -61,8 +67,28 @@ enum AssistantJobExecutor {
         try invocation.prepareEvidenceDirectories()
         let instructions = handoff.prompt + """
 
-            This is a headless MergeTether run. Do not open desktop apps, create GUI chats, or request interactive input.
+            This is a headless MergeTether run. Do not open coding-agent desktop apps, create GUI chats, or request interactive input.
             Keep working files and isolated Git worktrees beneath this run's working directory. Never modify another checkout.
+            If an assigned check or mandatory commit hook fails because an installed and configured local runtime
+            is stopped, diagnose the exact failed command and configured endpoint, then start only that required
+            runtime using its service CLI. For Docker, inspect `docker context show` and its endpoint first.
+            When the active context is `orbstack` and installed `orbctl status` reports stopped, use `orbctl start`.
+            A visible OrbStack GUI is not proof of a running daemon. Bound startup and readiness polling to at most 60 seconds;
+            check both `orbctl status` and `docker info` before proceeding. For another configured runtime, use its documented
+            service CLI and readiness check. Do not start services that the assigned work does not need.
+            After readiness, reconcile git status and recent git log with the failed command's output before retrying;
+            if the original local operation did not complete, retry the failed verification or commit hook once.
+            Never repeat a completed commit or push. If a check still fails, inspect its exact command and arguments,
+            including path quoting; do not edit global hooks or relax the check to make it pass.
+            Do not install tools, change global runtime versions or Docker contexts,
+            reset or delete containers, recreate VMs, or change service settings.
+            Do not stop other work, bypass checks or security controls, or request interactive passwords or OS consent.
+            Runtime recovery does not authorize replaying GitLab writes or expanding task permissions.
+            If safe recovery or readiness cannot be established within the bound, report the exact command and remaining cause.
+            Informational acknowledgements are performed by MergeTether after its current verifier and policy checks.
+            Do not add reactions or resolve purely informational threads in this worker, even if an installed
+            general instruction grants that permission outside this headless run. Do not create courtesy reply drafts.
+            Existing explicit permissions for resolving your own substantive review findings remain unchanged.
             A writable private temporary directory is supplied in TMPDIR, TMP and TEMP, and in JAVA_TOOL_OPTIONS
             as java.io.tmpdir. Preserve that JVM option when invoking Maven or Gradle; if a wrapper overrides it,
             pass -Djava.io.tmpdir with TMPDIR explicitly. Do not disable tests to work around temporary-file failures.
