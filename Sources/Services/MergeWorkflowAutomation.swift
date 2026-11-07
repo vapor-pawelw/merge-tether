@@ -148,6 +148,7 @@ final class MergeWorkflowAutomation {
             }
         }
         reconsiderRegisteredPipelines()
+        reconsiderSkippedPipelines(authored, user: user)
         let knownChats = Set(settings.assistantChats.keys.filter { $0.work.host == host && $0.username == user.username }.map(\.work))
         let knownHandoffs = Set(settings.assistantHandoffs.filter { $0.key.work.host == host && $0.key.username == user.username }.map(\.key.work))
         let trackedReviews = knownChats.union(knownHandoffs).filter {
@@ -190,6 +191,46 @@ final class MergeWorkflowAutomation {
                   configuredRule(for: entry.event)?.mode == .assistant
             else { continue }
             update(entry.id, pipelineDisposition(entry, key: key))
+        }
+    }
+
+    /// Older gates could skip a pipeline before claiming or launching work.
+    /// Reconsider that event only while every recorded effect is still absent;
+    /// execution keeps the live account, source/target and atomic-claim checks.
+    private func reconsiderSkippedPipelines(_ authored: [GitLabMergeRequest], user: GitLabAuthenticatedUser) {
+        guard settings.automation.autoClaimPipelineFailures else { return }
+        for entry in entries where entry.state == .skipped && entry.event.kind == .pipelineFailure {
+            guard entry.user == user, entry.assistantJobID == nil, entry.chatURL == nil,
+                  (entry.summary ?? "").trimmingCharacters(in: .whitespacesAndNewlines).isEmpty,
+                  let key = pipelineKey(entry), key.projectID > 0, key.mergeRequestIID > 0, key.pipelineID > 0,
+                  let current = authored.first(where: { $0.projectID == key.projectID && $0.iid == key.mergeRequestIID }),
+                  current.state == "opened", current.author.id == user.id,
+                  let source = current.sha, GlabService.isFullGitSHA(source), source == entry.event.mergeRequest.sha,
+                  current.headPipeline?.id == key.pipelineID, current.headPipeline?.status == "failed",
+                  current.webURL.isGitLabMergeRequest(host: entry.host, iid: current.iid),
+                  let rule = configuredRule(for: entry.event), rule.mode == .assistant, rule.includes(current),
+                  detector.status(for: key) == .unverified,
+                  !AssistantAutomationRunner.isWorking(on: workKey(entry))
+            else { continue }
+            let recordedWorker = settings.assistantHandoffs.contains { job in
+                job.key.work == workKey(entry) && job.key.username == entry.user.username
+                    && job.pipelineReservation?.host == key.host && job.pipelineReservation?.projectID == key.projectID
+                    && job.pipelineReservation?.mergeRequestIID == key.mergeRequestIID
+                    && job.pipelineReservation?.pipelineID == key.pipelineID
+            }
+            let routedWorker = settings.mrActionIntents.contains { intent in
+                intent.kind == .pipeline && intent.jobID != nil && intent.target.host == entry.host
+                    && intent.target.username == entry.user.username && intent.target.projectID == key.projectID
+                    && intent.target.iid == key.mergeRequestIID && intent.request.headPipeline?.id == key.pipelineID
+            }
+            let refreshAttempt = settings.pipelineRefreshAttempts.contains {
+                $0.target.host == entry.host && $0.target.username == entry.user.username && $0.userID == user.id
+                    && $0.target.projectID == key.projectID && $0.target.iid == key.mergeRequestIID
+                    && $0.oldPipelineID == key.pipelineID
+            }
+            guard !recordedWorker, !routedWorker, !refreshAttempt,
+                  history.lazy.filter({ $0.state == .queued }).prefix(24).count < 24 else { continue }
+            update(entry.id, .queued)
         }
     }
 

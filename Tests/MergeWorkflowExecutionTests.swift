@@ -170,6 +170,84 @@ import Testing
         #expect(settings.assistantHandoffs.isEmpty)
     }
 
+    @Test(arguments: ["none", "receipt", "active", "linked-missing", "linked-failed", "linked-interrupted",
+                      "linked-completed", "unlinked-pipeline-job", "routed-linked-job", "refresh-attempt", "chat", "summary", "stale-head",
+                      "different-pipeline", "successful-pipeline", "wrong-account", "checkpoints", "paused", "failed-entry"])
+    func fullProfileReconsidersOnlyCurrentSkippedPipelineWorkWithoutRecordedEffects(blocker: String) async throws {
+        let suite = "MergeWorkflowSkippedPipeline.\(UUID())"
+        let defaults = try #require(UserDefaults(suiteName: suite))
+        defer { defaults.removePersistentDomain(forName: suite) }
+        let settings = SettingsManager(defaults: defaults)
+        settings.automation.applyPreset(blocker == "checkpoints" ? .checkpoints : .full, for: .codex)
+        let directory = FileManager.default.temporaryDirectory.appending(path: UUID().uuidString)
+        defer { try? FileManager.default.removeItem(at: directory) }
+        let detector = ExistingPipelineWorkDetector(directory: directory)
+        var stored = try entry(jobID: nil)
+        stored.state = blocker == "failed-entry" ? .failed : .skipped
+        if blocker == "summary" { stored.summary = "An earlier outcome is uncertain." }
+        if blocker == "chat" { stored.chatURL = URL(string: "https://example.test/existing-session") }
+        let key = ExistingPipelineWorkDetector.Key(host: stored.host, projectID: 7, mergeRequestIID: 11, pipelineID: 101)
+        if blocker == "receipt" {
+            let reserved = try detector.registerRun(for: key)
+            let owned = try #require(reserved)
+            try detector.finishHandoff(for: owned)
+        } else if blocker == "active" {
+            try FileManager.default.createDirectory(at: detector.externalRegistrationURL(for: key), withIntermediateDirectories: true)
+        }
+        let jobID = UUID()
+        if blocker.hasPrefix("linked-") { stored.assistantJobID = jobID }
+        if ["linked-failed", "linked-interrupted", "linked-completed", "unlinked-pipeline-job"].contains(blocker) {
+            let state: AssistantJobExecution.State = blocker == "linked-interrupted" ? .interrupted
+                : blocker == "linked-completed" ? .succeeded : .failed
+            settings.assistantHandoffs = [.init(id: jobID,
+                key: .init(assistant: .codex, work: .init(host: stored.host, projectID: 7, iid: 11),
+                           username: "me", workspace: "", access: .configuredTools), title: "CI work", prompt: "CI work",
+                createdAt: Date(), allowsPush: false, pipelineReservation: key, execution: .init(state: state), workflow: .followUp)]
+        }
+        if blocker == "refresh-attempt" {
+            settings.pipelineRefreshAttempts.insert(.init(
+                target: .init(host: stored.host, username: "me", projectID: 7, iid: 11), userID: 1,
+                oldPipelineID: 101, sourceProjectID: 7, sourceBranch: "feature", sourceSHA: String(repeating: "a", count: 40),
+                targetProjectID: 7, targetBranch: "main", targetSHA: String(repeating: "b", count: 40)))
+        }
+        if blocker == "paused" {
+            settings.automation.scope[.init(host: stored.host, username: "me", projectID: 7, iid: 11)] = .paused
+        }
+        settings.workflowActivity = [stored]
+        settings.save()
+        var currentObject = try #require(JSONSerialization.jsonObject(with: JSONEncoder().encode(stored.event.mergeRequest)) as? [String: Any])
+        currentObject["sha"] = String(repeating: blocker == "stale-head" ? "b" : "a", count: 40)
+        currentObject["head_pipeline"] = ["id": blocker == "different-pipeline" ? 102 : 101, "project_id": 7,
+                                          "status": blocker == "successful-pipeline" ? "success" : "failed",
+                                          "sha": String(repeating: "a", count: 40)]
+        let current = try JSONDecoder().decode(GitLabMergeRequest.self, from: JSONSerialization.data(withJSONObject: currentObject))
+        if blocker == "routed-linked-job" {
+            settings.mrActionIntents = [.init(id: UUID(),
+                target: .init(host: stored.host, username: "me", projectID: 7, iid: 11), kind: .pipeline, state: .failed,
+                todoIDs: [], noteIDs: [], sourceEvents: [], request: current, headSHA: current.sha ?? "",
+                jobID: jobID, updatedAt: Date())]
+            settings.save()
+        }
+        let glab = GlabService()
+        glab.resolvedHost = stored.host
+        glab.currentUsername = stored.user.username
+        let automation = MergeWorkflowAutomation(settings: settings, glab: glab, notifications: NotificationService(), detector: detector)
+        let user = GitLabAuthenticatedUser(id: blocker == "wrong-account" ? 2 : 1, username: "me")
+        automation.observe([current], host: stored.host, user: user)
+        if blocker == "none" {
+            #expect(automation.entries.first?.state == .queued)
+            #expect(automation.entries.first?.assistantJobID == nil)
+            #expect(automation.isAutomaticallyProcessingPipeline(current))
+            #expect(SettingsManager(defaults: defaults).workflowActivity.first?.state == .queued)
+        } else {
+            #expect(automation.entries.first?.state != .queued)
+        }
+        #expect(automation.entries.count == 1)
+        #expect(automation.entries.first?.id == stored.id)
+        #expect(settings.assistantHandoffs.count == (["linked-failed", "linked-interrupted", "linked-completed", "unlinked-pipeline-job"].contains(blocker) ? 1 : 0))
+        for _ in 0..<4 { await Task.yield() }
+    }
+
     private func waitingEntry(jobID: UUID?, state: MergeWorkflowActivityState) throws -> MergeWorkflowActivityEntry {
         var object = try #require(JSONSerialization.jsonObject(with: JSONEncoder().encode(entry(jobID: jobID))) as? [String: Any])
         var event = try #require(object["event"] as? [String: Any])
