@@ -6,6 +6,13 @@ struct MergeRequestBoardSnapshot {
         let item: MergeRequestAttentionMonitor.Item
         let latestJob: AssistantAutomationRunner.Handoff?
         let intents: [MRTodoIntent]
+        var pipelineEvidence: GitLabMergeRequest? = nil
+        var pipelineEvidenceCheckedAt: Date? = nil
+        /// Dedicated CI metadata never replaces the MR snapshot bound to drafts or feedback.
+        var currentPipelineRequest: GitLabMergeRequest? {
+            PipelineJobReconciliation.matchingDetails(item.mergeRequest, details: pipelineEvidence,
+                checkedAt: pipelineEvidenceCheckedAt, job: latestJob) ?? item.mergeRequest
+        }
         var id: MergeRequestAttentionMonitor.Item.ID { item.id }
         var isCheckingReadOnlyReconciliation: Bool {
             guard let status = item.authorFeedbackStatus, let request = item.mergeRequest else { return false }
@@ -18,12 +25,19 @@ struct MergeRequestBoardSnapshot {
                 && intent.state == .failed && intent.target.projectID == id.projectID && intent.target.iid == id.iid
                 && intent.target.username == item.mergeRequest?.author.username
         }
+        var attentionIntents: [MRTodoIntent] {
+            intents.filter { intent in
+                !(intent.kind == .pipeline && intent.jobID == latestJob?.id
+                    && PipelineJobReconciliation.isObsolete(latestJob, request: currentPipelineRequest))
+            }
+        }
         var stoppedJobNeedsAttention: Bool {
             Self.jobNeedsAttention(latestJob?.operationalExecution?.state)
+                && !PipelineJobReconciliation.isObsolete(latestJob, request: currentPipelineRequest)
                 && !intents.contains { $0.jobID == latestJob?.id && $0.state == .completed }
         }
         var hasIndependentStoppedWork: Bool {
-            stoppedJobNeedsAttention || intents.contains { $0.state == .failed && !isReconciling($0) }
+            stoppedJobNeedsAttention || attentionIntents.contains { $0.state == .failed && !isReconciling($0) }
         }
         var needsAttention: Bool {
             if let humanActionRequired = item.humanActionRequired { return humanActionRequired }
@@ -32,7 +46,7 @@ struct MergeRequestBoardSnapshot {
                 return hasIndependentStoppedWork
             }
             if item.authorFeedbackStatus?.phase == .checking || item.aiOriginChecking { return false }
-            return item.needsAttention || intents.contains { ($0.state == .pending && !$0.isDeferredReview) || $0.state == .failed }
+            return item.needsAttention || attentionIntents.contains { ($0.state == .pending && !$0.isDeferredReview) || $0.state == .failed }
                 || stoppedJobNeedsAttention
         }
         static func jobNeedsAttention(_ state: AssistantJobExecution.State?) -> Bool {
@@ -66,7 +80,8 @@ struct MergeRequestBoardSnapshot {
          handoffs: [AssistantAutomationRunner.Handoff], host: String?, username: String?,
          intents: [MRTodoIntent] = [], routedTodoIDs: Set<Int> = [],
          ignoredTargets: Set<MRAutomationScope.Target> = [], humanAttention: UserAttentionSnapshot? = nil,
-         pinnedCards: Set<BoardCardPin> = []) {
+         pinnedCards: Set<BoardCardPin> = [], pipelineEvidence: [GitLabMergeRequest] = [],
+         pipelineEvidenceCheckedAt: Date? = nil) {
         self.ignoredTargets = ignoredTargets
         func target(for todo: Todo) -> MRAutomationScope.Target? {
             guard let host, let username, todo.targetType == .mergeRequest,
@@ -108,7 +123,9 @@ struct MergeRequestBoardSnapshot {
             }.sorted { $0.updatedAt > $1.updatedAt }
             let actionKey = "\(host ?? "")/\(username ?? "")/mr/\(item.id.projectID)/\(item.id.iid)"
             item.humanActionRequired = humanAttention.map { $0.items.contains { $0.id == actionKey } }
-            return Row(item: item, latestJob: latest, intents: currentIntents)
+            return Row(item: item, latestJob: latest, intents: currentIntents,
+                pipelineEvidence: pipelineEvidence.first { $0.projectID == item.id.projectID && $0.iid == item.id.iid },
+                pipelineEvidenceCheckedAt: pipelineEvidenceCheckedAt)
         }
         let originalListed = own + reviewed
         let orphanIntents = accountIntents.filter { intent in

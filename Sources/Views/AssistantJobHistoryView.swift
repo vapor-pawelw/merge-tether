@@ -90,12 +90,15 @@ struct AssistantJobRow: View {
             if let retryError {
                 Text(verbatim: GlabService.redactWorkflowEvidence(retryError)).foregroundStyle(.orange).textSelection(.enabled)
             }
+            AssistantJobPreflightNotice(jobID: handoff.id, monitor: monitor)
             HStack {
                 if let execution = handoff.execution {
                     if execution.state.isActive {
                         Button(role: .destructive) { monitor.cancelAssistantJob(handoff.id) } label: {
                             Text(.AssistantJobs.assistantJobsStop)
                         }
+                    } else if PipelineJobReconciliation.isObsolete(handoff, request: monitor.currentRequest(for: handoff)) {
+                        Text(.MRFreshness.mrFreshnessHistoricalRun).font(.caption).foregroundStyle(.secondary)
                     } else if execution.state != .succeeded && !handoff.isObsoleteReminder {
                         Button {
                             isRetrying = true

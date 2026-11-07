@@ -89,7 +89,7 @@ struct MRCardPresentation {
         if item.hasConflict || item.mergeRequest?.hasMergeConflict == true {
             result.append(.init(title: .Board.boardCompactConflict, symbol: "arrow.triangle.branch"))
         }
-        if let pipeline = item.mergeRequest?.headPipeline,
+        if let pipeline = row.currentPipelineRequest?.headPipeline,
            ["running", "pending", "created", "preparing", "waiting_for_resource"].contains(pipeline.status) {
             result.append(.init(title: .Board.boardCompactPipelineRunning, symbol: "clock"))
         } else if automaticPipelineProgress {

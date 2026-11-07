@@ -124,6 +124,18 @@ enum AssistantAutomationRunner {
         case cannotBuildLink
         case executionUnavailable
         case legacyJob
+        case pipelinePassed(Int)
+        case pipelineSuperseded(Int)
+        case pipelineState(Int, String)
+
+        var isObsoletePipelineRetry: Bool {
+            switch self {
+            case .pipelinePassed, .pipelineSuperseded: true
+            case .pipelineState(_, let state):
+                ["running", "pending", "created", "preparing", "waiting_for_resource"].contains(state)
+            default: false
+            }
+        }
 
         var errorDescription: String? {
             switch self {
@@ -131,6 +143,9 @@ enum AssistantAutomationRunner {
             case .cannotBuildLink: String(localized: .AutomationRuntime.runtimeCannotBuildLink)
             case .executionUnavailable: String(localized: .AutomationRuntime.runtimeAlreadyActive)
             case .legacyJob: String(localized: .AutomationRuntime.runtimeLegacyJob)
+            case .pipelinePassed(let id): String(localized: .MRFreshness.mrFreshnessPipelinePassed(id))
+            case .pipelineSuperseded(let id): String(localized: .MRFreshness.mrFreshnessPipelineSuperseded(id))
+            case .pipelineState(let id, let state): String(localized: .MRFreshness.mrFreshnessPipelineState(id, state))
             }
         }
     }
@@ -354,6 +369,7 @@ enum AssistantAutomationRunner {
         guard let execution = handoff.execution, !execution.state.isActive,
               let taskPrompt = handoff.taskPrompt, let url = handoff.mergeRequestURL else { throw HandoffError.legacyJob }
         var reservation: ExistingPipelineWorkDetector.Key?
+        var retryHead = expectedHeadSHA
         if let prior = handoff.pipelineReservation {
             let glab = GlabService()
             if let executable = settings.glabPath { glab.glabPath = executable }
@@ -366,12 +382,23 @@ enum AssistantAutomationRunner {
             let request = try await glab.fetchMergeRequest(projectID: handoff.key.work.projectID,
                                                           iid: handoff.key.work.iid, host: handoff.key.work.host)
             guard request.state == "opened", request.author.id == user.id,
-                  request.headPipeline?.id == prior.pipelineID, request.headPipeline?.status == "failed",
                   prior.host == handoff.key.work.host, prior.projectID == request.projectID,
                   prior.mergeRequestIID == request.iid else {
                 throw AssistantJobExecutor.ExecutionError.inactiveMergeRequest
             }
+            try AssistantJobExecutor.validateHeadSnapshot(expected: handoff.expectedHeadSHA, actual: request.sha)
+            if let expectedHeadSHA {
+                try AssistantJobExecutor.validateHeadSnapshot(expected: expectedHeadSHA, actual: request.sha)
+            }
+            guard let pipeline = request.headPipeline, let currentID = pipeline.id, currentID > 0 else {
+                throw HandoffError.pipelineState(prior.pipelineID, "unknown")
+            }
+            if currentID > prior.pipelineID { throw HandoffError.pipelineSuperseded(prior.pipelineID) }
+            guard currentID == prior.pipelineID else { throw HandoffError.pipelineState(prior.pipelineID, "unknown") }
+            if pipeline.status == "success" { throw HandoffError.pipelinePassed(prior.pipelineID) }
+            guard pipeline.status == "failed" else { throw HandoffError.pipelineState(prior.pipelineID, pipeline.status) }
             _ = try await glab.verifiedFailedPipeline(for: request, host: handoff.key.work.host, expectedUser: user)
+            retryHead = request.sha
             guard let owned = try ExistingPipelineWorkDetector().registerRun(for: prior, explicitRetry: true) else {
                 throw HandoffError.executionUnavailable
             }
@@ -384,7 +411,7 @@ enum AssistantAutomationRunner {
                                     allowsPush: handoff.allowsPush, pipelineReservation: reservation,
                                     feedbackNoteIDs: handoff.feedbackNoteIDs ?? [], feedbackTodos: handoff.feedbackTodos ?? [],
                                     isReview: handoff.workflow == .review || handoff.reviewModel != nil, mrWorkflow: handoff.workflow,
-                                    manual: true, expectedHeadSHA: expectedHeadSHA, jobCoordinator: jobCoordinator)
+                                    manual: true, expectedHeadSHA: retryHead, jobCoordinator: jobCoordinator)
             for index in settings.workflowActivity.indices where settings.workflowActivity[index].assistantJobID == handoff.id {
                 settings.workflowActivity[index].assistantJobID = replacement.id
                 settings.workflowActivity[index].state = .waitingForAssistant

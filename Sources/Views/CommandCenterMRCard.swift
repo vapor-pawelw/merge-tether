@@ -30,7 +30,7 @@ private struct CommandCenterMRCardContent: View {
     let presentation: MRCardPresentation
     private var busy: Bool { presentation.busy }
     private var nextIntent: MRTodoIntent? {
-        row.intents.first { $0.state == .failed } ?? row.intents.first { $0.state == .pending }
+        row.attentionIntents.first { $0.state == .failed } ?? row.attentionIntents.first { $0.state == .pending }
     }
     private var needsCLI: Bool { !monitor.availableAssistants.contains(monitor.settings.automation.assistant) }
     private var humanAction: MRHumanAction? { presentation.humanAction }
@@ -59,6 +59,7 @@ private struct CommandCenterMRCardContent: View {
                 Text(verbatim: retryError).font(.caption).foregroundStyle(.red)
                     .fixedSize(horizontal: false, vertical: true)
             }
+            if let job = row.latestJob { AssistantJobPreflightNotice(jobID: job.id, monitor: monitor) }
             if busy || row.latestJob?.execution?.state.isActive == true || humanAction != nil || neutralStatus != nil {
                 HStack(spacing: 6) {
                     if presentation.working {
@@ -233,28 +234,8 @@ private struct CommandCenterMRCardContent: View {
     private var moreMenu: some View {
         Menu {
             Button(action: onDetails) { Label { Text(.Board.boardDetails) } icon: { Image(systemName: "rectangle.expand.vertical") } }
-            Link(destination: item.url) { Label { Text(.CommandCenter.commandCenterOpenGitLab) } icon: { Image(systemName: "arrow.up.right.square") } }
-            if !item.isAuthored {
-                Button { start { await monitor.runReview(for: item) } } label: { Label { Text(.CommandCenter.commandCenterReviewRun) } icon: { Image(systemName: "text.magnifyingglass") } }
-                    .disabled(isStarting || busy || !monitor.canRunReview(for: item))
-            }
-            AssistantContextMenu(mergeRequestURL: item.url, title: item.title,
-                                 workspace: monitor.settings.automation.assistantWorkspace)
-            if let target = monitor.scopeTarget(projectID: item.id.projectID, iid: item.id.iid, url: item.url) {
-                Divider()
-                MRAutomationScopeMenu(settings: monitor.settings, target: target, projectPath: item.url.gitLabProjectPath)
-                if !item.isAuthored, monitor.settings.automation.autoApproveEnabled {
-                    Toggle(isOn: Binding(get: { !monitor.settings.autoApproveOptOuts.contains(target) }, set: { enabled in
-                        if enabled { monitor.settings.autoApproveOptOuts.remove(target) }
-                        else { monitor.settings.autoApproveOptOuts.insert(target) }
-                        monitor.settings.save()
-                    })) { Label { Text(.CommandCenter.commandCenterAutoApprove) } icon: { Image(systemName: "checkmark.seal") } }
-                }
-            }
-            if allowsRemoval {
-                Divider()
-                Button(role: .destructive) { confirmRemoval = true } label: { Label { Text(.Board.boardRemove) } icon: { Image(systemName: "minus.circle") } }
-            }
+            MRCommonMenuItems(item: item, monitor: monitor,
+                onRemove: allowsRemoval ? { confirmRemoval = true } : nil)
         } label: { BoardCardActionIcon(systemName: "ellipsis") }
         .menuStyle(.borderlessButton).menuIndicator(.hidden).fixedSize()
         .frame(width: 24, height: 24)
@@ -313,7 +294,8 @@ struct BoardTodoRow: View {
                     Text(.Board.boardCompactWorking).foregroundStyle(.secondary)
                 }
                 Spacer(minLength: 0)
-                Button { monitor.markDoneWithUndo(todo) } label: { Text(.Board.boardEventMarkRead) }
+                GitLabRefreshButton(monitor: monitor)
+            Button { monitor.markDoneWithUndo(todo) } label: { Text(.Board.boardEventMarkRead) }
                     .buttonStyle(.bordered)
                     .disabled(monitor.isAssessingNotice(todo))
             }

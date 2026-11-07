@@ -141,6 +141,7 @@ struct BoardMRProposalCard: View {
             Link(destination: proposal.url) {
                 Label { Text(.CommandCenter.commandCenterOpenGitLab) } icon: { Image(systemName: "arrow.up.right.square") }
             }
+            GitLabRefreshButton(monitor: monitor) { await authorLoader.load(proposal, force: true) }
             AssistantContextMenu(mergeRequestURL: proposal.url, title: proposal.title,
                 workspace: monitor.settings.automation.assistantWorkspace)
         } label: { BoardCardActionIcon(systemName: "ellipsis") }

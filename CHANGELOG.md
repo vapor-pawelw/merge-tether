@@ -14,6 +14,8 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 
 ### Added
 
+- Refresh tracked GitLab data from MR menus and Details, with shared card actions and pinning available in Details.
+
 - Show one combined MR dependency row with open prerequisites and verified linear-stack positions on Mac and iOS, retaining marked last-known data when reads fail.
 - Acknowledge explicitly verified purely informational review threads with an idempotent thumbs-up and resolve them under the accepted-feedback automation setting, without courtesy replies.
 
@@ -82,9 +84,10 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 
 ### Fixed
 
-- Keep normal branching MR stacks free of ambiguity warnings while retaining their merge prerequisites.
+- Reconcile obsolete pipeline failures against current GitLab status and refresh stale retries without suggesting an unrelated CLI problem.
 
 - Automatically reverify existing app-created reply drafts after a new MR commit, bind successful checks to the current source, and publish only replies allowed by the current publication policy.
+- Keep normal branching MR stacks free of ambiguity warnings while retaining their merge prerequisites.
 
 - Let both headless coding agents recover required installed local runtimes before treating a stopped service as a blocker, with bounded readiness checks and unchanged GitLab permissions.
 

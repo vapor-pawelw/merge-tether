@@ -9,7 +9,7 @@ struct BoardMRIntentActions: View {
 
     var body: some View {
         VStack(alignment: .leading, spacing: 12) {
-            ForEach(row.intents.filter { $0.state != .completed }, id: \.id) { intent in
+            ForEach(row.attentionIntents.filter { $0.state != .completed }, id: \.id) { intent in
                 VStack(alignment: .leading, spacing: 6) {
                     HStack(alignment: .firstTextBaseline, spacing: 12) {
                         Label { Text(Self.title(intent.kind)) } icon: { Image(systemName: symbol(intent.kind)) }
@@ -38,7 +38,7 @@ struct BoardMRIntentActions: View {
                     }
                 }
             }
-            if row.intents.contains(where: { $0.state != .completed && $0.kind != .refresh }),
+            if row.attentionIntents.contains(where: { $0.state != .completed && $0.kind != .refresh }),
                !monitor.availableAssistants.contains(monitor.settings.automation.assistant) {
                 HStack {
                     BoardStatusChip(title: .Board.boardCompactCliRequired, symbol: "terminal", tint: .orange)

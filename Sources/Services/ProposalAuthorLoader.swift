@@ -26,7 +26,7 @@ final class ProposalAuthorLoader {
         })
     }
 
-    func load(_ proposal: MergeRequestBoardSnapshot.Proposal) async {
+    func load(_ proposal: MergeRequestBoardSnapshot.Proposal, force: Bool = false) async {
         let token = UUID()
         generation = token
         loadingTarget = nil
@@ -36,8 +36,8 @@ final class ProposalAuthorLoader {
             cachedTarget = nil
             return
         }
-        guard ProposalMRContext(proposal: proposal).author == nil else { return }
-        guard request(for: proposal) == nil else { return }
+        guard force || ProposalMRContext(proposal: proposal).author == nil else { return }
+        guard force || request(for: proposal) == nil else { return }
         cachedRequest = nil
         cachedTarget = nil
         loadingTarget = proposal.target

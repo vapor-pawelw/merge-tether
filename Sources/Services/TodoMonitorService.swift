@@ -24,6 +24,7 @@ final class TodoMonitorService {
     private(set) var lastRefresh: Date?
     private(set) var isLoading = false
     var assistantJobActionError: String?
+    private(set) var assistantJobActionNotices: [UUID: String] = [:]
     private(set) var desktopHandoffError = false
     let assistantDependencies = AssistantDependencyMonitor()
     var availableAssistants: Set<AutomationAssistant> { assistantDependencies.available }
@@ -665,7 +666,8 @@ final class TodoMonitorService {
                     && status.mayAutoMerge && settings.automation.permitsAutoMerge(project: request.webURL.gitLabProjectPath)
                     && settings.automation.scope.permits(request, host: host, username: username)
                     && !AssistantJobExecution.hasUnfinishedWork(in: settings.assistantHandoffs,
-                        for: .init(host: host, projectID: id.projectID, iid: id.iid), username: username)
+                        for: .init(host: host, projectID: id.projectID, iid: id.iid), username: username,
+                        currentRequest: request)
                 guard !automatic else { continue }
                 if let index = items.firstIndex(where: { $0.id == id }) { items[index].needsMerge = true }
                 else { items.append(.init(id: id, title: request.title, url: request.webURL, needsMerge: true, mergeRequest: request, isAuthored: true)) }
@@ -764,7 +766,8 @@ final class TodoMonitorService {
         let board = MergeRequestBoardSnapshot(own: ownMergeRequestItems, reviewed: reviewedMergeRequestItems,
             todos: currentAccountTodos, attention: attentionItems, handoffs: settings.assistantHandoffs,
             host: host, username: username, intents: currentMRTodoIntents, routedTodoIDs: routedMRTodoIDs,
-            ignoredTargets: settings.ignoredMergeRequests)
+            ignoredTargets: settings.ignoredMergeRequests, pipelineEvidence: currentPipelineEvidence,
+            pipelineEvidenceCheckedAt: currentPipelineEvidenceDate)
         var candidates: [UserAttentionSnapshot.Candidate] = []
         func key(_ project: Int, _ iid: Int) -> String { "\(host)/\(username)/mr/\(project)/\(iid)" }
         func eventToken(_ todo: Todo) -> String {
@@ -819,11 +822,11 @@ final class TodoMonitorService {
             }
             if state == .failed || state == .changed { add(.failedWork, "confirmation-\(String(describing: state))") }
             if let job = row.latestJob, let execution = job.operationalExecution,
-               [.failed, .blocked, .interrupted].contains(execution.state),
+               row.stoppedJobNeedsAttention, [.failed, .blocked, .interrupted].contains(execution.state),
                !row.intents.contains(where: { $0.jobID == job.id && $0.state == .completed }) {
                 add(.failedWork, job.id.uuidString + ":" + execution.state.rawValue)
             }
-            for intent in row.intents where intent.state != .completed && intent.state != .running {
+            for intent in row.attentionIntents where intent.state != .completed && intent.state != .running {
                 if intent.state == .failed {
                     add(.failedWork, intent.id.uuidString + ":" + (intent.jobID?.uuidString ?? "") + ":" + UserAttentionSnapshot.digest(intent.error ?? ""))
                 } else {
@@ -997,6 +1000,40 @@ final class TodoMonitorService {
             // Intentionally keep allTodos as-is: a stale list is more useful
             // than an empty one while the user fixes their glab auth.
         }
+    }
+
+    /// Reuse normal polling and its action fences. A forced read never resets proofs or retry receipts.
+    func forceRefreshFromGitLab() async {
+        let alreadyFetching = isLoading
+        await refreshNow()
+        if alreadyFetching || lastError != nil {
+            authoredMergeRequests.refreshIfNeeded()
+            if let host = glab.resolvedHost, let username = glab.currentUsername, settings.onboardingCompleted {
+                attention.refresh(host: host, username: username, todos: currentAccountTodos)
+            }
+        }
+    }
+
+    var currentPipelineEvidence: [GitLabMergeRequest] {
+        guard authoredMergeRequests.hasSyncedCurrentCatalog,
+              let host = glab.resolvedHost, let username = glab.currentUsername else { return [] }
+        return authoredMergeRequests.requests.map(\.request).filter {
+            $0.author.username == username && $0.webURL.isGitLabMergeRequest(host: host, iid: $0.iid)
+        }
+    }
+
+    var currentPipelineEvidenceDate: Date? {
+        authoredMergeRequests.hasSyncedCurrentCatalog ? authoredMergeRequests.catalogReadStartedAt : nil
+    }
+
+    func currentRequest(for job: AssistantAutomationRunner.Handoff) -> GitLabMergeRequest? {
+        guard glab.resolvedHost == job.key.work.host, glab.currentUsername == job.key.username else { return nil }
+        let catalog = (attention.currentOpenItems + attention.currentItems).first {
+            $0.id.projectID == job.key.work.projectID && $0.id.iid == job.key.work.iid
+        }?.mergeRequest
+        let details = currentPipelineEvidence.first { $0.projectID == job.key.work.projectID && $0.iid == job.key.work.iid }
+        return PipelineJobReconciliation.matchingDetails(catalog ?? details, details: details,
+            checkedAt: currentPipelineEvidenceDate, job: job) ?? catalog
     }
 
     private func scheduleAutomation(host: String, username: String) {
@@ -1184,6 +1221,7 @@ final class TodoMonitorService {
             projectID: job.key.work.projectID, iid: job.key.work.iid)
         settings.recordAutomationEvent(target: target, action: .retry, origin: .manual, state: .requested, jobID: id)
         assistantJobActionError = nil
+        assistantJobActionNotices.removeValue(forKey: id)
         do {
             let replacement = try await AssistantAutomationRunner.retry(id, settings: settings)
             mrTodoRouter.rebindJob(oldID: id, replacement: replacement)
@@ -1191,7 +1229,26 @@ final class TodoMonitorService {
             settings.recordAutomationEvent(target: target, action: .retry, origin: .manual, state: .queued,
                 jobID: replacement.id, relatedJobID: id)
         } catch {
-            assistantJobActionError = String(localized: .AssistantJobs.assistantJobsActionFailed)
+            if let pipelineError = error as? AssistantAutomationRunner.HandoffError, pipelineError.isObsoletePipelineRetry {
+                assistantJobActionNotices[id] = pipelineError.localizedDescription
+                settings.recordAutomationEvent(target: target, action: .retry, origin: .manual, state: .completed,
+                    message: pipelineError.localizedDescription, jobID: id)
+                await forceRefreshFromGitLab()
+                return
+            } else if let known = error as? AssistantAutomationRunner.HandoffError {
+                assistantJobActionError = known.localizedDescription
+            } else if error as? AssistantJobExecutor.ExecutionError == .cliUnavailable {
+                assistantJobActionError = String(localized: .AssistantJobs.assistantJobsActionFailed)
+            } else if error as? AssistantJobExecutor.ExecutionError == .wrongAccount {
+                assistantJobActionError = String(localized: .MRFreshness.mrFreshnessAccountChanged)
+            } else if error as? AssistantJobExecutor.ExecutionError == .inactiveMergeRequest {
+                assistantJobActionError = String(localized: .MRFreshness.mrFreshnessInactive)
+            } else if error as? AssistantJobExecutor.ExecutionError == .headChanged {
+                assistantJobActionError = String(localized: .MRFreshness.mrFreshnessStaleHead)
+            } else {
+                assistantJobActionError = String(localized: .MRFreshness.mrFreshnessStartFailed(
+                    GlabService.redactWorkflowEvidence(String(describing: error))))
+            }
             settings.recordAutomationEvent(target: target, action: .retry, origin: .manual, state: .failed,
                 message: String(describing: error), jobID: id)
             Log.monitor.error("Could not retry assistant job: \(String(describing: error), privacy: .private)")

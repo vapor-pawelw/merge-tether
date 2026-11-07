@@ -18,6 +18,7 @@ struct BoardCompactJobCard: View {
                     Button { showingDetails = true } label: {
                         Label { Text(.Board.boardDetails) } icon: { Image(systemName: "rectangle.expand.vertical") }
                     }
+                    GitLabRefreshButton(monitor: monitor)
                     if let url = handoff.mergeRequestURL {
                         Link(destination: url) {
                             Label { Text(.CommandCenter.commandCenterOpenGitLab) } icon: { Image(systemName: "arrow.up.right.square") }
@@ -31,6 +32,7 @@ struct BoardCompactJobCard: View {
                 .accessibilityLabel(Text(.CommandCenter.commandCenterActions))
             }
             BoardJobStatusActions(handoff: handoff, monitor: monitor)
+            AssistantJobPreflightNotice(jobID: handoff.id, monitor: monitor)
             Button { showingDetails = true } label: {
                 Text(.MRHumanAction.mrHumanActionActionReviewRun)
             }
@@ -74,7 +76,8 @@ struct BoardJobStatusActions: View {
     private var active: Bool { handoff.operationalExecution?.state.isActive == true }
 
     var body: some View {
-        if active || MergeRequestBoardSnapshot.Row.jobNeedsAttention(handoff.operationalExecution?.state) {
+        if active || (MergeRequestBoardSnapshot.Row.jobNeedsAttention(handoff.operationalExecution?.state)
+            && !PipelineJobReconciliation.isObsolete(handoff, request: monitor.currentRequest(for: handoff))) {
             HStack {
                 BoardStatusChip(title: active ? .Board.boardCompactWorking : .Board.boardCompactBlocked,
                     symbol: active ? "arrow.triangle.2.circlepath" : "exclamationmark.circle",

@@ -57,7 +57,7 @@ struct MRHumanAction {
         // Recovery verifies evidence, so its retry must never publish the draft.
         // An independent stopped worker keeps the higher-priority action above.
         if item.draftProofRecoveryChecking || row.isCheckingReadOnlyReconciliation {
-            guard let intent = row.intents.first(where: { $0.state == .failed && !row.isReconciling($0) }) else { return nil }
+            guard let intent = row.attentionIntents.first(where: { $0.state == .failed && !row.isReconciling($0) }) else { return nil }
             self.init(kind: .intent, action: .retryIntent, message: Self.intentMessage(intent),
                       detail: intent.error.map(GlabService.redactWorkflowEvidence))
             return
@@ -82,8 +82,8 @@ struct MRHumanAction {
             self.init(kind: unchecked ? .uncheckedDrafts : .publication, action: .reviewDrafts, message: message)
             return
         }
-        let intent = row.intents.first { $0.state == .failed && !row.isReconciling($0) }
-            ?? row.intents.first { $0.state == .pending && !$0.isDeferredReview }
+        let intent = row.attentionIntents.first { $0.state == .failed && !row.isReconciling($0) }
+            ?? row.attentionIntents.first { $0.state == .pending && !$0.isDeferredReview }
         let needsAssistant = intent.map { $0.kind != .refresh } == true || !item.feedback.isEmpty
             || item.needsDiscussion || item.needsChanges || item.failedPipeline || item.hasConflict
             || item.authorFeedbackStatus?.needsAttention == true || item.autoApproveReady

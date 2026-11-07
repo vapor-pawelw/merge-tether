@@ -1,0 +1,105 @@
+{
+  "sourceLanguage": "en",
+  "strings": {
+    "mr.freshness.accountChanged": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "The GitLab account changed. Refresh the MR and check GitLab sign-in."
+          }
+        }
+      }
+    },
+    "mr.freshness.inactive": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "This merge request is no longer open. Refresh its GitLab status."
+          }
+        }
+      }
+    },
+    "mr.freshness.pipelinePassed": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Pipeline %lld already passed. Its previous failure no longer needs another run."
+          }
+        }
+      }
+    },
+    "mr.freshness.pipelineState": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Pipeline %lld is now %@. Refresh the MR to see its current status."
+          }
+        }
+      }
+    },
+    "mr.freshness.pipelineSuperseded": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "A newer pipeline replaced pipeline %lld. Refresh the MR to see its current status."
+          }
+        }
+      }
+    },
+    "mr.freshness.refresh": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Refresh from GitLab"
+          }
+        }
+      }
+    },
+    "mr.freshness.startFailed": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Could not start this run: %@"
+          }
+        }
+      }
+    },
+    "mr.freshness.staleHead": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "The MR changed before this action could start. Refresh its GitLab status."
+          }
+        }
+      }
+    },
+    "mr.freshness.historicalRun": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "This run is historical. Current GitLab status no longer requires retrying its pipeline failure."
+          }
+        }
+      }
+    }
+  },
+  "version": "1.0"
+}

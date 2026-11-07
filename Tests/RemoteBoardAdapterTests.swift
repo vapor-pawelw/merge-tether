@@ -4,7 +4,7 @@ import MergeTetherRemote
 @testable import GitLabTodos
 
 @MainActor @Suite struct RemoteBoardAdapterTests {
-    @Test(arguments: [AssistantJobExecution.State.failed, .blocked], ["completed", "unrelatedCompleted", "independentFailure"])
+    @Test(arguments: [AssistantJobExecution.State.failed, .blocked], ["completed", "unrelatedCompleted", "independentFailure", "obsoletePipeline", "obsoleteWithIndependentIntent"])
     func phoneActionsRespectCompletedHistoricalJobs(state: AssistantJobExecution.State, scenario: String) async throws {
         let directory = FileManager.default.temporaryDirectory.appending(path: UUID().uuidString)
         try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: false)
@@ -15,7 +15,11 @@ import MergeTetherRemote
         let settings = SettingsManager(defaults: defaults)
         settings.automation.applyPreset(.manual, for: .codex)
         settings.onboardingCompleted = false
-        let requestJSON = #"{"project_id":1,"iid":2,"author":{"id":3,"username":"me","name":"Me"},"title":"Example","web_url":"https://gitlab.example.org/group/project/-/merge_requests/2","state":"opened","draft":false,"sha":"aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa","source_branch":"feature","target_branch":"main","labels":[],"has_conflicts":false,"blocking_discussions_resolved":true}"#
+        var requestJSON = #"{"project_id":1,"iid":2,"author":{"id":3,"username":"me","name":"Me"},"title":"Example","web_url":"https://gitlab.example.org/group/project/-/merge_requests/2","state":"opened","draft":false,"sha":"aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa","source_branch":"feature","target_branch":"main","labels":[],"has_conflicts":false,"blocking_discussions_resolved":true}"#
+        if scenario.hasPrefix("obsolete") {
+            requestJSON = requestJSON.replacingOccurrences(of: "\"labels\":[]", with:
+                "\"labels\":[],\"head_pipeline\":{\"id\":10,\"project_id\":1,\"status\":\"success\",\"sha\":\"aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa\"}")
+        }
         let request = try JSONDecoder().decode(GitLabMergeRequest.self, from: Data(requestJSON.utf8))
         try Data(requestJSON.utf8).write(to: directory.appending(path: "mr.json"))
         let drafts = scenario == "independentFailure" ? "[]" : #"[{"id":11,"author_id":3,"note":"My manual draft"}]"#
@@ -38,16 +42,19 @@ import MergeTetherRemote
         settings.glabPath = executable
         settings.resolvedHost = "gitlab.example.org"
         let work = AssistantAutomationRunner.MergeRequestWork(host: "gitlab.example.org", projectID: 1, iid: 2)
-        let job = AssistantAutomationRunner.Handoff(id: UUID(), key: .init(assistant: .codex, work: work,
+        var job = AssistantAutomationRunner.Handoff(id: UUID(), key: .init(assistant: .codex, work: work,
             username: "me", workspace: "", access: .gitLabRead), title: "Historical run", prompt: "Inspect",
             createdAt: Date(), allowsPush: false, execution: .init(state: state, error: "Historical failure"),
             taskPrompt: "Inspect", mergeRequestURL: request.webURL, expectedHeadSHA: request.sha)
+        if scenario.hasPrefix("obsolete") {
+            job.pipelineReservation = .init(host: work.host, projectID: 1, mergeRequestIID: 2, pipelineID: 10)
+        }
         settings.assistantHandoffs = [job]
         let target = MRAutomationScope.Target(host: work.host, username: "me", projectID: 1, iid: 2)
-        settings.mrActionIntents = [.init(id: UUID(), target: target, kind: .pipeline, state: .completed,
+        settings.mrActionIntents = [.init(id: UUID(), target: target, kind: .pipeline, state: scenario.hasPrefix("obsolete") ? .failed : .completed,
             todoIDs: [], noteIDs: [], sourceEvents: [], request: request, headSHA: request.sha!,
             jobID: scenario == "unrelatedCompleted" ? UUID() : job.id, updatedAt: Date())]
-        if scenario == "independentFailure" {
+        if scenario == "independentFailure" || scenario == "obsoleteWithIndependentIntent" {
             settings.mrActionIntents.append(.init(id: UUID(), target: target, kind: .conflict, state: .failed,
                 todoIDs: [], noteIDs: [], sourceEvents: [], request: request, headSHA: request.sha!,
                 error: "Conflict verification failed", updatedAt: Date()))
@@ -65,13 +72,15 @@ import MergeTetherRemote
         #expect(board.partial == false)
         let card = try #require(board.lanes.first { $0.id == .own }?.cards.first { $0.id == "mr:1:2" })
         let expectedDestination: RemoteCardCTA.Destination = switch scenario {
-        case "completed": .drafts
+        case "completed", "obsoletePipeline", "obsoleteWithIndependentIntent": .drafts
         case "unrelatedCompleted": .assistantRuns
         default: monitor.availableAssistants.contains(settings.automation.assistant) ? .overview : .setup
         }
         #expect(card.needsAttention == true)
         #expect(card.primaryCTA?.destination == expectedDestination)
         #expect(card.actions.contains { $0.kind == .retryJob } == (scenario == "unrelatedCompleted"))
+        if scenario == "obsoletePipeline" { #expect(!card.actions.contains { $0.kind == .prepare }) }
+
     }
 
     func item() throws -> MergeRequestAttentionMonitor.Item {

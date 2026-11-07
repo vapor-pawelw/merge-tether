@@ -65,7 +65,7 @@ import MergeTetherRemote
                     let busy = presentation.working
                     if busy { card.actions = [] }
                     else {
-                        let intent = row.intents.first { $0.state == .failed } ?? row.intents.first { $0.state == .pending }
+                        let intent = row.attentionIntents.first { $0.state == .failed } ?? row.attentionIntents.first { $0.state == .pending }
                         if let intent, intent.kind == .refresh || monitor.availableAssistants.contains(monitor.settings.automation.assistant),
                            let token = try? RemoteDigest.token([account, try RemoteDigest.token(intent), try RemoteDigest.token(monitor.settings.automation)]) {
                             card.actions.append(.init(id: "intent:\(intent.id)", kind: .prepare, token: token))

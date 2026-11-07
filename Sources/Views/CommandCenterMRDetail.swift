@@ -43,6 +43,7 @@ private struct CommandCenterMRDetailContent: View {
     @State private var reviewStartError: String?
     @State private var isRetrying = false
     @State private var retryError: String?
+    @State private var confirmRemoval = false
     @State private var discussionStore = MRDiscussionStore()
     @State private var draftSelection = DraftPublicationSelection()
     @State private var detailsExpanded = false
@@ -70,14 +71,18 @@ private struct CommandCenterMRDetailContent: View {
         guard let work, let target else { return [] }
         return monitor.assistantHandoffs.filter { $0.key.work == work && $0.key.username == target.username && !$0.isObsoleteReminder }.sorted { $0.createdAt > $1.createdAt }
     }
+    private var presentationRow: MergeRequestBoardSnapshot.Row {
+        .init(item: presentationItem, latestJob: jobs.first, intents: monitor.mrTodoIntents(for: item),
+            pipelineEvidence: jobs.first.flatMap { monitor.currentRequest(for: $0) },
+            pipelineEvidenceCheckedAt: monitor.currentPipelineEvidenceDate)
+    }
     private var humanAction: MRHumanAction? {
         let ready = monitor.availableAssistants.contains(monitor.settings.automation.assistant)
         let automatic = target.map {
             item.draftIDsHandledAutomatically(automation: monitor.settings.automation, target: $0,
                 assistantPreparing: ready || monitor.assistantDependencies.isChecking)
         } ?? []
-        return MRHumanAction(row: .init(item: presentationItem, latestJob: jobs.first,
-            intents: monitor.mrTodoIntents(for: item)), assistantReady: ready,
+        return MRHumanAction(row: presentationRow, assistantReady: ready,
             confirmationState: monitor.attention.confirmationStates[item.id], automaticallyPublishedDraftIDs: automatic)
     }
     private var showsDecisions: Bool { needsHumanAttention || initialSection == .drafts }
@@ -165,6 +170,9 @@ private struct CommandCenterMRDetailContent: View {
                 if required && item.authorFeedbackStatus?.needsAttention == true { feedbackExpanded = true }
             }
             .onDisappear { discussionStore.cancel() }
+            .confirmationDialog(Text(.Board.boardRemove), isPresented: $confirmRemoval, titleVisibility: .visible) {
+                Button(role: .destructive) { monitor.removeReviewedMergeRequest(item) } label: { Text(.Board.boardRemove) }
+            } message: { Text(.Board.boardRemoveExplanation) }
         }
     }
 
@@ -191,6 +199,9 @@ private struct CommandCenterMRDetailContent: View {
                         .help(Text(verbatim: "@\(author.username)"))
                 }
                 Spacer()
+                BoardPinButton(pin: .mergeRequest(host: monitor.glab.resolvedHost,
+                    username: monitor.glab.currentUsername, projectID: item.id.projectID, iid: item.id.iid),
+                    settings: monitor.settings)
                 headerMenu
             }
             .font(.subheadline).foregroundStyle(.secondary)
@@ -206,6 +217,10 @@ private struct CommandCenterMRDetailContent: View {
                 } icon: { Image(systemName: needsHumanAttention ? "exclamationmark.circle" : "arrow.triangle.pull") }
                 .font(.subheadline).foregroundStyle(needsHumanAttention ? .orange : .secondary)
                 Spacer()
+                GitLabRefreshButton(monitor: monitor) {
+                    if let target = discussionTarget { await discussionStore.refresh(target: target, glab: monitor.glab) }
+                }
+                .buttonStyle(.bordered)
                 Link(destination: item.url) {
                     Label { Text(.CommandCenter.commandCenterOpenGitLab) } icon: { Image(systemName: "arrow.up.right.square") }
                 }
@@ -216,15 +231,9 @@ private struct CommandCenterMRDetailContent: View {
 
     private var headerMenu: some View {
         Menu {
-            AssistantContextMenu(mergeRequestURL: item.url, title: item.title,
-                                 workspace: monitor.settings.automation.assistantWorkspace)
-            if let target {
-                Divider()
-                MRAutomationScopeMenu(settings: monitor.settings, target: target, projectPath: item.url.gitLabProjectPath)
-                if !item.isAuthored, monitor.settings.automation.autoApproveEnabled {
-                    Toggle(isOn: approvalBinding(target)) { Text(.CommandCenter.commandCenterAutoApprove) }
-                }
-            }
+            MRCommonMenuItems(item: item, monitor: monitor,
+                onRemove: monitor.reviewedMergeRequestItems.contains(where: { $0.id == item.id && $0.url == item.url })
+                    ? { confirmRemoval = true } : nil)
         } label: { Image(systemName: "ellipsis") }
         .menuStyle(.borderlessButton).menuIndicator(.hidden).fixedSize()
         .accessibilityLabel(Text(.CommandCenter.commandCenterActions))
@@ -280,6 +289,7 @@ private struct CommandCenterMRDetailContent: View {
                 } else if !needsHumanAttention && !item.needsConfirmation {
                     Text(.CommandCenter.commandCenterNoPendingDecision).foregroundStyle(.secondary)
                 }
+                if let job = jobs.first { AssistantJobPreflightNotice(jobID: job.id, monitor: monitor) }
                 if let retryError {
                     Text(verbatim: retryError).foregroundStyle(.red).fixedSize(horizontal: false, vertical: true)
                 }
@@ -332,8 +342,7 @@ private struct CommandCenterMRDetailContent: View {
 
     private var decisionActions: some View {
         VStack(alignment: .leading, spacing: 12) {
-            BoardMRIntentActions(row: .init(item: presentationItem, latestJob: jobs.first,
-                intents: monitor.mrTodoIntents(for: item)), monitor: monitor)
+            BoardMRIntentActions(row: presentationRow, monitor: monitor)
             ReReviewControls(item: presentationItem, monitor: monitor.attention)
             InboxAttentionActions(item: presentationItem, feedbackAction: monitor.attentionFeedbackAction(for: item),
                 onFeedback: { Task { await monitor.runAttentionFeedback(for: item) } },
@@ -454,11 +463,5 @@ private struct CommandCenterMRDetailContent: View {
         Task { await discussionStore.refresh(target: target, glab: monitor.glab) }
     }
 
-    private func approvalBinding(_ target: MRAutomationScope.Target) -> Binding<Bool> {
-        Binding(get: { !monitor.settings.autoApproveOptOuts.contains(target) }, set: { enabled in
-            if enabled { monitor.settings.autoApproveOptOuts.remove(target) }
-            else { monitor.settings.autoApproveOptOuts.insert(target) }
-            monitor.settings.save()
-        })
-    }
+
 }

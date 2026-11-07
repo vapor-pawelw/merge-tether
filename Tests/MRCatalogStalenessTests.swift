@@ -214,6 +214,27 @@ struct MRCatalogStalenessTests {
         #expect(!monitor.hasSyncedCurrentCatalog)
     }
 
+    @Test func authoredEvidenceDatePrecedesTheListingReadIncludingSummaryFallback() async throws {
+        let h = try harness()
+        defer { h.cleanUp() }
+        let monitor = h.authoredMonitor()
+        try h.write("pause-owned", "yes")
+        monitor.setVisible(true)
+        try await h.waitForFile("owned-started")
+        let listingWasAlreadyReadingAt = Date()
+        try h.write("release-owned", "yes")
+        let deadline = ContinuousClock.now + .seconds(5)
+        while monitor.isLoading, ContinuousClock.now < deadline { try await Task.sleep(for: .milliseconds(20)) }
+        try #require(!monitor.isLoading && monitor.hasSyncedCurrentCatalog)
+        // The harness deliberately has no detail endpoint for !1, so the listed
+        // summary itself is also a possible source of pipeline evidence.
+        #expect(monitor.requests.map { $0.request.iid } == [1])
+        let lowerBound = try #require(monitor.catalogReadStartedAt)
+        let refreshedAt = try #require(monitor.lastRefresh)
+        #expect(lowerBound <= listingWasAlreadyReadingAt)
+        #expect(refreshedAt >= listingWasAlreadyReadingAt)
+    }
+
     @MainActor
     private struct Harness {
         let folder: URL

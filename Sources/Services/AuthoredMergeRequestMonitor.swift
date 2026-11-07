@@ -26,6 +26,7 @@ final class AuthoredMergeRequestMonitor {
     private var syncedCatalogRevision: UInt64?
     var hasSyncedCurrentCatalog: Bool { syncedCatalogRevision == glab.accountRevision && lastAccount.map(isCurrent) == true }
     private(set) var lastRefresh: Date?
+    private(set) var catalogReadStartedAt: Date?
     let workflow: MergeWorkflowAutomation
     /// The acceptance coordinator supplies a verdict bound to this exact source and discussion text.
     /// Missing or incomplete verification cannot authorize merging a reviewer's outstanding conditions.
@@ -171,6 +172,9 @@ final class AuthoredMergeRequestMonitor {
     }
 
     private func refresh(_ account: Account, revision: UInt64) async throws {
+        // A conservative lower bound also covers summaries used when a detail
+        // read fails. Keep completion time separate for normal refresh cadence.
+        let readStartedAt = Date()
         let host = account.host
         async let accountUser = glab.fetchAuthenticatedUser(host: host, expectedUsername: account.username)
         async let authored = glab.fetchAuthoredMergeRequests(host: host)
@@ -208,7 +212,7 @@ final class AuthoredMergeRequestMonitor {
                isCurrent(account), settings.automation.permitsAutoMerge(project: project),
                settings.automation.scope.permits(request, host: host, username: account.username),
                !AssistantAutomationRunner.isWorking(on: work),
-               !hasUnfinishedAssistantWork(on: work, username: user.username) {
+               !hasUnfinishedAssistantWork(on: work, username: user.username, currentRequest: request) {
                 let configuration = settings.automation
                 guard await canAutomate(configuration.assistant), !Task.isCancelled,
                       isCurrent(account), settings.automation == configuration else {
@@ -237,7 +241,7 @@ final class AuthoredMergeRequestMonitor {
                                 && self.settings.automation.permitsAutoMerge(project: project)
                                 && self.settings.automation.scope.permits(request, host: host, username: account.username)
                                 && !AssistantAutomationRunner.isWorking(on: work)
-                                && !self.hasUnfinishedAssistantWork(on: work, username: user.username)
+                                && !self.hasUnfinishedAssistantWork(on: work, username: user.username, currentRequest: request)
                         }
                     )
                     continue
@@ -256,6 +260,7 @@ final class AuthoredMergeRequestMonitor {
         guard isCurrent(account) else { return }
         requests = results
         syncedCatalogRevision = revision
+        catalogReadStartedAt = readStartedAt
         hasError = actionFailed
         lastRefresh = Date()
         notifyUnresolvedDiscussions(results)
@@ -266,8 +271,10 @@ final class AuthoredMergeRequestMonitor {
         wasWatchingWorkflow = isWatchingWorkflow
     }
 
-    private func hasUnfinishedAssistantWork(on work: AssistantAutomationRunner.MergeRequestWork, username: String) -> Bool {
-        AssistantJobExecution.hasUnfinishedWork(in: settings.assistantHandoffs, for: work, username: username)
+    private func hasUnfinishedAssistantWork(on work: AssistantAutomationRunner.MergeRequestWork, username: String,
+                                          currentRequest: GitLabMergeRequest) -> Bool {
+        AssistantJobExecution.hasUnfinishedWork(in: settings.assistantHandoffs, for: work, username: username,
+                                              currentRequest: currentRequest)
     }
 
     private func evaluate(
