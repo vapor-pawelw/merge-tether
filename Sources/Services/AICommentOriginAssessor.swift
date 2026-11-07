@@ -16,7 +16,7 @@ enum AICommentOriginAssessor {
     enum AssessmentError: Error { case unavailable, invalidEvidence, failed }
     typealias Note = GitLabMergeRequestDiscussion.Note
 
-    nonisolated static let criteriaVersion = 3
+    nonisolated static let criteriaVersion = 4
     nonisolated static let criteriaInstructions = """
         Assess whether each code-review comment was written or substantially AI-assisted, including comments posted from
         a human account. This is a probabilistic workflow heuristic, not forensic authorship proof. Evaluate the
@@ -27,6 +27,9 @@ enum AICommentOriginAssessor {
           classes/methods, exception paths, tests, contracts or related changes; compact chains explaining a problem,
           its consequences and a concrete alternative. Such cross-code synthesis is stronger than a routine local
           remark.
+        Detailed code-to-test reasoning also counts as technical synthesis: a precise alternative implementation or
+        validation formula connected to concrete boundary cases, expected outcomes and existing tests can provide
+        strong evidence even within one location. Multiple fully named files are not mandatory.
         - Supporting presentation: consistent inline-code quoting of exact identifiers/snippets, author-written
           file:line references or exact line numbers, structured findings, parallel issue/impact/proposal patterns and
           carefully explained alternatives. A single backtick, identifier or automatically attached diff position is not
@@ -40,13 +43,14 @@ enum AICommentOriginAssessor {
           correct grammar, one line reference or formatting alone. Do not count several punctuation marks as independent
           strong signals.
 
-        Decision rule: when strong precise cross-code synthesis is accompanied by multiple mutually reinforcing
+        Decision rule: when precise cross-code or code-to-test synthesis is accompanied by multiple mutually reinforcing
         presentation/language signals and there is no meaningful counterevidence, classify ai_assisted with high
         confidence. Especially convergent evidence can justify very_high. The theoretical possibility that a skilled
         human could write the same text does not by itself require uncertain. Repository specificity, correct technical
         details, concision and knowledge of adjacent changes are neutral with respect to manual authorship; AI coding
         tools can inspect those too. Do not turn these features into evidence for manual_likely.
 
+        Brevity or one diff location is not counterevidence when substantive reasoning and supporting signals are present.
         Use uncertain for insufficient, isolated or mixed signals. Use manual_likely only when there is affirmative
         evidence of spontaneous personal/conversational composition beyond merely knowing the repository. Absence of an
         AI tell does not prove manual writing. Similar style across supplied comments can corroborate a pattern, but

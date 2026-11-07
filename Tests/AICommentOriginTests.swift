@@ -68,7 +68,7 @@ struct AICommentOriginTests {
         #expect(calls == 1)
         #expect(AICommentAssessmentStore.isAI(source, host: target.host, projectID: 7, iid: 13, in: directory))
         let saved = try #require(JSONSerialization.jsonObject(with: Data(contentsOf: path)) as? [String: Any])
-        #expect(saved["criteriaVersion"] as? Int == 3)
+        #expect(saved["criteriaVersion"] as? Int == 4)
         let restarted = AICommentOriginCoordinator(directory: directory, assess: assess,
             fetchCurrent: { _ in [source] }, isCurrent: { _, _, _ in true })
         restarted.schedule(target: target, notes: [source], assistant: .codex, model: "cheap")
