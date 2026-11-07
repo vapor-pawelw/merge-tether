@@ -43,6 +43,24 @@ struct ExistingPipelineWorkDetector: Sendable {
         return FileManager.default.fileExists(atPath: active.path)
     }
 
+    func hasEmptyPipelineReceipt(for key: Key) -> Bool {
+        guard let active = try? externalRegistrationURL(for: key) else { return false }
+        let receipt = receiptURL(for: key, active: active)
+        guard let values = try? receipt.resourceValues(forKeys: [.isDirectoryKey, .isSymbolicLinkKey]),
+              values.isDirectory == true, values.isSymbolicLink != true,
+              let contents = try? FileManager.default.contentsOfDirectory(atPath: receipt.path) else { return false }
+        return contents.isEmpty
+    }
+
+    func ownsReservation(for key: Key) -> Bool {
+        guard key.reservationID != nil, let active = try? externalRegistrationURL(for: key),
+              let activeValues = try? active.resourceValues(forKeys: [.isDirectoryKey, .isSymbolicLinkKey]),
+              activeValues.isDirectory == true, activeValues.isSymbolicLink != true,
+              let values = try? ownerURL(for: key, active: active).resourceValues(forKeys: [.isDirectoryKey, .isSymbolicLinkKey])
+        else { return false }
+        return values.isDirectory == true && values.isSymbolicLink != true
+    }
+
     /// An external task may create this directory exclusively before beginning
     /// work and remove it with rmdir after finishing. It covers the whole MR.
     func externalRegistrationURL(for key: Key) throws -> URL {

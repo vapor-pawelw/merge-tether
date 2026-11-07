@@ -174,6 +174,18 @@ import Testing
                       "linked-completed", "unlinked-pipeline-job", "routed-linked-job", "refresh-attempt", "chat", "summary", "stale-head",
                       "different-pipeline", "successful-pipeline", "wrong-account", "checkpoints", "paused", "failed-entry"])
     func fullProfileReconsidersOnlyCurrentSkippedPipelineWorkWithoutRecordedEffects(blocker: String) async throws {
+        try await exerciseSkippedPipeline(blocker: blocker)
+    }
+
+    @Test(arguments: ["none", "active", "linked-missing", "linked-failed", "linked-interrupted", "linked-completed",
+                      "unlinked-pipeline-job", "routed-linked-job", "refresh-attempt", "chat", "summary", "stale-head",
+                      "different-pipeline", "successful-pipeline", "wrong-account", "checkpoints", "paused", "failed-entry",
+                      "package-disabled", "ignored", "nonempty-receipt", "prior-assessment"])
+    func anOrphanedReceiptAllowsOnlyOneSeparateCurrentAssessmentWithoutReplayingKnownWork(blocker: String) async throws {
+        try await exerciseSkippedPipeline(blocker: blocker, seedReceipt: true)
+    }
+
+    private func exerciseSkippedPipeline(blocker: String, seedReceipt: Bool = false) async throws {
         let suite = "MergeWorkflowSkippedPipeline.\(UUID())"
         let defaults = try #require(UserDefaults(suiteName: suite))
         defer { defaults.removePersistentDomain(forName: suite) }
@@ -187,12 +199,17 @@ import Testing
         if blocker == "summary" { stored.summary = "An earlier outcome is uncertain." }
         if blocker == "chat" { stored.chatURL = URL(string: "https://example.test/existing-session") }
         let key = ExistingPipelineWorkDetector.Key(host: stored.host, projectID: 7, mergeRequestIID: 11, pipelineID: 101)
-        if blocker == "receipt" {
+        if blocker == "receipt" || seedReceipt {
             let reserved = try detector.registerRun(for: key)
             let owned = try #require(reserved)
             try detector.finishHandoff(for: owned)
-        } else if blocker == "active" {
+        }
+        if blocker == "active" {
             try FileManager.default.createDirectory(at: detector.externalRegistrationURL(for: key), withIntermediateDirectories: true)
+        }
+        if blocker == "nonempty-receipt" {
+            let receipt = try detector.externalRegistrationURL(for: key).deletingLastPathComponent().appending(path: "pipeline-101")
+            try Data("Unverified prior evidence".utf8).write(to: receipt.appending(path: "evidence"))
         }
         let jobID = UUID()
         if blocker.hasPrefix("linked-") { stored.assistantJobID = jobID }
@@ -213,13 +230,30 @@ import Testing
         if blocker == "paused" {
             settings.automation.scope[.init(host: stored.host, username: "me", projectID: 7, iid: 11)] = .paused
         }
+        if blocker == "package-disabled" { settings.automation.packageDecision = .disabled }
+        if blocker == "ignored" { settings.ignoredMergeRequests.insert(.init(host: stored.host, username: "me", projectID: 7, iid: 11)) }
+        if blocker == "prior-assessment" {
+            settings.pipelineClaimAssessmentAttempts = [.init(
+                target: .init(host: stored.host, username: "me", projectID: 7, iid: 11), userID: 1,
+                lineage: .init(skippedActivityID: stored.id, skippedCreatedAt: stored.createdAt), assessmentActivityID: "prior",
+                sourceProjectID: 7, sourceBranch: "feature", sourceSHA: String(repeating: "a", count: 40),
+                targetProjectID: 7, targetBranch: "main", targetSHA: String(repeating: "b", count: 40), pipelineProjectID: 7,
+                pipelineID: 101, pipelineSHA: String(repeating: "c", count: 40), createdAt: Date())]
+        }
         settings.workflowActivity = [stored]
         settings.save()
         var currentObject = try #require(JSONSerialization.jsonObject(with: JSONEncoder().encode(stored.event.mergeRequest)) as? [String: Any])
         currentObject["sha"] = String(repeating: blocker == "stale-head" ? "b" : "a", count: 40)
         currentObject["head_pipeline"] = ["id": blocker == "different-pipeline" ? 102 : 101, "project_id": 7,
                                           "status": blocker == "successful-pipeline" ? "success" : "failed",
-                                          "sha": String(repeating: "a", count: 40)]
+                                          "sha": String(repeating: seedReceipt ? "c" : "a", count: 40),
+                                          "ref": seedReceipt ? "refs/merge-requests/11/merge" : "feature"]
+        if seedReceipt {
+            currentObject["source_project_id"] = 7
+            currentObject["target_project_id"] = 7
+            currentObject["draft"] = false
+            currentObject["has_conflicts"] = false
+        }
         let current = try JSONDecoder().decode(GitLabMergeRequest.self, from: JSONSerialization.data(withJSONObject: currentObject))
         if blocker == "routed-linked-job" {
             settings.mrActionIntents = [.init(id: UUID(),
@@ -234,7 +268,20 @@ import Testing
         let automation = MergeWorkflowAutomation(settings: settings, glab: glab, notifications: NotificationService(), detector: detector)
         let user = GitLabAuthenticatedUser(id: blocker == "wrong-account" ? 2 : 1, username: "me")
         automation.observe([current], host: stored.host, user: user)
-        if blocker == "none" {
+        let freshAssessment = seedReceipt && blocker == "none" || blocker == "receipt"
+        if freshAssessment {
+            #expect(automation.entries.first(where: { $0.id == stored.id })?.state == .skipped)
+            let fresh = try #require(automation.entries.first { $0.id != stored.id })
+            #expect(fresh.state == .queued)
+            #expect(fresh.event.kind == .pipelineFailure)
+            #expect(fresh.event.mergeRequest.sha == current.sha)
+            #expect(fresh.assistantJobID == nil)
+            let encoded = try #require(JSONSerialization.jsonObject(with: JSONEncoder().encode(fresh)) as? [String: Any])
+            let lineage = try #require(encoded["pipelineClaimAssessment"] as? [String: Any])
+            #expect(lineage["skippedActivityID"] as? String == stored.id)
+            #expect(detector.status(for: key) == .registered)
+            #expect(!detector.hasActiveReservation(for: key))
+        } else if blocker == "none" {
             #expect(automation.entries.first?.state == .queued)
             #expect(automation.entries.first?.assistantJobID == nil)
             #expect(automation.isAutomaticallyProcessingPipeline(current))
@@ -242,10 +289,158 @@ import Testing
         } else {
             #expect(automation.entries.first?.state != .queued)
         }
-        #expect(automation.entries.count == 1)
-        #expect(automation.entries.first?.id == stored.id)
+        #expect(automation.entries.count == (freshAssessment ? 2 : 1))
+        #expect(automation.entries.contains { $0.id == stored.id })
         #expect(settings.assistantHandoffs.count == (["linked-failed", "linked-interrupted", "linked-completed", "unlinked-pipeline-job"].contains(blocker) ? 1 : 0))
         for _ in 0..<4 { await Task.yield() }
+        if freshAssessment {
+            let restored = SettingsManager(defaults: defaults)
+            let restarted = MergeWorkflowAutomation(settings: restored, glab: glab, notifications: NotificationService(), detector: detector)
+            restarted.observe([current], host: stored.host, user: user)
+            #expect(restarted.entries.count == 2)
+            #expect(restarted.entries.first(where: { $0.id == stored.id })?.state == .skipped)
+            #expect(detector.status(for: key) == .registered)
+            for _ in 0..<4 { await Task.yield() }
+        }
+    }
+
+    @Test(arguments: ["none", "unrelated-scope", "pause", "permission", "capacity"])
+    func orphanedClaimDispatchUsesFreshProofAndOneDurableAssessment(mutation: String) async throws {
+        let root = FileManager.default.temporaryDirectory.appending(path: UUID().uuidString)
+        try FileManager.default.createDirectory(at: root, withIntermediateDirectories: true)
+        defer { try? FileManager.default.removeItem(at: root) }
+        let suite = "PipelineClaimAssessment.\(UUID())"
+        let defaults = try #require(UserDefaults(suiteName: suite))
+        defer { defaults.removePersistentDomain(forName: suite) }
+        let settings = SettingsManager(defaults: defaults)
+        settings.automation.applyPreset(.full, for: .codex)
+        let host = "gitlab-\(UUID().uuidString.lowercased()).example.test"
+        let source = String(repeating: "a", count: 40), target = String(repeating: "b", count: 40)
+        let merged = String(repeating: "c", count: 40)
+        let request = """
+        {"project_id":7,"iid":11,"author":{"id":1,"username":"me","name":"Me"},"title":"Fixture",
+        "web_url":"https://\(host)/team/repo/-/merge_requests/11","state":"opened","draft":false,"has_conflicts":false,
+        "sha":"\(source)","source_project_id":7,"source_branch":"feature","target_project_id":7,"target_branch":"main","labels":[],
+        "head_pipeline":{"id":101,"project_id":7,"status":"failed","sha":"\(merged)","ref":"refs/merge-requests/11/merge"}}
+        """
+        let current = try JSONDecoder().decode(GitLabMergeRequest.self, from: Data(request.utf8))
+        let id = "\(host)|1|pipelineFailure|7!11|101"
+        let event = MergeWorkflowEvent(kind: .pipelineFailure, mergeRequest: current, identity: id,
+            context: "OLD-FIX-COMMAND-MUST-NOT-BE-REPLAYED", pipelineProjectID: 7, pipelineID: 101)
+        let old = MergeWorkflowActivityEntry(id: id, event: event, createdAt: Date(timeIntervalSince1970: 0),
+                                            host: host, user: .init(id: 1, username: "me"), state: .skipped)
+        settings.workflowActivity = [old]
+        let detector = ExistingPipelineWorkDetector(directory: root.appending(path: "claims"))
+        let key = ExistingPipelineWorkDetector.Key(host: host, projectID: 7, mergeRequestIID: 11, pipelineID: 101)
+        let previous = try detector.registerRun(for: key)
+        let priorToken = try #require(previous)
+        try detector.finishHandoff(for: priorToken)
+        let executable = root.appending(path: "glab")
+        try Data("""
+        #!/bin/sh
+        set -eu
+        root="${0%/*}"
+        printf '%s\\n' "$*" >> "$root/commands"
+        case "$*" in
+          'config get host') printf '%s' '\(host)' ;;
+          'auth status') printf '%s' 'Logged in to \(host) as me' >&2 ;;
+          'api /user '*) printf '%s' '{"id":1,"username":"me"}' ;;
+          'api /projects/7/merge_requests/11 '*) printf '%s' '\(request)' ;;
+          'api /projects/7/pipelines/101 '*) printf '%s' '{"id":101,"project_id":7,"status":"failed","sha":"\(merged)","ref":"refs/merge-requests/11/merge"}' ;;
+          'api /projects/7/repository/branches/feature '*) printf '%s' '{"commit":{"id":"\(source)"}}' ;;
+          'api /projects/7/repository/branches/main '*) printf '%s' '{"commit":{"id":"\(target)"}}' ;;
+          'api /projects/7/repository/commits/'*) printf '%s' '{"id":"\(merged)","parent_ids":["\(target)","\(source)"]}' ;;
+          'api /projects/7/merge_requests/11/diffs?'*)
+            touch "$root/entered"
+            if test '\(mutation)' != none && test '\(mutation)' != capacity; then
+              count=0
+              while test ! -f "$root/release" && test "$count" -lt 500; do sleep 0.01; count=$((count + 1)); done
+            fi
+            printf '%s' '[]' ;;
+          'api /projects/7 --hostname '*) printf '%s' '{"default_branch":"main"}' ;;
+          *) case "$*" in *'--method POST'*|*'--method PUT'*|*'--method DELETE'*) exit 90 ;; esac; printf '%s' '[]' ;;
+        esac
+        """.utf8).write(to: executable)
+        try FileManager.default.setAttributes([.posixPermissions: 0o700], ofItemAtPath: executable.path)
+        settings.glabPath = executable
+        settings.save()
+        let glab = GlabService()
+        glab.glabPath = executable
+        glab.resolvedHost = host
+        glab.currentUsername = "me"
+        var launched: [AssistantAutomationRunner.Handoff] = []
+        var releaseAssessment = false
+        defer { releaseAssessment = true }
+        let coordinator = AssistantJobCoordinator(execute: { handoff, _ in
+            let durable = SettingsManager(defaults: defaults).pipelineClaimAssessmentAttempts
+            #expect(durable.count == 1)
+            #expect(durable.first?.sourceSHA == source && durable.first?.targetSHA == target)
+            #expect(durable.first?.pipelineSHA == merged && durable.first?.lineage.skippedActivityID == id)
+            #expect(handoff.pipelineReservation?.reservationID != priorToken.reservationID)
+            #expect(handoff.expectedHeadSHA == source)
+            #expect(handoff.prompt.lowercased().contains("reconcile"))
+            #expect(handoff.prompt.lowercased().contains("do not replay"))
+            #expect(!handoff.prompt.contains("OLD-FIX-COMMAND"))
+            launched.append(handoff)
+            while mutation == "capacity" && !releaseAssessment { try await Task.sleep(for: .milliseconds(10)) }
+            return .init(result: .init(status: .blocked, summary: "Fresh assessment fixture finished.",
+                                      blocker: "Fixture does not execute remote corrections."), output: "")
+        })
+        let automation = MergeWorkflowAutomation(settings: settings, glab: glab, notifications: NotificationService(),
+                                                detector: detector, jobCoordinator: coordinator)
+        coordinator.onFinished = { [weak automation] handoff in
+            if let reservation = handoff.pipelineReservation { try? detector.finishHandoff(for: reservation) }
+            automation?.synchronizeAssistantJobs()
+        }
+        automation.observe([current], host: host, user: old.user)
+        for _ in 0..<300 {
+            if FileManager.default.fileExists(atPath: root.appending(path: "entered").path) { break }
+            if automation.entries.contains(where: { $0.id != id && $0.state == .alreadyRegistered }) { break }
+            try await Task.sleep(for: .milliseconds(10))
+        }
+        if ["unrelated-scope", "pause", "permission"].contains(mutation) {
+            #expect(FileManager.default.fileExists(atPath: root.appending(path: "entered").path))
+            if mutation == "unrelated-scope" {
+                settings.automation.scope[.init(host: host, username: "me", projectID: 99, iid: 22)] = .active
+            } else if mutation == "pause" {
+                settings.automation.scope[.init(host: host, username: "me", projectID: 7, iid: 11)] = .paused
+            } else { settings.automation.allowFollowUpPush = false }
+            try Data().write(to: root.appending(path: "release"))
+        }
+        if mutation == "capacity" {
+            for _ in 0..<300 where launched.isEmpty { try await Task.sleep(for: .milliseconds(10)) }
+            let assessment = try #require(automation.entries.first { $0.pipelineClaimAssessment != nil })
+            #expect(assessment.state == .waitingForAssistant)
+            for index in 0..<130 {
+                automation.receive(.init(kind: .reviewWaiting, mergeRequest: current, identity: "passive-\(index)",
+                                         context: "Passive history fixture"), host: host, user: old.user)
+            }
+            #expect(automation.entries.contains { $0.id == assessment.id })
+            #expect(automation.entries.contains { $0.id == id })
+            releaseAssessment = true
+        }
+        for _ in 0..<300 where automation.entries.contains(where: { [.queued, .running, .waitingForAssistant].contains($0.state) }) {
+            try await Task.sleep(for: .milliseconds(10))
+        }
+        let shouldLaunch = mutation == "none" || mutation == "unrelated-scope" || mutation == "capacity"
+        #expect(launched.count == (shouldLaunch ? 1 : 0))
+        #expect(settings.pipelineClaimAssessmentAttempts.count == (shouldLaunch ? 1 : 0))
+        #expect(automation.entries.first(where: { $0.id == id })?.state == .skipped)
+        #expect(detector.hasEmptyPipelineReceipt(for: key))
+        #expect(!detector.hasActiveReservation(for: key))
+        let restored = SettingsManager(defaults: defaults)
+        let restarted = MergeWorkflowAutomation(settings: restored, glab: glab, notifications: NotificationService(),
+                                               detector: detector, jobCoordinator: coordinator)
+        restarted.observe([current], host: host, user: old.user)
+        for _ in 0..<4 { await Task.yield() }
+        #expect(restarted.entries.count == (mutation == "capacity" ? 120 : 2))
+        if mutation == "capacity" {
+            #expect(restarted.entries.contains { $0.pipelineClaimAssessment?.skippedActivityID == id })
+            #expect(restarted.entries.contains { $0.id == id })
+        }
+        #expect(launched.count == (shouldLaunch ? 1 : 0))
+        let commands = try String(contentsOf: root.appending(path: "commands"), encoding: .utf8)
+        #expect(!commands.contains("--method POST") && !commands.contains("--method PUT"))
     }
 
     private func waitingEntry(jobID: UUID?, state: MergeWorkflowActivityState) throws -> MergeWorkflowActivityEntry {

@@ -28,6 +28,7 @@ final class SettingsManager {
     var automationAttemptReceipts: Set<TodoAutomationReceipt>
     var authorFeedbackAttempts: Set<AuthorFeedbackAttempt>
     var pipelineRefreshAttempts: Set<PipelineRefreshAttempt>
+    var pipelineClaimAssessmentAttempts: [PipelineClaimAssessmentAttempt]
     var pendingTodoAcknowledgements: Set<TodoActionAcknowledgement>
     var conflictReceipts: Set<MergeConflictReceipt>
     var reReviewReceipts: [ReReviewReceipt.Key: ReReviewReceipt]
@@ -56,6 +57,8 @@ final class SettingsManager {
             .flatMap { try? JSONDecoder().decode(Set<AuthorFeedbackAttempt>.self, from: $0) } ?? []
         pipelineRefreshAttempts = defaults.data(forKey: Key.pipelineRefreshAttempts)
             .flatMap { try? JSONDecoder().decode(Set<PipelineRefreshAttempt>.self, from: $0) } ?? []
+        pipelineClaimAssessmentAttempts = defaults.data(forKey: Key.pipelineClaimAssessmentAttempts)
+            .flatMap { try? JSONDecoder().decode([PipelineClaimAssessmentAttempt].self, from: $0) } ?? []
         pendingTodoAcknowledgements = defaults.data(forKey: Key.pendingTodoAcknowledgements)
             .flatMap { try? JSONDecoder().decode(Set<TodoActionAcknowledgement>.self, from: $0) } ?? []
         assistantHandoffs = defaults.data(forKey: Key.assistantHandoffs)
@@ -143,6 +146,9 @@ final class SettingsManager {
         if let data = try? JSONEncoder().encode(pipelineRefreshAttempts) {
             defaults.set(data, forKey: Key.pipelineRefreshAttempts)
         }
+        if let data = try? JSONEncoder().encode(pipelineClaimAssessmentAttempts) {
+            defaults.set(data, forKey: Key.pipelineClaimAssessmentAttempts)
+        }
         if let data = try? JSONEncoder().encode(pendingTodoAcknowledgements) {
             defaults.set(data, forKey: Key.pendingTodoAcknowledgements)
         }
@@ -214,6 +220,19 @@ final class SettingsManager {
         return defaults.synchronize()
     }
 
+    func savePipelineClaimAssessmentAttempt(_ attempt: PipelineClaimAssessmentAttempt) -> Bool {
+        guard !pipelineClaimAssessmentAttempts.contains(where: {
+            $0.target == attempt.target && $0.userID == attempt.userID && $0.lineage == attempt.lineage
+                && $0.pipelineID == attempt.pipelineID && $0.pipelineSHA == attempt.pipelineSHA
+                && $0.pipelineProjectID == attempt.pipelineProjectID
+                && $0.sourceProjectID == attempt.sourceProjectID && $0.sourceBranch == attempt.sourceBranch && $0.sourceSHA == attempt.sourceSHA
+                && $0.targetProjectID == attempt.targetProjectID && $0.targetBranch == attempt.targetBranch && $0.targetSHA == attempt.targetSHA
+        }) else { return false }
+        pipelineClaimAssessmentAttempts.append(attempt)
+        save()
+        return defaults.synchronize()
+    }
+
     func saveEnvironmentRecoveryAttempt(_ id: UUID) -> Bool {
         guard let index = assistantHandoffs.firstIndex(where: { $0.id == id }),
               assistantHandoffs[index].environmentRecoveryAttempted != true else { return false }
@@ -249,6 +268,7 @@ final class SettingsManager {
         static let automationAttemptReceipts = "automationAttemptReceipts"
         static let authorFeedbackAttempts = "authorFeedbackAttempts"
         static let pipelineRefreshAttempts = "pipelineRefreshAttempts"
+        static let pipelineClaimAssessmentAttempts = "pipelineClaimAssessmentAttempts"
         static let pendingTodoAcknowledgements = "pendingTodoAcknowledgements"
         static let boardPins = "boardPins"
         static let conflictReceipts = "conflictReceipts"

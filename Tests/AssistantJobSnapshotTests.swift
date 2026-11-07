@@ -3,6 +3,66 @@ import Testing
 @testable import GitLabTodos
 
 @Suite struct AssistantJobSnapshotTests {
+    @MainActor @Test(arguments: ["unrelated-scope", "pause", "permission"])
+    func launchRechecksCapturedAutomaticPolicyAfterFreshRequest(mutation: String) async throws {
+        let root = FileManager.default.temporaryDirectory.appending(path: UUID().uuidString)
+        try FileManager.default.createDirectory(at: root, withIntermediateDirectories: true)
+        defer { try? FileManager.default.removeItem(at: root) }
+        let suite = "AssistantLaunchPolicy.\(UUID())"
+        let defaults = try #require(UserDefaults(suiteName: suite))
+        defer { defaults.removePersistentDomain(forName: suite) }
+        let settings = SettingsManager(defaults: defaults)
+        settings.automation.applyPreset(.full, for: .codex)
+        let captured = settings.automation
+        let host = "gitlab-\(UUID().uuidString.lowercased()).example.test"
+        let sha = String(repeating: "a", count: 40)
+        let executable = root.appending(path: "glab")
+        try Data("""
+        #!/bin/sh
+        root="${0%/*}"
+        case "$*" in
+          'config get host') printf '%s' '\(host)' ;;
+          'auth status') printf '%s' 'Logged in to \(host) as me' >&2 ;;
+          'api /user '*) printf '%s' '{"id":1,"username":"me"}' ;;
+          'api /projects/7/merge_requests/11 '*)
+            touch "$root/entered"
+            count=0
+            while test ! -f "$root/release" && test "$count" -lt 500; do sleep 0.01; count=$((count + 1)); done
+            printf '%s' '{"project_id":7,"iid":11,"author":{"id":1,"username":"me","name":"Me"},"title":"Fixture","web_url":"https://\(host)/team/repo/-/merge_requests/11","state":"opened","sha":"\(sha)","source_branch":"feature","target_branch":"main","labels":[]}' ;;
+          *) exit 20 ;;
+        esac
+        """.utf8).write(to: executable)
+        try FileManager.default.setAttributes([.posixPermissions: 0o700], ofItemAtPath: executable.path)
+        settings.glabPath = executable
+        let coordinator = AssistantJobCoordinator(execute: { _, _ in
+            .init(result: .init(status: .blocked, summary: "Fixture boundary", blocker: "No commands executed."), output: "")
+        })
+        let work = AssistantAutomationRunner.MergeRequestWork(host: host, projectID: 7, iid: 11)
+        let task = Task {
+            try await AssistantAutomationRunner.launch(.codex, title: "Fresh assessment",
+                mergeRequestURL: URL(string: "https://\(host)/team/repo/-/merge_requests/11")!, prompt: "Fresh task",
+                workspace: "", access: .gitLabRead, work: work, username: "me", settings: settings,
+                mrWorkflow: .followUp, expectedHeadSHA: sha, jobCoordinator: coordinator, configurationSnapshot: captured)
+        }
+        for _ in 0..<300 where !FileManager.default.fileExists(atPath: root.appending(path: "entered").path) {
+            try await Task.sleep(for: .milliseconds(10))
+        }
+        #expect(FileManager.default.fileExists(atPath: root.appending(path: "entered").path))
+        if mutation == "unrelated-scope" { settings.automation.scope[.init(host: host, username: "me", projectID: 99, iid: nil)] = .active }
+        else if mutation == "pause" { settings.automation.scope[.init(host: host, username: "me", projectID: 7, iid: 11)] = .paused }
+        else { settings.automation.allowFollowUpPush = false }
+        try Data().write(to: root.appending(path: "release"))
+        do {
+            let handoff = try await task.value
+            #expect(mutation == "unrelated-scope")
+            coordinator.cancel(handoff.id)
+        } catch {
+            #expect(mutation != "unrelated-scope")
+            #expect(error as? AssistantJobExecutor.ExecutionError == .disabledPermission)
+        }
+        #expect(settings.assistantHandoffs.count == (mutation == "unrelated-scope" ? 1 : 0))
+    }
+
     @Test func rejectsChangedOrMissingHeadBeforeExecution() throws {
         try AssistantJobExecutor.validateHeadSnapshot(expected: "abc", actual: "abc")
         for pair: (String?, String?) in [("abc", "def"), (nil, "abc"), ("abc", nil), ("", "")] {

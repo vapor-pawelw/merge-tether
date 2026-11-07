@@ -55,6 +55,28 @@
           }
         }
       }
+    },
+    "pipeline.claimAssessment.context": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Fresh assessment: reconcile the current failed pipeline after a claim without a recorded worker."
+          }
+        }
+      }
+    },
+    "pipeline.claimAssessment.persistenceUnavailable": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "The fresh pipeline assessment was not started because its durable attempt record could not be saved."
+          }
+        }
+      }
     }
   },
   "version": "1.0"

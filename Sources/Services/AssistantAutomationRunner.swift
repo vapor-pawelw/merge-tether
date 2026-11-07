@@ -204,18 +204,29 @@ enum AssistantAutomationRunner {
         mrWorkflow: MRWorkflow? = nil,
         manual: Bool = false,
         expectedHeadSHA: String? = nil,
-        jobCoordinator: AssistantJobCoordinator? = nil
+        jobCoordinator: AssistantJobCoordinator? = nil,
+        configurationSnapshot: AutomationSettings? = nil
     ) async throws -> Handoff {
         guard mrWorkflow != .draftReply else { throw AssistantJobExecutor.ExecutionError.disabledPermission }
+        let automaticConfiguration = configurationSnapshot ?? settings.automation
+        let target = MRAutomationScope.Target(host: work.host, username: username, projectID: work.projectID, iid: work.iid)
+        func validateLaunchPolicy() throws {
+            guard !settings.ignoredMergeRequests.contains(target),
+                  manual || (automaticConfiguration.preservingScope(from: settings.automation) == settings.automation
+                    && settings.automation.scope.resolve(target).active)
+            else { throw AssistantJobExecutor.ExecutionError.disabledPermission }
+        }
+        try validateLaunchPolicy()
         let executionCoordinator = jobCoordinator ?? coordinator
         guard !executionCoordinator.isWorking(on: work) else { throw HandoffError.executionUnavailable }
 
         let headSHA: String?
-        if jobCoordinator == nil {
+        if jobCoordinator == nil || configurationSnapshot != nil {
             headSHA = try await freshRequest(work: work, username: username, settings: settings).sha
             guard let headSHA, !headSHA.isEmpty else { throw AssistantJobExecutor.ExecutionError.inactiveMergeRequest }
             if let expectedHeadSHA, expectedHeadSHA != headSHA { throw AssistantJobExecutor.ExecutionError.headChanged }
         } else { headSHA = expectedHeadSHA }
+        try validateLaunchPolicy()
         guard !executionCoordinator.isWorking(on: work) else { throw HandoffError.executionUnavailable }
         let boundedPrompt = refreshedTaskPrompt(prompt, expectedHeadSHA: headSHA)
         let acknowledgements = (feedbackTodos + (feedbackTodo.map { [$0] } ?? [])).reduce(into: [Todo.FeedbackIdentity]()) {
@@ -301,9 +312,8 @@ enum AssistantAutomationRunner {
             execution: AssistantJobExecution(state: .queued), taskPrompt: prompt,
             mergeRequestURL: mergeRequestURL, workflow: mrWorkflow,
             resolvesOwnThreads: (isReview || mrWorkflow == .review) ? settings.automation.autoResolveOwnReviewThreads : nil,
-            manual: manual, expectedHeadSHA: headSHA, configurationSnapshot: settings.automation
+            manual: manual, expectedHeadSHA: headSHA, configurationSnapshot: manual ? settings.automation : automaticConfiguration
         )
-        let target = MRAutomationScope.Target(host: work.host, username: username, projectID: work.projectID, iid: work.iid)
         for (noteID, revision) in verifiedFeedbackNotes ?? [:] {
             settings.authorFeedbackAttempts.insert(.init(target: target, noteID: noteID, revision: revision))
         }
