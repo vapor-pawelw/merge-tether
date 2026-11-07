@@ -5,7 +5,7 @@ import Foundation
 enum ReReviewVerifier {
     enum VerificationError: Error, Equatable { case unavailable, failed, incompleteEvidence }
 
-    static let schema = #"{"type":"object","additionalProperties":false,"properties":{"notes":{"type":"array","items":{"type":"object","additionalProperties":false,"properties":{"noteID":{"type":"integer"},"state":{"type":"string","enum":["addressed","informational","blocking","uncertain"]},"reason":{"type":"string"},"acceptanceNoteID":{"type":["integer","null"]}},"required":["noteID","state","reason","acceptanceNoteID"]}}},"required":["notes"]}"#
+    static let schema = #"{"type":"object","additionalProperties":false,"properties":{"notes":{"type":"array","items":{"type":"object","additionalProperties":false,"properties":{"noteID":{"type":"integer"},"state":{"type":"string","enum":["addressed","informational","blocking","uncertain"]},"reason":{"type":"string"},"acceptanceNoteID":{"type":["integer","null"]},"informationalAcknowledgementSafe":{"type":"boolean"}},"required":["noteID","state","reason","acceptanceNoteID","informationalAcknowledgementSafe"]}}},"required":["notes"]}"#
 
     private static func outputSchema(noteIDs: [Int]) throws -> String {
         guard var document = try JSONSerialization.jsonObject(with: Data(schema.utf8)) as? [String: Any],
@@ -131,6 +131,16 @@ enum ReReviewVerifier {
             Classify EVERY non-system note by someone other than authorID, including general comments.
             Return its exact noteID, state and a concise English reason (at most 600 characters).
             informational: summaries, reports, acknowledgements, unrelated or non-actionable comments.
+            For each note also return informationalAcknowledgementSafe. Set it true ONLY for an
+            informational note after reading its COMPLETE thread, including the MR author's replies,
+            and proving that no question, requested change, expected answer, outstanding condition,
+            uncertainty or substantive reply remains anywhere in that thread. A positive last sentence
+            does not make a mixed thread safe. Unrelated or non-actionable classification alone is
+            not enough: return false when a request or ambiguity exists, and for every other state.
+            This separate verdict may let the app add a thumbs-up reaction and close that purely
+            informational thread; it never approves a reviewer or accepts their other findings.
+            Other threads do not prevent acknowledging this independently pure informational one.
+            Do not add reactions or resolve threads yourself. When unsure, return false.
             addressed: the current diff, title or description proves the requested correction in that
             artifact, or a substantive reply explains
             why the concern does not apply and is ready for the reviewer to reconsider. An author's
@@ -204,7 +214,8 @@ enum ReReviewVerifier {
     private static func redactingReasons(in assessment: ReReviewAssessment) -> ReReviewAssessment {
         .init(notes: assessment.notes.map { note in
             .init(noteID: note.noteID, state: note.state,
-                reason: GlabService.redactWorkflowEvidence(note.reason), acceptanceNoteID: note.acceptanceNoteID)
+                reason: GlabService.redactWorkflowEvidence(note.reason), acceptanceNoteID: note.acceptanceNoteID,
+                informationalAcknowledgementSafe: note.informationalAcknowledgementSafe)
         })
     }
 

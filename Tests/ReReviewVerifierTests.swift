@@ -5,6 +5,37 @@ import Testing
 @Suite("Headless re-review verification")
 struct ReReviewVerifierTests {
     @Test(arguments: AutomationAssistant.allCases)
+    func explicitInformationalAcknowledgementProofSurvivesVerifierSanitization(_ assistant: AutomationAssistant) async throws {
+        let folder = FileManager.default.temporaryDirectory.appending(path: UUID().uuidString)
+        try FileManager.default.createDirectory(at: folder, withIntermediateDirectories: false)
+        defer { try? FileManager.default.removeItem(at: folder) }
+        let script = folder.appending(path: "cli")
+        try Data("""
+            #!/usr/bin/python3
+            import json,sys
+            args=sys.argv[1:]
+            sys.stdin.read()
+            result={'notes':[{'noteID':10,'state':'informational','reason':'Pure positive acknowledgement with no outstanding request','acceptanceNoteID':None,'informationalAcknowledgementSafe':True}]}
+            if args[0]=='exec': json.dump(result,open(args[args.index('-o')+1],'w'))
+            else: print(json.dumps({'is_error':False,'structured_output':result}))
+            """.utf8).write(to: script)
+        try FileManager.default.setAttributes([.posixPermissions: 0o700], ofItemAtPath: script.path)
+        let discussions = try JSONDecoder().decode([GitLabMergeRequestDiscussion].self,
+            from: Data(#"[{"id":"thread","notes":[{"id":10,"author":{"id":7},"system":false,"body":"This fixes my earlier concern."},{"id":11,"author":{"id":3},"system":false,"body":"Thanks."}]}]"#.utf8))
+        let input = ReReviewVerifier.Input(authorID: 3, headSHA: String(repeating: "a", count: 40),
+            title: "Synthetic MR", description: nil, diff: "Current diff", discussions: discussions)
+
+        let assessment = try await ReReviewVerifier.run(input, assistant: assistant, model: "fixture", executable: script)
+
+        #expect(assessment.notes.first?.informationalAcknowledgementSafe == true)
+        let schema = try #require(JSONSerialization.jsonObject(with: Data(ReReviewVerifier.schema.utf8)) as? [String: Any])
+        let properties = try #require(schema["properties"] as? [String: Any])
+        let notes = try #require(properties["notes"] as? [String: Any])
+        let fields = try #require(notes["items"] as? [String: Any])
+        #expect((fields["required"] as? [String])?.contains("informationalAcknowledgementSafe") == true)
+    }
+
+    @Test(arguments: AutomationAssistant.allCases)
     func verifierCanReadTheTargetWithFullCLIToolsWhileItsRoleStaysReadOnly(_ assistant: AutomationAssistant) async throws {
         let folder = FileManager.default.temporaryDirectory.appending(path: UUID().uuidString)
         try FileManager.default.createDirectory(at: folder, withIntermediateDirectories: false)

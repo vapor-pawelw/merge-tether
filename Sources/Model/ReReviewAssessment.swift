@@ -9,6 +9,8 @@ struct ReReviewAssessment: Codable, Sendable {
         let state: State
         let reason: String
         var acceptanceNoteID: Int? = nil
+        // Legacy assessments omit this field and never authorize a reaction or informational closure.
+        var informationalAcknowledgementSafe: Bool? = nil
     }
     let notes: [Note]
 

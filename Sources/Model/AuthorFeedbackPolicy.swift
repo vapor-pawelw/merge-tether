@@ -8,8 +8,9 @@ struct AuthorFeedbackAttempt: Codable, Hashable {
 
 /// Decides which external threads on the user's own MR may be resolved. A thread is ready only when
 /// every actionable participant has no blocking or uncertain note anywhere in the MR and has consented
-/// through a current approval or a later, verified acceptance comment. Pure: the caller supplies
-/// current approvals and rechecks live account/head/discussion/draft state before every write.
+/// through a current approval or a later, verified acceptance comment. A separately proven purely
+/// informational thread needs no approval and grants no consent for other concerns. The caller
+/// supplies current evidence and rechecks live account/head/discussion/draft state before every write.
 struct AuthorFeedbackPolicy {
     enum State: String, Codable, Sendable { case ready, needsChanges, needsVerification, waitingAcceptance, waitingPublication, disabled }
 
@@ -24,6 +25,36 @@ struct AuthorFeedbackPolicy {
         var canResolve: Bool { state == .ready && discussionID != nil }
     }
 
+    struct InformationalAcknowledgement: Equatable {
+        let discussionID: String?
+        let noteIDs: [Int]
+        let canResolve: Bool
+    }
+
+    /// Informational classification alone is not permission to acknowledge unrelated feedback.
+    /// Every external note needs explicit proof that the entire thread has no remaining expectation.
+    static func informationalAcknowledgements(discussions: [GitLabMergeRequestDiscussion], assessment: ReReviewAssessment,
+                                              authorID: Int, enabled: Bool = true,
+                                              pendingDraftCount: Int = 0) -> [InformationalAcknowledgement] {
+        guard enabled, pendingDraftCount == 0,
+              (try? assessment.reviewers(in: discussions, authorID: authorID)) != nil else { return [] }
+        let verdicts = Dictionary(uniqueKeysWithValues: assessment.notes.map { ($0.noteID, $0) })
+        return discussions.compactMap { discussion in
+            let relevant = discussion.notes.filter { $0.system != true }
+            let external = relevant.filter { $0.author?.id != authorID }
+            guard discussion.notes.first?.resolved != true, !external.isEmpty, relevant.allSatisfy({
+                ($0.id ?? 0) > 0 && ($0.author?.id ?? 0) > 0 && $0.body != nil
+            }), external.allSatisfy({ note in
+                guard let verdict = verdicts[note.id ?? 0] else { return false }
+                return verdict.state == .informational && verdict.informationalAcknowledgementSafe == true
+            }) else { return nil }
+            let root = discussion.notes.first
+            let canResolve = discussion.id?.isEmpty == false && root?.system == false
+                && root?.author?.id != authorID && root?.resolvable == true && root?.resolved == false
+            return .init(discussionID: discussion.id, noteIDs: external.compactMap(\.id), canResolve: canResolve)
+        }
+    }
+
     private typealias Note = GitLabMergeRequestDiscussion.Note
     private typealias Verdict = ReReviewAssessment.Note
 
@@ -32,6 +63,10 @@ struct AuthorFeedbackPolicy {
         let gate: State? = !enabled ? .disabled : pendingDraftCount > 0 ? .waitingPublication : nil
         let verified = assessment.flatMap { (try? $0.reviewers(in: discussions, authorID: authorID)) == nil ? nil : $0 }
         let verdicts = Dictionary(uniqueKeysWithValues: (verified?.notes ?? []).map { ($0.noteID, $0) })
+        let informationalThreads = Set(verified.map {
+            informationalAcknowledgements(discussions: discussions, assessment: $0, authorID: authorID)
+                .filter(\.canResolve).compactMap(\.discussionID)
+        } ?? [])
         let published = discussions.flatMap(\.notes).filter { $0.system == false }
         let notesByID = Dictionary(published.compactMap { note in note.id.map { ($0, note) } }, uniquingKeysWith: { first, _ in first })
         var blockers: [Int: Verdict] = [:]
@@ -63,8 +98,9 @@ struct AuthorFeedbackPolicy {
                       !participants.contains(where: { $0.id == author.id }) else { continue }
                 participants.append(author)
             }
-            let blocked = participants.filter { blockers[$0.id] != nil }
-            let waiting = participants.filter { participant in
+            let purelyInformational = informationalThreads.contains(discussionID)
+            let blocked = purelyInformational ? [] : participants.filter { blockers[$0.id] != nil }
+            let waiting = purelyInformational ? [] : participants.filter { participant in
                 blockers[participant.id] != nil || !approvedReviewerIDs.contains(participant.id) && !thread.filter {
                     $0.author?.id == participant.id && ($0.id == rootID || verdicts[$0.id ?? 0]?.state == .addressed)
                 }.allSatisfy(accepted)

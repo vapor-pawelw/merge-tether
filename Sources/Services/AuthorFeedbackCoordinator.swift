@@ -29,6 +29,15 @@ final class AuthorFeedbackCoordinator {
     private(set) var statuses: [MRAutomationScope.Target: AuthorFeedbackStatus] = [:]
     @ObservationIgnored private var tasks: [MRAutomationScope.Target: Task<Void, Never>] = [:]
     @ObservationIgnored private var pending: [MRAutomationScope.Target: Input] = [:]
+    private struct AcknowledgementProgress {
+        let userID: Int
+        var threadRevisions: [Int: String] = [:]
+        var reactions: Set<Int> = []
+        var resolutions: Set<Int> = []
+        var failures: [Int: String] = [:]
+    }
+    @ObservationIgnored private var acknowledgedReactions: [MRAutomationScope.Target: Set<String>] = [:]
+    @ObservationIgnored private var acknowledgementAttempts: [MRAutomationScope.Target: AcknowledgementProgress] = [:]
     @ObservationIgnored private var cache: [MRAutomationScope.Target: (String, ReReviewAssessment)] = [:]
     private let settings: SettingsManager
     private let glab: GlabService
@@ -108,10 +117,12 @@ final class AuthorFeedbackCoordinator {
     }
 
     func cancel(outsideScope: MRAutomationScope? = nil) {
-        for target in Set(tasks.keys).union(pending.keys).union(statuses.keys) {
+        for target in Set(tasks.keys).union(pending.keys).union(statuses.keys).union(acknowledgementAttempts.keys).union(acknowledgedReactions.keys) {
             guard outsideScope.map({ !$0.resolve(target).active }) ?? true else { continue }
             pending.removeValue(forKey: target); tasks[target]?.cancel()
             statuses.removeValue(forKey: target); cache.removeValue(forKey: target)
+            acknowledgementAttempts.removeValue(forKey: target)
+            acknowledgedReactions.removeValue(forKey: target)
         }
     }
 
@@ -119,6 +130,8 @@ final class AuthorFeedbackCoordinator {
         guard let host = glab.resolvedHost, let username = glab.currentUsername else { return }
         let target = MRAutomationScope.Target(host: host, username: username, projectID: projectID, iid: iid)
         cache.removeValue(forKey: target)
+        acknowledgementAttempts.removeValue(forKey: target)
+        acknowledgedReactions.removeValue(forKey: target)
         statuses.removeValue(forKey: target)
     }
 
@@ -230,7 +243,9 @@ final class AuthorFeedbackCoordinator {
             approvedReviewerIDs: approved, enabled: input.configuration.autoResolveAcceptedFeedback)
         var accepted: Set<Int> = []
         var changed = false
-        for finding in initial where finding.canResolve {
+        let informationalThreads = Set(AuthorFeedbackPolicy.informationalAcknowledgements(discussions: threads,
+            assessment: assessment, authorID: input.user.id).filter(\.canResolve).compactMap(\.discussionID))
+        for finding in initial where finding.canResolve && !informationalThreads.contains(finding.discussionID ?? "") {
             guard isCurrent(input) else { throw CancellationError() }
             guard await canAutomate(input.configuration.assistant) else { throw ReReviewVerifier.VerificationError.unavailable }
             guard isCurrent(input), let discussionID = finding.discussionID else { throw CancellationError() }
@@ -261,7 +276,7 @@ final class AuthorFeedbackCoordinator {
                   ReviewVerdict.fingerprint(threads) == input.fingerprint else { throw CancellationError() }
         }
         guard isCurrent(input) else { throw CancellationError() }
-        let findings = AuthorFeedbackPolicy.evaluate(discussions: threads, assessment: assessment, authorID: input.user.id,
+        var findings = AuthorFeedbackPolicy.evaluate(discussions: threads, assessment: assessment, authorID: input.user.id,
             approvedReviewerIDs: approved, enabled: input.configuration.autoResolveAcceptedFeedback)
         accepted.formUnion(AuthorFeedbackPolicy.acceptedReviewers(discussions: threads, assessment: assessment,
             authorID: input.user.id, approvedReviewerIDs: approved))
@@ -283,14 +298,148 @@ final class AuthorFeedbackCoordinator {
         followUp.formUnion(owedNotes)
         if !followUp.isEmpty, isCurrent(input) { await onNeedsWork?(request, followUp, input.fingerprint) }
         guard isCurrent(input) else { throw CancellationError() }
+        // Courtesy acknowledgement is optional and must never suppress independent correction work.
+        let acknowledgement = try await acknowledgeInformational(input, assessment: assessment, discussions: threads)
+        threads = acknowledgement.threads
+        changed = changed || acknowledgement.changed
+        let acknowledgementFailures = acknowledgementAttempts[input.target]?.failures ?? [:]
+        findings = AuthorFeedbackPolicy.evaluate(discussions: threads, assessment: assessment, authorID: input.user.id,
+            approvedReviewerIDs: approved, enabled: input.configuration.autoResolveAcceptedFeedback).map { finding in
+                guard finding.state == .ready, let reason = acknowledgementFailures[finding.id] else { return finding }
+                return .init(id: finding.id, discussionID: finding.discussionID, reviewerID: finding.reviewerID,
+                    reviewerUsername: finding.reviewerUsername, state: .needsVerification, reason: reason,
+                    waitingForReviewers: [])
+            }
         let completed = AuthorFeedbackStatus(head: request.sha ?? "", fingerprint: input.fingerprint,
             semanticContextFingerprint: request.semanticContextFingerprint, phase: .complete,
             findings: findings, acceptedReviewerIDs: accepted, followUpNoteIDs: followUp, replyNoteIDs: missingReplies,
-            addressedNoteIDs: Set(assessment.notes.filter { $0.state == .addressed || $0.state == .informational }.map(\.noteID)).subtracting(owedNotes))
+            addressedNoteIDs: Set(assessment.notes.filter { $0.state == .addressed || $0.state == .informational }.map(\.noteID))
+                .subtracting(owedNotes).subtracting(acknowledgementFailures.keys))
         let updated = statuses[input.target] != completed
         statuses[input.target] = completed
         if changed || updated { onRemoteChange?() }
     }
+
+    private func liveInformationalDiscussions(_ input: Input) async throws -> [GitLabMergeRequestDiscussion] {
+        guard isCurrent(input), !input.readOnly, input.configuration.autoResolveAcceptedFeedback else { throw CancellationError() }
+        let request = input.request
+        let host = input.target.host
+        async let currentMR = glab.fetchMergeRequest(projectID: request.projectID, iid: request.iid, host: host)
+        async let currentThreads = glab.fetchMergeRequestDiscussions(projectID: request.projectID, iid: request.iid, host: host)
+        async let currentUser = glab.fetchAuthenticatedUser(host: host, expectedUsername: input.user.username)
+        async let currentDrafts = glab.fetchOwnDraftNoteCount(projectID: request.projectID, iid: request.iid, host: host, userID: input.user.id)
+        let (live, discussions, user, count) = try await (currentMR, currentThreads, currentUser, currentDrafts)
+        guard isCurrent(input), live.sha == request.sha, live.state == "opened", live.draft == false,
+              live.semanticContextFingerprint == request.semanticContextFingerprint,
+              live.author.id == input.user.id, user == input.user, count == 0, live.webURL == request.webURL,
+              settings.automation.scope.permits(live, host: host, username: user.username),
+              ReviewVerdict.fingerprint(discussions) == input.fingerprint else { throw CancellationError() }
+        return discussions
+    }
+
+    private func acknowledgeInformational(_ input: Input, assessment: ReReviewAssessment,
+                                          discussions: [GitLabMergeRequestDiscussion]) async throws
+        -> (threads: [GitLabMergeRequestDiscussion], changed: Bool) {
+        guard input.configuration.autoResolveAcceptedFeedback else { return (discussions, false) }
+        let candidates = AuthorFeedbackPolicy.informationalAcknowledgements(discussions: discussions,
+            assessment: assessment, authorID: input.user.id)
+        if acknowledgementAttempts[input.target]?.userID != input.user.id {
+            acknowledgementAttempts[input.target] = .init(userID: input.user.id)
+            acknowledgedReactions.removeValue(forKey: input.target)
+        }
+        for discussion in discussions where discussion.notes.first?.resolved == true {
+            if let rootID = discussion.notes.first?.id { acknowledgementAttempts[input.target]?.failures.removeValue(forKey: rootID) }
+        }
+        var threads = discussions
+        var changed = false
+        var freshCandidates = 0
+        for candidate in candidates {
+            guard let rootID = candidate.noteIDs.first,
+                  let thread = discussions.first(where: { $0.id == candidate.discussionID && $0.notes.contains(where: { $0.id == rootID }) }),
+                  let fingerprint = ReviewVerdict.fingerprint([thread]) else { continue }
+            let threadRevision = AICommentAssessmentStore.digest("\(candidate.discussionID ?? "")|\(fingerprint)")
+            if acknowledgementAttempts[input.target]?.threadRevisions[rootID] != threadRevision {
+                acknowledgementAttempts[input.target]?.threadRevisions[rootID] = threadRevision
+                acknowledgementAttempts[input.target]?.reactions.subtract(candidate.noteIDs)
+                acknowledgementAttempts[input.target]?.resolutions.remove(rootID)
+                acknowledgementAttempts[input.target]?.failures.removeValue(forKey: rootID)
+            }
+            let reactionKeys = Dictionary(uniqueKeysWithValues: candidate.noteIDs.map {
+                ($0, AICommentAssessmentStore.digest("\(candidate.discussionID ?? "")|\($0)|\(fingerprint)"))
+            })
+            let pendingReactions = candidate.noteIDs.filter { noteID in
+                acknowledgementAttempts[input.target]?.reactions.contains(noteID) != true
+                    && reactionKeys[noteID].map { acknowledgedReactions[input.target]?.contains($0) != true } == true
+            }
+            let pendingResolution = candidate.canResolve && acknowledgementAttempts[input.target]?.resolutions.contains(rootID) != true
+            guard !pendingReactions.isEmpty || pendingResolution else { continue }
+            // Cached and fenced history consumes no budget, so later notes progress on the next pass.
+            guard freshCandidates < 4 else { break }
+            freshCandidates += 1
+            do {
+                guard isCurrent(input) else { throw CancellationError() }
+                guard await canAutomate(input.configuration.assistant) else { throw ReReviewVerifier.VerificationError.unavailable }
+                func currentCandidate(_ current: [GitLabMergeRequestDiscussion]) -> AuthorFeedbackPolicy.InformationalAcknowledgement? {
+                    AuthorFeedbackPolicy.informationalAcknowledgements(discussions: current, assessment: assessment,
+                        authorID: input.user.id).first { $0.discussionID == candidate.discussionID && $0.noteIDs == candidate.noteIDs }
+                }
+                for noteID in pendingReactions {
+                    acknowledgementAttempts[input.target]?.reactions.insert(noteID)
+                    do {
+                        let exists = try await glab.hasOwnThumbsUp(projectID: input.request.projectID, iid: input.request.iid,
+                            noteID: noteID, host: input.target.host, userID: input.user.id)
+                        if !exists {
+                            threads = try await liveInformationalDiscussions(input)
+                            guard currentCandidate(threads) != nil else { throw CancellationError() }
+                            try await glab.addOwnThumbsUp(projectID: input.request.projectID, iid: input.request.iid,
+                                noteID: noteID, host: input.target.host, userID: input.user.id)
+                            changed = true
+                        }
+                        if let key = reactionKeys[noteID] { acknowledgedReactions[input.target, default: []].insert(key) }
+                    } catch is CancellationError { throw CancellationError() }
+                    catch {
+                        Log.monitor.error("Informational feedback reaction failed for note \(noteID): \(String(describing: error), privacy: .private)")
+                    }
+                }
+                guard pendingResolution else { continue }
+                threads = try await liveInformationalDiscussions(input)
+                guard let liveCandidate = currentCandidate(threads) else {
+                    if threads.contains(where: { $0.id == candidate.discussionID && $0.notes.first?.resolved == true }) {
+                        acknowledgementAttempts[input.target]?.failures.removeValue(forKey: rootID)
+                        continue
+                    }
+                    throw CancellationError()
+                }
+                guard liveCandidate.canResolve, let discussionID = liveCandidate.discussionID else { continue }
+                acknowledgementAttempts[input.target]?.resolutions.insert(rootID)
+                // A fresh read reconciles lost responses before a fenced failure reaches the UI.
+                acknowledgementAttempts[input.target]?.failures[rootID] = String(describing:
+                    GlabError.decoding("GitLab did not confirm discussion resolution"))
+                do {
+                    let resolved = try await glab.resolveAcceptedDiscussion(projectID: input.request.projectID, iid: input.request.iid,
+                        discussionID: discussionID, host: input.target.host)
+                    acknowledgementAttempts[input.target]?.failures.removeValue(forKey: rootID)
+                    if let index = threads.firstIndex(where: { $0.id == discussionID }) { threads[index] = resolved }
+                    guard ReviewVerdict.fingerprint(threads) == input.fingerprint else { throw CancellationError() }
+                    changed = true
+                } catch is CancellationError { throw CancellationError() }
+                catch {
+                    acknowledgementAttempts[input.target]?.failures[rootID] = String(
+                        GlabService.redactWorkflowEvidence(String(describing: error)).prefix(600))
+                    Log.monitor.error("Informational feedback resolution failed for note \(rootID): \(String(describing: error), privacy: .private)")
+                }
+                threads = try await liveInformationalDiscussions(input)
+                if threads.contains(where: { $0.id == discussionID && $0.notes.first?.resolved == true }) {
+                    acknowledgementAttempts[input.target]?.failures.removeValue(forKey: rootID)
+                }
+            } catch is CancellationError { throw CancellationError() }
+            catch {
+                Log.monitor.error("Informational feedback verification failed for note \(rootID): \(String(describing: error), privacy: .private)")
+            }
+        }
+        return (threads, changed)
+    }
+
 }
 
 extension GlabService {
@@ -304,7 +453,8 @@ extension GlabService {
         return Set(approvals.approvedBy.map(\.user.id).filter { $0 > 0 })
     }
 
-    func resolveAcceptedDiscussion(projectID: Int, iid: Int, discussionID: String, host: String) async throws {
+    @discardableResult
+    func resolveAcceptedDiscussion(projectID: Int, iid: Int, discussionID: String, host: String) async throws -> GitLabMergeRequestDiscussion {
         let unreserved = CharacterSet(charactersIn: "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789-._~")
         guard !discussionID.isEmpty, let encoded = discussionID.addingPercentEncoding(withAllowedCharacters: unreserved) else {
             throw GlabError.decoding("Missing discussion identity")
@@ -316,5 +466,6 @@ extension GlabService {
               result.notes.allSatisfy({ $0.resolvable != true || $0.resolved == true }) else {
             throw GlabError.decoding("GitLab did not confirm discussion resolution")
         }
+        return result
     }
 }

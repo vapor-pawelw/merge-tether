@@ -43,6 +43,62 @@ struct AuthorFeedbackPolicyTests {
         #expect(findings.first?.canResolve == true)
     }
 
+    @Test func purelyInformationalThreadNeedsNoApprovalAndDoesNotGrantReviewerAcceptance() throws {
+        let threads = [thread("thanks", note(10, by: 7, "The access mapping looks good", resolvable: true)),
+                       thread("other", note(20, by: 7, "Please cover another path", resolvable: true))]
+        let assessment = ReReviewAssessment(notes: [
+            .init(noteID: 10, state: .informational, reason: "No request, question or condition", informationalAcknowledgementSafe: true),
+            .init(noteID: 20, state: .blocking, reason: "Independent coverage is still missing")
+        ])
+        let discussions = try decode(threads)
+        let findings = AuthorFeedbackPolicy.evaluate(discussions: discussions, assessment: assessment,
+            authorID: 3, approvedReviewerIDs: [])
+        #expect(findings.first?.canResolve == true)
+        #expect(findings.first?.waitingForReviewers.isEmpty == true)
+        #expect(findings.last?.state == .needsChanges)
+        #expect(AuthorFeedbackPolicy.acceptedReviewers(discussions: discussions, assessment: assessment,
+            authorID: 3, approvedReviewerIDs: []).isEmpty)
+        #expect(try evaluate(threads, assessment.notes, enabled: false).first?.state == .disabled)
+        #expect(try evaluate(threads, assessment.notes, drafts: 1).first?.state == .waitingPublication)
+    }
+
+    @Test(arguments: [ReReviewAssessment.Note.State.addressed, .blocking, .uncertain])
+    func informationalChildNeverMakesAMixedThreadReadyWithoutNormalConsent(_ state: ReReviewAssessment.Note.State) throws {
+        let threads = [thread("mixed", note(10, by: 7, "Please cover a missing path", resolvable: true),
+                              note(20, by: 8, "The mapping itself looks good"))]
+        let findings = try evaluate(threads, [
+            .init(noteID: 10, state: state, reason: "The original request still requires its ordinary workflow"),
+            .init(noteID: 20, state: .informational, reason: "A positive side observation", informationalAcknowledgementSafe: true)
+        ])
+        #expect(findings.count == 1)
+        #expect(findings.first?.canResolve == false)
+    }
+
+    @Test(arguments: [ReReviewAssessment.Note.State.addressed, .blocking, .uncertain])
+    func acknowledgementFlagNeverOverridesAnActionableState(_ state: ReReviewAssessment.Note.State) throws {
+        let discussions = try decode([thread("mixed", note(10, by: 7, "Please add coverage", resolvable: true),
+                                             note(20, by: 8, "The mapping looks good"))])
+        let assessment = ReReviewAssessment(notes: [
+            .init(noteID: 10, state: state, reason: "The original expectation requires its normal workflow", informationalAcknowledgementSafe: true),
+            .init(noteID: 20, state: .informational, reason: "A positive side observation", informationalAcknowledgementSafe: true)
+        ])
+        #expect(AuthorFeedbackPolicy.informationalAcknowledgements(discussions: discussions,
+            assessment: assessment, authorID: 3).isEmpty)
+        #expect(AuthorFeedbackPolicy.evaluate(discussions: discussions, assessment: assessment,
+            authorID: 3, approvedReviewerIDs: []).allSatisfy { !$0.canResolve })
+    }
+
+    @Test func legacyInformationalAssessmentNeverAuthorizesAcknowledgement() throws {
+        let discussions = try decode([thread("praise", note(10, by: 7, "Looks good", resolvable: true))])
+        let legacy = try JSONDecoder().decode(ReReviewAssessment.self,
+            from: Data(#"{"notes":[{"noteID":10,"state":"informational","reason":"No remaining action"}]}"#.utf8))
+        #expect(legacy.notes.first?.informationalAcknowledgementSafe == nil)
+        #expect(AuthorFeedbackPolicy.informationalAcknowledgements(discussions: discussions,
+            assessment: legacy, authorID: 3).isEmpty)
+        #expect(AuthorFeedbackPolicy.evaluate(discussions: discussions, assessment: legacy,
+            authorID: 3, approvedReviewerIDs: []).allSatisfy { !$0.canResolve })
+    }
+
     @Test func advanceApprovalNeverOverridesARemainingConditionElsewhere() throws {
         let general = thread("g1", note(20, by: 7, "Also rename X", at: "2026-01-01T10:05:00Z"))
         let otherThread = thread("d2", note(20, by: 7, "Also rename X", at: "2026-01-01T10:05:00Z", resolvable: true))

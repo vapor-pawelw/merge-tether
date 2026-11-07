@@ -14,6 +14,9 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 
 ### Added
 
+- Show one combined MR dependency row with open prerequisites and verified linear-stack positions on Mac and iOS, retaining marked last-known data when reads fail.
+- Acknowledge explicitly verified purely informational review threads with an idempotent thumbs-up and resolve them under the accepted-feedback automation setting, without courtesy replies.
+
 - Recover known app-created reply drafts with fresh verification, and offer a direct retry when verification cannot finish.
 - Automatically track eligible Draft review requests until ready and assess informational mentions before acknowledging them.
 - Give headless workers private temporary directories and allow one fresh, guarded follow-up after a proven local temporary-file permission failure.
@@ -78,6 +81,8 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 - Refresh public documentation and use the retro painted-style MergeTether icon.
 
 ### Fixed
+
+- Let both headless coding agents recover required installed local runtimes before treating a stopped service as a blocker, with bounded readiness checks and unchanged GitLab permissions.
 
 - Keep independent incoming reviewer feedback moving while unrelated private replies await verification, preserving existing drafts and publication safeguards.
 - Prevent review jobs on the current user’s own merge requests, including restored runs, while retaining scoped feedback handling and failed-pipeline fixes.

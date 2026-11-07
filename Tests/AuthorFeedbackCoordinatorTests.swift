@@ -108,13 +108,289 @@ struct AuthorFeedbackCoordinatorTests {
         }
     }
 
+    @Test(arguments: ["none", "own", "other", "ownLaterPage", "ghost"])
+    func purelyInformationalThreadReceivesOneThumbsUpAndResolvesWithoutApproval(existingReaction: String) async throws {
+        try await withFixture { fixture in
+            let thread = #"{"id":"thread-a","notes":[{"id":10,"author":{"id":7,"username":"alice"},"system":false,"body":"The scoped error mapping looks good.","resolvable":true,"resolved":false}]}"#
+            try fixture.write("discussions.json", "[\(thread)]")
+            try fixture.write("resolved.json", thread.replacingOccurrences(of: "\"resolved\":false", with: "\"resolved\":true"))
+            try fixture.write("approvals.json", #"{"approved_by":[]}"#)
+            let ownAward = #"[{"id":40,"name":"thumbsup","user":{"id":3,"username":"me"}}]"#
+            let otherAward = #"[{"id":41,"name":"thumbsup","user":{"id":8,"username":"other"}}]"#
+            if existingReaction == "own" { try fixture.write("awards.json", ownAward) }
+            if existingReaction == "other" { try fixture.write("awards.json", otherAward) }
+            if existingReaction == "ghost" { try fixture.write("awards.json", #"[{"id":41,"name":"thumbsup","user":null}]"#) }
+            if existingReaction == "ownLaterPage" { try fixture.write("awards.json", otherAward + "\n" + ownAward) }
+            let coordinator = fixture.coordinator(assessment: .init(notes: [
+                .init(noteID: 10, state: .informational, reason: "A positive acknowledgement with no request or condition", informationalAcknowledgementSafe: true)
+            ]))
+            var requested: Set<Int> = []
+            coordinator.onNeedsWork = { _, notes, _ in requested = notes }
+            try await fixture.run(coordinator)
+            #expect(fixture.reactionPosts == (["own", "ownLaterPage"].contains(existingReaction) ? 0 : 1))
+            #expect(fixture.resolved)
+            let status = try #require(coordinator.status(projectID: 1, iid: 2))
+            #expect(status.phase == .complete)
+            #expect(status.acceptedReviewerIDs.isEmpty)
+            #expect(status.replyNoteIDs.isEmpty && requested.isEmpty)
+            #expect(!status.needsAttention)
+        }
+    }
+
+    @Test func resolvedInformationalHistoryReceivesNoNewReactionOrLiveAcknowledgementReads() async throws {
+        try await withFixture { fixture in
+            try fixture.write("discussions.json", #"[{"id":"thread-a","notes":[{"id":10,"author":{"id":7,"username":"alice"},"system":false,"body":"The mapping looks good.","resolvable":true,"resolved":true}]}]"#)
+            let coordinator = fixture.coordinator(assessment: .init(notes: [
+                .init(noteID: 10, state: .informational, reason: "A closed historical acknowledgement", informationalAcknowledgementSafe: true)
+            ]))
+            try await fixture.run(coordinator)
+            #expect(fixture.reactionPosts == 0 && fixture.awardReads == 0 && fixture.userReads == 0)
+            #expect(fixture.resolutionPosts == 0)
+        }
+    }
+
+    @Test func acknowledgedSummaryDoesNotRepeatAwardOrLiveAccountReadsAfterANewHead() async throws {
+        try await withFixture { fixture in
+            try fixture.write("discussions.json", #"[{"id":"summary","notes":[{"id":20,"author":{"id":7,"username":"alice"},"system":false,"body":"Review complete, all good.","resolvable":false}]}]"#)
+            let coordinator = fixture.coordinator(assessment: .init(notes: [
+                .init(noteID: 20, state: .informational, reason: "A pure review acknowledgement", informationalAcknowledgementSafe: true)
+            ]))
+            try await fixture.run(coordinator)
+            let reads = fixture.awardReads
+            let accounts = fixture.userReads
+            #expect(fixture.reactionPosts == 1 && reads == 2)
+            let updated = Fixture.request.replacingOccurrences(of: Fixture.sha, with: String(repeating: "b", count: 40))
+            try fixture.write("request.json", updated)
+            try await fixture.run(coordinator, requestJSON: updated)
+            #expect(fixture.reactionPosts == 1)
+            #expect(fixture.awardReads == reads && fixture.userReads == accounts)
+        }
+    }
+
+    @Test func freshInformationalWorkIsBoundedAndLaterCandidatesProgressOnNextProcess() async throws {
+        try await withFixture { fixture in
+            let ids = Array(20..<40)
+            let summaries = ids.map { id in
+                #"{"id":"summary-\#(id)","notes":[{"id":\#(id),"author":{"id":7,"username":"alice"},"system":false,"body":"Review section \#(id) looks good.","resolvable":false}]}"#
+            }
+            try fixture.write("discussions.json", "[" + summaries.joined(separator: ",") + "]")
+            let coordinator = fixture.coordinator(assessment: .init(notes: ids.map {
+                .init(noteID: $0, state: .informational, reason: "A pure positive review summary", informationalAcknowledgementSafe: true)
+            }))
+            try await fixture.run(coordinator)
+            #expect(fixture.reactionPosts == 4 && fixture.awardReads == 8)
+            #expect(fixture.userReads <= 4)
+            try fixture.start(coordinator)
+            let deadline = ContinuousClock.now + .seconds(15)
+            while fixture.awardReads < 16 && ContinuousClock.now < deadline { try await Task.sleep(for: .milliseconds(20)) }
+            #expect(fixture.reactionPosts == 8 && fixture.awardReads == 16)
+            #expect(fixture.userReads <= 8)
+        }
+    }
+
+    @Test func pureInformationalGeneralNoteReceivesReactionWithoutResolution() async throws {
+        try await withFixture { fixture in
+            try fixture.write("discussions.json", #"[{"id":"summary","notes":[{"id":20,"author":{"id":7,"username":"alice"},"system":false,"body":"Review complete, all good.","resolvable":false}]}]"#)
+            let coordinator = fixture.coordinator(assessment: .init(notes: [
+                .init(noteID: 20, state: .informational, reason: "A pure review acknowledgement", informationalAcknowledgementSafe: true)
+            ]))
+            try await fixture.run(coordinator)
+            #expect(fixture.reactionPosts == 1)
+            #expect(!fixture.resolved)
+            let status = try #require(coordinator.status(projectID: 1, iid: 2))
+            #expect(status.phase == .complete && !status.needsAttention)
+            #expect(status.acceptedReviewerIDs.isEmpty && status.replyNoteIDs.isEmpty)
+        }
+    }
+
+    @Test(arguments: ["GET", "POST"])
+    func failedReactionCannotSuppressIndependentFeedbackOrReplayOnEveryPoll(_ phase: String) async throws {
+        try await withFixture { fixture in
+            let praise = #"{"id":"thread-a","notes":[{"id":10,"author":{"id":7,"username":"alice"},"system":false,"body":"The scoped mapping looks good.","resolvable":true,"resolved":false}]}"#
+            try fixture.write("discussions.json", "[\(praise),\(Fixture.condition)]")
+            try fixture.write("resolved.json", praise.replacingOccurrences(of: "\"resolved\":false", with: "\"resolved\":true"))
+            try fixture.write(phase == "GET" ? "fail-award-read" : "fail-award", "yes")
+            let coordinator = fixture.coordinator(assessment: .init(notes: [
+                .init(noteID: 10, state: .informational, reason: "No remaining expectation in this thread", informationalAcknowledgementSafe: true),
+                .init(noteID: 20, state: .blocking, reason: "The independent rename still needs work")
+            ]))
+            var requested: Set<Int> = []
+            var dispatches = 0
+            coordinator.onNeedsWork = { _, notes, _ in requested.formUnion(notes); dispatches += 1 }
+            try await fixture.run(coordinator)
+            try fixture.start(coordinator)
+            let deadline = ContinuousClock.now + .seconds(15)
+            while dispatches < 2 && ContinuousClock.now < deadline { try await Task.sleep(for: .milliseconds(20)) }
+            #expect(dispatches == 2)
+            #expect(requested == [20])
+            #expect(fixture.reactionPosts == (phase == "GET" ? 0 : 1))
+            #expect(fixture.awardReads == 1)
+            #expect(fixture.resolved)
+            let status = try #require(coordinator.status(projectID: 1, iid: 2))
+            #expect(status.phase == .complete && status.followUpNoteIDs == [20])
+            #expect(!status.findings.contains { $0.id == 10 && $0.state == .needsVerification })
+        }
+    }
+
+    @Test(arguments: ["denied", "responseLostButClosed"])
+    func informationalResolutionFailureIsReconciledAndRemainsVisibleWhileFenced(_ scenario: String) async throws {
+        try await withFixture { fixture in
+            let praise = #"{"id":"thread-a","notes":[{"id":10,"author":{"id":7,"username":"alice"},"system":false,"body":"The scoped mapping looks good.","resolvable":true,"resolved":false}]}"#
+            try fixture.write("discussions.json", "[\(praise)]")
+            try fixture.write("resolved.json", praise.replacingOccurrences(of: "\"resolved\":false", with: "\"resolved\":true"))
+            try fixture.write(scenario == "denied" ? "deny-resolve" : "lose-resolve-response", "yes")
+            let coordinator = fixture.coordinator(assessment: .init(notes: [
+                .init(noteID: 10, state: .informational, reason: "No remaining expectation", informationalAcknowledgementSafe: true)
+            ]))
+            try await fixture.run(coordinator)
+            let status = try #require(coordinator.status(projectID: 1, iid: 2))
+            #expect(status.phase == .complete)
+            #expect(fixture.resolutionPosts == 1)
+            if scenario == "denied" {
+                #expect(!fixture.resolved)
+                #expect(status.needsAttention)
+                #expect(status.findings.first?.state == .needsVerification)
+                #expect(status.findings.first?.reason?.isEmpty == false)
+                #expect(!status.addressedNoteIDs.contains(10))
+            } else {
+                #expect(fixture.resolved)
+                #expect(!status.needsAttention && status.findings.isEmpty)
+            }
+            // The cached content is unchanged. A subsequent poll must not replay the PUT or
+            // replace a verified closure failure with a ready-to-resolve finding.
+            try fixture.start(coordinator)
+            try await Task.sleep(for: .milliseconds(250))
+            #expect(fixture.resolutionPosts == 1)
+            let refreshed = try #require(coordinator.status(projectID: 1, iid: 2))
+            #expect(refreshed.needsAttention == (scenario == "denied"))
+            #expect(refreshed.findings.first?.state == (scenario == "denied" ? .needsVerification : nil))
+            if scenario == "denied" {
+                try FileManager.default.removeItem(at: fixture.directory.appending(path: "deny-resolve"))
+                coordinator.invalidate(projectID: 1, iid: 2)
+                try await fixture.run(coordinator)
+                #expect(fixture.resolutionPosts == 2 && fixture.resolved)
+                #expect(coordinator.status(projectID: 1, iid: 2)?.needsAttention == false)
+            }
+        }
+    }
+
+    @Test(arguments: ["head", "otherThread"])
+    func unrelatedRevisionChangesDoNotReplayAFailedResolution(_ change: String) async throws {
+        try await withFixture { fixture in
+            let praise = #"{"id":"thread-a","notes":[{"id":10,"author":{"id":7,"username":"alice"},"system":false,"body":"The scoped mapping looks good.","resolvable":true,"resolved":false}]}"#
+            try fixture.write("discussions.json", "[\(praise),\(Fixture.condition)]")
+            try fixture.write("deny-resolve", "yes")
+            let coordinator = fixture.coordinator(assessment: .init(notes: [
+                .init(noteID: 10, state: .informational, reason: "No remaining expectation in this thread", informationalAcknowledgementSafe: true),
+                .init(noteID: 20, state: .blocking, reason: "The independent rename remains outstanding")
+            ]))
+            try await fixture.run(coordinator)
+            #expect(fixture.resolutionPosts == 1)
+            #expect(coordinator.status(projectID: 1, iid: 2)?.findings.first?.state == .needsVerification)
+            let updated = change == "head" ? Fixture.request.replacingOccurrences(of: Fixture.sha, with: String(repeating: "b", count: 40)) : Fixture.request
+            try fixture.write("request.json", updated)
+            if change == "otherThread" {
+                try fixture.write("discussions.json", "[\(praise),\(Fixture.condition.replacingOccurrences(of: "rename X", with: "rename Y"))]")
+            }
+            try await fixture.run(coordinator, requestJSON: updated)
+            #expect(fixture.resolutionPosts == 1)
+            #expect(coordinator.status(projectID: 1, iid: 2)?.findings.first?.state == .needsVerification)
+            // A real edit of the target thread permits a newly assessed attempt.
+            let editedPraise = praise.replacingOccurrences(of: "mapping looks good.", with: "mapping and scope look good.")
+            try fixture.write("discussions.json", "[\(editedPraise),\(Fixture.condition)]")
+            try fixture.write("resolved.json", editedPraise.replacingOccurrences(of: "\"resolved\":false", with: "\"resolved\":true"))
+            try FileManager.default.removeItem(at: fixture.directory.appending(path: "deny-resolve"))
+            try await fixture.run(coordinator, requestJSON: updated)
+            #expect(fixture.resolutionPosts == 2 && fixture.resolved)
+        }
+    }
+
+    @Test func validatedResolutionDoesNotBecomeAFailureWhenItsAdditionalReadFails() async throws {
+        try await withFixture { fixture in
+            let praise = #"{"id":"thread-a","notes":[{"id":10,"author":{"id":7,"username":"alice"},"system":false,"body":"The scoped mapping looks good.","resolvable":true,"resolved":false}]}"#
+            try fixture.write("discussions.json", "[\(praise)]")
+            try fixture.write("resolved.json", praise.replacingOccurrences(of: "\"resolved\":false", with: "\"resolved\":true"))
+            try fixture.write("fail-discussions-after-resolution", "yes")
+            let coordinator = fixture.coordinator(assessment: .init(notes: [
+                .init(noteID: 10, state: .informational, reason: "No remaining expectation", informationalAcknowledgementSafe: true)
+            ]))
+            try await fixture.run(coordinator)
+            let status = try #require(coordinator.status(projectID: 1, iid: 2))
+            #expect(fixture.resolutionPosts == 1 && fixture.resolved)
+            #expect(status.phase == .complete && !status.needsAttention)
+            #expect(status.findings.isEmpty)
+        }
+    }
+
+    @Test func editedThreadAfterAwardLookupCannotReceiveReaction() async throws {
+        try await withFixture { fixture in
+            let thread = #"[{"id":"thread-a","notes":[{"id":10,"author":{"id":7,"username":"alice"},"system":false,"body":"Looks good.","resolvable":true,"resolved":false}]}]"#
+            try fixture.write("discussions.json", thread)
+            try fixture.write("changed-discussions.json", thread.replacingOccurrences(of: "Looks good.", with: "Please also add coverage."))
+            try fixture.write("change-after-award-read", "yes")
+            let coordinator = fixture.coordinator(assessment: .init(notes: [
+                .init(noteID: 10, state: .informational, reason: "No request or condition", informationalAcknowledgementSafe: true)
+            ]))
+            try await fixture.run(coordinator)
+            #expect(fixture.reactionPosts == 0 && !fixture.resolved)
+            #expect(coordinator.status(projectID: 1, iid: 2)?.phase != .complete)
+        }
+    }
+
+    @Test(arguments: ["draftMR", "pendingDraft", "disabled", "head", "account", "comment"])
+    func informationalAcknowledgementPreservesPolicyAndFreshEvidenceGuards(_ scenario: String) async throws {
+        try await withFixture { fixture in
+            let thread = #"[{"id":"thread-a","notes":[{"id":10,"author":{"id":7,"username":"alice"},"system":false,"body":"Looks good.","resolvable":true,"resolved":false}]}]"#
+            try fixture.write("discussions.json", thread)
+            let request = scenario == "draftMR" ? Fixture.request.replacingOccurrences(of: "\"draft\":false", with: "\"draft\":true") : Fixture.request
+            try fixture.write("request.json", request)
+            let drafts = scenario == "pendingDraft" ? 1 : 0
+            if drafts > 0 { try fixture.write("drafts.json", #"[{"id":30,"author_id":3,"note":"Keep my draft"}]"#) }
+            if scenario == "disabled" {
+                fixture.settings.automation.autoResolveAcceptedFeedback = false
+                fixture.settings.automation.authorFeedback.isEnabled = true
+            }
+            let coordinator = fixture.coordinator(assessment: .init(notes: [
+                .init(noteID: 10, state: .informational, reason: "A positive acknowledgement", informationalAcknowledgementSafe: true)
+            ]), duringVerification: {
+                do {
+                    switch scenario {
+                    case "head": try fixture.write("request.json", Fixture.request.replacingOccurrences(of: Fixture.sha, with: String(repeating: "b", count: 40)))
+                    case "account": try fixture.write("user.json", #"{"id":99,"username":"me"}"#)
+                    case "comment": try fixture.write("discussions.json", thread.replacingOccurrences(of: "Looks good.", with: "Please add a test first."))
+                    default: break
+                    }
+                } catch { Issue.record(error) }
+            })
+            try await fixture.run(coordinator, requestJSON: request, drafts: drafts)
+            #expect(fixture.reactionPosts == 0)
+            #expect(!fixture.resolved)
+        }
+    }
+
+    @Test func informationalThreadEditedAfterReactionCannotBeResolved() async throws {
+        try await withFixture { fixture in
+            let thread = #"{"id":"thread-a","notes":[{"id":10,"author":{"id":7,"username":"alice"},"system":false,"body":"Looks good.","resolvable":true,"resolved":false}]}"#
+            try fixture.write("discussions.json", "[\(thread)]")
+            try fixture.write("changed-discussions.json", "[\(thread.replacingOccurrences(of: "Looks good.", with: "Please also add coverage."))]")
+            try fixture.write("change-after-award", "yes")
+            let coordinator = fixture.coordinator(assessment: .init(notes: [
+                .init(noteID: 10, state: .informational, reason: "No request or condition", informationalAcknowledgementSafe: true)
+            ]))
+            try await fixture.run(coordinator)
+            #expect(fixture.reactionPosts == 1)
+            #expect(!fixture.resolved)
+            #expect(coordinator.status(projectID: 1, iid: 2)?.phase != .complete)
+        }
+    }
+
     @Test(arguments: [ReReviewAssessment.Note.State.blocking, .uncertain])
     func informationalRootDoesNotHideAnActionableChild(state: ReReviewAssessment.Note.State) async throws {
         try await withFixture { fixture in
             try fixture.write("approvals.json", #"{"approved_by":[]}"#)
             try fixture.write("discussions.json", #"[{"id":"thread-a","notes":[{"id":10,"author":{"id":7,"username":"alice"},"system":false,"body":"Positive acknowledgement","resolvable":true,"resolved":false},{"id":20,"author":{"id":8,"username":"bob"},"system":false,"body":"One correction still needs work","resolvable":false}]}]"#)
             let coordinator = fixture.coordinator(assessment: .init(notes: [
-                .init(noteID: 10, state: .informational, reason: "No action requested"),
+                .init(noteID: 10, state: .informational, reason: "No action requested", informationalAcknowledgementSafe: true),
                 .init(noteID: 20, state: state, reason: "Remaining expectation needs work or verification")
             ]))
             var requested: Set<Int> = []
@@ -127,6 +403,7 @@ struct AuthorFeedbackCoordinatorTests {
             #expect(status.findings.first?.state == .needsChanges)
             #expect(status.findings.allSatisfy { !$0.canResolve })
             #expect(!fixture.resolved)
+            #expect(fixture.reactionPosts == 0)
         }
     }
 
@@ -410,6 +687,8 @@ struct AuthorFeedbackCoordinatorTests {
             try await fixture.run(coordinator)
             #expect(fixture.verified)
             #expect(requested.isEmpty)
+            #expect(fixture.reactionPosts == 0)
+            #expect(!fixture.resolved)
             #expect(coordinator.status(projectID: 1, iid: 2)?.phase == .complete)
             #expect(coordinator.status(projectID: 1, iid: 2)?.needsAttention == false)
         }
@@ -531,6 +810,13 @@ struct AuthorFeedbackCoordinatorTests {
         let glab: GlabService
         var verified = false
         var inputs: [ReReviewVerifier.Input] = []
+        var reactionPosts: Int { count("reaction-posts") }
+        var awardReads: Int { count("award-reads") }
+        var userReads: Int { count("user-reads") }
+        var resolutionPosts: Int { count("resolution-posts") }
+        private func count(_ name: String) -> Int {
+            (try? String(contentsOf: directory.appending(path: name), encoding: .utf8).split(separator: "\n").count) ?? 0
+        }
         var resolved: Bool { FileManager.default.fileExists(atPath: directory.appending(path: "resolved").path) }
 
         init() throws {
@@ -550,6 +836,7 @@ struct AuthorFeedbackCoordinatorTests {
             try write("discussions.json", "[\(Self.thread)]")
             try write("resolved.json", Self.thread.replacingOccurrences(of: "\"resolved\":false", with: "\"resolved\":true"))
             try write("drafts.json", "[]")
+            try write("awards.json", "[]")
             try write("glab", """
                 #!/bin/sh
                 set -eu
@@ -558,8 +845,26 @@ struct AuthorFeedbackCoordinatorTests {
                 test "$3" = --hostname
                 test "$4" = \(Self.host)
                 case "$2" in
-                  /user) cat user.json ;;
+                  /user) printf 'user\\n' >> user-reads; cat user.json ;;
                   /projects/1/merge_requests/2) cat request.json ;;
+                  */award_emoji*)
+                    note_path="${2%/award_emoji*}"
+                    note_id="${note_path##*/}"
+                    award_file="awards-$note_id.json"
+                    if [ "${5-}" = --method ]; then
+                      test "$5" = --method
+                      test "$6" = POST
+                      printf 'post\\n' >> reaction-posts
+                      if [ -e fail-award ]; then printf '%s' '403 Forbidden' >&2; exit 1; fi
+                      printf '%s' '{"id":40,"name":"thumbsup","user":{"id":3,"username":"me"}}'
+                      printf '%s' '[{"id":40,"name":"thumbsup","user":{"id":3,"username":"me"}}]' > "$award_file"
+                      if [ -e change-after-award ]; then cp changed-discussions.json discussions.json; fi
+                    else
+                      printf 'get\\n' >> award-reads
+                      if [ -e fail-award-read ]; then printf '%s' '403 Forbidden' >&2; exit 1; fi
+                      if [ -e "$award_file" ]; then cat "$award_file"; else cat awards.json; fi
+                      if [ -e change-after-award-read ]; then cp changed-discussions.json discussions.json; fi
+                    fi ;;
                   */raw_diffs) printf '%s' 'diff --git a/A b/A' ;;
                   */approvals)
                     if [ -e approvals-read ] && [ -e withdraw-approval ]; then
@@ -568,11 +873,15 @@ struct AuthorFeedbackCoordinatorTests {
                     touch approvals-read ;;
                   */draft_notes*) cat drafts.json ;;
                   */discussions\\?*)
-                    if [ -e resolved ]; then printf '['; cat resolved.json; printf ']';
+                    if [ -e resolved ] && [ -e fail-discussions-after-resolution ]; then printf '%s' '503 unavailable' >&2; exit 1; fi
+                    if [ -e resolved ]; then sed 's/"resolved":false/"resolved":true/g' discussions.json;
                     else cat discussions.json; fi ;;
                   */discussions/thread-a)
                     test "$*" = 'api /projects/1/merge_requests/2/discussions/thread-a --hostname \(Self.host) --method PUT --field resolved=true'
+                    printf 'put\\n' >> resolution-posts
+                    if [ -e deny-resolve ]; then printf '%s' '403 Forbidden' >&2; exit 1; fi
                     touch resolved
+                    if [ -e lose-resolve-response ]; then printf '%s' 'response lost' >&2; exit 1; fi
                     cat resolved.json ;;
                   *) printf '%s' "Unexpected glab command: $*" >&2; exit 100 ;;
                 esac
@@ -599,7 +908,7 @@ struct AuthorFeedbackCoordinatorTests {
         func run(_ coordinator: AuthorFeedbackCoordinator, initialDiscussions: [GitLabMergeRequestDiscussion]? = nil,
                  requestJSON: String = Fixture.request, drafts: Int = 0) async throws {
             try start(coordinator, initialDiscussions: initialDiscussions, requestJSON: requestJSON, drafts: drafts)
-            let deadline = ContinuousClock.now + .seconds(5)
+            let deadline = ContinuousClock.now + .seconds(15)
             while ContinuousClock.now < deadline {
                 if let phase = coordinator.status(projectID: 1, iid: 2)?.phase, phase == .complete || phase == .failed || phase == .waitingPublication { return }
                 if verified && coordinator.status(projectID: 1, iid: 2) == nil { return }
@@ -615,7 +924,9 @@ struct AuthorFeedbackCoordinatorTests {
         }
 
         func discussions() throws -> [GitLabMergeRequestDiscussion] {
-            try JSONDecoder().decode([GitLabMergeRequestDiscussion].self, from: Data(contentsOf: directory.appending(path: "discussions.json")))
+            var json = try String(contentsOf: directory.appending(path: "discussions.json"), encoding: .utf8)
+            if resolved { json = json.replacingOccurrences(of: "\"resolved\":false", with: "\"resolved\":true") }
+            return try JSONDecoder().decode([GitLabMergeRequestDiscussion].self, from: Data(json.utf8))
         }
 
         func write(_ name: String, _ content: String) throws { try Data(content.utf8).write(to: directory.appending(path: name)) }
