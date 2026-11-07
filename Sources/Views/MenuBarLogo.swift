@@ -3,7 +3,14 @@ import AppKit
 /// A scalable, single-color version of the app icon's three linked branch ends.
 @MainActor
 enum MenuBarLogo {
+    private static let neutralImage = makeImage(needsAttention: false)
+    private static let attentionImage = makeImage(needsAttention: true)
+
     static func image(needsAttention: Bool) -> NSImage {
+        needsAttention ? attentionImage : neutralImage
+    }
+
+    private static func makeImage(needsAttention: Bool) -> NSImage {
         let image = NSImage(size: NSSize(width: 18, height: 18), flipped: false) { _ in
             guard let context = NSGraphicsContext.current?.cgContext else { return false }
             let color = (needsAttention ? NSColor.systemOrange : NSColor.labelColor).withAlphaComponent(1)

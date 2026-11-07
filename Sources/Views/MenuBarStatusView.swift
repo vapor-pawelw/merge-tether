@@ -18,15 +18,13 @@ struct MenuBarStatusLabel: View {
     let monitor: TodoMonitorService
     @Environment(\.openWindow) private var openWindow
 
-    private var status: LocalizedStringResource {
-        monitor.userAttention.hasAttention
-            ? .MenuBar.menuBarAttention(monitor.userAttention.count)
-            : .MenuBar.menuBarClear
-    }
-
     var body: some View {
-        Image(nsImage: MenuBarLogo.image(needsAttention: monitor.userAttention.hasAttention))
-            .renderingMode(monitor.userAttention.hasAttention ? .original : .template)
+        let attention = monitor.userAttention
+        let status: LocalizedStringResource = attention.hasAttention
+            ? .MenuBar.menuBarAttention(attention.count)
+            : .MenuBar.menuBarClear
+        Image(nsImage: MenuBarLogo.image(needsAttention: attention.hasAttention))
+            .renderingMode(attention.hasAttention ? .original : .template)
             .accessibilityLabel(Text(.MenuBar.menuBarTitle))
             .accessibilityValue(Text(status))
             .help(Text(status))

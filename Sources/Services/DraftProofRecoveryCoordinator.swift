@@ -69,8 +69,9 @@ final class DraftProofRecoveryCoordinator {
 
     func presentationIsCurrent(request: GitLabMergeRequest, host: String, fingerprint: String, configuration: AutomationSettings) -> Bool {
         let work = AssistantAutomationRunner.MergeRequestWork(host: host, projectID: request.projectID, iid: request.iid)
+        guard let context = presentationContexts[work] else { return false }
         return configuration == settings.automation && configuration.allowFollowUpPush && configuration.publicationMode != .manual
-            && presentationContexts[work] == presentationContext(request: request, fingerprint: fingerprint, configuration: configuration)
+            && context == presentationContext(request: request, fingerprint: fingerprint, configuration: configuration)
     }
 
     private func presentationContext(request: GitLabMergeRequest, fingerprint: String, configuration: AutomationSettings) -> String? {

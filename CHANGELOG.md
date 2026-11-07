@@ -75,6 +75,7 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 
 ### Fixed
 
+- Reduce repeated work when updating the menu-bar attention indicator.
 - Keep active verification in progress and prevent reconciled historical failures from replacing current draft actions on Mac or iPhone.
 - Keep rejected reply checks stable across restarts and partial publication, and retain owed author replies on Draft MR cards.
 - Recover unlinked finished CI claims through one separately verified assessment while preserving original history and excluding recorded execution effects.
