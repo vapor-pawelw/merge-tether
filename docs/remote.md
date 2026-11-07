@@ -33,6 +33,10 @@ in the background and refresh every 25 seconds while foregrounded, renewing soon
 when needed to keep the host status current. The connection label remains stable
 during an in-flight refresh; remote writes still require an unexpired snapshot.
 
+The Mac reads saved pairing from Keychain in the background. A system permission
+prompt does not prevent the main window or MR automation from starting. A late
+read cannot override pairing details you edit or an explicit enable/disable action.
+
 The QR contains the relay address, an operator invitation and a random 256-bit
 pairing secret. HKDF derives directional AES-256-GCM keys; the room is a hash of the
 secret. The relay sees IP addresses, timing, room IDs and ciphertext, but cannot

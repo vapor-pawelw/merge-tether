@@ -10,34 +10,74 @@ import MergeTetherRemote
     private(set) var connected = false
     private let monitor: TodoMonitorService
     private let store: RemotePairingStore
+    private let savePairing: (RemotePairing) throws -> Void
+    private let removePairing: () throws -> Void
+    private let connectPairing: ((RemotePairing) -> Void)?
+    @ObservationIgnored private(set) var startupLoadTask: Task<Void, Never>?
+    private var startupGeneration = UUID()
     private var connection: RemoteConnection?
     private var hostSession = UUID()
     private var account = ""
     private var accountRevision: UInt64?
     private var gate = RemoteCommandGate()
 
-    init(monitor: TodoMonitorService) {
+    init(monitor: TodoMonitorService,
+         loadPairing: (@Sendable () async throws -> RemotePairing?)? = nil,
+         savePairing: ((RemotePairing) throws -> Void)? = nil,
+         removePairing: (() throws -> Void)? = nil,
+         connectPairing: ((RemotePairing) -> Void)? = nil) {
         self.monitor = monitor
-        store = RemotePairingStore(service: (Bundle.main.bundleIdentifier ?? "MergeTether") + ".remote")
-        do {
-            pairing = try store.load()
-            if let pairing { origin = pairing.origin.absoluteString; invitation = pairing.access; start(pairing) }
-            else { loadLocalOperatorSetup() }
-        } catch { failed = true }
+        let store = RemotePairingStore(service: (Bundle.main.bundleIdentifier ?? "MergeTether") + ".remote")
+        self.store = store
+        self.savePairing = savePairing ?? { try store.save($0) }
+        self.removePairing = removePairing ?? { try store.remove() }
+        self.connectPairing = connectPairing
+        let load: @Sendable () async throws -> RemotePairing? = loadPairing ?? { try store.load() }
+        loadStoredPairing(using: load)
+    }
+
+    private func loadStoredPairing(using load: @escaping @Sendable () async throws -> RemotePairing?) {
+        let generation = startupGeneration
+        let initialOrigin = origin, initialInvitation = invitation
+        // Keychain may wait for user consent. Optional companion setup must never
+        // hold the main actor while the Mac board and automation are starting.
+        let read = Task.detached(priority: .utility) { try await load() }
+        startupLoadTask = Task { [weak self] in
+            do {
+                let loaded = try await read.value
+                guard !Task.isCancelled, let self,
+                      startupGeneration == generation, origin == initialOrigin, invitation == initialInvitation else { return }
+                pairing = loaded
+                if let loaded {
+                    origin = loaded.origin.absoluteString; invitation = loaded.access
+                    activatePairing(loaded)
+                } else { loadLocalOperatorSetup() }
+            } catch {
+                guard !Task.isCancelled, let self,
+                      startupGeneration == generation, origin == initialOrigin, invitation == initialInvitation else { return }
+                failed = true
+            }
+        }
     }
 
     func enable() {
+        startupGeneration = UUID(); startupLoadTask?.cancel()
         do {
             guard let url = URL(string: origin.trimmingCharacters(in: .whitespacesAndNewlines)) else { throw RemoteProtocolError.invalid }
             let pair = try RemotePairing.generate(origin: url, access: invitation.trimmingCharacters(in: .whitespacesAndNewlines))
-            try store.save(pair)
+            try savePairing(pair)
             connection?.stop(); connection = nil
-            pairing = pair; start(pair)
+            pairing = pair; activatePairing(pair)
         } catch { failed = true }
     }
     func disable() {
-        do { try store.remove() } catch { failed = true; return }
+        startupGeneration = UUID(); startupLoadTask?.cancel()
+        do { try removePairing() } catch { failed = true; return }
         connection?.stop(); connection = nil; pairing = nil; connected = false
+    }
+    private func activatePairing(_ pair: RemotePairing) {
+        if let connectPairing { connectPairing(pair); failed = false }
+        else { start(pair) }
     }
     private func start(_ pair: RemotePairing) {
         do {
