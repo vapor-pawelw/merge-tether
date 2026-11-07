@@ -62,7 +62,7 @@ struct GitLabTodosApp: App {
         }
         .menuBarExtraStyle(.menu)
 
-        Window(Text(.Remote.remotePair), id: "remote-access") {
+        Window(Text(.Remote.remoteMacPairPhone), id: "remote-access") {
             RemoteAccessView(remote: appDelegate.remote)
         }
         .windowResizability(.contentSize)

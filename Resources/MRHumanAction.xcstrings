@@ -441,6 +441,28 @@
           }
         }
       }
+    },
+    "mrHumanAction.actionRetryDraftVerification": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Verify drafts again"
+          }
+        }
+      }
+    },
+    "mrHumanAction.draftVerificationFailure": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Draft verification needs another check before publication."
+          }
+        }
+      }
     }
   }
 }

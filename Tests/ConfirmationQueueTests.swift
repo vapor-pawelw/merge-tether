@@ -279,6 +279,7 @@ import Testing
                     note.id.map { .init(noteID: $0, state: .addressed, reason: "Verified fixture correction") }
                 })
             },
+            verifyDraftProofRecovery: { _, _, _ in throw DraftProofRecoveryVerifier.Failure.failed },
             assessAIOrigin: assessAIOrigin ?? { _, notes, _, _ in
                 .init(notes: notes.compactMap { note in note.id.map {
                     .init(noteID: $0, classification: .uncertain, confidence: .uncertain, evidence: "No AI provenance in this fixture.")
@@ -1620,6 +1621,29 @@ import Testing
         #expect(harness.log("publish.log").isEmpty)
         #expect(harness.log("selected.log").isEmpty)
         #expect(harness.monitor.currentItems.first?.draftCount == 2)
+    }
+
+    @Test func aVerifiedAuthorReplyIsEligibleAndPublishesWhileAnUnverifiedSiblingStaysPrivate() async throws {
+        let harness = try makeHarness(assistantWorked: true, authored: true)
+        defer { harness.cleanUp() }
+        harness.settings.automation.publicationMode = .aiReplies
+        try harness.write("drafts.json", #"[{"id":11,"author_id":3,"note":"Unproven sibling","discussion_id":"abc"},{"id":12,"author_id":3,"note":"Verified sibling","discussion_id":"abc"}]"#)
+        try harness.write("discussions.json", duoDiscussion)
+        try harness.verifyFollowUpDrafts()
+        let path = FollowUpVerificationStore.recordURL(kind: "follow-up-verifications",
+            work: .init(host: host, projectID: 1, iid: 2), username: "me", in: harness.folder)
+        var record = try #require(JSONSerialization.jsonObject(with: Data(contentsOf: path)) as? [String: Any])
+        record["drafts"] = (record["drafts"] as? [[String: Any]])?.filter { $0["id"] as? Int == 12 }
+        try JSONSerialization.data(withJSONObject: record).write(to: path)
+        try await harness.poll()
+        let preview = try #require(harness.monitor.currentOpenItems.first)
+        #expect(preview.awaitingRemoteVerification)
+        #expect(preview.requiresDiscussionRecheck)
+        #expect(preview.automaticDraftIDs == [12])
+        try await harness.poll()
+        #expect(harness.log("selected.log").contains("/draft_notes/12/publish"))
+        #expect(!harness.log("selected.log").contains("/draft_notes/11/publish"))
+        #expect(harness.monitor.currentOpenItems.first?.drafts.compactMap(\.id) == [11])
     }
 
     @Test func authorFollowUpPushOffBlocksEvenPreviouslyVerifiedDrafts() async throws {

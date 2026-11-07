@@ -14,6 +14,10 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 
 ### Added
 
+- Recover known app-created reply drafts with fresh verification, and offer a direct retry when verification cannot finish.
+- Automatically track eligible Draft review requests until ready and assess informational mentions before acknowledging them.
+- Give headless workers private temporary directories and allow one fresh, guarded follow-up after a proven local temporary-file permission failure.
+
 - Select individual private drafts for manual publication, with a persistent selection action while reading threads and unchanged Publish all support.
 
 - Add an expandable per-MR automation event log with attempt timestamps, application decisions, exact failure reasons and optional raw diagnostics.
@@ -71,8 +75,13 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 
 ### Fixed
 
+- Keep active verification in progress and prevent reconciled historical failures from replacing current draft actions on Mac or iPhone.
+- Keep rejected reply checks stable across restarts and partial publication, and retain owed author replies on Draft MR cards.
+- Recover unlinked finished CI claims through one separately verified assessment while preserving original history and excluding recorded execution effects.
 - Keep optional iOS pairing reads off the main thread so a Keychain prompt cannot freeze Mac startup or automation.
 - Let Full automation claim unowned failed pipelines, including earlier failures skipped without starting work, validate merged-result commits against source and target parents, and request fresh CI when the target has advanced.
+- Reconcile completed follow-ups from current feedback and published replies, including deferred Draft MRs, while retaining historical diagnostics.
+
 - Keep reviewer waiting local: never create reminder comments or drafts, migrate legacy agent rules, and retire queued reminder jobs.
 - Attribute background reconciliation to automation independently of how an earlier worker was launched.
 

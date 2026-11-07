@@ -4,8 +4,8 @@ import Testing
 
 @MainActor
 struct ReviewingContextTests {
-    private func request() throws -> GitLabMergeRequest {
-        try JSONDecoder().decode(GitLabMergeRequest.self, from: Data(#"{"project_id":1,"iid":2,"author":{"id":7,"username":"alice","name":"Alice Author"},"title":"Example","web_url":"https://gitlab.example.test/group/repo/-/merge_requests/2","state":"opened","draft":false,"sha":"abc","source_branch":"feature","target_branch":"main","labels":[]}"#.utf8))
+    private func request(draft: Bool = false) throws -> GitLabMergeRequest {
+        try JSONDecoder().decode(GitLabMergeRequest.self, from: Data(#"{"project_id":1,"iid":2,"author":{"id":7,"username":"alice","name":"Alice Author"},"title":"Example","web_url":"https://gitlab.example.test/group/repo/-/merge_requests/2","state":"opened","draft":\#(draft),"sha":"abc","source_branch":"feature","target_branch":"main","labels":[]}"#.utf8))
     }
     private func item() throws -> MergeRequestAttentionMonitor.Item {
         let request = try request()
@@ -24,6 +24,23 @@ struct ReviewingContextTests {
             work: .init(host: "gitlab.example.test", projectID: 1, iid: 2), username: "me", workspace: "", access: .gitLabRead),
               title: "Review", prompt: "", createdAt: Date(), allowsPush: false,
               execution: .init(state: state), workflow: .review, expectedHeadSHA: "abc")
+    }
+
+    @Test func adoptedDraftWaitsNeutrallyWithoutAReviewOrSetupAction() throws {
+        let request = try request(draft: true)
+        var item = try item(); item.mergeRequest = request
+        item.reviewingActivity = ReviewingActivity(discussions: [], reviewerID: 3, authorID: 7)
+        let intent = MRTodoIntent(id: UUID(), target: .init(host: "gitlab.example.test", username: "me", projectID: 1, iid: 2),
+            kind: .review, state: .pending, todoIDs: [5], noteIDs: [], sourceEvents: [], request: request,
+            headSHA: "abc", updatedAt: Date())
+        let snapshot = row(item, intents: [intent])
+        let context = ReviewingContext(row: snapshot, assistantReady: false)
+        #expect(!snapshot.needsAttention)
+        #expect(MRHumanAction(row: snapshot, assistantReady: false) == nil)
+        #expect(context.nextStep == .monitoring)
+        #expect(context.actionLabel == nil)
+        #expect(!context.isAutomaticProcessing)
+        #expect(String(localized: context.nextStepMessage) == "No action needed. Waiting for the author to mark this merge request ready.")
     }
 
     @Test func unknownActivityDoesNotInventAFirstReviewOrARecentlyAddedReceipt() throws {

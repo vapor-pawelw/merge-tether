@@ -4,6 +4,76 @@ import MergeTetherRemote
 @testable import GitLabTodos
 
 @MainActor @Suite struct RemoteBoardAdapterTests {
+    @Test(arguments: [AssistantJobExecution.State.failed, .blocked], ["completed", "unrelatedCompleted", "independentFailure"])
+    func phoneActionsRespectCompletedHistoricalJobs(state: AssistantJobExecution.State, scenario: String) async throws {
+        let directory = FileManager.default.temporaryDirectory.appending(path: UUID().uuidString)
+        try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: false)
+        defer { try? FileManager.default.removeItem(at: directory) }
+        let suite = "RemoteHistoricalJobTests.\(UUID())"
+        let defaults = try #require(UserDefaults(suiteName: suite))
+        defer { defaults.removePersistentDomain(forName: suite) }
+        let settings = SettingsManager(defaults: defaults)
+        settings.automation.applyPreset(.manual, for: .codex)
+        settings.onboardingCompleted = false
+        let requestJSON = #"{"project_id":1,"iid":2,"author":{"id":3,"username":"me","name":"Me"},"title":"Example","web_url":"https://gitlab.example.org/group/project/-/merge_requests/2","state":"opened","draft":false,"sha":"aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa","source_branch":"feature","target_branch":"main","labels":[],"has_conflicts":false,"blocking_discussions_resolved":true}"#
+        let request = try JSONDecoder().decode(GitLabMergeRequest.self, from: Data(requestJSON.utf8))
+        try Data(requestJSON.utf8).write(to: directory.appending(path: "mr.json"))
+        let drafts = scenario == "independentFailure" ? "[]" : #"[{"id":11,"author_id":3,"note":"My manual draft"}]"#
+        try Data(drafts.utf8).write(to: directory.appending(path: "drafts.json"))
+        let executable = directory.appending(path: "glab")
+        try Data("""
+            #!/bin/sh
+            root="${0%/*}"
+            case "$*" in
+              'config get host') printf '%s' 'gitlab.example.org' ;;
+              'auth status') printf '%s' 'Logged in to gitlab.example.org as me' >&2 ;;
+              'api /user '*) printf '%s' '{"id":3,"username":"me"}' ;;
+              'api /merge_requests?scope=created_by_me&'*) printf '['; cat "$root/mr.json"; printf ']' ;;
+              'api /projects/1/merge_requests/2 --hostname '*) cat "$root/mr.json" ;;
+              'api /projects/1/merge_requests/2/draft_notes?'*) cat "$root/drafts.json" ;;
+              *) printf '[]' ;;
+            esac
+            """.utf8).write(to: executable)
+        try FileManager.default.setAttributes([.posixPermissions: 0o700], ofItemAtPath: executable.path)
+        settings.glabPath = executable
+        settings.resolvedHost = "gitlab.example.org"
+        let work = AssistantAutomationRunner.MergeRequestWork(host: "gitlab.example.org", projectID: 1, iid: 2)
+        let job = AssistantAutomationRunner.Handoff(id: UUID(), key: .init(assistant: .codex, work: work,
+            username: "me", workspace: "", access: .gitLabRead), title: "Historical run", prompt: "Inspect",
+            createdAt: Date(), allowsPush: false, execution: .init(state: state, error: "Historical failure"),
+            taskPrompt: "Inspect", mergeRequestURL: request.webURL, expectedHeadSHA: request.sha)
+        settings.assistantHandoffs = [job]
+        let target = MRAutomationScope.Target(host: work.host, username: "me", projectID: 1, iid: 2)
+        settings.mrActionIntents = [.init(id: UUID(), target: target, kind: .pipeline, state: .completed,
+            todoIDs: [], noteIDs: [], sourceEvents: [], request: request, headSHA: request.sha!,
+            jobID: scenario == "unrelatedCompleted" ? UUID() : job.id, updatedAt: Date())]
+        if scenario == "independentFailure" {
+            settings.mrActionIntents.append(.init(id: UUID(), target: target, kind: .conflict, state: .failed,
+                todoIDs: [], noteIDs: [], sourceEvents: [], request: request, headSHA: request.sha!,
+                error: "Conflict verification failed", updatedAt: Date()))
+        }
+        let monitor = TodoMonitorService(settings: settings, glab: GlabService())
+        defer { monitor.stopTimer() }
+        await monitor.bootstrap()
+        monitor.attention.refresh(host: work.host, username: "me", todos: [])
+        let deadline = ContinuousClock.now + .seconds(5)
+        while monitor.attention.isLoading, ContinuousClock.now < deadline {
+            try await Task.sleep(for: .milliseconds(10))
+        }
+        try #require(!monitor.attention.isLoading && !monitor.attention.hasError)
+        let board = RemoteBoardAdapter.board(monitor: monitor, session: UUID(), account: "me@host")
+        #expect(board.partial == false)
+        let card = try #require(board.lanes.first { $0.id == .own }?.cards.first { $0.id == "mr:1:2" })
+        let expectedDestination: RemoteCardCTA.Destination = switch scenario {
+        case "completed": .drafts
+        case "unrelatedCompleted": .assistantRuns
+        default: monitor.availableAssistants.contains(settings.automation.assistant) ? .overview : .setup
+        }
+        #expect(card.needsAttention == true)
+        #expect(card.primaryCTA?.destination == expectedDestination)
+        #expect(card.actions.contains { $0.kind == .retryJob } == (scenario == "unrelatedCompleted"))
+    }
+
     func item() throws -> MergeRequestAttentionMonitor.Item {
         var item = MergeRequestAttentionMonitor.Item(id: .init(projectID: 1, iid: 2), title: "Fix a crash",
             url: URL(string: "https://gitlab.example.org/group/project/-/merge_requests/2")!)
@@ -183,6 +253,44 @@ import MergeTetherRemote
         #expect(context.nextStep == .runReview)
         let model = MRCardPresentation(row: row, reviewingContext: context, allowsRemoval: true, assistantReady: false)
         #expect(model.actionLabel.map { String(localized: $0) } == String(localized: .Board.boardCompactSetupCli))
+    }
+
+    @Test func sharedCardKeepsAnIndependentBlockedRunVisibleDuringDraftProofRecovery() throws {
+        var item = try item()
+        item.isAuthored = true
+        item.draftProofRecoveryChecking = true
+        item.authorFeedbackStatus = .init(head: item.mergeRequest?.sha ?? "head", fingerprint: "discussion", phase: .checking)
+        let job = AssistantAutomationRunner.Handoff(id: UUID(), key: .init(assistant: .codex,
+            work: .init(host: "gitlab.example.org", projectID: item.id.projectID, iid: item.id.iid),
+            username: "me", workspace: "", access: .gitLabRead), title: "Independent fix", prompt: "Fix",
+            createdAt: Date(), allowsPush: true, execution: .init(state: .blocked, blocker: "Tests could not run."),
+            taskPrompt: "Fix", mergeRequestURL: item.url, expectedHeadSHA: item.mergeRequest?.sha)
+        let row = MergeRequestBoardSnapshot.Row(item: item, latestJob: job, intents: [])
+        let model = MRCardPresentation(row: row, reviewingContext: ReviewingContext(row: row), allowsRemoval: false, assistantReady: true)
+        #expect(!model.busy)
+        #expect(model.humanAction?.kind == .blockedRun)
+        let phone = RemoteBoardAdapter.presentation(RemoteBoardAdapter.card(item, account: "me@host"), model: model)
+        #expect(phone.needsAttention == true)
+        #expect(phone.primaryCTA != nil)
+    }
+
+    @Test func pipelineRefreshShowsSharedProgressUntilANewerPipelineIsVisible() throws {
+        var item = try item()
+        item.isAuthored = true
+        item.drafts = []; item.draftCount = 0
+        item.failedPipeline = true
+        item.humanActionRequired = false
+        let row = MergeRequestBoardSnapshot.Row(item: item, latestJob: nil, intents: [])
+        let model = MRCardPresentation(row: row, reviewingContext: ReviewingContext(row: row),
+            allowsRemoval: false, assistantReady: true, automaticPipelineProgress: true)
+        #expect(model.busy && model.working)
+        #expect(model.status == String(localized: .Board.boardCompactWorking))
+        #expect(model.actionLabel == nil)
+        #expect(model.chips.map { String(localized: $0.title) }.contains(String(localized: .PipelineAutomation.pipelineHandling)))
+        #expect(!model.chips.map { String(localized: $0.title) }.contains(String(localized: .Board.boardCompactPipelineFailed)))
+        let phone = RemoteBoardAdapter.presentation(RemoteBoardAdapter.card(item, account: "me@host"), model: model)
+        #expect(phone.needsAttention == false && phone.primaryCTA == nil)
+        #expect(phone.presentation?.status == model.status)
     }
 
 }

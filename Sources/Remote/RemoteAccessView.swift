@@ -5,7 +5,7 @@ struct RemoteAccessView: View {
     @Bindable var remote: RemoteHostController
     var body: some View {
         VStack(alignment: .leading, spacing: 18) {
-            Label(.Remote.remotePair, systemImage: "iphone").font(.title2.bold())
+            Label(.Remote.remoteMacPairPhone, systemImage: "iphone").font(.title2.bold())
             if let pairing = remote.pairing {
                 Text(.Remote.remoteMacHelp).font(.callout).foregroundStyle(.secondary)
                 if let image = qr(pairing.deepLink.absoluteString) {

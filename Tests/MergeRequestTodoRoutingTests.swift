@@ -45,6 +45,8 @@ import Testing
         case "$2" in
           /user) printf '%s' '{"id":1,"username":"me"}' ;;
           */discussions*) cat "$root/discussions" ;;
+          /projects/7/pipelines/*) /usr/bin/python3 -c 'import json,sys; p=json.load(open(sys.argv[1]))["head_pipeline"]; p.setdefault("project_id",7); p.setdefault("ref","feature"); print(json.dumps(p))' "$root/mr" ;;
+          /projects/7/repository/branches/feature) /usr/bin/python3 -c 'import json,sys; print(json.dumps({"commit":{"id":json.load(open(sys.argv[1]))["sha"]}}))' "$root/mr" ;;
           */merge_requests/11)
             if [ -f "$root/pause-mr" ]; then
               touch "$root/mr-entered"
@@ -65,7 +67,7 @@ import Testing
         let request = """
         {"project_id":7,"iid":11,"author":{"id":\(id),"username":"\(author)","name":"Example"},
          "title":"Example MR","web_url":"https://gitlab.example.test/team/repo/-/merge_requests/11",
-         "state":"opened","sha":"\(String(repeating: "a", count: 40))","source_project_id":7,
+         "state":"opened","sha":"\(String(repeating: "a", count: 40))","source_project_id":7,"target_project_id":7,
          "source_branch":"feature","target_branch":"main","draft":false,"labels":[],"has_conflicts":false}
         """
         try request.write(to: root.appending(path: "mr"), atomically: true, encoding: .utf8)
@@ -92,6 +94,192 @@ import Testing
         let reply = withReply ? #",{"id":43,"author":{"id":1,"username":"me"},"system":false,"body":"Fixed with source and test evidence."}"# : ""
         try (#"[{"id":"d","notes":[{"id":42,"author":{"id":2,"username":"other"},"system":false,"resolvable":true,"resolved":false,"body":"Please fix this."}"#
             + reply + "]}]").write(to: fixture.root.appending(path: "discussions"), atomically: true, encoding: .utf8)
+    }
+
+    @Test func unboundDraftFollowUpReconcilesCurrentEvidenceWithoutRerunningWork() async throws {
+        let f = try fixture(owned: true); defer { f.cleanup() }
+        try completedFollowUp(f)
+        f.settings.mrActionIntents[0].jobID = nil
+        f.settings.mrActionIntents[0].state = .pending
+        let file = f.root.appending(path: "mr")
+        let text = try String(contentsOf: file, encoding: .utf8)
+        try text.replacingOccurrences(of: #""draft":false"#, with: #""draft":true"#)
+            .replacingOccurrences(of: String(repeating: "a", count: 40), with: String(repeating: "b", count: 40))
+            .write(to: file, atomically: true, encoding: .utf8)
+        var launches = 0
+        let router = MergeRequestTodoRouter(settings: f.settings, glab: f.glab, canAutomate: { true }, launcher: { _, _ in
+            launches += 1; return UUID()
+        })
+        router.followUpAssessment = { _, _ in .init(notes: [.init(noteID: 42, state: .addressed, reason: "Current code and published response verified.")]) }
+        await router.refreshCompletionEvidence(host: target.host, username: target.username)
+        #expect(f.settings.mrActionIntents[0].state == .completed)
+        #expect(f.settings.mrActionIntents[0].jobID == nil)
+        #expect(f.settings.assistantHandoffs.count == 1)
+        #expect(launches == 0)
+        #expect(!FileManager.default.fileExists(atPath: f.root.appending(path: "acks").path))
+    }
+
+    @Test func unboundFollowUpKeepsPendingWhenAddressedConcernStillNeedsAReply() async throws {
+        let f = try fixture(owned: true); defer { f.cleanup() }
+        try completedFollowUp(f, withReply: false)
+        f.settings.mrActionIntents[0].jobID = nil
+        f.settings.mrActionIntents[0].state = .pending
+        let router = MergeRequestTodoRouter(settings: f.settings, glab: f.glab, canAutomate: { false })
+        router.followUpAssessment = { _, _ in .init(notes: [.init(noteID: 42, state: .addressed, reason: "Code is fixed but no response exists.")]) }
+        await router.refreshCompletionEvidence(host: target.host, username: target.username)
+        #expect(f.settings.mrActionIntents[0].state == .pending)
+    }
+
+    @Test func unboundEarlierAttemptFailureReconcilesOnlyFromCurrentNoWorkEvidence() async throws {
+        let f = try fixture(owned: true); defer { f.cleanup() }
+        try completedFollowUp(f)
+        f.settings.mrActionIntents[0].jobID = nil
+        f.settings.mrActionIntents[0].state = .failed
+        f.settings.mrActionIntents[0].error = "This event was attempted earlier."
+        var launches = 0
+        let router = MergeRequestTodoRouter(settings: f.settings, glab: f.glab, canAutomate: { true }, launcher: { _, _ in
+            launches += 1; return UUID()
+        })
+        router.followUpAssessment = { _, _ in .init(notes: [.init(noteID: 42, state: .addressed, reason: "Current remote code and published author reply verified.")]) }
+        await router.refreshCompletionEvidence(host: target.host, username: target.username)
+        #expect(f.settings.mrActionIntents[0].state == .completed)
+        #expect(f.settings.mrActionIntents[0].jobID == nil)
+        #expect(f.settings.automationEvents.contains { $0.state == .failed && $0.message == "This event was attempted earlier." })
+        #expect(launches == 0)
+    }
+
+    @Test func unrelatedBlockingFeedbackDoesNotKeepAnAddressedSelectedIntentFailed() async throws {
+        let f = try fixture(owned: true); defer { f.cleanup() }
+        try completedFollowUp(f)
+        f.settings.mrActionIntents[0].jobID = nil
+        f.settings.mrActionIntents[0].state = .failed
+        f.settings.mrActionIntents[0].error = "Earlier attempt"
+        let file = f.root.appending(path: "discussions")
+        let text = try String(contentsOf: file, encoding: .utf8)
+        try text.replacingOccurrences(of: "]}]", with: #",{"id":44,"author":{"id":2,"username":"other"},"system":false,"resolvable":false,"body":"A separate concern remains."}]}]"#)
+            .write(to: file, atomically: true, encoding: .utf8)
+        let router = MergeRequestTodoRouter(settings: f.settings, glab: f.glab, canAutomate: { false })
+        router.followUpAssessment = { _, _ in .init(notes: [
+            .init(noteID: 42, state: .addressed, reason: "Selected concern and its published reply verified."),
+            .init(noteID: 44, state: .blocking, reason: "Separate concern remains unaddressed.")
+        ]) }
+        await router.refreshCompletionEvidence(host: target.host, username: target.username)
+        #expect(f.settings.mrActionIntents[0].state == .completed)
+        #expect(try String(contentsOf: file, encoding: .utf8).contains("A separate concern remains."))
+        #expect(!FileManager.default.fileExists(atPath: f.root.appending(path: "acks").path))
+    }
+
+    @Test func draftReviewRequestIsAdoptedThenStartsOnlyAfterReady() async throws {
+        let f = try fixture(); defer { f.cleanup() }
+        f.settings.automation.reviewRequested.isEnabled = true
+        let file = f.root.appending(path: "mr")
+        let ready = try String(contentsOf: file, encoding: .utf8)
+        try ready.replacingOccurrences(of: #""draft":false"#, with: #""draft":true"#)
+            .write(to: file, atomically: true, encoding: .utf8)
+        var launches = 0
+        let router = MergeRequestTodoRouter(settings: f.settings, glab: f.glab, canAutomate: { true }, launcher: { _, _ in
+            launches += 1; return UUID()
+        })
+        #expect(await router.process([todo()], host: target.host, username: target.username, managed: []) == [10])
+        #expect(f.settings.automation.scope[target] == .active)
+        #expect(f.settings.mrActionIntents.first?.state == .pending)
+        #expect(launches == 0)
+        try ready.write(to: file, atomically: true, encoding: .utf8)
+        _ = await router.process([], host: target.host, username: target.username, managed: [target])
+        #expect(launches == 1)
+        #expect(f.settings.mrActionIntents.first?.state == .running)
+    }
+
+    @Test func informationalMentionIsAcknowledgedWithoutAdoptingOrReviewingForeignDraft() async throws {
+        let f = try fixture(); defer { f.cleanup() }
+        let file = f.root.appending(path: "mr")
+        let text = try String(contentsOf: file, encoding: .utf8)
+        try text.replacingOccurrences(of: #""draft":false"#, with: #""draft":true"#)
+            .write(to: file, atomically: true, encoding: .utf8)
+        try #"[{"id":"d","notes":[{"id":42,"author":{"id":2,"username":"other"},"system":false,"body":"@me review is deferred until the author finishes this draft."}]}]"#
+            .write(to: f.root.appending(path: "discussions"), atomically: true, encoding: .utf8)
+        var launches = 0
+        let router = MergeRequestTodoRouter(settings: f.settings, glab: f.glab, canAutomate: { true }, launcher: { _, _ in
+            launches += 1; return UUID()
+        })
+        router.mentionDisposition = { request, discussions, user, noteID in
+            #expect(request.draft == true && user.username == "me")
+            #expect(discussions.flatMap(\.notes).contains { $0.id == noteID })
+            return .informational
+        }
+        let event = todo(action: .mentioned, linked: true)
+        #expect(await router.process([event], host: target.host, username: target.username, managed: []) == [event.id])
+        #expect(f.settings.automation.scope[target] == .inherit)
+        #expect(f.settings.mrActionIntents.first?.kind == .refresh)
+        #expect(f.settings.mrActionIntents.first?.state == .completed)
+        #expect(launches == 0)
+    }
+
+    @Test func informationalReceiptDoesNotManageALaterForeignReviewRequest() async throws {
+        let f = try fixture(); defer { f.cleanup() }
+        try #"[{"id":"d","notes":[{"id":42,"author":{"id":2,"username":"other"},"system":false,"body":"@me status update only."}]}]"#
+            .write(to: f.root.appending(path: "discussions"), atomically: true, encoding: .utf8)
+        let router = MergeRequestTodoRouter(settings: f.settings, glab: f.glab, canAutomate: { false })
+        router.mentionDisposition = { _, _, _, _ in .informational }
+        let notice = todo(action: .mentioned, linked: true)
+        #expect(await router.process([notice], host: target.host, username: target.username, managed: []) == [notice.id])
+        #expect(f.settings.mrActionIntents.first?.kind == .refresh)
+        let request = todo(20, action: .reviewRequested)
+        #expect(await router.process([request], host: target.host, username: target.username, managed: []).isEmpty)
+        #expect(f.settings.mrActionIntents.count == 1)
+        #expect(f.settings.automation.scope[target] == .inherit)
+    }
+
+    @Test(arguments: [MRTodoMentionDisposition.actionable, .uncertain])
+    func foreignMentionWithoutInformationalEvidenceRemainsUnread(disposition: MRTodoMentionDisposition) async throws {
+        let f = try fixture(); defer { f.cleanup() }
+        try #"[{"id":"d","notes":[{"id":42,"author":{"id":2,"username":"other"},"system":false,"body":"@me please inspect this."}]}]"#
+            .write(to: f.root.appending(path: "discussions"), atomically: true, encoding: .utf8)
+        f.settings.automation.reviewRequested.isEnabled = true
+        let router = MergeRequestTodoRouter(settings: f.settings, glab: f.glab, canAutomate: { true })
+        router.mentionDisposition = { _, _, _, _ in disposition }
+        #expect(await router.process([todo(action: .mentioned, linked: true)], host: target.host, username: target.username, managed: []).isEmpty)
+        #expect(f.settings.mrActionIntents.isEmpty)
+        #expect(f.settings.automation.scope[target] == .inherit)
+    }
+
+    @Test func changedDiscussionDuringMentionAssessmentPreservesUnreadEvent() async throws {
+        let f = try fixture(); defer { f.cleanup() }
+        try #"[{"id":"d","notes":[{"id":42,"author":{"id":2,"username":"other"},"system":false,"body":"@me informational context."}]}]"#
+            .write(to: f.root.appending(path: "discussions"), atomically: true, encoding: .utf8)
+        let router = MergeRequestTodoRouter(settings: f.settings, glab: f.glab, canAutomate: { true })
+        router.mentionDisposition = { _, _, _, _ in
+            try? #"[{"id":"d","notes":[{"id":42,"author":{"id":2,"username":"other"},"system":false,"body":"@me please fix this immediately."}]}]"#
+                .write(to: f.root.appending(path: "discussions"), atomically: true, encoding: .utf8)
+            return .informational
+        }
+        #expect(await router.process([todo(action: .mentioned, linked: true)], host: target.host, username: target.username, managed: []).isEmpty)
+        #expect(f.settings.mrActionIntents.isEmpty)
+    }
+
+    @Test(arguments: ["ready", "resolved"])
+    func changedReadinessOrThreadStateDuringNoticeAssessmentPreservesUnreadEvent(change: String) async throws {
+        let f = try fixture(); defer { f.cleanup() }
+        let requestFile = f.root.appending(path: "mr")
+        let ready = try String(contentsOf: requestFile, encoding: .utf8)
+        let draft = ready.replacingOccurrences(of: #""draft":false"#, with: #""draft":true"#)
+        try draft.write(to: requestFile, atomically: true, encoding: .utf8)
+        let threads = #"[{"id":"d","notes":[{"id":42,"author":{"id":2,"username":"other"},"system":false,"body":"@me review once this is ready.","resolvable":true,"resolved":false}]}]"#
+        try threads.write(to: f.root.appending(path: "discussions"), atomically: true, encoding: .utf8)
+        let router = MergeRequestTodoRouter(settings: f.settings, glab: f.glab, canAutomate: { false })
+        router.mentionDisposition = { _, _, _, _ in
+            if change == "ready" { try? ready.write(to: requestFile, atomically: true, encoding: .utf8) }
+            else {
+                try? threads.replacingOccurrences(of: #""resolved":false"#, with: #""resolved":true"#)
+                    .write(to: f.root.appending(path: "discussions"), atomically: true, encoding: .utf8)
+            }
+            return .informational
+        }
+        let acknowledged = await router.process([todo(action: .mentioned, linked: true)], host: target.host,
+                                                username: target.username, managed: [])
+        #expect(acknowledged.isEmpty)
+        #expect(f.settings.mrActionIntents.isEmpty)
+        #expect(!FileManager.default.fileExists(atPath: f.root.appending(path: "acks").path))
     }
 
     @Test("An independently verified no-op follow-up completes without a draft publication receipt",

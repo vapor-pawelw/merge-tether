@@ -11,6 +11,22 @@ struct ReReviewAssessment: Codable, Sendable {
         var acceptanceNoteID: Int? = nil
     }
     let notes: [Note]
+
+    /// Addressed code does not replace an explanation still owed in an open thread.
+    /// Discussion notes are published evidence; private drafts never satisfy it.
+    func missingPublishedReplyNoteIDs(in discussions: [GitLabMergeRequestDiscussion], authorID: Int) -> Set<Int> {
+        let addressed = Set(notes.filter { $0.state == .addressed }.map(\.noteID))
+        return Set(discussions.flatMap { thread in
+            thread.notes.compactMap { note -> Int? in
+                guard let id = note.id, addressed.contains(id), note.resolvable == true, note.resolved == false,
+                      !thread.notes.contains(where: {
+                          $0.system == false && $0.author?.id == authorID && ($0.id ?? 0) > id
+                      }) else { return nil }
+                return id
+            }
+        })
+    }
+
     enum ValidationError: Error { case incompleteEvidence }
     func reviewers(in discussions: [GitLabMergeRequestDiscussion], authorID: Int) throws -> [Int: Int] {
         let external = discussions.flatMap(\.notes).filter { $0.system != true && $0.author?.id != authorID }

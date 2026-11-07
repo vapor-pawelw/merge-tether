@@ -1,0 +1,94 @@
+{
+  "sourceLanguage": "en",
+  "strings": {
+    "draftProofRecoveryInterrupted": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Draft verification was interrupted. Verify these drafts again to obtain current proof."
+          }
+        }
+      }
+    },
+    "draftProofRecoveryUnavailable": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "The configured coding agent is unavailable. Complete agent setup, then verify the drafts again."
+          }
+        }
+      }
+    },
+    "draftProofRecoveryChanged": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "The account, merge request or discussion changed during draft verification. Refresh and verify the current drafts again."
+          }
+        }
+      }
+    },
+    "draftProofRecoverySourceChanged": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "The remote source or test files differ from the recorded evidence. Review the changes before verifying the drafts again."
+          }
+        }
+      }
+    },
+    "draftProofRecoveryFailed": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Draft verification could not establish current proof. Check the agent and GitLab connection, then verify the drafts again."
+          }
+        }
+      }
+    },
+    "draftProofRecoveryChecking": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Verifying draft replies…"
+          }
+        }
+      }
+    },
+    "draftProofRecoveryCompleted": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Verified the current source, tests and existing draft claims."
+          }
+        }
+      }
+    },
+    "draftProofRecoveryRetryRequested": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Requested another verification of the existing draft replies."
+          }
+        }
+      }
+    }
+  },
+  "version": "1.0"
+}

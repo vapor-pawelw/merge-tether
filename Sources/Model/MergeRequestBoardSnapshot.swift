@@ -7,11 +7,33 @@ struct MergeRequestBoardSnapshot {
         let latestJob: AssistantAutomationRunner.Handoff?
         let intents: [MRTodoIntent]
         var id: MergeRequestAttentionMonitor.Item.ID { item.id }
+        var isCheckingReadOnlyReconciliation: Bool {
+            guard let status = item.authorFeedbackStatus, let request = item.mergeRequest else { return false }
+            return status.readOnlyReconciliation && status.phase == .checking
+                && status.head == request.sha && status.fingerprint == item.observedDiscussionFingerprint
+                && status.semanticContextFingerprint == request.semanticContextFingerprint
+        }
+        func isReconciling(_ intent: MRTodoIntent) -> Bool {
+            isCheckingReadOnlyReconciliation && intent.kind == .followUp && intent.jobID == nil
+                && intent.state == .failed && intent.target.projectID == id.projectID && intent.target.iid == id.iid
+                && intent.target.username == item.mergeRequest?.author.username
+        }
+        var stoppedJobNeedsAttention: Bool {
+            Self.jobNeedsAttention(latestJob?.operationalExecution?.state)
+                && !intents.contains { $0.jobID == latestJob?.id && $0.state == .completed }
+        }
+        var hasIndependentStoppedWork: Bool {
+            stoppedJobNeedsAttention || intents.contains { $0.state == .failed && !isReconciling($0) }
+        }
         var needsAttention: Bool {
             if let humanActionRequired = item.humanActionRequired { return humanActionRequired }
-            if latestJob?.operationalExecution?.state.isActive == true || item.authorFeedbackStatus?.phase == .checking || item.aiOriginChecking { return false }
-            return item.needsAttention || intents.contains { $0.state == .pending || $0.state == .failed }
-                || Self.jobNeedsAttention(latestJob?.operationalExecution?.state)
+            if latestJob?.operationalExecution?.state.isActive == true { return false }
+            if item.draftProofRecoveryChecking || isCheckingReadOnlyReconciliation {
+                return hasIndependentStoppedWork
+            }
+            if item.authorFeedbackStatus?.phase == .checking || item.aiOriginChecking { return false }
+            return item.needsAttention || intents.contains { ($0.state == .pending && !$0.isDeferredReview) || $0.state == .failed }
+                || stoppedJobNeedsAttention
         }
         static func jobNeedsAttention(_ state: AssistantJobExecution.State?) -> Bool {
             switch state {
@@ -86,7 +108,7 @@ struct MergeRequestBoardSnapshot {
         }
         let originalListed = own + reviewed
         let orphanIntents = accountIntents.filter { intent in
-            intent.state != .completed && !ignoredTargets.contains(intent.target)
+            intent.grantsManagement && intent.state != .completed && !ignoredTargets.contains(intent.target)
                 && !originalListed.contains { $0.id.projectID == intent.target.projectID && $0.id.iid == intent.target.iid
                     && $0.url.isGitLabMergeRequest(host: intent.target.host, iid: $0.id.iid) }
         }

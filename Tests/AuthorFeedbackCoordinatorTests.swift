@@ -4,6 +4,112 @@ import Testing
 
 @MainActor
 struct AuthorFeedbackCoordinatorTests {
+    @Test(arguments: ["missingReply", "publishedReply", "resolved", "informational"])
+    func draftAssessmentKeepsAnOwedPublishedReplyVisibleWithoutDispatchingWork(scenario: String) async throws {
+        try await withFixture { fixture in
+            let draft = Fixture.request.replacingOccurrences(of: "\"draft\":false", with: "\"draft\":true")
+            try fixture.write("request.json", draft)
+            if scenario != "publishedReply" {
+                let thread = #"[{"id":"thread-a","notes":[{"id":10,"author":{"id":7,"username":"alice"},"system":false,"body":"Current feedback","resolvable":true,"resolved":\#(scenario == "resolved")}]}]"#
+                try fixture.write("discussions.json", thread)
+            }
+            let coordinator = fixture.coordinator(assessment: .init(notes: [
+                .init(noteID: 10, state: scenario == "informational" ? .informational : .addressed,
+                    reason: "Current code and discussion assessed")
+            ]))
+            var requestedWork = false
+            coordinator.onNeedsWork = { _, _, _ in requestedWork = true }
+            try await fixture.run(coordinator, requestJSON: draft)
+            let request = try JSONDecoder().decode(GitLabMergeRequest.self, from: Data(draft.utf8))
+            let status = try #require(coordinator.status(projectID: 1, iid: 2))
+            let missingReply = scenario == "missingReply"
+            #expect(status.phase == .complete)
+            #expect(status.replyNoteIDs == (missingReply ? [10] : []))
+            var item = MergeRequestAttentionMonitor.Item(id: .init(projectID: 1, iid: 2), title: request.title,
+                url: request.webURL, needsDiscussion: true, mergeRequest: request, isAuthored: true,
+                feedback: [try #require(fixture.discussions().first?.notes.first)])
+            item.observedDiscussionFingerprint = ReviewVerdict.fingerprint(try fixture.discussions())
+            item.authorFeedbackStatus = status
+            let visible = item.presentingVerifiedAuthorFeedback()
+            #expect(visible.feedback.compactMap(\.id) == (missingReply ? [10] : []))
+            #expect(visible.needsDiscussion == missingReply)
+            #expect(status.needsAttention == missingReply)
+            #expect(!fixture.resolved && !requestedWork)
+        }
+    }
+
+    @Test(arguments: [ReReviewAssessment.Note.State.addressed, .blocking])
+    func pendingDraftsPermitReadOnlyAssessmentWithoutDispatchOrResolution(state: ReReviewAssessment.Note.State) async throws {
+        try await withFixture { fixture in
+            try fixture.write("drafts.json", #"[{"id":30,"author_id":3,"note":"Unrelated private reply"}]"#)
+            let coordinator = fixture.coordinator(assessment: .init(notes: [
+                .init(noteID: 10, state: state, reason: "Current scoped feedback assessed")
+            ]))
+            var requestedWork = false
+            var notified = false
+            coordinator.onNeedsWork = { _, _, _ in requestedWork = true }
+            coordinator.onRemoteChange = { notified = true }
+            try await fixture.run(coordinator, drafts: 1)
+            let request = try JSONDecoder().decode(GitLabMergeRequest.self, from: Data(Fixture.request.utf8))
+            let fingerprint = try #require(ReviewVerdict.fingerprint(fixture.discussions()))
+            #expect(fixture.verified)
+            #expect(coordinator.assessment(for: request, fingerprint: fingerprint)?.notes.first?.state == state)
+            #expect(coordinator.status(projectID: 1, iid: 2)?.phase == .waitingPublication)
+            #expect(coordinator.status(projectID: 1, iid: 2)?.pendingDraftCount == 1)
+            #expect(notified)
+            #expect(!fixture.resolved && !requestedWork)
+        }
+    }
+
+    @Test(arguments: [false, true])
+    func unrelatedDraftsDoNotBlockOldFollowUpReconciliationButPrivateRepliesNeverCompleteIt(missingPublishedReply: Bool) async throws {
+        try await withFixture { fixture in
+            try fixture.write("drafts.json", #"[{"id":30,"author_id":3,"note":"Unrelated private reply"}]"#)
+            if missingPublishedReply {
+                let thread = #"[{"id":"thread-a","notes":[{"id":10,"author":{"id":7,"username":"alice"},"system":false,"body":"Fix A","resolvable":true,"resolved":false}]}]"#
+                try fixture.write("discussions.json", thread)
+            }
+            let request = try JSONDecoder().decode(GitLabMergeRequest.self, from: Data(Fixture.request.utf8))
+            fixture.settings.mrActionIntents.append(.init(id: UUID(),
+                target: .init(host: Fixture.host, username: "me", projectID: 1, iid: 2), kind: .followUp,
+                state: .failed, todoIDs: [], noteIDs: [10], sourceEvents: [], request: request,
+                headSHA: String(repeating: "b", count: 40), error: "Earlier attempt", updatedAt: Date()))
+            let coordinator = fixture.coordinator()
+            let router = MergeRequestTodoRouter(settings: fixture.settings, glab: fixture.glab, canAutomate: { false })
+            router.followUpAssessment = { request, discussions in
+                guard let fingerprint = ReviewVerdict.fingerprint(discussions) else { return nil }
+                return coordinator.assessment(for: request, fingerprint: fingerprint)
+            }
+            try await fixture.run(coordinator, drafts: 1)
+            await router.refreshCompletionEvidence(host: Fixture.host, username: "me")
+            #expect(fixture.settings.mrActionIntents[0].state == (missingPublishedReply ? .failed : .completed))
+            #expect(fixture.settings.mrActionIntents[0].jobID == nil)
+            #expect(!fixture.resolved && fixture.settings.assistantHandoffs.isEmpty)
+        }
+    }
+
+    @Test(arguments: [ReReviewAssessment.Note.State.addressed, .blocking])
+    func draftFeedbackIsAssessedReadOnlyForReconciliation(state: ReReviewAssessment.Note.State) async throws {
+        try await withFixture { fixture in
+            let draft = Fixture.request.replacingOccurrences(of: "\"draft\":false", with: "\"draft\":true")
+            try fixture.write("request.json", draft)
+            let coordinator = fixture.coordinator(assessment: .init(notes: [
+                .init(noteID: 10, state: state, reason: "Current evidence assessed")
+            ]))
+            var requestedWork = false
+            coordinator.onNeedsWork = { _, _, _ in requestedWork = true }
+
+            try await fixture.run(coordinator, requestJSON: draft)
+
+            let request = try JSONDecoder().decode(GitLabMergeRequest.self, from: Data(draft.utf8))
+            let fingerprint = try #require(ReviewVerdict.fingerprint(fixture.discussions()))
+            #expect(fixture.verified)
+            #expect(coordinator.assessment(for: request, fingerprint: fingerprint)?.notes.first?.state == state)
+            #expect(!fixture.resolved)
+            #expect(!requestedWork)
+        }
+    }
+
     @Test func checkingIsBoundToTheCurrentHeadDiscussionAndSemanticContext() async throws {
         try await withFixture { fixture in
             fixture.settings.automation.autoResolveAcceptedFeedback = false
@@ -358,18 +464,18 @@ struct AuthorFeedbackCoordinatorTests {
         }
 
         func start(_ coordinator: AuthorFeedbackCoordinator, initialDiscussions: [GitLabMergeRequestDiscussion]? = nil,
-                   requestJSON: String = Fixture.request) throws {
+                   requestJSON: String = Fixture.request, drafts: Int = 0) throws {
             let request = try JSONDecoder().decode(GitLabMergeRequest.self, from: Data(requestJSON.utf8))
-            coordinator.refresh(request: request, discussions: try initialDiscussions ?? discussions(), drafts: 0,
+            coordinator.refresh(request: request, discussions: try initialDiscussions ?? discussions(), drafts: drafts,
                                 host: Self.host, user: .init(id: 3, username: "me"))
         }
 
         func run(_ coordinator: AuthorFeedbackCoordinator, initialDiscussions: [GitLabMergeRequestDiscussion]? = nil,
-                 requestJSON: String = Fixture.request) async throws {
-            try start(coordinator, initialDiscussions: initialDiscussions, requestJSON: requestJSON)
+                 requestJSON: String = Fixture.request, drafts: Int = 0) async throws {
+            try start(coordinator, initialDiscussions: initialDiscussions, requestJSON: requestJSON, drafts: drafts)
             let deadline = ContinuousClock.now + .seconds(5)
             while ContinuousClock.now < deadline {
-                if let phase = coordinator.status(projectID: 1, iid: 2)?.phase, phase == .complete || phase == .failed { return }
+                if let phase = coordinator.status(projectID: 1, iid: 2)?.phase, phase == .complete || phase == .failed || phase == .waitingPublication { return }
                 if verified && coordinator.status(projectID: 1, iid: 2) == nil { return }
                 try await Task.sleep(for: .milliseconds(20))
             }

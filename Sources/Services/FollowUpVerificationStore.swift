@@ -19,11 +19,15 @@ struct FollowUpVerification: Codable, Equatable, Sendable {
     let files: [FileEvidence]
     let drafts: [DraftEvidence]
     var discussionFingerprint: String? = nil
+    var semanticContextFingerprint: String? = nil
+    var recoveryContextFingerprint: String? = nil
 
     func covers(_ draft: GitLabDraftNote, request: GitLabMergeRequest, host: String, user: GitLabAuthenticatedUser, runID: UUID) -> Bool {
         version == 1 && sealed && self.runID == runID && self.host == host && projectID == request.projectID && iid == request.iid
             && username == user.username && userID == user.id && request.author.id == user.id && request.state == "opened"
             && headSHA == request.sha && sourceProjectID == request.sourceProjectID && sourceBranch == request.sourceBranch
+            && (semanticContextFingerprint == nil || semanticContextFingerprint == request.semanticContextFingerprint)
+            && (recoveryContextFingerprint == nil || recoveryContextFingerprint == request.draftProofRecoveryContextFingerprint)
             && draft.authorID == user.id && !files.isEmpty && files.count <= 20
             && drafts.contains { $0.id == draft.id && $0.bodySHA256 == AICommentAssessmentStore.digest(draft.note ?? "") }
     }
@@ -121,7 +125,8 @@ enum FollowUpVerificationStore {
                 && !runs.contains { $0.createdAt > origin.createdAt && $0.execution?.state != .succeeded }
         }
         let originIDs = Set(origins.map(\.id))
-        guard !originIDs.isEmpty else { return [] }
+        let recovered = recoveredReceipts(work: work, username: username, settings: settings, in: directory)
+        guard !originIDs.isEmpty else { return recovered }
         var candidates: [FollowUpVerification] = []
         let latest = recordURL(kind: "follow-up-verifications", work: work, username: username, in: directory)
         if let proof = readPublicationReceipt(at: latest) { candidates.append(proof) }
@@ -154,17 +159,20 @@ enum FollowUpVerificationStore {
                 ambiguous.insert(proof.verificationID)
             } else { proofs[proof.verificationID] = proof }
         }
-        return proofs.values.filter { !ambiguous.contains($0.verificationID) }
+        return (Array(proofs.values.filter { !ambiguous.contains($0.verificationID) }) + recovered)
             .sorted { $0.verificationID.uuidString < $1.verificationID.uuidString }
     }
 
-    private nonisolated static func readPublicationReceipt(at path: URL) -> FollowUpVerification? {
+    private nonisolated static func readPublicationReceipt(at path: URL, requiresFingerprint: Bool = true) -> FollowUpVerification? {
         guard let size = try? path.resourceValues(forKeys: [.fileSizeKey]).fileSize, size < 1_000_000,
               let data = try? Data(contentsOf: path),
               let proof = try? JSONDecoder().decode(FollowUpVerification.self, from: data),
               proof.version == 1, proof.sealed, proof.userID > 0, proof.sourceProjectID > 0,
               !proof.sourceBranch.isEmpty, isHex(proof.headSHA, lengths: [40, 64]),
-              proof.discussionFingerprint.map({ isHex($0, lengths: [64]) }) == true,
+              (!requiresFingerprint || proof.discussionFingerprint.map({ isHex($0, lengths: [64]) }) == true),
+              proof.discussionFingerprint.map({ isHex($0, lengths: [64]) }) != false,
+              proof.semanticContextFingerprint.map({ isHex($0, lengths: [64]) }) != false,
+              proof.recoveryContextFingerprint.map({ isHex($0, lengths: [64]) }) != false,
               !proof.files.isEmpty, proof.files.count <= 20, !proof.drafts.isEmpty, proof.drafts.count <= 100,
               Set(proof.files.map(\.path)).count == proof.files.count,
               Set(proof.drafts.map(\.id)).count == proof.drafts.count,
@@ -197,5 +205,148 @@ enum FollowUpVerificationStore {
         Only after verification succeeds, save and re-fetch warranted private GitLab drafts. Then run `\(command) seal \(target) --verification-id <returned-id> --draft-ids '[<draft-ids>]'`, containing only those new or refreshed draft IDs. Unchanged legacy/user-created drafts cannot be adopted automatically. When re-verifying in this same run, include any still-pending drafts previously sealed by this run; unchanged bodies can be re-bound only after fresh remote verification.
         The publisher checks account, run, remote head, source branch, file content and exact draft bodies again. If sealing reports changed discussions, re-read and assess the new feedback, re-verify with its fingerprint, then explicitly edit or recreate every unsealed draft from that failed attempt before sealing. If verification or a required push fails, is pending, or is disabled, save NO response drafts for that unfinished run; report pending work only in the in-app result. Do not publish comments yourself or expand existing publication permissions. Follow applicable repository instructions within these permissions; an explicit review-only/local-only request keeps the result local.
         """
+    }
+}
+
+extension FollowUpVerificationStore {
+    /// Recovery verifies existing ownership; it never changes a legacy job's lifecycle or drafts.
+    /// Extending the ordinary publication gate would trust stale claims; replaying a follow-up
+    /// could repeat remote actions. A separate, content-bound assessment avoids both outcomes.
+    struct RecoveryRecord: Codable {
+        let version: Int
+        let attemptID: String
+        let assessmentID: UUID
+        let assistant: AutomationAssistant
+        let model: String
+        let origin: FollowUpVerification
+        let proof: FollowUpVerification
+        let assessment: DraftProofRecoveryVerifier.Assessment
+        var requestedDraftIDs: [Int]? = nil
+    }
+
+    @MainActor
+    static func recoveryOrigins(work: AssistantAutomationRunner.MergeRequestWork, username: String,
+                                settings: SettingsManager, in directory: URL = directory) -> [FollowUpVerification] {
+        let runs = settings.assistantHandoffs.filter {
+            $0.key.work == work && $0.key.username == username && $0.followUpPushAllowed != nil
+        }
+        let origins = runs.filter { origin in
+            origin.followUpPushAllowed == true && origin.key.assistant == settings.automation.assistant
+                && (origin.execution == nil || origin.execution?.state == .succeeded)
+        }
+        guard !origins.isEmpty else { return [] }
+        var paths = [recordURL(kind: "follow-up-verifications", work: work, username: username, in: directory)]
+        let archive = recordURL(kind: "follow-up-verifications-archive", work: work, username: username, in: directory).deletingPathExtension()
+        paths += ((try? FileManager.default.contentsOfDirectory(at: archive, includingPropertiesForKeys: nil)) ?? [])
+            .filter { $0.pathExtension == "json" }
+        for origin in origins {
+            let folder = directory.deletingLastPathComponent().appending(path: "Assistant Runs/\(origin.id.uuidString)")
+            if let working = origin.execution?.workingDirectory,
+               URL(fileURLWithPath: working).standardizedFileURL == folder.standardizedFileURL,
+               (try? folder.resourceValues(forKeys: [.isSymbolicLinkKey]).isSymbolicLink) != true {
+                paths.append(folder.appending(path: "seal-receipt.json"))
+            }
+        }
+        var unique: [UUID: FollowUpVerification] = [:]
+        var ambiguous: Set<UUID> = []
+        for path in paths {
+            guard (try? path.resourceValues(forKeys: [.isSymbolicLinkKey]).isSymbolicLink) != true,
+                  let proof = readPublicationReceipt(at: path, requiresFingerprint: false),
+                  proof.host == work.host, proof.projectID == work.projectID, proof.iid == work.iid,
+                  proof.username == username, let origin = origins.first(where: { $0.id == proof.runID }),
+                  !runs.contains(where: { later in
+                      later.createdAt > origin.createdAt && later.execution?.state != .succeeded
+                          && !hasSuccessfulEnvironmentReplacement(for: later, runs: runs, headSHA: proof.headSHA)
+                  }) else { continue }
+            if path.deletingLastPathComponent().standardizedFileURL == archive.standardizedFileURL,
+               UUID(uuidString: path.deletingPathExtension().lastPathComponent) != proof.verificationID { continue }
+            if let previous = unique[proof.verificationID], previous != proof { ambiguous.insert(proof.verificationID) }
+            else { unique[proof.verificationID] = proof }
+        }
+        return unique.values.filter { !ambiguous.contains($0.verificationID) }
+            .sorted { $0.verificationID.uuidString < $1.verificationID.uuidString }
+    }
+
+    private static func hasSuccessfulEnvironmentReplacement(for stopped: AssistantAutomationRunner.Handoff,
+                                                            runs: [AssistantAutomationRunner.Handoff], headSHA: String) -> Bool {
+        guard stopped.environmentRecoveryAttempted == true,
+              stopped.execution?.state == .blocked || stopped.execution?.state == .failed else { return false }
+        return runs.contains { replacement in
+            replacement.environmentRecoveryOf == stopped.id && replacement.createdAt > stopped.createdAt
+                && replacement.execution?.state == .succeeded && replacement.followUpPushAllowed == true
+                && replacement.expectedHeadSHA == headSHA && replacement.key.work == stopped.key.work
+                && replacement.key.username == stopped.key.username && replacement.key.assistant == stopped.key.assistant
+        }
+    }
+
+    static func validRecoveryScope(_ draftIDs: [Int], origin: FollowUpVerification) -> Bool {
+        !draftIDs.isEmpty && draftIDs.count <= 100 && Set(draftIDs).count == draftIDs.count
+            && Set(draftIDs).isSubset(of: Set(origin.drafts.map(\.id)))
+    }
+
+    static func recoveredProof(origin: FollowUpVerification, assessmentID: UUID, fingerprint: String,
+                               semanticContext: String, recoveryContext: String, draftIDs: [Int]? = nil) -> FollowUpVerification {
+        .init(version: 1, sealed: true, verificationID: assessmentID, runID: origin.runID,
+            host: origin.host, projectID: origin.projectID, iid: origin.iid, username: origin.username,
+            userID: origin.userID, headSHA: origin.headSHA, sourceProjectID: origin.sourceProjectID,
+            sourceBranch: origin.sourceBranch, files: origin.files,
+            drafts: origin.drafts.filter { draftIDs.map(Set.init)?.contains($0.id) ?? true },
+            discussionFingerprint: fingerprint, semanticContextFingerprint: semanticContext,
+            recoveryContextFingerprint: recoveryContext)
+    }
+
+    @MainActor
+    static func persistRecovery(_ record: RecoveryRecord, work: AssistantAutomationRunner.MergeRequestWork,
+                                username: String, in directory: URL) throws {
+        let folder = recordURL(kind: "follow-up-proof-recoveries", work: work, username: username, in: directory).deletingPathExtension()
+        try FileManager.default.createDirectory(at: folder, withIntermediateDirectories: true, attributes: [.posixPermissions: 0o700])
+        try JSONEncoder().encode(record).write(to: folder.appending(path: "\(record.attemptID).json"), options: .atomic)
+    }
+
+    @MainActor
+    private static func recoveredReceipts(work: AssistantAutomationRunner.MergeRequestWork, username: String,
+                                          settings: SettingsManager, in directory: URL) -> [FollowUpVerification] {
+        recoveryRecords(work: work, username: username, settings: settings, in: directory).map(\.proof)
+    }
+
+    @MainActor
+    static func recoveryRecords(work: AssistantAutomationRunner.MergeRequestWork, username: String,
+                                settings: SettingsManager, in directory: URL) -> [RecoveryRecord] {
+        let origins = recoveryOrigins(work: work, username: username, settings: settings, in: directory)
+        guard !origins.isEmpty else { return [] }
+        let folder = recordURL(kind: "follow-up-proof-recoveries", work: work, username: username, in: directory).deletingPathExtension()
+        return ((try? FileManager.default.contentsOfDirectory(at: folder, includingPropertiesForKeys: nil)) ?? []).compactMap { path in
+            guard path.pathExtension == "json", (try? path.resourceValues(forKeys: [.isSymbolicLinkKey]).isSymbolicLink) != true,
+                  let size = try? path.resourceValues(forKeys: [.fileSizeKey]).fileSize, size < 1_000_000,
+                  let data = try? Data(contentsOf: path), let record = try? JSONDecoder().decode(RecoveryRecord.self, from: data),
+                  record.version == 1, path.deletingPathExtension().lastPathComponent == record.attemptID,
+                  isHex(record.attemptID, lengths: [64]), origins.contains(record.origin),
+                  record.assistant == settings.automation.assistant, !record.model.isEmpty,
+                  record.assessmentID != record.origin.verificationID,
+                  let fingerprint = record.proof.discussionFingerprint, isHex(fingerprint, lengths: [64]),
+                  let context = record.proof.semanticContextFingerprint, isHex(context, lengths: [64]),
+                  let recoveryContext = record.proof.recoveryContextFingerprint, isHex(recoveryContext, lengths: [64]) else { return nil }
+            // Old records assessed their complete origin. New records retain that origin
+            // unchanged and explicitly identify the exact subset independently assessed.
+            let requested = record.requestedDraftIDs ?? record.origin.drafts.map(\.id)
+            let valid = record.assessment.drafts.filter { $0.state == .valid }.map(\.draftID)
+            guard validRecoveryScope(requested, origin: record.origin), !valid.isEmpty,
+                  (try? DraftProofRecoveryVerifier.validate(record.assessment, draftIDs: requested)) != nil,
+                  record.proof == recoveredProof(origin: record.origin, assessmentID: record.assessmentID,
+                      fingerprint: fingerprint, semanticContext: context, recoveryContext: recoveryContext, draftIDs: valid)
+            else { return nil }
+            return record
+        }
+    }
+}
+
+
+extension GitLabMergeRequest {
+    /// Retargeting changes the meaning of current feedback even at the same source commit.
+    var draftProofRecoveryContextFingerprint: String {
+        UserAttentionSnapshot.digest(semanticContextFingerprint + "|\(projectID)|\(iid)|\(author.id)"
+            + "|\(sourceProjectID ?? 0)|\(sourceBranch.utf8.count):\(sourceBranch)"
+            + "|\(targetProjectID ?? 0)|\(targetBranch.utf8.count):\(targetBranch)"
+            + "|\(webURL.absoluteString)|\(state)|\(draft.map(String.init) ?? "unknown")")
     }
 }

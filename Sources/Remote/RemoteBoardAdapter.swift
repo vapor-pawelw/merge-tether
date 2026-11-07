@@ -52,7 +52,8 @@ import MergeTetherRemote
                     case .ready, .failed: extras.append(.prepare)
                     default: break
                     }
-                    if item.reReviewReadiness == .failed || item.reReviewReadiness == .unavailable { extras.append(.verify) }
+                    if item.reReviewReadiness == .failed || item.reReviewReadiness == .unavailable
+                        || item.draftProofRecoveryFailure != nil { extras.append(.verify) }
                     card = self.card(item, account: account, extraActions: extras, context: handoffs.map(\.id).sorted() + [(try? RemoteDigest.token(monitor.settings.automation)) ?? ""])
                     let presentation = MRCardPresentation(row: row, monitor: monitor, allowsRemoval: result.lanes[lane].id == .reviewed)
                     card = self.presentation(card, model: presentation)
@@ -64,12 +65,19 @@ import MergeTetherRemote
                            let token = try? RemoteDigest.token([account, try RemoteDigest.token(intent), try RemoteDigest.token(monitor.settings.automation)]) {
                             card.actions.append(.init(id: "intent:\(intent.id)", kind: .prepare, token: token))
                         }
-                        if let job = row.latestJob, MergeRequestBoardSnapshot.Row.jobNeedsAttention(job.execution?.state),
+                        if let job = row.latestJob, row.stoppedJobNeedsAttention,
                            job.taskPrompt != nil, job.mergeRequestURL != nil,
                            let token = try? RemoteDigest.token([account, try RemoteDigest.token(job), try RemoteDigest.token(monitor.settings.automation)]) {
                             card.actions.append(.init(id: "job:\(job.id)", kind: .retryJob, token: token))
                         }
                     }
+                } else if let todo = board.otherTodos.first(where: { "todo:\($0.id)" == card.id }),
+                          monitor.isAssessingNotice(todo) {
+                    card.needsAttention = false
+                    card.actions = []
+                    card.primaryCTA = nil
+                    card.presentation = .init(repository: todo.project.pathWithNamespace.split(separator: "/").last.map(String.init) ?? "",
+                        status: String(localized: .Board.boardCompactWorking), working: true)
                 }
                 result.lanes[lane].cards[index] = card
             }
@@ -184,6 +192,7 @@ private extension MRHumanAction {
         case .reviewDrafts: .drafts
         case .reviewApproval: .actions
         case .reviewRun, .retryRun: .assistantRuns
+        case .retryDraftVerification: .drafts
         case .setupAssistant: .setup
         case .reviewDecision, .reviewFeedback, .handleFeedback, .verifyFeedback: .feedback
         case .reviewHandoff, .reviewMerge, .reviewIssue, .retryIntent: .overview

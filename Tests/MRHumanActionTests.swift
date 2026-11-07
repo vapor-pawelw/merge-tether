@@ -21,6 +21,58 @@ struct MRHumanActionTests {
         return .init(item: item, latestJob: job, intents: [])
     }
 
+    private func stoppedHistoryRow(state: AssistantJobExecution.State, manualDraft: Bool = false,
+                                   completedMatchesJob: Bool = true, independentFailure: Bool = false) throws -> MergeRequestBoardSnapshot.Row {
+        var item = item()
+        let request = try JSONDecoder().decode(GitLabMergeRequest.self, from: Data(#"{"project_id":1,"iid":2,"author":{"id":3,"username":"me","name":"Me"},"title":"Example","web_url":"https://gitlab.example.test/group/repo/-/merge_requests/2","state":"opened","draft":false,"sha":"head","source_branch":"feature","target_branch":"main","labels":[]}"#.utf8))
+        item.mergeRequest = request
+        item.isAuthored = true
+        item.draftCount = manualDraft ? 1 : 0
+        item.humanActionRequired = manualDraft ? true : nil
+        let base = row(item, execution: .init(state: state, error: "Historical failure"), expectedHead: "head")
+        let job = try #require(base.latestJob)
+        let target = MRAutomationScope.Target(host: "gitlab.example.test", username: "me", projectID: 1, iid: 2)
+        var intents = [MRTodoIntent(id: UUID(), target: target, kind: .pipeline, state: .completed,
+            todoIDs: [], noteIDs: [], sourceEvents: [], request: request, headSHA: "head",
+            jobID: completedMatchesJob ? job.id : UUID(), updatedAt: Date())]
+        if independentFailure {
+            intents.append(.init(id: UUID(), target: target, kind: .conflict, state: .failed,
+                todoIDs: [], noteIDs: [], sourceEvents: [], request: request, headSHA: "head",
+                error: "Conflict verification failed", updatedAt: Date()))
+        }
+        return .init(item: item, latestJob: job, intents: intents)
+    }
+
+    @Test(arguments: [AssistantJobExecution.State.failed, .blocked], [false, true])
+    func completedHistoricalJobCannotReviveAttentionOrReplaceManualDraftPublication(state: AssistantJobExecution.State,
+                                                                                   manualDraft: Bool) throws {
+        let row = try stoppedHistoryRow(state: state, manualDraft: manualDraft)
+        #expect(!row.hasIndependentStoppedWork)
+        #expect(row.needsAttention == manualDraft)
+        let action = MRHumanAction(row: row, assistantReady: true)
+        if manualDraft {
+            #expect(action?.kind == .publication && action?.action == .reviewDrafts)
+        } else {
+            #expect(action == nil)
+        }
+    }
+
+    @Test(arguments: [AssistantJobExecution.State.failed, .blocked])
+    func unrelatedCompletedIntentDoesNotHideARealStoppedJob(state: AssistantJobExecution.State) throws {
+        let row = try stoppedHistoryRow(state: state, manualDraft: true, completedMatchesJob: false)
+        #expect(row.hasIndependentStoppedWork && row.needsAttention)
+        #expect(MRHumanAction(row: row, assistantReady: true)?.action == .retryRun)
+    }
+
+    @Test(arguments: [AssistantJobExecution.State.failed, .blocked])
+    func completedHistoricalJobDoesNotReplaceAnIndependentFailedIntent(state: AssistantJobExecution.State) throws {
+        let row = try stoppedHistoryRow(state: state, independentFailure: true)
+        #expect(row.hasIndependentStoppedWork && row.needsAttention)
+        let action = try #require(MRHumanAction(row: row, assistantReady: true))
+        #expect(action.action == .retryIntent)
+        #expect(action.detail == "Conflict verification failed")
+    }
+
     @Test func aRunAllowedToPushMayHaveChangedTheHeadBeforeStopping() throws {
         var item = item()
         item.mergeRequest = try JSONDecoder().decode(GitLabMergeRequest.self, from: Data(#"{"project_id":1,"iid":2,"author":{"id":3,"username":"me","name":"Me"},"title":"Example","web_url":"https://gitlab.example.test/group/repo/-/merge_requests/2","state":"opened","draft":false,"sha":"pushed","source_branch":"feature","target_branch":"main","labels":[]}"#.utf8))
@@ -140,6 +192,70 @@ struct MRHumanActionTests {
         #expect(action.action == .reviewDrafts)
         #expect(String(localized: action.message) == "3 comments need your review before publication.")
         #expect(action.detail == nil)
+    }
+
+    @Test func failedDraftProofRecoveryOffersVerificationWithoutPublication() throws {
+        var item = item()
+        item.draftCount = 1
+        let reason = "The remote file changed after this draft was prepared."
+        item.draftProofRecoveryFailure = reason
+        let action = try #require(MRHumanAction(row: row(item), assistantReady: true))
+        #expect(action.kind == .verificationFailure)
+        #expect(action.detail == reason)
+        #expect(String(localized: action.actionLabel) == "Verify drafts again")
+    }
+
+    @Test func recoveringDraftProofDoesNotAskForManualPublication() {
+        var item = item()
+        item.draftCount = 1
+        item.draftProofRecoveryChecking = true
+        #expect(MRHumanAction(row: row(item), assistantReady: true) == nil)
+    }
+
+    @Test func recoveringDraftProofKeepsAnIndependentBlockedRunAction() throws {
+        var item = item()
+        item.draftCount = 1
+        item.draftProofRecoveryChecking = true
+        item.authorFeedbackStatus = .init(head: "head", fingerprint: "discussion", phase: .checking)
+        let action = try #require(MRHumanAction(row: row(item, execution: .init(state: .blocked, blocker: "Tests could not run.")), assistantReady: true))
+        #expect(action.kind == .blockedRun)
+    }
+
+    @Test func recoveringDraftProofKeepsAnIndependentFailedIntentAction() throws {
+        var item = item()
+        let request = try JSONDecoder().decode(GitLabMergeRequest.self, from: Data(#"{"project_id":1,"iid":2,"author":{"id":3,"username":"me","name":"Me"},"title":"Example","web_url":"https://gitlab.example.test/group/repo/-/merge_requests/2","state":"opened","draft":false,"sha":"head","source_branch":"feature","target_branch":"main","labels":[]}"#.utf8))
+        item.mergeRequest = request
+        item.draftCount = 1
+        item.draftProofRecoveryChecking = true
+        item.authorFeedbackStatus = .init(head: "head", fingerprint: "discussion", phase: .checking)
+        let intent = MRTodoIntent(id: UUID(), target: .init(host: "gitlab.example.test", username: "me", projectID: 1, iid: 2),
+            kind: .pipeline, state: .failed, todoIDs: [], noteIDs: [], sourceEvents: [], request: request,
+            headSHA: "head", error: "Pipeline ownership could not be verified.", updatedAt: Date())
+        let snapshot = MergeRequestBoardSnapshot.Row(item: item, latestJob: nil, intents: [intent])
+        let action = try #require(MRHumanAction(row: snapshot, assistantReady: true))
+        #expect(action.kind == .intent && action.action == .retryIntent)
+        #expect(action.detail == intent.error)
+    }
+
+    @Test(arguments: [false, true])
+    func unboundFailedFollowUpWaitsNeutrallyOnlyForExplicitCurrentReconciliation(checkingReconciliation: Bool) throws {
+        var item = item()
+        let request = try JSONDecoder().decode(GitLabMergeRequest.self, from: Data(#"{"project_id":1,"iid":2,"author":{"id":3,"username":"me","name":"Me"},"title":"Example","web_url":"https://gitlab.example.test/group/repo/-/merge_requests/2","state":"opened","draft":false,"sha":"head","source_branch":"feature","target_branch":"main","labels":[]}"#.utf8))
+        item.mergeRequest = request
+        item.isAuthored = true
+        item.draftCount = 4
+        item.draftProofRecoveryChecking = true
+        item.observedDiscussionFingerprint = "discussion"
+        item.authorFeedbackStatus = .init(head: "head", fingerprint: "discussion",
+            semanticContextFingerprint: request.semanticContextFingerprint, readOnlyReconciliation: checkingReconciliation,
+            phase: .checking, pendingDraftCount: 4)
+        let intent = MRTodoIntent(id: UUID(), target: .init(host: "gitlab.example.test", username: "me", projectID: 1, iid: 2),
+            kind: .followUp, state: .failed, todoIDs: [], noteIDs: [42], sourceEvents: [], request: request,
+            headSHA: "old-head", error: "Earlier attempt", updatedAt: Date())
+        let snapshot = MergeRequestBoardSnapshot.Row(item: item, latestJob: nil, intents: [intent])
+        #expect(snapshot.hasIndependentStoppedWork == !checkingReconciliation)
+        #expect(snapshot.needsAttention == !checkingReconciliation)
+        #expect((MRHumanAction(row: snapshot, assistantReady: true) == nil) == checkingReconciliation)
     }
 
     @Test func oneDraftUsesSingularLanguage() throws {

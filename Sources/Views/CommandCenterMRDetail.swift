@@ -264,6 +264,9 @@ private struct CommandCenterMRDetailContent: View {
                         Button { openHistory(proxy: proxy) } label: {
                             Text(action.actionLabel)
                         }
+                    } else if action.action == .retryDraftVerification {
+                        Button { monitor.attention.retryDraftProofRecovery(item.id) } label: { Text(action.actionLabel) }
+                            .buttonStyle(.borderedProminent)
                     } else if action.action == .setupAssistant {
                         Button { openSettings() } label: { Text(action.actionLabel) }
                     } else if action.action == .reviewIssue {

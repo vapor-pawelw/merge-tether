@@ -6,6 +6,7 @@ struct AuthorFeedbackStatus: Equatable, Sendable {
     let head: String
     let fingerprint: String
     var semanticContextFingerprint: String? = nil
+    var readOnlyReconciliation = false
     var phase: Phase
     var findings: [AuthorFeedbackPolicy.Finding] = []
     var pendingDraftCount = 0
@@ -44,6 +45,7 @@ final class AuthorFeedbackCoordinator {
         let configuration: AutomationSettings
         let fingerprint: String
         let drafts: Int
+        var readOnly: Bool { request.draft == true || drafts > 0 }
     }
 
     init(settings: SettingsManager, glab: GlabService,
@@ -61,7 +63,8 @@ final class AuthorFeedbackCoordinator {
 
     func assessment(for request: GitLabMergeRequest, fingerprint: String) -> ReReviewAssessment? {
         guard let host = glab.resolvedHost, let username = glab.currentUsername,
-              let state = status(projectID: request.projectID, iid: request.iid), state.phase == .complete,
+              let state = status(projectID: request.projectID, iid: request.iid),
+              state.phase == .complete || state.phase == .waitingPublication,
               state.head == request.sha, state.fingerprint == fingerprint,
               state.semanticContextFingerprint == request.semanticContextFingerprint else { return nil }
         return cache[.init(host: host, username: username, projectID: request.projectID, iid: request.iid)]?.1
@@ -80,7 +83,7 @@ final class AuthorFeedbackCoordinator {
         let workflow = configuration.workflowRules[.newDiscussion]
         let followsFeedback = configuration.authorFeedback.isEnabled
             || (workflow.mode == .assistant && workflow.includes(request))
-        guard request.author.id == user.id, request.state == "opened", request.draft == false,
+        guard request.author.id == user.id, request.state == "opened", request.draft != nil,
               configuration.autoResolveAcceptedFeedback || configuration.autoMergeEnabled || followsFeedback,
               settings.automation.packageDecision != .disabled,
               settings.automation.packageDecision == .enabled || settings.automation.usesAssistant
@@ -92,18 +95,13 @@ final class AuthorFeedbackCoordinator {
         if let status = statuses[target], status.head == head, status.fingerprint == fingerprint,
            status.semanticContextFingerprint == request.semanticContextFingerprint,
            status.phase == .failed { return }
-        if drafts > 0 {
-            pending.removeValue(forKey: target); tasks[target]?.cancel()
-            statuses[target] = .init(head: head, fingerprint: fingerprint,
-                semanticContextFingerprint: request.semanticContextFingerprint, phase: .waitingPublication, pendingDraftCount: drafts)
-            return
-        }
         let input = Input(request: request, discussions: discussions, user: user, target: target,
                           configuration: settings.automation, fingerprint: fingerprint, drafts: drafts)
         if statuses[target]?.head != head || statuses[target]?.fingerprint != fingerprint
             || statuses[target]?.semanticContextFingerprint != request.semanticContextFingerprint {
             statuses[target] = .init(head: head, fingerprint: fingerprint,
-                semanticContextFingerprint: request.semanticContextFingerprint, phase: .checking)
+                semanticContextFingerprint: request.semanticContextFingerprint,
+                readOnlyReconciliation: input.readOnly, phase: .checking, pendingDraftCount: drafts)
         }
         pending[target] = input
         startNext()
@@ -130,7 +128,8 @@ final class AuthorFeedbackCoordinator {
             if statuses[target]?.head != input.request.sha || statuses[target]?.fingerprint != input.fingerprint
                 || statuses[target]?.semanticContextFingerprint != input.request.semanticContextFingerprint {
                 statuses[target] = .init(head: input.request.sha ?? "", fingerprint: input.fingerprint,
-                    semanticContextFingerprint: input.request.semanticContextFingerprint, phase: .checking)
+                    semanticContextFingerprint: input.request.semanticContextFingerprint,
+                    readOnlyReconciliation: input.readOnly, phase: .checking, pendingDraftCount: input.drafts)
             }
             tasks[target] = Task { [weak self] in
                 guard let self else { return }
@@ -195,8 +194,27 @@ final class AuthorFeedbackCoordinator {
         let current = try await glab.fetchMergeRequest(projectID: request.projectID, iid: request.iid, host: host)
         guard isCurrent(input), current.sha == request.sha,
               current.semanticContextFingerprint == request.semanticContextFingerprint,
-              current.state == "opened", current.draft == false, current.author.id == input.user.id,
+              current.state == "opened", current.draft == request.draft, current.author.id == input.user.id,
               current.webURL == request.webURL else { throw CancellationError() }
+        if input.readOnly {
+            // Private drafts and author readiness constrain actions, not reading
+            // whether an earlier, independently delivered follow-up is complete.
+            async let liveThreads = glab.fetchMergeRequestDiscussions(projectID: request.projectID, iid: request.iid, host: host)
+            async let liveUser = glab.fetchAuthenticatedUser(host: host, expectedUsername: input.user.username)
+            async let liveDrafts = glab.fetchOwnDraftNoteCount(projectID: request.projectID, iid: request.iid, host: host, userID: input.user.id)
+            let (threads, user, drafts) = try await (liveThreads, liveUser, liveDrafts)
+            guard isCurrent(input), user == input.user, drafts == input.drafts,
+                  ReviewVerdict.fingerprint(threads) == input.fingerprint else { throw CancellationError() }
+            let completed = AuthorFeedbackStatus(head: request.sha ?? "", fingerprint: input.fingerprint,
+                semanticContextFingerprint: request.semanticContextFingerprint,
+                phase: drafts > 0 ? .waitingPublication : .complete, pendingDraftCount: drafts,
+                replyNoteIDs: assessment.missingPublishedReplyNoteIDs(in: threads, authorID: input.user.id),
+                addressedNoteIDs: Set(assessment.notes.filter { $0.state == .addressed || $0.state == .informational }.map(\.noteID)))
+            let changed = statuses[input.target] != completed
+            statuses[input.target] = completed
+            if changed { onRemoteChange?() }
+            return
+        }
         var approved = try await glab.fetchMergeRequestApproverIDs(projectID: request.projectID, iid: request.iid, host: host)
         var threads = input.discussions
         let initial = AuthorFeedbackPolicy.evaluate(discussions: threads, assessment: assessment, authorID: input.user.id,

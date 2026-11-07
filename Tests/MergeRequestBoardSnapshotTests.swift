@@ -217,13 +217,13 @@ struct MergeRequestBoardSnapshotTests {
         #expect(board.otherMergeRequests.isEmpty && board.otherTodos.isEmpty)
     }
 
-    private func intent(_ iid: Int = 42, state: MRTodoIntent.State = .pending) throws -> MRTodoIntent {
+    private func intent(_ iid: Int = 42, state: MRTodoIntent.State = .pending, kind: MRTodoIntent.Kind = .review) throws -> MRTodoIntent {
         let request = try JSONDecoder().decode(GitLabMergeRequest.self, from: Data("""
         {"project_id":1,"iid":\(iid),"title":"Review","author":{"id":9,"username":"author","name":"Author"},
          "web_url":"https://gitlab.example.org/g/p/-/merge_requests/\(iid)","state":"opened",
          "source_branch":"fix","target_branch":"main","labels":[],"sha":"aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"}
         """.utf8))
-        return .init(id: UUID(), target: .init(host: host, username: "me", projectID: 1, iid: iid), kind: .review,
+        return .init(id: UUID(), target: .init(host: host, username: "me", projectID: 1, iid: iid), kind: kind,
             state: state, todoIDs: [1], noteIDs: [], sourceEvents: [], request: request,
             headSHA: request.sha!, updatedAt: Date())
     }
@@ -258,11 +258,21 @@ struct MergeRequestBoardSnapshotTests {
         #expect(board.otherTodos.map(\.id) == [4])
     }
 
-    @Test func temporarilyMissingManagedCatalogKeepsDurableWorkInReviewing() throws {
-        let durable = try intent()
+    @Test(arguments: [MRTodoIntent.Kind.review, .followUp, .pipeline, .conflict])
+    func temporarilyMissingManagedCatalogKeepsDurableWorkInReviewing(kind: MRTodoIntent.Kind) throws {
+        let durable = try intent(kind: kind)
         let board = MergeRequestBoardSnapshot(own: [], reviewed: [], todos: [], attention: [], handoffs: [],
             host: host, username: "me", intents: [durable])
         #expect(board.reviewed.first?.intents.map(\.id) == [durable.id])
+        #expect(board.proposals.isEmpty)
+    }
+
+    @Test(arguments: [MRTodoIntent.State.pending, .completed])
+    func refreshOnlyHistoryDoesNotRestoreUnmanagedForeignReviewingRows(state: MRTodoIntent.State) throws {
+        let receipt = try intent(state: state, kind: .refresh)
+        let board = MergeRequestBoardSnapshot(own: [], reviewed: [], todos: [], attention: [], handoffs: [],
+            host: host, username: "me", intents: [receipt])
+        #expect(board.reviewed.isEmpty)
         #expect(board.proposals.isEmpty)
     }
 

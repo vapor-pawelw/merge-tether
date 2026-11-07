@@ -50,7 +50,7 @@ struct ReviewingContext {
     enum Status: Equatable {
         case activityUnknown, drafts(Int), running, authorReplied(Int), otherReplied(Int)
         case openThreads(Int), commented(Int), reviewCompleted, noPublishedComments
-        case queued, verifying, reviewNeeded, waitingForOtherDiscussions
+        case queued, verifying, reviewNeeded, waitingForOtherDiscussions, waitingForReady
     }
     enum NextStep: Equatable {
         case monitoring, runReview, viewDiscussions, reviewComments, automaticReview, verifying, viewRun, setupAgent
@@ -67,7 +67,8 @@ struct ReviewingContext {
         case .viewRun: .ReviewingContext.reviewingRunNeedsInput
         case .viewDiscussions: .ReviewingContext.reviewingInspectDiscussions
         case .monitoring:
-            if status == .waitingForOtherDiscussions { .ReviewingContext.reviewingWaitingOtherThreads }
+            if status == .waitingForReady { .ReviewingContext.reviewingWaitingReadyMessage }
+            else if status == .waitingForOtherDiscussions { .ReviewingContext.reviewingWaitingOtherThreads }
             else if case .openThreads = status { .ReviewingContext.reviewingWaitingAuthor }
             else { .ReviewingContext.reviewingMonitoring }
         }
@@ -75,7 +76,8 @@ struct ReviewingContext {
     var actionLabel: LocalizedStringResource? {
         switch nextStep {
         case .automaticReview, .verifying: nil
-        case .monitoring, .viewDiscussions: .ReviewingContext.reviewingViewDiscussions
+        case .monitoring: status == .waitingForReady ? nil : .ReviewingContext.reviewingViewDiscussions
+        case .viewDiscussions: .ReviewingContext.reviewingViewDiscussions
         case .runReview: .CommandCenter.commandCenterReviewRun
         case .reviewComments: .MRHumanAction.mrHumanActionActionReviewDrafts
         case .viewRun: .MRHumanAction.mrHumanActionActionReviewRun
@@ -149,11 +151,15 @@ struct ReviewingContext {
             || automaticIntent || item.reviewingProgress == .queued
         let checking = item.reReviewReadiness == .checking || item.authorFeedbackStatus?.phase == .checking
             || item.reviewingProgress == .checking
+        let deferredReview = item.mergeRequest?.draft == true && row.intents.contains(where: \.isDeferredReview)
         func readyAction(_ action: NextStep) -> NextStep {
             assistantReady || assistantChecking ? action : .setupAgent
         }
         if review?.execution?.state.isActive == true {
             nextStep = .automaticReview
+        } else if deferredReview, drafts == 0, !MergeRequestBoardSnapshot.Row.jobNeedsAttention(currentReview?.execution?.state) {
+            status = .waitingForReady
+            nextStep = .monitoring
         } else if queued {
             status = workflowState == .running ? .running : .queued
             nextStep = readyAction(.automaticReview)
@@ -213,6 +219,7 @@ struct ReviewingContext {
         case .verifying: .ReviewingContext.reviewingVerifying
         case .reviewNeeded: .ReviewingContext.reviewingReviewNeeded
         case .waitingForOtherDiscussions: .ReviewingContext.reviewingOtherThreadsOpen
+        case .waitingForReady: .ReviewingContext.reviewingWaitingReady
         }
     }
 }

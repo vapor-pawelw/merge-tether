@@ -46,7 +46,44 @@ final class TodoMonitorService {
     @ObservationIgnored private var attentionNotificationLedger = UserAttentionNotificationLedger()
     @ObservationIgnored private var manualAdoptions: [MRAutomationScope.Target: Int] = [:]
     private var isAutomating = false
+    private(set) var assessingMentionNoteIDs: Set<Int> = []
+
+    func isAssessingNotice(_ todo: Todo) -> Bool {
+        todo.linkedNoteID.map { assessingMentionNoteIDs.contains($0) } == true
+    }
     private let automation: TodoAutomationService
+    @ObservationIgnored private lazy var environmentRecovery = makeEnvironmentRecovery()
+
+    private func makeEnvironmentRecovery() -> AutomaticEnvironmentRecovery {
+        let recovery = AutomaticEnvironmentRecovery(settings: settings, fetch: { [weak self] original in
+            guard let self, self.glab.resolvedHost == original.key.work.host,
+                  self.glab.currentUsername == original.key.username else { throw CancellationError() }
+            let revision = self.glab.accountRevision
+            async let user = self.glab.fetchAuthenticatedUser(host: original.key.work.host, expectedUsername: original.key.username)
+            async let request = self.glab.fetchMergeRequest(projectID: original.key.work.projectID,
+                iid: original.key.work.iid, host: original.key.work.host)
+            async let discussions = self.glab.fetchMergeRequestDiscussions(projectID: original.key.work.projectID,
+                iid: original.key.work.iid, host: original.key.work.host)
+            let snapshot = try await AutomaticEnvironmentRecovery.Snapshot(request: request, user: user, discussions: discussions)
+            guard self.glab.resolvedHost == original.key.work.host,
+                  self.glab.currentUsername == original.key.username, self.glab.accountRevision == revision else {
+                throw CancellationError()
+            }
+            return snapshot
+        }, launch: { [weak self] original, snapshot, prompt in
+            guard let self else { throw CancellationError() }
+            return try await AssistantAutomationRunner.launch(original.key.assistant, title: original.title,
+                mergeRequestURL: snapshot.request.webURL, prompt: prompt,
+                workspace: self.settings.automation.assistantWorkspace, access: original.key.access,
+                work: original.key.work, username: original.key.username, settings: self.settings,
+                feedbackNoteIDs: original.feedbackNoteIDs ?? [], feedbackTodos: original.feedbackTodos ?? [],
+                mrWorkflow: .followUp, manual: false, expectedHeadSHA: snapshot.request.sha)
+        })
+        recovery.onScheduled = { [weak self] oldID, replacement in
+            self?.mrTodoRouter.rebindJob(oldID: oldID, replacement: replacement)
+        }
+        return recovery
+    }
     @ObservationIgnored private lazy var mrTodoRouter: MergeRequestTodoRouter = {
         let router = MergeRequestTodoRouter(settings: settings, glab: glab, canAutomate: { [weak self] in
             guard let self else { return false }
@@ -63,6 +100,26 @@ final class TodoMonitorService {
         router.followUpVerificationPending = { [weak self] request, discussions in
             guard let fingerprint = ReviewVerdict.fingerprint(discussions) else { return false }
             return self?.attention.authorFeedbackCoordinator?.isChecking(for: request, fingerprint: fingerprint) == true
+        }
+        router.mentionDisposition = { [weak self] request, discussions, user, noteID in
+            guard let self, let host = self.glab.resolvedHost,
+                  self.glab.currentUsername == user.username else { return .uncertain }
+            let configuration = self.settings.automation
+            let revision = self.glab.accountRevision
+            let target = MRAutomationScope.Target(host: host, username: user.username,
+                projectID: request.projectID, iid: request.iid)
+            guard configuration.canClassifyIncomingNotices, configuration.scope.resolve(target).active,
+                  !self.settings.ignoredMergeRequests.contains(target) else { return .uncertain }
+            let model = configuration.assistant == .codex
+                ? configuration.codexVerificationModel.rawValue : configuration.claudeVerificationModel.rawValue
+            self.assessingMentionNoteIDs.insert(noteID)
+            defer { self.assessingMentionNoteIDs.remove(noteID) }
+            let disposition = await MRNoticeClassifier.classify(request: request, discussions: discussions,
+                user: user, noteID: noteID, assistant: configuration.assistant, model: model)
+            guard self.glab.resolvedHost == host, self.glab.currentUsername == user.username,
+                  self.glab.accountRevision == revision, self.settings.automation == configuration,
+                  !self.settings.ignoredMergeRequests.contains(target) else { return .uncertain }
+            return disposition
         }
         return router
     }()
@@ -91,6 +148,9 @@ final class TodoMonitorService {
         self.attention = MergeRequestAttentionMonitor(glab: glab, settings: settings,
                                                        reportDirectory: CodexDesktopRelay.directory)
         self.authoredMergeRequests = AuthoredMergeRequestMonitor(settings: settings, glab: glab, notifications: notifications)
+        authoredMergeRequests.workflow.onRemoteChange = { [weak self] in
+            Task { await self?.refreshNow() }
+        }
         authoredMergeRequests.authorFeedbackAllowsMerge = { [weak self] request, discussions, authorID in
             guard let self, let fingerprint = ReviewVerdict.fingerprint(discussions),
                   let assessment = self.attention.authorFeedbackCoordinator?.assessment(for: request, fingerprint: fingerprint),
@@ -317,7 +377,7 @@ final class TodoMonitorService {
 
     private func trackedReviewTarget(_ target: MRAutomationScope.Target) -> Bool {
         settings.automation.scope[target] == .active
-            || settings.mrActionIntents.contains { $0.target == target }
+            || settings.mrActionIntents.contains { $0.target == target && $0.grantsManagement }
             || settings.assistantChats.keys.contains {
                 $0.work.host == target.host && $0.username == target.username && $0.work.projectID == target.projectID && $0.work.iid == target.iid
             }
@@ -336,6 +396,7 @@ final class TodoMonitorService {
         allTodos.removeAll { acknowledged.contains($0.id) }
         acknowledgedDuringFetch.formUnion(acknowledged)
         if let error = mrTodoRouter.acknowledgementError { assistantJobActionError = error.localizedDescription }
+        if automatically { await environmentRecovery.recover(host: host, username: username) }
     }
 
     func reviewingContext(for row: MergeRequestBoardSnapshot.Row) -> ReviewingContext {
@@ -718,11 +779,13 @@ final class TodoMonitorService {
                 assistantReady: preparing)
             let state = attention.confirmationStates[row.id]
             let conflictProcessing = row.item.mergeRequest.map { automaticConflictIsProcessing(for: $0) } ?? false
+            let pipelineProcessing = row.item.mergeRequest.map { authoredMergeRequests.workflow.isAutomaticallyProcessingPipeline($0) } ?? false
+            let recoveryWaitsForHuman = (row.item.draftProofRecoveryChecking || row.isCheckingReadOnlyReconciliation) && row.hasIndependentStoppedWork
             let busy = row.latestJob?.operationalExecution?.state.isActive == true || state == .publishing || state == .approving
                 || row.item.aiOriginChecking
-                || row.item.authorFeedbackStatus?.phase == .checking
-                || conflictProcessing
-                || (!row.item.isAuthored && reviewingContext(for: row).isAutomaticProcessing)
+                || (!recoveryWaitsForHuman && (row.item.authorFeedbackStatus?.phase == .checking || row.item.draftProofRecoveryChecking))
+                || conflictProcessing || pipelineProcessing
+                || (!recoveryWaitsForHuman && !row.item.isAuthored && reviewingContext(for: row).isAutomaticProcessing)
             var actions: [UserAttentionSnapshot.Action] = []
             func add(_ reason: UserAttentionSnapshot.Reason, _ token: String, automatic: Bool = false) {
                 actions.append(.init(reason: reason, token: token, automatic: automatic))
@@ -783,6 +846,7 @@ final class TodoMonitorService {
                 title: proposal.title, subtitle: proposal.url.gitLabProjectPath, actions: actions))
         }
         for todo in board.otherTodos {
+            if isAssessingNotice(todo) { continue }
             if isLoading && MRTodoIntent.kind(for: todo, username: username) != nil { continue }
             let id = todo.targetType == .mergeRequest && todo.target.iid != nil
                 ? key(todo.project.id, todo.target.iid!) : "\(host)/\(username)/todo/\(todo.id)"
@@ -794,8 +858,9 @@ final class TodoMonitorService {
 
     private func attentionIntentIsAutomatic(_ intent: MRTodoIntent, ready: Bool) -> Bool {
         let configuration = settings.automation
-        guard ready, configuration.packageDecision != .disabled, configuration.scope.resolve(intent.target).active,
-              !settings.ignoredMergeRequests.contains(intent.target), intent.request.state == "opened", intent.request.draft != true else { return false }
+        guard configuration.packageDecision != .disabled, configuration.scope.resolve(intent.target).active,
+              !settings.ignoredMergeRequests.contains(intent.target), intent.request.state == "opened",
+              intent.isDeferredReview || (ready && intent.request.draft != true) else { return false }
         let project = intent.request.webURL.gitLabProjectPath
         switch intent.kind {
         case .review:
@@ -806,6 +871,10 @@ final class TodoMonitorService {
             let workflow = configuration.workflowRules[.newDiscussion]
             return rule.runner == .assistant && rule.isConfigured && rule.includes(project: project)
                 && (rule.isEnabled || (workflow.mode == .assistant && workflow.includes(intent.request)))
+        case .pipeline:
+            let rule = configuration.workflowRules[.pipelineFailure]
+            return intent.request.author.username == intent.target.username && configuration.autoClaimPipelineFailures
+                && rule.mode == .assistant && rule.includes(intent.request)
         default: return false
         }
     }

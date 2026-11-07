@@ -6,7 +6,7 @@ MergeTether is a local MR command center. Manual GitLab management works without
 
 **When you are the reviewer**
 
-1. A review request arrives. The selected CLI reviews the current MR and saves warranted findings as private GitLab drafts.
+1. A review request arrives. Eligible Draft MRs are tracked in Reviewing and wait until ready. The selected CLI reviews ready MRs and saves warranted findings as private GitLab drafts.
 2. Drafts wait on the relevant MR card. Open **Review and confirm** to read the complete discussion and private drafts, then publish the reviewed set or edit it in GitLab. Publication can also run automatically under the selected profile and publication mode.
 3. New commits or author replies trigger a new re-review task. The first poll establishes a baseline; later events are deduplicated across restarts.
 4. With **Resolve my verified findings during re-review** enabled, the agent checks each concern against the current remote head and resolves only threads whose first non-system note belongs to you. Unaddressed or uncertain concerns stay open with private draft replies. Turning the option off leaves resolution to you.
@@ -17,7 +17,7 @@ MergeTether is a local MR command center. Manual GitLab management works without
 1. Review feedback arrives. The agent implements warranted fixes in an isolated worktree, tests, commits and pushes when follow-up push is enabled. It is instructed to keep work inside its run directory and leave other checkouts alone; this is a workflow rule, not a filesystem sandbox.
 2. Before saving completion replies, the worker re-fetches the MR HEAD and verifies the remote source/test content. With push off, pending or failed, the proposal stays in the task result and no completion drafts are created.
 3. Verified replies wait on the relevant MR card or qualify for the selected publication rule. MergeTether requests another review only when feedback is ready and unpublished replies no longer block it.
-4. Failed pipelines and conflicts can become separate tasks. Unverified pipeline ownership requires your confirmation.
+4. Failed pipelines and conflicts can become separate tasks. Full automation checks existing reservations and atomically claims unowned pipeline failures. With checkpoints, ownership waits for your confirmation; the permission is adjustable separately.
 5. Automatic merge is enabled by Full automation and disabled by the other profiles. It checks ownership, scope, approvals, discussions, pipeline and the source commit.
 
 Reviewing cards show the MR author by display name (hover for the account handle), the review-request source when known, and participation in your review threads. Historical replies in resolved threads do not count as pending work. Each card explains the next step and offers an action where needed; queued reviews and verification show automatic progress, while waits on other reviewers remain neutral. Without a recorded request source they say **Tracked for review**; missing discussion data is shown honestly rather than implying a first review. Proposals show the MR author and originating event.
@@ -27,6 +27,10 @@ When a current-head review verdict no longer covers the discussion text, the wor
 **Review and confirm** includes complete discussion threads and inline private drafts. An **AI** badge indicates a verified agent identity or a high-confidence assessment bound to the current note and its content. No badge does not prove manual authorship; the badge does not authorize publication or resolution.
 
 An MR has local task history. A process reporting success does not prove that a fix reached GitLab, a review remains current or a pipeline passed.
+
+Pending drafts do not prevent a read-only check of existing feedback. A historical unbound follow-up can close once its own current requirements are addressed and required replies are published, even while unrelated drafts or feedback remain. This assessment does not run fixes, push, resolve threads or merge Drafts.
+
+Incoming mentions without a known action may receive a read-only semantic assessment using the selected lightweight model. Only a proven informational event is acknowledged automatically, after a fresh account, MR and discussion check. Ambiguous or actionable notices stay available to read. Handled-event banners follow the existing optional banner preference.
 
 ## CLI setup and execution
 
@@ -130,6 +134,12 @@ Draft readiness requires a check covering the current MR head and discussion con
 
 ## Remote proof for author follow-ups
 
+Known app-origin sealed drafts with incomplete older proof can receive one fresh verification per exact account, MR, draft, discussion, code and verification context. Current automation permissions must still allow it. The lightweight verifier reads live GitLab evidence and checks each draft's claims. It archives independent current proof without changing the original run's result. Each requested draft subset remains bound to its complete historical origin. Verified replies can publish individually while uncertain siblings stay private; refreshing one draft does not adopt or invalidate its unchanged siblings. Unknown origins, edited drafts and uncertain claims remain private. Verification progress is neutral; a failed check shows its reason and a retry action.
+
+Rejected checks remain fenced per exact draft across restarts and narrower batches. Publishing a verified sibling or automatically tracking another MR does not reset that result. Meaningful new claim evidence, such as changed code, discussions or CI, can permit a fresh check; **Verify drafts again** explicitly resets the attempt fence while retaining valid proof.
+
+Workers receive a private temporary directory in `TMPDIR`, `TMP` and `TEMP`, and an explicit JVM `java.io.tmpdir` option. A blocked author follow-up with an identified local temporary-file permission failure can receive one fresh automatic attempt while its original commit, account, discussion and active permissions still match. The attempt is persisted before launch and reconciles existing remote changes before doing new work. It preserves the old failure in history; failed, cancelled, interrupted or otherwise uncertain runs are not blindly replayed.
+
 **Let the agent push fixes to my merge requests** is enabled by Full automation and is independent of conflict-push permission. Turning it off is preserved across restarts. Installed MR skills can refine the work, but are not required for this sequence.
 
 The worker runs the bundled `author_follow_up.py status` command at the start and immediately before pushing. Only an explicit author-follow-up run carries that permission; review, legacy and conflict tasks cannot inherit it. Before drafting it runs `author_follow_up.py verify` with the run ID, tested/pushed commit and an evidence file containing the assessed discussion fingerprint and SHA-256 hashes of committed source/test files. The verifier reads the authenticated user, owned MR, source branch and remote file contents.
@@ -185,7 +195,7 @@ Approval is pinned to the checked source SHA. A new or edited comment invalidate
 | Review | Inspect other authors’ code and save private findings; never modify their branches. |
 | Author follow-up | Isolate edits, test, commit and push only under its own follow-up permission; verify remote content before completion drafts. |
 | Stack follow-up | Prepare a plan and identify the proposed target and changes. |
-| Pipeline failure | Coordinate ownership before fixing. Full CI traces stay out of the preparation prompt. Infrastructure retries need a listed project, current-head evidence and a confirmed handoff. |
+| Pipeline failure | Check existing reservations and claim unowned work automatically under Full automation; a separate checkpoint can require confirmation. Source pipelines bind to the live source head. Merged-result pipelines bind their immutable commit to the current source and target parents. When only the target is stale, Full requests one current MR pipeline before any code fix. The account, MR, source, target, old pipeline and exclusive reservation are rechecked; a durable attempt is saved before the request, and an uncertain reply is never blindly retried. Full CI traces stay out of the preparation prompt. Infrastructure job retries still need a listed project and verified current pipeline evidence. |
 | Conflict resolution | Prepare a resolution. A push requires its separate toggle, the additional project-task permission and the active scope plus any configured project restriction. |
 | Merge | Enabled by Full automation. Requires active scope plus any configured project restriction, your own MR, required approvals, resolved discussions, an eligible pipeline and the checked source SHA. Advanced task configurations or conflict work can also require a verified approval-reset policy. |
 | To-do events | A recognized event is marked read only after its MR action is durably recorded and the live MR refreshed. This acknowledges the event, not the agent’s work. Unknown events remain unread in Other. Explicitly ignored MR events are acknowledged without running a task. |
@@ -209,4 +219,4 @@ mkdir "$claim" || exit 1
 rmdir "$claim"
 ```
 
-Remove only a reservation created by the current task. External sessions do not reliably expose which pipeline they are fixing. Unverified ownership requires confirmation. Interrupted runs can leave a reservation; inspect the associated execution before clearing it.
+Remove only a reservation created by the current task. Full automation checks these reservations and claims unowned pipeline work atomically. With the automatic pipeline ownership permission off, unverified ownership requires confirmation. Existing failures are discovered on the first enabled poll and persisted pipeline identities prevent replay across restarts. Interrupted runs can leave a reservation; inspect the associated execution before clearing it. A pipeline-refresh attempt is stored separately before requesting current-target CI, including when the server response is uncertain.

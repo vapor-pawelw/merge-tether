@@ -1,5 +1,7 @@
 import Foundation
 
+enum MRTodoMentionDisposition: Equatable, Sendable { case informational, actionable, uncertain }
+
 /// A durable action accepted from a GitLab event. Receiving the event and
 /// finishing the action are deliberately separate states.
 struct MRTodoIntent: Codable, Identifiable, Sendable {
@@ -18,6 +20,15 @@ struct MRTodoIntent: Codable, Identifiable, Sendable {
     var error: String?
     var updatedAt: Date
     var sourceTodo: Todo?
+
+    /// A notice receipt retains routing history without enrolling its MR for work.
+    var grantsManagement: Bool { kind != .refresh }
+
+    /// Accepted review requests remain tracked while their author finishes a Draft.
+    var isDeferredReview: Bool {
+        kind == .review && state == .pending && jobID == nil
+            && request.state == "opened" && request.draft == true
+    }
 
     /// Only candidates with a concrete meaning are proposed. Discussion events
     /// still require matching live unresolved feedback before routing.

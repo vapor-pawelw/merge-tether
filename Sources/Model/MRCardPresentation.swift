@@ -11,16 +11,19 @@ struct MRCardPresentation {
     let confirmationState: MergeRequestAttentionMonitor.ConfirmationState?
     let automaticallyPublishedDraftIDs: Set<Int>
     let automaticConflictProgress: Bool
+    let automaticPipelineProgress: Bool
     private var item: MergeRequestAttentionMonitor.Item { row.item }
 
     init(row: MergeRequestBoardSnapshot.Row, reviewingContext: ReviewingContext,
          allowsRemoval: Bool, assistantReady: Bool,
          confirmationState: MergeRequestAttentionMonitor.ConfirmationState? = nil,
-         automaticallyPublishedDraftIDs: Set<Int> = [], automaticConflictProgress: Bool = false) {
+         automaticallyPublishedDraftIDs: Set<Int> = [], automaticConflictProgress: Bool = false,
+         automaticPipelineProgress: Bool = false) {
         self.row = row; self.reviewingContext = reviewingContext; self.allowsRemoval = allowsRemoval
         self.assistantReady = assistantReady; self.confirmationState = confirmationState
         self.automaticallyPublishedDraftIDs = automaticallyPublishedDraftIDs
         self.automaticConflictProgress = automaticConflictProgress
+        self.automaticPipelineProgress = automaticPipelineProgress
     }
 
     init(row: MergeRequestBoardSnapshot.Row, monitor: TodoMonitorService, allowsRemoval: Bool) {
@@ -33,13 +36,17 @@ struct MRCardPresentation {
         self.init(row: row, reviewingContext: monitor.reviewingContext(for: row), allowsRemoval: allowsRemoval,
             assistantReady: ready, confirmationState: monitor.attention.confirmationStates[row.id],
             automaticallyPublishedDraftIDs: automatic,
-            automaticConflictProgress: row.item.mergeRequest.map { monitor.automaticConflictIsProcessing(for: $0) } ?? false)
+            automaticConflictProgress: row.item.mergeRequest.map { monitor.automaticConflictIsProcessing(for: $0) } ?? false,
+            automaticPipelineProgress: row.item.mergeRequest.map { monitor.authoredMergeRequests.workflow.isAutomaticallyProcessingPipeline($0) } ?? false)
     }
 
     var busy: Bool {
-        confirmationState == .publishing || confirmationState == .approving
-            || item.authorFeedbackStatus?.phase == .checking || item.reReviewReadiness == .checking
-            || item.aiOriginChecking || (allowsRemoval && reviewingContext.isAutomaticProcessing)
+        let recoveryWaitsForHuman = (item.draftProofRecoveryChecking || row.isCheckingReadOnlyReconciliation) && row.hasIndependentStoppedWork
+        return confirmationState == .publishing || confirmationState == .approving
+            || (!recoveryWaitsForHuman && (item.authorFeedbackStatus?.phase == .checking || item.draftProofRecoveryChecking))
+            || item.reReviewReadiness == .checking || item.aiOriginChecking
+            || (!recoveryWaitsForHuman && allowsRemoval && reviewingContext.isAutomaticProcessing)
+            || automaticPipelineProgress
             || (automaticConflictProgress && row.latestJob?.execution?.state.isActive != true)
     }
     var working: Bool { busy || row.latestJob?.execution?.state.isActive == true }
@@ -63,6 +70,7 @@ struct MRCardPresentation {
         if let job = row.latestJob, job.execution?.state.isActive == true {
             return String(localized: .Board.boardCompactWorking) + " · " + String(localized: job.key.assistant.displayName)
         }
+        if item.draftProofRecoveryChecking, !row.hasIndependentStoppedWork { return String(localized: .DraftProofRecovery.draftProofRecoveryChecking) }
         if busy { return String(localized: item.aiOriginChecking ? .MRDiscussions.mrDiscussionsAiChecking : .Board.boardCompactWorking) }
         return humanAction == nil ? neutralStatus.map { String(localized: $0) } : nil
     }
@@ -81,11 +89,13 @@ struct MRCardPresentation {
         if item.hasConflict || item.mergeRequest?.hasMergeConflict == true {
             result.append(.init(title: .Board.boardCompactConflict, symbol: "arrow.triangle.branch"))
         }
-        if item.failedPipeline || item.mergeRequest?.headPipeline?.status == "failed" {
-            result.append(.init(title: .Board.boardCompactPipelineFailed, symbol: "xmark.circle"))
-        } else if let pipeline = item.mergeRequest?.headPipeline,
-                  ["running", "pending", "created", "preparing", "waiting_for_resource"].contains(pipeline.status) {
+        if let pipeline = item.mergeRequest?.headPipeline,
+           ["running", "pending", "created", "preparing", "waiting_for_resource"].contains(pipeline.status) {
             result.append(.init(title: .Board.boardCompactPipelineRunning, symbol: "clock"))
+        } else if automaticPipelineProgress {
+            result.append(.init(title: .PipelineAutomation.pipelineHandling, symbol: "gearshape"))
+        } else if item.failedPipeline || item.mergeRequest?.headPipeline?.status == "failed" {
+            result.append(.init(title: .Board.boardCompactPipelineFailed, symbol: "xmark.circle"))
         }
         if humanAction == nil, !busy, !allowsRemoval, max(item.draftCount, item.drafts.count) > 0 {
             result.append(.init(title: .Board.boardCompactDrafts(max(item.draftCount, item.drafts.count)), symbol: "text.bubble"))

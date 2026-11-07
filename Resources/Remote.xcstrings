@@ -1,6 +1,17 @@
 {
   "sourceLanguage": "en",
   "strings": {
+    "remote.mac.pairPhone": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Pair with iPhone"
+          }
+        }
+      }
+    },
     "remote.title": {
       "extractionState": "manual",
       "localizations": {

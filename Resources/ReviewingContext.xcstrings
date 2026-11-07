@@ -402,6 +402,28 @@
           }
         }
       }
+    },
+    "reviewing.waitingReady": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Waiting for author readiness"
+          }
+        }
+      }
+    },
+    "reviewing.waitingReadyMessage": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "No action needed. Waiting for the author to mark this merge request ready."
+          }
+        }
+      }
     }
   }
 }

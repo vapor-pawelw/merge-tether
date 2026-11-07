@@ -200,6 +200,10 @@ import MergeTetherRemote
             await monitor.attention.confirmReReview(item.id, head: head, fingerprint: fingerprint)
             return monitor.attention.currentOpenItems.first(where: { $0.id == item.id })?.reReviewRequested == true ? .completed : .uncertain
         case .verify:
+            if item.draftProofRecoveryFailure != nil {
+                monitor.attention.retryDraftProofRecovery(item.id)
+                return .completed
+            }
             await monitor.attention.retryReReview(item.id); return .completed
         default: return .changed
         }

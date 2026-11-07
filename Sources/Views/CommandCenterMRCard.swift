@@ -182,6 +182,8 @@ private struct CommandCenterMRCardContent: View {
             primary(action.actionLabel) { openAttention(.drafts) }
         case .verifyFeedback:
             primary(action.actionLabel) { monitor.attention.retryAuthorFeedback(item.id) }
+        case .retryDraftVerification:
+            primary(action.actionLabel) { monitor.attention.retryDraftProofRecovery(item.id) }
         case .setupAssistant:
             primary(action.actionLabel) { openSettings() }
         case .reviewDecision, .reviewFeedback:
@@ -304,9 +306,14 @@ struct BoardTodoRow: View {
                     .help(Text(verbatim: title))
             }
             HStack {
+                if monitor.isAssessingNotice(todo) {
+                    ProgressView().controlSize(.small)
+                    Text(.Board.boardCompactWorking).foregroundStyle(.secondary)
+                }
                 Spacer(minLength: 0)
                 Button { monitor.markDoneWithUndo(todo) } label: { Text(.Board.boardEventMarkRead) }
                     .buttonStyle(.bordered)
+                    .disabled(monitor.isAssessingNotice(todo))
             }
             .font(.caption)
         }
@@ -336,6 +343,7 @@ struct BoardTodoRow: View {
             Button { monitor.markDoneWithUndo(todo) } label: {
                 Label { Text(.Board.boardEventMarkRead) } icon: { Image(systemName: "checkmark") }
             }
+            .disabled(monitor.isAssessingNotice(todo))
             if todo.targetType == .mergeRequest {
                 AssistantContextMenu(mergeRequestURL: todo.targetURL, title: todo.displayTitle,
                     workspace: monitor.settings.automation.assistantWorkspace)

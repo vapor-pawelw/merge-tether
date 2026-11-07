@@ -1,6 +1,17 @@
 {
   "sourceLanguage": "en",
   "strings": {
+    "automationHistory.environmentRecovery.queued": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Started a fresh follow-up after a local temporary-file permission failure."
+          }
+        }
+      }
+    },
     "automationHistory.title": {
       "extractionState": "manual",
       "localizations": {
