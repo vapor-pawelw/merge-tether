@@ -22,10 +22,18 @@ struct FollowUpVerification: Codable, Equatable, Sendable {
     var semanticContextFingerprint: String? = nil
     var recoveryContextFingerprint: String? = nil
 
-    func covers(_ draft: GitLabDraftNote, request: GitLabMergeRequest, host: String, user: GitLabAuthenticatedUser, runID: UUID) -> Bool {
-        version == 1 && sealed && self.runID == runID && self.host == host && projectID == request.projectID && iid == request.iid
+    /// Historical identity establishes ownership only; fresh verification must establish current truth.
+    func owns(_ draft: GitLabDraftNote, request: GitLabMergeRequest, host: String, user: GitLabAuthenticatedUser) -> Bool {
+        version == 1 && sealed && self.host == host && projectID == request.projectID && iid == request.iid
             && username == user.username && userID == user.id && request.author.id == user.id && request.state == "opened"
-            && headSHA == request.sha && sourceProjectID == request.sourceProjectID && sourceBranch == request.sourceBranch
+            && sourceProjectID == request.sourceProjectID && sourceBranch == request.sourceBranch
+            && draft.authorID == user.id && !files.isEmpty && files.count <= 20
+            && drafts.contains { $0.id == draft.id && $0.bodySHA256 == AICommentAssessmentStore.digest(draft.note ?? "") }
+    }
+
+    func covers(_ draft: GitLabDraftNote, request: GitLabMergeRequest, host: String, user: GitLabAuthenticatedUser, runID: UUID) -> Bool {
+        owns(draft, request: request, host: host, user: user) && self.runID == runID
+            && headSHA == request.sha
             && (semanticContextFingerprint == nil || semanticContextFingerprint == request.semanticContextFingerprint)
             && (recoveryContextFingerprint == nil || recoveryContextFingerprint == request.draftProofRecoveryContextFingerprint)
             && draft.authorID == user.id && !files.isEmpty && files.count <= 20
@@ -285,14 +293,23 @@ extension FollowUpVerificationStore {
     }
 
     static func recoveredProof(origin: FollowUpVerification, assessmentID: UUID, fingerprint: String,
-                               semanticContext: String, recoveryContext: String, draftIDs: [Int]? = nil) -> FollowUpVerification {
+                               semanticContext: String, recoveryContext: String, draftIDs: [Int]? = nil,
+                               headSHA: String? = nil, files: [FollowUpVerification.FileEvidence]? = nil) -> FollowUpVerification {
         .init(version: 1, sealed: true, verificationID: assessmentID, runID: origin.runID,
             host: origin.host, projectID: origin.projectID, iid: origin.iid, username: origin.username,
-            userID: origin.userID, headSHA: origin.headSHA, sourceProjectID: origin.sourceProjectID,
-            sourceBranch: origin.sourceBranch, files: origin.files,
+            userID: origin.userID, headSHA: headSHA ?? origin.headSHA, sourceProjectID: origin.sourceProjectID,
+            sourceBranch: origin.sourceBranch, files: files ?? origin.files,
             drafts: origin.drafts.filter { draftIDs.map(Set.init)?.contains($0.id) ?? true },
             discussionFingerprint: fingerprint, semanticContextFingerprint: semanticContext,
             recoveryContextFingerprint: recoveryContext)
+    }
+
+    static func validRecoveryEvidence(headSHA: String, files: [FollowUpVerification.FileEvidence],
+                                      origin: FollowUpVerification) -> Bool {
+        isHex(headSHA, lengths: [40, 64]) && !files.isEmpty && files.count <= 20
+            && files.map(\.path) == origin.files.map(\.path)
+            && files.allSatisfy { isHex($0.sha256, lengths: [64]) }
+            && (headSHA != origin.headSHA || files == origin.files)
     }
 
     @MainActor
@@ -319,7 +336,7 @@ extension FollowUpVerificationStore {
             guard path.pathExtension == "json", (try? path.resourceValues(forKeys: [.isSymbolicLinkKey]).isSymbolicLink) != true,
                   let size = try? path.resourceValues(forKeys: [.fileSizeKey]).fileSize, size < 1_000_000,
                   let data = try? Data(contentsOf: path), let record = try? JSONDecoder().decode(RecoveryRecord.self, from: data),
-                  record.version == 1, path.deletingPathExtension().lastPathComponent == record.attemptID,
+                  [1, 2].contains(record.version), path.deletingPathExtension().lastPathComponent == record.attemptID,
                   isHex(record.attemptID, lengths: [64]), origins.contains(record.origin),
                   record.assistant == settings.automation.assistant, !record.model.isEmpty,
                   record.assessmentID != record.origin.verificationID,
@@ -332,8 +349,12 @@ extension FollowUpVerificationStore {
             let valid = record.assessment.drafts.filter { $0.state == .valid }.map(\.draftID)
             guard validRecoveryScope(requested, origin: record.origin), !valid.isEmpty,
                   (try? DraftProofRecoveryVerifier.validate(record.assessment, draftIDs: requested)) != nil,
+                  (record.version == 1 || validRecoveryEvidence(headSHA: record.proof.headSHA,
+                      files: record.proof.files, origin: record.origin)),
                   record.proof == recoveredProof(origin: record.origin, assessmentID: record.assessmentID,
-                      fingerprint: fingerprint, semanticContext: context, recoveryContext: recoveryContext, draftIDs: valid)
+                      fingerprint: fingerprint, semanticContext: context, recoveryContext: recoveryContext, draftIDs: valid,
+                      headSHA: record.version == 2 ? record.proof.headSHA : nil,
+                      files: record.version == 2 ? record.proof.files : nil)
             else { return nil }
             return record
         }

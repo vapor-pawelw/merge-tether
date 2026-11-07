@@ -22,6 +22,7 @@ final class DraftProofRecoveryCoordinator {
         let key: String
         let discussionFingerprint: String
         let drafts: [FollowUpVerification.DraftEvidence]
+        var originID: UUID? = nil
     }
     private struct Attempt: Codable {
         enum Phase: String, Codable { case checking, verified, blocked }
@@ -78,7 +79,7 @@ final class DraftProofRecoveryCoordinator {
         var presentationPolicy = configuration
         presentationPolicy.scope = MRAutomationScope()
         guard let data = try? JSONEncoder.sorted.encode(presentationPolicy) else { return nil }
-        return request.draftProofRecoveryContextFingerprint + "|" + fingerprint + "|" + AICommentAssessmentStore.digest(String(decoding: data, as: UTF8.self))
+        return (request.sha ?? "") + "|" + request.draftProofRecoveryContextFingerprint + "|" + fingerprint + "|" + AICommentAssessmentStore.digest(String(decoding: data, as: UTF8.self))
     }
 
     func schedule(snapshot: Snapshot, origin: FollowUpVerification, draftIDs: [Int]? = nil, configuration: AutomationSettings) {
@@ -96,6 +97,10 @@ final class DraftProofRecoveryCoordinator {
         let matching = previous.filter { attempt in
             attempt.context?.key == key && attempt.context.map {
                 discussionMatches($0.discussionFingerprint, snapshot: snapshot)
+                    // A failure without a semantic verdict is scoped to its evidence origin.
+                    // Preserve in-flight checks across normalized publication of our own replies.
+                    && (attempt.phase == .checking || attempt.assessment != nil
+                        || $0.originID == nil || $0.originID == origin.verificationID)
             } == true
         }
         let known = matching.flatMap { $0.context?.drafts ?? [] }
@@ -120,8 +125,9 @@ final class DraftProofRecoveryCoordinator {
             return
         }
         let context = AttemptContext(key: key, discussionFingerprint: fingerprint,
-            drafts: origin.drafts.filter { selected.contains($0.id) })
-        let id = AICommentAssessmentStore.digest(key + "|" + fingerprint + "|" + selected.map(String.init).joined(separator: ","))
+            drafts: origin.drafts.filter { selected.contains($0.id) }, originID: origin.verificationID)
+        let id = AICommentAssessmentStore.digest(key + "|" + fingerprint + "|" + selected.map(String.init).joined(separator: ",")
+            + "|" + origin.verificationID.uuidString)
         let request = Request(snapshot: snapshot, origin: origin, draftIDs: selected,
             configuration: configuration, context: context, id: id)
         tasks[snapshot.work]?.cancel()
@@ -198,14 +204,19 @@ final class DraftProofRecoveryCoordinator {
               matchesOwnership(live, origin: input.origin, draftIDs: input.draftIDs) else {
             throw Blocked(reason: String(localized: .DraftProofRecovery.draftProofRecoveryChanged))
         }
+        var files: [FollowUpVerification.FileEvidence] = []
         for file in input.origin.files {
-            guard try await hashFile(live, file) == file.sha256, current(input) else {
-                throw Blocked(reason: String(localized: .DraftProofRecovery.draftProofRecoverySourceChanged))
-            }
+            let hash = try await hashFile(live, file)
+            guard current(input) else { throw CancellationError() }
+            files.append(.init(path: file.path, sha256: hash))
+        }
+        guard let head = live.request.sha,
+              FollowUpVerificationStore.validRecoveryEvidence(headSHA: head, files: files, origin: input.origin) else {
+            throw Blocked(reason: String(localized: .DraftProofRecovery.draftProofRecoverySourceChanged))
         }
         let model = input.configuration.assistant == .codex
             ? input.configuration.codexVerificationModel.rawValue : input.configuration.claudeVerificationModel.rawValue
-        let assessment = try await verify(.init(snapshot: live, origin: input.origin, draftIDs: input.draftIDs), input.configuration.assistant, model)
+        let assessment = try await verify(.init(snapshot: live, origin: input.origin, draftIDs: input.draftIDs, currentFiles: files), input.configuration.assistant, model)
         try DraftProofRecoveryVerifier.validate(assessment, draftIDs: input.draftIDs)
         guard current(input) else { throw CancellationError() }
         states[snapshot.work]?.assessment = assessment
@@ -221,11 +232,16 @@ final class DraftProofRecoveryCoordinator {
               let fingerprint = ReviewVerdict.fingerprint(final.discussions) else {
             throw Blocked(reason: String(localized: .DraftProofRecovery.draftProofRecoveryChanged))
         }
+        for file in files {
+            guard try await hashFile(final, file) == file.sha256, current(input) else {
+                throw Blocked(reason: String(localized: .DraftProofRecovery.draftProofRecoverySourceChanged))
+            }
+        }
         let assessmentID = UUID()
         let proof = FollowUpVerificationStore.recoveredProof(origin: input.origin, assessmentID: assessmentID,
             fingerprint: fingerprint, semanticContext: final.request.semanticContextFingerprint,
-            recoveryContext: final.request.draftProofRecoveryContextFingerprint, draftIDs: valid)
-        try FollowUpVerificationStore.persistRecovery(.init(version: 1, attemptID: input.id, assessmentID: assessmentID,
+            recoveryContext: final.request.draftProofRecoveryContextFingerprint, draftIDs: valid, headSHA: head, files: files)
+        try FollowUpVerificationStore.persistRecovery(.init(version: 2, attemptID: input.id, assessmentID: assessmentID,
             assistant: input.configuration.assistant, model: model, origin: input.origin, proof: proof,
             assessment: assessment, requestedDraftIDs: input.draftIDs),
             work: snapshot.work, username: snapshot.user.username, in: directory)
@@ -259,10 +275,11 @@ final class DraftProofRecoveryCoordinator {
 
     private func matchesOwnership(_ snapshot: Snapshot, origin: FollowUpVerification, draftIDs: [Int]) -> Bool {
         snapshot.request.draft == false && snapshot.request.webURL.isGitLabMergeRequest(host: snapshot.host, iid: snapshot.request.iid)
-            && snapshot.branchHead == origin.headSHA && draftIDs.allSatisfy { draftID in
+            && snapshot.request.state == "opened" && snapshot.request.author.id == snapshot.user.id
+            && snapshot.branchHead == snapshot.request.sha && draftIDs.allSatisfy { draftID in
                 let matching = snapshot.drafts.filter { $0.id == draftID }
                 return matching.count == 1 && AutomaticPublicationPolicy.safeForAutomaticPublication(matching[0])
-                    && origin.covers(matching[0], request: snapshot.request, host: snapshot.host, user: snapshot.user, runID: origin.runID)
+                    && origin.owns(matching[0], request: snapshot.request, host: snapshot.host, user: snapshot.user)
             }
     }
 
@@ -337,7 +354,7 @@ final class DraftProofRecoveryCoordinator {
         }
         // Old failed/interrupted records lacked scope and context metadata. Migrate
         // them conservatively once; never turn missing historical evidence into another try.
-        for legacy in attempts where legacy.context == nil {
+        for legacy in attempts where legacy.context == nil && snapshot.request.sha == origin.headSHA {
             let context = AttemptContext(key: key, discussionFingerprint: ReviewVerdict.fingerprint(snapshot.discussions) ?? "",
                 drafts: origin.drafts)
             var imported = legacy; imported.context = context

@@ -119,7 +119,8 @@ import Testing
     private func makeHarness(assistantWorked: Bool, authored: Bool = false,
                              duringAutomationCheck: (@MainActor (URL) -> Void)? = nil,
                              assessment: ReReviewAssessment? = nil,
-                             assessAIOrigin: AICommentOriginCoordinator.Assess? = nil) throws -> Harness {
+                             assessAIOrigin: AICommentOriginCoordinator.Assess? = nil,
+                             verifyDraftRecovery: DraftProofRecoveryCoordinator.Verify? = nil) throws -> Harness {
         let folder = FileManager.default.temporaryDirectory.appending(path: UUID().uuidString)
         try FileManager.default.createDirectory(at: folder, withIntermediateDirectories: false)
         let suite = "ConfirmationQueueTests.\(UUID())"
@@ -279,7 +280,7 @@ import Testing
                     note.id.map { .init(noteID: $0, state: .addressed, reason: "Verified fixture correction") }
                 })
             },
-            verifyDraftProofRecovery: { _, _, _ in throw DraftProofRecoveryVerifier.Failure.failed },
+            verifyDraftProofRecovery: verifyDraftRecovery ?? { _, _, _ in throw DraftProofRecoveryVerifier.Failure.failed },
             assessAIOrigin: assessAIOrigin ?? { _, notes, _, _ in
                 .init(notes: notes.compactMap { note in note.id.map {
                     .init(noteID: $0, classification: .uncertain, confidence: .uncertain, evidence: "No AI provenance in this fixture.")
@@ -1644,6 +1645,42 @@ import Testing
         #expect(harness.log("selected.log").contains("/draft_notes/12/publish"))
         #expect(!harness.log("selected.log").contains("/draft_notes/11/publish"))
         #expect(harness.monitor.currentOpenItems.first?.drafts.compactMap(\.id) == [11])
+    }
+
+    @Test func changedHeadAutomaticallyRechecksKnownDraftsAndPublishesOnlyValidAIReplies() async throws {
+        var checkedHeads: [String] = []
+        let harness = try makeHarness(assistantWorked: true, authored: true, verifyDraftRecovery: { input, _, _ in
+            checkedHeads.append(input.snapshot.request.sha ?? "")
+            return .init(drafts: input.requestedDraftIDs.map {
+                .init(draftID: $0, state: $0 == 13 ? .uncertain : .valid,
+                    reason: $0 == 13 ? "Missing current evidence" : "Verified current source and tests")
+            })
+        })
+        defer { harness.cleanUp() }
+        harness.settings.automation.publicationMode = .aiReplies
+        try harness.write("drafts.json", #"[{"id":11,"author_id":3,"note":"Verified human reply","discussion_id":"human"},{"id":12,"author_id":3,"note":"Verified AI reply","discussion_id":"abc"},{"id":13,"author_id":3,"note":"Unverified AI reply","discussion_id":"abc"}]"#)
+        try harness.write("discussions.json", #"[{"id":"abc","notes":[{"id":40,"author":{"id":8,"username":"GitLabDuo"},"body":"AI finding","system":false,"resolvable":true,"resolved":false}]},{"id":"human","notes":[{"id":41,"author":{"id":9,"username":"alice"},"body":"Human finding","system":false,"resolvable":true,"resolved":false}]}]"#)
+        try harness.verifyFollowUpDrafts()
+        let currentHead = String(repeating: "b", count: 40)
+        for name in ["request.json", "authored.json"] {
+            try harness.write(name, harness.log(name).replacingOccurrences(of: head, with: currentHead))
+        }
+        try harness.write("remote-head.txt", currentHead)
+        try harness.write("remote-file-content.txt", "updated current source\n")
+        for _ in 0..<4 {
+            try await harness.poll()
+            let deadline = ContinuousClock.now + .seconds(3)
+            while harness.monitor.draftProofRecoveryCoordinator?.isChecking(work: .init(host: host, projectID: 1, iid: 2)) == true,
+                  ContinuousClock.now < deadline { try await Task.sleep(for: .milliseconds(20)) }
+            if harness.log("selected.log").contains("/draft_notes/12/publish") { break }
+        }
+        #expect(!checkedHeads.isEmpty && checkedHeads.allSatisfy { $0 == currentHead })
+        #expect(harness.log("selected.log").contains("/draft_notes/12/publish"))
+        #expect(!harness.log("selected.log").contains("/draft_notes/11/publish"))
+        #expect(!harness.log("selected.log").contains("/draft_notes/13/publish"))
+        #expect(harness.log("publish.log").isEmpty)
+        let remaining = try JSONDecoder().decode([GitLabDraftNote].self, from: Data(harness.log("drafts.json").utf8))
+        #expect(Set(remaining.compactMap(\.id)) == [11, 13])
     }
 
     @Test func authorFollowUpPushOffBlocksEvenPreviouslyVerifiedDrafts() async throws {

@@ -545,6 +545,217 @@ struct DraftProofRecoveryTests {
         #expect(coordinator.failure(work: f.work) == nil)
     }
 
+    @Test(arguments: [false, true])
+    func changedHeadGetsFreshClaimChecksAndCurrentSourceProofWithoutAdoptingItsSibling(_ legacyAttempt: Bool) async throws {
+        let f = try Fixture()
+        defer { f.clean() }
+        try f.addSibling()
+        f.claimState = .uncertain
+        let coordinator = f.coordinator()
+        coordinator.schedule(snapshot: f.snapshot, origin: f.proof, configuration: f.settings.automation)
+        try await f.settle(coordinator)
+        #expect(f.assessments == 1)
+        if legacyAttempt {
+            let folder = FollowUpVerificationStore.recordURL(kind: "follow-up-proof-recovery-attempts", work: f.work,
+                username: "me", in: f.folder).deletingPathExtension()
+            for path in try FileManager.default.contentsOfDirectory(at: folder, includingPropertiesForKeys: nil) {
+                var object = try #require(JSONSerialization.jsonObject(with: Data(contentsOf: path)) as? [String: Any])
+                object.removeValue(forKey: "context"); object.removeValue(forKey: "assessment")
+                try JSONSerialization.data(withJSONObject: object).write(to: path)
+            }
+        }
+        f.snapshot.request = try f.request(head: String(repeating: "b", count: 40))
+        f.snapshot.branchHead = f.snapshot.request.sha!
+        f.live = f.snapshot
+        f.remoteHash = AICommentAssessmentStore.digest("updated current source and regression tests")
+        f.claimsOverride = [.init(draftID: 12, state: .valid, reason: "Verified against the new source commit"),
+            .init(draftID: 13, state: .uncertain, reason: "The other claim remains unsupported")]
+        coordinator.schedule(snapshot: f.snapshot, origin: f.proof, configuration: f.settings.automation)
+        try await f.settle(coordinator)
+        #expect(f.assessments == 2)
+        let recovered = try #require(f.receipts().first)
+        #expect(recovered.headSHA == f.snapshot.request.sha)
+        #expect(recovered.files == [.init(path: "Sources/Fixed.swift", sha256: f.remoteHash)])
+        #expect(recovered.runID == f.proof.runID && recovered.drafts.map(\.id) == [12])
+        #expect(recovered.covers(f.snapshot.drafts[0], request: f.snapshot.request, host: f.work.host, user: f.snapshot.user, runID: recovered.runID))
+        #expect(!recovered.covers(f.snapshot.drafts[0], request: try f.request(), host: f.work.host, user: f.snapshot.user, runID: recovered.runID))
+        #expect(!f.proof.covers(f.snapshot.drafts[0], request: f.snapshot.request, host: f.work.host, user: f.snapshot.user, runID: f.proof.runID))
+        let restarted = f.coordinator()
+        restarted.schedule(snapshot: f.snapshot, origin: f.proof, draftIDs: [13], configuration: f.settings.automation)
+        try await f.settle(restarted)
+        #expect(f.assessments == 2)
+    }
+
+    @Test(arguments: [DraftProofRecoveryVerifier.Assessment.State.invalid, .uncertain])
+    func aNewHeadDoesNotMakeAnUnsupportedClaimPublishable(_ state: DraftProofRecoveryVerifier.Assessment.State) async throws {
+        let f = try Fixture()
+        defer { f.clean() }
+        f.snapshot.request = try f.request(head: String(repeating: "b", count: 40))
+        f.snapshot.branchHead = f.snapshot.request.sha!
+        f.live = f.snapshot
+        f.claimState = state
+        let coordinator = f.coordinator()
+        coordinator.schedule(snapshot: f.snapshot, origin: f.proof, configuration: f.settings.automation)
+        try await f.settle(coordinator)
+        #expect(f.assessments == 1)
+        #expect(f.receipts().isEmpty)
+        #expect(coordinator.failure(work: f.work) != nil)
+    }
+
+    @Test func anotherHeadChangeDuringFreshClaimVerificationCannotCreatePublicationProof() async throws {
+        let f = try Fixture()
+        defer { f.clean() }
+        f.snapshot.request = try f.request(head: String(repeating: "b", count: 40))
+        f.snapshot.branchHead = f.snapshot.request.sha!
+        f.live = f.snapshot
+        f.duringAssessment = {
+            f.live.request = try! f.request(head: String(repeating: "c", count: 40))
+            f.live.branchHead = f.live.request.sha!
+        }
+        let coordinator = f.coordinator()
+        coordinator.schedule(snapshot: f.snapshot, origin: f.proof, configuration: f.settings.automation)
+        try await f.settle(coordinator)
+        #expect(f.assessments == 1)
+        #expect(f.receipts().isEmpty)
+    }
+
+    @Test(arguments: AutomationAssistant.allCases)
+    func headlessClaimVerifierReceivesTheCurrentHeadInsteadOfTheHistoricalHead(_ assistant: AutomationAssistant) async throws {
+        let f = try Fixture()
+        defer { f.clean() }
+        f.snapshot.request = try f.request(head: String(repeating: "b", count: 40))
+        f.snapshot.branchHead = f.snapshot.request.sha!
+        let script = f.folder.appending(path: "claim-cli")
+        try Data("""
+            #!/usr/bin/python3
+            import json,sys,pathlib
+            args=sys.argv[1:]; raw=sys.stdin.read(); codex=args[0]=='exec'
+            evidence=json.loads(raw[raw.index('{'):]) if codex else json.loads(raw)
+            pathlib.Path(__file__+'.capture').write_text(json.dumps(evidence))
+            result={'drafts':[{'draftID':12,'state':'valid','reason':'Current source and regression tests checked.'}]}
+            if codex: json.dump(result,open(args[args.index('-o')+1],'w'))
+            else: print(json.dumps({'is_error':False,'structured_output':result}))
+            """.utf8).write(to: script)
+        try FileManager.default.setAttributes([.posixPermissions: 0o700], ofItemAtPath: script.path)
+        let currentFiles = [FollowUpVerification.FileEvidence(path: "Sources/Fixed.swift",
+            sha256: AICommentAssessmentStore.digest("new committed source and tests"))]
+        let result = try await DraftProofRecoveryVerifier.run(.init(snapshot: f.snapshot, origin: f.proof, currentFiles: currentFiles),
+            assistant: assistant, model: "fixture", executable: script)
+        #expect(result.drafts.first?.state == .valid)
+        let payload = try #require(JSONSerialization.jsonObject(with: Data(contentsOf: URL(fileURLWithPath: script.path + ".capture"))) as? [String: Any])
+        let target = try #require(payload["target"] as? [String: Any])
+        #expect(target["headSHA"] as? String == f.snapshot.request.sha)
+        let files = try #require(payload["files"] as? [[String: String]])
+        #expect(files == [["path": currentFiles[0].path, "sha256": currentFiles[0].sha256]])
+    }
+
+    @Test(arguments: AutomationAssistant.allCases)
+    func aNewHeadRequiresCurrentFileEvidenceBeforeEitherProviderStarts(_ assistant: AutomationAssistant) async throws {
+        let f = try Fixture()
+        defer { f.clean() }
+        f.snapshot.request = try f.request(head: String(repeating: "b", count: 40))
+        f.snapshot.branchHead = f.snapshot.request.sha!
+        let script = f.folder.appending(path: "must-not-start")
+        try Data("""
+            #!/bin/sh
+            touch "\(script.path).started"
+            exit 17
+            """.utf8).write(to: script)
+        try FileManager.default.setAttributes([.posixPermissions: 0o700], ofItemAtPath: script.path)
+        do {
+            _ = try await DraftProofRecoveryVerifier.run(.init(snapshot: f.snapshot, origin: f.proof),
+                assistant: assistant, model: "fixture", executable: script)
+            Issue.record("Missing current file evidence must be rejected")
+        } catch DraftProofRecoveryVerifier.Failure.invalidEvidence { }
+        catch { Issue.record("Expected invalidEvidence before provider launch, got \(error)") }
+        #expect(!FileManager.default.fileExists(atPath: script.path + ".started"))
+    }
+
+    @Test func aNewHeadSupersedesAnInFlightCheckEvenWhenDiscussionTextIsUnchanged() async throws {
+        let f = try Fixture()
+        defer { f.releaseVerification(); f.clean() }
+        f.holdVerification = true
+        let coordinator = f.coordinator()
+        coordinator.schedule(snapshot: f.snapshot, origin: f.proof, configuration: f.settings.automation)
+        let deadline = ContinuousClock.now + .seconds(3)
+        while f.verificationGate == nil, ContinuousClock.now < deadline { try await Task.sleep(for: .milliseconds(10)) }
+        try #require(f.verificationGate != nil)
+        f.snapshot.request = try f.request(head: String(repeating: "b", count: 40))
+        f.snapshot.branchHead = f.snapshot.request.sha!
+        f.live = f.snapshot
+        let fingerprint = try #require(ReviewVerdict.fingerprint(f.snapshot.discussions))
+        #expect(!coordinator.presentationIsCurrent(request: f.snapshot.request, host: f.work.host,
+            fingerprint: fingerprint, configuration: f.settings.automation))
+        coordinator.schedule(snapshot: f.snapshot, origin: f.proof, configuration: f.settings.automation)
+        f.releaseVerification()
+        try await f.settle(coordinator)
+        #expect(f.assessments == 2)
+        #expect(f.receipts().contains { $0.headSHA == f.snapshot.request.sha })
+    }
+
+    @Test func missingHistoricalFilesDoNotStrandAnotherKnownOriginForTheSameDraft() async throws {
+        let f = try Fixture()
+        defer { f.clean() }
+        let old = f.proof
+        let other = FollowUpVerification(version: 1, sealed: true, verificationID: UUID(), runID: old.runID,
+            host: old.host, projectID: old.projectID, iid: old.iid, username: old.username, userID: old.userID,
+            headSHA: old.headSHA, sourceProjectID: old.sourceProjectID, sourceBranch: old.sourceBranch,
+            files: [.init(path: "Sources/Current.swift", sha256: old.files[0].sha256)], drafts: old.drafts)
+        let archive = FollowUpVerificationStore.recordURL(kind: "follow-up-verifications-archive", work: f.work,
+            username: "me", in: f.folder).deletingPathExtension()
+        try FileManager.default.createDirectory(at: archive, withIntermediateDirectories: true)
+        try JSONEncoder().encode(other).write(to: archive.appending(path: "\(other.verificationID.uuidString).json"))
+        f.snapshot.request = try f.request(head: String(repeating: "b", count: 40))
+        f.snapshot.branchHead = f.snapshot.request.sha!
+        f.live = f.snapshot
+        f.unreadableFiles = ["Sources/Fixed.swift"]
+        let coordinator = f.coordinator()
+        coordinator.schedule(snapshot: f.snapshot, origin: old, configuration: f.settings.automation)
+        try await f.settle(coordinator)
+        #expect(f.assessments == 0 && f.receipts().isEmpty)
+        coordinator.schedule(snapshot: f.snapshot, origin: other, configuration: f.settings.automation)
+        try await f.settle(coordinator)
+        #expect(f.assessments == 1)
+        #expect(f.receipts().first?.files.map(\.path) == ["Sources/Current.swift"])
+    }
+
+    @Test func anotherOriginsPreflightFenceCannotInterruptANormalizedSiblingCheck() async throws {
+        let f = try Fixture()
+        defer { f.releaseVerification(); f.clean() }
+        try f.addSibling()
+        let old = f.proof
+        let other = FollowUpVerification(version: 1, sealed: true, verificationID: UUID(), runID: old.runID,
+            host: old.host, projectID: old.projectID, iid: old.iid, username: old.username, userID: old.userID,
+            headSHA: old.headSHA, sourceProjectID: old.sourceProjectID, sourceBranch: old.sourceBranch,
+            files: [.init(path: "Sources/Current.swift", sha256: old.files[0].sha256)], drafts: [old.drafts[1]])
+        let archive = FollowUpVerificationStore.recordURL(kind: "follow-up-verifications-archive", work: f.work,
+            username: "me", in: f.folder).deletingPathExtension()
+        try FileManager.default.createDirectory(at: archive, withIntermediateDirectories: true)
+        try JSONEncoder().encode(other).write(to: archive.appending(path: "\(other.verificationID.uuidString).json"))
+        ReviewVerdictStore.rememberDrafts(f.snapshot.drafts, host: f.work.host, projectID: 1, iid: 2,
+            in: f.folder.appending(path: "verdicts"))
+        f.unreadableFiles = ["Sources/Fixed.swift"]
+        let coordinator = f.coordinator()
+        coordinator.schedule(snapshot: f.snapshot, origin: old, draftIDs: [13], configuration: f.settings.automation)
+        try await f.settle(coordinator)
+        f.holdVerification = true
+        coordinator.schedule(snapshot: f.snapshot, origin: other, draftIDs: [13], configuration: f.settings.automation)
+        let started = ContinuousClock.now + .seconds(3)
+        while f.verificationGate == nil, ContinuousClock.now < started { try await Task.sleep(for: .milliseconds(10)) }
+        try #require(f.verificationGate != nil)
+        f.publishKnownA()
+        coordinator.schedule(snapshot: f.snapshot, origin: old, draftIDs: [13], configuration: f.settings.automation)
+        #expect(coordinator.isChecking(work: f.work))
+        #expect(coordinator.failure(work: f.work) == nil)
+        f.releaseVerification()
+        let finished = ContinuousClock.now + .seconds(3)
+        while !f.receipts().contains(where: { $0.drafts.contains { $0.id == 13 } }), ContinuousClock.now < finished {
+            try await Task.sleep(for: .milliseconds(10))
+        }
+        #expect(f.receipts().contains { $0.drafts.contains { $0.id == 13 } })
+        #expect(f.assessments == 1)
+    }
+
     @MainActor private final class Fixture {
         let folder: URL
         let settings: SettingsManager
@@ -561,6 +772,7 @@ struct DraftProofRecoveryTests {
         var claimState = DraftProofRecoveryVerifier.Assessment.State.valid
         var claimsOverride: [DraftProofRecoveryVerifier.Assessment.Draft]?
         var duringAssessment: (() -> Void)?
+        var unreadableFiles: Set<String> = []
         var remoteHash = AICommentAssessmentStore.digest("source and test")
         init() throws {
             folder = FileManager.default.temporaryDirectory.appending(path: UUID().uuidString)
@@ -614,7 +826,10 @@ struct DraftProofRecoveryTests {
         }
         func coordinator() -> DraftProofRecoveryCoordinator {
             DraftProofRecoveryCoordinator(settings: settings, directory: folder, canAutomate: { _ in true },
-                fetch: { [self] _ in live }, hashFile: { [self] _, _ in remoteHash }, verify: { [self] input, _, _ in
+                fetch: { [self] _ in live }, hashFile: { [self] _, file in
+                    if unreadableFiles.contains(file.path) { throw DraftProofRecoveryVerifier.Failure.failed }
+                    return remoteHash
+                }, verify: { [self] input, _, _ in
                     assessments += 1
                     if verifyFails { throw DraftProofRecoveryVerifier.Failure.failed }
                     duringAssessment?()

@@ -7,6 +7,7 @@ enum DraftProofRecoveryVerifier {
         let snapshot: DraftProofRecoveryCoordinator.Snapshot
         let origin: FollowUpVerification
         var draftIDs: [Int]? = nil
+        var currentFiles: [FollowUpVerification.FileEvidence]? = nil
         var requestedDraftIDs: [Int] { draftIDs ?? origin.drafts.map(\.id) }
     }
     struct Assessment: Codable, Sendable {
@@ -38,18 +39,22 @@ enum DraftProofRecoveryVerifier {
         guard FollowUpVerificationStore.validRecoveryScope(ids, origin: origin) else { throw Failure.invalidEvidence }
         let drafts = snapshot.drafts.filter { ids.contains($0.id ?? 0) }
         guard drafts.count == ids.count, Set(drafts.compactMap(\.id)) == Set(ids),
-              drafts.allSatisfy({ origin.covers($0, request: snapshot.request, host: snapshot.host,
-                  user: snapshot.user, runID: origin.runID) && AutomaticPublicationPolicy.safeForAutomaticPublication($0) }),
-              let fingerprint = ReviewVerdict.fingerprint(snapshot.discussions) else { throw Failure.invalidEvidence }
+              drafts.allSatisfy({ origin.owns($0, request: snapshot.request, host: snapshot.host, user: snapshot.user) && AutomaticPublicationPolicy.safeForAutomaticPublication($0) }),
+              let head = snapshot.request.sha, snapshot.branchHead == head,
+              head == origin.headSHA || input.currentFiles != nil,
+              snapshot.request.draft == false,
+              let fingerprint = ReviewVerdict.fingerprint(snapshot.discussions),
+              FollowUpVerificationStore.validRecoveryEvidence(headSHA: head, files: input.currentFiles ?? origin.files, origin: origin)
+        else { throw Failure.invalidEvidence }
         let payload: [String: Any] = [
             "target": ["host": snapshot.host, "projectID": snapshot.request.projectID, "iid": snapshot.request.iid,
                 "url": snapshot.request.webURL.absoluteString, "expectedUsername": snapshot.user.username, "authorID": snapshot.user.id,
-                "headSHA": origin.headSHA, "sourceProjectID": origin.sourceProjectID, "sourceBranch": origin.sourceBranch,
+                "headSHA": head, "sourceProjectID": origin.sourceProjectID, "sourceBranch": origin.sourceBranch,
                 "targetProjectID": snapshot.request.targetProjectID ?? snapshot.request.projectID, "targetBranch": snapshot.request.targetBranch],
             "title": GlabService.redactWorkflowEvidence(snapshot.request.title),
             "description": GlabService.redactWorkflowEvidence(snapshot.request.description ?? ""),
             "discussionFingerprint": fingerprint, "semanticContextFingerprint": snapshot.request.semanticContextFingerprint,
-            "files": origin.files.map { ["path": $0.path, "sha256": $0.sha256] },
+            "files": (input.currentFiles ?? origin.files).map { ["path": $0.path, "sha256": $0.sha256] },
             "drafts": drafts.map { ["id": $0.id!, "body": GlabService.redactWorkflowEvidence($0.note ?? ""),
                 "discussionID": $0.discussionID ?? ""] as [String: Any] },
             "discussions": snapshot.discussions.map { discussion in
@@ -82,7 +87,8 @@ enum DraftProofRecoveryVerifier {
             run GitLab quick actions, change app settings, or write app proof records. Return structured assessment only.
 
             The app has independently established ownership of the exact historical draft IDs and body hashes;
-            that establishes origin only, not the truth of their claims. AI authorship and a prior sealed receipt
+            that establishes origin only, not the truth of their claims. The original run may predate headSHA;
+            assess the supplied CURRENT headSHA, never the historical commit. AI authorship and a prior sealed receipt
             prove no claim. Assess EVERY listed draft separately without omitting or adding IDs.
             Use glab api --method GET --hostname target.host to read /user and verify expectedUsername and authorID.
             Read the current /projects/projectID/merge_requests/iid metadata, all discussion pages (--paginate,

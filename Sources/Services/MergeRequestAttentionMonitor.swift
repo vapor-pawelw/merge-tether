@@ -758,7 +758,7 @@ final class MergeRequestAttentionMonitor {
                             for origin in FollowUpVerificationStore.recoveryOrigins(work: work, username: user.username,
                                 settings: settings, in: followUpDirectory) {
                                 let scopedIDs = unverified.filter { draft in
-                                    origin.covers(draft, request: observedRequest, host: host, user: user, runID: origin.runID)
+                                    origin.owns(draft, request: observedRequest, host: host, user: user)
                                         && AutomaticPublicationPolicy.safeForAutomaticPublication(draft)
                                 }.compactMap(\.id)
                                 guard !scopedIDs.isEmpty else { continue }
