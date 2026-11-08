@@ -5,6 +5,9 @@ import Foundation
 struct MRCardPresentation {
     struct Chip { let title: LocalizedStringResource; let symbol: String }
     let row: MergeRequestBoardSnapshot.Row
+    let preservedHumanAction: MRHumanAction?
+    let isRefreshingAttention: Bool
+    let refreshFailed: Bool
     let reviewingContext: ReviewingContext
     let allowsRemoval: Bool
     let assistantReady: Bool
@@ -19,8 +22,11 @@ struct MRCardPresentation {
          allowsRemoval: Bool, assistantReady: Bool,
          confirmationState: MergeRequestAttentionMonitor.ConfirmationState? = nil,
          automaticallyPublishedDraftIDs: Set<Int> = [], automaticConflictProgress: Bool = false,
-         automaticPipelineProgress: Bool = false, conflictReceipts: Set<MergeConflictReceipt> = []) {
+         automaticPipelineProgress: Bool = false, conflictReceipts: Set<MergeConflictReceipt> = [],
+         preservedHumanAction: MRHumanAction? = nil, isRefreshingAttention: Bool = false, refreshFailed: Bool = false) {
         self.row = row; self.reviewingContext = reviewingContext; self.allowsRemoval = allowsRemoval
+        self.preservedHumanAction = preservedHumanAction; self.isRefreshingAttention = isRefreshingAttention
+        self.refreshFailed = refreshFailed
         self.assistantReady = assistantReady; self.confirmationState = confirmationState
         self.automaticallyPublishedDraftIDs = automaticallyPublishedDraftIDs
         self.automaticConflictProgress = automaticConflictProgress
@@ -40,7 +46,9 @@ struct MRCardPresentation {
             automaticallyPublishedDraftIDs: automatic,
             automaticConflictProgress: row.item.mergeRequest.map { monitor.automaticConflictIsProcessing(for: $0) } ?? false,
             automaticPipelineProgress: row.item.mergeRequest.map { monitor.authoredMergeRequests.workflow.isAutomaticallyProcessingPipeline($0) } ?? false,
-            conflictReceipts: monitor.settings.conflictReceipts)
+            conflictReceipts: monitor.settings.conflictReceipts,
+            preservedHumanAction: monitor.confirmedHumanAction(for: row),
+            isRefreshingAttention: monitor.isRecheckingAttention(for: row), refreshFailed: monitor.attentionRefreshFailed(for: row))
     }
 
     var busy: Bool {
@@ -52,8 +60,15 @@ struct MRCardPresentation {
             || automaticPipelineProgress
             || (automaticConflictProgress && row.latestJob?.execution?.state.isActive != true)
     }
-    var working: Bool { busy || row.latestJob?.execution?.state.isActive == true }
+    var working: Bool { busy || isRefreshingAttention || row.latestJob?.execution?.state.isActive == true }
+    private var preservesConfirmedAttention: Bool {
+        (isRefreshingAttention || refreshFailed) && row.needsAttention && preservedHumanAction != nil
+            && row.latestJob?.operationalExecution?.state.isActive != true
+            && confirmationState != .publishing && confirmationState != .approving
+            && !automaticConflictProgress && !automaticPipelineProgress
+    }
     var humanAction: MRHumanAction? {
+        if preservesConfirmedAttention { return preservedHumanAction }
         guard row.needsAttention, !busy,
               !(allowsRemoval && reviewingContext.nextStep == .setupAgent) else { return nil }
         return MRHumanAction(row: row, assistantReady: assistantReady, confirmationState: confirmationState,
@@ -72,7 +87,7 @@ struct MRCardPresentation {
         if let job = row.latestJob, job.execution?.state.isActive == true {
             return String(localized: job.progressTitle(intents: row.intents, conflictReceipts: conflictReceipts)) + " · " + String(localized: job.key.assistant.displayName)
         }
-        if busy { return String(localized: progressTitle) }
+        if busy || isRefreshingAttention { return String(localized: progressTitle) }
         return humanAction == nil ? neutralStatus.map { String(localized: $0) } : nil
     }
     private var progressTitle: LocalizedStringResource {
@@ -86,13 +101,13 @@ struct MRCardPresentation {
         if automaticConflictProgress { return .AutomationProgress.progressConflictPreparing }
         if allowsRemoval, reviewingContext.nextStep == .verifying { return .AutomationProgress.progressReviewCheck }
         if allowsRemoval, reviewingContext.nextStep == .automaticReview { return .AutomationProgress.progressReviewPreparing }
-        return .AutomationProgress.progressProcessing
+        return isRefreshingAttention ? .AutomationProgress.progressRefreshing : .AutomationProgress.progressProcessing
     }
     var nextStep: String? {
         allowsRemoval && humanAction == nil && !busy ? String(localized: reviewingContext.nextStepMessage) : nil
     }
     var actionLabel: LocalizedStringResource? {
-        guard !working else { return nil }
+        guard !working || preservesConfirmedAttention else { return nil }
         if humanAction == nil, allowsRemoval, reviewingContext.nextStep == .runReview, !assistantReady {
             return .Board.boardCompactSetupCli
         }

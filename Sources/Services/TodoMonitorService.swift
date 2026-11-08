@@ -18,6 +18,56 @@ final class TodoMonitorService {
 
     func dismissAutoHandledEventBanner(_ id: UUID) { autoHandledEventBanners.dismiss(id) }
 
+    private var confirmedAttention = ConfirmedAttentionSnapshot()
+    private var attentionPresentationAccount: String? {
+        guard let host = glab.resolvedHost, let username = glab.currentUsername else { return nil }
+        return "\(host)/\(username)/\(glab.accountRevision)"
+    }
+    var userAttention: UserAttentionSnapshot {
+        confirmedAttention.matches(account: attentionPresentationAccount)
+            ? confirmedAttention.snapshot : .init(candidates: [])
+    }
+
+    private func attentionKey(_ item: MergeRequestAttentionMonitor.Item) -> String? {
+        guard let host = glab.resolvedHost, let username = glab.currentUsername else { return nil }
+        return "\(host)/\(username)/mr/\(item.id.projectID)/\(item.id.iid)"
+    }
+
+    func confirmedHumanAction(for row: MergeRequestBoardSnapshot.Row) -> MRHumanAction? {
+        guard confirmedAttention.matches(account: attentionPresentationAccount) else { return nil }
+        return attentionKey(row.item).flatMap { confirmedAttention.humanActions[$0] }
+    }
+
+    private func isExecutingAttentionWork(_ row: MergeRequestBoardSnapshot.Row) -> Bool {
+        let state = attention.confirmationStates[row.id]
+        return row.latestJob?.operationalExecution?.state.isActive == true
+            || state == .publishing || state == .approving
+            || row.item.mergeRequest.map { automaticConflictIsProcessing(for: $0)
+                || authoredMergeRequests.workflow.isAutomaticallyProcessingPipeline($0) } == true
+    }
+
+    func attentionRefreshFailed(for row: MergeRequestBoardSnapshot.Row) -> Bool {
+        guard !isExecutingAttentionWork(row), !row.hasIndependentStoppedWork else { return false }
+        if row.item.authorFeedbackStatus?.isReadOnlyFailure == true { return true }
+        if row.item.draftProofRecoveryReadFailure { return true }
+        if let request = row.item.mergeRequest,
+           authoredMergeRequests.workflow.hasReadOnlyFailure(for: request) { return true }
+        if max(row.item.draftCount, row.item.drafts.count) > 0, settings.automation.needsAIAssessment,
+           let host = glab.resolvedHost,
+           attention.aiOriginCoordinator.failure(work: .init(host: host, projectID: row.id.projectID, iid: row.id.iid)) != nil { return true }
+        return lastError != nil || attention.hasError || authoredMergeRequests.hasError
+    }
+
+    func isRecheckingAttention(for row: MergeRequestBoardSnapshot.Row) -> Bool {
+        guard !isExecutingAttentionWork(row) else { return false }
+        // Manual GitLab actions do not depend on an agent's CLI availability.
+        let recheckingProvider = assistantDependencies.isChecking && settings.automation.packageDecision != .disabled
+        return isLoading || attention.isLoading || authoredMergeRequests.isLoading || recheckingProvider
+            || row.item.aiOriginChecking || row.item.draftProofRecoveryChecking
+            || row.item.authorFeedbackStatus?.phase == .checking || row.item.reReviewReadiness == .checking
+            || (!row.item.isAuthored && reviewingContext(for: row).nextStep == .verifying)
+    }
+
     private(set) var allTodos: [Todo] = []
     private(set) var lastError: GlabError?
     private(set) var failedAutomationTodoID: Int?
@@ -149,6 +199,12 @@ final class TodoMonitorService {
         self.attention = MergeRequestAttentionMonitor(glab: glab, settings: settings,
                                                        reportDirectory: CodexDesktopRelay.directory)
         self.authoredMergeRequests = AuthoredMergeRequestMonitor(settings: settings, glab: glab, notifications: notifications)
+        attention.onRefreshed = { [weak self] in
+            guard let self else { return }
+            // Publish the confirmed projection before consumers observe a completed fetch.
+            // Observation's asynchronous invalidation remains responsible for other changes.
+            self.confirmedAttention.update(self.pendingUserAttention)
+        }
         authoredMergeRequests.workflow.onRemoteChange = { [weak self] in
             Task { await self?.refreshNow() }
         }
@@ -169,9 +225,16 @@ final class TodoMonitorService {
             Task { await self.mrTodoRouter.refreshCompletionEvidence(host: host, username: username) }
         }
         assistantDependencies.onRecovered = { [weak self] assistant in
-            guard let self, self.settings.automation.autoVerifyReReview,
-                  self.settings.automation.assistant == assistant else { return }
-            Task { await self.attention.retryFailedReReviews() }
+            guard let self, self.settings.automation.assistant == assistant else { return }
+            self.attention.authorFeedbackCoordinator?.retryReadOnlyFailures()
+            self.attention.aiOriginCoordinator.retryReadOnlyFailures()
+            self.authoredMergeRequests.workflow.retryReadOnlyFailures()
+            if let host = self.glab.resolvedHost, let username = self.glab.currentUsername {
+                self.attention.draftProofRecoveryCoordinator?.retryReadOnlyFailures(host: host, username: username)
+            }
+            if self.settings.automation.autoVerifyReReview {
+                Task { await self.attention.retryFailedReReviews() }
+            }
         }
 
         // Hydrate the service from any previously persisted state so the
@@ -199,18 +262,20 @@ final class TodoMonitorService {
     }
 
     private func observeUserAttentionChanges() {
-        withObservationTracking {
-            _ = userAttention
+        let input = withObservationTracking {
+            let input = pendingUserAttention
             _ = settings.notificationsEnabled
             _ = freshUserAttention
             _ = glab.resolvedHost
             _ = glab.currentUsername
+            return input
         } onChange: { [weak self] in
             Task { @MainActor [weak self] in
                 self?.observeUserAttentionChanges()
                 self?.scheduleUserAttentionNotifications()
             }
         }
+        confirmedAttention.update(input)
     }
 
     private var userAttentionAccount: String? {
@@ -681,7 +746,8 @@ final class TodoMonitorService {
                     && $0.event.mergeRequest.sha == item.mergeRequest?.sha
             }
             var failures = Set(MergeWorkflowTrigger.allCases.filter { trigger in
-                currentEvents.first { $0.event.kind == trigger }?.state == .failed
+                guard let entry = currentEvents.first(where: { $0.event.kind == trigger }) else { return false }
+                return entry.state == .failed && !entry.isReadOnlyFailure
             })
             if failedAttentionFeedback.contains(work) { failures.insert(.newDiscussion) }
             let conflictFailed = item.mergeRequest.map {
@@ -759,8 +825,8 @@ final class TodoMonitorService {
     }
 
     /// Shared semantic projection for the menu indicator and native notifications.
-    var userAttention: UserAttentionSnapshot {
-        guard let host = glab.resolvedHost, let username = glab.currentUsername else { return .empty }
+    private var pendingUserAttention: ConfirmedAttentionSnapshot.Input {
+        guard let host = glab.resolvedHost, let username = glab.currentUsername else { return .init(account: nil) }
         let ready = availableAssistants.contains(settings.automation.assistant)
         let preparing = ready || assistantDependencies.isChecking
         let board = MergeRequestBoardSnapshot(own: ownMergeRequestItems, reviewed: reviewedMergeRequestItems,
@@ -769,6 +835,8 @@ final class TodoMonitorService {
             ignoredTargets: settings.ignoredMergeRequests, pipelineEvidence: currentPipelineEvidence,
             pipelineEvidenceCheckedAt: currentPipelineEvidenceDate)
         var candidates: [UserAttentionSnapshot.Candidate] = []
+        var checkingIDs: Set<String> = []
+        var humanActions: [String: MRHumanAction] = [:]
         func key(_ project: Int, _ iid: Int) -> String { "\(host)/\(username)/mr/\(project)/\(iid)" }
         func eventToken(_ todo: Todo) -> String {
             "\(todo.id):\(todo.updatedAt?.timeIntervalSince1970 ?? todo.createdAt.timeIntervalSince1970):" + UserAttentionSnapshot.digest(todo.body + todo.displayTitle)
@@ -837,26 +905,39 @@ final class TodoMonitorService {
                     }
                 }
             }
-            candidates.append(.init(id: key(row.id.projectID, row.id.iid), title: row.item.title,
-                subtitle: row.item.url.gitLabProjectPath, actions: actions, working: busy))
+            let id = key(row.id.projectID, row.id.iid)
+            let candidate = UserAttentionSnapshot.Candidate(id: id, title: row.item.title,
+                subtitle: row.item.url.gitLabProjectPath, actions: actions, working: busy)
+            candidates.append(candidate)
+            if isRecheckingAttention(for: row) || attentionRefreshFailed(for: row) { checkingIDs.insert(id) }
+            if UserAttentionSnapshot(candidates: [candidate]).hasAttention {
+                var confirmedItem = row.item
+                confirmedItem.humanActionRequired = true
+                let confirmedRow = MergeRequestBoardSnapshot.Row(item: confirmedItem, latestJob: row.latestJob,
+                    intents: row.intents, pipelineEvidence: row.pipelineEvidence,
+                    pipelineEvidenceCheckedAt: row.pipelineEvidenceCheckedAt)
+                humanActions[id] = MRHumanAction(row: confirmedRow, assistantReady: ready,
+                    confirmationState: state, automaticallyPublishedDraftIDs: automaticDrafts)
+            }
         }
         for proposal in board.proposals {
-            guard !(isLoading && !proposal.todos.isEmpty) else { continue }
+            let id = key(proposal.target.projectID, proposal.target.iid ?? 0)
+            if isLoading { checkingIDs.insert(id) }
             let tokens = proposal.todos.map(eventToken)
             let actions = tokens.isEmpty ? [UserAttentionSnapshot.Action(reason: .proposal, token: "adopt")]
                 : tokens.map { UserAttentionSnapshot.Action(reason: .proposal, token: $0) }
-            candidates.append(.init(id: key(proposal.target.projectID, proposal.target.iid ?? 0),
+            candidates.append(.init(id: id,
                 title: proposal.title, subtitle: proposal.url.gitLabProjectPath, actions: actions))
         }
         for todo in board.otherTodos {
-            if isAssessingNotice(todo) { continue }
-            if isLoading && MRTodoIntent.kind(for: todo, username: username) != nil { continue }
             let id = todo.targetType == .mergeRequest && todo.target.iid != nil
                 ? key(todo.project.id, todo.target.iid!) : "\(host)/\(username)/todo/\(todo.id)"
+            if isLoading || isAssessingNotice(todo) { checkingIDs.insert(id) }
             candidates.append(.init(id: id, title: todo.displayTitle, subtitle: todo.project.pathWithNamespace,
                 actions: [.init(reason: .otherEvent, token: eventToken(todo))]))
         }
-        return UserAttentionSnapshot(candidates: candidates)
+        return .init(account: attentionPresentationAccount, candidates: candidates,
+            checkingIDs: checkingIDs, humanActions: humanActions)
     }
 
     private func attentionIntentIsAutomatic(_ intent: MRTodoIntent, ready: Bool) -> Bool {
@@ -945,6 +1026,7 @@ final class TodoMonitorService {
             isLoading = false
             acknowledgedDuringFetch.removeAll()
             lastRefresh = Date()
+            confirmedAttention.update(pendingUserAttention)
             scheduleUserAttentionNotifications()
         }
 

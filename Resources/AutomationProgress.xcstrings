@@ -187,6 +187,28 @@
           }
         }
       }
+    },
+    "progressRefreshing": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Refreshing status"
+          }
+        }
+      }
+    },
+    "progressRefreshFailed": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Couldn’t refresh status"
+          }
+        }
+      }
     }
   },
   "version": "1.0"

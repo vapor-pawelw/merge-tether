@@ -14,6 +14,8 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 
 ### Added
 
+- Return unsupported app-created reply claims to the configured coding agent for a bounded correction, followed by independent verification and the existing publication policy.
+
 - Refresh tracked GitLab data from MR menus and Details, with shared card actions and pinning available in Details.
 
 - Show one combined MR dependency row with open prerequisites and verified linear-stack positions on Mac and iOS, retaining marked last-known data when reads fail.
@@ -54,6 +56,8 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 
 ### Changed
 
+- Identify rejected prepared replies by their exact text and source discussion, with a direct review action and expandable technical evidence.
+
 - Separate plain-language attention explanations from technical verifier evidence, keep diagnostics collapsed in Details, and use readable fallbacks for older cached results.
 
 - Name current automation stages on MR cards and in Details, distinguish queued agents from running work, and show merge dependencies below status.
@@ -87,6 +91,14 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 - Refresh public documentation and use the retro painted-style MergeTether icon.
 
 ### Fixed
+
+- Preserve pending verifier decisions across restarts and defer automatic publication during active agent work without discarding unrelated reply evidence.
+
+- Show verified, addressed change requests as waiting for the reviewer, preserving GitLab's merge restrictions.
+
+- Recover transient read-only assessment and preflight failures with bounded retries, retain completed semantic decisions through transport errors, and reconcile uncertain approval responses without duplicate submissions.
+
+- Keep each MR’s last confirmed attention state, explanation and priority during read-only refreshes; show progress separately until a new result is confirmed.
 
 - Recheck known reply drafts after a failed follow-up was superseded by its recorded successful manual retry, retaining fresh claim verification and publication filters.
 

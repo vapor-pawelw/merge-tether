@@ -57,11 +57,13 @@ private struct CommandCenterMRCardContent: View {
                     .fixedSize(horizontal: false, vertical: true)
             }
             if let job = row.latestJob { AssistantJobPreflightNotice(jobID: job.id, monitor: monitor) }
-            if busy || row.latestJob?.execution?.state.isActive == true || humanAction != nil || neutralStatus != nil {
+            if presentation.working || presentation.refreshFailed || humanAction != nil || neutralStatus != nil {
                 HStack(spacing: 6) {
                     if presentation.working {
                         ProgressView().controlSize(.mini)
                         if let status = presentation.status { Text(verbatim: status) }
+                    } else if presentation.refreshFailed {
+                        Label { Text(.AutomationProgress.progressRefreshFailed) } icon: { Image(systemName: "arrow.clockwise") }
                     } else if humanAction?.action == .retryRun {
                         Button { openAttention(.assistantRuns) } label: { Text(.MRHumanAction.mrHumanActionActionReviewRun) }
                             .buttonStyle(.plain)
@@ -134,8 +136,8 @@ private struct CommandCenterMRCardContent: View {
         if let job = row.latestJob, job.execution?.state.isActive == true {
             Button(role: .destructive) { monitor.cancelAssistantJob(job.id) } label: { Text(.AssistantJobs.assistantJobsStop) }
                 .buttonStyle(.plain)
-        } else if !busy, let action = humanAction {
-            humanActionButton(action)
+        } else if let action = humanAction {
+            humanActionButton(action).disabled(busy || presentation.isRefreshingAttention)
         } else if !busy, allowsRemoval {
             reviewingAction
         }

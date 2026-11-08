@@ -77,14 +77,10 @@ private struct CommandCenterMRDetailContent: View {
             pipelineEvidenceCheckedAt: monitor.currentPipelineEvidenceDate)
     }
     private var humanAction: MRHumanAction? {
-        let ready = monitor.availableAssistants.contains(monitor.settings.automation.assistant)
-        let automatic = target.map {
-            item.draftIDsHandledAutomatically(automation: monitor.settings.automation, target: $0,
-                assistantPreparing: ready || monitor.assistantDependencies.isChecking)
-        } ?? []
-        return MRHumanAction(row: presentationRow, assistantReady: ready,
-            confirmationState: monitor.attention.confirmationStates[item.id], automaticallyPublishedDraftIDs: automatic)
+        let reviewing = monitor.reviewedMergeRequestItems.contains { $0.id == item.id && $0.url == item.url }
+        return MRCardPresentation(row: presentationRow, monitor: monitor, allowsRemoval: reviewing).humanAction
     }
+
     private var showsDecisions: Bool { needsHumanAttention || initialSection == .drafts }
     private var initialDestinationIsReady: Bool {
         guard let anchor = pendingInitialAnchor else { return false }
@@ -209,19 +205,25 @@ private struct CommandCenterMRDetailContent: View {
             .font(.subheadline).foregroundStyle(.secondary)
             Text(verbatim: item.title).font(.title2.weight(.semibold)).textSelection(.enabled)
             HStack {
-                if progress.working, let status = progress.status {
-                    HStack(spacing: 6) {
-                        ProgressView().controlSize(.mini)
-                        Text(verbatim: status)
+                VStack(alignment: .leading, spacing: 4) {
+                    if needsHumanAttention || !progress.working {
+                        Label {
+                            Text(needsHumanAttention ? .CommandCenter.commandCenterStatusAttention
+                                 : item.section == .draftMergeRequests ? .CommandCenter.commandCenterStatusDraft
+                                 : .CommandCenter.commandCenterStatusMonitoring)
+                        } icon: { Image(systemName: needsHumanAttention ? "exclamationmark.circle" : "arrow.triangle.pull") }
+                        .font(.subheadline).foregroundStyle(needsHumanAttention ? .orange : .secondary)
                     }
-                    .font(.subheadline).foregroundStyle(.secondary)
-                } else {
-                    Label {
-                        Text(needsHumanAttention ? .CommandCenter.commandCenterStatusAttention
-                             : item.section == .draftMergeRequests ? .CommandCenter.commandCenterStatusDraft
-                             : .CommandCenter.commandCenterStatusMonitoring)
-                    } icon: { Image(systemName: needsHumanAttention ? "exclamationmark.circle" : "arrow.triangle.pull") }
-                    .font(.subheadline).foregroundStyle(needsHumanAttention ? .orange : .secondary)
+                    if progress.working, let status = progress.status {
+                        HStack(spacing: 6) {
+                            ProgressView().controlSize(.mini)
+                            Text(verbatim: status)
+                        }
+                        .font(.subheadline).foregroundStyle(.secondary)
+                    } else if progress.refreshFailed {
+                        Label { Text(.AutomationProgress.progressRefreshFailed) } icon: { Image(systemName: "arrow.clockwise") }
+                            .font(.subheadline).foregroundStyle(.secondary)
+                    }
                 }
                 Spacer()
                 GitLabRefreshButton(monitor: monitor) {
@@ -256,7 +258,7 @@ private struct CommandCenterMRDetailContent: View {
                     if !item.needsConfirmation || (action.kind != .publication && action.kind != .approval) {
                         Text(verbatim: action.explanation).textSelection(.enabled)
                     }
-                    if let detail = action.detail, detail != action.explanation {
+                    if let detail = action.detail, detail != action.explanation, action.preparedReply == nil {
                         AgentDiagnosticDetails(reason: detail)
                     }
                     if action.action == .retryRun, let job = jobs.first {
@@ -288,6 +290,11 @@ private struct CommandCenterMRDetailContent: View {
                         Button { openHistory(proxy: proxy) } label: {
                             Text(action.actionLabel)
                         }
+                    } else if action.action == .reviewDrafts, let reply = action.preparedReply {
+                        Button {
+                            withAnimation { proxy.scrollTo("prepared-reply-\(reply.draftID)", anchor: .top) }
+                        } label: { Text(action.actionLabel) }
+                            .buttonStyle(.borderedProminent)
                     } else if action.action == .retryDraftVerification {
                         Button { monitor.attention.retryDraftProofRecovery(item.id) } label: { Text(action.actionLabel) }
                             .buttonStyle(.borderedProminent)
