@@ -150,7 +150,7 @@
         "en": {
           "stringUnit": {
             "state": "translated",
-            "value": "Review model"
+            "value": "Coding model"
           }
         }
       }
@@ -161,7 +161,7 @@
         "en": {
           "stringUnit": {
             "state": "translated",
-            "value": "Review reasoning"
+            "value": "Coding reasoning"
           }
         }
       }
@@ -172,7 +172,7 @@
         "en": {
           "stringUnit": {
             "state": "translated",
-            "value": "Used when Codex reviews an MR or reviews new commits. Feedback checks use the separate verification model."
+            "value": "Used by Codex for MR reviews, feedback fixes, pipeline fixes and conflicts. Lightweight checks use the separate verification model."
           }
         }
       }

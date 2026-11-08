@@ -63,12 +63,16 @@ struct ConfirmationQueueRow<AdditionalActions: View>: View {
                 Text(.Menu.menuConfirmApproveReady)
             }
 
-            if item.awaitingRemoteVerification {
-                Text(.Menu.menuConfirmRemoteVerificationRequired)
+            let rejected = PreparedReplyContext.rejected(in: item)
+            ForEach(rejected, id: \.draftID) { reply in
+                PreparedReplyWarning(reply: reply).id("prepared-reply-\(reply.draftID)")
+            }
+            if item.awaitingRemoteVerification && rejected.isEmpty {
+                Text(.PreparedReplies.preparedRepliesChecksPending)
                     .foregroundStyle(.orange)
             }
-            if item.requiresDiscussionRecheck {
-                Text(.Menu.menuConfirmDiscussionRecheckRequired)
+            if item.requiresDiscussionRecheck && rejected.isEmpty {
+                Text(.PreparedReplies.preparedRepliesDiscussionCheck)
                     .foregroundStyle(.orange)
             }
             statusLine
@@ -171,5 +175,30 @@ struct ConfirmationQueueRow<AdditionalActions: View>: View {
         .overlay(alignment: .leading) {
             Rectangle().fill(Color.secondary.opacity(0.3)).frame(width: 2)
         }
+    }
+}
+
+struct PreparedReplyWarning: View {
+    let reply: PreparedReplyContext
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 8) {
+            Label { Text(.PreparedReplies.preparedRepliesLabel(reply.draftID)) } icon: {
+                Image(systemName: "text.bubble")
+            }
+            .font(.subheadline.weight(.medium))
+            if let summary = AgentExplanation.summary(reply.summary) {
+                Text(verbatim: summary).foregroundStyle(.orange)
+            }
+            Text(verbatim: reply.quote)
+                .font(.callout).textSelection(.enabled)
+                .padding(10).frame(maxWidth: .infinity, alignment: .leading)
+                .background(.quaternary, in: RoundedRectangle(cornerRadius: 6))
+            if let url = reply.discussionURL {
+                Link(destination: url) { Text(.PreparedReplies.preparedRepliesViewDiscussion) }
+            }
+            AgentDiagnosticDetails(reason: reply.reason)
+        }
+        .padding(.vertical, 6)
     }
 }

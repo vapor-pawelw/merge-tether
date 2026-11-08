@@ -42,6 +42,18 @@ class AuthorFollowUpVerifier:
     def __init__(self, root, reader):
         self.root, self.read = Path(root), reader
 
+    @staticmethod
+    def repair_scope(run):
+        scope = run.get("repairDrafts")
+        if scope is None:
+            return None
+        if (not isinstance(scope, list) or len(scope) != 1 or not isinstance(scope[0], dict) or
+                type(scope[0].get("id")) is not int or scope[0]["id"] <= 0 or
+                not isinstance(scope[0].get("bodySHA256"), str) or
+                not re.fullmatch(r"[0-9a-f]{64}", scope[0]["bodySHA256"])):
+            raise ValueError("Invalid exact reply-repair permission")
+        return scope
+
     @contextlib.contextmanager
     def local_lock(self):
         self.root.mkdir(parents=True, exist_ok=True, mode=0o700)
@@ -67,6 +79,7 @@ class AuthorFollowUpVerifier:
                 run.get("host") != host or run.get("projectID") != int(projectID) or run.get("iid") != int(iid) or
                 run.get("username") != username or (runID is not None and run.get("runID", "").lower() != str(uuid.UUID(runID)))):
             raise ValueError("This author follow-up run is not authorized to push")
+        self.repair_scope(run)
         mr = self.read(host, f"/projects/{projectID}/merge_requests/{iid}")
         if (mr.get("project_id") != int(projectID) or mr.get("iid") != int(iid) or mr.get("state") != "opened" or
                 mr.get("author", {}).get("id") != user.get("id") or type(user.get("id")) is not int or
@@ -156,12 +169,31 @@ class AuthorFollowUpVerifier:
                     prior.get("host") == host and prior.get("projectID") == int(projectID) and prior.get("iid") == int(iid) and
                     prior.get("username") == user["username"] and prior.get("userID") == user["id"])
         previously_sealed = {d["id"]: d["bodySHA256"] for d in prior.get("drafts", [])} if same_run else {}
+        repair_scope = self.repair_scope(run)
+        repair_intent = evidence.get("repairIntent") if repair_scope else None
+        if repair_intent is not None:
+            if (not isinstance(repair_intent, dict) or type(repair_intent.get("draftID")) is not int or
+                    repair_intent["draftID"] != repair_scope[0]["id"] or
+                    not isinstance(repair_intent.get("bodySHA256"), str) or
+                    not re.fullmatch(r"[0-9a-f]{64}", repair_intent["bodySHA256"]) or
+                    repair_intent["bodySHA256"] == repair_scope[0]["bodySHA256"]):
+                raise ValueError("Supply the exact intended corrected reply hash before editing")
+        if repair_scope:
+            expected = repair_scope[0]
+            matching = [d for d in before if d["id"] == expected["id"]]
+            allowed_bodies = {expected["bodySHA256"], previously_sealed.get(expected["id"])}
+            if len(matching) != 1 or digest(matching[0]["note"]) not in allowed_bodies:
+                raise ValueError("The owned reply was edited or removed; fresh app authorization is required")
         proof = {"version": 1, "sealed": False, "verificationID": str(uuid.uuid4()), "runID": run["runID"],
                  "host": host, "projectID": int(projectID), "iid": int(iid), "username": user["username"], "userID": user["id"],
                  "headSHA": headSHA, "sourceProjectID": source, "sourceBranch": mr["source_branch"], "files": files,
                  "discussionFingerprint": fingerprint,
                  "baselineDrafts": [{"id": d["id"], "bodySHA256": digest(d["note"])} for d in before
                                     if previously_sealed.get(d["id"]) != digest(d["note"])]}
+        if repair_scope:
+            proof["repairDrafts"] = repair_scope
+            if repair_intent:
+                proof["repairIntent"] = repair_intent
         with self.local_lock():
             save(self.root / "follow-up-preflight" / host / key, proof)
         return {"verificationID": proof["verificationID"], "headSHA": headSHA, "verified": True}
@@ -185,12 +217,25 @@ class AuthorFollowUpVerifier:
         ids = json.loads(draftIDsJSON)
         if not isinstance(ids, list) or not 1 <= len(ids) <= 100 or any(type(i) is not int or i <= 0 for i in ids) or len(set(ids)) != len(ids):
             raise ValueError("Supply the exact new or refreshed draft IDs")
+        repair_scope = self.repair_scope(run)
+        if proof.get("repairDrafts") != repair_scope:
+            raise ValueError("Reply-repair permission changed since remote verification")
+        if repair_scope and ids != [repair_scope[0]["id"]]:
+            raise ValueError("This repair may seal only its exact previously owned reply")
+        repair_intent = proof.get("repairIntent")
+        if repair_scope and (not isinstance(repair_intent, dict) or repair_intent.get("draftID") != ids[0] or
+                             not isinstance(repair_intent.get("bodySHA256"), str)):
+            raise ValueError("No reply edit was authorized by the persisted verification intent")
         drafts = {d["id"]: d for d in self.drafts(host, projectID, iid, user["id"])}
         baseline = {d["id"]: d["bodySHA256"] for d in proof["baselineDrafts"]}
         sealed = []
         for draftID in ids:
             if draftID not in drafts: raise ValueError("A draft is missing or belongs to another account")
             checksum = digest(drafts[draftID]["note"])
+            if repair_scope and checksum != repair_intent["bodySHA256"]:
+                raise ValueError("The live reply differs from the correction planned before verification; do not adopt a user edit")
+            if repair_scope and checksum == repair_scope[0]["bodySHA256"]:
+                raise ValueError("The rejected reply has not been corrected")
             if baseline.get(draftID) == checksum:
                 raise ValueError("Legacy or user-created drafts cannot be automatically adopted; verify and refresh claims after remote proof")
             sealed.append({"id": draftID, "bodySHA256": checksum})

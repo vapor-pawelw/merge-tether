@@ -4,6 +4,99 @@ import Testing
 
 @MainActor
 @Suite struct MergeWorkflowExecutionTests {
+    @MainActor private final class ReadRetryClock { var date = Date() }
+
+    @Test(arguments: ["cooldown", "dependency", "account-change"])
+    func purePrelaunchFailurePreservesRestartAccountHeadAndRetryBoundaries(_ recovery: String) async throws {
+        let suite = "WorkflowReadRetry.\(UUID())"
+        let defaults = try #require(UserDefaults(suiteName: suite))
+        defer { defaults.removePersistentDomain(forName: suite) }
+        let directory = FileManager.default.temporaryDirectory.appending(path: UUID().uuidString)
+        try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
+        defer { try? FileManager.default.removeItem(at: directory) }
+        let settings = SettingsManager(defaults: defaults)
+        settings.automation.applyPreset(.full, for: .codex)
+        let original = try entry(jobID: nil)
+        let request = original.event.mergeRequest
+        let head = try #require(request.sha)
+        let event = MergeWorkflowEvent(kind: .blockerChange, mergeRequest: request, identity: "read-retry", context: "Read-only admission")
+        let encoder = JSONEncoder()
+        let staleRequest = String(decoding: try encoder.encode(request), as: UTF8.self)
+            .replacingOccurrences(of: head, with: String(repeating: "b", count: 40))
+        let executable = directory.appending(path: "glab")
+        try Data("""
+            #!/bin/sh
+            set -eu
+            case "$*" in
+              *'--method'*) printf x >> "$0-write"; exit 9 ;;
+              'api /user '*)
+                printf x >> "$0-reads"
+                if ! test -f "$0-available"; then printf '503 temporarily unavailable' >&2; exit 1; fi
+                printf '%s' '{"id":1,"username":"me"}' ;;
+              'api /projects/7/merge_requests/11 '*) printf '%s' '\(staleRequest)' ;;
+              *) exit 9 ;;
+            esac
+            """.utf8).write(to: executable)
+        try FileManager.default.setAttributes([.posixPermissions: 0o700], ofItemAtPath: executable.path)
+        let glab = GlabService()
+        glab.resolvedHost = original.host; glab.currentUsername = "me"; glab.glabPath = executable
+        let clock = ReadRetryClock()
+        func make(_ state: SettingsManager) -> MergeWorkflowAutomation {
+            MergeWorkflowAutomation(settings: state, glab: glab, notifications: NotificationService(),
+                detector: .init(directory: directory.appending(path: "claims")),
+                retryWait: { _ in
+                    if recovery == "account-change" {
+                        glab.currentUsername = "other-account"
+                        glab.currentUsername = "me"
+                    }
+                    await Task.yield()
+                }, now: { clock.date })
+        }
+        func settle(_ automation: MergeWorkflowAutomation) async throws {
+            for _ in 0..<500 where automation.entries.first.map({ [.queued, .running].contains($0.state) }) == true {
+                try await Task.sleep(for: .milliseconds(10))
+            }
+        }
+        func reads() -> String { (try? String(contentsOf: URL(fileURLWithPath: executable.path + "-reads"), encoding: .utf8)) ?? "" }
+        let automation = make(settings)
+        automation.receive(event, host: original.host, user: original.user)
+        automation.startNext()
+        try await settle(automation)
+        if recovery == "account-change" {
+            #expect(reads() == "x")
+            #expect(automation.entries.first?.state == .skipped)
+            #expect(automation.entries.first?.isReadOnlyFailure == false)
+            #expect(settings.assistantHandoffs.isEmpty && settings.pipelineRefreshAttempts.isEmpty)
+            #expect(!FileManager.default.fileExists(atPath: executable.path + "-write"))
+            return
+        }
+        #expect(reads() == "xxx")
+        #expect(automation.entries.first?.isReadOnlyFailure == true)
+        #expect(automation.hasReadOnlyFailure(for: request))
+        let restoredSettings = SettingsManager(defaults: defaults)
+        let restored = make(restoredSettings)
+        #expect(restored.hasReadOnlyFailure(for: request))
+        glab.currentUsername = "other-account"
+        #expect(!restored.hasReadOnlyFailure(for: request))
+        restored.startNext()
+        #expect(reads() == "xxx")
+        glab.currentUsername = "me"
+        restored.startNext()
+        #expect(reads() == "xxx")
+        try Data().write(to: URL(fileURLWithPath: executable.path + "-available"))
+        if recovery == "cooldown" {
+            clock.date = clock.date.addingTimeInterval(ReadOnlyAssessmentRetry.cooldown + 1)
+            restored.startNext()
+        } else { restored.retryReadOnlyFailures() }
+        try await settle(restored)
+        #expect(reads() == "xxxx")
+        // The new source head invalidates this old event before any action can be entered.
+        #expect(restored.entries.first?.state == .skipped)
+        #expect(!restored.hasReadOnlyFailure(for: request))
+        #expect(restoredSettings.assistantHandoffs.isEmpty && restoredSettings.pipelineRefreshAttempts.isEmpty)
+        #expect(!FileManager.default.fileExists(atPath: executable.path + "-write"))
+    }
+
     private func entry(jobID: UUID?) throws -> MergeWorkflowActivityEntry {
         let pipeline = jobID == nil ? 101 : 100
         let eventID = "pipeline:7:11:\(pipeline)"
@@ -643,8 +736,13 @@ import Testing
         try await exercisePipelineRefresh(ambiguousResponse: false, ownershipRace: true)
     }
 
+    @Test func transientPrelaunchReadFailureRecoversBeforeThePipelineRefreshAction() async throws {
+        try await exercisePipelineRefresh(ambiguousResponse: false, prelaunchFailures: 1)
+    }
+
     private func exercisePipelineRefresh(
-        ambiguousResponse: Bool, wrongCreatedParents: Bool = false, priorReceipt: Bool = false, ownershipRace: Bool = false
+        ambiguousResponse: Bool, wrongCreatedParents: Bool = false, priorReceipt: Bool = false, ownershipRace: Bool = false,
+        prelaunchFailures: Int = 0
     ) async throws {
         let directory = FileManager.default.temporaryDirectory.appending(path: UUID().uuidString)
         try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
@@ -670,7 +768,13 @@ import Testing
         #!/bin/sh
         set -eu
         case "$*" in
-          'api /user '*) printf '%s' '{"id":1,"username":"me"}' ;;
+          'api /user '*)
+            count=0
+            if test -f "$0-user-count"; then count=$(cat "$0-user-count"); fi
+            count=$((count + 1))
+            printf '%s' "$count" > "$0-user-count"
+            if test "$count" -le '\(prelaunchFailures)'; then printf '503 temporarily unavailable' >&2; exit 1; fi
+            printf '%s' '{"id":1,"username":"me"}' ;;
           'api /projects/7/merge_requests/11/pipelines '*'--method POST'*)
             printf x >> "$0-posted"
             if test '\(ambiguousResponse)' = true; then printf 'network response lost' >&2; exit 1; fi

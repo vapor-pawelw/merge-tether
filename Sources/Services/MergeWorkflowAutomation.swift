@@ -27,6 +27,11 @@ struct PipelineClaimAssessmentAttempt: Codable, Sendable {
     let createdAt: Date
 }
 
+struct MergeWorkflowReadFailure: Codable, Sendable {
+    let date: Date
+    let configuration: AutomationSettings
+}
+
 enum PipelineClaimAssessmentError: LocalizedError {
     case ownershipReserved, persistenceUnavailable
     var errorDescription: String? {
@@ -48,6 +53,8 @@ struct MergeWorkflowActivityEntry: Codable, Identifiable {
     var chatURL: URL?
     var assistantJobID: UUID?
     var pipelineClaimAssessment: PipelineClaimAssessmentLineage? = nil
+    var readOnlyFailure: MergeWorkflowReadFailure? = nil
+    var isReadOnlyFailure: Bool { readOnlyFailure != nil }
 }
 
 @MainActor
@@ -68,10 +75,38 @@ final class MergeWorkflowAutomation {
     private let detector: ExistingPipelineWorkDetector
     private let jobCoordinator: AssistantJobCoordinator?
     private let monitor = MergeWorkflowMonitor()
+    private let retryWait: ReadOnlyAssessmentRetry.Wait
+    private let now: ReadOnlyAssessmentRetry.Clock
     private var work: Task<Void, Never>?
     private var polling = false
     private var confirmedPipelineHandoffs: Set<String> = []
     @ObservationIgnored var onRemoteChange: (() -> Void)?
+
+    func hasReadOnlyFailure(for request: GitLabMergeRequest) -> Bool {
+        let current = entries.filter {
+            $0.event.mergeRequest.projectID == request.projectID && $0.event.mergeRequest.iid == request.iid
+                && $0.event.mergeRequest.sha == request.sha
+                && ($0.event.kind != .pipelineFailure || $0.event.pipelineID == request.headPipeline?.id)
+        }
+        // A newer result for the same trigger supersedes its older admission failure.
+        return MergeWorkflowTrigger.allCases.contains { trigger in
+            guard let entry = current.first(where: { $0.event.kind == trigger }), entry.state == .failed,
+                  let failure = entry.readOnlyFailure, shouldProceed(entry),
+                  failure.configuration.preservingScope(from: settings.automation) == settings.automation else { return false }
+            return true
+        }
+    }
+
+    func retryReadOnlyFailures() {
+        for index in history.indices where history[index].state == .failed && history[index].isReadOnlyFailure
+            && isCurrent(host: history[index].host, user: history[index].user) {
+            if let failure = history[index].readOnlyFailure {
+                history[index].readOnlyFailure = .init(date: .distantPast, configuration: failure.configuration)
+            }
+        }
+        saveHistory()
+        startNext()
+    }
 
     func isAutomaticallyProcessingPipeline(_ request: GitLabMergeRequest) -> Bool {
         guard let host = glab.resolvedHost, let username = glab.currentUsername else { return false }
@@ -99,13 +134,17 @@ final class MergeWorkflowAutomation {
 
     init(
         settings: SettingsManager, glab: GlabService, notifications: NotificationService,
-        detector: ExistingPipelineWorkDetector = ExistingPipelineWorkDetector(), jobCoordinator: AssistantJobCoordinator? = nil
+        detector: ExistingPipelineWorkDetector = ExistingPipelineWorkDetector(), jobCoordinator: AssistantJobCoordinator? = nil,
+        retryWait: @escaping ReadOnlyAssessmentRetry.Wait = ReadOnlyAssessmentRetry.wait,
+        now: @escaping ReadOnlyAssessmentRetry.Clock = { Date() }
     ) {
         self.settings = settings
         self.glab = glab
         self.notifications = notifications
         self.detector = detector
         self.jobCoordinator = jobCoordinator
+        self.retryWait = retryWait
+        self.now = now
         history = settings.workflowActivity.map { stored in
             var entry = stored
             if entry.state == .queued || entry.state == .running { entry.state = .skipped }
@@ -324,6 +363,14 @@ final class MergeWorkflowAutomation {
 
     func startNext() {
         guard work == nil else { return }
+        for entry in entries where entry.state == .failed && entry.isReadOnlyFailure
+            && entry.assistantJobID == nil && entry.chatURL == nil && shouldProceed(entry)
+            && !AssistantAutomationRunner.isWorking(on: workKey(entry)) {
+            guard let failure = entry.readOnlyFailure,
+                  failure.configuration.preservingScope(from: settings.automation) != settings.automation
+                    || now().timeIntervalSince(failure.date) >= ReadOnlyAssessmentRetry.cooldown else { continue }
+            update(entry.id, .queued)
+        }
         while let next = entries.last(where: { $0.state == .queued }) {
             let mode = configuredRule(for: next.event)?.mode
             guard next.event.kind != .reviewWaiting, mode == .assistant else {
@@ -344,6 +391,13 @@ final class MergeWorkflowAutomation {
                     update(next.id, .alreadyRegistered)
                 } catch PipelineClaimAssessmentError.ownershipReserved {
                     update(next.id, .alreadyRegistered)
+                } catch let failure as InitialReadFailure {
+                    if let index = history.firstIndex(where: { $0.id == next.id }) {
+                        history[index].state = .failed
+                        history[index].readOnlyFailure = .init(date: now(), configuration: failure.configuration)
+                        history[index].summary = String(GlabService.redactWorkflowEvidence(String(describing: failure.cause)).prefix(600))
+                        saveHistory()
+                    }
                 } catch {
                     update(next.id, .failed)
                     let summary = (error as? PipelineRefreshError)?.errorDescription
@@ -360,6 +414,11 @@ final class MergeWorkflowAutomation {
         }
     }
 
+    private struct InitialReadFailure: Error {
+        let cause: any Error
+        let configuration: AutomationSettings
+    }
+
     private func execute(_ entry: MergeWorkflowActivityEntry) async throws {
         let event = entry.event
         let original = event.mergeRequest
@@ -368,13 +427,29 @@ final class MergeWorkflowAutomation {
         var assessmentTargetSHA: String?
         guard shouldProceed(entry) else { throw CancellationError() }
 
-        let authenticated = try await glab.fetchAuthenticatedUser(host: entry.host, expectedUsername: entry.user.username)
-        guard authenticated == entry.user else { throw CancellationError() }
-        let latest = try await glab.fetchMergeRequest(projectID: original.projectID, iid: original.iid, host: entry.host)
-        guard latest.state == "opened", latest.sha == original.sha, latest.sha != nil,
-              latest.webURL.isGitLabMergeRequest(host: entry.host, iid: latest.iid),
-              configuredRule(for: event)?.includes(latest) == true, shouldProceed(entry)
-        else { throw CancellationError() }
+        let latest: GitLabMergeRequest
+        do {
+            latest = try await ReadOnlyAssessmentRetry.run(isCurrent: {
+                self.shouldProceed(entry) && self.glab.accountRevision == assessmentAccountRevision
+                    && assessmentConfiguration.preservingScope(from: self.settings.automation) == self.settings.automation
+            }, wait: retryWait) {
+                let authenticated = try await self.glab.fetchAuthenticatedUser(host: entry.host, expectedUsername: entry.user.username)
+                guard authenticated == entry.user else { throw CancellationError() }
+                let current = try await self.glab.fetchMergeRequest(projectID: original.projectID, iid: original.iid, host: entry.host)
+                guard current.state == "opened", current.sha == original.sha, current.sha != nil,
+                      current.webURL.isGitLabMergeRequest(host: entry.host, iid: current.iid),
+                      self.configuredRule(for: event)?.includes(current) == true, self.shouldProceed(entry)
+                else { throw CancellationError() }
+                return current
+            }
+        } catch is CancellationError { throw CancellationError() }
+        catch { throw InitialReadFailure(cause: error, configuration: assessmentConfiguration) }
+        if let index = history.firstIndex(where: { $0.id == entry.id }), history[index].readOnlyFailure != nil {
+            history[index].readOnlyFailure = nil
+            history[index].summary = nil
+            saveHistory()
+        }
+        // Pipeline refresh, reservations, job retries and worker launch remain outside the read retry boundary.
 
         var handoff: ExistingPipelineWorkDetector.Key?
         if event.kind == .pipelineFailure {

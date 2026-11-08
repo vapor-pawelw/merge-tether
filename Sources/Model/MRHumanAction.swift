@@ -1,5 +1,28 @@
 import Foundation
 
+@MainActor
+struct PreparedReplyContext {
+    let draftID: Int
+    let quote: String
+    let discussionURL: URL?
+    let reason: String
+    let summary: String?
+
+    static func rejected(in item: MergeRequestAttentionMonitor.Item) -> [Self] {
+        item.rejectedDrafts.compactMap { rejection in
+            guard rejection.state != .valid,
+                  let draft = item.drafts.first(where: { $0.id == rejection.draftID }),
+                  let quote = draft.note, !quote.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else { return nil }
+            var components = URLComponents(url: item.url, resolvingAgainstBaseURL: false)
+            let noteID = rejection.discussionRootNoteID.flatMap { $0 > 0 ? $0 : nil }
+            components?.fragment = noteID.map { "note_\($0)" }
+            return .init(draftID: rejection.draftID, quote: quote,
+                discussionURL: noteID == nil ? nil : components?.url,
+                reason: rejection.reason, summary: rejection.summary)
+        }
+    }
+}
+
 /// A concrete reason for a human action, shared by the MR card and its detail view.
 @MainActor
 struct MRHumanAction {
@@ -10,9 +33,16 @@ struct MRHumanAction {
     let message: LocalizedStringResource
     let detail: String?
     let summary: String?
-    var explanation: String { AgentExplanation.summary(summary) ?? String(localized: message) }
+    let preparedReply: PreparedReplyContext?
+    var explanation: String {
+        let explanation = AgentExplanation.summary(summary) ?? String(localized: message)
+        guard preparedReply != nil else { return explanation }
+        let subject = String(localized: .PreparedReplies.preparedRepliesNeedsReview)
+        return explanation == subject ? subject : subject + " " + explanation
+    }
     var actionLabel: LocalizedStringResource {
-        switch action {
+        if preparedReply != nil { return .PreparedReplies.preparedRepliesReviewAction }
+        return switch action {
         case .reviewRun: .MRHumanAction.mrHumanActionActionReviewRun
         case .retryRun: .MRHumanAction.mrHumanActionActionRetryRun
         case .reviewDrafts: .MRHumanAction.mrHumanActionActionReviewDrafts
@@ -65,6 +95,12 @@ struct MRHumanAction {
             return
         }
         if let failure = item.draftProofRecoveryFailure {
+            if let reply = PreparedReplyContext.rejected(in: item).first {
+                self.init(kind: .verificationFailure, action: .reviewDrafts,
+                          message: .PreparedReplies.preparedRepliesNeedsReview,
+                          detail: reply.reason, summary: reply.summary, preparedReply: reply)
+                return
+            }
             self.init(kind: .verificationFailure, action: .retryDraftVerification,
                       message: .MRHumanAction.mrHumanActionDraftVerificationFailure,
                       detail: GlabService.redactWorkflowEvidence(failure), summary: item.draftProofRecoverySummary)
@@ -130,8 +166,10 @@ struct MRHumanAction {
         } else { return nil }
     }
 
-    private init(kind: Kind, action: Action, message: LocalizedStringResource, detail: String? = nil, summary: String? = nil) {
+    private init(kind: Kind, action: Action, message: LocalizedStringResource, detail: String? = nil, summary: String? = nil,
+                 preparedReply: PreparedReplyContext? = nil) {
         self.kind = kind; self.action = action; self.message = message; self.detail = detail; self.summary = summary
+        self.preparedReply = preparedReply
     }
 
     private static func feedbackSummary(_ item: MergeRequestAttentionMonitor.Item) -> String? {

@@ -7,6 +7,11 @@ import Testing
     private let host = "gitlab.example.org"
     private let head = "0123456789012345678901234567890123456789"
 
+    private final class ApprovalUserReadProbe {
+        var armed = true
+        var now = Date()
+    }
+
     private final class OriginProbe {
         var notes: [GitLabMergeRequestDiscussion.Note] = []
         private var continuation: CheckedContinuation<AICommentOriginAssessment, Never>?
@@ -78,6 +83,29 @@ import Testing
             try bindFollowUpDiscussions()
         }
 
+        /// Explicit positive precondition; raw delivery proofs and unrequested sibling drafts remain unassessed.
+        func assessFollowUpClaims(draftIDs: [Int]? = nil) throws {
+            let work = AssistantAutomationRunner.MergeRequestWork(host: "gitlab.example.org", projectID: 1, iid: 2)
+            let path = FollowUpVerificationStore.recordURL(kind: "follow-up-verifications", work: work, username: "me", in: folder)
+            let origin = try JSONDecoder().decode(FollowUpVerification.self, from: Data(contentsOf: path))
+            let request = try JSONDecoder().decode(GitLabMergeRequest.self, from: Data(contentsOf: folder.appending(path: "request.json")))
+            let threads = try JSONDecoder().decode([GitLabMergeRequestDiscussion].self, from: Data(contentsOf: folder.appending(path: "discussions.json")))
+            let ids = draftIDs ?? origin.drafts.map(\.id)
+            try #require(FollowUpVerificationStore.validRecoveryScope(ids, origin: origin))
+            let identity = UUID()
+            let fingerprint = try #require(ReviewVerdict.fingerprint(threads))
+            let proof = FollowUpVerificationStore.recoveredProof(origin: origin, assessmentID: identity, fingerprint: fingerprint,
+                semanticContext: request.semanticContextFingerprint, recoveryContext: request.draftProofRecoveryContextFingerprint,
+                draftIDs: ids)
+            let assessment = DraftProofRecoveryVerifier.Assessment(drafts: ids.map {
+                .init(draftID: $0, state: .valid, reason: "Independent fixture assessment supports this exact reply")
+            })
+            try FollowUpVerificationStore.persistRecovery(.init(version: 2,
+                attemptID: AICommentAssessmentStore.digest(identity.uuidString), assessmentID: identity,
+                assistant: settings.automation.assistant, model: settings.automation.codexVerificationModel.rawValue,
+                origin: origin, proof: proof, assessment: assessment, requestedDraftIDs: ids), work: work, username: "me", in: folder)
+        }
+
         func log(_ name: String) -> String {
             (try? String(contentsOf: folder.appending(path: name), encoding: .utf8)) ?? ""
         }
@@ -91,9 +119,9 @@ import Testing
             try JSONSerialization.data(withJSONObject: receipt).write(to: url)
         }
 
-        func poll(waitForAIOrigin: Bool = true) async throws {
+        func poll(waitForAIOrigin: Bool = true, timeout: Duration = .seconds(5)) async throws {
             monitor.refresh(host: "gitlab.example.org", username: "me", todos: [])
-            let deadline = ContinuousClock.now + .seconds(5)
+            let deadline = ContinuousClock.now + timeout
             while monitor.isLoading || monitor.isVerifyingReReview || (waitForAIOrigin && monitor.isAssessingAIOrigins), ContinuousClock.now < deadline {
                 try await Task.sleep(for: .milliseconds(20))
             }
@@ -118,6 +146,7 @@ import Testing
     /// A GitLab stub where "me" (id 3) reviews MR !2, authored by someone else (id 9).
     private func makeHarness(assistantWorked: Bool, authored: Bool = false,
                              duringAutomationCheck: (@MainActor (URL) -> Void)? = nil,
+                             approvalReadClock: @escaping ReadOnlyAssessmentRetry.Clock = { Date() },
                              assessment: ReReviewAssessment? = nil,
                              assessAIOrigin: AICommentOriginCoordinator.Assess? = nil,
                              verifyDraftRecovery: DraftProofRecoveryCoordinator.Verify? = nil) throws -> Harness {
@@ -156,7 +185,9 @@ import Testing
                 touch ai-assessment-added-after-preview
             fi
             case "$2" in
-                /user) cat live-user.json ;;
+                /user)
+                    if [ -f fail-next-approval-user ]; then rm fail-next-approval-user; exit 1; fi
+                    cat live-user.json ;;
                 /merge_requests?scope=created_by_me*)
                     if [ -f fail-owned-list ]; then exit 1; fi
                     cat authored.json ;;
@@ -167,6 +198,7 @@ import Testing
                 graphql)
                     echo "$*" >> re-review-targets.log
                     echo requested >> re-review.log
+                    if [ -f fail-review-request ]; then exit 1; fi
                     echo '{"data":{"mergeRequestReviewerRereview":{"mergeRequest":{"iid":"2"},"errors":[]}}}' ;;
                 */draft_notes/*/publish)
                     if [ -f fail-publish ]; then exit 1; fi
@@ -199,6 +231,14 @@ import Testing
                     user="${2##*/}"
                     printf '{"id":%s,"username":"reviewer%s","bot":false,"state":"active"}' "$user" "$user" ;;
                 */draft_notes*)
+                    if [ -f approval-preflight-armed ] && [ -f approval-preflight-failures ]; then
+                        count="$(cat approval-preflight-failures)"
+                        if [ "$count" -gt 0 ]; then
+                            echo "$((count - 1))" > approval-preflight-failures
+                            echo failed >> approval-preflight.log
+                            exit 1
+                        fi
+                    fi
                     if [ -f pause-selected-read ]; then
                         touch selected-read-entered
                         attempts=0
@@ -208,7 +248,11 @@ import Testing
                     if [ -f fail-next-draft-read ]; then rm fail-next-draft-read; exit 1; fi
                     cat drafts.json ;;
                 */raw_diffs) echo "verified diff fixture" ;;
-                */reviewers*) cat reviewers.json ;;
+                */reviewers*)
+                    if [ -f approval-preflight-failures ]; then touch approval-preflight-armed; fi
+                    cat reviewers.json ;;
+                */approvals)
+                    if [ -f approvals.json ]; then cat approvals.json; else echo '{"approved_by":[]}'; fi ;;
                 */discussions*)
                     if [ -f fail-discussion-read ]; then exit 1; fi
                     if [ -f edit-on-this-discussion ]; then
@@ -230,6 +274,11 @@ import Testing
                     cat discussions.json ;;
                 */approve)
                     echo "$*" >> approve.log
+                    if [ -f approval-response-lost ]; then
+                        echo '{"approved_by":[{"user":{"id":3,"username":"me"}}]}' > approvals.json
+                        exit 1
+                    fi
+                    if [ -f fail-approval-write ]; then exit 1; fi
                     echo '{"approved_by":[{"user":{"id":3}}]}' ;;
                 /projects/1/repository/branches/fix) printf '{"commit":{"id":"'; cat remote-head.txt; printf '"}}' ;;
                 /projects/1/repository/files/Sources%2FA.swift?ref=*)
@@ -238,6 +287,8 @@ import Testing
                         /usr/bin/python3 -c 'import json; p="drafts.json"; a=json.load(open(p)); [d.update(note="New unsupported local fix") for d in a if d["id"]==12]; json.dump(a,open(p,"w"))'
                     fi
                     /usr/bin/python3 -c 'import json,base64; print(json.dumps(dict(file_path="Sources/A.swift",encoding="base64",content=base64.b64encode(open("remote-file-content.txt","rb").read()).decode())))' ;;
+                /projects/99/merge_requests/2|/projects/1/merge_requests/99)
+                    /usr/bin/python3 -c 'import json,sys; parts=sys.argv[1].split("/"); p=int(parts[2]); i=int(parts[4]); r=json.load(open("request.json")); r.update(project_id=p,iid=i,state="closed",source_project_id=p,target_project_id=p,web_url="https://gitlab.example.org/g/p/-/merge_requests/"+str(i)); print(json.dumps(r))' "$2" ;;
                 /projects/1/merge_requests/2) cat request.json ;;
                 *) exit 100 ;;
             esac
@@ -265,6 +316,7 @@ import Testing
                 duringAutomationCheck?(folder)
                 return !FileManager.default.fileExists(atPath: folder.appending(path: "assistant-unavailable").path)
             },
+            approvalReadClock: approvalReadClock, approvalReadWait: { _ in },
             verifyReReview: { input, _, _ in
                 try JSONEncoder().encode(input).write(to: folder.appending(path: "verifier-input.json"))
                 let log = folder.appending(path: "verification.log")
@@ -272,6 +324,9 @@ import Testing
                 try (previous + Data("verified\n".utf8)).write(to: log)
                 if FileManager.default.fileExists(atPath: folder.appending(path: "fail-verification").path) {
                     throw ReReviewVerifier.VerificationError.failed
+                }
+                if FileManager.default.fileExists(atPath: folder.appending(path: "unavailable-verification").path) {
+                    throw ReReviewVerifier.VerificationError.unavailable
                 }
                 if let assessment { return assessment }
                 return ReReviewAssessment(notes: input.discussions.flatMap(\.notes).filter {
@@ -658,6 +713,7 @@ import Testing
         harness.settings.automation.publishAIRepliesWithoutConfirmation = false
         try harness.write("drafts.json", draftJSON)
         try harness.verifyFollowUpDrafts()
+        try harness.assessFollowUpClaims()
         try harness.bindFollowUpDiscussions()
         try await harness.poll()
         #expect(harness.monitor.currentItems.first?.section == .unpublishedComments)
@@ -808,6 +864,86 @@ import Testing
         try await harness.poll()
         #expect(harness.monitor.currentItems.isEmpty)
         #expect(harness.log("approve.log").split(separator: "\n").count == 1)
+    }
+
+    @Test(arguments: [1, 3])
+    func automaticApprovalReadFailuresDoNotPermanentlyRequireManualApproval(_ failures: Int) async throws {
+        let probe = ApprovalUserReadProbe()
+        let harness = try makeHarness(assistantWorked: true, approvalReadClock: { probe.now })
+        defer { harness.cleanUp() }
+        try harness.recordVerdict("no_objections", head: head)
+        try harness.write("approval-preflight-failures", String(failures))
+
+        try await harness.poll(timeout: .seconds(15))
+
+        #expect(harness.log("approval-preflight.log").split(separator: "\n").count == failures)
+        #expect(harness.log("approve.log").split(separator: "\n").count == (failures == 1 ? 1 : 0))
+        #expect(harness.monitor.confirmationStates[.init(projectID: 1, iid: 2)] == nil)
+        try harness.write("approval-preflight-failures", "0")
+        try await harness.poll()
+        #expect(harness.log("approve.log").split(separator: "\n").count == (failures == 1 ? 1 : 0))
+        #expect(harness.log("approval-preflight.log").split(separator: "\n").count == failures)
+        probe.now = probe.now.addingTimeInterval(ReadOnlyAssessmentRetry.cooldown + 1)
+        try await harness.poll()
+        #expect(harness.log("approve.log").split(separator: "\n").count == 1)
+        #expect(harness.monitor.currentItems.first?.canApprove != true)
+    }
+
+    @Test func theAdaptersFinalUserReadCannotCreateAnApprovalWriteFence() async throws {
+        let probe = ApprovalUserReadProbe()
+        let harness = try makeHarness(assistantWorked: true, duringAutomationCheck: { folder in
+            guard probe.armed else { return }
+            probe.armed = false
+            try? Data("yes".utf8).write(to: folder.appending(path: "fail-next-approval-user"))
+        }, approvalReadClock: { probe.now })
+        defer { harness.cleanUp() }
+        try harness.recordVerdict("no_objections", head: head)
+        try await harness.poll()
+        #expect(harness.log("approve.log").isEmpty)
+        #expect(harness.monitor.confirmationStates[.init(projectID: 1, iid: 2)] == nil)
+
+        try await harness.poll()
+        #expect(harness.log("approve.log").isEmpty)
+        probe.now = probe.now.addingTimeInterval(ReadOnlyAssessmentRetry.cooldown + 1)
+        try await harness.poll()
+
+        #expect(harness.log("approve.log").split(separator: "\n").count == 1)
+        #expect(harness.monitor.currentItems.first?.canApprove != true)
+    }
+
+    @Test func anAmbiguousApprovalResponseIsReconciledWithoutAnotherSubmission() async throws {
+        let harness = try makeHarness(assistantWorked: true)
+        defer { harness.cleanUp() }
+        try harness.recordVerdict("no_objections", head: head)
+        try harness.write("approval-response-lost", "yes")
+
+        try await harness.poll()
+
+        #expect(harness.log("approve.log").split(separator: "\n").count == 1)
+        #expect(harness.monitor.confirmationStates[.init(projectID: 1, iid: 2)] == nil)
+        try await harness.poll()
+        #expect(harness.log("approve.log").split(separator: "\n").count == 1)
+        #expect(harness.monitor.currentItems.first?.canApprove != true)
+    }
+
+    @Test func anUnconfirmedApprovalWriteRemainsFencedButManualRetryFirstReconcilesItsEffect() async throws {
+        let harness = try makeHarness(assistantWorked: true)
+        defer { harness.cleanUp() }
+        try harness.recordVerdict("no_objections", head: head)
+        try harness.write("fail-approval-write", "yes")
+        try await harness.poll()
+        try await harness.poll()
+        #expect(harness.log("approve.log").split(separator: "\n").count == 1)
+        let item = try #require(harness.monitor.currentItems.first)
+        #expect(item.canApprove && harness.monitor.confirmationStates[item.id] == .failed)
+
+        // GitLab confirms the original effect only after the unsuccessful readback.
+        try harness.write("approvals.json", #"{"approved_by":[{"user":{"id":3,"username":"me"}}]}"#)
+        try FileManager.default.removeItem(at: harness.folder.appending(path: "fail-approval-write"))
+        await harness.monitor.approve(item.id)
+
+        #expect(harness.log("approve.log").split(separator: "\n").count == 1)
+        #expect(harness.monitor.confirmationStates[item.id] == nil)
     }
 
     @Test func approvalIsNotOfferedOnceApproved() async throws {
@@ -1121,6 +1257,7 @@ import Testing
         try harness.write("drafts.json", #"[{"id":12,"author_id":3,"note":"Verified fix","discussion_id":"abc"}]"#)
         try harness.write("discussions.json", duoDiscussion)
         try harness.verifyFollowUpDrafts()
+        try harness.assessFollowUpClaims()
 
         try await harness.poll()
 
@@ -1140,6 +1277,7 @@ import Testing
         try harness.write("drafts.json", #"[{"id":12,"author_id":3,"note":"Verified fix","discussion_id":"abc"}]"#)
         try harness.write("discussions.json", duoDiscussion)
         try harness.verifyFollowUpDrafts()
+        try harness.assessFollowUpClaims()
         try await harness.poll()
         #expect(harness.monitor.currentItems.first?.awaitingRemoteVerification == true)
         harness.settings.automation.publicationRestrictions.repositories = [.init(host: host, entityID: 99, label: "other/repo")]
@@ -1158,6 +1296,7 @@ import Testing
         try harness.write("drafts.json", #"[{"id":12,"author_id":3,"note":"Verified fix","discussion_id":"abc"}]"#)
         try harness.write("discussions.json", duoDiscussion)
         try harness.verifyFollowUpDrafts()
+        try harness.assessFollowUpClaims()
         try await harness.poll()
         try harness.write("edit-after-proof-draft-read", "yes")
 
@@ -1457,6 +1596,85 @@ import Testing
         #expect(harness.log("re-review.log") == "requested\n")
         #expect(harness.log("publish.log").isEmpty && harness.log("selected.log").isEmpty)
     }
+    @Test(arguments: ["failed", "unavailable"], [ReReviewAssessment.Note.State.addressed, .blocking])
+    func aCurrentSharedAssessmentReplacesOnlyAnEmptyCachedVerifierFailure(_ failure: String, _ state: ReReviewAssessment.Note.State) async throws {
+        let harness = try makeHarness(assistantWorked: true, authored: true, assessment: .init(notes: [
+            .init(noteID: 40, state: state, reason: "Current source checked", summary: "The current correction needs reviewer attention.")
+        ]))
+        defer { harness.cleanUp() }
+        try prepareAuthoredFeedback(harness)
+        try await harness.poll()
+        let marker = failure == "failed" ? "fail-verification" : "unavailable-verification"
+        try harness.write(marker, "yes")
+        try harness.write("drafts.json", "[]")
+        try harness.write("discussions.json", harness.log("published-discussions.json"))
+        try await harness.poll()
+        let before = try #require(harness.monitor.currentOpenItems.first)
+        #expect(before.reReviewReadiness == (failure == "failed" ? .failed : .unavailable))
+        #expect(harness.log("re-review.log").isEmpty)
+
+        try FileManager.default.removeItem(at: harness.folder.appending(path: marker))
+        try await completeSharedAuthorFeedback(harness)
+        try await harness.poll()
+
+        let current = try #require(harness.monitor.currentOpenItems.first)
+        #expect(current.reReviewReadiness != .failed && current.reReviewReadiness != .unavailable)
+        if state == .addressed {
+            #expect(harness.log("re-review.log") == "requested\n")
+            try await harness.poll()
+            #expect(harness.log("re-review.log") == "requested\n")
+        } else {
+            guard case .blocked(let blockers) = current.reReviewReadiness else {
+                Issue.record("The current semantic blocker must replace the obsolete transport failure")
+                return
+            }
+            #expect(blockers.map(\.noteID) == [40])
+            #expect(blockers.first?.summary == "The current correction needs reviewer attention.")
+            #expect(harness.log("re-review.log").isEmpty)
+        }
+        #expect(harness.log("publish.log").isEmpty && harness.log("selected.log").isEmpty)
+        #expect(harness.log("verification.log") == "verified\nverified\n")
+    }
+
+    @Test func sharedSemanticSuccessDoesNotHideAnUnconfirmedReviewerRequestOrRepeatItsWrite() async throws {
+        let harness = try makeHarness(assistantWorked: true, authored: true)
+        defer { harness.cleanUp() }
+        try prepareAuthoredFeedback(harness)
+        try await harness.poll()
+        try harness.write("fail-review-request", "yes")
+        try harness.write("drafts.json", "[]")
+        try harness.write("discussions.json", harness.log("published-discussions.json"))
+        try await harness.poll()
+        #expect(harness.log("re-review.log") == "requested\n")
+        #expect(harness.settings.reReviewReceipts.values.contains { $0.unconfirmed })
+
+        try await completeSharedAuthorFeedback(harness)
+        try await harness.poll()
+
+        let current = try #require(harness.monitor.currentOpenItems.first)
+        #expect(current.reReviewUnconfirmed)
+        #expect(harness.settings.reReviewReceipts.values.contains { $0.unconfirmed && $0.requested != true })
+        #expect(harness.log("re-review.log") == "requested\n")
+        #expect(harness.log("publish.log").isEmpty && harness.log("selected.log").isEmpty)
+    }
+
+    private func completeSharedAuthorFeedback(_ harness: Harness) async throws {
+        let coordinator = try #require(harness.monitor.authorFeedbackCoordinator)
+        // Finish the independent verifier without clearing or retrying the failed
+        // secondary gate. The next normal poll consumes its shared result.
+        coordinator.onRemoteChange = nil
+        harness.settings.automation.authorFeedback.isEnabled = true
+        let request = try JSONDecoder().decode(GitLabMergeRequest.self, from: Data(harness.log("request.json").utf8))
+        let discussions = try JSONDecoder().decode([GitLabMergeRequestDiscussion].self, from: Data(harness.log("discussions.json").utf8))
+        coordinator.refresh(request: request, discussions: discussions, drafts: 0, host: host, user: .init(id: 3, username: "me"))
+        let deadline = ContinuousClock.now + .seconds(5)
+        while coordinator.status(projectID: 1, iid: 2)?.phase == .checking, ContinuousClock.now < deadline {
+            try await Task.sleep(for: .milliseconds(20))
+        }
+        #expect(coordinator.status(projectID: 1, iid: 2)?.phase == .complete)
+        #expect(coordinator.assessment(for: request, fingerprint: try #require(ReviewVerdict.fingerprint(discussions))) != nil)
+    }
+
     @Test func unavailableCLIBlocksAutomaticReReviewButKeepsManualConfirmation() async throws {
         let harness = try makeHarness(assistantWorked: true, authored: true)
         defer { harness.cleanUp() }
@@ -1565,6 +1783,7 @@ import Testing
         try harness.assess(noteID: 40, body: "AI finding")
         try harness.write("discussions.json", #"[{"id":"abc","notes":[{"id":40,"author":{"id":8},"body":"AI finding","system":false,"resolvable":true,"resolved":false}]}]"#)
         try harness.verifyFollowUpDrafts()
+        try harness.assessFollowUpClaims()
         try await harness.poll()
         try await harness.poll()
         #expect(harness.log("re-review.log") == "requested\n")
@@ -1592,6 +1811,7 @@ import Testing
         try harness.write("drafts.json", #"[{"id":12,"author_id":3,"note":"Fixed","discussion_id":"abc"}]"#)
         try await harness.poll()
         try harness.verifyFollowUpDrafts()
+        try harness.assessFollowUpClaims()
         try harness.write("fail-read-after-publish", "yes")
         try await harness.poll()
         #expect(harness.log("selected.log").contains("/draft_notes/12/publish"))
@@ -1624,6 +1844,147 @@ import Testing
         #expect(harness.monitor.currentItems.first?.draftCount == 2)
     }
 
+    private func prepareIndependentPublicationReply(_ harness: Harness, authored: Bool) async throws {
+        try harness.write("drafts.json", #"[{"id":12,"author_id":3,"note":"Verified reply A","discussion_id":"abc"},{"id":13,"author_id":3,"note":"Reply B needs repair","discussion_id":"abc"}]"#)
+        try harness.write("discussions.json", duoDiscussion)
+        if authored {
+            try harness.verifyFollowUpDrafts()
+            try harness.assessFollowUpClaims(draftIDs: [12])
+            // Keep the publication test independent of actual coder dispatch.
+            harness.monitor.draftProofRecoveryCoordinator?.onNeedsRepair = nil
+            harness.monitor.draftProofRecoveryCoordinator?.onChange = nil
+        } else {
+            try harness.recordVerdict("objections", head: head)
+        }
+        try await harness.poll()
+        let deadline = ContinuousClock.now + .seconds(5)
+        while harness.monitor.draftProofRecoveryCoordinator?.isChecking(work: .init(host: host, projectID: 1, iid: 2)) == true,
+              ContinuousClock.now < deadline { try await Task.sleep(for: .milliseconds(20)) }
+        #expect(harness.log("selected.log").isEmpty)
+    }
+
+    private func publicationWorker(_ harness: Harness, authored: Bool, state: AssistantJobExecution.State) throws -> AssistantAutomationRunner.Handoff {
+        let work = AssistantAutomationRunner.MergeRequestWork(host: host, projectID: 1, iid: 2)
+        let request = try JSONDecoder().decode(GitLabMergeRequest.self, from: Data(harness.log("request.json").utf8))
+        var repair: DraftReplyRepair.Context?
+        if authored {
+            let originURL = FollowUpVerificationStore.recordURL(kind: "follow-up-verifications", work: work, username: "me", in: harness.folder)
+            let origin = try JSONDecoder().decode(FollowUpVerification.self, from: Data(contentsOf: originURL))
+            let snapshot = DraftProofRecoveryCoordinator.Snapshot(request: request,
+                discussions: try JSONDecoder().decode([GitLabMergeRequestDiscussion].self, from: Data(harness.log("discussions.json").utf8)),
+                drafts: try JSONDecoder().decode([GitLabDraftNote].self, from: Data(harness.log("drafts.json").utf8)),
+                user: .init(id: 3, username: "me"), host: host, branchHead: head)
+            repair = DraftReplyRepair.context(snapshot: snapshot, origin: origin,
+                rejection: .init(draftID: 13, state: .uncertain, reason: "Reply B needs a correction"), configuration: harness.settings.automation)
+            try #require(repair != nil)
+        }
+        return .init(id: UUID(), key: .init(assistant: .codex, work: work, username: "me", workspace: "", access: .gitLabRead),
+            title: authored ? "Repair B" : "Review in progress", prompt: "Fixture work", createdAt: Date().addingTimeInterval(1),
+            allowsPush: false, draftRepair: repair, followUpPushAllowed: authored ? true : nil,
+            execution: .init(state: state), taskPrompt: "Fixture work", mergeRequestURL: request.webURL,
+            workflow: authored ? .followUp : .review, expectedHeadSHA: head)
+    }
+
+    private func publicationProofIDs(_ harness: Harness) -> Set<UUID> {
+        Set(FollowUpVerificationStore.publicationReceipts(work: .init(host: host, projectID: 1, iid: 2),
+            username: "me", settings: harness.settings, in: harness.folder)
+            .filter { $0.drafts.contains { $0.id == 12 } }.map(\.verificationID))
+    }
+
+    @Test(arguments: [(false, AutomationPublicationMode.all), (false, .aiReplies), (true, .all), (true, .aiReplies)],
+          [AssistantJobExecution.State.queued, .running])
+    func activeWorkPausesAutomaticPublicationWithoutRevokingIndependentProof(_ scenario: (Bool, AutomationPublicationMode),
+                                                                         _ state: AssistantJobExecution.State) async throws {
+        let (authored, mode) = scenario
+        let harness = try makeHarness(assistantWorked: true, authored: authored, verifyDraftRecovery: { input, _, _ in
+            .init(drafts: input.requestedDraftIDs.map { .init(draftID: $0, state: .uncertain, reason: "Reply B remains unverified") })
+        })
+        defer { harness.monitor.draftProofRecoveryCoordinator?.cancel(); harness.cleanUp() }
+        harness.settings.automation.publicationMode = mode
+        try await prepareIndependentPublicationReply(harness, authored: authored)
+        let proofIDs = publicationProofIDs(harness)
+        if authored { #expect(proofIDs.count == 1) }
+        let job = try publicationWorker(harness, authored: authored, state: state)
+        harness.settings.assistantHandoffs.append(job)
+
+        try await harness.poll()
+
+        #expect(harness.log("selected.log").isEmpty && harness.log("publish.log").isEmpty)
+        if authored { #expect(publicationProofIDs(harness) == proofIDs) }
+        let index = try #require(harness.settings.assistantHandoffs.firstIndex { $0.id == job.id })
+        harness.settings.assistantHandoffs[index].execution?.state = .succeeded
+        try await harness.poll()
+        #expect(harness.log("selected.log").contains("/draft_notes/12/publish"))
+        if authored {
+            #expect(!harness.log("selected.log").contains("/draft_notes/13/publish"))
+            #expect(publicationProofIDs(harness) == proofIDs)
+        }
+    }
+
+    @Test(arguments: [false, true], [AutomationPublicationMode.all, .aiReplies])
+    func workStartingDuringFinalReadsStopsTheAutomaticPublish(_ authored: Bool, _ mode: AutomationPublicationMode) async throws {
+        let probe = ApprovalUserReadProbe()
+        probe.armed = false
+        let harness = try makeHarness(assistantWorked: true, authored: authored, duringAutomationCheck: { folder in
+            guard probe.armed else { return }
+            probe.armed = false
+            try? Data("yes".utf8).write(to: folder.appending(path: "pause-selected-read"))
+        }, verifyDraftRecovery: { input, _, _ in
+            .init(drafts: input.requestedDraftIDs.map { .init(draftID: $0, state: .uncertain, reason: "Reply B remains unverified") })
+        })
+        defer { harness.monitor.draftProofRecoveryCoordinator?.cancel(); harness.cleanUp() }
+        harness.settings.automation.publicationMode = mode
+        try await prepareIndependentPublicationReply(harness, authored: authored)
+        let proofIDs = publicationProofIDs(harness)
+        let job = try publicationWorker(harness, authored: authored, state: .running)
+        probe.armed = true
+        let polling = Task { try await harness.poll() }
+        defer { try? harness.write("release-selected-read", "yes") }
+        let deadline = ContinuousClock.now + .seconds(4)
+        while !FileManager.default.fileExists(atPath: harness.folder.appending(path: "selected-read-entered").path),
+              ContinuousClock.now < deadline { try await Task.sleep(for: .milliseconds(20)) }
+        try #require(FileManager.default.fileExists(atPath: harness.folder.appending(path: "selected-read-entered").path))
+        harness.settings.assistantHandoffs.append(job)
+        try harness.write("release-selected-read", "yes")
+        try await polling.value
+
+        #expect(harness.log("selected.log").isEmpty && harness.log("publish.log").isEmpty)
+        if authored { #expect(publicationProofIDs(harness) == proofIDs) }
+        let index = try #require(harness.settings.assistantHandoffs.firstIndex { $0.id == job.id })
+        harness.settings.assistantHandoffs[index].execution?.state = .succeeded
+        try await harness.poll()
+        #expect(harness.log("selected.log").contains("/draft_notes/12/publish"))
+    }
+
+    @Test(arguments: ["account", "project", "iid", "host"])
+    func unrelatedActiveWorkDoesNotBlockAutomaticPublication(_ difference: String) async throws {
+        let harness = try makeHarness(assistantWorked: true)
+        defer { harness.cleanUp() }
+        harness.settings.automation.publicationMode = .aiReplies
+        try await prepareIndependentPublicationReply(harness, authored: false)
+        harness.settings.assistantHandoffs.append(.init(id: UUID(), key: .init(assistant: .codex,
+            work: .init(host: difference == "host" ? "other.example.org" : host,
+                projectID: difference == "project" ? 99 : 1, iid: difference == "iid" ? 99 : 2),
+            username: difference == "account" ? "other" : "me", workspace: "", access: .gitLabRead),
+            title: "Other active work", prompt: "Fixture", createdAt: Date(), allowsPush: false,
+            execution: .init(state: .running), workflow: .review))
+        try await harness.poll()
+        #expect(harness.log("selected.log").contains("/draft_notes/12/publish"))
+    }
+
+    @Test(arguments: [false, true])
+    func explicitManualPublicationRemainsAuthorizedDuringActiveWork(_ authored: Bool) async throws {
+        let harness = try makeHarness(assistantWorked: true, authored: authored, verifyDraftRecovery: { input, _, _ in
+            .init(drafts: input.requestedDraftIDs.map { .init(draftID: $0, state: .uncertain, reason: "Reply B remains unverified") })
+        })
+        defer { harness.monitor.draftProofRecoveryCoordinator?.cancel(); harness.cleanUp() }
+        harness.settings.automation.publicationMode = .manual
+        try await prepareIndependentPublicationReply(harness, authored: authored)
+        harness.settings.assistantHandoffs.append(try publicationWorker(harness, authored: authored, state: .running))
+        await harness.monitor.publishDrafts(of: .init(projectID: 1, iid: 2))
+        #expect(harness.log("publish.log") == "published\n")
+    }
+
     @Test func aVerifiedAuthorReplyIsEligibleAndPublishesWhileAnUnverifiedSiblingStaysPrivate() async throws {
         let harness = try makeHarness(assistantWorked: true, authored: true)
         defer { harness.cleanUp() }
@@ -1636,6 +1997,7 @@ import Testing
         var record = try #require(JSONSerialization.jsonObject(with: Data(contentsOf: path)) as? [String: Any])
         record["drafts"] = (record["drafts"] as? [[String: Any]])?.filter { $0["id"] as? Int == 12 }
         try JSONSerialization.data(withJSONObject: record).write(to: path)
+        try harness.assessFollowUpClaims(draftIDs: [12])
         try await harness.poll()
         let preview = try #require(harness.monitor.currentOpenItems.first)
         #expect(preview.awaitingRemoteVerification)
@@ -1689,6 +2051,7 @@ import Testing
         harness.settings.automation.publishDraftsWithoutConfirmation = true
         try harness.write("drafts.json", draftJSON)
         try harness.verifyFollowUpDrafts()
+        try harness.assessFollowUpClaims()
         harness.settings.automation.allowFollowUpPush = false
         try await harness.poll()
         try await harness.poll()
@@ -1703,6 +2066,7 @@ import Testing
         harness.settings.automation.publishDraftsWithoutConfirmation = true
         try harness.write("drafts.json", draftJSON)
         try harness.verifyFollowUpDrafts()
+        try harness.assessFollowUpClaims()
         try await harness.poll()
         try await harness.poll()
         #expect(harness.log("selected.log").split(separator: "\n").count == 2)
@@ -1717,6 +2081,7 @@ import Testing
         try harness.write("discussions.json", discussions)
         try harness.write("drafts.json", pending)
         try harness.verifyFollowUpDrafts()
+        try harness.assessFollowUpClaims()
         let originalRun = try #require(harness.settings.assistantHandoffs.last?.id)
         let proofURL = harness.folder.appending(path: "follow-up-verifications/gitlab.example.org/1-2-me.json")
         let proof = try JSONDecoder().decode(FollowUpVerification.self, from: Data(contentsOf: proofURL))
@@ -1725,6 +2090,7 @@ import Testing
         try Data(contentsOf: proofURL).write(to: archive)
         try harness.write("drafts.json", newer)
         try harness.verifyFollowUpDrafts()
+        try harness.assessFollowUpClaims()
         let sent = try JSONDecoder().decode([GitLabDraftNote].self, from: Data(newer.utf8))
         ReviewVerdictStore.rememberDrafts(sent, host: host, projectID: 1, iid: 2, in: harness.folder.appending(path: "verdicts"))
         var published = try #require(JSONSerialization.jsonObject(with: Data(discussions.utf8)) as? [[String: Any]])
@@ -1763,7 +2129,10 @@ import Testing
         harness.settings.automation.publicationMode = .aiReplies
         try harness.write("drafts.json", #"[{"id":12,"author_id":3,"note":"Verified fix","discussion_id":"human"}]"#)
         try harness.write("discussions.json", #"[{"id":"human","notes":[{"id":49,"author":{"id":9,"username":"alice"},"body":"A source comment posted by a human account.","system":false,"resolvable":true,"resolved":false}]}]"#)
-        if outcome != "proofPending" && outcome != "noWorker" { try harness.verifyFollowUpDrafts() }
+        if outcome != "proofPending" && outcome != "noWorker" {
+            try harness.verifyFollowUpDrafts()
+            try harness.assessFollowUpClaims()
+        }
         try await harness.poll(waitForAIOrigin: false)
         let deadline = ContinuousClock.now + .seconds(2)
         while probe.notes.isEmpty, ContinuousClock.now < deadline { try await Task.sleep(for: .milliseconds(10)) }
@@ -1808,6 +2177,7 @@ import Testing
         harness.settings.automation.publishDraftsWithoutConfirmation = true
         try harness.write("drafts.json", draftJSON)
         try harness.verifyFollowUpDrafts()
+        try harness.assessFollowUpClaims()
         if change == "content" { try harness.write("remote-file-content.txt", "old code") }
         if change == "duringProof" { try harness.write("edit-during-proof", "yes") }
         if change == "body" { try harness.write("drafts.json", draftJSON.replacingOccurrences(of: "Thanks, looks fixed.", with: "A different unsupported fix claim")) }

@@ -96,6 +96,8 @@ struct TodoAutomationTests {
         })
         let automation = TodoAutomationService(canAutomate: { _ in true }, jobCoordinator: coordinator)
         settings.automation.allowFollowUpPush = pushAllowed
+        settings.automation.codexReviewModel = .astra
+        settings.automation.codexReviewThinking = .high
 
         let acknowledge = try await automation.prepareToAcknowledge(
             todo, event: .authorFeedback, host: "gitlab.example.org", username: "me",
@@ -113,6 +115,8 @@ struct TodoAutomationTests {
         #expect(prompt.contains("glab"))
         #expect(!prompt.contains("read_merge_request"))
         #expect(handoff.followUpPushAllowed == pushAllowed)
+        #expect(handoff.reviewModel == nil && handoff.reviewThinking == nil)
+        #expect(handoff.codingModel == .astra && handoff.codingThinking == .high)
         if pushAllowed {
             #expect(prompt.contains("without a separate push prompt"))
             #expect(prompt.contains("Mandatory author follow-up order"))

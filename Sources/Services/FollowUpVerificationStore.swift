@@ -4,6 +4,7 @@ import Foundation
 struct FollowUpVerification: Codable, Equatable, Sendable {
     struct FileEvidence: Codable, Equatable, Sendable { let path: String; let sha256: String }
     struct DraftEvidence: Codable, Equatable, Sendable { let id: Int; let bodySHA256: String }
+    struct RepairIntent: Codable, Equatable, Sendable { let draftID: Int; let bodySHA256: String }
     let version: Int
     let sealed: Bool
     let verificationID: UUID
@@ -21,6 +22,7 @@ struct FollowUpVerification: Codable, Equatable, Sendable {
     var discussionFingerprint: String? = nil
     var semanticContextFingerprint: String? = nil
     var recoveryContextFingerprint: String? = nil
+    var repairIntent: RepairIntent? = nil
 
     /// Historical identity establishes ownership only; fresh verification must establish current truth.
     func owns(_ draft: GitLabDraftNote, request: GitLabMergeRequest, host: String, user: GitLabAuthenticatedUser) -> Bool {
@@ -51,6 +53,7 @@ enum FollowUpVerificationStore {
         let iid: Int
         let username: String
         let pushAllowed: Bool
+        var repairDrafts: [FollowUpVerification.DraftEvidence]? = nil
     }
 
     nonisolated static let directory = ReviewVerdictStore.directory.deletingLastPathComponent()
@@ -80,7 +83,8 @@ enum FollowUpVerificationStore {
         guard handoff.followUpPushAllowed != nil else { return }
         let work = handoff.key.work
         let record = Run(runID: handoff.id, host: work.host, projectID: work.projectID, iid: work.iid,
-                         username: handoff.key.username, pushAllowed: canPush(handoff, configuration: settings.automation))
+                         username: handoff.key.username, pushAllowed: canPush(handoff, configuration: settings.automation),
+                         repairDrafts: handoff.draftRepair.map { [.init(id: $0.draftID, bodySHA256: $0.bodySHA256)] })
         let url = recordURL(kind: "follow-up-runs", work: work, username: handoff.key.username, in: directory)
         do {
             try FileManager.default.createDirectory(at: url.deletingLastPathComponent(), withIntermediateDirectories: true,
@@ -118,7 +122,14 @@ enum FollowUpVerificationStore {
         guard settings.automation.allowFollowUpPush,
               settings.automation.scope.resolve(.init(host: work.host, username: username,
                   projectID: work.projectID, iid: work.iid)).active else { return [] }
-        return contextReceipts(work: work, username: username, settings: settings, in: directory)
+        return claimReceipts(work: work, username: username, settings: settings, in: directory)
+    }
+
+    /// Factual readiness is retained when delivery/publication permissions are turned off.
+    @MainActor
+    static func claimReceipts(work: AssistantAutomationRunner.MergeRequestWork, username: String,
+                              settings: SettingsManager, in directory: URL = directory) -> [FollowUpVerification] {
+        recoveredReceipts(work: work, username: username, settings: settings, in: directory)
     }
 
     @MainActor
@@ -234,12 +245,14 @@ extension FollowUpVerificationStore {
 
     @MainActor
     static func recoveryOrigins(work: AssistantAutomationRunner.MergeRequestWork, username: String,
-                                settings: SettingsManager, in directory: URL = directory) -> [FollowUpVerification] {
+                                settings: SettingsManager, in directory: URL = directory,
+                                excludingRunID: UUID? = nil, excludingPredecessorID: UUID? = nil) -> [FollowUpVerification] {
         let runs = settings.assistantHandoffs.filter {
-            $0.key.work == work && $0.key.username == username && $0.followUpPushAllowed != nil
+            $0.id != excludingRunID && $0.id != excludingPredecessorID
+                && $0.key.work == work && $0.key.username == username && $0.followUpPushAllowed != nil
         }
         let origins = runs.filter { origin in
-            origin.followUpPushAllowed == true && origin.key.assistant == settings.automation.assistant
+            origin.followUpPushAllowed == true
                 && (origin.execution == nil || origin.execution?.state == .succeeded)
         }
         guard !origins.isEmpty else { return [] }
@@ -263,18 +276,41 @@ extension FollowUpVerificationStore {
                   proof.host == work.host, proof.projectID == work.projectID, proof.iid == work.iid,
                   proof.username == username, let origin = origins.first(where: { $0.id == proof.runID }),
                   !runs.contains(where: { later in
-                      later.createdAt > origin.createdAt && later.execution?.state != .succeeded
+                      later.draftRepair == nil && later.createdAt > origin.createdAt && later.execution?.state != .succeeded
                           && !hasSuccessfulEnvironmentReplacement(for: later, runs: runs, headSHA: proof.headSHA)
                           && !hasSuccessfulManualReplacement(for: later, runs: runs,
                               events: settings.automationEvents, headSHA: proof.headSHA)
+                          && !hasSuccessfulRepairReplacement(for: later, runs: runs)
                   }) else { continue }
+            if let repair = origin.draftRepair {
+                guard proof.drafts.count == 1, proof.drafts[0].id == repair.draftID,
+                      proof.drafts[0].bodySHA256 != repair.bodySHA256,
+                      proof.repairIntent?.draftID == repair.draftID,
+                      proof.repairIntent?.bodySHA256 == proof.drafts[0].bodySHA256,
+                      proof.host == repair.origin.host, proof.username == repair.origin.username,
+                      proof.userID == repair.origin.userID, proof.projectID == repair.origin.projectID,
+                      proof.iid == repair.origin.iid, proof.sourceProjectID == repair.origin.sourceProjectID,
+                      proof.sourceBranch == repair.origin.sourceBranch else { continue }
+            }
             if path.deletingLastPathComponent().standardizedFileURL == archive.standardizedFileURL,
                UUID(uuidString: path.deletingPathExtension().lastPathComponent) != proof.verificationID { continue }
             if let previous = unique[proof.verificationID], previous != proof { ambiguous.insert(proof.verificationID) }
             else { unique[proof.verificationID] = proof }
         }
-        return unique.values.filter { !ambiguous.contains($0.verificationID) }
-            .sorted { $0.verificationID.uuidString < $1.verificationID.uuidString }
+        let candidates = unique.values.filter { !ambiguous.contains($0.verificationID) }
+        // A repair's declaration cannot manufacture provenance for an arbitrary existing user draft.
+        // Its complete ancestry must lead back to an independently known ordinary app-owned seal.
+        var trusted = candidates.filter { proof in origins.first(where: { $0.id == proof.runID })?.draftRepair == nil }
+        var added = true
+        while added {
+            added = false
+            for proof in candidates where !trusted.contains(proof) {
+                guard let repair = origins.first(where: { $0.id == proof.runID })?.draftRepair,
+                      trusted.contains(repair.origin) else { continue }
+                trusted.append(proof); added = true
+            }
+        }
+        return trusted.sorted { $0.verificationID.uuidString < $1.verificationID.uuidString }
     }
 
     private static func hasSuccessfulEnvironmentReplacement(for stopped: AssistantAutomationRunner.Handoff,
@@ -286,6 +322,17 @@ extension FollowUpVerificationStore {
                 && replacement.execution?.state == .succeeded && replacement.followUpPushAllowed == true
                 && replacement.expectedHeadSHA == headSHA && replacement.key.work == stopped.key.work
                 && replacement.key.username == stopped.key.username && replacement.key.assistant == stopped.key.assistant
+        }
+    }
+
+    private static func hasSuccessfulRepairReplacement(for stopped: AssistantAutomationRunner.Handoff,
+                                                        runs: [AssistantAutomationRunner.Handoff]) -> Bool {
+        guard let context = stopped.draftRepair, let execution = stopped.execution, !execution.state.isActive else { return false }
+        return runs.contains { replacement in
+            replacement.manual == true && replacement.retryOf == stopped.id && replacement.createdAt > stopped.createdAt
+                && replacement.key == stopped.key && replacement.workflow == .followUp
+                && replacement.followUpPushAllowed == true && replacement.execution?.state == .succeeded
+                && replacement.expectedHeadSHA == context.headSHA && replacement.draftRepair?.key == context.key
         }
     }
 
@@ -335,7 +382,7 @@ extension FollowUpVerificationStore {
             sourceBranch: origin.sourceBranch, files: files ?? origin.files,
             drafts: origin.drafts.filter { draftIDs.map(Set.init)?.contains($0.id) ?? true },
             discussionFingerprint: fingerprint, semanticContextFingerprint: semanticContext,
-            recoveryContextFingerprint: recoveryContext)
+            recoveryContextFingerprint: recoveryContext, repairIntent: origin.repairIntent)
     }
 
     static func validRecoveryEvidence(headSHA: String, files: [FollowUpVerification.FileEvidence],

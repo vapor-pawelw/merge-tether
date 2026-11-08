@@ -93,6 +93,9 @@ enum AssistantAutomationRunner {
         var codexDispatchRequested: Bool?
         var reviewModel: CodexReviewModel?
         var reviewThinking: CodexReviewThinking?
+        var codingModel: CodexReviewModel?
+        var codingThinking: CodexReviewThinking?
+        var draftRepair: DraftReplyRepair.Context?
         var repository: String?
         var followUpPushAllowed: Bool?
         var execution: AssistantJobExecution?
@@ -108,6 +111,7 @@ enum AssistantAutomationRunner {
         var environmentRecoveryOf: UUID?
         var expectedHeadSHA: String?
         var configurationSnapshot: AutomationSettings?
+        var retryOf: UUID?
 
         var supportsCodexRelay: Bool {
             false
@@ -223,7 +227,9 @@ enum AssistantAutomationRunner {
         manual: Bool = false,
         expectedHeadSHA: String? = nil,
         jobCoordinator: AssistantJobCoordinator? = nil,
-        configurationSnapshot: AutomationSettings? = nil
+        configurationSnapshot: AutomationSettings? = nil,
+        draftRepair: DraftReplyRepair.Context? = nil,
+        retryOf: UUID? = nil
     ) async throws -> Handoff {
         guard mrWorkflow != .draftReply else { throw AssistantJobExecutor.ExecutionError.disabledPermission }
         let automaticConfiguration = configurationSnapshot ?? settings.automation
@@ -326,12 +332,16 @@ enum AssistantAutomationRunner {
             feedbackTodos: acknowledgements.isEmpty ? nil : acknowledgements,
             reviewModel: useReviewModel ? settings.automation.codexReviewModel : nil,
             reviewThinking: useReviewModel ? settings.automation.codexReviewThinking : nil,
+            codingModel: assistant == .codex && !useReviewModel ? settings.automation.codexReviewModel : nil,
+            codingThinking: assistant == .codex && !useReviewModel ? settings.automation.codexReviewThinking : nil,
+            draftRepair: draftRepair,
             repository: mergeRequestURL.gitLabProjectPath.split(separator: "/").last.map(String.init),
             followUpPushAllowed: mrWorkflow == .followUp ? settings.automation.allowFollowUpPush : nil,
             execution: AssistantJobExecution(state: .queued), taskPrompt: prompt,
             mergeRequestURL: mergeRequestURL, workflow: mrWorkflow,
             resolvesOwnThreads: (isReview || mrWorkflow == .review) ? settings.automation.autoResolveOwnReviewThreads : nil,
-            manual: manual, expectedHeadSHA: headSHA, configurationSnapshot: manual ? settings.automation : automaticConfiguration
+            manual: manual, expectedHeadSHA: headSHA, configurationSnapshot: manual ? settings.automation : automaticConfiguration,
+            retryOf: retryOf
         )
         for (noteID, revision) in verifiedFeedbackNotes ?? [:] {
             settings.authorFeedbackAttempts.insert(.init(target: target, noteID: noteID, revision: revision))
@@ -411,7 +421,8 @@ enum AssistantAutomationRunner {
                                     allowsPush: handoff.allowsPush, pipelineReservation: reservation,
                                     feedbackNoteIDs: handoff.feedbackNoteIDs ?? [], feedbackTodos: handoff.feedbackTodos ?? [],
                                     isReview: handoff.workflow == .review || handoff.reviewModel != nil, mrWorkflow: handoff.workflow,
-                                    manual: true, expectedHeadSHA: retryHead, jobCoordinator: jobCoordinator)
+                                    manual: true, expectedHeadSHA: retryHead, jobCoordinator: jobCoordinator,
+                                    draftRepair: handoff.draftRepair, retryOf: handoff.id)
             for index in settings.workflowActivity.indices where settings.workflowActivity[index].assistantJobID == handoff.id {
                 settings.workflowActivity[index].assistantJobID = replacement.id
                 settings.workflowActivity[index].state = .waitingForAssistant

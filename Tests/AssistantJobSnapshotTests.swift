@@ -3,6 +3,14 @@ import Testing
 @testable import GitLabTodos
 
 @Suite struct AssistantJobSnapshotTests {
+    @MainActor @Test func legacyJobsDecodeWithoutAssigningANewRoleOrCodingModel() throws {
+        let old = AssistantAutomationRunner.Handoff(id: UUID(),
+            key: .init(assistant: .codex, work: .init(host: "gitlab.example.test", projectID: 1, iid: 2),
+                username: "me", workspace: "", access: .gitLabRead), title: "Legacy", prompt: "Task", createdAt: Date(), allowsPush: false)
+        let restored = try JSONDecoder().decode(AssistantAutomationRunner.Handoff.self, from: JSONEncoder().encode(old))
+        #expect(restored.codingModel == nil && restored.codingThinking == nil && restored.draftRepair == nil)
+        #expect(restored.reviewModel == nil && restored.workflow == nil)
+    }
     @MainActor @Test(arguments: [true, false])
     func ownMergeRequestCannotLaunchAReviewIncludingLegacyReviewRouting(explicitWorkflow: Bool) async throws {
         // given

@@ -35,6 +35,15 @@ enum AssistantJobExecutor {
         if handoff.followUpPushAllowed == true {
             guard settings.automation.allowFollowUpPush, request.author.id == user.id else { throw ExecutionError.disabledPermission }
         }
+        if let repair = handoff.draftRepair {
+            guard handoff.workflow == .followUp, handoff.followUpPushAllowed == true,
+                  repair.assistant == handoff.key.assistant,
+                  repair.codingModel == settings.automation.codexReviewModel,
+                  repair.codingThinking == settings.automation.codexReviewThinking else { throw ExecutionError.disabledPermission }
+            let snapshot = DraftProofRecoveryCoordinator.Snapshot(request: request, discussions: [], drafts: [],
+                user: user, host: handoff.key.work.host, branchHead: request.sha ?? "")
+            try await DraftReplyRepair.validate(repair, snapshot: snapshot, settings: settings, glab: glab, excludingRunID: handoff.id)
+        }
         if let reservation = handoff.pipelineReservation {
             guard request.author.id == user.id, request.headPipeline?.id == reservation.pipelineID,
                   reservation.host == handoff.key.work.host, reservation.projectID == request.projectID,
@@ -117,7 +126,8 @@ enum AssistantJobExecutor {
         do {
         if handoff.key.assistant == .codex {
             try Data(AssistantJobResult.schema.utf8).write(to: invocation.schemaURL, options: .atomic)
-            let arguments = invocation.codexArguments(model: handoff.reviewModel, thinking: handoff.reviewThinking)
+            let arguments = invocation.codexArguments(model: handoff.codingModel ?? handoff.reviewModel,
+                thinking: handoff.codingThinking ?? handoff.reviewThinking)
             output = try await ProcessRunner.run(executable, arguments: arguments, environment: invocation.childEnvironment(environment),
                                                   currentDirectory: folder, timeout: 1_800, input: input)
             capturedOutput = output

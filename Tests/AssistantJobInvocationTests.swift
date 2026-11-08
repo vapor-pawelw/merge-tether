@@ -14,6 +14,8 @@ struct AssistantJobInvocationTests {
         defer { defaults.removePersistentDomain(forName: suite) }
         let settings = SettingsManager(defaults: defaults)
         settings.automation.applyPreset(.full, for: assistant)
+        settings.automation.codexReviewModel = .astra
+        settings.automation.codexReviewThinking = .high
         let host = "gitlab-\(UUID().uuidString.lowercased()).example.test"
         let sha = String(repeating: "a", count: 40)
         let glab = folder.appending(path: "glab")
@@ -49,7 +51,8 @@ struct AssistantJobInvocationTests {
             key: .init(assistant: assistant, work: .init(host: host, projectID: 7, iid: 11),
                 username: "me", workspace: "", access: .gitLabRead),
             title: "Verify assigned code", prompt: "Task: verify assigned code. This task does not authorize GitLab writes.",
-            createdAt: Date(), allowsPush: false, followUpPushAllowed: true, workflow: .followUp,
+            createdAt: Date(), allowsPush: false, codingModel: assistant == .codex ? .astra : nil,
+            codingThinking: assistant == .codex ? .high : nil, followUpPushAllowed: true, workflow: .followUp,
             manual: true, expectedHeadSHA: sha)
         let run = URL.homeDirectory.appending(path: "Library/Application Support/com.vaporpw.GitLabTodos/Assistant Runs/\(handoff.id.uuidString)")
         defer { try? FileManager.default.removeItem(at: run) }
@@ -79,6 +82,8 @@ struct AssistantJobInvocationTests {
         let arguments = try JSONDecoder().decode([String].self, from: Data(contentsOf: URL(fileURLWithPath: cli.path + ".args")))
         if assistant == .codex {
             #expect(arguments.contains("--dangerously-bypass-approvals-and-sandbox"))
+            #expect(value(after: "--model", in: arguments) == CodexReviewModel.astra.rawValue)
+            #expect(arguments.contains(#"model_reasoning_effort="high""#))
         } else {
             #expect(arguments.contains("--dangerously-skip-permissions"))
             #expect(value(after: "--tools", in: arguments) == "default")

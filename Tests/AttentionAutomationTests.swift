@@ -64,6 +64,51 @@ struct AttentionAutomationTests {
         #expect(original.requiringUserAttention(automation: config, target: target, failedTriggers: [.newDiscussion]).needsDiscussion)
     }
 
+    @Test(arguments: ["verified", "head", "context", "legacy-context", "discussion", "reply", "follow-up", "draft", "pending-draft", "checking", "needs-work"])
+    func verifiedWaitingForReviewerDoesNotRequireHumanCodeWork(_ scenario: String) throws {
+        var original = try item()
+        let storedRequest = try #require(original.mergeRequest)
+        let encoded = try JSONEncoder().encode(storedRequest)
+        let json = try JSONSerialization.jsonObject(with: encoded)
+        var object = try #require(json as? [String: Any])
+        object["detailed_merge_status"] = "requested_changes"
+        let request = try JSONDecoder().decode(GitLabMergeRequest.self, from: JSONSerialization.data(withJSONObject: object))
+        let head = try #require(request.sha)
+        original.mergeRequest = request
+        original.needsChanges = true
+        original.reReviewRequested = true
+        original.observedDiscussionFingerprint = "current-discussion"
+        original.authorFeedbackStatus = .init(head: scenario == "head" ? "old-head" : head,
+            fingerprint: scenario == "discussion" ? "old-discussion" : "current-discussion",
+            semanticContextFingerprint: scenario == "legacy-context" ? nil
+                : scenario == "context" ? "old-context" : request.semanticContextFingerprint,
+            phase: scenario == "checking" ? .checking : .complete,
+            findings: [.init(id: 9, discussionID: "thread", reviewerID: 8, reviewerUsername: "alice",
+                state: .waitingAcceptance, reason: "The correction is verified; reviewer acceptance is pending",
+                waitingForReviewers: ["alice"])],
+            pendingDraftCount: scenario == "pending-draft" ? 1 : 0,
+            followUpNoteIDs: scenario == "follow-up" ? [9] : [],
+            replyNoteIDs: scenario == "reply" ? [9] : [], addressedNoteIDs: [9])
+        if scenario == "draft" { original.draftCount = 1 }
+        if scenario == "needs-work" {
+            original.authorFeedbackStatus?.findings.append(.init(id: 10, discussionID: "other-thread", reviewerID: 8,
+                reviewerUsername: "alice", state: .needsChanges, reason: "Another correction remains",
+                waitingForReviewers: ["alice"]))
+        }
+        var config = AutomationSettings()
+        config.applyPreset(.full, for: .codex)
+        let visible = original.presentingVerifiedAuthorFeedback().requiringUserAttention(automation: config,
+            target: target, feedbackOwnedAutomatically: false)
+        #expect(visible.needsChanges == (scenario != "verified"))
+        #expect(visible.needsAttention == (scenario != "verified"))
+        #expect(original.needsChanges)
+        #expect(visible.mergeRequest?.detailedMergeStatus == "requested_changes")
+        let serverStatus = AuthoredMergeRequestStatus(request: request, approvals: nil, discussionsResolved: true,
+            projectRequiresResolvedDiscussions: true, autoMergeEnabled: true)
+        #expect(serverStatus.blockers.contains(.changesRequested))
+        #expect(!serverStatus.mayAutoMerge && !visible.canOfferMerge(using: serverStatus))
+    }
+
     @Test func pipelineAutomationPreservesOwnershipConfirmationAndFailures() throws {
         var original = try item()
         original.failedPipeline = true

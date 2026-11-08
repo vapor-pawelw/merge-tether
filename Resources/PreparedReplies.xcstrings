@@ -1,0 +1,72 @@
+{
+  "sourceLanguage": "en",
+  "strings": {
+    "preparedRepliesLabel": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Prepared reply #%lld"
+          }
+        }
+      }
+    },
+    "preparedRepliesNeedsReview": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Prepared reply needs review."
+          }
+        }
+      }
+    },
+    "preparedRepliesViewDiscussion": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "View source discussion"
+          }
+        }
+      }
+    },
+    "preparedRepliesReviewAction": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Review prepared reply"
+          }
+        }
+      }
+    },
+    "preparedRepliesChecksPending": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "One or more prepared replies are waiting for verification or publication checks."
+          }
+        }
+      }
+    },
+    "preparedRepliesDiscussionCheck": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "A prepared reply needs a fresh discussion check before automatic publication."
+          }
+        }
+      }
+    }
+  },
+  "version": "1.0"
+}

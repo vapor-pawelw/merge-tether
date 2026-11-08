@@ -223,6 +223,38 @@ struct MRHumanActionTests {
         #expect(action.detail == item.draftProofRecoveryFailure)
     }
 
+    @Test func semanticRejectionPointsToTheExactPreparedReplyAndItsSourceDiscussion() throws {
+        var item = item()
+        item.draftCount = 2
+        item.drafts = [.init(id: 11, authorID: 3, note: "A verified reply waiting for publication permission", discussionID: "other", position: nil),
+            .init(id: 12, authorID: 3, note: "I confirmed empty HTTP 200 in a test.\nThe second sentence is part of this reply.", discussionID: "source", position: nil)]
+        item.draftProofRecoveryFailure = "No independent evidence establishes the claimed test run."
+        item.draftProofRecoverySummary = "The empty-response test could not be confirmed."
+        item.rejectedDrafts = [.init(draftID: 12, state: .uncertain, reason: item.draftProofRecoveryFailure!,
+            summary: item.draftProofRecoverySummary, discussionRootNoteID: 40)]
+
+        let action = try #require(MRHumanAction(row: row(item), assistantReady: true))
+        #expect(action.action == .reviewDrafts)
+        let context = try #require(action.preparedReply)
+        #expect(context.draftID == 12)
+        #expect(context.quote == item.drafts[1].note)
+        #expect(context.discussionURL?.absoluteString == item.url.absoluteString + "#note_40")
+        #expect(action.explanation.lowercased().contains("prepared reply"))
+        #expect(PreparedReplyContext.rejected(in: item).map(\.draftID) == [12])
+    }
+
+    @Test func aRejectedIDMissingFromTheCurrentDraftsCannotInventAQuote() throws {
+        var item = item()
+        item.draftCount = 1
+        item.drafts = [.init(id: 11, authorID: 3, note: "User's current reply", discussionID: "other", position: nil)]
+        item.draftProofRecoveryFailure = "The current draft snapshot could not be read."
+        item.rejectedDrafts = [.init(draftID: 12, state: .invalid, reason: "An older reply was invalid",
+            summary: "Check the prepared reply", discussionRootNoteID: 40)]
+        let action = try #require(MRHumanAction(row: row(item), assistantReady: true))
+        #expect(action.action == .retryDraftVerification && action.preparedReply == nil)
+        #expect(PreparedReplyContext.rejected(in: item).isEmpty)
+    }
+
     @Test func failedDraftProofRecoveryOffersVerificationWithoutPublication() throws {
         var item = item()
         item.draftCount = 1

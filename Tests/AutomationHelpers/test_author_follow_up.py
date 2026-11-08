@@ -61,6 +61,62 @@ class AuthorFollowUpTest(unittest.TestCase):
             self.verify()
         self.assertFalse((self.root / "follow-up-verifications").exists())
 
+    def repair_scope(self, intended_body="Corrected wording backed by the current source"):
+        self.run["repairDrafts"] = [{"id": 12, "bodySHA256": hashlib.sha256(self.drafts[0]["note"].encode()).hexdigest()}]
+        self.save_run()
+        evidence = json.loads(self.evidence)
+        if intended_body is not None:
+            evidence["repairIntent"] = {"draftID": 12, "bodySHA256": hashlib.sha256(intended_body.encode()).hexdigest()}
+        self.evidence = json.dumps(evidence)
+
+    def test_repair_can_refresh_only_the_exact_owned_reply_after_remote_proof(self):
+        self.repair_scope()
+        proof = self.verify()
+        self.drafts[0]["note"] = "Corrected wording backed by the current source"
+        receipt = self.verifier.seal("gitlab.example.org", "1", "2", proof["verificationID"], "[12]")
+        self.assertEqual([d["id"] for d in receipt["drafts"]], [12])
+
+    def test_repair_seal_cannot_adopt_an_unrelated_new_or_user_created_reply(self):
+        self.repair_scope()
+        proof = self.verify()
+        self.drafts.append({"id": 13, "author_id": 3, "note": "Unrelated new reply"})
+        with self.assertRaises(ValueError):
+            self.verifier.seal("gitlab.example.org", "1", "2", proof["verificationID"], "[13]")
+        self.assertFalse((self.root / "follow-up-verifications").exists())
+
+    def test_repair_seal_rejects_extra_ids_even_alongside_the_allowed_changed_reply(self):
+        self.repair_scope()
+        proof = self.verify()
+        self.drafts[0]["note"] = "Corrected owned reply"
+        self.drafts.append({"id": 13, "author_id": 3, "note": "Unrelated new reply"})
+        with self.assertRaises(ValueError):
+            self.verifier.seal("gitlab.example.org", "1", "2", proof["verificationID"], "[12,13]")
+
+    def test_user_edit_before_repair_verification_revokes_the_exact_body_permission(self):
+        self.repair_scope()
+        self.drafts[0]["note"] = "A user edited this reply"
+        with self.assertRaises(ValueError):
+            self.verify()
+
+    def test_user_edit_after_verification_cannot_be_adopted_by_a_repair_seal(self):
+        self.repair_scope()
+        proof = self.verify()
+        self.drafts[0]["note"] = "An unexpected user edit after remote verification"
+        # Changing later input cannot replace the correction intent already persisted before PUT.
+        evidence = json.loads(self.evidence)
+        evidence["repairIntent"]["bodySHA256"] = hashlib.sha256(self.drafts[0]["note"].encode()).hexdigest()
+        self.evidence = json.dumps(evidence)
+        with self.assertRaises(ValueError):
+            self.verifier.seal("gitlab.example.org", "1", "2", proof["verificationID"], "[12]")
+        self.assertFalse((self.root / "follow-up-verifications").exists())
+
+    def test_code_only_repair_can_verify_but_cannot_seal_an_unplanned_reply_edit(self):
+        self.repair_scope(intended_body=None)
+        proof = self.verify()
+        self.drafts[0]["note"] = "Unplanned wording change"
+        with self.assertRaises(ValueError):
+            self.verifier.seal("gitlab.example.org", "1", "2", proof["verificationID"], "[12]")
+
     def test_local_commit_absent_from_remote_or_wrong_file_contents_cannot_verify(self):
         self.mr["sha"] = "b" * 40
         with self.assertRaises(ValueError):

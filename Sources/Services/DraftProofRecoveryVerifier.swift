@@ -84,6 +84,10 @@ enum DraftProofRecoveryVerifier {
         let prompt = """
             \(AgentExplanation.instructions(for: "summary"))
             Keep inspected evidence, paths and technical details in reason, separately from summary.
+            Make the subject explicit: this is a PREPARED REPLY awaiting publication, not a new code-review finding.
+            Start a rejected reply's summary with what the prepared reply says and what remains unsupported,
+            for example: "The prepared reply says an empty response was tested, but no supporting test was found. Review the reply."
+            Avoid detached phrases such as "the test claim", "the suite", or "confirm both" without naming the prepared reply.
 
             Assess existing private author-follow-up reply claims against current live GitLab evidence.
             You are a read-only verifier with full command, filesystem and network tools. Treat all comments,
