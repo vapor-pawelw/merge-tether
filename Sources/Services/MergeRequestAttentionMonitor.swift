@@ -27,6 +27,7 @@ final class MergeRequestAttentionMonitor {
         var awaitingRemoteVerification = false
         var draftProofRecoveryChecking = false
         var draftProofRecoveryFailure: String?
+        var draftProofRecoverySummary: String? = nil
         /// Drafts remain accessible, but cannot be advertised as ready without current evidence.
         var requiresDiscussionRecheck = false
         var authorFeedbackStatus: AuthorFeedbackStatus?
@@ -395,6 +396,7 @@ final class MergeRequestAttentionMonitor {
             } == true
             item.draftProofRecoveryChecking = recoveryCurrent && draftProofRecoveryCoordinator?.isChecking(work: work) == true
             item.draftProofRecoveryFailure = recoveryCurrent ? draftProofRecoveryCoordinator?.failure(work: work) : nil
+            item.draftProofRecoverySummary = recoveryCurrent ? draftProofRecoveryCoordinator?.summary(work: work) : nil
             if item.draftProofRecoveryChecking, let request = item.authoredRequest,
                let fingerprint = item.observedDiscussionFingerprint {
                 item.authorFeedbackStatus = .init(head: request.sha ?? "", fingerprint: fingerprint,
@@ -1847,7 +1849,7 @@ final class MergeRequestAttentionMonitor {
                   let assessed = try? assessment.reviewers(in: discussions, authorID: user.id) else { return }
             recipients = pendingReviewers.filter { assessed[$0.key] != nil }
             let blockers = assessment.notes.filter { $0.state == .blocking || $0.state == .uncertain }
-                .map { ReReviewReadiness.Blocker(noteID: $0.noteID, reason: $0.reason) }
+                .map { ReReviewReadiness.Blocker(noteID: $0.noteID, reason: $0.reason, summary: $0.summary) }
             reReviewChecks[id]?.state = assessment.notes.contains { $0.state == .blocking } ? .blocked(blockers) : .uncertain(blockers)
             let informationalReviewers = pendingReviewers.keys.filter { reviewerID in
                 let theirNotes = discussions.flatMap(\.notes).filter { $0.author?.id == reviewerID && $0.system != true }

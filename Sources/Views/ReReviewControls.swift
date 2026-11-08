@@ -20,7 +20,8 @@ struct ReReviewControls: View {
                         ForEach(blockers, id: \.noteID) { blocker in
                             VStack(alignment: .leading, spacing: 2) {
                                 Link(destination: noteURL(blocker.noteID)) { Text(.Menu.menuReReviewNote(blocker.noteID)) }
-                                Text(verbatim: blocker.reason).foregroundStyle(.secondary)
+                                if let summary = AgentExplanation.summary(blocker.summary) { Text(verbatim: summary) }
+                                AgentDiagnosticDetails(reason: blocker.reason)
                             }
                             .font(.caption)
                         }

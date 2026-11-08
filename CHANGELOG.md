@@ -54,6 +54,8 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 
 ### Changed
 
+- Separate plain-language attention explanations from technical verifier evidence, keep diagnostics collapsed in Details, and use readable fallbacks for older cached results.
+
 - Name current automation stages on MR cards and in Details, distinguish queued agents from running work, and show merge dependencies below status.
 
 - Give empty lanes a centered icon and clear title, distinguish first-load placeholders from empty lists, and dim entire Draft cards consistently.

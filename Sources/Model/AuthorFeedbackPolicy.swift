@@ -22,6 +22,7 @@ struct AuthorFeedbackPolicy {
         let state: State
         let reason: String?
         let waitingForReviewers: [String]
+        var summary: String? = nil
         var canResolve: Bool { state == .ready && discussionID != nil }
     }
 
@@ -110,11 +111,11 @@ struct AuthorFeedbackPolicy {
             let state = pendingDraftCount > 0 ? .waitingPublication
                 : semanticState == .ready ? (gate ?? .ready) : semanticState
             let threadBlocker = thread.lazy.compactMap { verdicts[$0.id ?? 0] }.first(where: isBlocking)
-            let reason = blocked.isEmpty ? verdicts[rootID]?.reason
-                : (threadBlocker ?? blockers[blocked[0].id])?.reason
+            let explanation = blocked.isEmpty ? verdicts[rootID]
+                : (threadBlocker ?? blockers[blocked[0].id])
             findings.append(Finding(id: rootID, discussionID: discussionID, reviewerID: owner.id,
-                                    reviewerUsername: handle(owner), state: state, reason: reason,
-                                    waitingForReviewers: verified == nil ? [] : waiting.map(handle)))
+                                    reviewerUsername: handle(owner), state: state, reason: explanation?.reason,
+                                    waitingForReviewers: verified == nil ? [] : waiting.map(handle), summary: explanation?.summary))
         }
 
         for (index, discussion) in discussions.enumerated() where !represented.contains(index) {
@@ -123,7 +124,7 @@ struct AuthorFeedbackPolicy {
                 findings.append(Finding(id: id, discussionID: note.resolvable == true ? discussion.id : nil,
                                         reviewerID: author.id, reviewerUsername: handle(author),
                                         state: pendingDraftCount > 0 ? .waitingPublication : .needsChanges,
-                                        reason: verdict.reason, waitingForReviewers: [handle(author)]))
+                                        reason: verdict.reason, waitingForReviewers: [handle(author)], summary: verdict.summary))
             }
         }
         return findings

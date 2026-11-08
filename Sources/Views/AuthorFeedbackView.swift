@@ -22,7 +22,8 @@ struct AuthorFeedbackView: View {
                                 }
                                 Text(message(finding))
                                 if status.replyNoteIDs.contains(finding.id) { Text(.AuthorFeedback.authorFeedbackReplyNeeded) }
-                                if let reason = finding.reason { Text(verbatim: reason).foregroundStyle(.secondary).textSelection(.enabled) }
+                                if let summary = AgentExplanation.summary(finding.summary) { Text(verbatim: summary).textSelection(.enabled) }
+                                if let reason = finding.reason { AgentDiagnosticDetails(reason: reason) }
                             }
                         }
                     }

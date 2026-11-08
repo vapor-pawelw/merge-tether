@@ -9,6 +9,8 @@ struct MRHumanAction {
     let action: Action
     let message: LocalizedStringResource
     let detail: String?
+    let summary: String?
+    var explanation: String { AgentExplanation.summary(summary) ?? String(localized: message) }
     var actionLabel: LocalizedStringResource {
         switch action {
         case .reviewRun: .MRHumanAction.mrHumanActionActionReviewRun
@@ -50,7 +52,7 @@ struct MRHumanAction {
             let executable = row.latestJob?.taskPrompt != nil && row.latestJob?.mergeRequestURL != nil
             self.init(kind: interrupted ? .interruptedRun : .blockedRun, action: executable ? .retryRun : .reviewRun,
                       message: interrupted ? .MRHumanAction.mrHumanActionInterruptedRun : .MRHumanAction.mrHumanActionBlockedRun,
-                      detail: execution.attentionExplanation)
+                      detail: execution.attentionExplanation, summary: execution.blocker)
             return
         }
 
@@ -65,7 +67,7 @@ struct MRHumanAction {
         if let failure = item.draftProofRecoveryFailure {
             self.init(kind: .verificationFailure, action: .retryDraftVerification,
                       message: .MRHumanAction.mrHumanActionDraftVerificationFailure,
-                      detail: GlabService.redactWorkflowEvidence(failure))
+                      detail: GlabService.redactWorkflowEvidence(failure), summary: item.draftProofRecoverySummary)
             return
         }
 
@@ -89,7 +91,7 @@ struct MRHumanAction {
             || item.authorFeedbackStatus?.needsAttention == true || item.autoApproveReady
         if item.canConfirmReReview {
             self.init(kind: .reviewDecision, action: .reviewDecision, message: Self.reviewDecisionMessage(item),
-                      detail: Self.feedbackDetail(item))
+                      detail: Self.feedbackDetail(item), summary: Self.feedbackSummary(item))
         } else if item.canApprove {
             self.init(kind: .approval, action: .reviewApproval, message: .MRHumanAction.mrHumanActionApproval)
         } else if item.needsPipelineHandoff {
@@ -103,7 +105,7 @@ struct MRHumanAction {
             self.init(kind: .setupAssistant, action: .setupAssistant, message: .MRHumanAction.mrHumanActionSetupAssistant)
         } else if item.authorFeedbackStatus?.needsAttention == true {
             self.init(kind: .feedback, action: .handleFeedback, message: .MRHumanAction.mrHumanActionFeedback,
-                      detail: Self.feedbackDetail(item))
+                      detail: Self.feedbackDetail(item), summary: Self.feedbackSummary(item))
         } else if let intent {
             self.init(kind: .intent, action: .retryIntent, message: Self.intentMessage(intent),
                       detail: intent.error.map(GlabService.redactWorkflowEvidence))
@@ -113,10 +115,10 @@ struct MRHumanAction {
             self.init(kind: .intent, action: .reviewIssue, message: .MRHumanAction.mrHumanActionPipelineIntent)
         } else if item.reReviewReadiness != nil || item.reReviewUnconfirmed {
             self.init(kind: .reviewDecision, action: .reviewFeedback, message: Self.reviewDecisionMessage(item),
-                      detail: Self.feedbackDetail(item))
+                      detail: Self.feedbackDetail(item), summary: Self.feedbackSummary(item))
         } else if item.needsChanges || !item.feedback.isEmpty {
             self.init(kind: .feedback, action: .handleFeedback, message: .MRHumanAction.mrHumanActionFeedback,
-                      detail: Self.feedbackDetail(item))
+                      detail: Self.feedbackDetail(item), summary: Self.feedbackSummary(item))
         } else if item.needsDiscussion {
             self.init(kind: .feedback, action: .reviewFeedback, message: .MRHumanAction.mrHumanActionDiscussion)
         } else if unchecked {
@@ -128,8 +130,22 @@ struct MRHumanAction {
         } else { return nil }
     }
 
-    private init(kind: Kind, action: Action, message: LocalizedStringResource, detail: String? = nil) {
-        self.kind = kind; self.action = action; self.message = message; self.detail = detail
+    private init(kind: Kind, action: Action, message: LocalizedStringResource, detail: String? = nil, summary: String? = nil) {
+        self.kind = kind; self.action = action; self.message = message; self.detail = detail; self.summary = summary
+    }
+
+    private static func feedbackSummary(_ item: MergeRequestAttentionMonitor.Item) -> String? {
+        let finding = item.authorFeedbackStatus?.findings.first {
+            [.needsChanges, .needsVerification].contains($0.state)
+                || item.authorFeedbackStatus?.replyNoteIDs.contains($0.id) == true
+        }
+        if let finding, let reason = finding.reason, !reason.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
+            return finding.summary
+        }
+        switch item.reReviewReadiness {
+        case .blocked(let blockers), .uncertain(let blockers): return blockers.first?.summary
+        default: return nil
+        }
     }
 
     private static func feedbackDetail(_ item: MergeRequestAttentionMonitor.Item) -> String? {

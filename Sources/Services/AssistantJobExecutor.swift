@@ -104,6 +104,8 @@ enum AssistantJobExecutor {
             In your final structured result, status succeeded means the assigned work finished; it never substitutes for remote verification receipts.
             Return status blocked if any requested work remains undone, a required tool was denied, or meaningful verification is missing.
             Include the MR link, actions, verification and remaining blockers in summary. Do not claim private drafts were saved unless re-fetched.
+            \(AgentExplanation.instructions(for: "blocker"))
+            Keep the detailed run evidence and completed actions in summary and the transcript.
             For a blocked result, set blocker to one concise English sentence naming the exact stopped
             step and its actual cause, so the MR card explains why automatic progress stopped.
             Do not use a generic status such as "blocked" as the explanation. For succeeded, set blocker to null.

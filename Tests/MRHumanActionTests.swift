@@ -194,6 +194,35 @@ struct MRHumanActionTests {
         #expect(action.detail == nil)
     }
 
+    @Test(arguments: [false, true])
+    func rawVerificationAndProcessDiagnosticsNeverBecomeTheCardHeadline(worker: Bool) throws {
+        var item = item()
+        let diagnostic = "Current account and headSHA match the snapshot. Technical evidence is missing."
+        item.draftProofRecoveryFailure = worker ? nil : diagnostic
+        item.draftCount = worker ? 0 : 1
+        let row = row(item, execution: worker ? .init(state: .blocked, error: diagnostic) : nil)
+        let model = MRCardPresentation(row: row, reviewingContext: ReviewingContext(row: row),
+            allowsRemoval: false, assistantReady: true)
+        let action = try #require(model.humanAction)
+        #expect(model.message == String(localized: action.message))
+        #expect(!model.message.contains("headSHA"))
+        #expect(action.detail == diagnostic)
+    }
+
+    @Test(arguments: ["The test described in this reply could not be confirmed. Check the reply before publishing.", "  ", String(repeating: "x", count: 201)])
+    func onlyBoundedHumanSummariesBecomeHeadlines(summary: String) throws {
+        var item = item()
+        item.draftCount = 2
+        item.draftProofRecoveryFailure = "Current account and commit match, but independent evidence is missing."
+        item.draftProofRecoverySummary = summary
+        let row = row(item)
+        let model = MRCardPresentation(row: row, reviewingContext: ReviewingContext(row: row), allowsRemoval: false, assistantReady: true)
+        let action = try #require(model.humanAction)
+        #expect(model.message == (AgentExplanation.summary(summary) ?? String(localized: action.message)))
+        #expect(action.action == .retryDraftVerification)
+        #expect(action.detail == item.draftProofRecoveryFailure)
+    }
+
     @Test func failedDraftProofRecoveryOffersVerificationWithoutPublication() throws {
         var item = item()
         item.draftCount = 1

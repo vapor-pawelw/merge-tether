@@ -39,6 +39,25 @@ struct DraftProofRecoveryTests {
         #expect(FollowUpVerificationStore.recoveryOrigins(work: fixture.work, username: "me", settings: fixture.settings, in: fixture.folder).isEmpty)
     }
 
+    @Test func aCachedRejectedClaimRetainsHumanCopySeparatelyFromItsDiagnostic() async throws {
+        let f = try Fixture()
+        defer { f.clean() }
+        let diagnostic = "Current account and source snapshot match, but the reported regression has no test evidence."
+        let summary = "The test described in this reply could not be confirmed. Check the reply before publishing."
+        f.claimsOverride = [.init(draftID: 12, state: .uncertain, reason: diagnostic, summary: summary)]
+        let coordinator = f.coordinator()
+        coordinator.schedule(snapshot: f.snapshot, origin: f.proof, configuration: f.settings.automation)
+        try await f.settle(coordinator)
+        #expect(coordinator.failure(work: f.work) == diagnostic)
+        #expect(coordinator.summary(work: f.work) == summary)
+        let restored = f.coordinator()
+        restored.schedule(snapshot: f.snapshot, origin: f.proof, configuration: f.settings.automation)
+        try await f.settle(restored)
+        #expect(f.assessments == 1)
+        #expect(restored.summary(work: f.work) == summary)
+        #expect(f.receipts().isEmpty)
+    }
+
     @Test func freshClaimAndRemoteContentAssessmentProducesSeparateCurrentProof() async throws {
         let fixture = try Fixture()
         defer { fixture.clean() }
@@ -723,7 +742,7 @@ struct DraftProofRecoveryTests {
             args=sys.argv[1:]; raw=sys.stdin.read(); codex=args[0]=='exec'
             evidence=json.loads(raw[raw.index('{'):]) if codex else json.loads(raw)
             pathlib.Path(__file__+'.capture').write_text(json.dumps(evidence))
-            result={'drafts':[{'draftID':12,'state':'valid','reason':'Current source and regression tests checked.'}]}
+            result={'drafts':[{'draftID':12,'state':'valid','reason':'Current source and regression tests checked.','summary':'The reply is supported by the current code and tests.'}]}
             if codex: json.dump(result,open(args[args.index('-o')+1],'w'))
             else: print(json.dumps({'is_error':False,'structured_output':result}))
             """.utf8).write(to: script)
@@ -733,6 +752,7 @@ struct DraftProofRecoveryTests {
         let result = try await DraftProofRecoveryVerifier.run(.init(snapshot: f.snapshot, origin: f.proof, currentFiles: currentFiles),
             assistant: assistant, model: "fixture", executable: script)
         #expect(result.drafts.first?.state == .valid)
+        #expect(result.drafts.first?.summary == "The reply is supported by the current code and tests.")
         let payload = try #require(JSONSerialization.jsonObject(with: Data(contentsOf: URL(fileURLWithPath: script.path + ".capture"))) as? [String: Any])
         let target = try #require(payload["target"] as? [String: Any])
         #expect(target["headSHA"] as? String == f.snapshot.request.sha)

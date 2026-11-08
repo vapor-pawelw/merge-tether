@@ -459,7 +459,7 @@
         "en": {
           "stringUnit": {
             "state": "translated",
-            "value": "Draft verification needs another check before publication."
+            "value": "Some replies could not be verified. Review them or run the check again."
           }
         }
       }

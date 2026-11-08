@@ -4,6 +4,15 @@ import Testing
 
 @Suite("Headless re-review verification")
 struct ReReviewVerifierTests {
+    @Test func verifierOutputSeparatesAHumanExplanationFromTechnicalEvidence() throws {
+        let data = Data(#"{"notes":[{"noteID":10,"state":"uncertain","reason":"Current account and commit match; missing independent regression evidence.","summary":"The reported fix could not be confirmed. Check the response before publishing."}]}"#.utf8)
+        let assessment = try JSONDecoder().decode(ReReviewAssessment.self, from: data)
+        let encoded = try #require(JSONSerialization.jsonObject(with: JSONEncoder().encode(assessment)) as? [String: Any])
+        let note = try #require((encoded["notes"] as? [[String: Any]])?.first)
+        #expect(note["summary"] as? String == "The reported fix could not be confirmed. Check the response before publishing.")
+        #expect((note["reason"] as? String)?.contains("independent regression evidence") == true)
+    }
+
     @Test(arguments: AutomationAssistant.allCases)
     func explicitInformationalAcknowledgementProofSurvivesVerifierSanitization(_ assistant: AutomationAssistant) async throws {
         let folder = FileManager.default.temporaryDirectory.appending(path: UUID().uuidString)
@@ -15,7 +24,7 @@ struct ReReviewVerifierTests {
             import json,sys
             args=sys.argv[1:]
             sys.stdin.read()
-            result={'notes':[{'noteID':10,'state':'informational','reason':'Pure positive acknowledgement with no outstanding request','acceptanceNoteID':None,'informationalAcknowledgementSafe':True}]}
+            result={'notes':[{'noteID':10,'state':'informational','reason':'Pure positive acknowledgement with no outstanding request','summary':'The reviewer has no remaining requests.','acceptanceNoteID':None,'informationalAcknowledgementSafe':True}]}
             if args[0]=='exec': json.dump(result,open(args[args.index('-o')+1],'w'))
             else: print(json.dumps({'is_error':False,'structured_output':result}))
             """.utf8).write(to: script)
@@ -28,6 +37,7 @@ struct ReReviewVerifierTests {
         let assessment = try await ReReviewVerifier.run(input, assistant: assistant, model: "fixture", executable: script)
 
         #expect(assessment.notes.first?.informationalAcknowledgementSafe == true)
+        #expect(assessment.notes.first?.summary == "The reviewer has no remaining requests.")
         let schema = try #require(JSONSerialization.jsonObject(with: Data(ReReviewVerifier.schema.utf8)) as? [String: Any])
         let properties = try #require(schema["properties"] as? [String: Any])
         let notes = try #require(properties["notes"] as? [String: Any])

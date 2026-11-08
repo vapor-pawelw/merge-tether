@@ -68,6 +68,14 @@ final class DraftProofRecoveryCoordinator {
         states[work]?.phase == .blocked ? states[work]?.reason : nil
     }
 
+    func summary(work: AssistantAutomationRunner.MergeRequestWork) -> String? {
+        guard let state = states[work], state.phase == .blocked else { return nil }
+        // A later stale-snapshot or transport error must not inherit an earlier claim's explanation.
+        return state.assessment?.drafts.first {
+            $0.state != .valid && GlabService.redactWorkflowEvidence($0.reason) == state.reason
+        }.flatMap { AgentExplanation.summary($0.summary) }
+    }
+
     func presentationIsCurrent(request: GitLabMergeRequest, host: String, fingerprint: String, configuration: AutomationSettings) -> Bool {
         let work = AssistantAutomationRunner.MergeRequestWork(host: host, projectID: request.projectID, iid: request.iid)
         guard let context = presentationContexts[work] else { return false }

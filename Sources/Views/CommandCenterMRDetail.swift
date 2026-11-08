@@ -253,9 +253,11 @@ private struct CommandCenterMRDetailContent: View {
         GroupBox {
             VStack(alignment: .leading, spacing: 12) {
                 if let action = humanAction {
-                    if let detail = action.detail { Text(verbatim: detail).textSelection(.enabled) }
-                    else if !item.needsConfirmation || (action.kind != .publication && action.kind != .approval) {
-                        Text(action.message)
+                    if !item.needsConfirmation || (action.kind != .publication && action.kind != .approval) {
+                        Text(verbatim: action.explanation).textSelection(.enabled)
+                    }
+                    if let detail = action.detail, detail != action.explanation {
+                        AgentDiagnosticDetails(reason: detail)
                     }
                     if action.action == .retryRun, let job = jobs.first {
                         HStack {

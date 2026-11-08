@@ -66,8 +66,7 @@ struct MRCardPresentation {
     }
     var message: String {
         guard let human = humanAction else { return "" }
-        if let detail = human.detail, !detail.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty { return detail }
-        return String(localized: human.message)
+        return human.explanation
     }
     var status: String? {
         if let job = row.latestJob, job.execution?.state.isActive == true {

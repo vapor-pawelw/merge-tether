@@ -5,7 +5,7 @@ enum ReReviewReadiness: Equatable, Sendable {
     case blocked([Blocker])
     case uncertain([Blocker])
 
-    struct Blocker: Equatable, Sendable { let noteID: Int; let reason: String }
+    struct Blocker: Equatable, Sendable { let noteID: Int; let reason: String; var summary: String? = nil }
 
     var canConfirm: Bool {
         switch self {
