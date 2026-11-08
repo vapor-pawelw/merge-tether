@@ -212,22 +212,24 @@ enum ReReviewVerifier {
             let schemaURL = folder.appending(path: "schema.json")
             let outputURL = folder.appending(path: "result.json")
             try Data(constrainedSchema.utf8).write(to: schemaURL)
-            output = try await ProcessRunner.run(executable, arguments: ["exec", "--ignore-user-config", "--ignore-rules",
+            output = try await AssistantUsageRunner.run(executable, arguments: ["exec", "--json", "--ignore-user-config", "--ignore-rules",
                 "--ephemeral", "--skip-git-repo-check", "--dangerously-bypass-approvals-and-sandbox", "--model", model,
                 "-c", "model_reasoning_effort=\"\(input.thinking.rawValue)\"", "-c", "web_search=\"disabled\"",
                 "-c", "agents.enabled=false", "--disable", "apps", "--disable", "plugins",
                 "--disable", "memories", "--output-schema", schemaURL.path, "-o", outputURL.path, "-"],
                 environment: environment, currentDirectory: folder, timeout: 180,
-                input: Data((prompt + "\n\n" + evidence).utf8))
+                input: Data((prompt + "\n\n" + evidence).utf8),
+                usage: .init(role: .verifier, assistant: assistant, model: model))
             guard output.exitCode == 0, !Task.isCancelled else { throw VerificationError.failed }
             result = try Data(contentsOf: outputURL)
         } else {
-            output = try await ProcessRunner.run(executable, arguments: ["-p", prompt, "--model", model, "--effort", input.thinking.rawValue,
+            output = try await AssistantUsageRunner.run(executable, arguments: ["-p", prompt, "--model", model, "--effort", input.thinking.rawValue,
                 "--dangerously-skip-permissions", "--permission-prompts", "none", "--tools", "default",
                 "--settings", #"{"sandbox":{"enabled":false}}"#,
                 "--strict-mcp-config", "--mcp-config", #"{"mcpServers":{}}"#,
                 "--setting-sources", "", "--no-session-persistence", "--output-format", "json", "--json-schema", constrainedSchema],
-                environment: environment, currentDirectory: folder, timeout: 180, input: Data(evidence.utf8))
+                environment: environment, currentDirectory: folder, timeout: 180, input: Data(evidence.utf8),
+                usage: .init(role: .verifier, assistant: assistant, model: model))
             guard output.exitCode == 0, !Task.isCancelled else { throw VerificationError.failed }
             struct Envelope: Decodable {
                 let is_error: Bool?

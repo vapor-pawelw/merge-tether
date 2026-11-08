@@ -31,6 +31,15 @@ struct SettingsView: View {
                         Image(systemName: "bolt.circle")
                     }
                 }
+
+            AssistantUsageSettingsTab()
+                .tabItem {
+                    Label {
+                        Text(.AssistantUsage.assistantUsageTab)
+                    } icon: {
+                        Image(systemName: "chart.bar")
+                    }
+                }
         }
         .frame(minWidth: 680, idealWidth: 720, minHeight: 560, idealHeight: 680)
     }

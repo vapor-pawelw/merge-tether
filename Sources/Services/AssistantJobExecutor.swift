@@ -128,8 +128,10 @@ enum AssistantJobExecutor {
             try Data(AssistantJobResult.schema.utf8).write(to: invocation.schemaURL, options: .atomic)
             let arguments = invocation.codexArguments(model: handoff.codingModel ?? handoff.reviewModel,
                 thinking: handoff.codingThinking ?? handoff.reviewThinking)
-            output = try await ProcessRunner.run(executable, arguments: arguments, environment: invocation.childEnvironment(environment),
-                                                  currentDirectory: folder, timeout: 1_800, input: input)
+            output = try await AssistantUsageRunner.run(executable, arguments: arguments, environment: invocation.childEnvironment(environment),
+                                                  currentDirectory: folder, timeout: 1_800, input: input,
+                                                  usage: .init(role: .codingAgent, assistant: handoff.key.assistant,
+                                                    model: (handoff.codingModel ?? handoff.reviewModel)?.rawValue))
             capturedOutput = output
             guard output.exitCode == 0 else { throw CLIProcessError(exitCode: output.exitCode, diagnostic: output.stderr) }
             try AssistantJobResult.validateCodexEvents(output.stdout)
@@ -137,8 +139,10 @@ enum AssistantJobExecutor {
             result = try AssistantJobResult.codex(data)
         } else {
             let arguments = invocation.claudeArguments
-            output = try await ProcessRunner.run(executable, arguments: arguments, environment: invocation.childEnvironment(environment),
-                                                  currentDirectory: folder, timeout: 1_800, input: input)
+            output = try await AssistantUsageRunner.run(executable, arguments: arguments, environment: invocation.childEnvironment(environment),
+                                                  currentDirectory: folder, timeout: 1_800, input: input,
+                                                  usage: .init(role: .codingAgent, assistant: handoff.key.assistant,
+                                                    model: (handoff.codingModel ?? handoff.reviewModel)?.rawValue))
             capturedOutput = output
             guard output.exitCode == 0 else { throw CLIProcessError(exitCode: output.exitCode, diagnostic: output.stderr) }
             result = try AssistantJobResult.claude(output.stdout)

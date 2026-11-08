@@ -1,0 +1,622 @@
+{
+  "sourceLanguage": "en",
+  "strings": {
+    "assistantUsageTitle": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Agent usage · estimated USD"
+          }
+        }
+      }
+    },
+    "assistantUsagePeriod": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Usage period"
+          }
+        }
+      }
+    },
+    "assistantUsageThisMonth": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "This month (UTC)"
+          }
+        }
+      }
+    },
+    "assistantUsageAllTracked": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "All tracked runs"
+          }
+        }
+      }
+    },
+    "assistantUsageCodingAgent": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Coding agent"
+          }
+        }
+      }
+    },
+    "assistantUsageCodingAgentDetail": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Reviews, follow-ups, conflicts and pipeline fixes"
+          }
+        }
+      }
+    },
+    "assistantUsageVerification": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Verification"
+          }
+        }
+      }
+    },
+    "assistantUsageVerificationDetail": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Checks, reply verification and classification"
+          }
+        }
+      }
+    },
+    "assistantUsageRuns": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Runs: %lld"
+          }
+        }
+      }
+    },
+    "assistantUsageUnknownRuns": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "%lld unknown or partial"
+          }
+        }
+      }
+    },
+    "assistantUsageTokens": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Reported tokens: %lld input · %lld cached · %lld output"
+          }
+        }
+      }
+    },
+    "assistantUsageEstimate": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "≈ %@"
+          }
+        }
+      }
+    },
+    "assistantUsageEstimateBelow": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "< %@ estimated"
+          }
+        }
+      }
+    },
+    "assistantUsageNoRuns": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "No tracked runs"
+          }
+        }
+      }
+    },
+    "assistantUsageCostUnavailable": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Cost unavailable"
+          }
+        }
+      }
+    },
+    "assistantUsageUnavailable": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Usage history is unavailable. Previously loaded totals may be out of date."
+          }
+        }
+      }
+    },
+    "assistantUsageTrackingSince": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Tracking since %@ (UTC). Earlier runs are not included."
+          }
+        }
+      }
+    },
+    "assistantUsageTrackingStarts": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Tracking starts with your next agent run. Earlier runs are not included."
+          }
+        }
+      }
+    },
+    "assistantUsageEstimateExplanation": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "How estimates work"
+          }
+        }
+      }
+    },
+    "assistantUsageEstimateHelp": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "USD estimates do not measure subscription payments. Codex uses standard short-context API rates from 8 Nov 2026, excluding cache-write premiums, tools and tier/context adjustments. Claude uses the CLI estimate."
+          }
+        }
+      }
+    },
+    "assistantUsageScopeHelp": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Only runs started by MergeTether are recorded. Separately launched nested CLIs may not be included."
+          }
+        }
+      }
+    },
+    "assistantUsageUnknownHelp": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Unknown or partial runs may add cost beyond the displayed subtotal. Cached input is included in input tokens."
+          }
+        }
+      }
+    },
+    "assistantUsagePricingSource": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "OpenAI API pricing"
+          }
+        }
+      }
+    },
+    "assistantUsageTokensUnavailable": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Reported token totals unavailable"
+          }
+        }
+      }
+    },
+    "assistantUsageTab": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Agent usage"
+          }
+        }
+      }
+    },
+    "assistantUsageDashboardTitle": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Agent usage"
+          }
+        }
+      }
+    },
+    "assistantUsageOverall": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Overall"
+          }
+        }
+      }
+    },
+    "assistantUsageAppOnly": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Runs started by MergeTether"
+          }
+        }
+      }
+    },
+    "assistantUsageAverageDaily": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Known estimate per day"
+          }
+        }
+      }
+    },
+    "assistantUsageCoveredDays": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Calendar days tracked: %lld"
+          }
+        }
+      }
+    },
+    "assistantUsageAverageHelp": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Includes zero-activity days since tracking or range start; the partial current day counts once."
+          }
+        }
+      }
+    },
+    "assistantUsageToday": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Today"
+          }
+        }
+      }
+    },
+    "assistantUsageLast7Days": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Last 7 days"
+          }
+        }
+      }
+    },
+    "assistantUsageLast30Days": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Last 30 days"
+          }
+        }
+      }
+    },
+    "assistantUsageDailyTitle": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Daily estimates · UTC"
+          }
+        }
+      }
+    },
+    "assistantUsageDailyHistory": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Daily history"
+          }
+        }
+      }
+    },
+    "assistantUsageDay": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Day (UTC)"
+          }
+        }
+      }
+    },
+    "assistantUsageEstimatedUSD": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Estimated USD"
+          }
+        }
+      }
+    },
+    "assistantUsageCategory": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Agent role"
+          }
+        }
+      }
+    },
+    "assistantUsageUnknownDay": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Unknown or partial usage in this period"
+          }
+        }
+      }
+    },
+    "assistantUsageChartHelp": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Hover over a bar for the overall estimate and each CLI. Bars show known estimates; orange markers indicate unknown or partial usage. Missing costs are not plotted as zero. Runs are grouped by start time (UTC)."
+          }
+        }
+      }
+    },
+    "assistantUsageNoActivity": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "No activity"
+          }
+        }
+      }
+    },
+    "assistantUsageChartTitle": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Usage by CLI · UTC"
+          }
+        }
+      }
+    },
+    "assistantUsageHours": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Hours"
+          }
+        }
+      }
+    },
+    "assistantUsageDays": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Days"
+          }
+        }
+      }
+    },
+    "assistantUsageWeeks": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Weeks"
+          }
+        }
+      }
+    },
+    "assistantUsageMonths": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Months"
+          }
+        }
+      }
+    },
+    "assistantUsageGranularity": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Group usage by"
+          }
+        }
+      }
+    },
+    "assistantUsageCodexCLI": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Codex CLI"
+          }
+        }
+      }
+    },
+    "assistantUsageClaudeCLI": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Claude CLI"
+          }
+        }
+      }
+    },
+    "assistantUsageProvider": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "CLI"
+          }
+        }
+      }
+    },
+    "assistantUsageTime": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Time (UTC)"
+          }
+        }
+      }
+    },
+    "assistantUsageBucketRange": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "%@ – %@ (UTC, end exclusive)"
+          }
+        }
+      }
+    },
+    "assistantUsageChartTruncated": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Showing the latest %lld of %lld periods. Totals above cover the full selected range."
+          }
+        }
+      }
+    },
+    "assistantUsageAveragePartial": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Known subtotal only; %lld runs have unknown or partial costs."
+          }
+        }
+      }
+    },
+    "assistantUsageTokensPartial": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Partial token counts; some usage is unavailable."
+          }
+        }
+      }
+    }
+  },
+  "version": "1.0"
+}

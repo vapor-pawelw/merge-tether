@@ -91,20 +91,22 @@ enum MRNoticeClassifier {
         if assistant == .codex {
             let schemaURL = folder.appending(path: "schema.json"), resultURL = folder.appending(path: "result.json")
             try Data(schema.utf8).write(to: schemaURL)
-            output = try await ProcessRunner.run(executable, arguments: ["exec", "--ignore-user-config", "--ignore-rules",
+            output = try await AssistantUsageRunner.run(executable, arguments: ["exec", "--json", "--ignore-user-config", "--ignore-rules",
                 "--ephemeral", "--skip-git-repo-check", "--dangerously-bypass-approvals-and-sandbox", "--model", model,
                 "--disable", "apps", "--disable", "plugins", "--disable", "memories",
                 "-c", "model_reasoning_effort=\"medium\"", "--output-schema", schemaURL.path, "-o", resultURL.path, "-"],
                 environment: environment, currentDirectory: folder, timeout: 120,
-                input: Data((prompt + "\n\n" + String(decoding: encoded, as: UTF8.self)).utf8))
+                input: Data((prompt + "\n\n" + String(decoding: encoded, as: UTF8.self)).utf8),
+                usage: .init(role: .verifier, assistant: assistant, model: model))
             guard output.exitCode == 0, !Task.isCancelled else { throw Failure.failed }
             result = try JSONDecoder().decode(Result.self, from: Data(contentsOf: resultURL))
         } else {
-            output = try await ProcessRunner.run(executable, arguments: ["-p", prompt, "--model", model,
+            output = try await AssistantUsageRunner.run(executable, arguments: ["-p", prompt, "--model", model,
                 "--effort", "medium", "--dangerously-skip-permissions", "--permission-prompts", "none", "--tools", "default",
                 "--settings", #"{"sandbox":{"enabled":false}}"#, "--strict-mcp-config", "--mcp-config", #"{"mcpServers":{}}"#,
                 "--setting-sources", "", "--no-session-persistence", "--output-format", "json", "--json-schema", schema],
-                environment: environment, currentDirectory: folder, timeout: 120, input: encoded)
+                environment: environment, currentDirectory: folder, timeout: 120, input: encoded,
+                usage: .init(role: .verifier, assistant: assistant, model: model))
             struct Envelope: Decodable { let is_error: Bool?; let structured_output: Result? }
             let envelope = try JSONDecoder().decode(Envelope.self, from: output.stdout)
             guard output.exitCode == 0, envelope.is_error == false, !Task.isCancelled,

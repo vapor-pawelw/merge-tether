@@ -19,7 +19,8 @@ enum ProcessRunner {
         environment: [String: String],
         currentDirectory: URL? = nil,
         timeout: TimeInterval = 30,
-        input: Data? = nil
+        input: Data? = nil,
+        onOutput: (@Sendable (Output) -> Void)? = nil
     ) async throws -> Output {
         let process = Process()
         process.executableURL = executable
@@ -54,14 +55,19 @@ enum ProcessRunner {
                     finished.terminationHandler = nil
                     tree.finish()
 
+                    // Capture available bytes even after a timeout or cancellation. Accounting
+                    // observers must not change the process's original completion semantics.
+                    let captured = Result {
+                        try Output(stdout: outputCollector.stdout.read(),
+                            stderr: String(data: outputCollector.stderr.read(), encoding: .utf8) ?? "",
+                            exitCode: finished.terminationStatus)
+                    }
+                    if case .success(let output) = captured { onOutput?(output) }
+
                     switch reason {
                     case .completed:
                         do {
-                            cont.resume(returning: try Output(
-                                stdout: outputCollector.stdout.read(),
-                                stderr: String(data: outputCollector.stderr.read(), encoding: .utf8) ?? "",
-                                exitCode: finished.terminationStatus
-                            ))
+                            cont.resume(returning: try captured.get())
                         } catch {
                             cont.resume(throwing: RunError.outputCaptureFailed(error.localizedDescription))
                         }

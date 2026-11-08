@@ -86,7 +86,9 @@ Choose **Start a conversation with an agent…** from an MR’s **…** menu to 
 
 ## Privacy
 
-MergeTether runs locally, without a hosted MergeTether service or analytics. It uses your local `glab` credentials, stores settings and activity on your Mac, downloads avatars directly and checks GitHub for releases. Agent workers can read local files, run commands and access the network; task content and data they read can reach the provider you choose. Credential filtering applies to prepared excerpts, not every live tool read. Scope automation to repositories you are allowed to share.
+MergeTether runs locally, without a hosted MergeTether service or remote analytics. It uses your local `glab` credentials, stores settings and activity on your Mac, downloads avatars directly and checks GitHub for releases. Agent workers can read local files, run commands and access the network; task content and data they read can reach the provider you choose. Credential filtering applies to prepared excerpts, not every live tool read. Scope automation to repositories you are allowed to share.
+
+Settings compares local usage estimates for coding-agent work and verification. Tracking starts with new app-owned runs; these estimates are not billing receipts. The usage ledger stores numeric metadata without prompts or transcripts. See [how estimates work](docs/automation.md#agent-usage-estimates).
 
 ## Contributing
 
