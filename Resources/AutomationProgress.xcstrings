@@ -1,6 +1,17 @@
 {
   "sourceLanguage": "en",
   "strings": {
+    "progressMerging": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Merging MR"
+          }
+        }
+      }
+    },
     "progressQueued": {
       "extractionState": "manual",
       "localizations": {

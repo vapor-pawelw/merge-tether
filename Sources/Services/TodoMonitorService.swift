@@ -73,6 +73,13 @@ final class TodoMonitorService {
     private(set) var failedAutomationTodoID: Int?
     private(set) var lastRefresh: Date?
     private(set) var isLoading = false
+    private let refreshProgress = RefreshProgressState()
+    var showsGlobalRefreshProgress: Bool {
+        boardRefreshState == .syncing || refreshProgress.showsGlobal(accountRevision: glab.accountRevision)
+    }
+    func showsRefreshProgress(for id: MergeRequestAttentionMonitor.Item.ID) -> Bool {
+        boardRefreshState == .syncing || refreshProgress.showsRefresh(for: id, accountRevision: glab.accountRevision)
+    }
     var assistantJobActionError: String?
     private(set) var assistantJobActionNotices: [UUID: String] = [:]
     private(set) var desktopHandoffError = false
@@ -446,7 +453,7 @@ final class TodoMonitorService {
     }
 
     private func trackedReviewTarget(_ target: MRAutomationScope.Target) -> Bool {
-        settings.automation.scope[target] == .active
+        settings.automation.scope.isManaged(target)
             || settings.mrActionIntents.contains { $0.target == target && $0.grantsManagement }
             || settings.assistantChats.keys.contains {
                 $0.work.host == target.host && $0.username == target.username && $0.work.projectID == target.projectID && $0.work.iid == target.iid
@@ -1019,6 +1026,22 @@ final class TodoMonitorService {
     }
 
     // MARK: - Commands
+
+    /// A visible user request may join a background read. Its intent remains until the
+    /// existing catalog children settle; it never changes their fetch or action policy.
+    func refreshManually() async {
+        await refreshProgress.perform(scope: .global, accountRevision: glab.accountRevision,
+            currentAccountRevision: { self.glab.accountRevision },
+            isRefreshing: { self.isLoading || self.attention.isLoading || self.authoredMergeRequests.isLoading },
+            refresh: { await self.refreshNow() })
+    }
+
+    func refreshFromGitLab(for id: MergeRequestAttentionMonitor.Item.ID) async {
+        await refreshProgress.perform(scope: .mergeRequest(id), accountRevision: glab.accountRevision,
+            currentAccountRevision: { self.glab.accountRevision },
+            isRefreshing: { self.isLoading || self.attention.isLoading || self.authoredMergeRequests.isLoading },
+            refresh: { await self.forceRefreshFromGitLab() })
+    }
 
     func refreshNow() async {
         retireLegacyGUIQueueIfNeeded()

@@ -9,6 +9,11 @@ struct BoardCompactJobCard: View {
         handoff.mergeRequestURL?.gitLabProjectPath ?? handoff.repository ?? ""
     }
 
+    private var scopeTarget: MRAutomationScope.Target {
+        .init(host: handoff.key.work.host, username: handoff.key.username,
+            projectID: handoff.key.work.projectID, iid: handoff.key.work.iid)
+    }
+
     var body: some View {
         VStack(alignment: .leading, spacing: 9) {
             metadataHeader
@@ -18,7 +23,8 @@ struct BoardCompactJobCard: View {
                     Button { showingDetails = true } label: {
                         Label { Text(.Board.boardDetails) } icon: { Image(systemName: "rectangle.expand.vertical") }
                     }
-                    GitLabRefreshButton(monitor: monitor)
+                    GitLabRefreshButton(monitor: monitor,
+                        itemID: .init(projectID: handoff.key.work.projectID, iid: handoff.key.work.iid))
                     if let url = handoff.mergeRequestURL {
                         Link(destination: url) {
                             Label { Text(.CommandCenter.commandCenterOpenGitLab) } icon: { Image(systemName: "arrow.up.right.square") }
@@ -26,6 +32,9 @@ struct BoardCompactJobCard: View {
                         AssistantContextMenu(mergeRequestURL: url, title: handoff.title,
                             workspace: monitor.settings.automation.assistantWorkspace)
                     }
+                    Divider()
+                    MRAutomationScopeMenu(settings: monitor.settings, target: scopeTarget,
+                        projectPath: repositoryPath)
                 } label: { BoardCardActionIcon(systemName: "ellipsis") }
                 .menuStyle(.borderlessButton).menuIndicator(.hidden).fixedSize()
                 .frame(width: 24, height: 24)
@@ -47,6 +56,7 @@ struct BoardCompactJobCard: View {
                 Text(verbatim: handoff.title).font(.title3).textSelection(.enabled)
                 Text(verbatim: repositoryPath).foregroundStyle(.secondary)
                 AssistantJobRow(handoff: handoff, monitor: monitor)
+                MRAutomationScopeMenu(settings: monitor.settings, target: scopeTarget, projectPath: repositoryPath)
             }
         }
     }
@@ -58,6 +68,7 @@ struct BoardCompactJobCard: View {
             Text(handoff.createdAt, style: .relative)
             Spacer(minLength: 4)
             BoardMRIdentifier(iid: handoff.key.work.iid)
+            BoardAutomationToggle(settings: monitor.settings, target: scopeTarget, projectPath: repositoryPath)
             BoardPinButton(pin: .mergeRequest(host: handoff.key.work.host,
                 username: handoff.key.username, projectID: handoff.key.work.projectID, iid: handoff.key.work.iid),
                 settings: monitor.settings)
@@ -70,6 +81,7 @@ struct BoardCompactJobCard: View {
 struct BoardJobStatusActions: View {
     let handoff: AssistantAutomationRunner.Handoff
     let monitor: TodoMonitorService
+    var muted = false
     @State private var retrying = false
     @Environment(\.openSettings) private var openSettings
 
@@ -81,7 +93,7 @@ struct BoardJobStatusActions: View {
             HStack {
                 BoardStatusChip(title: active ? handoff.progressTitle(intents: monitor.settings.mrActionIntents, conflictReceipts: monitor.settings.conflictReceipts) : .Board.boardCompactBlocked,
                     symbol: active ? "arrow.triangle.2.circlepath" : "exclamationmark.circle",
-                    tint: active ? .blue : .orange)
+                    tint: muted ? .secondary : active ? .blue : .orange)
                 Spacer(minLength: 6)
                 if active {
                     Button(role: .destructive) { monitor.cancelAssistantJob(handoff.id) } label: {

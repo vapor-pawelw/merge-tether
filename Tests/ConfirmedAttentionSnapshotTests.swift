@@ -78,6 +78,30 @@ struct ConfirmedAttentionSnapshotTests {
         #expect(phone.presentation?.working == true && phone.actions.isEmpty)
     }
 
+    @Test(arguments: [false, true])
+    func cachedReadChecksStayQuietWhilePreservingAttentionAndRemoteActionFences(_ visible: Bool) throws {
+        var item = MergeRequestAttentionMonitor.Item(id: .init(projectID: 1, iid: 2), title: "Example",
+            url: URL(string: "https://host/group/repo/-/merge_requests/2")!)
+        item.draftCount = 1
+        item.humanActionRequired = true
+        let before = MergeRequestBoardSnapshot.Row(item: item, latestJob: nil, intents: [])
+        let action = try #require(MRHumanAction(row: before, assistantReady: true))
+        item.authorFeedbackStatus = .init(head: "head", fingerprint: "notes", phase: .checking)
+        let checking = MergeRequestBoardSnapshot.Row(item: item, latestJob: nil, intents: [])
+        let model = MRCardPresentation(row: checking, reviewingContext: ReviewingContext(row: checking),
+            allowsRemoval: false, assistantReady: true, preservedHumanAction: action, isRefreshingAttention: true,
+            showsReadProgress: visible)
+        #expect(model.working == visible)
+        #expect(model.status == (visible ? "Checking feedback" : nil))
+        #expect(model.busy && model.actionsBlocked)
+        #expect(model.message == action.explanation && model.humanAction != nil)
+        var original = RemoteBoardAdapter.card(item, account: "me")
+        original.actions = [.init(id: "publish", kind: .publish, token: "current-token")]
+        let phone = RemoteBoardAdapter.presentation(original, model: model)
+        #expect(phone.needsAttention == true && phone.detail == action.explanation)
+        #expect(phone.presentation?.working == visible && phone.actions.isEmpty)
+    }
+
     @Test func aRecheckCannotMoveACardOutOfTheAttentionGroupBeforeItsResult() {
         var cache = ConfirmedAttentionSnapshot()
         let a = MergeRequestAttentionMonitor.Item(id: .init(projectID: 1, iid: 2), title: "A",

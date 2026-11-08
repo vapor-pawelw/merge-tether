@@ -2,7 +2,6 @@ import SwiftUI
 
 /// The background exposes a keyboard action; the fallback tap also covers static text.
 private struct BoardCardInteraction: ViewModifier {
-    let isDraft: Bool
     let onDetails: () -> Void
     @State private var isHovered = false
 
@@ -23,13 +22,12 @@ private struct BoardCardInteraction: ViewModifier {
             }
             .onHover { isHovered = $0 }
             .onTapGesture(perform: onDetails)
-            .opacity(isDraft ? 0.7 : 1)
     }
 }
 
 extension View {
-    func boardCardInteraction(isDraft: Bool = false, onDetails: @escaping () -> Void) -> some View {
-        modifier(BoardCardInteraction(isDraft: isDraft, onDetails: onDetails))
+    func boardCardInteraction(onDetails: @escaping () -> Void) -> some View {
+        modifier(BoardCardInteraction(onDetails: onDetails))
     }
 }
 

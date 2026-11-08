@@ -11,7 +11,7 @@ struct ManagedMergeRequestsView: View {
         let scope = monitor.settings.automation.scope
         let rows = monitor.attention.currentOpenItems.compactMap { item -> Row? in
             guard let target = monitor.scopeTarget(projectID: item.id.projectID, iid: item.id.iid, url: item.url),
-                  scope.resolve(target).active || scope[target] != .inherit || scope[target.repository] != .inherit
+                  scope.isManaged(target) || scope.resolve(target).active || scope[target] != .inherit || scope[target.repository] != .inherit
             else { return nil }
             return Row(item: item, target: target)
         }
@@ -82,7 +82,7 @@ struct ManagedMergeRequestsView: View {
 
     private func individualTargets(_ scope: MRAutomationScope) -> [MRAutomationScope.Target] {
         guard let host = monitor.glab.resolvedHost, let username = monitor.glab.currentUsername else { return [] }
-        return scope.individualOverrides(host: host, username: username).sorted {
+        return scope.individualTargets(host: host, username: username).sorted {
             (scope.repositoryLabel(for: $0) ?? "", $0.projectID, $0.iid ?? 0)
                 < (scope.repositoryLabel(for: $1) ?? "", $1.projectID, $1.iid ?? 0)
         }

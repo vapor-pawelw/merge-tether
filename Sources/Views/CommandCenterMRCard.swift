@@ -27,6 +27,10 @@ private struct CommandCenterMRCardContent: View {
     @Environment(\.openSettings) private var openSettings
 
     private var item: MergeRequestAttentionMonitor.Item { row.item }
+    private var isDraft: Bool { item.section == .draftMergeRequests }
+    private var scopeTarget: MRAutomationScope.Target? {
+        monitor.scopeTarget(projectID: item.id.projectID, iid: item.id.iid, url: item.url)
+    }
     let presentation: MRCardPresentation
     private var busy: Bool { presentation.busy }
     private var nextIntent: MRTodoIntent? {
@@ -40,7 +44,8 @@ private struct CommandCenterMRCardContent: View {
             metadataHeader
             HStack(alignment: .top, spacing: 6) {
                 Button(action: onDetails) {
-                    BoardCardTitle(title: item.title, repositoryPath: item.url.gitLabProjectPath)
+                    BoardCardTitle(title: item.title, repositoryPath: item.url.gitLabProjectPath,
+                        titleColor: isDraft ? .secondary : .primary)
                         .contentShape(Rectangle())
                 }
                 .buttonStyle(.plain)
@@ -49,7 +54,7 @@ private struct CommandCenterMRCardContent: View {
             }
             if humanAction != nil {
                 Text(verbatim: presentation.message).help(Text(verbatim: presentation.message))
-                    .font(.callout).foregroundStyle(.orange)
+                    .font(.callout).foregroundStyle(isDraft ? Color.secondary : Color.orange)
                     .lineLimit(2).fixedSize(horizontal: false, vertical: true)
             }
             if let retryError {
@@ -68,7 +73,7 @@ private struct CommandCenterMRCardContent: View {
                         Button { openAttention(.assistantRuns) } label: { Text(.MRHumanAction.mrHumanActionActionReviewRun) }
                             .buttonStyle(.plain)
                     } else if humanAction == nil, let status = neutralStatus {
-                        Text(status).font(.callout).foregroundStyle(.primary).lineLimit(1)
+                        Text(status).font(.callout).foregroundStyle(isDraft ? Color.secondary : Color.primary).lineLimit(1)
                             .help(Text(reviewingContext.presenceMessage)
                                   + Text(verbatim: "\n") + Text(reviewingContext.statusMessage))
                     }
@@ -104,7 +109,7 @@ private struct CommandCenterMRCardContent: View {
                     .padding(.vertical, 10)
             }
         }
-        .boardCardInteraction(isDraft: item.section == .draftMergeRequests, onDetails: onDetails)
+        .boardCardInteraction(onDetails: onDetails)
         .confirmationDialog(Text(.Board.boardRemove), isPresented: $confirmRemoval, titleVisibility: .visible) {
             Button(role: .destructive) { monitor.removeReviewedMergeRequest(item) } label: { Text(.Board.boardRemove) }
         } message: { Text(.Board.boardRemoveExplanation) }
@@ -120,8 +125,12 @@ private struct CommandCenterMRCardContent: View {
                     .accessibilityLabel(Text(.ReviewingContext.reviewingAuthorUnknown))
             }
             Spacer(minLength: 4)
-            if item.section == .draftMergeRequests { BoardDraftBadge() }
+            if isDraft { BoardDraftBadge() }
             BoardMRIdentifier(iid: item.id.iid)
+            if let scopeTarget {
+                BoardAutomationToggle(settings: monitor.settings, target: scopeTarget,
+                    projectPath: item.url.gitLabProjectPath)
+            }
             BoardPinButton(pin: .mergeRequest(host: monitor.glab.resolvedHost,
                 username: monitor.glab.currentUsername, projectID: item.id.projectID, iid: item.id.iid),
                 settings: monitor.settings)
@@ -269,6 +278,11 @@ struct BoardTodoRow: View {
     let monitor: TodoMonitorService
     @State private var showingDetails = false
 
+    private var scopeTarget: MRAutomationScope.Target? {
+        guard todo.targetType == .mergeRequest, let iid = todo.target.iid else { return nil }
+        return monitor.scopeTarget(projectID: todo.project.id, iid: iid, url: todo.targetURL)
+    }
+
     var body: some View {
         VStack(alignment: .leading, spacing: 8) {
             metadataHeader
@@ -276,7 +290,7 @@ struct BoardTodoRow: View {
                 Button { showingDetails = true } label: {
                     ActionDescriptionText(todo: todo, currentUsername: monitor.glab.currentUsername,
                         repositoryPath: todo.project.pathWithNamespace)
-                        .font(.callout).foregroundStyle(.primary)
+                        .font(.callout).foregroundStyle(todo.isDraft ? Color.secondary : Color.primary)
                         .multilineTextAlignment(.leading).lineLimit(2)
                         .fixedSize(horizontal: false, vertical: true)
                         .frame(maxWidth: .infinity, alignment: .leading)
@@ -296,8 +310,9 @@ struct BoardTodoRow: View {
                     Text(.AutomationProgress.progressNotice).foregroundStyle(.secondary)
                 }
                 Spacer(minLength: 0)
-                GitLabRefreshButton(monitor: monitor)
-            Button { monitor.markDoneWithUndo(todo) } label: { Text(.Board.boardEventMarkRead) }
+                GitLabRefreshButton(monitor: monitor,
+                    itemID: scopeTarget?.iid.map { .init(projectID: todo.project.id, iid: $0) })
+                Button { monitor.markDoneWithUndo(todo) } label: { Text(.Board.boardEventMarkRead) }
                     .buttonStyle(.bordered)
                     .disabled(monitor.isAssessingNotice(todo))
             }
@@ -306,7 +321,7 @@ struct BoardTodoRow: View {
         .controlSize(.small)
         .padding(10)
         .frame(maxWidth: .infinity, alignment: .leading)
-        .boardCardInteraction(isDraft: todo.isDraft) { showingDetails = true }
+        .boardCardInteraction { showingDetails = true }
         .sheet(isPresented: $showingDetails) {
             BoardItemDetailSheet {
                 metadataHeader
@@ -320,6 +335,10 @@ struct BoardTodoRow: View {
                 }
                 Link(destination: todo.targetURL) {
                     Label { Text(.Board.boardEventOpen) } icon: { Image(systemName: "arrow.up.right.square") }
+                }
+                if let scopeTarget {
+                    MRAutomationScopeMenu(settings: monitor.settings, target: scopeTarget,
+                        projectPath: todo.project.pathWithNamespace)
                 }
             }
         }
@@ -336,6 +355,10 @@ struct BoardTodoRow: View {
                 BoardMRIdentifier(iid: iid)
             } else if !todo.relativeIdentifier.isEmpty {
                 Text(verbatim: todo.relativeIdentifier).font(.caption).foregroundStyle(.secondary)
+            }
+            if let scopeTarget {
+                BoardAutomationToggle(settings: monitor.settings, target: scopeTarget,
+                    projectPath: todo.project.pathWithNamespace)
             }
             BoardPinButton(pin: .todo(host: monitor.glab.resolvedHost,
                 username: monitor.glab.currentUsername, id: todo.id), settings: monitor.settings)
@@ -357,6 +380,11 @@ struct BoardTodoRow: View {
             if todo.targetType == .mergeRequest {
                 AssistantContextMenu(mergeRequestURL: todo.targetURL, title: todo.displayTitle,
                     workspace: monitor.settings.automation.assistantWorkspace)
+            }
+            if let scopeTarget {
+                Divider()
+                MRAutomationScopeMenu(settings: monitor.settings, target: scopeTarget,
+                    projectPath: todo.project.pathWithNamespace)
             }
         } label: { BoardCardActionIcon(systemName: "ellipsis") }
         .menuStyle(.borderlessButton).menuIndicator(.hidden).fixedSize()

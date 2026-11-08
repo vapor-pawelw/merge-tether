@@ -196,6 +196,9 @@ private struct CommandCenterMRDetailContent: View {
                     Text(verbatim: author.name.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty ? author.username : author.name).lineLimit(1)
                         .help(Text(verbatim: "@\(author.username)"))
                 }
+                if let target = monitor.scopeTarget(projectID: item.id.projectID, iid: item.id.iid, url: item.url) {
+                    BoardAutomationToggle(settings: monitor.settings, target: target, projectPath: item.url.gitLabProjectPath)
+                }
                 Spacer()
                 BoardPinButton(pin: .mergeRequest(host: monitor.glab.resolvedHost,
                     username: monitor.glab.currentUsername, projectID: item.id.projectID, iid: item.id.iid),
@@ -226,7 +229,7 @@ private struct CommandCenterMRDetailContent: View {
                     }
                 }
                 Spacer()
-                GitLabRefreshButton(monitor: monitor) {
+                GitLabRefreshButton(monitor: monitor, itemID: item.id) {
                     if let target = discussionTarget { await discussionStore.refresh(target: target, glab: monitor.glab) }
                 }
                 .buttonStyle(.bordered)

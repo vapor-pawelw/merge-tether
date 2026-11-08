@@ -32,6 +32,12 @@ final class AuthoredMergeRequestMonitor {
     /// Missing or incomplete verification cannot authorize merging a reviewer's outstanding conditions.
     var authorFeedbackAllowsMerge: ((GitLabMergeRequest, [GitLabMergeRequestDiscussion], Int) -> Bool)?
     var authorFeedbackStatus: ((GitLabMergeRequest) -> AuthorFeedbackStatus?)?
+    func isMerging(_ request: GitLabMergeRequest) -> Bool {
+        let id = MergeRequestAttentionMonitor.Item.ID(projectID: request.projectID, iid: request.iid)
+        guard let progress = mergingRequests[id], progress.revision == glab.accountRevision,
+              isCurrent(progress.account), progress.headSHA == request.sha else { return false }
+        return true
+    }
 
     private let settings: SettingsManager
     private let glab: GlabService
@@ -111,6 +117,12 @@ final class AuthoredMergeRequestMonitor {
         let host: String
         let username: String
     }
+    private struct MergeProgress {
+        let account: Account
+        let revision: UInt64
+        let headSHA: String
+    }
+    private var mergingRequests: [MergeRequestAttentionMonitor.Item.ID: MergeProgress] = [:]
 
     init(settings: SettingsManager, glab: GlabService, notifications: NotificationService,
          canAutomate: @escaping @MainActor (AutomationAssistant) async -> Bool = {
@@ -233,6 +245,9 @@ final class AuthoredMergeRequestMonitor {
                         results.append(status)
                         continue
                     }
+                    let mergingID = MergeRequestAttentionMonitor.Item.ID(projectID: request.projectID, iid: request.iid)
+                    mergingRequests[mergingID] = .init(account: account, revision: revision, headSHA: sha)
+                    defer { mergingRequests.removeValue(forKey: mergingID) }
                     try await glab.mergeMergeRequest(
                         projectID: request.projectID, iid: request.iid, headSHA: sha, host: host, expectedUser: user,
                         expectedDiscussionFingerprint: fingerprint,

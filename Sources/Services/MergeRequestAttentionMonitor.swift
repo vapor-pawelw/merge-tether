@@ -548,7 +548,7 @@ final class MergeRequestAttentionMonitor {
         var explicitFetchFailed = false
         var lookedUpIDs = listedIDs
         var removedMergedOverride = false
-        for target in settings?.automation.scope.individualOverrides(host: host, username: user.username) ?? [] {
+        for target in settings?.automation.scope.individualTargets(host: host, username: user.username) ?? [] {
             guard let iid = target.iid, !listedIDs.contains(.init(projectID: target.projectID, iid: iid)) else { continue }
             let id = Item.ID(projectID: target.projectID, iid: iid)
             lookedUpIDs.insert(id)
@@ -561,6 +561,7 @@ final class MergeRequestAttentionMonitor {
             if request.state == "merged" {
                 retainedCatalog.removeValue(forKey: id)
                 settings?.automation.scope[target] = .inherit
+                settings?.automation.scope.forgetManaged(target)
                 settings?.reReviewDraftBaselines.removeValue(forKey: target)
                 removedMergedOverride = true
             } else if request.state == "closed" {

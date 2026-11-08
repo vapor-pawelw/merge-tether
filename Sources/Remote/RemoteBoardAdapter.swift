@@ -63,7 +63,7 @@ import MergeTetherRemote
                     card = self.card(item, account: account, extraActions: extras, context: handoffs.map(\.id).sorted() + [(try? RemoteDigest.token(monitor.settings.automation)) ?? ""])
                     let presentation = MRCardPresentation(row: row, monitor: monitor, allowsRemoval: result.lanes[lane].id == .reviewed)
                     card = self.presentation(card, model: presentation)
-                    let busy = presentation.working
+                    let busy = presentation.actionsBlocked
                     if busy { card.actions = [] }
                     else {
                         let intent = row.attentionIntents.first { $0.state == .failed } ?? row.attentionIntents.first { $0.state == .pending }
@@ -189,7 +189,7 @@ import MergeTetherRemote
             status: model.status, nextStep: model.nextStep, working: model.working,
             chips: model.chips.map { .init(title: String(localized: $0.title), symbol: $0.symbol) },
             secondaryCTA: human?.action == .retryRun ? .init(title: String(localized: .MRHumanAction.mrHumanActionActionReviewRun), destination: .assistantRuns) : nil)
-        if model.working { card.actions = [] }
+        if model.actionsBlocked { card.actions = [] }
         return card
     }
 

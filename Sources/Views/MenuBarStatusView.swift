@@ -47,8 +47,8 @@ struct MenuBarStatusMenu: View {
         } else {
             Text(.MenuBar.menuBarClear)
         }
-        Button { Task { await monitor.refreshNow() } } label: { Text(.CommandCenter.commandCenterRefresh) }
-            .disabled(monitor.isLoading)
+        Button { Task { await monitor.refreshManually() } } label: { Text(.CommandCenter.commandCenterRefresh) }
+            .disabled(monitor.showsGlobalRefreshProgress)
         SettingsLink { Text(.CommandCenter.commandCenterSettings) }
         Divider()
         Button { NSApplication.shared.terminate(nil) } label: { Text(.MenuBar.menuBarQuit) }

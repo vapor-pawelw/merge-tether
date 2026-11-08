@@ -90,7 +90,7 @@ final class MergeRequestTodoRouter {
             guard request.author.id == user.id || !explicitlyPaused else { continue }
             let alreadyManaged = request.author.id == user.id || managed.contains(target)
                 || settings.mrActionIntents.contains { $0.target == target && $0.grantsManagement }
-                || settings.automation.scope[target] == .active
+                || settings.automation.scope.isManaged(target)
             var autoAdopt = false
             if shouldAdoptAutomatically(kind, request: request, target: target) {
                 autoAdopt = await canAutomate()

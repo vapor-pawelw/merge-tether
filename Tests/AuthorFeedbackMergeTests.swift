@@ -4,6 +4,28 @@ import Testing
 
 @MainActor
 struct AuthorFeedbackMergeTests {
+    @Test func actualAutomaticMergeIsReportedOnlyWhileTheWriteIsInFlight() async throws {
+        try await withFixture { monitor, folder, _ in
+            let request = try JSONDecoder().decode(GitLabMergeRequest.self,
+                from: Data(contentsOf: folder.appending(path: "request.json")))
+            try Data("yes".utf8).write(to: folder.appending(path: "hold-merge"))
+            defer { try? Data("yes".utf8).write(to: folder.appending(path: "release-merge")) }
+            monitor.authorFeedbackAllowsMerge = { _, _, _ in true }
+            #expect(!monitor.isMerging(request))
+            monitor.refreshIfNeeded()
+            let deadline = ContinuousClock.now + .seconds(5)
+            while !FileManager.default.fileExists(atPath: folder.appending(path: "merge-started").path),
+                  monitor.isLoading, ContinuousClock.now < deadline {
+                try await Task.sleep(for: .milliseconds(20))
+            }
+            let duringWrite = monitor.isMerging(request)
+            try Data("yes".utf8).write(to: folder.appending(path: "release-merge"))
+            while monitor.isLoading, ContinuousClock.now < deadline { try await Task.sleep(for: .milliseconds(20)) }
+            #expect(FileManager.default.fileExists(atPath: folder.appending(path: "merged").path))
+            #expect(duringWrite && !monitor.isMerging(request))
+        }
+    }
+
     @Test func advanceApprovalWithGeneralConditionCannotMergeWithoutSemanticProof() async throws {
         try await withFixture { monitor, folder, _ in
             monitor.refreshIfNeeded()
@@ -141,7 +163,16 @@ struct AuthorFeedbackMergeTests {
           */discussions\\?*) cat discussions.json ;;
           */draft_notes\\?*) cat drafts.json ;;
           /projects/1) echo '{"only_allow_merge_if_all_discussions_are_resolved":true,"reset_approvals_on_push":true}' ;;
-          */merge) touch merged; echo '{"project_id":1,"iid":2,"state":"merged"}' ;;
+          */merge)
+            touch merge-started
+            if [ -e hold-merge ]; then
+                attempts=0
+                while [ ! -e release-merge ] && [ "$attempts" -lt 200 ]; do
+                    /bin/sleep 0.02
+                    attempts=$((attempts + 1))
+                done
+            fi
+            touch merged; echo '{"project_id":1,"iid":2,"state":"merged"}' ;;
           *) exit 100 ;;
         esac
         """.utf8).write(to: executable)

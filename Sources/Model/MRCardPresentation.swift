@@ -7,6 +7,7 @@ struct MRCardPresentation {
     let row: MergeRequestBoardSnapshot.Row
     let preservedHumanAction: MRHumanAction?
     let isRefreshingAttention: Bool
+    let showsReadProgress: Bool
     let refreshFailed: Bool
     let reviewingContext: ReviewingContext
     let allowsRemoval: Bool
@@ -16,6 +17,7 @@ struct MRCardPresentation {
     let automaticConflictProgress: Bool
     let conflictReceipts: Set<MergeConflictReceipt>
     let automaticPipelineProgress: Bool
+    let automaticMergeProgress: Bool
     private var item: MergeRequestAttentionMonitor.Item { row.item }
 
     init(row: MergeRequestBoardSnapshot.Row, reviewingContext: ReviewingContext,
@@ -23,10 +25,13 @@ struct MRCardPresentation {
          confirmationState: MergeRequestAttentionMonitor.ConfirmationState? = nil,
          automaticallyPublishedDraftIDs: Set<Int> = [], automaticConflictProgress: Bool = false,
          automaticPipelineProgress: Bool = false, conflictReceipts: Set<MergeConflictReceipt> = [],
-         preservedHumanAction: MRHumanAction? = nil, isRefreshingAttention: Bool = false, refreshFailed: Bool = false) {
+         preservedHumanAction: MRHumanAction? = nil, isRefreshingAttention: Bool = false, refreshFailed: Bool = false,
+         showsReadProgress: Bool = true, automaticMergeProgress: Bool = false) {
         self.row = row; self.reviewingContext = reviewingContext; self.allowsRemoval = allowsRemoval
         self.preservedHumanAction = preservedHumanAction; self.isRefreshingAttention = isRefreshingAttention
         self.refreshFailed = refreshFailed
+        self.showsReadProgress = showsReadProgress
+        self.automaticMergeProgress = automaticMergeProgress
         self.assistantReady = assistantReady; self.confirmationState = confirmationState
         self.automaticallyPublishedDraftIDs = automaticallyPublishedDraftIDs
         self.automaticConflictProgress = automaticConflictProgress
@@ -48,24 +53,39 @@ struct MRCardPresentation {
             automaticPipelineProgress: row.item.mergeRequest.map { monitor.authoredMergeRequests.workflow.isAutomaticallyProcessingPipeline($0) } ?? false,
             conflictReceipts: monitor.settings.conflictReceipts,
             preservedHumanAction: monitor.confirmedHumanAction(for: row),
-            isRefreshingAttention: monitor.isRecheckingAttention(for: row), refreshFailed: monitor.attentionRefreshFailed(for: row))
+            isRefreshingAttention: monitor.isRecheckingAttention(for: row), refreshFailed: monitor.attentionRefreshFailed(for: row),
+            showsReadProgress: monitor.showsRefreshProgress(for: row.id),
+            automaticMergeProgress: row.item.mergeRequest.map { monitor.authoredMergeRequests.isMerging($0) } ?? false)
     }
 
+    private var recoveryWaitsForHuman: Bool {
+        (item.draftProofRecoveryChecking || row.isCheckingReadOnlyReconciliation) && row.hasIndependentStoppedWork
+    }
     var busy: Bool {
-        let recoveryWaitsForHuman = (item.draftProofRecoveryChecking || row.isCheckingReadOnlyReconciliation) && row.hasIndependentStoppedWork
         return confirmationState == .publishing || confirmationState == .approving
             || (!recoveryWaitsForHuman && (item.authorFeedbackStatus?.phase == .checking || item.draftProofRecoveryChecking))
             || item.reReviewReadiness == .checking || item.aiOriginChecking
             || (!recoveryWaitsForHuman && allowsRemoval && reviewingContext.isAutomaticProcessing)
             || automaticPipelineProgress
+            || automaticMergeProgress
             || (automaticConflictProgress && row.latestJob?.execution?.state.isActive != true)
     }
-    var working: Bool { busy || isRefreshingAttention || row.latestJob?.execution?.state.isActive == true }
+    private var executingWork: Bool {
+        confirmationState == .publishing || confirmationState == .approving
+            || row.latestJob?.operationalExecution?.state.isActive == true
+            || automaticPipelineProgress || automaticConflictProgress || automaticMergeProgress
+            || (!recoveryWaitsForHuman && allowsRemoval && reviewingContext.nextStep == .automaticReview)
+    }
+    private var quietReadCheck: Bool {
+        !showsReadProgress && !executingWork && (busy || isRefreshingAttention)
+    }
+    var working: Bool { executingWork || (showsReadProgress && (busy || isRefreshingAttention)) }
+    var actionsBlocked: Bool { busy || isRefreshingAttention || row.latestJob?.execution?.state.isActive == true }
     private var preservesConfirmedAttention: Bool {
         (isRefreshingAttention || refreshFailed) && row.needsAttention && preservedHumanAction != nil
             && row.latestJob?.operationalExecution?.state.isActive != true
             && confirmationState != .publishing && confirmationState != .approving
-            && !automaticConflictProgress && !automaticPipelineProgress
+            && !automaticConflictProgress && !automaticPipelineProgress && !automaticMergeProgress
     }
     var humanAction: MRHumanAction? {
         if preservesConfirmedAttention { return preservedHumanAction }
@@ -75,6 +95,9 @@ struct MRCardPresentation {
                              automaticallyPublishedDraftIDs: automaticallyPublishedDraftIDs)
     }
     var neutralStatus: LocalizedStringResource? {
+        if quietReadCheck {
+            if busy || reviewingContext.status == .activityUnknown || reviewingContext.status == .verifying { return nil }
+        }
         if item.authorFeedbackStatus?.waitingForReviewer == true { return .AuthorFeedback.authorFeedbackWaitingChip }
         guard allowsRemoval else { return nil }
         return reviewingContext.status == .activityUnknown ? reviewingContext.presenceMessage : reviewingContext.statusMessage
@@ -87,12 +110,13 @@ struct MRCardPresentation {
         if let job = row.latestJob, job.execution?.state.isActive == true {
             return String(localized: job.progressTitle(intents: row.intents, conflictReceipts: conflictReceipts)) + " · " + String(localized: job.key.assistant.displayName)
         }
-        if busy || isRefreshingAttention { return String(localized: progressTitle) }
+        if working { return String(localized: progressTitle) }
         return humanAction == nil ? neutralStatus.map { String(localized: $0) } : nil
     }
     private var progressTitle: LocalizedStringResource {
         if confirmationState == .publishing { return .AutomationProgress.progressPublishing }
         if confirmationState == .approving { return .AutomationProgress.progressApproving }
+        if automaticMergeProgress { return .AutomationProgress.progressMerging }
         if item.draftProofRecoveryChecking, !row.hasIndependentStoppedWork { return .AutomationProgress.progressReplies }
         if item.aiOriginChecking { return .AutomationProgress.progressAIAssistance }
         if item.authorFeedbackStatus?.phase == .checking { return .AutomationProgress.progressFeedbackCheck }
@@ -104,10 +128,12 @@ struct MRCardPresentation {
         return isRefreshingAttention ? .AutomationProgress.progressRefreshing : .AutomationProgress.progressProcessing
     }
     var nextStep: String? {
-        allowsRemoval && humanAction == nil && !busy ? String(localized: reviewingContext.nextStepMessage) : nil
+        allowsRemoval && humanAction == nil && !busy
+            && !(quietReadCheck && reviewingContext.status == .activityUnknown)
+            ? String(localized: reviewingContext.nextStepMessage) : nil
     }
     var actionLabel: LocalizedStringResource? {
-        guard !working || preservesConfirmedAttention else { return nil }
+        guard !actionsBlocked || preservesConfirmedAttention else { return nil }
         if humanAction == nil, allowsRemoval, reviewingContext.nextStep == .runReview, !assistantReady {
             return .Board.boardCompactSetupCli
         }

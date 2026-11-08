@@ -1,6 +1,83 @@
 {
   "sourceLanguage": "en",
   "strings": {
+    "menu.scope.enabledHelp.%@": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Automation enabled. Uses your current Settings rules and permissions. Globally disabled actions stay off. Scope: %@."
+          }
+        }
+      }
+    },
+    "menu.scope.pausedHelp.%@": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Automation paused. General permissions are unchanged. Scope: %@."
+          }
+        }
+      }
+    },
+    "menu.scope.repositoryDefault": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Repository default"
+          }
+        }
+      }
+    },
+    "menu.scope.repositoryDefaultHelp": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Sets the default for this repository. Individual MR overrides still take priority."
+          }
+        }
+      }
+    },
+    "menu.scope.defaults": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Defaults"
+          }
+        }
+      }
+    },
+    "menu.scope.followRepository": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Follow repository default"
+          }
+        }
+      }
+    },
+    "menu.scope.followGlobal": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Follow general scope"
+          }
+        }
+      }
+    },
     "menu.scope.add": {
       "extractionState": "manual",
       "localizations": {

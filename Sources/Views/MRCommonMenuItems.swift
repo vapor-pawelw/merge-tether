@@ -2,6 +2,7 @@ import SwiftUI
 
 struct GitLabRefreshButton: View {
     let monitor: TodoMonitorService
+    var itemID: MergeRequestAttentionMonitor.Item.ID? = nil
     var afterRefresh: @MainActor () async -> Void = {}
     @State private var refreshing = false
 
@@ -10,7 +11,8 @@ struct GitLabRefreshButton: View {
             refreshing = true
             Task {
                 defer { refreshing = false }
-                await monitor.forceRefreshFromGitLab()
+                if let itemID { await monitor.refreshFromGitLab(for: itemID) }
+                else { await monitor.forceRefreshFromGitLab() }
                 await afterRefresh()
             }
         } label: {
@@ -34,7 +36,7 @@ struct MRCommonMenuItems: View {
         Link(destination: item.url) {
             Label { Text(.CommandCenter.commandCenterOpenGitLab) } icon: { Image(systemName: "arrow.up.right.square") }
         }
-        GitLabRefreshButton(monitor: monitor)
+        GitLabRefreshButton(monitor: monitor, itemID: item.id)
         if monitor.canRunReview(for: item) {
             Button {
                 startingReview = true

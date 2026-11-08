@@ -45,7 +45,8 @@ struct BoardMRProposalCard: View {
             metadataHeader
             HStack(alignment: .top) {
                 Button { showingDetails = true } label: {
-                    BoardCardTitle(title: proposal.title, repositoryPath: proposal.url.gitLabProjectPath)
+                    BoardCardTitle(title: proposal.title, repositoryPath: proposal.url.gitLabProjectPath,
+                        titleColor: isDraft ? .secondary : .primary)
                 }
                 .buttonStyle(.plain)
                 moreMenu
@@ -76,7 +77,7 @@ struct BoardMRProposalCard: View {
             }
             .disabled(isWorking)
             if failed {
-                BoardStatusChip(title: .Board.boardCompactBlocked, symbol: "exclamationmark.circle", tint: .orange)
+                BoardStatusChip(title: .Board.boardCompactBlocked, symbol: "exclamationmark.circle", tint: isDraft ? .secondary : .orange)
                     .help(Text(.Menu.menuMrAddFailed))
             }
             runResult
@@ -94,7 +95,7 @@ struct BoardMRProposalCard: View {
         .controlSize(.small)
         .padding(12).frame(maxWidth: .infinity, alignment: .leading)
         .overlay(RoundedRectangle(cornerRadius: 8).stroke(.secondary.opacity(0.12), lineWidth: 0.5))
-        .boardCardInteraction(isDraft: isDraft) { showingDetails = true }
+        .boardCardInteraction { showingDetails = true }
         .task(id: authorTaskID) { await authorLoader.load(proposal) }
         .sheet(isPresented: $showingDetails) {
             BoardItemDetailSheet {
@@ -115,6 +116,8 @@ struct BoardMRProposalCard: View {
                     Label { Text(.CommandCenter.commandCenterOpenGitLab) } icon: { Image(systemName: "arrow.up.right.square") }
                 }
                 if let job = proposal.latestJob { AssistantJobRow(handoff: job, monitor: monitor) }
+                MRAutomationScopeMenu(settings: monitor.settings, target: proposal.target,
+                    projectPath: proposal.url.gitLabProjectPath)
             }
         }
     }
@@ -128,6 +131,8 @@ struct BoardMRProposalCard: View {
                 BoardDraftBadge()
             }
             if let iid = proposal.target.iid { BoardMRIdentifier(iid: iid) }
+            BoardAutomationToggle(settings: monitor.settings, target: proposal.target,
+                projectPath: proposal.url.gitLabProjectPath)
             BoardPinButton(pin: .mergeRequest(host: proposal.target.host, username: proposal.target.username,
                 projectID: proposal.target.projectID, iid: proposal.target.iid ?? 0), settings: monitor.settings)
         }
@@ -141,9 +146,15 @@ struct BoardMRProposalCard: View {
             Link(destination: proposal.url) {
                 Label { Text(.CommandCenter.commandCenterOpenGitLab) } icon: { Image(systemName: "arrow.up.right.square") }
             }
-            GitLabRefreshButton(monitor: monitor) { await authorLoader.load(proposal, force: true) }
+            GitLabRefreshButton(monitor: monitor,
+                itemID: proposal.target.iid.map { .init(projectID: proposal.target.projectID, iid: $0) }) {
+                await authorLoader.load(proposal, force: true)
+            }
             AssistantContextMenu(mergeRequestURL: proposal.url, title: proposal.title,
                 workspace: monitor.settings.automation.assistantWorkspace)
+            Divider()
+            MRAutomationScopeMenu(settings: monitor.settings, target: proposal.target,
+                projectPath: proposal.url.gitLabProjectPath)
         } label: { BoardCardActionIcon(systemName: "ellipsis") }
         .menuStyle(.borderlessButton).menuIndicator(.hidden).fixedSize()
         .frame(width: 24, height: 24)
@@ -166,7 +177,7 @@ struct BoardMRProposalCard: View {
     @ViewBuilder
     private var runResult: some View {
         if let job = proposal.latestJob {
-            BoardJobStatusActions(handoff: job, monitor: monitor)
+            BoardJobStatusActions(handoff: job, monitor: monitor, muted: isDraft)
             Button { showingDetails = true } label: {
                 Text(.MRHumanAction.mrHumanActionActionReviewRun)
             }
@@ -185,7 +196,7 @@ struct BoardMRProposalCard: View {
                 .help(Text(.Proposal.proposalMoreReasonsHelp))
             }
         }
-        .font(.callout).foregroundStyle(.primary)
+        .font(.callout).foregroundStyle(isDraft ? Color.secondary : Color.primary)
     }
 
     @ViewBuilder

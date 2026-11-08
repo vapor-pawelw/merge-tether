@@ -249,6 +249,8 @@ Approval is pinned to the checked source SHA. A new or edited comment invalidate
 | To-do events | A recognized event is marked read only after its MR action is durably recorded and the live MR refreshed. This acknowledges the event, not the agent’s work. Unknown events remain unread in Other. Explicitly ignored MR events are acknowledged without running a task. |
 | Legacy shell rules | Retained for reference and compatibility. They do not run automatically or get replaced by an AI task. Choose the selected agent CLI in Settings to migrate the handler. |
 
+The small **Automation** lightning button on an MR card follows your current action settings. Turn it off to exclude that MR, or on to include it without granting any additional permissions. The **…** menu also offers a repository-default switch. Pausing automation keeps the MR on your list. MR exceptions take precedence over the repository, then the global scope; switching back to the parent setting removes the redundant exception. Hover over the lightning button to see which level applies.
+
 Saving automation policy or scope changes synchronizes proof permissions immediately. Scope changes cancel only automatic work for targets that are now inactive, preserving unrelated and manually started work. Other automation policy changes cancel active app-owned agent work. Historical script execution remains internally compatible, but is not an available MR automation mode. Remote actions are rechecked at their relevant boundaries; actions already accepted by GitLab cannot be undone by cancellation. Manual actions remain explicitly user initiated.
 
 ## What the agent sees

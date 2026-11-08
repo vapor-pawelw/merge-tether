@@ -39,6 +39,128 @@ struct AutomationPackageTests {
         #expect(try JSONDecoder().decode(MRAutomationScope.self, from: JSONEncoder().encode(scope)) == scope)
     }
 
+    @Test func aSimpleMRTogglePausesAndReturnsToTheRepositoryDefault() {
+        let target = MRAutomationScope.Target(host: "gitlab.example.test", username: "me", projectID: 1, iid: 42)
+        let sibling = MRAutomationScope.Target(host: target.host, username: target.username, projectID: 1, iid: 43)
+        var scope = MRAutomationScope()
+        scope.setEnabled(false, for: target)
+        #expect(scope[target] == .paused && !scope.resolve(target).active)
+        #expect(scope.resolve(sibling).active)
+        scope.setEnabled(true, for: target)
+        #expect(scope[target] == .inherit && scope.resolve(target).active)
+        #expect(scope.individualOverrides(host: target.host, username: target.username).isEmpty)
+        scope[target.repository] = .paused
+        scope.setEnabled(true, for: target)
+        #expect(scope[target] == .active && scope.resolve(target).active)
+        scope.setEnabled(false, for: target)
+        #expect(scope[target] == .inherit && !scope.resolve(target).active)
+    }
+
+    @Test func aSimpleToggleCanOptIntoSelectedScopeWithoutLeavingRedundantOverrides() {
+        let target = MRAutomationScope.Target(host: "gitlab.example.test", username: "me", projectID: 1, iid: 42)
+        var scope = MRAutomationScope()
+        scope.mode = .selected
+        scope.setEnabled(true, for: target)
+        #expect(scope[target] == .active && scope.resolve(target).active)
+        #expect(!scope.resolve(target.repository).active)
+        scope.setEnabled(false, for: target)
+        #expect(scope[target] == .inherit && !scope.resolve(target).active)
+        scope.setEnabled(true, for: target.repository)
+        #expect(scope[target.repository] == .active && scope.resolve(target).active)
+        scope.setEnabled(false, for: target.repository)
+        #expect(scope[target.repository] == .inherit && !scope.resolve(target).active)
+    }
+
+    @Test func repositoryTogglesSetDefaultsWhileExplicitMROverridesStillWin() {
+        let target = MRAutomationScope.Target(host: "gitlab.example.test", username: "me", projectID: 1, iid: 42)
+        let paused = MRAutomationScope.Target(host: target.host, username: target.username, projectID: 1, iid: 43)
+        let inherited = MRAutomationScope.Target(host: target.host, username: target.username, projectID: 1, iid: 44)
+        var scope = MRAutomationScope()
+        scope[target] = .active
+        scope[paused] = .paused
+        scope.setEnabled(false, for: target.repository)
+        #expect(scope[target.repository] == .paused)
+        #expect(scope.resolve(target).active && !scope.resolve(paused).active && !scope.resolve(inherited).active)
+        scope.setEnabled(true, for: target.repository)
+        #expect(scope[target.repository] == .inherit)
+        #expect(scope[target] == .active && scope[paused] == .paused)
+        #expect(scope.resolve(target).active && !scope.resolve(paused).active && scope.resolve(inherited).active)
+    }
+
+    @Test func scopeTogglesRemainAccountBoundAndPersistWithRepositoryLabels() throws {
+        let target = MRAutomationScope.Target(host: "gitlab.example.test", username: "me", projectID: 1, iid: 42)
+        let otherUser = MRAutomationScope.Target(host: target.host, username: "other", projectID: 1, iid: 42)
+        let otherHost = MRAutomationScope.Target(host: "other.example.test", username: target.username, projectID: 1, iid: 42)
+        let otherRepository = MRAutomationScope.Target(host: target.host, username: target.username, projectID: 2, iid: 42)
+        var scope = MRAutomationScope()
+        scope.rememberRepository("team/repository", for: target)
+        scope.setEnabled(false, for: target)
+        scope.setEnabled(false, for: target.repository)
+        #expect(!scope.resolve(target).active)
+        #expect(scope.resolve(otherUser).active && scope.resolve(otherHost).active && scope.resolve(otherRepository).active)
+        let loaded = try JSONDecoder().decode(MRAutomationScope.self, from: JSONEncoder().encode(scope))
+        #expect(loaded == scope && loaded[target] == .paused && loaded[target.repository] == .paused)
+        #expect(loaded.repositoryLabel(for: target) == "team/repository")
+    }
+
+    @Test func managedReviewRegistrationSurvivesScopeOffOnAndReload() throws {
+        let target = MRAutomationScope.Target(host: "gitlab.example.test", username: "me", projectID: 1, iid: 42)
+        var scope = MRAutomationScope()
+        scope[target] = .active
+        #expect(scope.isManaged(target))
+        scope.setEnabled(false, for: target)
+        #expect(scope.isManaged(target) && !scope.resolve(target).active)
+        scope.setEnabled(true, for: target)
+        #expect(scope[target] == .inherit && scope.isManaged(target))
+        #expect(scope.individualOverrides(host: target.host, username: target.username).isEmpty)
+        let loaded = try JSONDecoder().decode(MRAutomationScope.self, from: JSONEncoder().encode(scope))
+        #expect(loaded == scope && loaded.isManaged(target) && loaded.resolve(target).active)
+        #expect(loaded.individualTargets(host: target.host, username: target.username) == [target])
+    }
+
+    @Test(arguments: [MRAutomationScope.Choice.inherit, .paused])
+    func legacyActiveScopeRetainsManagementWhenOverrideChanges(choice: MRAutomationScope.Choice) throws {
+        let target = MRAutomationScope.Target(host: "gitlab.example.test", username: "me", projectID: 1, iid: 42)
+        var original = MRAutomationScope()
+        original[target] = .active
+        var legacy = try #require(JSONSerialization.jsonObject(with: JSONEncoder().encode(original)) as? [String: Any])
+        legacy.removeValue(forKey: "managedTargets")
+        var loaded = try JSONDecoder().decode(MRAutomationScope.self, from: JSONSerialization.data(withJSONObject: legacy))
+        #expect(loaded.isManaged(target))
+        loaded[target] = choice
+        #expect(loaded[target] == choice && loaded.isManaged(target))
+        #expect(loaded.individualTargets(host: target.host, username: target.username).contains(target))
+    }
+
+    @Test func scopeOptInRegistersButANewPauseDoesNotGrantManagement() {
+        let target = MRAutomationScope.Target(host: "gitlab.example.test", username: "me", projectID: 1, iid: 42)
+        let untracked = MRAutomationScope.Target(host: target.host, username: target.username, projectID: 1, iid: 43)
+        var scope = MRAutomationScope()
+        scope.setEnabled(true, for: target)
+        scope.setEnabled(false, for: untracked)
+        #expect(scope[target] == .inherit && scope.isManaged(target))
+        #expect(scope[untracked] == .paused && !scope.isManaged(untracked))
+        #expect(Set(scope.individualTargets(host: target.host, username: target.username)) == [target, untracked])
+        #expect(scope.individualTargets(host: target.host, username: "other").isEmpty)
+        #expect(scope.individualTargets(host: "other.example.test", username: target.username).isEmpty)
+        #expect(!scope.isManaged(target.repository) && scope.mode == .all)
+    }
+
+    @Test func forgettingTerminalRegistrationKeepsOtherTargetsAndOverrideCatalog() {
+        let target = MRAutomationScope.Target(host: "gitlab.example.test", username: "me", projectID: 1, iid: 42)
+        let retained = MRAutomationScope.Target(host: target.host, username: target.username, projectID: 1, iid: 43)
+        let paused = MRAutomationScope.Target(host: target.host, username: target.username, projectID: 1, iid: 44)
+        var scope = MRAutomationScope()
+        scope.setEnabled(true, for: target)
+        scope.setEnabled(true, for: retained)
+        scope[paused] = .paused
+        scope[target] = .inherit
+        scope.forgetManaged(target)
+        #expect(!scope.isManaged(target) && scope.resolve(target).active)
+        #expect(scope.isManaged(retained) && !scope.isManaged(paused))
+        #expect(Set(scope.individualTargets(host: target.host, username: target.username)) == [retained, paused])
+    }
+
     @Test func recommendationEnablesAssistantWorkflowsWithSeparateMergeAndConflictPushControls() {
         var settings = AutomationSettings()
         settings.reviewRequested.runner = .shell

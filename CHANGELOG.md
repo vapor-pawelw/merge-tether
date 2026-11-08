@@ -14,6 +14,10 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 
 ### Added
 
+- Add a simple per-MR Automation switch and repository-default toggles, preserving inherited scope and existing action permissions.
+- Keep cached background refreshes silent while showing startup, explicit global and per-MR refresh progress without weakening action freshness checks.
+- Keep draft cards at normal contrast and distinguish them with gray titles and statuses.
+
 - Compare app-owned coding-agent and verification usage in a dedicated Settings tab, with persistent USD estimates, daily averages/history, hourly through monthly Codex/Claude bars and precise hover details; retain reported tokens and explicit unknown or partial runs.
 
 - Return unsupported app-created reply claims to the configured coding agent for a bounded correction, followed by independent verification and the existing publication policy.

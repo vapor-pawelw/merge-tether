@@ -143,7 +143,7 @@ struct TodoListView: View {
                 }
 
                 Button {
-                    Task { await monitor.refreshNow() }
+                    Task { await monitor.refreshManually() }
                 } label: {
                     ZStack {
                         if isRefreshing {
@@ -155,6 +155,7 @@ struct TodoListView: View {
                     .frame(width: 16, height: 16)
                 }
                 .buttonStyle(.borderless)
+                .disabled(isRefreshing)
                 .help(Text(.Menu.menuHeaderRefreshTooltip))
                 .accessibilityLabel(Text(.Menu.menuHeaderRefreshTooltip))
             }
@@ -164,7 +165,7 @@ struct TodoListView: View {
     }
 
     private var isRefreshing: Bool {
-        monitor.isLoading || monitor.attention.isLoading || monitor.authoredMergeRequests.isLoading
+        monitor.showsGlobalRefreshProgress
     }
 
     @ViewBuilder

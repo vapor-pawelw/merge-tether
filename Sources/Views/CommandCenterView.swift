@@ -62,11 +62,14 @@ struct CommandCenterView: View {
                 Button { showingAdd = true } label: {
                     Label { Text(.Board.boardAdd) } icon: { Image(systemName: "plus") }
                 }
-                Button { Task { await monitor.refreshNow() } } label: {
-                    Label { Text(.CommandCenter.commandCenterRefresh) } icon: { Image(systemName: "arrow.clockwise") }
+                Button { Task { await monitor.refreshManually() } } label: {
+                    Label { Text(.CommandCenter.commandCenterRefresh) } icon: {
+                        if monitor.showsGlobalRefreshProgress { ProgressView().controlSize(.small) }
+                        else { Image(systemName: "arrow.clockwise") }
+                    }
                 }
                 .keyboardShortcut("r", modifiers: .command)
-                .disabled(monitor.isLoading)
+                .disabled(monitor.showsGlobalRefreshProgress)
                 Button { openSettings() } label: {
                     Label { Text(.CommandCenter.commandCenterSettings) } icon: { Image(systemName: "gearshape") }
                 }
@@ -99,7 +102,7 @@ struct CommandCenterView: View {
             HStack {
                 Label { Text(.Board.boardInitialSyncFailed) } icon: { Image(systemName: "exclamationmark.triangle") }
                 Spacer()
-                Button { Task { await monitor.refreshNow() } } label: { Text(.CommandCenter.commandCenterRefresh) }
+                Button { Task { await monitor.refreshManually() } } label: { Text(.CommandCenter.commandCenterRefresh) }
             }
             .font(.caption).foregroundStyle(.orange).padding(10)
         } else if monitor.attention.hasError || monitor.authoredMergeRequests.hasError {
