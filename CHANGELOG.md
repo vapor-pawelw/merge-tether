@@ -94,6 +94,8 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 
 ### Fixed
 
+- Skip courtesy reactions on unclear comment purposes and automatically generated artifact-status reports, including those posted from regular GitLab accounts.
+
 - Correlate review summaries with answered findings across threads without requiring duplicate replies, while preserving outstanding conditions and reviewer consent.
 
 - Keep courtesy thumbs-ups for human feedback, including AI-assisted comments, while skipping generic bot and automated workflow reports; concrete bot review feedback remains eligible without affecting safe thread closure.

@@ -152,8 +152,12 @@ enum ReReviewVerifier {
             concreteCodeReviewFeedback for specific, concrete feedback about code behavior, a finding,
             or its verified correction; code references alone do not qualify a general summary.
             Return reviewSummary for general review, no-findings or code-shape summaries. Return
-            automatedReviewReport for such a generic report with explicit automated-process provenance,
-            such as a generated-by workflow and pipeline/job reference. Merely mentioning AI assistance,
+            automatedReviewReport for a generic report or status announcement with explicit automated-process
+            provenance: generated test-quality/score reports, automatic changelog or artifact-generation
+            status, and workflow completion notifications. A pipeline/job reference is supporting evidence,
+            not required when the message explicitly says an automation generated and committed an artifact.
+            Quoting generated YAML, file paths or code does not turn such a status into code-review feedback.
+            Merely mentioning AI assistance,
             polished prose, tables or an AI-authorship assessment is not automated-process provenance.
             Concrete feedback remains concreteCodeReviewFeedback even when an automated process posted
             it. Return other for unrelated purposes, non-informational states or unclear purpose.

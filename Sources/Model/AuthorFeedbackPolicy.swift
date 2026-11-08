@@ -64,7 +64,7 @@ struct AuthorFeedbackPolicy {
         guard note.state == .informational, note.informationalAcknowledgementSafe == true,
               let purpose = note.informationalPurpose, purpose != .automatedReviewReport else { return false }
         switch accountKind {
-        case .regular: return true
+        case .regular: return purpose == .concreteCodeReviewFeedback || purpose == .reviewSummary
         case .automation: return purpose == .concreteCodeReviewFeedback
         case .unknown: return false
         }
