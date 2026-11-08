@@ -14,6 +14,8 @@ struct AuthorFeedbackStatus: Equatable, Sendable {
     var followUpNoteIDs: Set<Int> = []
     var replyNoteIDs: Set<Int> = []
     var addressedNoteIDs: Set<Int> = []
+    var failureReason: String? = nil
+    var isReadOnlyFailure = false
 
     var needsAttention: Bool {
         phase == .failed || phase == .waitingPublication || !replyNoteIDs.isEmpty || findings.contains {
@@ -43,6 +45,14 @@ final class AuthorFeedbackCoordinator {
     private let glab: GlabService
     private let canAutomate: @MainActor (AutomationAssistant) async -> Bool
     private let verify: @MainActor (ReReviewVerifier.Input, AutomationAssistant, String) async throws -> ReReviewAssessment
+    private let retryWait: ReadOnlyAssessmentRetry.Wait
+    private let now: ReadOnlyAssessmentRetry.Clock
+    private struct FailedRead {
+        let date: Date
+        let accountRevision: UInt64
+        let configuration: AutomationSettings
+    }
+    @ObservationIgnored private var failedReads: [MRAutomationScope.Target: FailedRead] = [:]
     var onRemoteChange: (() -> Void)?
     var onNeedsWork: ((GitLabMergeRequest, Set<Int>, String) async -> Void)?
 
@@ -54,15 +64,28 @@ final class AuthorFeedbackCoordinator {
         let configuration: AutomationSettings
         let fingerprint: String
         let drafts: Int
+        let accountRevision: UInt64
         var readOnly: Bool { request.draft == true || drafts > 0 }
     }
+
+    private struct Preparation {
+        let assessment: ReReviewAssessment
+        let threads: [GitLabMergeRequestDiscussion]
+        let drafts: [GitLabDraftNote]
+        let approvals: Set<Int>
+    }
+
+    private struct ReadOnlyFailure: Error { let cause: any Error }
 
     init(settings: SettingsManager, glab: GlabService,
          canAutomate: @escaping @MainActor (AutomationAssistant) async -> Bool = { await AssistantCLI.detect($0, requireCLI: true).isReady },
          verify: @escaping @MainActor (ReReviewVerifier.Input, AutomationAssistant, String) async throws -> ReReviewAssessment = {
              try await ReReviewVerifier.verify($0, assistant: $1, model: $2)
-         }) {
+         }, retryWait: @escaping ReadOnlyAssessmentRetry.Wait = ReadOnlyAssessmentRetry.wait,
+         now: @escaping ReadOnlyAssessmentRetry.Clock = { Date() }) {
         self.settings = settings; self.glab = glab; self.canAutomate = canAutomate; self.verify = verify
+        self.retryWait = retryWait
+        self.now = now
     }
 
     func status(projectID: Int, iid: Int) -> AuthorFeedbackStatus? {
@@ -103,9 +126,17 @@ final class AuthorFeedbackCoordinator {
         guard hasFeedback else { statuses.removeValue(forKey: target); return }
         if let status = statuses[target], status.head == head, status.fingerprint == fingerprint,
            status.semanticContextFingerprint == request.semanticContextFingerprint,
-           status.phase == .failed { return }
+           status.phase == .failed {
+            guard status.isReadOnlyFailure, let failure = failedReads[target],
+                  failure.accountRevision != glab.accountRevision || failure.configuration != configuration
+                    || now().timeIntervalSince(failure.date) >= ReadOnlyAssessmentRetry.cooldown else { return }
+            statuses[target]?.phase = .checking
+            statuses[target]?.isReadOnlyFailure = false
+            statuses[target]?.failureReason = nil
+        }
         let input = Input(request: request, discussions: discussions, user: user, target: target,
-                          configuration: settings.automation, fingerprint: fingerprint, drafts: drafts)
+                          configuration: settings.automation, fingerprint: fingerprint, drafts: drafts,
+                          accountRevision: glab.accountRevision)
         if statuses[target]?.head != head || statuses[target]?.fingerprint != fingerprint
             || statuses[target]?.semanticContextFingerprint != request.semanticContextFingerprint {
             statuses[target] = .init(head: head, fingerprint: fingerprint,
@@ -121,6 +152,7 @@ final class AuthorFeedbackCoordinator {
             guard outsideScope.map({ !$0.resolve(target).active }) ?? true else { continue }
             pending.removeValue(forKey: target); tasks[target]?.cancel()
             statuses.removeValue(forKey: target); cache.removeValue(forKey: target)
+            failedReads.removeValue(forKey: target)
             acknowledgementAttempts.removeValue(forKey: target)
             acknowledgedReactions.removeValue(forKey: target)
         }
@@ -133,6 +165,15 @@ final class AuthorFeedbackCoordinator {
         acknowledgementAttempts.removeValue(forKey: target)
         acknowledgedReactions.removeValue(forKey: target)
         statuses.removeValue(forKey: target)
+        failedReads.removeValue(forKey: target)
+    }
+
+    /// Dependency recovery reopens only evidence gathering, never a failed action.
+    func retryReadOnlyFailures() {
+        for (target, failure) in failedReads where target.host == glab.resolvedHost && target.username == glab.currentUsername {
+            failedReads[target] = .init(date: .distantPast, accountRevision: failure.accountRevision,
+                configuration: failure.configuration)
+        }
     }
 
     private func startNext() {
@@ -156,8 +197,16 @@ final class AuthorFeedbackCoordinator {
                 }
                 catch {
                     if !Task.isCancelled, isCurrent(input) {
+                        let readOnly = error as? ReadOnlyFailure
+                        if readOnly != nil {
+                            failedReads[target] = .init(date: now(), accountRevision: input.accountRevision, configuration: input.configuration)
+                        } else { failedReads.removeValue(forKey: target) }
                         statuses[target] = .init(head: input.request.sha ?? "", fingerprint: input.fingerprint,
-                            semanticContextFingerprint: input.request.semanticContextFingerprint, phase: .failed)
+                            semanticContextFingerprint: input.request.semanticContextFingerprint, phase: .failed,
+                            failureReason: String(GlabService.redactWorkflowEvidence(String(describing: readOnly?.cause ?? error)).prefix(600)),
+                            isReadOnlyFailure: readOnly != nil)
+                        // Refreshes queued during backoff cannot restart an exhausted snapshot's budget.
+                        pending.removeValue(forKey: target)
                         Log.monitor.error("Author feedback verification failed: \(String(describing: error), privacy: .private)")
                     }
                 }
@@ -167,6 +216,7 @@ final class AuthorFeedbackCoordinator {
 
     private func isCurrent(_ input: Input) -> Bool {
         !Task.isCancelled && glab.resolvedHost == input.target.host && glab.currentUsername == input.user.username
+            && glab.accountRevision == input.accountRevision
             && statuses[input.target]?.head == input.request.sha
             && statuses[input.target]?.fingerprint == input.fingerprint
             && statuses[input.target]?.semanticContextFingerprint == input.request.semanticContextFingerprint
@@ -176,7 +226,7 @@ final class AuthorFeedbackCoordinator {
             && settings.automation.scope.permits(input.request, host: input.target.host, username: input.user.username)
     }
 
-    private func process(_ input: Input) async throws {
+    private func prepare(_ input: Input) async throws -> Preparation {
         guard isCurrent(input) else { throw CancellationError() }
         guard await canAutomate(input.configuration.assistant) else { throw ReReviewVerifier.VerificationError.unavailable }
         guard isCurrent(input) else { throw CancellationError() }
@@ -210,14 +260,38 @@ final class AuthorFeedbackCoordinator {
               current.state == "opened", current.draft == request.draft, current.author.id == input.user.id,
               current.webURL == request.webURL else { throw CancellationError() }
         if input.readOnly {
-            // Drafts block resolution and their own thread's duplicate follow-up,
-            // while independent incoming feedback can still receive scoped work.
             async let liveThreads = glab.fetchMergeRequestDiscussions(projectID: request.projectID, iid: request.iid, host: host)
             async let liveUser = glab.fetchAuthenticatedUser(host: host, expectedUsername: input.user.username)
             async let liveDrafts = glab.fetchOwnDraftNotes(projectID: request.projectID, iid: request.iid, host: host, userID: input.user.id)
             let (threads, user, drafts) = try await (liveThreads, liveUser, liveDrafts)
             guard isCurrent(input), user == input.user, drafts.count == input.drafts,
                   ReviewVerdict.fingerprint(threads) == input.fingerprint else { throw CancellationError() }
+            return Preparation(assessment: assessment, threads: threads, drafts: drafts, approvals: [])
+        }
+        let approvals = try await glab.fetchMergeRequestApproverIDs(projectID: request.projectID, iid: request.iid, host: host)
+        guard isCurrent(input) else { throw CancellationError() }
+        return Preparation(assessment: assessment, threads: input.discussions, drafts: [], approvals: approvals)
+    }
+
+    private func process(_ input: Input) async throws {
+        let prepared: Preparation
+        do {
+            prepared = try await ReadOnlyAssessmentRetry.run(isCurrent: { self.isCurrent(input) }, wait: retryWait, onRetry: {
+                self.statuses[input.target]?.phase = .checking
+                self.statuses[input.target]?.readOnlyReconciliation = input.readOnly
+                self.statuses[input.target]?.failureReason = nil
+                self.statuses[input.target]?.isReadOnlyFailure = false
+            }) { try await self.prepare(input) }
+        } catch is CancellationError { throw CancellationError() }
+        catch { throw ReadOnlyFailure(cause: error) }
+        failedReads.removeValue(forKey: input.target)
+        // No executable follow-up, reaction or resolution is inside the retry boundary.
+        let request = input.request
+        let host = input.target.host
+        let assessment = prepared.assessment
+        if input.readOnly {
+            let threads = prepared.threads
+            let drafts = prepared.drafts
             let repliesByThread = assessment.missingPublishedRepliesByThread(in: threads, authorID: input.user.id)
             let owedNotes = Set(repliesByThread.values.flatMap { $0 })
             let draftedThreads = Set(drafts.compactMap(\.discussionID))
@@ -237,7 +311,7 @@ final class AuthorFeedbackCoordinator {
             if changed { onRemoteChange?() }
             return
         }
-        var approved = try await glab.fetchMergeRequestApproverIDs(projectID: request.projectID, iid: request.iid, host: host)
+        var approved = prepared.approvals
         var threads = input.discussions
         let initial = AuthorFeedbackPolicy.evaluate(discussions: threads, assessment: assessment, authorID: input.user.id,
             approvedReviewerIDs: approved, enabled: input.configuration.autoResolveAcceptedFeedback)

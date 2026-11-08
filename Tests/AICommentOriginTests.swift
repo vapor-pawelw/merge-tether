@@ -4,6 +4,241 @@ import Testing
 
 @MainActor
 struct AICommentOriginTests {
+    @MainActor private final class RetryState {
+        var calls = 0
+        var reads = 0
+        var now = Date()
+        var recovered = false
+    }
+
+    @Test(arguments: ["assessment", "live-read"])
+    func transientReadOnlyFailureRetriesWithoutAnotherPoll(_ stage: String) async throws {
+        let directory = try folder(); defer { try? FileManager.default.removeItem(at: directory) }
+        let source = note()
+        var calls = 0
+        var reads = 0
+        let coordinator = AICommentOriginCoordinator(directory: directory, assess: { _, notes, _, _ in
+            calls += 1
+            if stage == "assessment" && calls == 1 { throw AICommentOriginAssessor.AssessmentError.failed }
+            return positive(notes)
+        }, fetchCurrent: { _ in
+            reads += 1
+            if stage == "live-read" && reads == 1 { throw AICommentOriginAssessor.AssessmentError.failed }
+            return [source]
+        }, isCurrent: { _, _, _ in true }, retryWait: { _ in await Task.yield() })
+        coordinator.schedule(target: target, notes: [source], assistant: .codex, model: "cheap")
+        let deadline = ContinuousClock.now + .seconds(5)
+        while coordinator.isChecking(work: work), ContinuousClock.now < deadline {
+            try await Task.sleep(for: .milliseconds(20))
+        }
+        #expect(calls == (stage == "assessment" ? 2 : 1))
+        #expect(AICommentAssessmentStore.isAI(source, host: target.host, projectID: 7, iid: 13, in: directory))
+    }
+
+    @Test(arguments: [AICommentOriginAssessment.Classification.uncertain, .manualLikely])
+    func completedNonAIVerdictSurvivesFinalReadFailuresAndCooldown(_ classification: AICommentOriginAssessment.Classification) async throws {
+        let directory = try folder(); defer { try? FileManager.default.removeItem(at: directory) }
+        let state = RetryState()
+        let coordinator = AICommentOriginCoordinator(directory: directory, assess: { _, incoming, _, _ in
+            state.calls += 1
+            if state.calls > 1 { return positive(incoming) }
+            return .init(notes: incoming.map { .init(noteID: $0.id!, classification: classification,
+                confidence: .uncertain, evidence: "The completed assessment does not establish AI assistance.") })
+        }, fetchCurrent: { _ in
+            state.reads += 1
+            if !state.recovered { throw AICommentOriginAssessor.AssessmentError.failed }
+            return [note()]
+        }, isCurrent: { _, _, _ in true }, retryWait: { _ in await Task.yield() }, now: { state.now })
+        coordinator.schedule(target: target, notes: [note()], assistant: .codex, model: "cheap")
+        await settle(coordinator)
+        #expect(state.calls == 1 && state.reads == 3)
+        #expect(coordinator.failure(work: work) != nil)
+        state.now = state.now.addingTimeInterval(ReadOnlyAssessmentRetry.cooldown + 1)
+        state.recovered = true
+        coordinator.schedule(target: target, notes: [note()], assistant: .codex, model: "cheap")
+        await settle(coordinator)
+        #expect(state.calls == 1 && state.reads == 4)
+        #expect(coordinator.failure(work: work) == nil)
+        let stored = try #require(AICommentAssessmentStore.result(for: note(), host: target.host, projectID: 7, iid: 13, in: directory))
+        #expect(stored.classification == classification.rawValue)
+        #expect(!AICommentAssessmentStore.isAI(note(), host: target.host, projectID: 7, iid: 13, in: directory))
+    }
+
+    @Test(arguments: [AICommentOriginAssessment.Classification.uncertain, .manualLikely, .aiAssisted])
+    func completedVerdictSurvivesRestartBeforeFinalSourceVerification(_ classification: AICommentOriginAssessment.Classification) async throws {
+        let directory = try folder(); defer { try? FileManager.default.removeItem(at: directory) }
+        let state = RetryState()
+        do {
+            let original = AICommentOriginCoordinator(directory: directory, assess: { _, incoming, _, _ in
+                state.calls += 1
+                return .init(notes: incoming.map { .init(noteID: $0.id!, classification: classification,
+                    confidence: classification == .aiAssisted ? .veryHigh : .uncertain,
+                    evidence: "A completed semantic assessment awaiting live source verification.") })
+            }, fetchCurrent: { _ in
+                state.reads += 1
+                throw AICommentOriginAssessor.AssessmentError.failed
+            }, isCurrent: { _, _, _ in true }, retryWait: { _ in await Task.yield() }, now: { state.now })
+            original.schedule(target: target, notes: [note()], assistant: .codex, model: "cheap")
+            await settle(original)
+            #expect(state.calls == 1 && state.reads == 3)
+            #expect(AICommentAssessmentStore.result(for: note(), host: target.host, projectID: 7, iid: 13, in: directory) == nil)
+        }
+        state.now = state.now.addingTimeInterval(ReadOnlyAssessmentRetry.cooldown + 1)
+        let restarted = AICommentOriginCoordinator(directory: directory, assess: { _, incoming, _, _ in
+            state.calls += 1
+            return positive(incoming)
+        }, fetchCurrent: { _ in state.reads += 1; return [note()] }, isCurrent: { _, _, _ in true },
+            retryWait: { _ in await Task.yield() }, now: { state.now })
+        restarted.schedule(target: target, notes: [note()], assistant: .codex, model: "cheap")
+        await settle(restarted)
+        #expect(state.calls == 1 && state.reads == 4)
+        let stored = try #require(AICommentAssessmentStore.result(for: note(), host: target.host, projectID: 7, iid: 13, in: directory))
+        #expect(stored.classification == classification.rawValue)
+        #expect(stored.qualifiesAsAI == (classification == .aiAssisted))
+    }
+
+    @Test func completedPendingVerdictIsNotReusedAfterSourceAuthorChanges() async throws {
+        let directory = try folder(); defer { try? FileManager.default.removeItem(at: directory) }
+        let state = RetryState()
+        let original = note()
+        let changed = GitLabMergeRequestDiscussion.Note(id: original.id,
+            author: .init(id: 19, username: "different-author", name: "Different Author"),
+            system: false, resolvable: nil, resolved: nil, resolvedBy: nil, body: original.body)
+        let coordinator = AICommentOriginCoordinator(directory: directory, assess: { _, incoming, _, _ in
+            state.calls += 1
+            if state.calls > 1 { return positive(incoming) }
+            return .init(notes: incoming.map { .init(noteID: $0.id!, classification: .uncertain,
+                confidence: .uncertain, evidence: "A verdict tied to the original source author.") })
+        }, fetchCurrent: { _ in
+            if !state.recovered { throw AICommentOriginAssessor.AssessmentError.failed }
+            return [changed]
+        }, isCurrent: { _, _, _ in true }, retryWait: { _ in await Task.yield() }, now: { state.now })
+        coordinator.schedule(target: target, notes: [original], assistant: .codex, model: "cheap")
+        await settle(coordinator)
+        state.now = state.now.addingTimeInterval(ReadOnlyAssessmentRetry.cooldown + 1)
+        state.recovered = true
+        coordinator.schedule(target: target, notes: [changed], assistant: .codex, model: "cheap")
+        await settle(coordinator)
+        #expect(state.calls == 2)
+        #expect(AICommentAssessmentStore.isAI(changed, host: target.host, projectID: 7, iid: 13, in: directory))
+    }
+
+    @Test(arguments: ["body", "author", "note", "account", "host", "project", "mr", "model", "provider"])
+    func durablePendingVerdictCannotCrossItsSourceOrAssessmentContext(_ changed: String) async throws {
+        let directory = try folder(); defer { try? FileManager.default.removeItem(at: directory) }
+        let source = note()
+        let pending = AICommentOriginAssessment.Note(noteID: 10, classification: .uncertain,
+            confidence: .uncertain, evidence: "Only the original exact assessment context was verified.")
+        try AICommentAssessmentStore.preservePendingVerdict(pending, for: source, target: target,
+            assistant: .codex, model: "cheap", in: directory)
+        let nextTarget = MRAutomationScope.Target(host: changed == "host" ? "other.example.test" : target.host,
+            username: changed == "account" ? "other-account" : target.username,
+            projectID: changed == "project" ? 8 : target.projectID, iid: changed == "mr" ? 14 : target.iid)
+        let nextSource = GitLabMergeRequestDiscussion.Note(id: changed == "note" ? 11 : source.id,
+            author: .init(id: changed == "author" ? 19 : 9, username: "person", name: "Person"),
+            system: false, resolvable: nil, resolved: nil, resolvedBy: nil,
+            body: changed == "body" ? "An edited source body" : source.body)
+        var calls = 0
+        let coordinator = AICommentOriginCoordinator(directory: directory, assess: { _, incoming, _, _ in
+            calls += 1; return positive(incoming)
+        }, fetchCurrent: { _ in [nextSource] }, isCurrent: { _, _, _ in true })
+        coordinator.schedule(target: nextTarget, notes: [nextSource], assistant: changed == "provider" ? .claude : .codex,
+            model: changed == "model" ? "different-model" : "cheap")
+        let nextIID = try #require(nextTarget.iid)
+        let nextWork = AssistantAutomationRunner.MergeRequestWork(host: nextTarget.host, projectID: nextTarget.projectID, iid: nextIID)
+        for _ in 0..<300 {
+            await Task.yield()
+            if !coordinator.isChecking(work: nextWork) { break }
+        }
+        #expect(calls == 1)
+        #expect(AICommentAssessmentStore.isAI(nextSource, host: nextTarget.host,
+            projectID: nextTarget.projectID, iid: nextIID, in: directory))
+    }
+
+    @Test func unreadablePendingVerdictCannotSolicitAnotherOpinion() async throws {
+        let directory = try folder(); defer { try? FileManager.default.removeItem(at: directory) }
+        let source = note()
+        try AICommentAssessmentStore.preservePendingVerdict(.init(noteID: 10, classification: .manualLikely,
+            confidence: .high, evidence: "The completed opinion must not be replaced by another vote."),
+            for: source, target: target, assistant: .codex, model: "cheap", in: directory)
+        let enumerator = try #require(FileManager.default.enumerator(at: directory, includingPropertiesForKeys: nil))
+        let jsonFiles = enumerator.allObjects.compactMap { $0 as? URL }.filter { $0.pathExtension == "json" }
+        let path = try #require(jsonFiles.first)
+        try Data("malformed pending verdict".utf8).write(to: path)
+        var calls = 0
+        let coordinator = AICommentOriginCoordinator(directory: directory, assess: { _, incoming, _, _ in
+            calls += 1; return positive(incoming)
+        }, fetchCurrent: { _ in [source] }, isCurrent: { _, _, _ in true }, retryWait: { _ in await Task.yield() })
+        coordinator.schedule(target: target, notes: [source], assistant: .codex, model: "cheap")
+        await settle(coordinator)
+        #expect(calls == 0)
+        #expect(coordinator.failure(work: work) != nil)
+        #expect(AICommentAssessmentStore.result(for: source, host: target.host, projectID: 7, iid: 13, in: directory) == nil)
+    }
+
+    @Test(arguments: ["cooldown", "dependency"])
+    func exhaustedReadOnlyBudgetDoesNotRestartOnLaterPolls(_ recovery: String) async throws {
+        let directory = try folder(); defer { try? FileManager.default.removeItem(at: directory) }
+        let state = RetryState()
+        let coordinator = AICommentOriginCoordinator(directory: directory, assess: { _, incoming, _, _ in
+            state.calls += 1
+            if state.recovered { return positive(incoming) }
+            throw AICommentOriginAssessor.AssessmentError.failed
+        }, fetchCurrent: { _ in [note()] }, isCurrent: { _, _, _ in true }, retryWait: { _ in await Task.yield() }, now: { state.now })
+        for _ in 0..<3 {
+            coordinator.schedule(target: target, notes: [note()], assistant: .codex, model: "cheap")
+            await settle(coordinator)
+        }
+        #expect(state.calls == 3)
+        #expect(coordinator.failure(work: work)?.isEmpty == false)
+        #expect(!coordinator.isChecking(work: work))
+        #expect(!AICommentAssessmentStore.isAI(note(), host: target.host, projectID: 7, iid: 13, in: directory))
+        if recovery == "cooldown" { state.now = state.now.addingTimeInterval(ReadOnlyAssessmentRetry.cooldown + 1) }
+        else { coordinator.retryReadOnlyFailures() }
+        state.recovered = true
+        coordinator.schedule(target: target, notes: [note()], assistant: .codex, model: "cheap")
+        await settle(coordinator)
+        #expect(state.calls == 4)
+        #expect(coordinator.failure(work: work) == nil)
+        #expect(AICommentAssessmentStore.isAI(note(), host: target.host, projectID: 7, iid: 13, in: directory))
+    }
+
+    @Test(arguments: [AICommentOriginAssessment.Classification.uncertain, .manualLikely])
+    func successfulNonAIOriginRemainsPrivateAfterFailureCooldown(_ classification: AICommentOriginAssessment.Classification) async throws {
+        let directory = try folder(); defer { try? FileManager.default.removeItem(at: directory) }
+        var calls = 0
+        var clock = Date()
+        let coordinator = AICommentOriginCoordinator(directory: directory, assess: { _, incoming, _, _ in
+            calls += 1
+            return .init(notes: incoming.map { .init(noteID: $0.id!, classification: classification,
+                confidence: .uncertain, evidence: "Current source evidence remains uncertain.") })
+        }, fetchCurrent: { _ in [note()] }, isCurrent: { _, _, _ in true }, now: { clock })
+        coordinator.schedule(target: target, notes: [note()], assistant: .codex, model: "cheap")
+        await settle(coordinator)
+        clock = clock.addingTimeInterval(ReadOnlyAssessmentRetry.cooldown + 1)
+        coordinator.schedule(target: target, notes: [note()], assistant: .codex, model: "cheap")
+        await settle(coordinator)
+        #expect(calls == 1)
+        #expect(coordinator.failure(work: work) == nil)
+        #expect(!AICommentAssessmentStore.isAI(note(), host: target.host, projectID: 7, iid: 13, in: directory))
+    }
+
+    @Test func cancellationDuringReadOnlyBackoffCannotPersistOrRetry() async throws {
+        let directory = try folder(); defer { try? FileManager.default.removeItem(at: directory) }
+        var calls = 0
+        var current = true
+        let coordinator = AICommentOriginCoordinator(directory: directory, assess: { _, _, _, _ in
+            calls += 1
+            throw AICommentOriginAssessor.AssessmentError.failed
+        }, fetchCurrent: { _ in [note()] }, isCurrent: { _, _, _ in current }, retryWait: { _ in current = false })
+        coordinator.schedule(target: target, notes: [note()], assistant: .codex, model: "cheap")
+        await settle(coordinator)
+        #expect(calls == 1)
+        #expect(!coordinator.isChecking(work: work))
+        #expect(coordinator.failure(work: work) == nil)
+        #expect(AICommentAssessmentStore.result(for: note(), host: target.host, projectID: 7, iid: 13, in: directory) == nil)
+    }
+
     private let target = MRAutomationScope.Target(host: "gitlab.example.test", username: "me", projectID: 7, iid: 13)
     private var work: AssistantAutomationRunner.MergeRequestWork { .init(host: target.host, projectID: 7, iid: 13) }
     private func note(_ id: Int = 10, body: String = "A detailed review with a suggested patch") -> GitLabMergeRequestDiscussion.Note {
@@ -123,7 +358,7 @@ struct AICommentOriginTests {
         #expect(calls == 1)
     }
 
-    @Test func changedLiveBodyOrAccountCannotGainARecordAndFailureDoesNotLoop() async throws {
+    @Test func changedLiveBodyOrAccountCannotGainARecordAndFailuresHaveABoundedBudget() async throws {
         let directory = try folder(); defer { try? FileManager.default.removeItem(at: directory) }
         let source = note()
         var calls = 0
@@ -134,21 +369,28 @@ struct AICommentOriginTests {
         await settle(coordinator)
         #expect(calls == 1)
         #expect(AICommentAssessmentStore.assessment(for: source, host: target.host, projectID: 7, iid: 13, in: directory) == nil)
-        let failed = AICommentOriginCoordinator(directory: directory, assess: { _, _, _, _ in
-            calls += 1; throw AICommentOriginAssessor.AssessmentError.failed
-        }, fetchCurrent: { _ in [source] }, isCurrent: { _, _, _ in true })
+        let failedDirectory = try folder(); defer { try? FileManager.default.removeItem(at: failedDirectory) }
+        var failedCalls = 0
+        let failed = AICommentOriginCoordinator(directory: failedDirectory, assess: { _, _, _, _ in
+            failedCalls += 1; throw AICommentOriginAssessor.AssessmentError.failed
+        }, fetchCurrent: { _ in [source] }, isCurrent: { _, _, _ in true }, retryWait: { _ in await Task.yield() })
         for _ in 0..<3 {
             failed.schedule(target: target, notes: [source], assistant: .codex, model: "cheap")
             await settle(failed)
         }
-        #expect(calls == 2)
+        #expect(failedCalls == 3)
+        #expect(failed.failure(work: work) != nil && !failed.isChecking(work: work))
+        #expect(AICommentAssessmentStore.assessment(for: source, host: target.host, projectID: 7, iid: 13, in: failedDirectory) == nil)
+        let obsoleteDirectory = try folder(); defer { try? FileManager.default.removeItem(at: obsoleteDirectory) }
         var current = true
-        let obsolete = AICommentOriginCoordinator(directory: directory, assess: { _, notes, _, _ in
-            current = false; return positive(notes)
+        var obsoleteCalls = 0
+        let obsolete = AICommentOriginCoordinator(directory: obsoleteDirectory, assess: { _, notes, _, _ in
+            obsoleteCalls += 1; current = false; return positive(notes)
         }, fetchCurrent: { _ in [source] }, isCurrent: { _, _, _ in current })
         obsolete.schedule(target: target, notes: [source], assistant: .codex, model: "cheap")
         await settle(obsolete)
-        #expect(AICommentAssessmentStore.assessment(for: source, host: target.host, projectID: 7, iid: 13, in: directory) == nil)
+        #expect(obsoleteCalls == 1)
+        #expect(AICommentAssessmentStore.assessment(for: source, host: target.host, projectID: 7, iid: 13, in: obsoleteDirectory) == nil)
     }
 
     @Test func oversizedBodyRemainsUnknownWithoutInvokingAnExecutable() async throws {

@@ -4,6 +4,117 @@ import Testing
 
 @MainActor
 struct AuthorFeedbackCoordinatorTests {
+    @MainActor private final class RetryState {
+        var calls = 0
+        var now = Date()
+        var recovered = false
+        weak var coordinator: AuthorFeedbackCoordinator?
+    }
+
+    @Test func transientVerificationFailureRetriesBeforeFeedbackActions() async throws {
+        try await withFixture { fixture in
+            var calls = 0
+            let coordinator = AuthorFeedbackCoordinator(settings: fixture.settings, glab: fixture.glab,
+                canAutomate: { _ in true }, verify: { _, _, _ in
+                    calls += 1
+                    if calls == 1 { throw ReReviewVerifier.VerificationError.failed }
+                    return .init(notes: [.init(noteID: 10, state: .addressed, reason: "The current fix is verified")])
+                }, retryWait: { _ in await Task.yield() })
+            try await fixture.run(coordinator)
+            #expect(calls == 2)
+            #expect(coordinator.status(projectID: 1, iid: 2)?.phase == .complete)
+            #expect(fixture.resolutionPosts == 1)
+        }
+    }
+
+    @Test(arguments: [ReReviewAssessment.Note.State.uncertain, .blocking])
+    func completedSemanticVerdictIsReusedWhenFinalMRReadFails(_ verdict: ReReviewAssessment.Note.State) async throws {
+        try await withFixture { fixture in
+            try fixture.write("fail-request-once", "yes")
+            let state = RetryState()
+            let coordinator = AuthorFeedbackCoordinator(settings: fixture.settings, glab: fixture.glab,
+                canAutomate: { _ in true }, verify: { _, _, _ in
+                    state.calls += 1
+                    return .init(notes: [.init(noteID: 10, state: verdict, reason: "A completed semantic verdict")])
+                }, retryWait: { _ in await Task.yield() })
+            try await fixture.run(coordinator)
+            #expect(state.calls == 1)
+            #expect(coordinator.status(projectID: 1, iid: 2)?.phase == .complete)
+            #expect(fixture.resolutionPosts == 0)
+            let request = try JSONDecoder().decode(GitLabMergeRequest.self, from: Data(Fixture.request.utf8))
+            let discussions = try fixture.discussions()
+            let fingerprint = try #require(ReviewVerdict.fingerprint(discussions))
+            #expect(coordinator.assessment(for: request, fingerprint: fingerprint)?.notes.first?.state == verdict)
+        }
+    }
+
+    @Test func failureAfterResolutionDoesNotReplayTheFeedbackProcess() async throws {
+        try await withFixture { fixture in
+            try fixture.write("fail-discussions-after-resolution", "yes")
+            let coordinator = fixture.coordinator()
+            try await fixture.run(coordinator)
+            try await fixture.run(coordinator)
+            #expect(coordinator.status(projectID: 1, iid: 2)?.phase == .failed)
+            #expect(coordinator.status(projectID: 1, iid: 2)?.isReadOnlyFailure == false)
+            #expect(fixture.inputs.count == 1)
+            #expect(fixture.resolutionPosts == 1)
+        }
+    }
+
+    @Test(arguments: ["cooldown", "dependency"])
+    func exhaustedReadOnlyBudgetStaysBoundedAcrossQueuedRefreshes(_ recovery: String) async throws {
+        try await withFixture { fixture in
+            let state = RetryState()
+            let coordinator = AuthorFeedbackCoordinator(settings: fixture.settings, glab: fixture.glab,
+                canAutomate: { _ in true }, verify: { _, _, _ in
+                    state.calls += 1
+                    if state.recovered { return .init(notes: [.init(noteID: 10, state: .addressed, reason: "Current evidence recovered")]) }
+                    throw ReReviewVerifier.VerificationError.failed
+                }, retryWait: { _ in
+                    let running = try #require(state.coordinator)
+                    #expect(running.status(projectID: 1, iid: 2)?.phase == .checking)
+                    try fixture.start(running)
+                    await Task.yield()
+                }, now: { state.now })
+            state.coordinator = coordinator
+            let running = coordinator
+            try await fixture.run(running)
+            for _ in 0..<20 { await Task.yield() }
+            try await fixture.run(running)
+            #expect(state.calls == 3)
+            let status = try #require(running.status(projectID: 1, iid: 2))
+            #expect(status.phase == .failed && status.isReadOnlyFailure)
+            #expect(status.failureReason?.isEmpty == false)
+            #expect(fixture.resolutionPosts == 0 && fixture.reactionPosts == 0)
+            if recovery == "cooldown" { state.now = state.now.addingTimeInterval(ReadOnlyAssessmentRetry.cooldown + 1) }
+            else { running.retryReadOnlyFailures() }
+            state.recovered = true
+            try await fixture.run(running)
+            #expect(state.calls == 4)
+            #expect(running.status(projectID: 1, iid: 2)?.phase == .complete)
+            #expect(fixture.resolutionPosts == 1)
+        }
+    }
+
+    @Test func accountChangeDuringReadOnlyBackoffPreventsActionsAndFurtherAttempts() async throws {
+        try await withFixture { fixture in
+            var calls = 0
+            let coordinator = AuthorFeedbackCoordinator(settings: fixture.settings, glab: fixture.glab,
+                canAutomate: { _ in true }, verify: { _, _, _ in
+                    calls += 1
+                    throw ReReviewVerifier.VerificationError.failed
+                }, retryWait: { _ in fixture.glab.currentUsername = "another-account" })
+            try fixture.start(coordinator)
+            let deadline = ContinuousClock.now + .seconds(5)
+            while fixture.glab.currentUsername == "me", ContinuousClock.now < deadline {
+                try await Task.sleep(for: .milliseconds(20))
+            }
+            for _ in 0..<20 { await Task.yield() }
+            #expect(calls == 1)
+            #expect(fixture.resolutionPosts == 0 && fixture.reactionPosts == 0)
+        }
+    }
+
     @Test(arguments: [ReReviewAssessment.Note.State.blocking, .uncertain, .addressed])
     func unrelatedPrivateDraftDoesNotSuppressIncomingFeedback(state: ReReviewAssessment.Note.State) async throws {
         try await withFixture { fixture in
@@ -846,7 +957,9 @@ struct AuthorFeedbackCoordinatorTests {
                 test "$4" = \(Self.host)
                 case "$2" in
                   /user) printf 'user\\n' >> user-reads; cat user.json ;;
-                  /projects/1/merge_requests/2) cat request.json ;;
+                  /projects/1/merge_requests/2)
+                    if [ -e fail-request-once ]; then rm fail-request-once; printf '503 temporarily unavailable' >&2; exit 1; fi
+                    cat request.json ;;
                   */award_emoji*)
                     note_path="${2%/award_emoji*}"
                     note_id="${note_path##*/}"
