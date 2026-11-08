@@ -96,6 +96,10 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 
 ### Fixed
 
+- Reassess completed author follow-ups before handing residual work to a person; distinguish observed defects from suggested remedies and allow one proof-bound, scoped reconciliation of concrete omitted work with a durable retry budget.
+
+- Reconcile stopped feedback follow-ups against current remote evidence without replaying them, retiring obsolete retry prompts and unfinished-work blockers while retaining execution history and live merge checks.
+
 - Skip courtesy reactions on unclear comment purposes and automatically generated artifact-status reports, including those posted from regular GitLab accounts.
 
 - Correlate review summaries with answered findings across threads without requiring duplicate replies, while preserving outstanding conditions and reviewer consent.

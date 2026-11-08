@@ -473,7 +473,13 @@ final class MergeRequestTodoRouter {
                 continue
             }
             if let execution = job?.execution, execution.state.isActive { continue }
-            if let execution = job?.execution, [.failed, .blocked, .interrupted, .cancelled].contains(execution.state) {
+            let stoppedFollowUp = original.kind == .followUp && job.map {
+                AuthorFeedbackStatus.canReconcile($0, request: request)
+                    && $0.key.work.host == original.target.host && $0.key.username == original.target.username
+                    && Set($0.feedbackNoteIDs ?? []) == original.noteIDs
+            } == true
+            if let execution = job?.execution, [.failed, .blocked, .interrupted, .cancelled].contains(execution.state),
+               !stoppedFollowUp {
                 update(original.id) { $0.state = .failed; $0.error = execution.attentionExplanation ?? execution.error ?? execution.summary }
                 continue
             }
@@ -487,8 +493,8 @@ final class MergeRequestTodoRouter {
             // An earlier unbound routing failure is not a worker result. Current
             // independent evidence can finish it without replaying that attempt.
             let unboundFollowUp = original.jobID == nil
-            if original.kind == .followUp, job?.execution?.state == .succeeded || unboundFollowUp, !provedFollowUp {
-                switch await followUpNeedsNoWork(original, request: request) {
+            if original.kind == .followUp, job?.execution?.state == .succeeded || unboundFollowUp || stoppedFollowUp, !provedFollowUp {
+                switch await followUpNeedsNoWork(original, request: request, requireNoDrafts: stoppedFollowUp) {
                 case .proved: provedFollowUp = true
                 case .checking: checkingFollowUp = true
                 case .unverified: break
@@ -502,6 +508,8 @@ final class MergeRequestTodoRouter {
                 update(original.id) { $0.state = .completed; $0.error = nil }
             } else if checkingFollowUp {
                 update(original.id) { $0.state = .running; $0.error = nil }
+            } else if stoppedFollowUp, let execution = job?.execution {
+                update(original.id) { $0.state = .failed; $0.error = execution.attentionExplanation ?? execution.error ?? execution.summary }
             } else if job?.execution?.state == .succeeded {
                 update(original.id) {
                     $0.state = .failed
@@ -545,7 +553,8 @@ final class MergeRequestTodoRouter {
     /// This changes only the local intent; drafts keep their separate remote-proof gate.
     private enum FollowUpCompletion { case proved, checking, unverified }
 
-    private func followUpNeedsNoWork(_ intent: MRTodoIntent, request: GitLabMergeRequest) async -> FollowUpCompletion {
+    private func followUpNeedsNoWork(_ intent: MRTodoIntent, request: GitLabMergeRequest,
+                                     requireNoDrafts: Bool = false) async -> FollowUpCompletion {
         let accountRevision = glab.accountRevision
         guard let iid = intent.target.iid, request.author.username == intent.target.username,
               let head = request.sha, !head.isEmpty,
@@ -561,6 +570,10 @@ final class MergeRequestTodoRouter {
               selected.allSatisfy({ assessed[$0] == .addressed || assessed[$0] == .informational }) else { return .unverified }
         guard assessment.missingPublishedReplyNoteIDs(in: discussions, authorID: request.author.id).isDisjoint(with: selected)
         else { return .unverified }
+        if requireNoDrafts {
+            guard let count = try? await glab.fetchOwnDraftNoteCount(projectID: request.projectID, iid: iid,
+                host: intent.target.host, userID: request.author.id), count == 0 else { return .unverified }
+        }
         guard let live = try? await glab.fetchMergeRequest(projectID: request.projectID, iid: iid, host: intent.target.host),
               let liveDiscussions = try? await glab.fetchMergeRequestDiscussions(projectID: request.projectID, iid: iid, host: intent.target.host),
               let liveUser = try? await glab.fetchAuthenticatedUser(host: intent.target.host, expectedUsername: intent.target.username),

@@ -34,7 +34,13 @@ struct MergeRequestBoardSnapshot {
         var stoppedJobNeedsAttention: Bool {
             Self.jobNeedsAttention(latestJob?.operationalExecution?.state)
                 && !PipelineJobReconciliation.isObsolete(latestJob, request: currentPipelineRequest)
+                && !stoppedFollowUpIsReconciled
                 && !intents.contains { $0.jobID == latestJob?.id && $0.state == .completed }
+        }
+        private var stoppedFollowUpIsReconciled: Bool {
+            guard item.isAuthored, let job = latestJob, let request = item.mergeRequest else { return false }
+            return item.authorFeedbackStatus?.reconciles(job, request: request,
+                discussionFingerprint: item.observedDiscussionFingerprint) == true
         }
         var hasIndependentStoppedWork: Bool {
             stoppedJobNeedsAttention || attentionIntents.contains { $0.state == .failed && !isReconciling($0) }

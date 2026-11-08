@@ -4,6 +4,15 @@ struct AuthorFeedbackAttempt: Codable, Hashable {
     let target: MRAutomationScope.Target
     let noteID: Int
     let revision: String
+    var recoveryRootID: UUID? = nil
+}
+
+/// Concrete residual work assessed after a completed follow-up. The run ID
+/// fences the assessment's timing; it does not grant permission to replay that run.
+struct AuthorFeedbackResidual: Sendable {
+    let assessedRunID: UUID
+    let notes: [ReReviewAssessment.Note]
+    var semanticContextFingerprint: String? = nil
 }
 
 /// Decides which external threads on the user's own MR may be resolved. A thread is ready only when

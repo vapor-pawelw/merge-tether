@@ -156,6 +156,12 @@ struct ReReviewVerifierTests {
         }
         let instructions = try #require(captured["instructions"] as? String)
         #expect(instructions.contains("Do not perform a fresh general code review or introduce new findings"))
+        let normalized = instructions.split(whereSeparator: \.isWhitespace).joined(separator: " ")
+        #expect(normalized.contains("A supported explanation disputing a proposed remedy can be addressed without proving an undocumented business meaning"))
+        #expect(normalized.contains("Check the separately alleged defect and any remaining author obligation before reaching that verdict"))
+        #expect(normalized.contains("Distinguish work still owed by the author from evidence or acceptance requested from the reviewer"))
+        #expect(normalized.contains("Name the exact missing fact and why accessible evidence cannot establish it"))
+        #expect(!normalized.contains("then the useful next step for the user"))
         let evidence = try #require(captured["evidence"] as? [String: Any])
         let target = try #require(evidence["target"] as? [String: Any])
         #expect(target["url"] as? String == input.target?.url.absoluteString)

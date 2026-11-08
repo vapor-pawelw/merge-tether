@@ -16,6 +16,16 @@ struct AssistantTaskGroup: Identifiable {
     }
     var chatURL: URL? { chatHandoff.flatMap(Self.chatURL(for:)) }
 
+    func manualHandoff(currentItem: MergeRequestAttentionMonitor.Item?) -> AssistantAutomationRunner.Handoff? {
+        guard let job = handoffs.first(where: { $0.operationalExecution != nil }),
+              let execution = job.operationalExecution,
+              [.failed, .blocked, .interrupted, .cancelled].contains(execution.state) else { return nil }
+        if let item = currentItem, item.isAuthored, let request = item.mergeRequest,
+           item.authorFeedbackStatus?.reconciles(job, request: request,
+                discussionFingerprint: item.observedDiscussionFingerprint) == true { return nil }
+        return job
+    }
+
     private init(id: AssistantAutomationRunner.MergeRequestWork, handoffs: [AssistantAutomationRunner.Handoff]) {
         self.id = id
         self.handoffs = handoffs

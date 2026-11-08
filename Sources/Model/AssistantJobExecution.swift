@@ -34,13 +34,17 @@ struct AssistantJobExecution: Codable, Equatable, Sendable {
     @MainActor
     static func hasUnfinishedWork(in handoffs: [AssistantAutomationRunner.Handoff],
                                   for work: AssistantAutomationRunner.MergeRequestWork, username: String,
-                                  currentRequest: GitLabMergeRequest? = nil) -> Bool {
+                                  currentRequest: GitLabMergeRequest? = nil,
+                                  feedbackStatus: AuthorFeedbackStatus? = nil,
+                                  discussionFingerprint: String? = nil) -> Bool {
         let latest = handoffs.filter {
             !$0.isObsoleteReminder && $0.key.work == work && $0.key.username == username
                 && !PipelineJobReconciliation.isObsolete($0, request: currentRequest)
         }
             .max { $0.createdAt < $1.createdAt }
         guard let latest else { return false }
+        if let currentRequest, feedbackStatus?.reconciles(latest, request: currentRequest,
+            discussionFingerprint: discussionFingerprint) == true { return false }
         guard let state = latest.execution?.state else { return true }
         return state != .succeeded
     }

@@ -16,6 +16,30 @@ struct AuthorFeedbackStatus: Equatable, Sendable {
     var addressedNoteIDs: Set<Int> = []
     var failureReason: String? = nil
     var isReadOnlyFailure = false
+    /// Exact stopped attempts observed before the current remote preflight; never persisted as worker success.
+    var reconciledFollowUpJobIDs: Set<UUID> = []
+    /// Binds checking and failed attempts even when no successful assessment was cached.
+    var completedFollowUpJobID: UUID? = nil
+
+    static func canReconcile(_ job: AssistantAutomationRunner.Handoff, request: GitLabMergeRequest) -> Bool {
+        guard job.workflow == .followUp, job.pipelineReservation == nil, !job.allowsPush,
+              let state = job.operationalExecution?.state, [.failed, .interrupted, .cancelled].contains(state),
+              let selected = job.feedbackNoteIDs, !selected.isEmpty, selected.allSatisfy({ $0 > 0 }),
+              job.key.work.projectID == request.projectID, job.key.work.iid == request.iid,
+              request.author.username == job.key.username, request.state == "opened",
+              request.webURL.isGitLabMergeRequest(host: job.key.work.host, iid: request.iid) else { return false }
+        return true
+    }
+
+    func reconciles(_ job: AssistantAutomationRunner.Handoff, request: GitLabMergeRequest,
+                    discussionFingerprint: String?) -> Bool {
+        guard Self.canReconcile(job, request: request), reconciledFollowUpJobIDs.contains(job.id),
+              phase == .complete || phase == .waitingPublication,
+              head == request.sha, !head.isEmpty, fingerprint == discussionFingerprint,
+              semanticContextFingerprint == request.semanticContextFingerprint else { return false }
+        let selected = Set(job.feedbackNoteIDs ?? [])
+        return selected.isSubset(of: addressedNoteIDs) && selected.isDisjoint(with: followUpNoteIDs)
+    }
 
     var needsAttention: Bool {
         phase == .failed || phase == .waitingPublication || !replyNoteIDs.isEmpty || findings.contains {
@@ -40,7 +64,7 @@ final class AuthorFeedbackCoordinator {
     }
     @ObservationIgnored private var acknowledgedReactions: [MRAutomationScope.Target: Set<String>] = [:]
     @ObservationIgnored private var acknowledgementAttempts: [MRAutomationScope.Target: AcknowledgementProgress] = [:]
-    @ObservationIgnored private var cache: [MRAutomationScope.Target: (String, ReReviewAssessment)] = [:]
+    @ObservationIgnored private var cache: [MRAutomationScope.Target: (String, ReReviewAssessment, UUID?)] = [:]
     private let settings: SettingsManager
     private let glab: GlabService
     private let canAutomate: @MainActor (AutomationAssistant) async -> Bool
@@ -54,7 +78,7 @@ final class AuthorFeedbackCoordinator {
     }
     @ObservationIgnored private var failedReads: [MRAutomationScope.Target: FailedRead] = [:]
     var onRemoteChange: (() -> Void)?
-    var onNeedsWork: ((GitLabMergeRequest, Set<Int>, String) async -> Void)?
+    var onNeedsWork: ((GitLabMergeRequest, Set<Int>, String, AuthorFeedbackResidual?) async -> Void)?
 
     private struct Input {
         let request: GitLabMergeRequest
@@ -65,6 +89,7 @@ final class AuthorFeedbackCoordinator {
         let fingerprint: String
         let drafts: Int
         let accountRevision: UInt64
+        let completedFollowUpJobID: UUID?
         var readOnly: Bool { request.draft == true || drafts > 0 }
     }
 
@@ -73,6 +98,7 @@ final class AuthorFeedbackCoordinator {
         let threads: [GitLabMergeRequestDiscussion]
         let drafts: [GitLabDraftNote]
         let approvals: Set<Int>
+        var stoppedFollowUps: [AssistantAutomationRunner.Handoff] = []
     }
 
     private struct ReadOnlyFailure: Error { let cause: any Error }
@@ -99,7 +125,9 @@ final class AuthorFeedbackCoordinator {
               state.phase == .complete || state.phase == .waitingPublication,
               state.head == request.sha, state.fingerprint == fingerprint,
               state.semanticContextFingerprint == request.semanticContextFingerprint else { return nil }
-        return cache[.init(host: host, username: username, projectID: request.projectID, iid: request.iid)]?.1
+        let target = MRAutomationScope.Target(host: host, username: username, projectID: request.projectID, iid: request.iid)
+        guard let stored = cache[target], stored.2 == completedFollowUpJob(for: request, target: target)?.id else { return nil }
+        return stored.1
     }
 
     func isChecking(for request: GitLabMergeRequest, fingerprint: String) -> Bool {
@@ -124,9 +152,10 @@ final class AuthorFeedbackCoordinator {
               let fingerprint = ReviewVerdict.fingerprint(discussions), let head = request.sha else { return }
         let hasFeedback = discussions.contains { $0.notes.contains { $0.system == false && $0.author?.id != user.id } }
         guard hasFeedback else { statuses.removeValue(forKey: target); return }
+        let completedJobID = completedFollowUpJob(for: request, target: target)?.id
         if let status = statuses[target], status.head == head, status.fingerprint == fingerprint,
            status.semanticContextFingerprint == request.semanticContextFingerprint,
-           status.phase == .failed {
+           status.phase == .failed, status.completedFollowUpJobID == completedJobID {
             guard status.isReadOnlyFailure, let failure = failedReads[target],
                   failure.accountRevision != glab.accountRevision || failure.configuration != configuration
                     || now().timeIntervalSince(failure.date) >= ReadOnlyAssessmentRetry.cooldown else { return }
@@ -136,12 +165,15 @@ final class AuthorFeedbackCoordinator {
         }
         let input = Input(request: request, discussions: discussions, user: user, target: target,
                           configuration: settings.automation, fingerprint: fingerprint, drafts: drafts,
-                          accountRevision: glab.accountRevision)
+                          accountRevision: glab.accountRevision,
+                          completedFollowUpJobID: completedJobID)
         if statuses[target]?.head != head || statuses[target]?.fingerprint != fingerprint
-            || statuses[target]?.semanticContextFingerprint != request.semanticContextFingerprint {
+            || statuses[target]?.semanticContextFingerprint != request.semanticContextFingerprint
+            || statuses[target]?.completedFollowUpJobID != completedJobID {
             statuses[target] = .init(head: head, fingerprint: fingerprint,
                 semanticContextFingerprint: request.semanticContextFingerprint,
-                readOnlyReconciliation: input.readOnly, phase: .checking, pendingDraftCount: drafts)
+                readOnlyReconciliation: input.readOnly, phase: .checking, pendingDraftCount: drafts,
+                completedFollowUpJobID: input.completedFollowUpJobID)
         }
         pending[target] = input
         startNext()
@@ -180,10 +212,12 @@ final class AuthorFeedbackCoordinator {
         while tasks.count < 2, let (target, input) = pending.first(where: { tasks[$0.key] == nil }) {
             pending.removeValue(forKey: target)
             if statuses[target]?.head != input.request.sha || statuses[target]?.fingerprint != input.fingerprint
-                || statuses[target]?.semanticContextFingerprint != input.request.semanticContextFingerprint {
+                || statuses[target]?.semanticContextFingerprint != input.request.semanticContextFingerprint
+                || statuses[target]?.completedFollowUpJobID != input.completedFollowUpJobID {
                 statuses[target] = .init(head: input.request.sha ?? "", fingerprint: input.fingerprint,
                     semanticContextFingerprint: input.request.semanticContextFingerprint,
-                    readOnlyReconciliation: input.readOnly, phase: .checking, pendingDraftCount: input.drafts)
+                    readOnlyReconciliation: input.readOnly, phase: .checking, pendingDraftCount: input.drafts,
+                    completedFollowUpJobID: input.completedFollowUpJobID)
             }
             tasks[target] = Task { [weak self] in
                 guard let self else { return }
@@ -204,7 +238,7 @@ final class AuthorFeedbackCoordinator {
                         statuses[target] = .init(head: input.request.sha ?? "", fingerprint: input.fingerprint,
                             semanticContextFingerprint: input.request.semanticContextFingerprint, phase: .failed,
                             failureReason: String(GlabService.redactWorkflowEvidence(String(describing: readOnly?.cause ?? error)).prefix(600)),
-                            isReadOnlyFailure: readOnly != nil)
+                            isReadOnlyFailure: readOnly != nil, completedFollowUpJobID: input.completedFollowUpJobID)
                         // Refreshes queued during backoff cannot restart an exhausted snapshot's budget.
                         pending.removeValue(forKey: target)
                         Log.monitor.error("Author feedback verification failed: \(String(describing: error), privacy: .private)")
@@ -220,14 +254,47 @@ final class AuthorFeedbackCoordinator {
             && statuses[input.target]?.head == input.request.sha
             && statuses[input.target]?.fingerprint == input.fingerprint
             && statuses[input.target]?.semanticContextFingerprint == input.request.semanticContextFingerprint
+            && statuses[input.target]?.completedFollowUpJobID == input.completedFollowUpJobID
             && settings.automation == input.configuration
+            && completedFollowUpJob(for: input.request, target: input.target)?.id == input.completedFollowUpJobID
             && settings.automation.packageDecision != .disabled
             && !settings.ignoredMergeRequests.contains(input.target)
             && settings.automation.scope.permits(input.request, host: input.target.host, username: input.user.username)
     }
 
+    /// A successful worker can leave work outstanding. Its prior semantic verdict then
+    /// predates the worker and cannot establish that the worker omitted remaining author work.
+    private func completedFollowUpJob(for request: GitLabMergeRequest, target: MRAutomationScope.Target) -> AssistantAutomationRunner.Handoff? {
+        settings.assistantHandoffs.filter {
+            $0.key.work.host == target.host && $0.key.work.projectID == target.projectID
+                && $0.key.work.iid == target.iid && $0.key.username == target.username
+                && $0.workflow == .followUp && $0.draftRepair == nil
+                && $0.execution?.state == .succeeded
+                && $0.execution?.finishedAt != nil && !($0.feedbackNoteIDs ?? []).isEmpty
+        }.max {
+            let first = $0.execution?.finishedAt ?? $0.createdAt
+            let second = $1.execution?.finishedAt ?? $1.createdAt
+            return first == second ? $0.id.uuidString < $1.id.uuidString : first < second
+        }
+    }
+
+    private func residual(_ input: Input, assessment: ReReviewAssessment, notes: Set<Int>) -> AuthorFeedbackResidual? {
+        guard let runID = input.completedFollowUpJobID, cache[input.target]?.2 == runID else { return nil }
+        let blocking = assessment.notes.filter {
+            notes.contains($0.noteID) && $0.state == .blocking && !$0.reason.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+        }
+        return blocking.isEmpty ? nil : .init(assessedRunID: runID, notes: blocking,
+            semanticContextFingerprint: input.request.semanticContextFingerprint)
+    }
+
     private func prepare(_ input: Input) async throws -> Preparation {
         guard isCurrent(input) else { throw CancellationError() }
+        // Capture attempt identity before reading remote postconditions. A later run
+        // cannot inherit proof produced for an earlier stopped attempt.
+        let stoppedFollowUps = settings.assistantHandoffs.filter {
+            $0.key.work.host == input.target.host && $0.key.username == input.target.username
+                && AuthorFeedbackStatus.canReconcile($0, request: input.request)
+        }
         guard await canAutomate(input.configuration.assistant) else { throw ReReviewVerifier.VerificationError.unavailable }
         guard isCurrent(input) else { throw CancellationError() }
         let request = input.request
@@ -237,6 +304,7 @@ final class AuthorFeedbackCoordinator {
         encoder.outputFormatting = [.sortedKeys]
         let key = (request.sha ?? "") + "|" + input.fingerprint + "|" + request.semanticContextFingerprint
             + "|" + UserAttentionSnapshot.digest(String(decoding: diff, as: UTF8.self))
+            + "|" + (input.completedFollowUpJobID?.uuidString ?? "")
             + "|" + String(decoding: try encoder.encode(input.configuration), as: UTF8.self)
         let assessment: ReReviewAssessment
         if let stored = cache[input.target], stored.0 == key { assessment = stored.1 }
@@ -252,7 +320,7 @@ final class AuthorFeedbackCoordinator {
                 thinking: input.configuration.verificationThinking), input.configuration.assistant, model)
             _ = try assessment.reviewers(in: input.discussions, authorID: input.user.id)
             guard isCurrent(input) else { throw CancellationError() }
-            cache[input.target] = (key, assessment)
+            cache[input.target] = (key, assessment, input.completedFollowUpJobID)
         }
         guard isCurrent(input) else { throw CancellationError() }
         let current = try await glab.fetchMergeRequest(projectID: request.projectID, iid: request.iid, host: host)
@@ -260,14 +328,18 @@ final class AuthorFeedbackCoordinator {
               current.semanticContextFingerprint == request.semanticContextFingerprint,
               current.state == "opened", current.draft == request.draft, current.author.id == input.user.id,
               current.webURL == request.webURL else { throw CancellationError() }
-        if input.readOnly {
+        if input.readOnly || !stoppedFollowUps.isEmpty {
             async let liveThreads = glab.fetchMergeRequestDiscussions(projectID: request.projectID, iid: request.iid, host: host)
             async let liveUser = glab.fetchAuthenticatedUser(host: host, expectedUsername: input.user.username)
             async let liveDrafts = glab.fetchOwnDraftNotes(projectID: request.projectID, iid: request.iid, host: host, userID: input.user.id)
             let (threads, user, drafts) = try await (liveThreads, liveUser, liveDrafts)
             guard isCurrent(input), user == input.user, drafts.count == input.drafts,
                   ReviewVerdict.fingerprint(threads) == input.fingerprint else { throw CancellationError() }
-            return Preparation(assessment: assessment, threads: threads, drafts: drafts, approvals: [])
+            let approvals = input.readOnly ? [] : try await glab.fetchMergeRequestApproverIDs(
+                projectID: request.projectID, iid: request.iid, host: host)
+            guard isCurrent(input) else { throw CancellationError() }
+            return Preparation(assessment: assessment, threads: threads, drafts: drafts, approvals: approvals,
+                stoppedFollowUps: stoppedFollowUps)
         }
         let approvals = try await glab.fetchMergeRequestApproverIDs(projectID: request.projectID, iid: request.iid, host: host)
         guard isCurrent(input) else { throw CancellationError() }
@@ -299,21 +371,24 @@ final class AuthorFeedbackCoordinator {
             let draftedNotes = Set(threads.filter { $0.id.map(draftedThreads.contains) == true }.flatMap(\.notes).compactMap(\.id))
             let actionable = Set(assessment.notes.filter { $0.state == .blocking || $0.state == .uncertain }.map(\.noteID))
             let followUp = request.draft == false ? actionable.union(owedNotes).subtracting(draftedNotes) : []
-            if !followUp.isEmpty { await onNeedsWork?(request, followUp, input.fingerprint) }
+            if !followUp.isEmpty { await onNeedsWork?(request, followUp, input.fingerprint,
+                residual(input, assessment: assessment, notes: followUp)) }
             guard isCurrent(input) else { throw CancellationError() }
-            let completed = AuthorFeedbackStatus(head: request.sha ?? "", fingerprint: input.fingerprint,
+            var completed = AuthorFeedbackStatus(head: request.sha ?? "", fingerprint: input.fingerprint,
                 semanticContextFingerprint: request.semanticContextFingerprint,
                 phase: drafts.isEmpty ? .complete : .waitingPublication, pendingDraftCount: drafts.count,
                 followUpNoteIDs: followUp,
                 replyNoteIDs: Set(repliesByThread.keys),
-                addressedNoteIDs: Set(assessment.notes.filter { $0.state == .addressed || $0.state == .informational }.map(\.noteID)).subtracting(owedNotes))
+                addressedNoteIDs: Set(assessment.notes.filter { $0.state == .addressed || $0.state == .informational }.map(\.noteID)).subtracting(owedNotes),
+                completedFollowUpJobID: input.completedFollowUpJobID)
+            bindStoppedFollowUpEvidence(to: &completed, prepared: prepared, discussions: threads, authorID: input.user.id)
             let changed = statuses[input.target] != completed
             statuses[input.target] = completed
             if changed { onRemoteChange?() }
             return
         }
         var approved = prepared.approvals
-        var threads = input.discussions
+        var threads = prepared.threads
         let initial = AuthorFeedbackPolicy.evaluate(discussions: threads, assessment: assessment, authorID: input.user.id,
             approvedReviewerIDs: approved, enabled: input.configuration.autoResolveAcceptedFeedback)
         var accepted: Set<Int> = []
@@ -371,7 +446,8 @@ final class AuthorFeedbackCoordinator {
             notes.formUnion(repliesByThread[rootID] ?? [])
         }
         followUp.formUnion(owedNotes)
-        if !followUp.isEmpty, isCurrent(input) { await onNeedsWork?(request, followUp, input.fingerprint) }
+        if !followUp.isEmpty, isCurrent(input) { await onNeedsWork?(request, followUp, input.fingerprint,
+            residual(input, assessment: assessment, notes: followUp)) }
         guard isCurrent(input) else { throw CancellationError() }
         // Courtesy acknowledgement is optional and must never suppress independent correction work.
         let acknowledgement = try await acknowledgeInformational(input, assessment: assessment, discussions: threads)
@@ -385,14 +461,33 @@ final class AuthorFeedbackCoordinator {
                     reviewerUsername: finding.reviewerUsername, state: .needsVerification, reason: reason,
                     waitingForReviewers: [])
             }
-        let completed = AuthorFeedbackStatus(head: request.sha ?? "", fingerprint: input.fingerprint,
+        var completed = AuthorFeedbackStatus(head: request.sha ?? "", fingerprint: input.fingerprint,
             semanticContextFingerprint: request.semanticContextFingerprint, phase: .complete,
             findings: findings, acceptedReviewerIDs: accepted, followUpNoteIDs: followUp, replyNoteIDs: missingReplies,
             addressedNoteIDs: Set(assessment.notes.filter { $0.state == .addressed || $0.state == .informational }.map(\.noteID))
-                .subtracting(owedNotes).subtracting(acknowledgementFailures.keys))
+                .subtracting(owedNotes).subtracting(acknowledgementFailures.keys),
+            completedFollowUpJobID: input.completedFollowUpJobID)
+        bindStoppedFollowUpEvidence(to: &completed, prepared: prepared, discussions: threads, authorID: input.user.id)
         let updated = statuses[input.target] != completed
         statuses[input.target] = completed
         if changed || updated { onRemoteChange?() }
+    }
+
+    private func bindStoppedFollowUpEvidence(to status: inout AuthorFeedbackStatus, prepared: Preparation,
+                                            discussions: [GitLabMergeRequestDiscussion], authorID: Int) {
+        let missingReplies = prepared.assessment.missingPublishedReplyNoteIDs(in: discussions, authorID: authorID)
+        for candidate in prepared.stoppedFollowUps {
+            guard let current = settings.assistantHandoffs.first(where: { $0.id == candidate.id }),
+                  current.key == candidate.key, current.workflow == candidate.workflow,
+                  current.execution?.state == candidate.execution?.state,
+                  current.feedbackNoteIDs == candidate.feedbackNoteIDs,
+                  current.pipelineReservation == nil, candidate.pipelineReservation == nil,
+                  current.allowsPush == candidate.allowsPush else { continue }
+            let selected = Set(candidate.feedbackNoteIDs ?? [])
+            guard selected.isSubset(of: status.addressedNoteIDs), selected.isDisjoint(with: status.followUpNoteIDs),
+                  selected.isDisjoint(with: missingReplies) else { continue }
+            status.reconciledFollowUpJobIDs.insert(candidate.id)
+        }
     }
 
     private func liveInformationalDiscussions(_ input: Input) async throws -> [GitLabMergeRequestDiscussion] {

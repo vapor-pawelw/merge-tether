@@ -279,7 +279,7 @@ final class MergeRequestAttentionMonitor {
     let aiOriginCoordinator: AICommentOriginCoordinator
     let draftProofRecoveryCoordinator: DraftProofRecoveryCoordinator?
     private var feedbackNeedsRefresh = false
-    var onAuthorFeedbackNeedsWork: ((GitLabMergeRequest, Set<Int>, String) async -> Void)?
+    var onAuthorFeedbackNeedsWork: ((GitLabMergeRequest, Set<Int>, String, AuthorFeedbackResidual?) async -> Void)?
     var onAuthorFeedbackChecked: (() -> Void)?
 
     private struct Account: Equatable {
@@ -363,8 +363,8 @@ final class MergeRequestAttentionMonitor {
             return try await DraftReplyRepair.launch(snapshot: snapshot, origin: origin, assessment: assessment,
                 settings: settings, glab: glab, directory: followUpDirectory)
         }
-        authorFeedbackCoordinator?.onNeedsWork = { [weak self] request, notes, fingerprint in
-            await self?.onAuthorFeedbackNeedsWork?(request, notes, fingerprint)
+        authorFeedbackCoordinator?.onNeedsWork = { [weak self] request, notes, fingerprint, residual in
+            await self?.onAuthorFeedbackNeedsWork?(request, notes, fingerprint, residual)
         }
         authorFeedbackCoordinator?.onRemoteChange = { [weak self] in
             guard let self, let account, isCurrent(account) else { return }

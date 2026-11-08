@@ -31,6 +31,7 @@ final class AuthoredMergeRequestMonitor {
     /// The acceptance coordinator supplies a verdict bound to this exact source and discussion text.
     /// Missing or incomplete verification cannot authorize merging a reviewer's outstanding conditions.
     var authorFeedbackAllowsMerge: ((GitLabMergeRequest, [GitLabMergeRequestDiscussion], Int) -> Bool)?
+    var authorFeedbackStatus: ((GitLabMergeRequest) -> AuthorFeedbackStatus?)?
 
     private let settings: SettingsManager
     private let glab: GlabService
@@ -241,7 +242,8 @@ final class AuthoredMergeRequestMonitor {
                                 && self.settings.automation.permitsAutoMerge(project: project)
                                 && self.settings.automation.scope.permits(request, host: host, username: account.username)
                                 && !AssistantAutomationRunner.isWorking(on: work)
-                                && !self.hasUnfinishedAssistantWork(on: work, username: user.username, currentRequest: request)
+                                && !self.hasUnfinishedAssistantWork(on: work, username: user.username,
+                                    currentRequest: request, discussions: discussions)
                         }
                     )
                     continue
@@ -272,9 +274,14 @@ final class AuthoredMergeRequestMonitor {
     }
 
     private func hasUnfinishedAssistantWork(on work: AssistantAutomationRunner.MergeRequestWork, username: String,
-                                          currentRequest: GitLabMergeRequest) -> Bool {
-        AssistantJobExecution.hasUnfinishedWork(in: settings.assistantHandoffs, for: work, username: username,
-                                              currentRequest: currentRequest)
+                                          currentRequest: GitLabMergeRequest,
+                                          discussions: [GitLabMergeRequestDiscussion]? = nil) -> Bool {
+        let feedback = authorFeedbackStatus?(currentRequest)
+        // Admission may use the last bound snapshot; final merge permission must
+        // match the discussions just read and GitLab rechecks them before writing.
+        let fingerprint = discussions.map { ReviewVerdict.fingerprint($0) } ?? feedback?.fingerprint
+        return AssistantJobExecution.hasUnfinishedWork(in: settings.assistantHandoffs, for: work, username: username,
+            currentRequest: currentRequest, feedbackStatus: feedback, discussionFingerprint: fingerprint)
     }
 
     private func evaluate(

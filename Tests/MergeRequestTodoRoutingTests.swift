@@ -45,6 +45,7 @@ import Testing
         case "$2" in
           /user) printf '%s' '{"id":1,"username":"me"}' ;;
           */discussions*) cat "$root/discussions" ;;
+          */draft_notes*) cat "$root/drafts" ;;
           /projects/7/pipelines/*) /usr/bin/python3 -c 'import json,sys; p=json.load(open(sys.argv[1]))["head_pipeline"]; p.setdefault("project_id",7); p.setdefault("ref","feature"); print(json.dumps(p))' "$root/mr" ;;
           /projects/7/repository/branches/feature) /usr/bin/python3 -c 'import json,sys; print(json.dumps({"commit":{"id":json.load(open(sys.argv[1]))["sha"]}}))' "$root/mr" ;;
           */merge_requests/11)
@@ -72,6 +73,7 @@ import Testing
         """
         try request.write(to: root.appending(path: "mr"), atomically: true, encoding: .utf8)
         try "[]".write(to: root.appending(path: "discussions"), atomically: true, encoding: .utf8)
+        try "[]".write(to: root.appending(path: "drafts"), atomically: true, encoding: .utf8)
         if acknowledgementFails { try Data().write(to: root.appending(path: "fail-ack")) }
         let glab = GlabService()
         glab.glabPath = executable; glab.resolvedHost = "gitlab.example.test"; glab.currentUsername = "me"
@@ -146,6 +148,50 @@ import Testing
         #expect(f.settings.mrActionIntents[0].jobID == nil)
         #expect(f.settings.automationEvents.contains { $0.state == .failed && $0.message == "This event was attempted earlier." })
         #expect(launches == 0)
+    }
+
+    @Test(arguments: [AssistantJobExecution.State.failed, .interrupted, .cancelled],
+          [ReReviewAssessment.Note.State.addressed, .informational])
+    func stoppedFollowUpReconcilesFreshPostconditionsWithoutReplayingTheWorker(
+        state: AssistantJobExecution.State, verdict: ReReviewAssessment.Note.State
+    ) async throws {
+        let f = try fixture(owned: true); defer { f.cleanup() }
+        try completedFollowUp(f, withReply: verdict == .addressed)
+        f.settings.assistantHandoffs[0].execution = .init(state: state, error: "Original stopped attempt")
+        f.settings.mrActionIntents[0].state = .failed
+        f.settings.mrActionIntents[0].error = "Original stopped attempt"
+        var launches = 0
+        let router = MergeRequestTodoRouter(settings: f.settings, glab: f.glab, canAutomate: { true }, launcher: { _, _ in
+            launches += 1; return UUID()
+        })
+        router.followUpAssessment = { _, _ in .init(notes: [
+            .init(noteID: 42, state: verdict, reason: "Current remote postconditions independently verified.")
+        ]) }
+        await router.refreshCompletionEvidence(host: target.host, username: target.username)
+        #expect(f.settings.mrActionIntents[0].state == .completed)
+        #expect(f.settings.assistantHandoffs[0].execution?.state == state)
+        #expect(f.settings.assistantHandoffs[0].execution?.error == "Original stopped attempt")
+        #expect(f.settings.automationEvents.contains { $0.state == .failed && $0.message == "Original stopped attempt" })
+        #expect(launches == 0 && f.settings.assistantHandoffs.count == 1)
+        #expect(!FileManager.default.fileExists(atPath: f.root.appending(path: "acks").path))
+    }
+
+    @Test func stoppedFollowUpDoesNotCompleteWhileUnpublishedRemoteWorkRemains() async throws {
+        let f = try fixture(owned: true); defer { f.cleanup() }
+        try completedFollowUp(f)
+        f.settings.assistantHandoffs[0].execution = .init(state: .interrupted, error: "Stopped before completion")
+        f.settings.mrActionIntents[0].state = .failed
+        try #"[{"id":99,"author_id":1,"note":"An unpublished reply needs verification."}]"#
+            .write(to: f.root.appending(path: "drafts"), atomically: true, encoding: .utf8)
+        let router = MergeRequestTodoRouter(settings: f.settings, glab: f.glab, canAutomate: { false })
+        router.followUpAssessment = { _, _ in .init(notes: [
+            .init(noteID: 42, state: .addressed, reason: "The source and existing reply are addressed.")
+        ]) }
+        await router.refreshCompletionEvidence(host: target.host, username: target.username)
+        #expect(f.settings.mrActionIntents[0].state == .failed)
+        #expect(f.settings.assistantHandoffs[0].execution?.state == .interrupted)
+        #expect(try String(contentsOf: f.root.appending(path: "drafts"), encoding: .utf8).contains("unpublished reply"))
+        #expect(!FileManager.default.fileExists(atPath: f.root.appending(path: "acks").path))
     }
 
     @Test func unrelatedBlockingFeedbackDoesNotKeepAnAddressedSelectedIntentFailed() async throws {
@@ -323,7 +369,7 @@ import Testing
         router.followUpAssessment = { _, _ in .init(notes: [.init(noteID: 42, state: .addressed, reason: "Current feedback verified.")]) }
         await router.refreshCompletionEvidence(host: target.host, username: target.username)
         let result = try #require(f.settings.automationEvents.first { $0.action == .followUp })
-        #expect(result.state == (state == .succeeded ? .completed : .failed))
+        #expect(result.state == .completed)
         #expect(result.origin == .automatic)
         #expect(SettingsManager(defaults: f.defaults).assistantHandoffs[0].manual == true)
     }

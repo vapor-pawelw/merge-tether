@@ -214,11 +214,15 @@ final class TodoMonitorService {
                   (try? assessment.reviewers(in: discussions, authorID: authorID)) != nil else { return false }
             return assessment.notes.allSatisfy { $0.state == .addressed || $0.state == .informational }
         }
+        authoredMergeRequests.authorFeedbackStatus = { [weak self] request in
+            self?.attention.authorFeedbackCoordinator?.status(projectID: request.projectID, iid: request.iid)
+        }
         attention.onAutoApproved = { [settings, notifications] request in
             if settings.notificationsEnabled { notifications.deliverAutoApproved(request) }
         }
-        attention.onAuthorFeedbackNeedsWork = { [weak self] request, notes, fingerprint in
-            await self?.runVerifiedAuthorFeedback(request: request, noteIDs: notes, fingerprint: fingerprint, manual: false)
+        attention.onAuthorFeedbackNeedsWork = { [weak self] request, notes, fingerprint, residual in
+            await self?.runVerifiedAuthorFeedback(request: request, noteIDs: notes, fingerprint: fingerprint,
+                residual: residual, manual: false)
         }
         attention.onAuthorFeedbackChecked = { [weak self] in
             guard let self, let host = self.glab.resolvedHost, let username = self.glab.currentUsername else { return }
@@ -508,16 +512,15 @@ final class TodoMonitorService {
 
     var manualAssistantGroups: [AssistantTaskGroup] {
         assistantGroups.filter { group in
-            guard let execution = group.handoffs.first(where: { $0.operationalExecution != nil })?.operationalExecution else { return false }
-            return [.failed, .blocked, .interrupted, .cancelled].contains(execution.state)
+            manualHandoff(in: group) != nil
         }
     }
 
     func manualHandoff(in group: AssistantTaskGroup) -> AssistantAutomationRunner.Handoff? {
-        group.handoffs.first { handoff in
-            guard let execution = handoff.operationalExecution else { return false }
-            return [.failed, .blocked, .interrupted, .cancelled].contains(execution.state)
-        }
+        group.manualHandoff(currentItem: attention.currentOpenItems.first {
+            $0.id.projectID == group.id.projectID && $0.id.iid == group.id.iid
+                && $0.url.isGitLabMergeRequest(host: group.id.host, iid: group.id.iid)
+        })
     }
 
     private func matches(_ todo: Todo, work: AssistantAutomationRunner.MergeRequestWork) -> Bool {
@@ -732,7 +735,8 @@ final class TodoMonitorService {
                     && settings.automation.scope.permits(request, host: host, username: username)
                     && !AssistantJobExecution.hasUnfinishedWork(in: settings.assistantHandoffs,
                         for: .init(host: host, projectID: id.projectID, iid: id.iid), username: username,
-                        currentRequest: request)
+                        currentRequest: request, feedbackStatus: current.authorFeedbackStatus,
+                        discussionFingerprint: current.observedDiscussionFingerprint)
                 guard !automatic else { continue }
                 if let index = items.firstIndex(where: { $0.id == id }) { items[index].needsMerge = true }
                 else { items.append(.init(id: id, title: request.title, url: request.webURL, needsMerge: true, mergeRequest: request, isAuthored: true)) }
@@ -1190,7 +1194,7 @@ final class TodoMonitorService {
     }
 
     func runVerifiedAuthorFeedback(request: GitLabMergeRequest, noteIDs: Set<Int>, fingerprint: String,
-                                  manual: Bool = true) async {
+                                  residual: AuthorFeedbackResidual? = nil, manual: Bool = true) async {
         guard let host = glab.resolvedHost, let username = glab.currentUsername,
               request.author.username == username, !noteIDs.isEmpty else { return }
         let configuration = settings.automation
@@ -1206,7 +1210,8 @@ final class TodoMonitorService {
         failedAttentionFeedback.remove(work)
         do {
             try await automation.prepareFeedback(work: work, noteIDs: noteIDs.sorted(), username: username,
-                settings: settings, glab: glab, manual: manual, verifiedFingerprint: fingerprint, expectedHeadSHA: request.sha) {
+                settings: settings, glab: glab, manual: manual, verifiedFingerprint: fingerprint, expectedHeadSHA: request.sha,
+                verifiedResidual: residual) {
                     self.glab.resolvedHost == host && self.glab.currentUsername == username
                         && self.settings.automation == configuration
                 }

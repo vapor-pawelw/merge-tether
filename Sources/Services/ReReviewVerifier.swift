@@ -166,11 +166,19 @@ enum ReReviewVerifier {
             artifact, or a substantive reply explains
             why the concern does not apply and is ready for the reviewer to reconsider. An author's
             unsupported claim that something is fixed is not proof. A resolved thread can be addressed.
+            A supported explanation disputing a proposed remedy can be addressed without proving an undocumented business meaning.
+            Check the separately alleged defect and any remaining author obligation before reaching that verdict.
+            Rejecting a proposed remedy while admitting an unresolved defect is blocking, not addressed.
+            Distinguish work still owed by the author from evidence or acceptance requested from the reviewer.
+            Do not invent business semantics or require the author to prove them merely to dispute an unsupported remedy.
             blocking: a concrete request still needs work or an answer.
             uncertain: the supplied diff, MR title/description and discussion cannot establish whether
             the concern was addressed. The current description is supplied as data, not a change diff;
             inspect it directly for requests concerning the description. A description's claim of a
             code fix does not prove that the code was changed.
+            When uncertainty concerns an external contract or decision, first inspect accessible authoritative
+            evidence relevant to the existing feedback. Name the exact missing fact and why accessible evidence cannot establish it.
+            Keep an independently supported defect blocking when it can be corrected without deciding that unknown meaning.
             Correlate review summaries with the concrete findings they reference across ALL discussions.
             A substantive author answer or verified correction in another thread can address the same
             concern; do not require a duplicate answer in the summary's own thread. A summary that only

@@ -4,6 +4,143 @@ import Testing
 
 @MainActor
 struct AuthorFeedbackCoordinatorTests {
+    @Test func approvedReviewerCannotWaiveAPublishedReplyBeforeStoppedAttemptReconciliation() async throws {
+        try await withFixture { fixture in
+            fixture.settings.automation.autoResolveAcceptedFeedback = false
+            fixture.settings.automation.authorFeedback.isEnabled = true
+            try fixture.write("discussions.json", #"[{"id":"thread-a","notes":[{"id":10,"author":{"id":7,"username":"alice"},"system":false,"body":"Fix A and explain the result.","resolvable":true,"resolved":false,"created_at":"2026-01-01T10:00:00Z"}]}]"#)
+            let request = try JSONDecoder().decode(GitLabMergeRequest.self, from: Data(Fixture.request.utf8))
+            let job = AssistantAutomationRunner.Handoff(id: UUID(), key: .init(assistant: .codex,
+                work: .init(host: Fixture.host, projectID: 1, iid: 2), username: "me", workspace: "", access: .gitLabRead),
+                title: "Stopped feedback", prompt: "Handle feedback", createdAt: Date(timeIntervalSince1970: 1),
+                allowsPush: false, feedbackNoteIDs: [10], followUpPushAllowed: true,
+                execution: .init(state: .interrupted, finishedAt: Date(timeIntervalSince1970: 2)), workflow: .followUp,
+                expectedHeadSHA: request.sha)
+            fixture.settings.assistantHandoffs = [job]
+            let coordinator = fixture.coordinator()
+            try await fixture.run(coordinator)
+            let status = try #require(coordinator.status(projectID: 1, iid: 2))
+            let fingerprint = ReviewVerdict.fingerprint(try fixture.discussions())
+            #expect(status.findings.first?.state == .disabled)
+            #expect(!status.reconciles(job, request: request, discussionFingerprint: fingerprint))
+            #expect(AssistantJobExecution.hasUnfinishedWork(in: [job], for: job.key.work, username: "me",
+                currentRequest: request, feedbackStatus: status, discussionFingerprint: fingerprint))
+            #expect(fixture.settings.assistantHandoffs[0].execution?.state == .interrupted)
+            #expect(fixture.resolutionPosts == 0 && fixture.reactionPosts == 0)
+        }
+    }
+
+    @Test(arguments: [false, true])
+    func completedFollowUpReadFailureKeepsCooldownWithoutItsSuccessfulAssessmentCache(priorAssessment: Bool) async throws {
+        try await withFixture { fixture in
+            let state = RetryState()
+            state.recovered = priorAssessment
+            let coordinator = AuthorFeedbackCoordinator(settings: fixture.settings, glab: fixture.glab,
+                canAutomate: { _ in true }, verify: { _, _, _ in
+                    state.calls += 1
+                    if state.recovered { return .init(notes: [.init(noteID: 10, state: .addressed, reason: "Current evidence verified")]) }
+                    throw ReReviewVerifier.VerificationError.failed
+                }, retryWait: { _ in await Task.yield() }, now: { state.now })
+            if priorAssessment { try await fixture.run(coordinator) }
+            let baseline = state.calls
+            state.recovered = false
+            let request = try JSONDecoder().decode(GitLabMergeRequest.self, from: Data(Fixture.request.utf8))
+            fixture.settings.assistantHandoffs.append(.init(id: UUID(), key: .init(assistant: .codex,
+                work: .init(host: Fixture.host, projectID: 1, iid: 2), username: "me", workspace: "", access: .gitLabRead),
+                title: "Completed feedback", prompt: "Handle feedback", createdAt: Date(timeIntervalSince1970: 1),
+                allowsPush: false, feedbackNoteIDs: [10], followUpPushAllowed: true,
+                execution: .init(state: .succeeded, finishedAt: Date(timeIntervalSince1970: 2)), workflow: .followUp,
+                expectedHeadSHA: request.sha))
+            try await fixture.run(coordinator)
+            #expect(state.calls == baseline + 3)
+            try await fixture.run(coordinator)
+            #expect(state.calls == baseline + 3)
+            #expect(coordinator.status(projectID: 1, iid: 2)?.phase == .failed)
+            state.now = state.now.addingTimeInterval(ReadOnlyAssessmentRetry.cooldown + 1)
+            state.recovered = true
+            try await fixture.run(coordinator)
+            #expect(state.calls == baseline + 4)
+            #expect(coordinator.status(projectID: 1, iid: 2)?.phase == .complete)
+        }
+    }
+
+    @Test func successfulNoChangeFollowUpRequiresANewAssessmentBeforeItsResidualWorkCanBeReused() async throws {
+        try await withFixture { fixture in
+            fixture.settings.automation.autoResolveAcceptedFeedback = false
+            fixture.settings.automation.authorFeedback.isEnabled = true
+            let coordinator = fixture.coordinator(assessment: .init(notes: [
+                .init(noteID: 10, state: .blocking, reason: "The observed defect is independently unresolved")
+            ]))
+            try await fixture.run(coordinator)
+            #expect(fixture.inputs.count == 1)
+            let request = try JSONDecoder().decode(GitLabMergeRequest.self, from: Data(Fixture.request.utf8))
+            fixture.settings.assistantHandoffs.append(.init(id: UUID(), key: .init(assistant: .codex,
+                work: .init(host: Fixture.host, projectID: 1, iid: 2), username: "me", workspace: "", access: .gitLabRead),
+                title: "Completed feedback", prompt: "Handle feedback", createdAt: Date(timeIntervalSince1970: 1),
+                allowsPush: false, feedbackNoteIDs: [10], followUpPushAllowed: true,
+                execution: .init(state: .succeeded, finishedAt: Date(timeIntervalSince1970: 2), summary: "No source change"),
+                taskPrompt: "Handle feedback", mergeRequestURL: request.webURL, workflow: .followUp,
+                expectedHeadSHA: request.sha))
+
+            try await fixture.run(coordinator)
+            let deadline = ContinuousClock.now + .seconds(5)
+            while fixture.inputs.count < 2, ContinuousClock.now < deadline {
+                try await Task.sleep(for: .milliseconds(20))
+            }
+            #expect(fixture.inputs.count == 2)
+            try await fixture.run(coordinator)
+            #expect(fixture.inputs.count == 2)
+            #expect(fixture.resolutionPosts == 0)
+        }
+    }
+
+    @Test(arguments: [AssistantJobExecution.State.interrupted, .cancelled, .failed])
+    func freshFeedbackPostconditionsRetireOnlyTheStoppedAttemptAttention(state: AssistantJobExecution.State) async throws {
+        try await withFixture { fixture in
+            fixture.settings.automation.autoResolveAcceptedFeedback = false
+            fixture.settings.automation.authorFeedback.isEnabled = true
+            let request = try JSONDecoder().decode(GitLabMergeRequest.self, from: Data(Fixture.request.utf8))
+            let job = AssistantAutomationRunner.Handoff(id: UUID(), key: .init(assistant: .codex,
+                work: .init(host: Fixture.host, projectID: 1, iid: 2), username: "me", workspace: "", access: .gitLabRead),
+                title: "Stopped feedback", prompt: "Handle feedback", createdAt: Date(timeIntervalSince1970: 1),
+                allowsPush: false, feedbackNoteIDs: [10], followUpPushAllowed: true,
+                execution: .init(state: state, finishedAt: Date(timeIntervalSince1970: 2), error: "Original attempt"),
+                taskPrompt: "Handle feedback", mergeRequestURL: request.webURL, workflow: .followUp,
+                expectedHeadSHA: request.sha)
+            fixture.settings.assistantHandoffs = [job]
+            let coordinator = fixture.coordinator()
+            try await fixture.run(coordinator)
+            let status = try #require(coordinator.status(projectID: 1, iid: 2))
+            var item = MergeRequestAttentionMonitor.Item(id: .init(projectID: 1, iid: 2), title: request.title,
+                url: request.webURL, authorFeedbackStatus: status,
+                observedDiscussionFingerprint: ReviewVerdict.fingerprint(try fixture.discussions()),
+                mergeRequest: request, isAuthored: true)
+            let row = MergeRequestBoardSnapshot.Row(item: item, latestJob: job, intents: [])
+            #expect(!row.stoppedJobNeedsAttention)
+            #expect(!row.needsAttention)
+            #expect(MRHumanAction(row: row, assistantReady: true) == nil)
+            let group = try #require(AssistantTaskGroup.groups(from: [job], host: Fixture.host, username: "me").first)
+            #expect(group.manualHandoff(currentItem: item) == nil)
+            #expect(!AssistantJobExecution.hasUnfinishedWork(in: [job], for: job.key.work, username: "me",
+                currentRequest: request, feedbackStatus: status, discussionFingerprint: item.observedDiscussionFingerprint))
+            #expect(AssistantJobExecution.hasUnfinishedWork(in: [job], for: job.key.work, username: "me",
+                currentRequest: request, feedbackStatus: status, discussionFingerprint: "changed conversation"))
+            #expect(fixture.settings.assistantHandoffs[0].execution?.state == state)
+            #expect(!fixture.resolved)
+
+            item.hasConflict = true
+            let conflict = MergeRequestBoardSnapshot.Row(item: item, latestJob: job, intents: [])
+            #expect(conflict.needsAttention)
+            #expect(MRHumanAction(row: conflict, assistantReady: true)?.kind == .intent)
+
+            item.hasConflict = false
+            item.observedDiscussionFingerprint = "changed conversation"
+            let stale = MergeRequestBoardSnapshot.Row(item: item, latestJob: job, intents: [])
+            #expect(stale.stoppedJobNeedsAttention)
+            #expect(group.manualHandoff(currentItem: item)?.id == job.id)
+        }
+    }
+
     @Test(arguments: VerificationThinking.allCases)
     func passesTheSelectedThinkingToFeedbackVerification(_ thinking: VerificationThinking) async throws {
         try await withFixture { fixture in
@@ -137,7 +274,7 @@ struct AuthorFeedbackCoordinatorTests {
                 .init(noteID: 20, state: state, reason: "Independent incoming feedback needs a follow-up")
             ]))
             var requested: Set<Int> = []
-            coordinator.onNeedsWork = { _, notes, _ in requested = notes }
+            coordinator.onNeedsWork = { _, notes, _, _ in requested = notes }
 
             // when
             try await fixture.run(coordinator, drafts: 1)
@@ -173,7 +310,7 @@ struct AuthorFeedbackCoordinatorTests {
                 .init(noteID: 20, state: .addressed, reason: "The child correction is verified")
             ]))
             var requested: Set<Int> = []
-            coordinator.onNeedsWork = { _, notes, _ in requested = notes }
+            coordinator.onNeedsWork = { _, notes, _, _ in requested = notes }
             try await fixture.run(coordinator, requestJSON: requestJSON, drafts: pendingDrafts)
             let status = try #require(coordinator.status(projectID: 1, iid: 2))
             #expect(status.replyNoteIDs == (published ? [] : [10]))
@@ -205,7 +342,7 @@ struct AuthorFeedbackCoordinatorTests {
                 .init(noteID: 10, state: state, reason: "Current scoped feedback assessment")
             ]))
             var requested: Set<Int> = []
-            coordinator.onNeedsWork = { _, notes, _ in requested = notes }
+            coordinator.onNeedsWork = { _, notes, _, _ in requested = notes }
             try await fixture.run(coordinator)
             let status = try #require(coordinator.status(projectID: 1, iid: 2))
             let requiresReply = state == .addressed
@@ -245,7 +382,7 @@ struct AuthorFeedbackCoordinatorTests {
                 .init(noteID: 10, state: .informational, reason: "A positive acknowledgement with no request or condition", informationalAcknowledgementSafe: true, informationalPurpose: .reviewSummary)
             ]))
             var requested: Set<Int> = []
-            coordinator.onNeedsWork = { _, notes, _ in requested = notes }
+            coordinator.onNeedsWork = { _, notes, _, _ in requested = notes }
             try await fixture.run(coordinator)
             #expect(fixture.reactionPosts == (["own", "ownLaterPage"].contains(existingReaction) ? 0 : 1))
             #expect(fixture.resolved)
@@ -374,7 +511,7 @@ struct AuthorFeedbackCoordinatorTests {
             ]))
             var requested: Set<Int> = []
             var dispatches = 0
-            coordinator.onNeedsWork = { _, notes, _ in requested.formUnion(notes); dispatches += 1 }
+            coordinator.onNeedsWork = { _, notes, _, _ in requested.formUnion(notes); dispatches += 1 }
             try await fixture.run(coordinator)
             try fixture.start(coordinator)
             let deadline = ContinuousClock.now + .seconds(15)
@@ -552,7 +689,7 @@ struct AuthorFeedbackCoordinatorTests {
                 .init(noteID: 20, state: state, reason: "Remaining expectation needs work or verification")
             ]))
             var requested: Set<Int> = []
-            coordinator.onNeedsWork = { _, notes, _ in requested = notes }
+            coordinator.onNeedsWork = { _, notes, _, _ in requested = notes }
             try await fixture.run(coordinator)
             let status = try #require(coordinator.status(projectID: 1, iid: 2))
             #expect(status.replyNoteIDs.isEmpty)
@@ -579,7 +716,7 @@ struct AuthorFeedbackCoordinatorTests {
                     reason: "Current code and discussion assessed")
             ]))
             var requestedWork = false
-            coordinator.onNeedsWork = { _, _, _ in requestedWork = true }
+            coordinator.onNeedsWork = { _, _, _, _ in requestedWork = true }
             try await fixture.run(coordinator, requestJSON: draft)
             let request = try JSONDecoder().decode(GitLabMergeRequest.self, from: Data(draft.utf8))
             let status = try #require(coordinator.status(projectID: 1, iid: 2))
@@ -608,7 +745,7 @@ struct AuthorFeedbackCoordinatorTests {
             ]))
             var requestedWork = false
             var notified = false
-            coordinator.onNeedsWork = { _, _, _ in requestedWork = true }
+            coordinator.onNeedsWork = { _, _, _, _ in requestedWork = true }
             coordinator.onRemoteChange = { notified = true }
             try await fixture.run(coordinator, drafts: 1)
             let request = try JSONDecoder().decode(GitLabMergeRequest.self, from: Data(Fixture.request.utf8))
@@ -658,7 +795,7 @@ struct AuthorFeedbackCoordinatorTests {
                 .init(noteID: 10, state: state, reason: "Current evidence assessed")
             ]))
             var requestedWork = false
-            coordinator.onNeedsWork = { _, _, _ in requestedWork = true }
+            coordinator.onNeedsWork = { _, _, _, _ in requestedWork = true }
 
             try await fixture.run(coordinator, requestJSON: draft)
 
@@ -790,7 +927,7 @@ struct AuthorFeedbackCoordinatorTests {
                 .init(noteID: 10, state: .blocking, reason: "Fix A remains necessary")
             ]))
             var requested: Set<Int> = []
-            coordinator.onNeedsWork = { _, notes, _ in requested = notes }
+            coordinator.onNeedsWork = { _, notes, _, _ in requested = notes }
             try await fixture.run(coordinator)
             #expect(fixture.verified)
             #expect(!fixture.resolved)
@@ -805,7 +942,7 @@ struct AuthorFeedbackCoordinatorTests {
             fixture.settings.automation.authorFeedback.isEnabled = true
             let coordinator = fixture.coordinator()
             var requested: Set<Int> = []
-            coordinator.onNeedsWork = { _, notes, _ in requested = notes }
+            coordinator.onNeedsWork = { _, notes, _, _ in requested = notes }
             try await fixture.run(coordinator)
             let status = try #require(coordinator.status(projectID: 1, iid: 2))
             #expect(fixture.verified)
@@ -823,7 +960,7 @@ struct AuthorFeedbackCoordinatorTests {
                 .init(noteID: 10, state: .blocking, reason: "The concern was closed but fix A is still absent")
             ]))
             var requested: Set<Int> = []
-            coordinator.onNeedsWork = { _, notes, _ in requested = notes }
+            coordinator.onNeedsWork = { _, notes, _, _ in requested = notes }
             try await fixture.run(coordinator)
             #expect(fixture.verified)
             #expect(!fixture.resolved)
@@ -841,7 +978,7 @@ struct AuthorFeedbackCoordinatorTests {
                 .init(noteID: 20, state: .informational, reason: "A review summary without a requested change")
             ]))
             var requested: Set<Int> = []
-            coordinator.onNeedsWork = { _, notes, _ in requested = notes }
+            coordinator.onNeedsWork = { _, notes, _, _ in requested = notes }
             try await fixture.run(coordinator)
             #expect(fixture.verified)
             #expect(requested.isEmpty)
@@ -862,7 +999,7 @@ struct AuthorFeedbackCoordinatorTests {
             let coordinator = fixture.coordinator(assessment: assessment)
             var requested: Set<Int> = []
             let expectedFingerprint = ReviewVerdict.fingerprint(try fixture.discussions())
-            coordinator.onNeedsWork = { _, notes, fingerprint in
+            coordinator.onNeedsWork = { _, notes, fingerprint, _ in
                 #expect(fingerprint == expectedFingerprint)
                 requested = notes
             }

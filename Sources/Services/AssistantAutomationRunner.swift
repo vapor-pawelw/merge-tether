@@ -27,6 +27,7 @@ enum AssistantAutomationRunner {
             if self == .followUp {
                 let scope = """
                     Stay within the assigned task: the indicated incoming reviewer feedback or the separately assigned failed-pipeline diagnosis and fix. Verify only the related corrections and replies. Do not perform a fresh general code review of my own MR or create unrelated findings. Do not create merge requests. Informational notes and accepted feedback require no change or reply. Check existing published replies and private drafts for duplicates before drafting. Preserve unrelated and user-created drafts; an uncertain draft must not stop independent incoming feedback.
+                    Separate the observed defect from the reviewer's proposed remedy and its rationale. Research accessible authoritative contracts, relevant callers and tests before asking for an external decision. Rejecting an unsupported remedy does not address an independently supported defect. Verify whether the MR introduces the defect or newly exposes inherited behavior through a changed caller or route. For each observed defect, either implement and verify a warranted correction that preserves the established contract, disprove it with evidence, or explain with evidence why it is outside this MR's scope. Do not invent an undocumented business meaning or status mapping. An unknown meaning need not prevent a safe correction using the established failure behavior. If an external decision genuinely prevents the remaining work, identify the exact missing external fact, the evidence checked and why it prevents the remaining work; return blocked with that concrete question. Do not hand research or code work to the user while accessible evidence or an in-scope correction can settle it.
                     """
                 guard allowFollowUpPush else {
                     return scope + "\nAutomatic author-follow-up push is OFF for this run. You may inspect and prepare local changes in isolation, but do not push, save author-follow-up response drafts, or publish anything for this run. Report pending corrections in the run result only. This setting is separate from permission to push conflict resolutions."
@@ -112,6 +113,8 @@ enum AssistantAutomationRunner {
         var expectedHeadSHA: String?
         var configurationSnapshot: AutomationSettings?
         var retryOf: UUID?
+        /// Durable lineage for the single automatic reconciliation of a reviewer revision.
+        var feedbackRecoveryRootID: UUID? = nil
 
         var supportsCodexRelay: Bool {
             false
@@ -229,7 +232,8 @@ enum AssistantAutomationRunner {
         jobCoordinator: AssistantJobCoordinator? = nil,
         configurationSnapshot: AutomationSettings? = nil,
         draftRepair: DraftReplyRepair.Context? = nil,
-        retryOf: UUID? = nil
+        retryOf: UUID? = nil,
+        feedbackRecoveryRootID: UUID? = nil
     ) async throws -> Handoff {
         guard mrWorkflow != .draftReply else { throw AssistantJobExecutor.ExecutionError.disabledPermission }
         let automaticConfiguration = configurationSnapshot ?? settings.automation
@@ -341,10 +345,14 @@ enum AssistantAutomationRunner {
             mergeRequestURL: mergeRequestURL, workflow: mrWorkflow,
             resolvesOwnThreads: (isReview || mrWorkflow == .review) ? settings.automation.autoResolveOwnReviewThreads : nil,
             manual: manual, expectedHeadSHA: headSHA, configurationSnapshot: manual ? settings.automation : automaticConfiguration,
-            retryOf: retryOf
+            retryOf: retryOf, feedbackRecoveryRootID: feedbackRecoveryRootID
         )
         for (noteID, revision) in verifiedFeedbackNotes ?? [:] {
             settings.authorFeedbackAttempts.insert(.init(target: target, noteID: noteID, revision: revision))
+            if let feedbackRecoveryRootID {
+                settings.authorFeedbackAttempts.insert(.init(target: target, noteID: noteID, revision: revision,
+                    recoveryRootID: feedbackRecoveryRootID))
+            }
         }
         settings.assistantHandoffs.append(handoff)
         settings.save()
@@ -422,7 +430,8 @@ enum AssistantAutomationRunner {
                                     feedbackNoteIDs: handoff.feedbackNoteIDs ?? [], feedbackTodos: handoff.feedbackTodos ?? [],
                                     isReview: handoff.workflow == .review || handoff.reviewModel != nil, mrWorkflow: handoff.workflow,
                                     manual: true, expectedHeadSHA: retryHead, jobCoordinator: jobCoordinator,
-                                    draftRepair: handoff.draftRepair, retryOf: handoff.id)
+                                    draftRepair: handoff.draftRepair, retryOf: handoff.id,
+                                    feedbackRecoveryRootID: handoff.feedbackRecoveryRootID)
             for index in settings.workflowActivity.indices where settings.workflowActivity[index].assistantJobID == handoff.id {
                 settings.workflowActivity[index].assistantJobID = replacement.id
                 settings.workflowActivity[index].state = .waitingForAssistant
