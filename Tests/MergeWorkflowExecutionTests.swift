@@ -109,7 +109,7 @@ import Testing
                       "mergeRequest": ["project_id": 7, "iid": 11,
                                        "author": ["id": 1, "username": "me", "name": "Me"],
                                        "title": "Example", "web_url": "https://gitlab.example.test/team/repo/-/merge_requests/11",
-                                       "state": "opened", "sha": String(repeating: "a", count: 40),
+                                       "state": "opened", "draft": false, "sha": String(repeating: "a", count: 40),
                                        "source_branch": "feature", "target_branch": "main", "labels": []]]
         ]
         return try JSONDecoder().decode(MergeWorkflowActivityEntry.self, from: JSONSerialization.data(withJSONObject: object))
@@ -278,6 +278,11 @@ import Testing
         try await exerciseSkippedPipeline(blocker: blocker, seedReceipt: true)
     }
 
+    @Test(arguments: [false, true])
+    func aPausedDraftPipelineBecomingReadyReconsidersOnlyItsEffectFreeWork(_ priorReceipt: Bool) async throws {
+        try await exerciseSkippedPipeline(blocker: "draft-became-ready", seedReceipt: priorReceipt)
+    }
+
     private func exerciseSkippedPipeline(blocker: String, seedReceipt: Bool = false) async throws {
         let suite = "MergeWorkflowSkippedPipeline.\(UUID())"
         let defaults = try #require(UserDefaults(suiteName: suite))
@@ -289,6 +294,15 @@ import Testing
         let detector = ExistingPipelineWorkDetector(directory: directory)
         var stored = try entry(jobID: nil)
         stored.state = blocker == "failed-entry" ? .failed : .skipped
+        if blocker == "draft-became-ready" {
+            var object = try #require(JSONSerialization.jsonObject(with: JSONEncoder().encode(stored)) as? [String: Any])
+            var event = try #require(object["event"] as? [String: Any])
+            var request = try #require(event["mergeRequest"] as? [String: Any])
+            request["draft"] = true
+            event["mergeRequest"] = request
+            object["event"] = event
+            stored = try JSONDecoder().decode(MergeWorkflowActivityEntry.self, from: JSONSerialization.data(withJSONObject: object))
+        }
         if blocker == "summary" { stored.summary = "An earlier outcome is uncertain." }
         if blocker == "chat" { stored.chatURL = URL(string: "https://example.test/existing-session") }
         let key = ExistingPipelineWorkDetector.Key(host: stored.host, projectID: 7, mergeRequestIID: 11, pipelineID: 101)
@@ -337,6 +351,7 @@ import Testing
         settings.save()
         var currentObject = try #require(JSONSerialization.jsonObject(with: JSONEncoder().encode(stored.event.mergeRequest)) as? [String: Any])
         currentObject["sha"] = String(repeating: blocker == "stale-head" ? "b" : "a", count: 40)
+        if blocker == "draft-became-ready" { currentObject["draft"] = false }
         currentObject["head_pipeline"] = ["id": blocker == "different-pipeline" ? 102 : 101, "project_id": 7,
                                           "status": blocker == "successful-pipeline" ? "success" : "failed",
                                           "sha": String(repeating: seedReceipt ? "c" : "a", count: 40),
@@ -361,7 +376,8 @@ import Testing
         let automation = MergeWorkflowAutomation(settings: settings, glab: glab, notifications: NotificationService(), detector: detector)
         let user = GitLabAuthenticatedUser(id: blocker == "wrong-account" ? 2 : 1, username: "me")
         automation.observe([current], host: stored.host, user: user)
-        let freshAssessment = seedReceipt && blocker == "none" || blocker == "receipt"
+        let resumable = blocker == "none" || blocker == "draft-became-ready"
+        let freshAssessment = seedReceipt && resumable || blocker == "receipt"
         if freshAssessment {
             #expect(automation.entries.first(where: { $0.id == stored.id })?.state == .skipped)
             let fresh = try #require(automation.entries.first { $0.id != stored.id })
@@ -374,8 +390,9 @@ import Testing
             #expect(lineage["skippedActivityID"] as? String == stored.id)
             #expect(detector.status(for: key) == .registered)
             #expect(!detector.hasActiveReservation(for: key))
-        } else if blocker == "none" {
+        } else if resumable {
             #expect(automation.entries.first?.state == .queued)
+            #expect(automation.entries.first?.event.mergeRequest.draft == false)
             #expect(automation.entries.first?.assistantJobID == nil)
             #expect(automation.isAutomaticallyProcessingPipeline(current))
             #expect(SettingsManager(defaults: defaults).workflowActivity.first?.state == .queued)
@@ -740,9 +757,21 @@ import Testing
         try await exercisePipelineRefresh(ambiguousResponse: false, prelaunchFailures: 1)
     }
 
+    @Test(arguments: [2, 3])
+    func becomingDraftDuringPipelineProofPreventsTheAutomaticWrite(_ firstDraftRead: Int) async throws {
+        try await exercisePipelineRefresh(ambiguousResponse: false, draftAfterRead: firstDraftRead)
+    }
+
+    @Test(arguments: [false, true])
+    func becomingDraftBeforeInfrastructureRetryPreventsTheWrite(_ duringJobRead: Bool) async throws {
+        try await exercisePipelineRefresh(ambiguousResponse: false, draftAfterRead: duringJobRead ? nil : 2,
+                                         infrastructureRetry: true, draftOnJobRead: duringJobRead)
+    }
+
     private func exercisePipelineRefresh(
         ambiguousResponse: Bool, wrongCreatedParents: Bool = false, priorReceipt: Bool = false, ownershipRace: Bool = false,
-        prelaunchFailures: Int = 0
+        prelaunchFailures: Int = 0, draftAfterRead: Int? = nil, infrastructureRetry: Bool = false,
+        draftOnJobRead: Bool = false
     ) async throws {
         let directory = FileManager.default.temporaryDirectory.appending(path: UUID().uuidString)
         try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
@@ -755,7 +784,7 @@ import Testing
         let target = String(repeating: "b", count: 40)
         let merged = String(repeating: "c", count: 40)
         let currentMerged = String(repeating: "e", count: 40)
-        let oldTarget = String(repeating: "d", count: 40)
+        let oldTarget = infrastructureRetry ? target : String(repeating: "d", count: 40)
         let createdTarget = wrongCreatedParents ? oldTarget : target
         let request = """
         {"project_id":7,"iid":11,"author":{"id":1,"username":"me","name":"Me"},
@@ -775,11 +804,24 @@ import Testing
             printf '%s' "$count" > "$0-user-count"
             if test "$count" -le '\(prelaunchFailures)'; then printf '503 temporarily unavailable' >&2; exit 1; fi
             printf '%s' '{"id":1,"username":"me"}' ;;
+          'api /projects/7/jobs/200/retry '*'--method POST'*)
+            printf x >> "$0-posted"
+            printf '%s' '{"id":200,"status":"pending","allow_failure":false,"failure_reason":"runner_system_failure","pipeline":{"id":100}}' ;;
+          'api /projects/7/jobs/200 '*)
+            if test '\(draftOnJobRead)' = true; then touch "$0-job-read"; fi
+            printf '%s' '{"id":200,"status":"failed","allow_failure":false,"failure_reason":"runner_system_failure","pipeline":{"id":100}}' ;;
           'api /projects/7/merge_requests/11/pipelines '*'--method POST'*)
             printf x >> "$0-posted"
             if test '\(ambiguousResponse)' = true; then printf 'network response lost' >&2; exit 1; fi
             printf '%s' '{"id":101,"project_id":7,"status":"pending","sha":"\(currentMerged)","ref":"refs/merge-requests/11/merge"}' ;;
-          'api /projects/7/merge_requests/11 '*) printf '%s' '\(request)' ;;
+          'api /projects/7/merge_requests/11 '*)
+            count=0
+            if test -f "$0-mr-count"; then count=$(cat "$0-mr-count"); fi
+            count=$((count + 1))
+            printf '%s' "$count" > "$0-mr-count"
+            if test "$count" -ge '\(draftAfterRead ?? Int.max)' || test -f "$0-job-read"; then
+              printf '%s' '\(request)' | sed 's/"draft":false/"draft":true/'
+            else printf '%s' '\(request)'; fi ;;
           'api /projects/7/pipelines/100 '*)
             if test '\(ownershipRace)' = true; then mkdir -p '\(directory.path)/claims/host-\(host)/project-7/mr-11/active'; fi
             printf '%s' '{"id":100,"project_id":7,"status":"failed","sha":"\(merged)","ref":"refs/merge-requests/11/merge"}' ;;
@@ -794,7 +836,8 @@ import Testing
         try FileManager.default.setAttributes([.posixPermissions: 0o700], ofItemAtPath: executable.path)
         let decoded = try JSONDecoder().decode(GitLabMergeRequest.self, from: Data(request.utf8))
         let event = MergeWorkflowEvent(kind: .pipelineFailure, mergeRequest: decoded, identity: "refresh-stale",
-                                       context: "Failed CI", pipelineProjectID: 7, pipelineID: 100)
+                                       context: "Failed CI", pipelineProjectID: 7, pipelineID: 100,
+                                       jobID: infrastructureRetry ? 200 : nil, isInfrastructureFailure: infrastructureRetry)
         let claims = directory.appending(path: "claims")
         if priorReceipt {
             let detector = ExistingPipelineWorkDetector(directory: claims)
@@ -802,9 +845,14 @@ import Testing
             let reservation = try #require(prior)
             try detector.finishHandoff(for: reservation)
         }
+        let draftPaused = draftAfterRead != nil || draftOnJobRead
         for attemptIndex in 0..<2 {
             let settings = SettingsManager(defaults: defaults)
             settings.automation.applyPreset(.full, for: .codex)
+            if infrastructureRetry {
+                settings.automation.workflowRules[.pipelineFailure].projects = "team/repo"
+                settings.automation.workflowRules[.pipelineFailure].retryInfrastructureFailure = true
+            }
             settings.workflowActivity = []
             let glab = GlabService()
             glab.glabPath = executable
@@ -821,11 +869,11 @@ import Testing
             }
             #expect(settings.assistantHandoffs.isEmpty)
             if attemptIndex == 0 {
-                let expected: MergeWorkflowActivityState = ownershipRace ? .alreadyRegistered
+                let expected: MergeWorkflowActivityState = draftPaused ? .skipped : ownershipRace ? .alreadyRegistered
                     : ambiguousResponse || wrongCreatedParents ? .failed : .completed
                 #expect(automation.entries.first?.state == expected)
             }
-            let confirmed = !ownershipRace && !ambiguousResponse && !wrongCreatedParents
+            let confirmed = !draftPaused && !ownershipRace && !ambiguousResponse && !wrongCreatedParents
             #expect(remoteChanges == (confirmed ? 1 : 0))
             #expect(automation.isAutomaticallyProcessingPipeline(decoded) == (confirmed || ownershipRace))
             var currentObject = try #require(JSONSerialization.jsonObject(with: Data(request.utf8)) as? [String: Any])
@@ -836,10 +884,10 @@ import Testing
             try? FileManager.default.removeItem(at: claims)
         }
         let posted = try? String(contentsOf: URL(fileURLWithPath: executable.path + "-posted"), encoding: .utf8)
-        #expect(posted == (ownershipRace ? nil : "x"))
+        #expect(posted == (ownershipRace || draftPaused ? nil : "x"))
         let attempts = defaults.data(forKey: "pipelineRefreshAttempts")
         let attemptCount = try attempts.map { (try JSONSerialization.jsonObject(with: $0) as? [Any])?.count ?? 0 } ?? 0
-        #expect(attemptCount == (ownershipRace ? 0 : 1))
+        #expect(attemptCount == (ownershipRace || draftPaused ? 0 : 1))
     }
 
 }

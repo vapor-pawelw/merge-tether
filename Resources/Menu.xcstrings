@@ -2387,6 +2387,83 @@
           }
         }
       }
+    },
+    "menu.scope.auto": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Auto"
+          }
+        }
+      }
+    },
+    "menu.scope.alwaysOn": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Always on"
+          }
+        }
+      }
+    },
+    "menu.scope.alwaysOff": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Always off"
+          }
+        }
+      }
+    },
+    "menu.scope.draftSafetyHelp": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Auto follows repository and general rules, including the draft default. Always on/off keeps your choice across draft and ready states. Global action permissions still apply; Draft merge requests never merge automatically."
+          }
+        }
+      }
+    },
+    "menu.scope.pauseDrafts": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Pause automation on draft merge requests by default"
+          }
+        }
+      }
+    },
+    "menu.scope.pauseDraftsHelp": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Applies to Auto. Always on/off overrides this default and keeps your choice when the merge request becomes ready. This setting never marks an MR ready, and Draft merge requests never merge automatically."
+          }
+        }
+      }
+    },
+    "menuScopeSourceDraft": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Draft default"
+          }
+        }
+      }
     }
   },
   "version": "1.0"

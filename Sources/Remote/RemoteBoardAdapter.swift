@@ -63,6 +63,11 @@ import MergeTetherRemote
                     card = self.card(item, account: account, extraActions: extras, context: handoffs.map(\.id).sorted() + [(try? RemoteDigest.token(monitor.settings.automation)) ?? ""])
                     let presentation = MRCardPresentation(row: row, monitor: monitor, allowsRemoval: result.lanes[lane].id == .reviewed)
                     card = self.presentation(card, model: presentation)
+                    if item.mergeRequest?.state == "merged" || item.mergeRequest?.state == "closed" {
+                        card.actions = []
+                        result.lanes[lane].cards[index] = card
+                        continue
+                    }
                     let busy = presentation.actionsBlocked
                     if busy { card.actions = [] }
                     else {
@@ -185,7 +190,8 @@ import MergeTetherRemote
         }
         card.presentation = .init(author: author,
             repository: card.project.split(separator: "/").last.map(String.init) ?? card.project,
-            draftBadge: model.row.item.section == .draftMergeRequests ? String(localized: .Menu.menuMrDraftBadge) : nil,
+            draftBadge: MergeRequestFinishedState(model.row.item.mergeRequest).map { String(localized: $0.badge) }
+                ?? (model.row.item.section == .draftMergeRequests ? String(localized: .Menu.menuMrDraftBadge) : nil),
             status: model.status, nextStep: model.nextStep, working: model.working,
             chips: model.chips.map { .init(title: String(localized: $0.title), symbol: $0.symbol) },
             secondaryCTA: human?.action == .retryRun ? .init(title: String(localized: .MRHumanAction.mrHumanActionActionReviewRun), destination: .assistantRuns) : nil)

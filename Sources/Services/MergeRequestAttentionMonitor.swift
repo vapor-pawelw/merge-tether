@@ -69,9 +69,10 @@ final class MergeRequestAttentionMonitor {
 
         func draftIDsHandledAutomatically(automation: AutomationSettings, target: MRAutomationScope.Target,
                                           assistantPreparing: Bool) -> Set<Int> {
-            guard assistantPreparing, automation.publicationMode != .manual,
+            guard assistantPreparing, automation.publicationMode != .manual, let request = mergeRequest,
                   automaticPublicationPolicy == automation.automaticPublicationPolicy,
-                  automation.scope.resolve(target).active, !isAuthored || automation.allowFollowUpPush else { return [] }
+                  automation.scope.permits(request, host: target.host, username: target.username),
+                  !isAuthored || automation.allowFollowUpPush else { return [] }
             return automaticDraftIDs
         }
 
@@ -132,11 +133,11 @@ final class MergeRequestAttentionMonitor {
             failedTriggers: Set<MergeWorkflowTrigger> = [], conflictTaskFailed: Bool = false,
             pipelineOwnedAutomatically: Bool = false, feedbackOwnedAutomatically: Bool = false
         ) -> Self {
-            guard let request = authoredRequest, request.state == "opened", request.draft == false,
+            guard let request = authoredRequest, request.state == "opened",
                   request.author.username == target.username,
                   request.projectID == target.projectID, request.iid == target.iid,
                   request.webURL.isGitLabMergeRequest(host: target.host, iid: request.iid),
-                  automation.scope.resolve(target).active else { return self }
+                  automation.scope.permits(request, host: target.host, username: target.username) else { return self }
             func handles(_ trigger: MergeWorkflowTrigger) -> Bool {
                 let rule = automation.workflowRules[trigger]
                 return rule.mode == .assistant && rule.includes(request) && !failedTriggers.contains(trigger)
@@ -261,6 +262,7 @@ final class MergeRequestAttentionMonitor {
     }
     private var reReviewChecks: [Item.ID: ReReviewCheck] = [:]
     private var reReviewTasks: [Item.ID: Task<Void, Never>] = [:]
+    private var runtimeScope: (account: Account, revision: UInt64, scope: MRAutomationScope)?
     private var manualReReviewApprovals: [Item.ID: String] = [:]
     private let canAutomate: @MainActor (AutomationAssistant) async -> Bool
     private let approvalReadClock: ReadOnlyAssessmentRetry.Clock
@@ -270,6 +272,7 @@ final class MergeRequestAttentionMonitor {
     /// Called after MergeTether approved a merge request on its own.
     var onAutoApproved: ((GitLabMergeRequest) -> Void)?
     var onRefreshed: (() -> Void)?
+    var onAutomationEligibilityObserved: (() -> Void)?
     private var pendingRefresh: (account: Account, todos: [Todo], revision: UInt64)?
     private var account: Account?
     private var accountGeneration = 0
@@ -323,7 +326,9 @@ final class MergeRequestAttentionMonitor {
                       glab.currentUsername == target.username else { throw CancellationError() }
                 _ = try await glab.fetchAuthenticatedUser(host: target.host, expectedUsername: target.username)
                 let request = try await glab.fetchMergeRequest(projectID: target.projectID, iid: iid, host: target.host)
-                guard request.state == "opened", request.webURL.isGitLabMergeRequest(host: target.host, iid: iid) else { throw CancellationError() }
+                guard request.state == "opened", request.webURL.isGitLabMergeRequest(host: target.host, iid: iid),
+                      settings?.automation.scope.permits(request, host: target.host, username: target.username) == true
+                else { throw CancellationError() }
                 return try await glab.fetchMergeRequestDiscussions(projectID: target.projectID, iid: iid, host: target.host).flatMap(\.notes)
             }, isCurrent: { target, assistant, model, thinking in
                 guard let settings, glab.resolvedHost == target.host, glab.currentUsername == target.username,
@@ -526,77 +531,113 @@ final class MergeRequestAttentionMonitor {
         self.user = user
         let agentWorks = assistantWorks(username: user.username)
         let verdictDirectory = verdictDirectory
+        let observedAt = Date()
         async let authored = try? glab.fetchAuthoredMergeRequests(host: host)
         async let reviewing = try? glab.fetchReviewAssignedMergeRequests(userID: user.id, host: host)
         let (owned, assigned) = await (authored, reviewing)
         guard isCurrent(account) else { return }
         let listed = (owned ?? []) + (assigned ?? [])
-        let listedIDs = Set(listed.map { Item.ID(projectID: $0.projectID, iid: $0.iid) })
-        for request in listed where request.state == "opened" {
-            terminalCatalogRequests.remove(.init(projectID: request.projectID, iid: request.iid))
+        func target(for request: GitLabMergeRequest) -> MRAutomationScope.Target {
+            .init(host: host, username: user.username, projectID: request.projectID, iid: request.iid)
         }
-        let previousCatalog = Dictionary(uniqueKeysWithValues: openItems.map { ($0.id, $0) })
-        // Catalog rows have independent sources. A failed source must not make its
-        // last good rows disappear merely because the other source succeeded.
+        func isIgnored(_ target: MRAutomationScope.Target) -> Bool {
+            settings?.ignoredMergeRequests.contains(target) == true
+        }
+        func hasManagedIntent(_ target: MRAutomationScope.Target) -> Bool {
+            settings?.mrActionIntents.contains { $0.target == target && $0.grantsManagement } == true
+        }
+        func isTracked(_ request: GitLabMergeRequest) -> Bool {
+            let target = target(for: request)
+            return request.author.id == user.id || settings?.automation.scope.isManaged(target) == true
+                || hasManagedIntent(target) || settings?.mrLifecycleLedger.request(for: target) != nil
+                || agentWorks.contains(.init(host: host, projectID: request.projectID, iid: request.iid))
+        }
+        func remember(_ request: GitLabMergeRequest, readStartedAt: Date) {
+            let target = target(for: request)
+            guard !isIgnored(target), isTracked(request) else { return }
+            settings?.mrLifecycleLedger.record(request, for: target, now: readStartedAt,
+                autoRemoveFinished: settings?.autoRemoveFinishedMRs == true)
+            onAutomationEligibilityObserved?()
+        }
+        guard revision == glab.accountRevision else { return }
+        for request in listed where request.webURL.isGitLabMergeRequest(host: host, iid: request.iid) {
+            remember(request, readStartedAt: observedAt)
+            if request.state == "opened" {
+                terminalCatalogRequests.remove(.init(projectID: request.projectID, iid: request.iid))
+            }
+        }
+        let listedIDs = Set(listed.filter {
+            $0.webURL.isGitLabMergeRequest(host: host, iid: $0.iid)
+                && ["opened", "closed", "merged"].contains($0.state)
+        }.map { Item.ID(projectID: $0.projectID, iid: $0.iid) })
+        var previousCatalog = Dictionary(uniqueKeysWithValues: openItems.map { ($0.id, $0) })
+        for request in settings?.mrLifecycleLedger.retainedRequests(host: host, username: user.username) ?? [] {
+            let id = Item.ID(projectID: request.projectID, iid: request.iid)
+            if previousCatalog[id] == nil {
+                previousCatalog[id] = Item(id: id, title: request.title, url: request.webURL,
+                    mergeRequest: request, isAuthored: request.author.id == user.id)
+            }
+        }
+        // Known tracked rows survive a successful open list until an exact read
+        // confirms their state. Absence, pagination and failures are not closure.
         var retainedCatalog = previousCatalog.filter { _, item in
-            item.mergeRequest?.author.id == user.id ? owned == nil : assigned == nil
+            let tracked = item.mergeRequest.map { settings?.mrLifecycleLedger.request(for: target(for: $0)) != nil } == true
+            return tracked || (item.mergeRequest?.author.id == user.id ? owned == nil : assigned == nil)
         }
         for request in listed where request.state == "closed" || request.state == "merged" {
             retainedCatalog.removeValue(forKey: .init(projectID: request.projectID, iid: request.iid))
         }
+        let scopeTargets = Set(settings?.automation.scope.individualTargets(host: host, username: user.username) ?? [])
+        let recordedTargets = Set(agentWorks.filter { $0.host == host }.map {
+            MRAutomationScope.Target(host: host, username: user.username, projectID: $0.projectID, iid: $0.iid)
+        })
+        let intentTargets = Set((settings?.mrActionIntents ?? []).filter {
+            $0.target.host == host && $0.target.username == user.username && $0.grantsManagement
+        }.map(\.target))
+        let trackedTargets = settings?.mrLifecycleLedger.targets(host: host, username: user.username) ?? []
+        let lookupTargets = scopeTargets.union(recordedTargets).union(intentTargets).union(trackedTargets)
         var explicit: [GitLabMergeRequest] = []
+        var recordedReviews: [GitLabMergeRequest] = []
         var explicitFetchFailed = false
-        var lookedUpIDs = listedIDs
-        var removedMergedOverride = false
-        for target in settings?.automation.scope.individualTargets(host: host, username: user.username) ?? [] {
-            guard let iid = target.iid, !listedIDs.contains(.init(projectID: target.projectID, iid: iid)) else { continue }
+        for target in lookupTargets.sorted(by: { ($0.projectID, $0.iid ?? 0) < ($1.projectID, $1.iid ?? 0) }) {
+            guard let iid = target.iid, !isIgnored(target) else { continue }
             let id = Item.ID(projectID: target.projectID, iid: iid)
-            lookedUpIDs.insert(id)
+            guard !listedIDs.contains(id) else { continue }
+            // Merged MRs cannot reopen. Closed rows, including Seen tombstones,
+            // continue exact checks because they may reopen without assignment.
+            if settings?.mrLifecycleLedger.request(for: target)?.state == "merged"
+                || terminalCatalogRequests.contains(id) { continue }
+            let requestReadStartedAt = Date()
             guard let request = try? await glab.fetchMergeRequest(projectID: target.projectID, iid: iid, host: host) else {
                 explicitFetchFailed = true
                 if let previous = previousCatalog[id] { retainedCatalog[id] = previous }
                 continue
             }
-            guard isCurrent(account) else { return }
-            if request.state == "merged" {
-                retainedCatalog.removeValue(forKey: id)
-                settings?.automation.scope[target] = .inherit
-                settings?.automation.scope.forgetManaged(target)
-                settings?.reReviewDraftBaselines.removeValue(forKey: target)
-                removedMergedOverride = true
-            } else if request.state == "closed" {
-                retainedCatalog.removeValue(forKey: id)
-            } else if request.state == "opened" {
-                terminalCatalogRequests.remove(id)
-                explicit.append(request)
-            }
-        }
-        guard isCurrent(account) else { return }
-        if removedMergedOverride { settings?.save() }
-
-        // A completed review may no longer be assigned to this user. Its recorded
-        // chat still identifies a managed MR, without turning catalog discovery
-        // into another automation trigger or draft-publication candidate.
-        var recordedReviews: [GitLabMergeRequest] = []
-        for work in agentWorks.sorted(by: { ($0.projectID, $0.iid) < ($1.projectID, $1.iid) }) {
-            let id = Item.ID(projectID: work.projectID, iid: work.iid)
-            let target = MRAutomationScope.Target(host: host, username: user.username,
-                                                  projectID: work.projectID, iid: work.iid)
-            guard work.host == host, !lookedUpIDs.contains(id), !terminalCatalogRequests.contains(id),
-                  settings?.automation.scope.resolve(target).active == true else { continue }
-            guard let request = try? await glab.fetchMergeRequest(projectID: work.projectID, iid: work.iid, host: host) else {
+            guard isCurrent(account), revision == glab.accountRevision else { return }
+            guard request.projectID == target.projectID, request.iid == iid,
+                  request.webURL.isGitLabMergeRequest(host: host, iid: iid),
+                  ["opened", "closed", "merged"].contains(request.state) else {
                 explicitFetchFailed = true
-                if let previous = previousCatalog[id] { retainedCatalog[id] = previous }
                 continue
             }
-            guard isCurrent(account) else { return }
             if request.state == "merged" || request.state == "closed" {
-                terminalCatalogRequests.insert(id)
+                let alreadyTracked = settings?.mrLifecycleLedger.request(for: target) != nil
+                    || settings?.automation.scope.isManaged(target) == true || hasManagedIntent(target)
+                if alreadyTracked { remember(request, readStartedAt: requestReadStartedAt) }
+                if request.state == "merged" { terminalCatalogRequests.insert(id) }
                 retainedCatalog.removeValue(forKey: id)
-            } else if request.state == "opened", request.author.id != user.id,
-                      request.webURL.isGitLabMergeRequest(host: host, iid: work.iid) {
-                recordedReviews.append(request)
+            } else {
+                terminalCatalogRequests.remove(id)
+                remember(request, readStartedAt: requestReadStartedAt)
+                if scopeTargets.contains(target) || request.author.id == user.id { explicit.append(request) }
+                else { recordedReviews.append(request) }
             }
+        }
+        guard isCurrent(account), revision == glab.accountRevision else { return }
+        // A newer Authored read may have completed while this poll was awaiting
+        // GitLab. Its observed state must win over the older list snapshot.
+        let currentListed = (listed + explicit).map { request in
+            settings?.mrLifecycleLedger.request(for: target(for: request)) ?? request
         }
 
         let todoItems: [Item] = todos.compactMap { todo in
@@ -620,7 +661,7 @@ final class MergeRequestAttentionMonitor {
         }
         recentTodos = todoItems
 
-        for mr in listed + explicit {
+        for mr in currentListed {
             guard mr.state == "opened", mr.webURL.isGitLabMergeRequest(host: host, iid: mr.iid) else { continue }
             let id = Item.ID(projectID: mr.projectID, iid: mr.iid)
             var item = Item(
@@ -650,6 +691,13 @@ final class MergeRequestAttentionMonitor {
             }
         }
 
+        for id in Array(candidates.keys) {
+            let target = MRAutomationScope.Target(host: host, username: user.username, projectID: id.projectID, iid: id.iid)
+            if let current = settings?.mrLifecycleLedger.request(for: target) {
+                if current.state != "opened" { candidates.removeValue(forKey: id) }
+                else { candidates[id]?.mergeRequest = current }
+            }
+        }
         var results: [Item] = []
         var failed = owned == nil || assigned == nil
         let ordered = candidates.values.sorted { ($0.id.projectID, $0.id.iid) < ($1.id.projectID, $1.id.iid) }
@@ -657,7 +705,7 @@ final class MergeRequestAttentionMonitor {
         for start in stride(from: 0, to: ordered.count, by: 4) {
             guard isCurrent(account) else { return }
             let batch = ordered[start..<min(start + 4, ordered.count)]
-            await withTaskGroup(of: (Item, Bool, ReReviewFeedback?, [GitLabMergeRequestDiscussion]?, Set<Int>, GitLabMergeRequest?).self) { group in
+            await withTaskGroup(of: (Item, Bool, ReReviewFeedback?, [GitLabMergeRequestDiscussion]?, Set<Int>, GitLabMergeRequest?, Date?).self) { group in
                 for item in batch {
                     let approvedHead = approvedHeads[item.id]
                     let failedHead = failedApprovalHeads[item.id]
@@ -670,6 +718,7 @@ final class MergeRequestAttentionMonitor {
                         var updated = item
                         var contextDraftIDs: Set<Int> = []
                         var recoveryRequest: GitLabMergeRequest?
+                        var recoveryReadStartedAt: Date?
                         updated.reviewingProgress = nil
                         let drafts = try? await glab.fetchOwnDraftNotes(
                             projectID: item.id.projectID, iid: item.id.iid, host: host, userID: user.id
@@ -683,7 +732,7 @@ final class MergeRequestAttentionMonitor {
                         updated.canApprove = false
                         updated.autoApproveReady = false
                         if drafts?.isEmpty == true, !item.isAuthored,
-                           let request = item.mergeRequest, request.author.id != user.id, request.draft != true,
+                           let request = item.mergeRequest, request.author.id != user.id, request.draft != nil,
                            let head = request.sha, head != approvedHead,
                            ReviewVerdictStore.verdict(
                                host: host, projectID: request.projectID, iid: request.iid, in: verdictDirectory
@@ -716,8 +765,10 @@ final class MergeRequestAttentionMonitor {
                                 discussions: discussions, host: host, user: user, verdictDirectory: verdictDirectory)
                         }
                         if hasDrafts {
+                            let requestReadStartedAt = Date()
                             let live = try? await glab.fetchMergeRequest(projectID: item.id.projectID, iid: item.id.iid, host: host)
                             recoveryRequest = live
+                            if live != nil { recoveryReadStartedAt = requestReadStartedAt }
                             updated.reviewingProgress = Self.reviewingProgress(for: item, request: live,
                                 discussions: discussions, host: host, user: user, verdictDirectory: verdictDirectory)
                             updated.requiresDiscussionRecheck = !Self.draftContextIsCurrent(
@@ -760,10 +811,21 @@ final class MergeRequestAttentionMonitor {
                             }
                         }
                         let feedback = discussions.map { ReReviewFeedback(discussions: $0, authorID: user.id) }
-                        return (updated, draftCount != nil && (!(item.isAuthored || hasDrafts) || discussions != nil), feedback, discussions, contextDraftIDs, recoveryRequest)
+                        return (updated, draftCount != nil && (!(item.isAuthored || hasDrafts) || discussions != nil), feedback, discussions, contextDraftIDs, recoveryRequest, recoveryReadStartedAt)
                     }
                 }
-                for await (var item, success, feedback, discussions, contextDraftIDs, recoveryRequest) in group {
+                for await (var item, success, feedback, discussions, contextDraftIDs, recoveryRequest, recoveryReadStartedAt) in group {
+                    guard isCurrent(account), revision == glab.accountRevision else { return }
+                    if let recoveryRequest, let recoveryReadStartedAt {
+                        remember(recoveryRequest, readStartedAt: recoveryReadStartedAt)
+                    }
+                    let lifecycleTarget = MRAutomationScope.Target(host: host, username: user.username,
+                        projectID: item.id.projectID, iid: item.id.iid)
+                    if let latest = settings?.mrLifecycleLedger.request(for: lifecycleTarget) {
+                        guard latest.state == "opened", latest.sha == item.mergeRequest?.sha,
+                              latest.semanticContextFingerprint == item.mergeRequest?.semanticContextFingerprint else { continue }
+                        item.mergeRequest = latest
+                    }
                     let work = AssistantAutomationRunner.MergeRequestWork(host: host, projectID: item.id.projectID, iid: item.id.iid)
                     if success, let request = item.mergeRequest, let discussions {
                         await scheduleAIOriginChecks(request: request, drafts: item.drafts, discussions: discussions,
@@ -854,7 +916,7 @@ final class MergeRequestAttentionMonitor {
                 }
             }
         }
-        guard isCurrent(account) else { return }
+        guard isCurrent(account), revision == glab.accountRevision else { return }
         for index in results.indices {
             let id = results[index].id
             guard let published = publishedDrafts[id] else { continue }
@@ -874,7 +936,7 @@ final class MergeRequestAttentionMonitor {
         items = Item.ordered(results.filter(\.needsAttention))
         hasError = failed || explicitFetchFailed
         hasOwnListing = owned != nil
-        let openIDs = Set((listed + explicit).filter { $0.state == "opened" }.map {
+        let openIDs = Set(currentListed.filter { $0.state == "opened" }.map {
             Item.ID(projectID: $0.projectID, iid: $0.iid)
         })
         for item in results where openIDs.contains(item.id) && item.mergeRequest?.state == "opened" {
@@ -883,6 +945,31 @@ final class MergeRequestAttentionMonitor {
         for request in recordedReviews {
             let id = Item.ID(projectID: request.projectID, iid: request.iid)
             retainedCatalog[id] = Item(id: id, title: request.title, url: request.webURL, mergeRequest: request)
+        }
+        if let settings {
+            if settings.autoRemoveFinishedMRs {
+                for target in settings.mrLifecycleLedger.targets(host: host, username: user.username) {
+                    settings.mrLifecycleLedger.acknowledgeFinished(target)
+                }
+            }
+            for target in settings.mrLifecycleLedger.targets(host: host, username: user.username) {
+                let id = Item.ID(projectID: target.projectID, iid: target.iid ?? 0)
+                if settings.mrLifecycleLedger.isSuppressed(target) || settings.ignoredMergeRequests.contains(target) {
+                    retainedCatalog.removeValue(forKey: id)
+                }
+            }
+            for request in settings.mrLifecycleLedger.retainedRequests(host: host, username: user.username)
+                where !settings.ignoredMergeRequests.contains(target(for: request)) {
+                let id = Item.ID(projectID: request.projectID, iid: request.iid)
+                if request.state == "opened", var item = retainedCatalog[id] {
+                    item.mergeRequest = request
+                    retainedCatalog[id] = item
+                } else {
+                    retainedCatalog[id] = Item(id: id, title: request.title, url: request.webURL,
+                        mergeRequest: request, isAuthored: request.author.id == user.id)
+                }
+            }
+            settings.save()
         }
         // Retention belongs only to the read-only catalog. Stale rows do not become
         // new publication, approval or re-review action candidates.
@@ -1556,7 +1643,7 @@ final class MergeRequestAttentionMonitor {
         @MainActor func permits(_ evidence: Evidence) -> Bool {
             let current = evidence.request
             let verdict = ReviewVerdictStore.verdict(host: account.host, projectID: id.projectID, iid: id.iid, in: verdictDirectory)
-            return currentAccount() && evidence.user == user && current.state == "opened" && current.draft != true
+            return currentAccount() && evidence.user == user && current.state == "opened" && current.draft != nil
                 && current.sha == head && current.author.id != user.id && evidence.drafts.isEmpty
                 && verdict?.approves(head: head, discussions: evidence.discussions, reviewerID: user.id,
                     publishedDrafts: ReviewVerdictStore.seenDrafts(host: account.host, projectID: id.projectID,
@@ -1772,6 +1859,27 @@ final class MergeRequestAttentionMonitor {
         await refreshReReviewAfterPublication(id, account: account, user: user)
     }
 
+    func cancelRuntimePreparation(outsideScope scope: MRAutomationScope) {
+        if let host = glab.resolvedHost, let username = glab.currentUsername {
+            runtimeScope = (Account(host: host, username: username), glab.accountRevision, scope)
+        } else { runtimeScope = nil }
+        for id in Array(reReviewTasks.keys) {
+            guard manualReReviewApprovals[id] == nil else { continue }
+            if let runtimeScope, let account, runtimeScope.account == account,
+               runtimeScope.revision == glab.accountRevision, runtimePermitsReReview(id, account: account) { continue }
+            reReviewTasks.removeValue(forKey: id)?.cancel()
+            reReviewChecks.removeValue(forKey: id)
+            updateReReviewPresentation(id)
+        }
+    }
+
+    private func runtimePermitsReReview(_ id: Item.ID, account: Account) -> Bool {
+        if manualReReviewApprovals[id] != nil { return true }
+        guard let runtimeScope, runtimeScope.account == account, runtimeScope.revision == glab.accountRevision else { return true }
+        return runtimeScope.scope.resolve(.init(host: account.host, username: account.username,
+            projectID: id.projectID, iid: id.iid)).active
+    }
+
     func automationConfigurationChanged(outsideScope scope: MRAutomationScope? = nil) {
         authorFeedbackCoordinator?.cancel(outsideScope: scope)
         draftProofRecoveryCoordinator?.cancel(outsideScope: scope)
@@ -1831,6 +1939,7 @@ final class MergeRequestAttentionMonitor {
         account: Account, user: GitLabAuthenticatedUser, discussions suppliedDiscussions: [GitLabMergeRequestDiscussion]? = nil
     ) async {
         let id = Item.ID(projectID: request.projectID, iid: request.iid)
+        guard runtimePermitsReReview(id, account: account) else { return }
         guard let settings, settings.automation.autoReReviewEnabled,
               isCurrent(account), request.state == "opened", request.author.id == user.id,
               settings.automation.scope.permits(request, host: account.host, username: account.username) else {
@@ -1858,7 +1967,7 @@ final class MergeRequestAttentionMonitor {
             settings.reReviewDraftBaselines.removeValue(forKey: target)
             settings.save()
         }
-        guard request.draft == false, let head = request.sha else { return }
+        guard let head = request.sha else { return }
         let authorProgress = authorFeedbackCoordinator?.status(projectID: request.projectID, iid: request.iid)
         let work = AssistantAutomationRunner.MergeRequestWork(host: host, projectID: request.projectID, iid: request.iid)
         let usedAssistant = settings.assistantHandoffs.contains {
@@ -1872,6 +1981,8 @@ final class MergeRequestAttentionMonitor {
             guard let fresh = try? await glab.fetchMergeRequestDiscussions(projectID: request.projectID, iid: request.iid, host: host) else { return }
             discussions = fresh
         }
+        guard !Task.isCancelled, isCurrent(account), runtimePermitsReReview(id, account: account),
+              settings.automation.scope.permits(request, host: host, username: account.username) else { return }
         guard let fingerprint = ReviewVerdict.fingerprint(discussions) else { return }
         let sharedAssessment = authorFeedbackCoordinator?.assessment(for: request, fingerprint: fingerprint)
         guard usedAssistant || observedPublication || manualReReviewApprovals[id] != nil
@@ -1895,6 +2006,8 @@ final class MergeRequestAttentionMonitor {
                 if try await glab.activeHumanReviewerUsername(userID: reviewerID, host: host) != nil {
                     pendingReviewers[reviewerID] = noteID
                 }
+                guard !Task.isCancelled, isCurrent(account), runtimePermitsReReview(id, account: account),
+                      settings.automation.scope.permits(request, host: host, username: account.username) else { return }
             } catch {
                 reReviewChecks[id] = ReReviewCheck(key: key, fingerprint: fingerprint, state: .failed)
                 updateReReviewPresentation(id, unanswered: feedback.hasUnansweredFeedback)
@@ -1925,6 +2038,9 @@ final class MergeRequestAttentionMonitor {
                     guard let self else { return }
                     do {
                         let diff: Data = try await glab.mergeRequestAPI("/projects/\(request.projectID)/merge_requests/\(request.iid)/raw_diffs", host: host, decode: { $0 })
+                        guard !Task.isCancelled, isCurrent(account), reReviewChecks[id]?.key == key,
+                              runtimePermitsReReview(id, account: account),
+                              settings.automation.scope.permits(request, host: host, username: account.username) else { return }
                         let input = ReReviewVerifier.Input(authorID: user.id, headSHA: head, title: request.title,
                                                           description: request.description,
                                                           diff: String(decoding: diff, as: UTF8.self), discussions: discussions,
@@ -1934,7 +2050,8 @@ final class MergeRequestAttentionMonitor {
                                                           thinking: thinking)
                         let assessment = try await verifyReReview(input, assistant, model)
                         _ = try assessment.reviewers(in: discussions, authorID: user.id)
-                        guard !Task.isCancelled, isCurrent(account), reReviewChecks[id]?.key == key else { return }
+                        guard !Task.isCancelled, isCurrent(account), reReviewChecks[id]?.key == key,
+                              runtimePermitsReReview(id, account: account) else { return }
                         reReviewChecks[id]?.assessment = assessment
                     } catch {
                         guard !Task.isCancelled, isCurrent(account), reReviewChecks[id]?.key == key else { return }
@@ -1981,12 +2098,13 @@ final class MergeRequestAttentionMonitor {
                 async let threads = glab.fetchMergeRequestDiscussions(projectID: request.projectID, iid: request.iid, host: host)
                 async let drafts = glab.fetchOwnDraftNoteCount(projectID: request.projectID, iid: request.iid, host: host, userID: user.id)
                 let (current, liveDiscussions, liveDraftCount) = try await (fresh, threads, drafts)
-                guard liveDraftCount == 0, current.state == "opened", current.draft == false, current.sha == head,
+                guard liveDraftCount == 0, current.state == "opened", current.sha == head,
                       current.author.id == user.id, current.webURL.isGitLabMergeRequest(host: host, iid: current.iid),
                       ReviewVerdict.fingerprint(liveDiscussions) == fingerprint,
                       reReviewKey(current, fingerprint: fingerprint, account: account) == key,
                       try await glab.fetchAuthenticatedUser(host: host, expectedUsername: account.username) == user,
                       isCurrent(account), settings.automation.autoReReviewEnabled,
+                      runtimePermitsReReview(id, account: account),
                       settings.automation.scope.permits(current, host: host, username: account.username) else { return }
                 if reviewer?.state == "unreviewed" || reviewer?.state == "review_started" {
                     settings.reReviewReceipts[receiptKey] = ReReviewReceipt(noteID: noteID, requested: true)
@@ -2014,8 +2132,9 @@ final class MergeRequestAttentionMonitor {
                 async let finalDrafts = glab.fetchOwnDraftNoteCount(projectID: request.projectID, iid: request.iid, host: host, userID: user.id)
                 let (checkedMR, checkedThreads, checkedDraftCount) = try await (finalMR, finalThreads, finalDrafts)
                 guard !Task.isCancelled, finalUser == user, isCurrent(account),
+                      runtimePermitsReReview(id, account: account),
                       settings.automation == finalConfiguration, settings.automation.autoReReviewEnabled,
-                      checkedDraftCount == 0, checkedMR.state == "opened", checkedMR.draft == false,
+                      checkedDraftCount == 0, checkedMR.state == "opened",
                       checkedMR.sha == head, checkedMR.author.id == user.id,
                       checkedMR.webURL.isGitLabMergeRequest(host: host, iid: request.iid),
                       ReviewVerdict.fingerprint(checkedThreads) == fingerprint,

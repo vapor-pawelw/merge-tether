@@ -4,6 +4,61 @@ import Testing
 
 @MainActor
 struct AuthorFeedbackCoordinatorTests {
+    @Test func aDefaultDraftDoesNotStartPaidFeedbackVerification() async throws {
+        try await withFixture { fixture in
+            let draft = Fixture.request.replacingOccurrences(of: "\"draft\":false", with: "\"draft\":true")
+            try fixture.write("request.json", draft)
+            let coordinator = fixture.coordinator()
+            try fixture.start(coordinator, requestJSON: draft)
+            await Task.yield()
+            #expect(!fixture.verified && fixture.inputs.isEmpty)
+            #expect(coordinator.status(projectID: 1, iid: 2) == nil)
+            #expect(!fixture.resolved && fixture.reactionPosts == 0)
+        }
+    }
+
+    @Test(arguments: [false, true])
+    func forceOnDraftCanRequestScopedFixesAndForceOffRevokesThem(_ revoke: Bool) async throws {
+        try await withFixture { fixture in
+            let target = MRAutomationScope.Target(host: Fixture.host, username: "me", projectID: 1, iid: 2)
+            fixture.settings.automation.scope.setManualChoice(.forceOn, for: target)
+            let draft = Fixture.request.replacingOccurrences(of: "\"draft\":false", with: "\"draft\":true")
+            try fixture.write("request.json", draft)
+            let coordinator = fixture.coordinator(assessment: .init(notes: [
+                .init(noteID: 10, state: .blocking, reason: "A scoped correction is still required")
+            ]), duringVerification: {
+                if revoke { fixture.settings.automation.scope.setManualChoice(.paused, for: target) }
+            })
+            var requested: Set<Int> = []
+            coordinator.onNeedsWork = { request, notes, _, _ in
+                #expect(request.draft == true)
+                requested = notes
+            }
+            try await fixture.run(coordinator, requestJSON: draft)
+            #expect(fixture.verified)
+            #expect(requested == (revoke ? [] : [10]))
+            #expect(!fixture.resolved)
+        }
+    }
+
+    @Test(arguments: [0, 1])
+    func forceOnDraftResolvesAcceptedFeedbackOnlyWithoutPendingReplies(_ pendingDrafts: Int) async throws {
+        try await withFixture { fixture in
+            fixture.settings.automation.scope.setManualChoice(.forceOn,
+                for: .init(host: Fixture.host, username: "me", projectID: 1, iid: 2))
+            let draft = Fixture.request.replacingOccurrences(of: "\"draft\":false", with: "\"draft\":true")
+            try fixture.write("request.json", draft)
+            if pendingDrafts > 0 {
+                try fixture.write("drafts.json", #"[{"id":30,"author_id":3,"discussion_id":"thread-a","note":"Private reply awaiting publication"}]"#)
+            }
+            let coordinator = fixture.coordinator()
+            try await fixture.run(coordinator, requestJSON: draft, drafts: pendingDrafts)
+            #expect(fixture.verified)
+            #expect(fixture.resolved == (pendingDrafts == 0))
+            #expect(coordinator.status(projectID: 1, iid: 2)?.phase == (pendingDrafts == 0 ? .complete : .waitingPublication))
+        }
+    }
+
     @Test func approvedReviewerCannotWaiveAPublishedReplyBeforeStoppedAttemptReconciliation() async throws {
         try await withFixture { fixture in
             fixture.settings.automation.autoResolveAcceptedFeedback = false
@@ -296,7 +351,11 @@ struct AuthorFeedbackCoordinatorTests {
             let draft = scenario.hasPrefix("draft")
             let published = scenario.hasSuffix("Published")
             let pendingDrafts = scenario == "pendingDraftMissing" ? 1 : 0
-            let readOnly = draft || pendingDrafts > 0
+            let readOnly = pendingDrafts > 0
+            if draft {
+                fixture.settings.automation.scope.setManualChoice(.forceOn,
+                    for: .init(host: Fixture.host, username: "me", projectID: 1, iid: 2))
+            }
             let requestJSON = Fixture.request.replacingOccurrences(of: "\"draft\":false", with: "\"draft\":\(draft)")
             try fixture.write("request.json", requestJSON)
             try fixture.write("approvals.json", #"{"approved_by":[]}"#)
@@ -703,8 +762,12 @@ struct AuthorFeedbackCoordinatorTests {
     }
 
     @Test(arguments: ["missingReply", "publishedReply", "resolved", "informational"])
-    func draftAssessmentKeepsAnOwedPublishedReplyVisibleWithoutDispatchingWork(scenario: String) async throws {
+    func optedInDraftAssessmentKeepsAnOwedReplyVisibleAndDispatchesOnlyMissingWork(scenario: String) async throws {
         try await withFixture { fixture in
+            fixture.settings.automation.autoResolveAcceptedFeedback = false
+            fixture.settings.automation.authorFeedback.isEnabled = true
+            fixture.settings.automation.scope.setManualChoice(.forceOn,
+                for: .init(host: Fixture.host, username: "me", projectID: 1, iid: 2))
             let draft = Fixture.request.replacingOccurrences(of: "\"draft\":false", with: "\"draft\":true")
             try fixture.write("request.json", draft)
             if scenario != "publishedReply" {
@@ -715,8 +778,8 @@ struct AuthorFeedbackCoordinatorTests {
                 .init(noteID: 10, state: scenario == "informational" ? .informational : .addressed,
                     reason: "Current code and discussion assessed")
             ]))
-            var requestedWork = false
-            coordinator.onNeedsWork = { _, _, _, _ in requestedWork = true }
+            var requestedWork: Set<Int> = []
+            coordinator.onNeedsWork = { _, notes, _, _ in requestedWork = notes }
             try await fixture.run(coordinator, requestJSON: draft)
             let request = try JSONDecoder().decode(GitLabMergeRequest.self, from: Data(draft.utf8))
             let status = try #require(coordinator.status(projectID: 1, iid: 2))
@@ -732,7 +795,7 @@ struct AuthorFeedbackCoordinatorTests {
             #expect(visible.feedback.compactMap(\.id) == (missingReply ? [10] : []))
             #expect(visible.needsDiscussion == missingReply)
             #expect(status.needsAttention == missingReply)
-            #expect(!fixture.resolved && !requestedWork)
+            #expect(!fixture.resolved && requestedWork == (missingReply ? [10] : []))
         }
     }
 
@@ -787,17 +850,20 @@ struct AuthorFeedbackCoordinatorTests {
     }
 
     @Test(arguments: [ReReviewAssessment.Note.State.addressed, .blocking])
-    func draftFeedbackIsAssessedReadOnlyForReconciliation(state: ReReviewAssessment.Note.State) async throws {
+    func optedInDraftWithAPendingReplyIsAssessedReadOnlyForReconciliation(state: ReReviewAssessment.Note.State) async throws {
         try await withFixture { fixture in
+            fixture.settings.automation.scope.setManualChoice(.forceOn,
+                for: .init(host: Fixture.host, username: "me", projectID: 1, iid: 2))
             let draft = Fixture.request.replacingOccurrences(of: "\"draft\":false", with: "\"draft\":true")
             try fixture.write("request.json", draft)
+            try fixture.write("drafts.json", #"[{"id":30,"author_id":3,"discussion_id":"thread-a","note":"Private reply awaiting publication"}]"#)
             let coordinator = fixture.coordinator(assessment: .init(notes: [
                 .init(noteID: 10, state: state, reason: "Current evidence assessed")
             ]))
             var requestedWork = false
             coordinator.onNeedsWork = { _, _, _, _ in requestedWork = true }
 
-            try await fixture.run(coordinator, requestJSON: draft)
+            try await fixture.run(coordinator, requestJSON: draft, drafts: 1)
 
             let request = try JSONDecoder().decode(GitLabMergeRequest.self, from: Data(draft.utf8))
             let fingerprint = try #require(ReviewVerdict.fingerprint(fixture.discussions()))
@@ -1209,8 +1275,10 @@ struct AuthorFeedbackCoordinatorTests {
         func run(_ coordinator: AuthorFeedbackCoordinator, initialDiscussions: [GitLabMergeRequestDiscussion]? = nil,
                  requestJSON: String = Fixture.request, drafts: Int = 0) async throws {
             try start(coordinator, initialDiscussions: initialDiscussions, requestJSON: requestJSON, drafts: drafts)
+            let request = try JSONDecoder().decode(GitLabMergeRequest.self, from: Data(requestJSON.utf8))
             let deadline = ContinuousClock.now + .seconds(15)
             while ContinuousClock.now < deadline {
+                if !settings.automation.scope.permits(request, host: Self.host, username: "me") { return }
                 if let phase = coordinator.status(projectID: 1, iid: 2)?.phase, phase == .complete || phase == .failed || phase == .waitingPublication { return }
                 if verified && coordinator.status(projectID: 1, iid: 2) == nil { return }
                 try await Task.sleep(for: .milliseconds(20))

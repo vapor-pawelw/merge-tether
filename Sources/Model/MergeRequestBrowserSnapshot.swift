@@ -1,6 +1,6 @@
 import Foundation
 
-/// Account-scoped, read-only rows. Automation scope limits Reviewed, never Own.
+/// Account-scoped tracked rows; automation permission does not control board membership.
 struct MergeRequestBrowserSnapshot {
     let own: [MergeRequestAttentionMonitor.Item]
     let reviewed: [MergeRequestAttentionMonitor.Item]
@@ -23,7 +23,8 @@ struct MergeRequestBrowserSnapshot {
             rows[id] = item
         }
         let items = MergeRequestAttentionMonitor.Item.ordered(rows.values.filter {
-            $0.mergeRequest?.state == "opened" && $0.url.isGitLabMergeRequest(host: host, iid: $0.id.iid)
+            ["opened", "merged", "closed"].contains($0.mergeRequest?.state ?? "")
+                && $0.url.isGitLabMergeRequest(host: host, iid: $0.id.iid)
                 && $0.mergeRequest?.webURL.isGitLabMergeRequest(host: host, iid: $0.id.iid) == true
         })
         let matchingStatuses = currentAuthored.filter { status in
@@ -42,7 +43,6 @@ struct MergeRequestBrowserSnapshot {
         }.map(\.element)
         reviewed = items.filter {
             $0.mergeRequest?.author.username != username
-                && scope.resolve(.init(host: host, username: username, projectID: $0.id.projectID, iid: $0.id.iid)).active
         }
     }
 }

@@ -235,6 +235,77 @@ struct MRCatalogStalenessTests {
         #expect(refreshedAt >= listingWasAlreadyReadingAt)
     }
 
+    @Test(arguments: ["authored", "missing", "recovery"], ["draft", "merged"])
+    func aDetailReadStartedAfterAnotherReadyObservationWinsTheLifecycleRace(_ path: String, _ state: String) async throws {
+        let h = try harness()
+        defer { h.cleanUp() }
+        let iid = path == "missing" ? 3 : 1
+        let target = MRAutomationScope.Target(host: host, username: "me", projectID: 1, iid: iid)
+        let ready = request(iid, owned: path != "missing")
+        let changed = state == "draft"
+            ? ready.replacingOccurrences(of: #""draft":false"#, with: #""draft":true"#)
+            : request(iid, owned: path != "missing", state: "merged")
+        if path == "missing" {
+            h.settings.automation.scope[target] = .active
+            try h.write("explicit.json", changed)
+        } else {
+            try h.write("detail.json", changed)
+        }
+        if path == "recovery" {
+            try h.write("drafts.json", #"[{"id":71,"author_id":3,"note":"Pending private reply"}]"#)
+        }
+        try h.write("pause-owned", "yes")
+        let authored = h.authoredMonitor()
+        authored.onObservedMergeRequests = { requests, observedAt in
+            for request in requests where request.iid == iid {
+                h.settings.mrLifecycleLedger.record(request, for: target, now: observedAt)
+            }
+        }
+        if path == "authored" { authored.setVisible(true) }
+        else { h.monitor.refresh(host: host, username: "me", todos: []) }
+        try await h.waitForFile("owned-started")
+        // This independent list observation is later than the first list read,
+        // but earlier than the detail GET that will begin after release.
+        let otherReady = try JSONDecoder().decode(GitLabMergeRequest.self, from: Data(ready.utf8))
+        h.settings.mrLifecycleLedger.record(otherReady, for: target, now: Date())
+        try h.write("release-owned", "yes")
+        let deadline = ContinuousClock.now + .seconds(5)
+        while (path == "authored" ? authored.isLoading : h.monitor.isLoading), ContinuousClock.now < deadline {
+            try await Task.sleep(for: .milliseconds(20))
+        }
+        try #require(!(path == "authored" ? authored.isLoading : h.monitor.isLoading))
+        let latest = try #require(h.settings.mrLifecycleLedger.request(for: target))
+        if state == "draft" { #expect(latest.draft == true) }
+        else { #expect(latest.state == "merged") }
+        #expect(h.settings.mrLifecycleLedger.takeTransitions(host: host, username: "me").map(\.kind.rawValue) == [state])
+    }
+
+    @Test func anOlderDetailAlreadyInFlightCannotUndoANewerDraftObservation() async throws {
+        let h = try harness()
+        defer { h.cleanUp() }
+        let target = MRAutomationScope.Target(host: host, username: "me", projectID: 1, iid: 1)
+        let ready = request(1, owned: true)
+        try h.write("detail.json", ready)
+        try h.write("pause-detail", "yes")
+        let authored = h.authoredMonitor()
+        authored.onObservedMergeRequests = { requests, observedAt in
+            for request in requests where request.iid == 1 {
+                h.settings.mrLifecycleLedger.record(request, for: target, now: observedAt)
+            }
+        }
+        authored.setVisible(true)
+        try await h.waitForFile("detail-started")
+        let newerDraft = try JSONDecoder().decode(GitLabMergeRequest.self,
+            from: Data(ready.replacingOccurrences(of: #""draft":false"#, with: #""draft":true"#).utf8))
+        h.settings.mrLifecycleLedger.record(newerDraft, for: target, now: Date())
+        try h.write("release-detail", "yes")
+        let deadline = ContinuousClock.now + .seconds(5)
+        while authored.isLoading, ContinuousClock.now < deadline { try await Task.sleep(for: .milliseconds(20)) }
+        try #require(!authored.isLoading)
+        #expect(h.settings.mrLifecycleLedger.request(for: target)?.draft == true)
+        #expect(h.settings.mrLifecycleLedger.takeTransitions(host: host, username: "me").map(\.kind) == [.draft])
+    }
+
     @MainActor
     private struct Harness {
         let folder: URL
@@ -333,7 +404,16 @@ struct MRCatalogStalenessTests {
                 [ ! -f fail-owned ] || exit 2; cat owned.json ;;
             /merge_requests?scope=all*) [ ! -f fail-reviewing ] || exit 2; cat reviewing.json ;;
             /projects/1/merge_requests/3) [ ! -f fail-explicit ] || exit 2; cat explicit.json ;;
+            /projects/1/merge_requests/1)
+                [ -f detail.json ] || exit 100
+                if [ -f pause-detail ]; then
+                    touch detail-started
+                    while [ ! -f release-detail ]; do sleep 0.02; done
+                fi
+                cat detail.json ;;
             /projects/1/merge_requests/1/discussions*) [ ! -f fail-discussions ] || exit 2; cat discussions.json ;;
+            /projects/1/merge_requests/1/draft_notes*)
+                if [ -f drafts.json ]; then cat drafts.json; else echo '[]'; fi ;;
             */draft_notes*) echo '[]' ;;
             */discussions*) echo '[]' ;;
             *) exit 100 ;;
@@ -375,9 +455,21 @@ struct MRCatalogStalenessTests {
         try FileManager.default.removeItem(at: h.folder.appending(path: failure))
         try h.write(ownedFails ? "owned.json" : "reviewing.json", "[]")
         try await h.poll()
-        #expect(!h.monitor.hasError)
+        // An own MR missing from a recovered open listing needs an exact state
+        // read. This fixture deliberately has no endpoint for MR 1, so the
+        // previous clickable snapshot stays visible with that read failure.
+        #expect(h.monitor.hasError == ownedFails)
         #expect(h.monitor.hasCurrentOwnListing)
-        #expect(h.monitor.currentOpenItems.map(\.id.iid) == [freshID])
+        #expect(Set(h.monitor.currentOpenItems.map(\.id.iid)) == (ownedFails ? [1, 2] : [freshID]))
+        #expect(h.monitor.currentOpenItems.first { $0.id.iid == freshID }?.title == "Fresh title")
+        if ownedFails {
+            let retained = try #require(h.monitor.currentOpenItems.first { $0.id.iid == 1 })
+            #expect(retained.mergeRequest?.state == "opened")
+            #expect(retained.url.absoluteString == "https://gitlab.example.org/g/p/-/merge_requests/1")
+            let calls = try String(contentsOf: h.folder.appending(path: "calls"), encoding: .utf8)
+            #expect(calls.split(separator: "\n").contains("/projects/1/merge_requests/1"))
+            #expect(h.settings.mrLifecycleLedger.takeTransitions(host: host, username: "me").isEmpty)
+        }
     }
 
     @Test(arguments: ["closed", "merged"])
@@ -399,8 +491,25 @@ struct MRCatalogStalenessTests {
         try h.write("explicit.json", request(3, owned: false, state: state))
         try await h.poll()
         #expect(!h.monitor.hasError)
-        #expect(h.monitor.currentOpenItems.isEmpty)
-        #expect(h.settings.automation.scope[target] == (state == "merged" ? .inherit : .active))
+        #expect(h.monitor.currentOpenItems.map(\.id.iid) == [3])
+        #expect(h.monitor.currentOpenItems.first?.mergeRequest?.state == state)
+        #expect(h.settings.automation.scope[target] == .active)
+        #expect(h.settings.automation.scope.isManaged(target))
+        let restartedSettings = SettingsManager(defaults: h.defaults)
+        #expect(restartedSettings.mrLifecycleLedger.retainedRequests(host: host, username: "me").first?.state == state)
+    }
+
+    @Test func aMissingManagedOwnListingRequiresAFreshStateReadAndDoesNotInferClosureOnFailure() async throws {
+        let h = try harness()
+        defer { h.cleanUp() }
+        try await h.poll()
+        #expect(h.monitor.currentOpenItems.contains { $0.id.iid == 1 })
+        try h.write("owned.json", "[]")
+        try await h.poll()
+        // The exact endpoint is deliberately unavailable in this fixture.
+        #expect(h.monitor.hasError)
+        #expect(h.monitor.currentOpenItems.contains { $0.id.iid == 1 && $0.mergeRequest?.state == "opened" })
+        #expect(h.settings.mrLifecycleLedger.takeTransitions(host: host, username: "me").isEmpty)
     }
 
     @Test func accountChangeNeverRetainsAnotherUsersCatalog() async throws {
@@ -475,9 +584,9 @@ struct MRCatalogStalenessTests {
 
         h.settings.automation.scope.mode = .selected
         try await h.poll()
-        #expect(!h.monitor.hasError)
-        #expect(Set(h.monitor.currentOpenItems.map(\.id.iid)) == [1, 2])
-        #expect(try h.exactFetchCount() == 2)
+        #expect(h.monitor.hasError)
+        #expect(Set(h.monitor.currentOpenItems.map(\.id.iid)) == [1, 2, 3])
+        #expect(try h.exactFetchCount() == 3)
     }
 
     @Test func mergedRecordedReviewIsNotFetchedEveryPollAndReopeningIsRediscovered() async throws {

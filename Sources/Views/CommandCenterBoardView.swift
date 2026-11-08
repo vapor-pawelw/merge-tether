@@ -29,13 +29,13 @@ struct CommandCenterBoardView: View {
                 if board.own.isEmpty {
                     empty(.Board.boardEmptyOwnTitle, message: .Board.boardLaneOwnEmpty, symbol: "arrow.triangle.pull")
                 }
-                ForEach(board.own) { row in card(row) }
+                laneCards(board.own)
             }
             lane(title: .Board.boardLaneReviewing, symbol: "text.magnifyingglass", cardIDs: board.reviewed.map(\.id), dependencies: board.reviewed.map { $0.item.dependencies }) {
                 if board.reviewed.isEmpty {
                     empty(.Board.boardEmptyReviewingTitle, message: .Board.boardLaneReviewingEmpty, symbol: "text.magnifyingglass")
                 }
-                ForEach(board.reviewed) { row in card(row, removable: true) }
+                laneCards(board.reviewed, removable: true)
             }
             lane(title: .Board.boardLaneOther, symbol: "tray", cardIDs: otherCards.map(\.id), dependencies: otherCards.map {
                 if case .proposal(let proposal) = $0.content { return proposal.item?.dependencies }
@@ -90,7 +90,25 @@ struct CommandCenterBoardView: View {
         }, onDetails: {
             selected = Selection(item: row.item, section: .overview, account: account)
         })
-        .transition(cardTransition)
+    }
+
+    private func laneCards(_ rows: [MergeRequestBoardSnapshot.Row], removable: Bool = false) -> some View {
+        ForEach(Array(rows.enumerated()), id: \.element.id) { index, row in
+            VStack(spacing: 10) {
+                if row.item.mergeRequest?.state == "opened", row.item.mergeRequest?.draft == true,
+                   index == 0 || rows[index - 1].item.mergeRequest?.draft != true
+                    || rows[index - 1].item.mergeRequest?.state != "opened" {
+                    HStack(spacing: 10) {
+                        Text(.DraftMR.sectionTitle).font(.caption.weight(.medium)).foregroundStyle(.secondary)
+                        Rectangle().fill(.secondary.opacity(0.16)).frame(height: 0.5)
+                    }
+                    .padding(.top, index == 0 ? 2 : 14)
+                    .padding(.horizontal, 4)
+                }
+                card(row, removable: removable)
+            }
+            .transition(cardTransition)
+        }
     }
 
     @ViewBuilder

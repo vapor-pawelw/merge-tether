@@ -14,6 +14,11 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 
 ### Added
 
+- Track MR lifecycle changes independently of coding automation, announce merged, closed and Draft/Ready transitions, and retain finished cards until Seen by default, with a separate optional automatic-removal setting.
+- Mark your own Draft merge requests ready from their card, menu and Details, with fresh account, ownership and revision checks.
+- Add Auto/Always on/Always off per-MR automation and a migrated default-on Draft pause; track paused Drafts, retain ordinary manual actions, and hide automation controls when all automatic features are off.
+- Apply Draft policy across agent checks, feedback, publication, CI and conflicts, retain pending events while paused, and keep Draft/Ready changes from overriding forced choices. Drafts still never merge automatically.
+
 - Add a simple per-MR Automation switch and repository-default toggles, preserving inherited scope and existing action permissions.
 - Keep cached background refreshes silent while showing startup, explicit global and per-MR refresh progress without weakening action freshness checks.
 - Keep draft cards at normal contrast and distinguish them with gray titles and statuses.

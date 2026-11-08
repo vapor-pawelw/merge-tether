@@ -24,9 +24,11 @@ enum DraftReplyRepair {
                 + "|\(bodySHA256)|\(rejection.state.rawValue)|" + AICommentAssessmentStore.digest(rejection.reason)
                 + "|\(assistant.rawValue)|\(codingModel.rawValue)|\(codingThinking.rawValue)")
         }
-        func matches(_ snapshot: DraftProofRecoveryCoordinator.Snapshot) -> Bool {
+        func matches(_ snapshot: DraftProofRecoveryCoordinator.Snapshot, configuration: AutomationSettings? = nil) -> Bool {
             snapshot.request.sha == headSHA && snapshot.branchHead == headSHA
-                && snapshot.request.draft == false
+                && snapshot.request.state == "opened"
+                && (configuration.map { $0.scope.permits(snapshot.request, host: snapshot.host, username: snapshot.user.username) }
+                    ?? (snapshot.request.draft == false))
                 && snapshot.request.draftProofRecoveryContextFingerprint == recoveryContextFingerprint
                 && ReviewVerdict.fingerprint(snapshot.discussions) == discussionFingerprint
                 && snapshot.drafts.filter { $0.id == draftID }.count == 1
@@ -45,9 +47,12 @@ enum DraftReplyRepair {
     enum Status { case working, blocked(String) }
 
     static func preparationAllowed(_ request: GitLabMergeRequest, configuration: AutomationSettings) -> Bool {
+        guard let host = request.webURL.host else { return false }
+        let authority = request.webURL.port.map { "\(host):\($0)" } ?? host
         let feedback = configuration.authorFeedback
         let workflow = configuration.workflowRules[.newDiscussion]
-        return configuration.packageDecision != .disabled && configuration.allowFollowUpPush
+        return configuration.scope.permits(request, host: authority, username: request.author.username)
+            && configuration.packageDecision != .disabled && configuration.allowFollowUpPush
             && feedback.runner == .assistant && feedback.isConfigured
             && feedback.includes(project: request.webURL.gitLabProjectPath)
             && (feedback.isEnabled || (workflow.mode == .assistant && workflow.includes(request)))
@@ -62,7 +67,7 @@ enum DraftReplyRepair {
             recoveryContextFingerprint: snapshot.request.draftProofRecoveryContextFingerprint,
             draftID: rejection.draftID, bodySHA256: AICommentAssessmentStore.digest(draft.note ?? ""), rejection: rejection,
             assistant: configuration.assistant, codingModel: configuration.codexReviewModel, codingThinking: configuration.codexReviewThinking)
-        return result.matches(snapshot) ? result : nil
+        return result.matches(snapshot, configuration: configuration) ? result : nil
     }
 
     private static func folder(_ snapshot: DraftProofRecoveryCoordinator.Snapshot, directory: URL) -> URL {
@@ -210,7 +215,8 @@ enum DraftReplyRepair {
         let branch = try await glab.fetchBranchHeadSHA(projectID: source, branch: liveRequest.sourceBranch, host: snapshot.host)
         let live = DraftProofRecoveryCoordinator.Snapshot(request: liveRequest, discussions: liveThreads, drafts: liveDrafts,
             user: liveUser, host: snapshot.host, branchHead: branch)
-        guard context.matches(live), glab.resolvedHost == snapshot.host,
+        guard context.matches(live, configuration: settings.automation),
+              preparationAllowed(live.request, configuration: settings.automation), glab.resolvedHost == snapshot.host,
               glab.currentUsername == snapshot.user.username else { throw AssistantJobExecutor.ExecutionError.headChanged }
     }
 

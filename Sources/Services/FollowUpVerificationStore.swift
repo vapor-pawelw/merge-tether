@@ -53,6 +53,7 @@ enum FollowUpVerificationStore {
         let iid: Int
         let username: String
         let pushAllowed: Bool
+        var draftAutomationAllowed = false
         var repairDrafts: [FollowUpVerification.DraftEvidence]? = nil
     }
 
@@ -82,8 +83,11 @@ enum FollowUpVerificationStore {
     static func register(_ handoff: AssistantAutomationRunner.Handoff, settings: SettingsManager, in directory: URL = directory) {
         guard handoff.followUpPushAllowed != nil else { return }
         let work = handoff.key.work
+        let target = MRAutomationScope.Target(host: work.host, username: handoff.key.username,
+            projectID: work.projectID, iid: work.iid)
         let record = Run(runID: handoff.id, host: work.host, projectID: work.projectID, iid: work.iid,
                          username: handoff.key.username, pushAllowed: canPush(handoff, configuration: settings.automation),
+                         draftAutomationAllowed: handoff.manual == true || settings.automation.scope.allowsDraftAutomation(for: target),
                          repairDrafts: handoff.draftRepair.map { [.init(id: $0.draftID, bodySHA256: $0.bodySHA256)] })
         let url = recordURL(kind: "follow-up-runs", work: work, username: handoff.key.username, in: directory)
         do {

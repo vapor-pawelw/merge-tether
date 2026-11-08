@@ -16,6 +16,20 @@ struct BoardMRProposalCard: View {
         _authorLoader = State(initialValue: ProposalAuthorLoader(glab: monitor.glab))
     }
 
+    private var currentRequest: GitLabMergeRequest? {
+        authorLoader.request(for: proposal) ?? proposal.item?.mergeRequest
+            ?? monitor.settings.mrLifecycleLedger.request(for: proposal.target)
+    }
+    private var finishedState: MergeRequestFinishedState? { .init(currentRequest) }
+    private var finishedItem: MergeRequestAttentionMonitor.Item? {
+        guard let request = currentRequest, finishedState != nil else { return nil }
+        var item = proposal.item ?? .init(id: .init(projectID: request.projectID, iid: request.iid),
+            title: request.title, url: request.webURL)
+        item.mergeRequest = request
+        item.isAuthored = request.author.username == proposal.target.username
+        return item
+    }
+
     private var context: ProposalMRContext {
         ProposalMRContext(proposal: proposal, fetchedRequest: authorLoader.request(for: proposal))
     }
@@ -51,36 +65,40 @@ struct BoardMRProposalCard: View {
                 .buttonStyle(.plain)
                 moreMenu
             }
-            dependencyRow
-            reasons
-            HStack {
-                Button {
-                    isWorking = true
-                    Task {
-                        defer { isWorking = false }
-                        if let todo = proposal.todos.first {
-                            await monitor.adoptMRTodoProposal(todo)
-                        } else {
-                            do {
-                                _ = try await monitor.addManagedMergeRequest(from: proposal.url.absoluteString)
-                                for intent in proposal.intents where intent.state == .pending || intent.state == .failed {
-                                    await monitor.runMRTodoIntent(id: intent.id)
-                                }
-                            } catch { failed = true }
+            if let finishedItem {
+                FinishedMergeRequestStatus(item: finishedItem, monitor: monitor)
+            } else {
+                dependencyRow
+                reasons
+                HStack {
+                    Button {
+                        isWorking = true
+                        Task {
+                            defer { isWorking = false }
+                            if let todo = proposal.todos.first {
+                                await monitor.adoptMRTodoProposal(todo)
+                            } else {
+                                do {
+                                    _ = try await monitor.addManagedMergeRequest(from: proposal.url.absoluteString)
+                                    for intent in proposal.intents where intent.state == .pending || intent.state == .failed {
+                                        await monitor.runMRTodoIntent(id: intent.id)
+                                    }
+                                } catch { failed = true }
+                            }
                         }
-                    }
-                } label: { Text(.Board.boardProposalAddAndHandle) }
-                .buttonStyle(.bordered).help(Text(.Board.boardProposalDescription))
-                Button { confirmIgnore = true } label: { Text(.Board.boardProposalIgnore) }
-                    .buttonStyle(.plain).foregroundStyle(.secondary)
-                if isWorking { ProgressView().controlSize(.small) }
+                    } label: { Text(.Board.boardProposalAddAndHandle) }
+                    .buttonStyle(.bordered).help(Text(.Board.boardProposalDescription))
+                    Button { confirmIgnore = true } label: { Text(.Board.boardProposalIgnore) }
+                        .buttonStyle(.plain).foregroundStyle(.secondary)
+                    if isWorking { ProgressView().controlSize(.small) }
+                }
+                .disabled(isWorking)
+                if failed {
+                    BoardStatusChip(title: .Board.boardCompactBlocked, symbol: "exclamationmark.circle", tint: isDraft ? .secondary : .orange)
+                        .help(Text(.Menu.menuMrAddFailed))
+                }
+                runResult
             }
-            .disabled(isWorking)
-            if failed {
-                BoardStatusChip(title: .Board.boardCompactBlocked, symbol: "exclamationmark.circle", tint: isDraft ? .secondary : .orange)
-                    .help(Text(.Menu.menuMrAddFailed))
-            }
-            runResult
         }
         .confirmationDialog(Text(.Board.boardProposalIgnore), isPresented: $confirmIgnore, titleVisibility: .visible) {
             Button(role: .destructive) {
@@ -115,9 +133,12 @@ struct BoardMRProposalCard: View {
                 Link(destination: proposal.url) {
                     Label { Text(.CommandCenter.commandCenterOpenGitLab) } icon: { Image(systemName: "arrow.up.right.square") }
                 }
-                if let job = proposal.latestJob { AssistantJobRow(handoff: job, monitor: monitor) }
-                MRAutomationScopeMenu(settings: monitor.settings, target: proposal.target,
-                    projectPath: proposal.url.gitLabProjectPath)
+                if let finishedItem { FinishedMergeRequestStatus(item: finishedItem, monitor: monitor) }
+                if let job = proposal.latestJob { AssistantJobRow(handoff: job, monitor: monitor, readOnly: finishedState != nil) }
+                if finishedState == nil {
+                    MRAutomationScopeMenu(settings: monitor.settings, target: proposal.target,
+                        projectPath: proposal.url.gitLabProjectPath, isDraft: isDraft)
+                }
             }
         }
     }
@@ -126,13 +147,16 @@ struct BoardMRProposalCard: View {
         HStack(spacing: 6) {
             author
             Spacer(minLength: 4)
-            BoardStatusChip(title: .Board.boardCompactProposal, symbol: "plus.circle")
-            if isDraft {
-                BoardDraftBadge()
+            if let finishedState { FinishedMergeRequestBadge(state: finishedState) }
+            else {
+                BoardStatusChip(title: .Board.boardCompactProposal, symbol: "plus.circle")
+                if isDraft { BoardDraftBadge() }
             }
             if let iid = proposal.target.iid { BoardMRIdentifier(iid: iid) }
-            BoardAutomationToggle(settings: monitor.settings, target: proposal.target,
-                projectPath: proposal.url.gitLabProjectPath)
+            if finishedState == nil {
+                BoardAutomationToggle(settings: monitor.settings, target: proposal.target,
+                    projectPath: proposal.url.gitLabProjectPath, isDraft: isDraft)
+            }
             BoardPinButton(pin: .mergeRequest(host: proposal.target.host, username: proposal.target.username,
                 projectID: proposal.target.projectID, iid: proposal.target.iid ?? 0), settings: monitor.settings)
         }
@@ -152,9 +176,11 @@ struct BoardMRProposalCard: View {
             }
             AssistantContextMenu(mergeRequestURL: proposal.url, title: proposal.title,
                 workspace: monitor.settings.automation.assistantWorkspace)
-            Divider()
-            MRAutomationScopeMenu(settings: monitor.settings, target: proposal.target,
-                projectPath: proposal.url.gitLabProjectPath)
+            if finishedState == nil {
+                Divider()
+                MRAutomationScopeMenu(settings: monitor.settings, target: proposal.target,
+                    projectPath: proposal.url.gitLabProjectPath, isDraft: isDraft)
+            }
         } label: { BoardCardActionIcon(systemName: "ellipsis") }
         .menuStyle(.borderlessButton).menuIndicator(.hidden).fixedSize()
         .frame(width: 24, height: 24)

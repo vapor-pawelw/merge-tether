@@ -18,6 +18,69 @@ extension GlabService {
         )
     }
 
+    func markMergeRequestReady(
+        projectID: Int, iid: Int, headSHA: String, host: String,
+        expectedUser: GitLabAuthenticatedUser, shouldProceed: @MainActor () -> Bool = { true }
+    ) async throws -> GitLabMergeRequest {
+        guard projectID > 0, iid > 0, Self.isFullGitSHA(headSHA) else {
+            throw GlabError.decoding("Invalid merge request identity or source SHA")
+        }
+        guard let executable = glabPath else { throw GlabError.glabNotInstalled }
+        let revision = accountRevision
+        func checkSession() throws {
+            guard accountRevision == revision, glabPath == executable,
+                  resolvedHost == host, currentUsername == expectedUser.username else {
+                throw GlabError.notAuthenticated
+            }
+            try Task.checkCancellation()
+            guard shouldProceed() else { throw CancellationError() }
+        }
+        try checkSession()
+        let user = try await fetchAuthenticatedUser(host: host, expectedUsername: expectedUser.username)
+        guard user == expectedUser else { throw GlabError.notAuthenticated }
+        try checkSession()
+        let current = try await fetchMergeRequest(projectID: projectID, iid: iid, host: host)
+        try checkSession()
+        guard current.author.id == expectedUser.id, current.state == "opened", current.sha == headSHA,
+              current.webURL.isGitLabMergeRequest(host: host, iid: iid), let draft = current.draft else {
+            throw CancellationError()
+        }
+        if !draft { return current }
+
+        var repository = URLComponents(url: current.webURL, resolvingAgainstBaseURL: false)
+        repository?.path = "/" + current.webURL.gitLabProjectPath
+        repository?.query = nil
+        repository?.fragment = nil
+        guard let repositoryURL = repository?.url, !current.webURL.gitLabProjectPath.isEmpty else {
+            throw GlabError.decoding("GitLab did not provide the merge request repository")
+        }
+        let finalUser = try await fetchAuthenticatedUser(host: host, expectedUsername: expectedUser.username)
+        guard finalUser == expectedUser else { throw GlabError.notAuthenticated }
+        try checkSession()
+        let output: ProcessRunner.Output
+        do {
+            output = try await ProcessRunner.run(
+                executable,
+                arguments: ["mr", "update", String(iid), "--ready", "--yes", "--repo", repositoryURL.absoluteString],
+                environment: Self.shellEnvironment,
+                timeout: 30
+            )
+        } catch ProcessRunner.RunError.timedOut {
+            throw GlabError.timedOut
+        }
+        guard output.exitCode == 0 else {
+            throw GlabError.classify(exitCode: output.exitCode, stderr: output.stderr)
+        }
+        try checkSession()
+        let updated = try await fetchMergeRequest(projectID: projectID, iid: iid, host: host)
+        try checkSession()
+        guard updated.author.id == expectedUser.id, updated.state == "opened", updated.sha == headSHA,
+              updated.webURL == current.webURL, updated.draft == false else {
+            throw GlabError.decoding("GitLab did not confirm the merge request is ready")
+        }
+        return updated
+    }
+
     func fetchMergeRequestStackSnapshot(projectID: Int, host: String) async throws -> MergeRequestStackSnapshot {
         async let requests: [GitLabMergeRequest] = fetchMergeRequestPages(
             "/projects/\(projectID)/merge_requests?state=opened&scope=all&per_page=100", host: host

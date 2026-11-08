@@ -78,6 +78,8 @@ enum AssistantJobExecutor {
 
             This is a headless MergeTether run. Do not open coding-agent desktop apps, create GUI chats, or request interactive input.
             Keep working files and isolated Git worktrees beneath this run's working directory. Never modify another checkout.
+            Preserve the MR's Draft or Ready status. Never mark a Draft ready, undraft it, or merge it in this worker.
+            MergeTether handles an explicit user's Mark ready action separately; Draft automation does not authorize that change.
             If an assigned check or mandatory commit hook fails because an installed and configured local runtime
             is stopped, diagnose the exact failed command and configured endpoint, then start only that required
             runtime using its service CLI. For Docker, inspect `docker context show` and its endpoint first.

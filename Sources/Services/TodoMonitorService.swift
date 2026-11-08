@@ -81,6 +81,8 @@ final class TodoMonitorService {
         boardRefreshState == .syncing || refreshProgress.showsRefresh(for: id, accountRevision: glab.accountRevision)
     }
     var assistantJobActionError: String?
+    var markMergeRequestReadyError: String?
+    @ObservationIgnored var boardPolicyOrder = BoardPolicyOrder()
     private(set) var assistantJobActionNotices: [UUID: String] = [:]
     private(set) var desktopHandoffError = false
     let assistantDependencies = AssistantDependencyMonitor()
@@ -166,7 +168,7 @@ final class TodoMonitorService {
             let revision = self.glab.accountRevision
             let target = MRAutomationScope.Target(host: host, username: user.username,
                 projectID: request.projectID, iid: request.iid)
-            guard configuration.canClassifyIncomingNotices, configuration.scope.resolve(target).active,
+            guard configuration.canClassifyIncomingNotices, configuration.scope.permits(request, host: host, username: user.username),
                   !self.settings.ignoredMergeRequests.contains(target) else { return .uncertain }
             let model = configuration.assistant == .codex
                 ? configuration.codexVerificationModel.rawValue : configuration.claudeVerificationModel.rawValue
@@ -208,9 +210,17 @@ final class TodoMonitorService {
         self.authoredMergeRequests = AuthoredMergeRequestMonitor(settings: settings, glab: glab, notifications: notifications)
         attention.onRefreshed = { [weak self] in
             guard let self else { return }
+            self.deliverLifecycleTransitions()
+            self.cancelIneligibleDraftAutomation()
             // Publish the confirmed projection before consumers observe a completed fetch.
             // Observation's asynchronous invalidation remains responsible for other changes.
             self.confirmedAttention.update(self.pendingUserAttention)
+        }
+        authoredMergeRequests.onObservedMergeRequests = { [weak self] requests, observedAt in
+            self?.recordOwnedLifecycleObservations(requests, observedAt: observedAt)
+        }
+        attention.onAutomationEligibilityObserved = { [weak self] in
+            self?.cancelIneligibleDraftAutomation()
         }
         authoredMergeRequests.workflow.onRemoteChange = { [weak self] in
             Task { await self?.refreshNow() }
@@ -287,6 +297,7 @@ final class TodoMonitorService {
             }
         }
         confirmedAttention.update(input)
+        boardPolicyOrder.observe(boardOrderingEntries(boardSnapshot))
     }
 
     private var userAttentionAccount: String? {
@@ -396,7 +407,7 @@ final class TodoMonitorService {
 
     private var mergeRequestBrowser: MergeRequestBrowserSnapshot? {
         guard let host = glab.resolvedHost, let username = glab.currentUsername else { return nil }
-        return MergeRequestBrowserSnapshot(openItems: attention.currentOpenItems,
+        return MergeRequestBrowserSnapshot(openItems: lifecycleCatalogItems(host: host, username: username),
             authored: authoredMergeRequests.requests, host: host, username: username, scope: settings.automation.scope,
             ownCatalogIsAuthoritative: attention.hasCurrentOwnListing)
     }
@@ -441,6 +452,7 @@ final class TodoMonitorService {
             else { manualAdoptions[target] = remaining }
         }
         settings.ignoredMergeRequests.remove(target)
+        settings.mrLifecycleLedger.restore(target)
         settings.automation.scope[target] = .active
         settings.automation.scope.rememberRepository(todo.project.pathWithNamespace, for: target)
         settings.save()
@@ -453,7 +465,7 @@ final class TodoMonitorService {
     }
 
     private func trackedReviewTarget(_ target: MRAutomationScope.Target) -> Bool {
-        settings.automation.scope.isManaged(target)
+        settings.automation.scope.isManaged(target) || settings.mrLifecycleLedger.request(for: target) != nil
             || settings.mrActionIntents.contains { $0.target == target && $0.grantsManagement }
             || settings.assistantChats.keys.contains {
                 $0.work.host == target.host && $0.username == target.username && $0.work.projectID == target.projectID && $0.work.iid == target.iid
@@ -480,7 +492,10 @@ final class TodoMonitorService {
         ReviewingContext(row: row,
             workflowState: ReviewingContext.workflowState(for: row, entries: authoredMergeRequests.workflow.entries),
             assistantReady: availableAssistants.contains(settings.automation.assistant),
-            assistantChecking: assistantDependencies.isChecking)
+            assistantChecking: assistantDependencies.isChecking,
+            draftAutomationAllowed: settings.automation.hasEnabledAutomation && row.item.mergeRequest.map {
+                settings.automation.scope.permits($0, host: glab.resolvedHost ?? "", username: glab.currentUsername ?? "")
+            } == true)
     }
 
     var ownMergeRequestItems: [MergeRequestAttentionMonitor.Item] { mergeRequestBrowser?.own ?? [] }
@@ -663,6 +678,7 @@ final class TodoMonitorService {
 
     private func enableAutomationTarget(_ target: MRAutomationScope.Target, projectPath: String) {
         settings.ignoredMergeRequests.remove(target)
+        settings.mrLifecycleLedger.restore(target)
         settings.automation.scope[target] = .active
         settings.automation.scope.rememberRepository(projectPath, for: target)
         settings.save()
@@ -795,8 +811,8 @@ final class TodoMonitorService {
 
     private func automaticallyHandlesFeedback(_ item: MergeRequestAttentionMonitor.Item) -> Bool {
         guard let target = scopeTarget(projectID: item.id.projectID, iid: item.id.iid, url: item.url),
-              settings.automation.scope.resolve(target).active,
-              let request = item.authoredRequest, request.state == "opened", request.draft == false,
+              let request = item.authoredRequest, request.state == "opened",
+              settings.automation.scope.permits(request, host: target.host, username: target.username),
               request.author.username == target.username else { return false }
         let rule = settings.automation.workflowRules[.newDiscussion]
         let feedback = settings.automation.authorFeedback
@@ -843,7 +859,7 @@ final class TodoMonitorService {
         let board = MergeRequestBoardSnapshot(own: ownMergeRequestItems, reviewed: reviewedMergeRequestItems,
             todos: currentAccountTodos, attention: attentionItems, handoffs: settings.assistantHandoffs,
             host: host, username: username, intents: currentMRTodoIntents, routedTodoIDs: routedMRTodoIDs,
-            ignoredTargets: settings.ignoredMergeRequests, pipelineEvidence: currentPipelineEvidence,
+            ignoredTargets: hiddenBoardTargets, pipelineEvidence: currentPipelineEvidence,
             pipelineEvidenceCheckedAt: currentPipelineEvidenceDate)
         var candidates: [UserAttentionSnapshot.Candidate] = []
         var checkingIDs: Set<String> = []
@@ -853,6 +869,7 @@ final class TodoMonitorService {
             "\(todo.id):\(todo.updatedAt?.timeIntervalSince1970 ?? todo.createdAt.timeIntervalSince1970):" + UserAttentionSnapshot.digest(todo.body + todo.displayTitle)
         }
         for row in board.own + board.reviewed {
+            guard row.item.mergeRequest?.state == "opened" else { continue }
             let target = MRAutomationScope.Target(host: host, username: username, projectID: row.id.projectID, iid: row.id.iid)
             guard !settings.ignoredMergeRequests.contains(target) else { continue }
             let item = row.item.presentingHumanAttention(
@@ -955,7 +972,8 @@ final class TodoMonitorService {
         let configuration = settings.automation
         guard configuration.packageDecision != .disabled, configuration.scope.resolve(intent.target).active,
               !settings.ignoredMergeRequests.contains(intent.target), intent.request.state == "opened",
-              intent.isDeferredReview || (ready && intent.request.draft != true) else { return false }
+              intent.isDeferredReview || (ready && configuration.scope.permits(intent.request,
+                  host: intent.target.host, username: intent.target.username)) else { return false }
         let project = intent.request.webURL.gitLabProjectPath
         switch intent.kind {
         case .review:
@@ -1299,25 +1317,156 @@ final class TodoMonitorService {
     func automationConfigurationChanged(previous: AutomationSettings) {
         let current = settings.automation
         guard previous != current else { return }
+        boardPolicyOrder.policyChanged(from: previous, to: current)
         let scopeOnly = previous.preservingScope(from: current) == current
+        let host = glab.resolvedHost ?? "", username = glab.currentUsername ?? ""
+        let targets = Set(previous.scope.individualTargets(host: host, username: username)
+            + current.scope.individualTargets(host: host, username: username)
+            + previous.scope.repositoryOverrides(host: host, username: username)
+            + current.scope.repositoryOverrides(host: host, username: username))
+        let executionChanged = previous.scope.mode != current.scope.mode
+            || previous.scope.pauseDraftsByDefault != current.scope.pauseDraftsByDefault
+            || targets.contains { target in
+                previous.scope.resolve(target).active != current.scope.resolve(target).active
+                    || previous.scope.resolve(target, isDraft: true).active != current.scope.resolve(target, isDraft: true).active
+            }
+        let cancellationScope = currentAutomationCancellationScope
+        authoredMergeRequests.cancelRuntimePreparation(outsideScope: cancellationScope)
+        attention.cancelRuntimePreparation(outsideScope: cancellationScope)
         // Revoke the helper's persisted permission before stopping an in-flight worker.
         FollowUpVerificationStore.synchronizeRuns(settings: settings)
-        automation.cancelRunningScripts(outsideScope: scopeOnly ? current.scope : nil)
+        automation.cancelRunningScripts(outsideScope: scopeOnly ? cancellationScope : nil)
         for handoff in settings.assistantHandoffs where handoff.execution?.state.isActive == true {
             if scopeOnly {
                 let target = MRAutomationScope.Target(host: handoff.key.work.host, username: handoff.key.username,
                     projectID: handoff.key.work.projectID, iid: handoff.key.work.iid)
-                guard handoff.manual != true, !current.scope.resolve(target).active else { continue }
+                guard handoff.manual != true, !cancellationScope.resolve(target).active else { continue }
             }
             cancelPolicyJob(handoff.id, settings)
         }
-        attention.automationConfigurationChanged(outsideScope: scopeOnly ? current.scope : nil)
+        attention.automationConfigurationChanged(outsideScope: scopeOnly ? cancellationScope : nil)
         assistantDependencies.refresh(requireCLI: true, force: !scopeOnly)
-        authoredMergeRequests.automationConfigurationChanged(outsideScope: scopeOnly ? current.scope : nil)
+        authoredMergeRequests.automationConfigurationChanged(outsideScope: scopeOnly ? cancellationScope : nil)
         authoredMergeRequests.workflow.synchronizeAssistantJobs()
         if let host = glab.resolvedHost, let username = glab.currentUsername {
             attention.refresh(host: host, username: username, todos: visibleTodos)
+            if current.hasEnabledAutomation && (!scopeOnly || executionChanged) {
+                Task { await self.routeMRTodos(host: host, username: username) }
+            }
         }
+    }
+
+    private var currentAutomationCancellationScope: MRAutomationScope {
+        guard let host = glab.resolvedHost, let username = glab.currentUsername else { return settings.automation.scope }
+        let targets = settings.mrLifecycleLedger.targets(host: host, username: username)
+        let latest = targets.compactMap { settings.mrLifecycleLedger.request(for: $0) }
+        let fallback = attention.currentOpenItems.compactMap(\.mergeRequest).filter { request in
+            !targets.contains(.init(host: host, username: username, projectID: request.projectID, iid: request.iid))
+        }
+        return settings.automation.scope.cancellationScope(for: latest + fallback,
+            host: host, username: username)
+    }
+
+    var hiddenBoardTargets: Set<MRAutomationScope.Target> {
+        guard let host = glab.resolvedHost, let username = glab.currentUsername else { return settings.ignoredMergeRequests }
+        return settings.ignoredMergeRequests.union(settings.mrLifecycleLedger.targets(host: host, username: username)
+            .filter { settings.mrLifecycleLedger.isSuppressed($0) })
+    }
+
+    private func lifecycleCatalogItems(host: String, username: String) -> [MergeRequestAttentionMonitor.Item] {
+        var rows = Dictionary(attention.currentOpenItems.map { ($0.id, $0) }, uniquingKeysWith: { first, _ in first })
+        for request in settings.mrLifecycleLedger.retainedRequests(host: host, username: username) {
+            let id = MergeRequestAttentionMonitor.Item.ID(projectID: request.projectID, iid: request.iid)
+            if let original = rows[id]?.mergeRequest, original.sha == request.sha,
+               original.state == request.state, original.draft == request.draft { continue }
+            // Never attach old publication/feedback proof to newly observed source or lifecycle state.
+            rows[id] = .init(id: id, title: request.title, url: request.webURL,
+                mergeRequest: request, isAuthored: request.author.username == username)
+        }
+        return rows.values.filter {
+            !hiddenBoardTargets.contains(.init(host: host, username: username, projectID: $0.id.projectID, iid: $0.id.iid))
+        }
+    }
+
+    private func recordOwnedLifecycleObservations(_ requests: [GitLabMergeRequest], observedAt: Date) {
+        guard let host = glab.resolvedHost, let username = glab.currentUsername else { return }
+        for request in requests where request.author.username == username {
+            let target = MRAutomationScope.Target(host: host, username: username, projectID: request.projectID, iid: request.iid)
+            guard !settings.ignoredMergeRequests.contains(target) else { continue }
+            settings.mrLifecycleLedger.record(request, for: target, now: observedAt,
+                autoRemoveFinished: settings.autoRemoveFinishedMRs)
+        }
+        settings.save()
+        deliverLifecycleTransitions()
+        cancelIneligibleDraftAutomation()
+    }
+
+    private func deliverLifecycleTransitions() {
+        guard let host = glab.resolvedHost, let username = glab.currentUsername else { return }
+        let events = settings.mrLifecycleLedger.takeTransitions(host: host, username: username)
+        for event in events {
+            guard let kind = AutoHandledEventBannerCenter.Kind(rawValue: event.kind.rawValue) else { continue }
+            autoHandledEventBanners.receiveLifecycle(id: event.id, target: event.target, kind: kind,
+                projectPath: event.url.gitLabProjectPath, enabled: settings.autoHandledEventBannersEnabled)
+        }
+        if !events.isEmpty { settings.save() }
+    }
+
+    func canAcknowledgeFinishedMergeRequest(_ item: MergeRequestAttentionMonitor.Item) -> Bool {
+        guard let target = scopeTarget(projectID: item.id.projectID, iid: item.id.iid, url: item.url),
+              let current = settings.mrLifecycleLedger.request(for: target), current.webURL == item.url,
+              current.state == item.mergeRequest?.state,
+              current.state == "merged" || current.state == "closed" else { return false }
+        return !settings.mrLifecycleLedger.isSuppressed(target)
+    }
+
+    func acknowledgeFinishedMergeRequest(_ item: MergeRequestAttentionMonitor.Item) {
+        guard canAcknowledgeFinishedMergeRequest(item),
+              let target = scopeTarget(projectID: item.id.projectID, iid: item.id.iid, url: item.url) else { return }
+        settings.mrLifecycleLedger.acknowledgeFinished(target)
+        settings.save()
+        confirmedAttention.update(pendingUserAttention)
+    }
+
+    func applyFinishedMRRemovalPreference() {
+        if settings.autoRemoveFinishedMRs, let host = glab.resolvedHost, let username = glab.currentUsername {
+            for target in settings.mrLifecycleLedger.targets(host: host, username: username) {
+                settings.mrLifecycleLedger.acknowledgeFinished(target)
+            }
+        }
+        settings.save()
+        confirmedAttention.update(pendingUserAttention)
+    }
+
+    func boardOrderingEntries(_ board: MergeRequestBoardSnapshot) -> [BoardPolicyOrder.Entry] {
+        guard let host = glab.resolvedHost, let username = glab.currentUsername else { return [] }
+        return [board.own, board.reviewed].flatMap { rows in
+            rows.filter { $0.item.mergeRequest?.state == "opened" }.enumerated().compactMap { rank, row in
+                guard let request = row.item.mergeRequest else { return nil }
+                let target = MRAutomationScope.Target(host: host, username: username, projectID: row.id.projectID, iid: row.id.iid)
+                let pin = BoardCardPin.mergeRequest(host: host, username: username, projectID: row.id.projectID, iid: row.id.iid)
+                return .init(target: target, rank: rank, request: request,
+                    discussionFingerprint: row.item.observedDiscussionFingerprint, jobID: row.latestJob?.id,
+                    pinned: pin.map { settings.boardPins.contains($0) } == true)
+            }
+        }
+    }
+
+    private func cancelIneligibleDraftAutomation() {
+        let scope = currentAutomationCancellationScope
+        authoredMergeRequests.cancelRuntimePreparation(outsideScope: scope)
+        attention.cancelRuntimePreparation(outsideScope: scope)
+        guard scope != settings.automation.scope else { return }
+        automation.cancelRunningScripts(outsideScope: scope)
+        FollowUpVerificationStore.synchronizeRuns(settings: settings)
+        for handoff in settings.assistantHandoffs where handoff.execution?.state.isActive == true && handoff.manual != true {
+            let target = MRAutomationScope.Target(host: handoff.key.work.host, username: handoff.key.username,
+                projectID: handoff.key.work.projectID, iid: handoff.key.work.iid)
+            if !scope.resolve(target).active { cancelPolicyJob(handoff.id, settings) }
+        }
+        attention.authorFeedbackCoordinator?.cancel(outsideScope: scope)
+        attention.draftProofRecoveryCoordinator?.cancel(outsideScope: scope)
+        attention.aiOriginCoordinator.cancel(outsideScope: scope)
     }
 
     func refreshAssistantRelay() {

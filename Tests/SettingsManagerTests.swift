@@ -28,6 +28,17 @@ struct SettingsManagerTests {
         #expect(settings.isFirstLaunch == true)
     }
 
+    @Test func finishedMRAutomaticRemovalDefaultsOffAndPersistsSeparatelyFromAutomation() {
+        let defaults = makeDefaults()
+        let settings = SettingsManager(defaults: defaults)
+        #expect(!settings.autoRemoveFinishedMRs)
+        settings.automation.applyPreset(.full, for: .codex)
+        #expect(!settings.autoRemoveFinishedMRs)
+        settings.autoRemoveFinishedMRs = true
+        settings.save()
+        #expect(SettingsManager(defaults: defaults).autoRemoveFinishedMRs)
+    }
+
     @Test("round-trips mutated state through save/reload")
     func roundTrip() {
         let defaults = makeDefaults()

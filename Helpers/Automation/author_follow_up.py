@@ -85,6 +85,10 @@ class AuthorFollowUpVerifier:
                 mr.get("author", {}).get("id") != user.get("id") or type(user.get("id")) is not int or
                 type(mr.get("source_project_id")) is not int or not mr.get("source_branch")):
             raise ValueError("The open MR must belong to the authenticated user")
+        if type(mr.get("draft")) is not bool:
+            raise ValueError("The live MR Draft status is unavailable")
+        if mr["draft"] and run.get("draftAutomationAllowed") is not True:
+            raise ValueError("Draft MR automation requires explicit authorization for this run")
         return user, run, mr, key
 
     def drafts(self, host, projectID, iid, userID):

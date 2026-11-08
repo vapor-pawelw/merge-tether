@@ -6,11 +6,11 @@ struct AutoHandledEventBannerView: View {
 
     var body: some View {
         HStack(alignment: .top, spacing: 10) {
-            Image(systemName: "checkmark.circle.fill")
-                .foregroundStyle(.green)
+            Image(systemName: symbol)
+                .foregroundStyle(tint)
                 .accessibilityHidden(true)
             VStack(alignment: .leading, spacing: 4) {
-                Text(.TodoRouting.todoRoutingBannerAccepted).font(.headline)
+                Text(title).font(.headline)
                 Text(action).font(.subheadline)
                 Text(verbatim: "\(event.projectPath) !\(event.target.iid ?? 0)")
                     .font(.caption).foregroundStyle(.secondary)
@@ -41,6 +41,38 @@ struct AutoHandledEventBannerView: View {
         case .pipeline: .TodoRouting.todoRoutingBannerPipeline
         case .conflict: .TodoRouting.todoRoutingBannerConflict
         case .refresh: .TodoRouting.todoRoutingBannerRefresh
+        case .merged: .MRLifecycleBanners.mrLifecycleBannersMerged
+        case .closed: .MRLifecycleBanners.mrLifecycleBannersClosed
+        case .ready: .MRLifecycleBanners.mrLifecycleBannersReady
+        case .draft: .MRLifecycleBanners.mrLifecycleBannersDraft
+        }
+    }
+
+    private var title: LocalizedStringResource {
+        switch event.kind {
+        case .merged: .MRLifecycleBanners.mrLifecycleBannersMergedTitle
+        case .closed: .MRLifecycleBanners.mrLifecycleBannersClosedTitle
+        case .ready: .MRLifecycleBanners.mrLifecycleBannersReadyTitle
+        case .draft: .MRLifecycleBanners.mrLifecycleBannersDraftTitle
+        case .review, .followUp, .pipeline, .conflict, .refresh: .TodoRouting.todoRoutingBannerAccepted
+        }
+    }
+
+    private var symbol: String {
+        switch event.kind {
+        case .merged: "arrow.triangle.merge"
+        case .closed: "xmark.circle.fill"
+        case .draft: "doc.text"
+        case .ready, .review, .followUp, .pipeline, .conflict, .refresh: "checkmark.circle.fill"
+        }
+    }
+
+    private var tint: Color {
+        switch event.kind {
+        case .merged: .purple
+        case .closed, .draft: .secondary
+        case .ready: .accentColor
+        case .review, .followUp, .pipeline, .conflict, .refresh: .green
         }
     }
 }

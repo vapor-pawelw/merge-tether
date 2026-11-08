@@ -76,6 +76,13 @@ struct CommandCenterView: View {
             }
         }
         .sheet(isPresented: $showingAdd) { CommandCenterAddMergeRequestView(monitor: monitor) }
+        .alert(Text(.DraftMR.failed), isPresented: Binding(
+            get: { monitor.markMergeRequestReadyError != nil },
+            set: { if !$0 { monitor.markMergeRequestReadyError = nil } })) {
+                Button(role: .cancel) { monitor.markMergeRequestReadyError = nil } label: { Text(.DraftMR.ok) }
+            } message: {
+                if let error = monitor.markMergeRequestReadyError { Text(verbatim: error) }
+            }
         .task { await prepareWindow() }
         .task {
             while !Task.isCancelled {

@@ -271,6 +271,69 @@ struct TodoAutomationTests {
     }
 
     @MainActor
+    @Test func freshAuthoredDraftObservationStopsOnlyTheMatchingAutomaticShell() async throws {
+        let suite = "LiveDraftShell.\(UUID())"
+        let defaults = try #require(UserDefaults(suiteName: suite))
+        defer { defaults.removePersistentDomain(forName: suite) }
+        let folder = FileManager.default.temporaryDirectory.appending(path: UUID().uuidString)
+        try FileManager.default.createDirectory(at: folder, withIntermediateDirectories: false)
+        defer { try? FileManager.default.removeItem(at: folder) }
+        let settings = SettingsManager(defaults: defaults)
+        settings.glabPath = URL(fileURLWithPath: "/usr/bin/false")
+        settings.resolvedHost = "gitlab.example.org"
+        settings.automation.authorFeedback.isEnabled = true
+        settings.automation.authorFeedback.runner = .shell
+        settings.automation.authorFeedback.projects = "bank/cards-api"
+        settings.automation.authorFeedback.command = "touch \"\(folder.path)/$GITLAB_TODO_ID\"; sleep 30"
+        let glab = GlabService()
+        glab.resolvedHost = "gitlab.example.org"
+        glab.currentUsername = "me"
+        let service = TodoAutomationService(canAutomate: { _ in true })
+        let monitor = TodoMonitorService(settings: settings, glab: glab, automation: service)
+        defer { monitor.stopTimer() }
+        func request(_ iid: Int, draft: Bool) throws -> GitLabMergeRequest {
+            try JSONDecoder().decode(GitLabMergeRequest.self, from: Data(#"{"project_id":1,"iid":\#(iid),"author":{"id":3,"username":"me","name":"Me"},"title":"Fixture","web_url":"https://gitlab.example.org/bank/cards-api/-/merge_requests/\#(iid)","state":"opened","draft":\#(draft),"sha":"abc","source_branch":"feature","target_branch":"main","labels":[]}"#.utf8))
+        }
+        let callback = try #require(monitor.authoredMergeRequests.onObservedMergeRequests)
+        callback([try request(1220, draft: false), try request(1221, draft: false)], Date())
+        let automatic = try makeTodo(action: "mentioned", author: "me", fragment: "#note_42", id: 42)
+        let manual = try makeTodo(action: "mentioned", author: "me", fragment: "#note_43", id: 43)
+        let sibling = try makeTodo(action: "mentioned", author: "me", fragment: "#note_44", id: 44, iid: 1221)
+        let workers = [(automatic, false), (manual, true), (sibling, false)].map { todo, manual in
+            Task {
+                try await service.prepareToAcknowledge(todo, event: .authorFeedback,
+                    host: "gitlab.example.org", username: "me", settings: settings, glab: glab,
+                    manual: manual, isPending: { true })
+            }
+        }
+        defer {
+            service.cancelRunningScripts()
+            for worker in workers { worker.cancel() }
+        }
+        let startDeadline = ContinuousClock.now + .seconds(5)
+        while ![42, 43, 44].allSatisfy({ FileManager.default.fileExists(atPath: folder.appending(path: String($0)).path) }),
+              ContinuousClock.now < startDeadline {
+            try await Task.sleep(for: .milliseconds(10))
+        }
+        try #require([42, 43, 44].allSatisfy { FileManager.default.fileExists(atPath: folder.appending(path: String($0)).path) })
+        func state(_ todo: Todo) -> TodoAutomationService.ActionState? {
+            service.actionState(for: todo, host: "gitlab.example.org", username: "me", settings: settings, available: [])
+        }
+        #expect(state(automatic) == .running && state(manual) == .running && state(sibling) == .running)
+        callback([try request(1220, draft: true)], Date())
+        let stopDeadline = ContinuousClock.now + .seconds(2)
+        while state(automatic) == .running, ContinuousClock.now < stopDeadline {
+            try await Task.sleep(for: .milliseconds(10))
+        }
+        #expect(state(automatic) == .failed)
+        #expect(state(manual) == .running)
+        #expect(state(sibling) == .running)
+        #expect(settings.automationReceipts.isEmpty && settings.pendingTodoAcknowledgements.isEmpty)
+        service.cancelRunningScripts()
+        for worker in workers { _ = try? await worker.value }
+    }
+
+    @MainActor
     @Test("a repeat review on the same MR runs once for its new to-do ID")
     func shellReceipt() async throws {
         let todo = try makeTodo(action: "review_requested", author: "anna")
@@ -491,17 +554,18 @@ struct TodoAutomationTests {
         state: String = "opened",
         type: String = "MergeRequest",
         id: Int = 42,
+        iid: Int = 1220,
         hasTargetAuthor: Bool = true
     ) throws -> Todo {
         let targetAuthor = hasTargetAuthor ? #", "author": {"id": 3, "username": "\#(author)", "name": "Anna White"}"# : ""
         let json = """
         [{
           "id": \(id), "action_name": "\(action)", "target_type": "\(type)",
-          "target_url": "https://gitlab.example.org/bank/cards-api/-/merge_requests/1220\(fragment)",
+          "target_url": "https://gitlab.example.org/bank/cards-api/-/merge_requests/\(iid)\(fragment)",
           "body": "Title", "created_at": "2026-11-04T10:00:00Z", "state": "pending",
           "project": {"id": 1, "name_with_namespace": "Bank / Cards API", "path_with_namespace": "bank/cards-api"},
           "author": {"id": 2, "username": "\(actor)", "name": "Peter Reviewer"},
-          "target": {"iid": 1220, "state": "\(state)"\(targetAuthor)}
+          "target": {"iid": \(iid), "state": "\(state)"\(targetAuthor)}
         }]
         """
         return try #require(GlabService.decodeTodos(Data(json.utf8)).first)

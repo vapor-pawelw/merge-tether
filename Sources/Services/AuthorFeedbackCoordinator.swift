@@ -55,6 +55,7 @@ final class AuthorFeedbackCoordinator {
     private(set) var statuses: [MRAutomationScope.Target: AuthorFeedbackStatus] = [:]
     @ObservationIgnored private var tasks: [MRAutomationScope.Target: Task<Void, Never>] = [:]
     @ObservationIgnored private var pending: [MRAutomationScope.Target: Input] = [:]
+    @ObservationIgnored private var activeInputs: [MRAutomationScope.Target: Input] = [:]
     private struct AcknowledgementProgress {
         let userID: Int
         var threadRevisions: [Int: String] = [:]
@@ -90,7 +91,7 @@ final class AuthorFeedbackCoordinator {
         let drafts: Int
         let accountRevision: UInt64
         let completedFollowUpJobID: UUID?
-        var readOnly: Bool { request.draft == true || drafts > 0 }
+        var readOnly: Bool { drafts > 0 }
     }
 
     private struct Preparation {
@@ -181,7 +182,13 @@ final class AuthorFeedbackCoordinator {
 
     func cancel(outsideScope: MRAutomationScope? = nil) {
         for target in Set(tasks.keys).union(pending.keys).union(statuses.keys).union(acknowledgementAttempts.keys).union(acknowledgedReactions.keys) {
-            guard outsideScope.map({ !$0.resolve(target).active }) ?? true else { continue }
+            let permitted: Bool
+            if let scope = outsideScope {
+                if let request = pending[target]?.request ?? activeInputs[target]?.request {
+                    permitted = scope.permits(request, host: target.host, username: target.username)
+                } else { permitted = scope.resolve(target).active }
+            } else { permitted = false }
+            guard !permitted else { continue }
             pending.removeValue(forKey: target); tasks[target]?.cancel()
             statuses.removeValue(forKey: target); cache.removeValue(forKey: target)
             failedReads.removeValue(forKey: target)
@@ -219,9 +226,10 @@ final class AuthorFeedbackCoordinator {
                     readOnlyReconciliation: input.readOnly, phase: .checking, pendingDraftCount: input.drafts,
                     completedFollowUpJobID: input.completedFollowUpJobID)
             }
+            activeInputs[target] = input
             tasks[target] = Task { [weak self] in
                 guard let self else { return }
-                defer { tasks.removeValue(forKey: target); startNext() }
+                defer { tasks.removeValue(forKey: target); activeInputs.removeValue(forKey: target); startNext() }
                 do { try await process(input) }
                 catch is CancellationError {
                     if !Task.isCancelled, isCurrent(input) {
@@ -370,7 +378,8 @@ final class AuthorFeedbackCoordinator {
             let draftedThreads = Set(drafts.compactMap(\.discussionID))
             let draftedNotes = Set(threads.filter { $0.id.map(draftedThreads.contains) == true }.flatMap(\.notes).compactMap(\.id))
             let actionable = Set(assessment.notes.filter { $0.state == .blocking || $0.state == .uncertain }.map(\.noteID))
-            let followUp = request.draft == false ? actionable.union(owedNotes).subtracting(draftedNotes) : []
+            let followUp = settings.automation.scope.permits(request, host: host, username: input.user.username)
+                ? actionable.union(owedNotes).subtracting(draftedNotes) : []
             if !followUp.isEmpty { await onNeedsWork?(request, followUp, input.fingerprint,
                 residual(input, assessment: assessment, notes: followUp)) }
             guard isCurrent(input) else { throw CancellationError() }
@@ -406,7 +415,7 @@ final class AuthorFeedbackCoordinator {
             async let approvals = glab.fetchMergeRequestApproverIDs(projectID: request.projectID, iid: request.iid, host: host)
             let (live, discussions, user, count, liveApproved) = try await (currentMR, currentThreads, currentUser, drafts, approvals)
             approved = liveApproved
-            guard isCurrent(input), live.sha == request.sha, live.state == "opened", live.draft == false,
+            guard isCurrent(input), live.sha == request.sha, live.state == "opened",
                   live.semanticContextFingerprint == request.semanticContextFingerprint,
                   live.author.id == input.user.id, user == input.user, count == 0,
                   settings.automation.scope.permits(live, host: host, username: user.username),
@@ -439,9 +448,9 @@ final class AuthorFeedbackCoordinator {
             outstanding.contains($0.noteID) && ($0.state == .blocking || $0.state == .uncertain)
         }.map(\.noteID))
         let repliesByThread = assessment.missingPublishedRepliesByThread(in: threads, authorID: input.user.id)
-        let missingReplies = Set(findings.filter {
-            $0.state == .waitingAcceptance && repliesByThread[$0.id] != nil
-        }.map(\.id))
+        // An owed published reply remains work even when approval or a disabled
+        // resolution policy changes the finding's presentation state.
+        let missingReplies = Set(repliesByThread.keys)
         let owedNotes = missingReplies.reduce(into: Set<Int>()) { notes, rootID in
             notes.formUnion(repliesByThread[rootID] ?? [])
         }
@@ -499,7 +508,7 @@ final class AuthorFeedbackCoordinator {
         async let currentUser = glab.fetchAuthenticatedUser(host: host, expectedUsername: input.user.username)
         async let currentDrafts = glab.fetchOwnDraftNoteCount(projectID: request.projectID, iid: request.iid, host: host, userID: input.user.id)
         let (live, discussions, user, count) = try await (currentMR, currentThreads, currentUser, currentDrafts)
-        guard isCurrent(input), live.sha == request.sha, live.state == "opened", live.draft == false,
+        guard isCurrent(input), live.sha == request.sha, live.state == "opened",
               live.semanticContextFingerprint == request.semanticContextFingerprint,
               live.author.id == input.user.id, user == input.user, count == 0, live.webURL == request.webURL,
               settings.automation.scope.permits(live, host: host, username: user.username),

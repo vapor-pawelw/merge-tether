@@ -107,9 +107,11 @@ final class MergeWorkflowMonitor {
         authored: [GitLabMergeRequest], enabled: Set<MergeWorkflowTrigger>,
         reviewSLA: TimeInterval, now: Date = Date(),
         trackedReviews: Set<AssistantAutomationRunner.MergeRequestWork> = [],
+        automationScope: MRAutomationScope = .init(),
+        isCurrent: @MainActor () -> Bool = { true },
         deliver: @MainActor (MergeWorkflowEvent) -> Void
     ) async {
-        guard !isPolling, !Task.isCancelled else { return }
+        guard !isPolling, !Task.isCancelled, isCurrent() else { return }
         let accountRevision = glab.accountRevision
         isPolling = true
         defer { isPolling = false }
@@ -118,6 +120,7 @@ final class MergeWorkflowMonitor {
         let owned = authored.filter {
             $0.state == "opened" && $0.author.id == user.id && $0.webURL.isGitLabMergeRequest(host: host, iid: $0.iid)
         }
+        let eligibleOwned = owned.filter { automationScope.permits($0, host: host, username: user.username) }
         let prior = baselines[account] ?? Baselines()
         var next = prior
         let ownedKeys = Set(owned.map(Self.key))
@@ -126,18 +129,19 @@ final class MergeWorkflowMonitor {
         var events: [MergeWorkflowEvent] = []
         var activeTrains: [Int: Set<Int>] = [:]
         if enabled.contains(.blockerChange) {
-            for project in Set(owned.map(\.projectID)) {
+            for project in Set(eligibleOwned.map(\.projectID)) {
                 activeTrains[project] = try? await glab.fetchActiveMergeTrainIIDs(projectID: project, host: host)
             }
         }
         var defaultBranches: [Int: String] = [:]
         if enabled.contains(.stackDependencyMerged) {
-            for project in Set(owned.compactMap(\.targetProjectID)) {
+            for project in Set(eligibleOwned.compactMap(\.targetProjectID)) {
                 defaultBranches[project] = try? await glab.fetchProjectDefaultBranch(projectID: project, host: host)
             }
         }
 
-        for request in owned {
+        // Paused MRs retain their existing checkpoints without consuming new events.
+        for request in eligibleOwned {
             guard !Task.isCancelled else { return }
             let key = Self.key(request)
             var snapshot = next.authored[key] ?? Snapshot()
@@ -162,12 +166,13 @@ final class MergeWorkflowMonitor {
         }
 
         if enabled.contains(.reviewUpdate) {
-            events.append(contentsOf: await reviewUpdates(glab: glab, account: account, baselines: &next, tracked: trackedReviews, ownedKeys: ownedKeys))
+            events.append(contentsOf: await reviewUpdates(glab: glab, account: account, baselines: &next, tracked: trackedReviews, ownedKeys: ownedKeys,
+                automationScope: automationScope, username: user.username))
         } else {
             next.reviews.removeAll()
         }
 
-        guard !Task.isCancelled, glab.accountRevision == accountRevision else { return }
+        guard !Task.isCancelled, glab.accountRevision == accountRevision, isCurrent() else { return }
         if prior != next {
             baselines[account] = next
             if let encoded = try? JSONEncoder().encode(baselines) {
@@ -328,7 +333,7 @@ final class MergeWorkflowMonitor {
         _ observation: Observation, seconds: TimeInterval, now: Date, snapshot: inout Snapshot
     ) async -> MergeWorkflowEvent? {
         let request = observation.request
-        guard request.draft == false, seconds.isFinite, seconds > 0,
+        guard seconds.isFinite, seconds > 0,
               let reviewers = try? await observation.glab.fetchMergeRequestReviewers(
                 projectID: request.projectID, iid: request.iid, host: observation.account.host
               ) else { return nil }
@@ -353,7 +358,8 @@ final class MergeWorkflowMonitor {
 
     private func reviewUpdates(
         glab: GlabService, account: Account, baselines: inout Baselines,
-        tracked: Set<AssistantAutomationRunner.MergeRequestWork>, ownedKeys: Set<String>
+        tracked: Set<AssistantAutomationRunner.MergeRequestWork>, ownedKeys: Set<String>,
+        automationScope: MRAutomationScope, username: String
     ) async -> [MergeWorkflowEvent] {
         let assigned = try? await glab.fetchReviewAssignedMergeRequests(userID: account.userID, host: account.host)
         guard assigned != nil || !tracked.isEmpty else { return [] }
@@ -387,7 +393,8 @@ final class MergeWorkflowMonitor {
         var events: [MergeWorkflowEvent] = []
         for request in others {
             guard !Task.isCancelled else { return [] }
-            guard let head = request.sha, !head.isEmpty, request.draft == false else { continue }
+            guard automationScope.permits(request, host: account.host, username: username),
+                  let head = request.sha, !head.isEmpty else { continue }
             let reviewers = try? await glab.fetchMergeRequestReviewers(projectID: request.projectID, iid: request.iid, host: account.host)
             let reviewer = reviewers?.first(where: { $0.user.id == account.userID })
             let key = Self.key(request)

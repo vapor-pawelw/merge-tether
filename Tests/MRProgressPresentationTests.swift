@@ -36,6 +36,37 @@ struct MRProgressPresentationTests {
         #expect(model.status == "Merging MR" && model.actionLabel == nil)
     }
 
+    @Test(arguments: ["merged", "closed"], [AssistantJobExecution.State.running, .blocked])
+    func finishedMRPresentationIgnoresStaleAttentionAndWorkerProgress(_ state: String, _ jobState: AssistantJobExecution.State) throws {
+        let url = try #require(URL(string: "https://gitlab.example.test/group/repo/-/merge_requests/2"))
+        let object: [String: Any] = ["project_id": 1, "iid": 2,
+            "author": ["id": 7, "username": "author", "name": "Author"],
+            "title": "Example", "web_url": url.absoluteString, "state": state, "draft": false,
+            "source_branch": "feature", "target_branch": "main", "labels": []]
+        let request = try JSONDecoder().decode(GitLabMergeRequest.self, from: JSONSerialization.data(withJSONObject: object))
+        var item = MergeRequestAttentionMonitor.Item(id: .init(projectID: 1, iid: 2), title: "Example", url: url)
+        item.mergeRequest = request
+        item.isAuthored = state == "merged"
+        item.hasConflict = true
+        item.failedPipeline = true
+        item.needsMerge = true
+        item.draftCount = 1
+        let job = AssistantAutomationRunner.Handoff(id: UUID(), key: .init(assistant: .codex,
+            work: .init(host: "gitlab.example.test", projectID: 1, iid: 2), username: "me", workspace: "", access: .gitLabRead),
+            title: "Earlier work", prompt: "Check", createdAt: Date(), allowsPush: false,
+            execution: .init(state: jobState), workflow: .review)
+        let row = MergeRequestBoardSnapshot.Row(item: item, latestJob: job, intents: [])
+        let model = MRCardPresentation(row: row, reviewingContext: ReviewingContext(row: row),
+            allowsRemoval: !item.isAuthored, assistantReady: true,
+            confirmationState: jobState == .running ? .publishing : nil,
+            automaticPipelineProgress: jobState == .running)
+        #expect(!model.busy && !model.working)
+        #expect(model.actionsBlocked)
+        #expect(model.humanAction == nil && model.actionLabel == nil && model.nextStep == nil)
+        #expect(model.chips.isEmpty)
+        #expect(model.status == (state == "merged" ? "Merged. Automation is off." : "Closed. Automation is off."))
+    }
+
     private func presentation(_ stage: String, state: AssistantJobExecution.State? = nil,
                               showsReadProgress: Bool = true) -> MRCardPresentation {
         var item = MergeRequestAttentionMonitor.Item(id: .init(projectID: 1, iid: 2), title: "Example",

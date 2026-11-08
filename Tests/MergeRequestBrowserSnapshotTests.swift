@@ -6,11 +6,11 @@ struct MergeRequestBrowserSnapshotTests {
     private let host = "gitlab.example.org"
 
     private func request(_ iid: Int, username: String = "me", title: String = "Fix",
-                         host: String = "gitlab.example.org", draft: Bool = false) throws -> GitLabMergeRequest {
+                         host: String = "gitlab.example.org", draft: Bool = false, state: String = "opened") throws -> GitLabMergeRequest {
         try JSONDecoder().decode(GitLabMergeRequest.self, from: Data("""
         {"project_id":1,"iid":\(iid),"author":{"id":3,"username":"\(username)","name":"Author"},
          "title":"\(title)","web_url":"https://\(host)/g/p/-/merge_requests/\(iid)",
-         "state":"opened","draft":\(draft),"sha":"aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+         "state":"\(state)","draft":\(draft),"sha":"aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
          "source_branch":"fix","target_branch":"main","detailed_merge_status":"mergeable",
          "has_conflicts":false,"labels":[],"blocking_discussions_resolved":true,"user":{"can_merge":true}}
         """.utf8))
@@ -29,7 +29,7 @@ struct MergeRequestBrowserSnapshotTests {
                      projectRequiresResolvedDiscussions: true, autoMergeEnabled: false)
     }
 
-    @Test func ownRemainsCompleteWhileReviewedRespectsMixedScopeAndPauses() throws {
+    @Test func automationPolicyChangesPreserveOwnAndReviewedMembershipAndOrder() throws {
         var scope = MRAutomationScope()
         scope.mode = .selected
         let target = MRAutomationScope.Target(host: host, username: "me", projectID: 1, iid: 2)
@@ -37,15 +37,15 @@ struct MergeRequestBrowserSnapshotTests {
         let items = try [item(request(1)), item(request(2, username: "alice")), item(request(3, username: "bob"))]
         var result = MergeRequestBrowserSnapshot(openItems: items, authored: [], host: host, username: "me", scope: scope)
         #expect(result.own.map(\.id.iid) == [1])
-        #expect(result.reviewed.map(\.id.iid) == [2])
+        #expect(result.reviewed.map(\.id.iid) == [2, 3])
         scope[target.repository] = .active
         scope[target] = .paused
         result = .init(openItems: items, authored: [], host: host, username: "me", scope: scope)
         #expect(result.own.map(\.id.iid) == [1])
-        #expect(result.reviewed.map(\.id.iid) == [3])
+        #expect(result.reviewed.map(\.id.iid) == [2, 3])
     }
 
-    @MainActor @Test func removingReviewedMRPersistsLocallyAndExplicitReaddRestoresIt() throws {
+    @MainActor @Test func pausingReviewedMRSurvivesRestartWithoutRemovingIt() throws {
         let suite = "ReviewedMRRemoval.\(UUID())"
         let defaults = try #require(UserDefaults(suiteName: suite))
         defer { defaults.removePersistentDomain(forName: suite) }
@@ -57,12 +57,97 @@ struct MergeRequestBrowserSnapshotTests {
         var result = MergeRequestBrowserSnapshot(openItems: items, authored: [], host: host, username: "me",
             scope: SettingsManager(defaults: defaults).automation.scope)
         #expect(result.own.map(\.id.iid) == [1])
-        #expect(result.reviewed.map(\.id.iid) == [3])
+        #expect(result.reviewed.map(\.id.iid) == [2, 3])
         settings.automation.scope[target] = .active
         settings.save()
         result = .init(openItems: items, authored: [], host: host, username: "me",
             scope: SettingsManager(defaults: defaults).automation.scope)
         #expect(Set(result.reviewed.map(\.id.iid)) == [2, 3])
+    }
+
+    @Test(arguments: ["merged", "closed"])
+    func finishedOwnAndReviewedRowsStayVisibleUntilTheirLifecycleIsAcknowledged(_ state: String) throws {
+        let rows = try [item(request(1, state: state)), item(request(2, username: "alice", state: state))]
+        let result = MergeRequestBrowserSnapshot(openItems: rows, authored: [], host: host, username: "me", scope: .init())
+        #expect(result.own.map(\.id.iid) == [1])
+        #expect(result.reviewed.map(\.id.iid) == [2])
+    }
+
+    @MainActor @Test(arguments: ["merged", "closed"])
+    func lifecycleRetentionAndSeenTombstoneSurviveRestartWithoutIgnoringTheMR(_ state: String) throws {
+        let suite = "MRLifecycle.\(UUID())"
+        let defaults = try #require(UserDefaults(suiteName: suite))
+        defer { defaults.removePersistentDomain(forName: suite) }
+        let target = MRAutomationScope.Target(host: host, username: "me", projectID: 1, iid: 2)
+        let settings = SettingsManager(defaults: defaults)
+        settings.mrLifecycleLedger.record(try request(2, username: "alice"), for: target)
+        #expect(settings.mrLifecycleLedger.takeTransitions(host: host, username: "me").isEmpty)
+        settings.mrLifecycleLedger.record(try request(2, username: "alice", state: state), for: target)
+        settings.save()
+        let reloaded = SettingsManager(defaults: defaults)
+        #expect(reloaded.mrLifecycleLedger.retainedRequests(host: host, username: "me").first?.state == state)
+        let events = reloaded.mrLifecycleLedger.takeTransitions(host: host, username: "me")
+        #expect(events.count == 1 && events.first?.kind.rawValue == state)
+        reloaded.mrLifecycleLedger.acknowledgeFinished(target)
+        reloaded.save()
+        let acknowledged = SettingsManager(defaults: defaults)
+        acknowledged.mrLifecycleLedger.record(try request(2, username: "alice", state: state), for: target)
+        #expect(acknowledged.mrLifecycleLedger.isSuppressed(target))
+        #expect(acknowledged.mrLifecycleLedger.retainedRequests(host: host, username: "me").isEmpty)
+        #expect(acknowledged.mrLifecycleLedger.takeTransitions(host: host, username: "me").isEmpty)
+        #expect(!acknowledged.ignoredMergeRequests.contains(target))
+        acknowledged.mrLifecycleLedger.record(try request(2, username: "alice"), for: target)
+        #expect(!acknowledged.mrLifecycleLedger.isSuppressed(target))
+        #expect(acknowledged.mrLifecycleLedger.retainedRequests(host: host, username: "me").first?.state == "opened")
+    }
+
+    @Test func lifecycleRecordsOnlyVerifiedAccountTargetsAndEmitsRealDraftTransitionsOnce() throws {
+        let target = MRAutomationScope.Target(host: host, username: "me", projectID: 1, iid: 2)
+        var ledger = MergeRequestLifecycleLedger()
+        ledger.record(try request(9, username: "alice"), for: target)
+        ledger.record(try request(2, username: "alice", host: "other.example.org"), for: target)
+        #expect(ledger.targets(host: host, username: "me").isEmpty)
+        ledger.record(try request(2, username: "alice"), for: target)
+        #expect(ledger.takeTransitions(host: host, username: "me").isEmpty)
+        ledger.record(try request(2, username: "alice", draft: true), for: target)
+        ledger.record(try request(2, username: "alice", draft: true), for: target)
+        let data = try JSONEncoder().encode(ledger)
+        var restarted = try JSONDecoder().decode(MergeRequestLifecycleLedger.self, from: data)
+        #expect(restarted.takeTransitions(host: host, username: "other").isEmpty)
+        let events = restarted.takeTransitions(host: host, username: "me")
+        #expect(events.count == 1 && events.first?.kind == .draft)
+        #expect(restarted.takeTransitions(host: host, username: "me").isEmpty)
+        restarted.record(try request(2, username: "alice"), for: target)
+        #expect(restarted.takeTransitions(host: host, username: "me").map(\.kind) == [.ready])
+        #expect(restarted.retainedRequests(host: "other.example.org", username: "me").isEmpty)
+    }
+
+    @Test func lateOlderObservationsCannotUndoDraftOrFinishedEvidence() throws {
+        let target = MRAutomationScope.Target(host: host, username: "me", projectID: 1, iid: 2)
+        let start = Date(timeIntervalSince1970: 1_000)
+        var ledger = MergeRequestLifecycleLedger()
+        ledger.record(try request(2, username: "alice"), for: target, now: start)
+        ledger.record(try request(2, username: "alice", draft: true), for: target, now: start.addingTimeInterval(2))
+        ledger.record(try request(2, username: "alice"), for: target, now: start.addingTimeInterval(1))
+        #expect(ledger.request(for: target)?.draft == true)
+        #expect(ledger.takeTransitions(host: host, username: "me").map(\.kind) == [.draft])
+        ledger.record(try request(2, username: "alice", state: "merged"), for: target, now: start.addingTimeInterval(4))
+        ledger.acknowledgeFinished(target)
+        ledger.record(try request(2, username: "alice"), for: target, now: start.addingTimeInterval(3))
+        #expect(ledger.request(for: target)?.state == "merged")
+        #expect(ledger.isSuppressed(target))
+    }
+
+    @Test func automaticArchiveEmitsTheVerifiedTransitionBeforeSuppressingItsRow() throws {
+        let target = MRAutomationScope.Target(host: host, username: "me", projectID: 1, iid: 2)
+        var ledger = MergeRequestLifecycleLedger()
+        ledger.record(try request(2, username: "alice"), for: target)
+        ledger.record(try request(2, username: "alice", state: "merged"), for: target, autoRemoveFinished: true)
+        #expect(ledger.isSuppressed(target))
+        #expect(ledger.retainedRequests(host: host, username: "me").isEmpty)
+        #expect(ledger.takeTransitions(host: host, username: "me").map(\.kind) == [.merged])
+        ledger.restore(target)
+        #expect(!ledger.isSuppressed(target))
     }
 
     @Test func ownUsesVerifiedApprovalsToPutReadyFirstAndDraftsLast() throws {

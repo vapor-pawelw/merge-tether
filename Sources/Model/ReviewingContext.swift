@@ -103,7 +103,8 @@ struct ReviewingContext {
     var status: Status = .activityUnknown
 
     init(row: MergeRequestBoardSnapshot.Row, workflowState: MergeWorkflowActivityState? = nil,
-         assistantReady: Bool = true, assistantChecking: Bool = false) {
+         assistantReady: Bool = true, assistantChecking: Bool = false,
+         draftAutomationAllowed: Bool = false) {
         let item = row.item
         if let request = item.mergeRequest, request.projectID == item.id.projectID,
            request.iid == item.id.iid, request.webURL == item.url,
@@ -151,7 +152,8 @@ struct ReviewingContext {
             || automaticIntent || item.reviewingProgress == .queued
         let checking = item.reReviewReadiness == .checking || item.authorFeedbackStatus?.phase == .checking
             || item.reviewingProgress == .checking
-        let deferredReview = item.mergeRequest?.draft == true && row.intents.contains(where: \.isDeferredReview)
+        let deferredReview = item.mergeRequest?.draft == true && !draftAutomationAllowed
+            && row.intents.contains(where: \.isDeferredReview)
         func readyAction(_ action: NextStep) -> NextStep {
             assistantReady || assistantChecking ? action : .setupAgent
         }
@@ -159,7 +161,7 @@ struct ReviewingContext {
             nextStep = .automaticReview
         } else if deferredReview, drafts == 0, !MergeRequestBoardSnapshot.Row.jobNeedsAttention(currentReview?.execution?.state) {
             status = .waitingForReady
-            nextStep = .monitoring
+            nextStep = readyAction(.runReview)
         } else if queued {
             status = workflowState == .running ? .running : .queued
             nextStep = readyAction(.automaticReview)

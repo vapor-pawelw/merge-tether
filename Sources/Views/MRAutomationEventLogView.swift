@@ -5,13 +5,15 @@ struct MRAutomationEventLogView: View {
     let monitor: TodoMonitorService
     let initiallyExpanded: Bool
     let initiallyExpandedJobID: UUID?
+    let readOnly: Bool
     @State private var expanded: Bool
     @State private var showAll: Bool
 
     init(target: MRAutomationScope.Target?, monitor: TodoMonitorService, initiallyExpanded: Bool = false,
-         initiallyExpandedJobID: UUID? = nil) {
+         initiallyExpandedJobID: UUID? = nil, readOnly: Bool = false) {
         self.target = target; self.monitor = monitor
         self.initiallyExpanded = initiallyExpanded; self.initiallyExpandedJobID = initiallyExpandedJobID
+        self.readOnly = readOnly
         _expanded = State(initialValue: initiallyExpanded || initiallyExpandedJobID != nil)
         _showAll = State(initialValue: initiallyExpandedJobID != nil)
     }
@@ -32,7 +34,7 @@ struct MRAutomationEventLogView: View {
                     }
                     ForEach(showAll ? entries : Array(entries.prefix(8))) { entry in
                         MRAutomationEventLogRow(entry: entry, runs: history?.associatedRuns(for: entry) ?? [],
-                            monitor: monitor, initiallyExpandedJobID: initiallyExpandedJobID)
+                            monitor: monitor, initiallyExpandedJobID: initiallyExpandedJobID, readOnly: readOnly)
                             .id(entry.id)
                         Divider()
                     }
@@ -58,12 +60,14 @@ private struct MRAutomationEventLogRow: View {
     let runs: [AssistantAutomationRunner.Handoff]
     let monitor: TodoMonitorService
     let initiallyExpandedJobID: UUID?
+    let readOnly: Bool
     @State private var detailsExpanded: Bool
 
     init(entry: MRAutomationHistory.Entry, runs: [AssistantAutomationRunner.Handoff], monitor: TodoMonitorService,
-         initiallyExpandedJobID: UUID?) {
+         initiallyExpandedJobID: UUID?, readOnly: Bool) {
         self.entry = entry; self.runs = runs; self.monitor = monitor
         self.initiallyExpandedJobID = initiallyExpandedJobID
+        self.readOnly = readOnly
         if case .job(let job, _) = entry.source {
             _detailsExpanded = State(initialValue: job.id == initiallyExpandedJobID)
         } else { _detailsExpanded = State(initialValue: false) }
@@ -192,7 +196,7 @@ private struct MRAutomationEventLogRow: View {
         VStack(alignment: .leading, spacing: 8) {
             switch entry.source {
             case .job(let job, _):
-                AssistantJobRow(handoff: job, monitor: monitor)
+                AssistantJobRow(handoff: job, monitor: monitor, readOnly: readOnly)
                 raw(.AutomationHistory.automationHistoryRunID, job.id.uuidString)
                 timestamp(.AutomationHistory.automationHistoryQueuedAt, job.createdAt)
                 if let execution = job.execution {
@@ -214,7 +218,7 @@ private struct MRAutomationEventLogRow: View {
             }
             raw(.AutomationHistory.automationHistoryOrigin, String(localized: origin))
             if case .job = entry.source {} else {
-                ForEach(runs) { job in MRAutomationLinkedRun(job: job, monitor: monitor) }
+                ForEach(runs) { job in MRAutomationLinkedRun(job: job, monitor: monitor, readOnly: readOnly) }
             }
         }
         .frame(maxWidth: .infinity, alignment: .leading)
@@ -244,11 +248,12 @@ private struct MRAutomationEventLogRow: View {
 private struct MRAutomationLinkedRun: View {
     let job: AssistantAutomationRunner.Handoff
     let monitor: TodoMonitorService
+    let readOnly: Bool
     @State private var expanded = false
 
     var body: some View {
         DisclosureGroup(isExpanded: $expanded) {
-            if expanded { AssistantJobRow(handoff: job, monitor: monitor).padding(.top, 6) }
+            if expanded { AssistantJobRow(handoff: job, monitor: monitor, readOnly: readOnly).padding(.top, 6) }
         } label: {
             HStack {
                 Text(.AutomationHistory.automationHistoryViewRun)

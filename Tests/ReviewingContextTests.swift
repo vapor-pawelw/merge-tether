@@ -26,7 +26,8 @@ struct ReviewingContextTests {
               execution: .init(state: state), workflow: .review, expectedHeadSHA: "abc")
     }
 
-    @Test func adoptedDraftWaitsNeutrallyWithoutAReviewOrSetupAction() throws {
+    @Test(arguments: [false, true])
+    func adoptedDraftKeepsOrdinaryManualActionsWithoutStartingAutomaticWork(_ ready: Bool) throws {
         let request = try request(draft: true)
         var item = try item(); item.mergeRequest = request
         item.reviewingActivity = ReviewingActivity(discussions: [], reviewerID: 3, authorID: 7)
@@ -34,13 +35,16 @@ struct ReviewingContextTests {
             kind: .review, state: .pending, todoIDs: [5], noteIDs: [], sourceEvents: [], request: request,
             headSHA: "abc", updatedAt: Date())
         let snapshot = row(item, intents: [intent])
-        let context = ReviewingContext(row: snapshot, assistantReady: false)
+        let context = ReviewingContext(row: snapshot, assistantReady: ready)
         #expect(!snapshot.needsAttention)
         #expect(MRHumanAction(row: snapshot, assistantReady: false) == nil)
-        #expect(context.nextStep == .monitoring)
-        #expect(context.actionLabel == nil)
+        #expect(context.nextStep == (ready ? .runReview : .setupAgent))
+        #expect(context.actionLabel != nil)
         #expect(!context.isAutomaticProcessing)
-        #expect(String(localized: context.nextStepMessage) == "No action needed. Waiting for the author to mark this merge request ready.")
+        #expect(context.status == .waitingForReady)
+        let automated = ReviewingContext(row: snapshot, workflowState: .queued,
+            assistantReady: true, draftAutomationAllowed: true)
+        #expect(automated.nextStep == .automaticReview && automated.isAutomaticProcessing)
     }
 
     @Test func unknownActivityDoesNotInventAFirstReviewOrARecentlyAddedReceipt() throws {

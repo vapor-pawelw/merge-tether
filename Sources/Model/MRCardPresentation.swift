@@ -1,5 +1,17 @@
 import Foundation
 
+enum MergeRequestFinishedState: String {
+    case merged, closed
+
+    init?(_ request: GitLabMergeRequest?) {
+        guard let state = request?.state else { return nil }
+        self.init(rawValue: state)
+    }
+
+    var badge: LocalizedStringResource { self == .merged ? .MRLifecycle.merged : .MRLifecycle.closed }
+    var status: LocalizedStringResource { self == .merged ? .MRLifecycle.mergedStatus : .MRLifecycle.closedStatus }
+}
+
 /// The visible text and attention treatment shared by the Mac card and phone snapshot.
 @MainActor
 struct MRCardPresentation {
@@ -19,6 +31,7 @@ struct MRCardPresentation {
     let automaticPipelineProgress: Bool
     let automaticMergeProgress: Bool
     private var item: MergeRequestAttentionMonitor.Item { row.item }
+    private var finishedState: MergeRequestFinishedState? { .init(item.mergeRequest) }
 
     init(row: MergeRequestBoardSnapshot.Row, reviewingContext: ReviewingContext,
          allowsRemoval: Bool, assistantReady: Bool,
@@ -62,6 +75,7 @@ struct MRCardPresentation {
         (item.draftProofRecoveryChecking || row.isCheckingReadOnlyReconciliation) && row.hasIndependentStoppedWork
     }
     var busy: Bool {
+        guard finishedState == nil else { return false }
         return confirmationState == .publishing || confirmationState == .approving
             || (!recoveryWaitsForHuman && (item.authorFeedbackStatus?.phase == .checking || item.draftProofRecoveryChecking))
             || item.reReviewReadiness == .checking || item.aiOriginChecking
@@ -71,16 +85,16 @@ struct MRCardPresentation {
             || (automaticConflictProgress && row.latestJob?.execution?.state.isActive != true)
     }
     private var executingWork: Bool {
-        confirmationState == .publishing || confirmationState == .approving
+        finishedState == nil && (confirmationState == .publishing || confirmationState == .approving
             || row.latestJob?.operationalExecution?.state.isActive == true
             || automaticPipelineProgress || automaticConflictProgress || automaticMergeProgress
-            || (!recoveryWaitsForHuman && allowsRemoval && reviewingContext.nextStep == .automaticReview)
+            || (!recoveryWaitsForHuman && allowsRemoval && reviewingContext.nextStep == .automaticReview))
     }
     private var quietReadCheck: Bool {
         !showsReadProgress && !executingWork && (busy || isRefreshingAttention)
     }
-    var working: Bool { executingWork || (showsReadProgress && (busy || isRefreshingAttention)) }
-    var actionsBlocked: Bool { busy || isRefreshingAttention || row.latestJob?.execution?.state.isActive == true }
+    var working: Bool { finishedState == nil && (executingWork || (showsReadProgress && (busy || isRefreshingAttention))) }
+    var actionsBlocked: Bool { finishedState != nil || busy || isRefreshingAttention || row.latestJob?.execution?.state.isActive == true }
     private var preservesConfirmedAttention: Bool {
         (isRefreshingAttention || refreshFailed) && row.needsAttention && preservedHumanAction != nil
             && row.latestJob?.operationalExecution?.state.isActive != true
@@ -88,6 +102,7 @@ struct MRCardPresentation {
             && !automaticConflictProgress && !automaticPipelineProgress && !automaticMergeProgress
     }
     var humanAction: MRHumanAction? {
+        guard finishedState == nil else { return nil }
         if preservesConfirmedAttention { return preservedHumanAction }
         guard row.needsAttention, !busy,
               !(allowsRemoval && reviewingContext.nextStep == .setupAgent) else { return nil }
@@ -95,6 +110,7 @@ struct MRCardPresentation {
                              automaticallyPublishedDraftIDs: automaticallyPublishedDraftIDs)
     }
     var neutralStatus: LocalizedStringResource? {
+        if let finishedState { return finishedState.status }
         if quietReadCheck {
             if busy || reviewingContext.status == .activityUnknown || reviewingContext.status == .verifying { return nil }
         }
@@ -107,6 +123,7 @@ struct MRCardPresentation {
         return human.explanation
     }
     var status: String? {
+        if let finishedState { return String(localized: finishedState.status) }
         if let job = row.latestJob, job.execution?.state.isActive == true {
             return String(localized: job.progressTitle(intents: row.intents, conflictReceipts: conflictReceipts)) + " · " + String(localized: job.key.assistant.displayName)
         }
@@ -128,11 +145,12 @@ struct MRCardPresentation {
         return isRefreshingAttention ? .AutomationProgress.progressRefreshing : .AutomationProgress.progressProcessing
     }
     var nextStep: String? {
-        allowsRemoval && humanAction == nil && !busy
+        finishedState == nil && allowsRemoval && humanAction == nil && !busy
             && !(quietReadCheck && reviewingContext.status == .activityUnknown)
             ? String(localized: reviewingContext.nextStepMessage) : nil
     }
     var actionLabel: LocalizedStringResource? {
+        guard finishedState == nil else { return nil }
         guard !actionsBlocked || preservesConfirmedAttention else { return nil }
         if humanAction == nil, allowsRemoval, reviewingContext.nextStep == .runReview, !assistantReady {
             return .Board.boardCompactSetupCli
@@ -140,6 +158,7 @@ struct MRCardPresentation {
         return humanAction?.actionLabel ?? (allowsRemoval ? reviewingContext.actionLabel : nil)
     }
     var chips: [Chip] {
+        guard finishedState == nil else { return [] }
         var result: [Chip] = []
         if item.hasConflict || item.mergeRequest?.hasMergeConflict == true {
             result.append(.init(title: .Board.boardCompactConflict, symbol: "arrow.triangle.branch"))

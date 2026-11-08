@@ -40,6 +40,8 @@ final class SettingsManager {
     var mrActionIntents: [MRTodoIntent]
     var routedMRTodoReceipts: Set<MRTodoRouteReceipt>
     var boardPins: Set<BoardCardPin>
+    var mrLifecycleLedger = MergeRequestLifecycleLedger()
+    var autoRemoveFinishedMRs = false
 
     init(defaults: UserDefaults = .standard) {
         self.defaults = defaults
@@ -75,6 +77,9 @@ final class SettingsManager {
             .flatMap { try? JSONDecoder().decode(Set<MRTodoRouteReceipt>.self, from: $0) } ?? []
         boardPins = defaults.data(forKey: Key.boardPins)
             .flatMap { try? JSONDecoder().decode(Set<BoardCardPin>.self, from: $0) } ?? []
+        mrLifecycleLedger = defaults.data(forKey: Key.mrLifecycleLedger)
+            .flatMap { try? JSONDecoder().decode(MergeRequestLifecycleLedger.self, from: $0) } ?? .init()
+        autoRemoveFinishedMRs = defaults.bool(forKey: Key.autoRemoveFinishedMRs)
         conflictReceipts = defaults.data(forKey: Key.conflictReceipts)
             .flatMap { try? JSONDecoder().decode(Set<MergeConflictReceipt>.self, from: $0) }
             ?? []
@@ -165,6 +170,8 @@ final class SettingsManager {
         if let data = try? JSONEncoder().encode(mrActionIntents) { defaults.set(data, forKey: Key.mrActionIntents) }
         if let data = try? JSONEncoder().encode(routedMRTodoReceipts) { defaults.set(data, forKey: Key.routedMRTodoReceipts) }
         if let data = try? JSONEncoder().encode(boardPins) { defaults.set(data, forKey: Key.boardPins) }
+        if let data = try? JSONEncoder().encode(mrLifecycleLedger) { defaults.set(data, forKey: Key.mrLifecycleLedger) }
+        defaults.set(autoRemoveFinishedMRs, forKey: Key.autoRemoveFinishedMRs)
         if let data = try? JSONEncoder().encode(conflictReceipts) {
             defaults.set(data, forKey: Key.conflictReceipts)
         }
@@ -256,6 +263,7 @@ final class SettingsManager {
             Key.unreadReminderSound: ReminderSound.off.rawValue,
             Key.notificationsEnabled: true,
             Key.autoHandledEventBannersEnabled: true,
+            Key.autoRemoveFinishedMRs: false,
             Key.onboardingCompleted: false,
             Key.launchAtLoginPreference: true,
             Key.hasLaunchedBefore: false,
@@ -271,6 +279,8 @@ final class SettingsManager {
         static let pipelineClaimAssessmentAttempts = "pipelineClaimAssessmentAttempts"
         static let pendingTodoAcknowledgements = "pendingTodoAcknowledgements"
         static let boardPins = "boardPins"
+        static let mrLifecycleLedger = "mrLifecycleLedger"
+        static let autoRemoveFinishedMRs = "autoRemoveFinishedMRs"
         static let conflictReceipts = "conflictReceipts"
         static let reReviewReceipts = "reReviewReceipts"
         static let reReviewDraftBaselines = "reReviewDraftBaselines"

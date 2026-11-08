@@ -13,6 +13,19 @@ struct BoardCompactJobCard: View {
         .init(host: handoff.key.work.host, username: handoff.key.username,
             projectID: handoff.key.work.projectID, iid: handoff.key.work.iid)
     }
+    private var currentRequest: GitLabMergeRequest? {
+        monitor.settings.mrLifecycleLedger.request(for: scopeTarget) ?? monitor.currentRequest(for: handoff)
+    }
+    private var isDraft: Bool { currentRequest?.draft == true }
+    private var finishedState: MergeRequestFinishedState? { .init(currentRequest) }
+    private var finishedItem: MergeRequestAttentionMonitor.Item? {
+        guard let request = currentRequest, finishedState != nil else { return nil }
+        var item = MergeRequestAttentionMonitor.Item(id: .init(projectID: request.projectID, iid: request.iid),
+            title: request.title, url: request.webURL)
+        item.mergeRequest = request
+        item.isAuthored = request.author.username == handoff.key.username
+        return item
+    }
 
     var body: some View {
         VStack(alignment: .leading, spacing: 9) {
@@ -32,16 +45,22 @@ struct BoardCompactJobCard: View {
                         AssistantContextMenu(mergeRequestURL: url, title: handoff.title,
                             workspace: monitor.settings.automation.assistantWorkspace)
                     }
-                    Divider()
-                    MRAutomationScopeMenu(settings: monitor.settings, target: scopeTarget,
-                        projectPath: repositoryPath)
+                    if finishedState == nil {
+                        Divider()
+                        MRAutomationScopeMenu(settings: monitor.settings, target: scopeTarget,
+                            projectPath: repositoryPath, isDraft: isDraft)
+                    }
                 } label: { BoardCardActionIcon(systemName: "ellipsis") }
                 .menuStyle(.borderlessButton).menuIndicator(.hidden).fixedSize()
                 .frame(width: 24, height: 24)
                 .accessibilityLabel(Text(.CommandCenter.commandCenterActions))
             }
-            BoardJobStatusActions(handoff: handoff, monitor: monitor)
-            AssistantJobPreflightNotice(jobID: handoff.id, monitor: monitor)
+            if let finishedItem {
+                FinishedMergeRequestStatus(item: finishedItem, monitor: monitor)
+            } else {
+                BoardJobStatusActions(handoff: handoff, monitor: monitor)
+                AssistantJobPreflightNotice(jobID: handoff.id, monitor: monitor)
+            }
             Button { showingDetails = true } label: {
                 Text(.MRHumanAction.mrHumanActionActionReviewRun)
             }
@@ -55,8 +74,11 @@ struct BoardCompactJobCard: View {
                 metadataHeader
                 Text(verbatim: handoff.title).font(.title3).textSelection(.enabled)
                 Text(verbatim: repositoryPath).foregroundStyle(.secondary)
-                AssistantJobRow(handoff: handoff, monitor: monitor)
-                MRAutomationScopeMenu(settings: monitor.settings, target: scopeTarget, projectPath: repositoryPath)
+                if let finishedItem { FinishedMergeRequestStatus(item: finishedItem, monitor: monitor) }
+                AssistantJobRow(handoff: handoff, monitor: monitor, readOnly: finishedState != nil)
+                if finishedState == nil {
+                    MRAutomationScopeMenu(settings: monitor.settings, target: scopeTarget, projectPath: repositoryPath, isDraft: isDraft)
+                }
             }
         }
     }
@@ -67,8 +89,12 @@ struct BoardCompactJobCard: View {
             Text(verbatim: "·")
             Text(handoff.createdAt, style: .relative)
             Spacer(minLength: 4)
+            if let finishedState { FinishedMergeRequestBadge(state: finishedState) }
+            else if isDraft { BoardDraftBadge() }
             BoardMRIdentifier(iid: handoff.key.work.iid)
-            BoardAutomationToggle(settings: monitor.settings, target: scopeTarget, projectPath: repositoryPath)
+            if finishedState == nil {
+                BoardAutomationToggle(settings: monitor.settings, target: scopeTarget, projectPath: repositoryPath, isDraft: isDraft)
+            }
             BoardPinButton(pin: .mergeRequest(host: handoff.key.work.host,
                 username: handoff.key.username, projectID: handoff.key.work.projectID, iid: handoff.key.work.iid),
                 settings: monitor.settings)
@@ -86,10 +112,16 @@ struct BoardJobStatusActions: View {
     @Environment(\.openSettings) private var openSettings
 
     private var active: Bool { handoff.operationalExecution?.state.isActive == true }
+    private var isFinished: Bool {
+        let target = MRAutomationScope.Target(host: handoff.key.work.host, username: handoff.key.username,
+            projectID: handoff.key.work.projectID, iid: handoff.key.work.iid)
+        return MergeRequestFinishedState(monitor.settings.mrLifecycleLedger.request(for: target)
+            ?? monitor.currentRequest(for: handoff)) != nil
+    }
 
     var body: some View {
-        if active || (MergeRequestBoardSnapshot.Row.jobNeedsAttention(handoff.operationalExecution?.state)
-            && !PipelineJobReconciliation.isObsolete(handoff, request: monitor.currentRequest(for: handoff))) {
+        if !isFinished && (active || (MergeRequestBoardSnapshot.Row.jobNeedsAttention(handoff.operationalExecution?.state)
+            && !PipelineJobReconciliation.isObsolete(handoff, request: monitor.currentRequest(for: handoff)))) {
             HStack {
                 BoardStatusChip(title: active ? handoff.progressTitle(intents: monitor.settings.mrActionIntents, conflictReceipts: monitor.settings.conflictReceipts) : .Board.boardCompactBlocked,
                     symbol: active ? "arrow.triangle.2.circlepath" : "exclamationmark.circle",

@@ -4,6 +4,40 @@ import Testing
 
 @MainActor
 @Suite struct MergeRequestTodoRoutingTests {
+    @Test(arguments: [false, true], [false, true])
+    func trackedDraftStartsItsConfiguredWorkOnlyAfterExplicitOptIn(owned: Bool, forceOff: Bool) async throws {
+        let f = try fixture(owned: owned); defer { f.cleanup() }
+        f.settings.automation.reviewRequested.isEnabled = true
+        f.settings.automation.authorFeedback.isEnabled = true
+        let file = f.root.appending(path: "mr")
+        let ready = try String(contentsOf: file, encoding: .utf8)
+        try ready.replacingOccurrences(of: #""draft":false"#, with: #""draft":true"#)
+            .write(to: file, atomically: true, encoding: .utf8)
+        if owned {
+            try #"[{"id":"feedback","notes":[{"id":42,"author":{"id":2,"username":"other"},"system":false,"resolvable":true,"resolved":false,"body":"Please fix this behavior."}]}]"#
+                .write(to: f.root.appending(path: "discussions"), atomically: true, encoding: .utf8)
+        }
+        var launches = 0
+        let router = MergeRequestTodoRouter(settings: f.settings, glab: f.glab, canAutomate: { true }, launcher: { intent, manual in
+            launches += 1
+            #expect(!manual && intent.request.draft == true)
+            #expect(intent.kind == (owned ? .followUp : .review))
+            return UUID()
+        })
+        let event = todo(action: owned ? .reviewSubmitted : .reviewRequested)
+        #expect(await router.process([event], host: target.host, username: target.username, managed: []) == [event.id])
+        #expect(launches == 0 && f.settings.mrActionIntents.first?.state == .pending)
+
+        f.settings.automation.scope.setEnabled(true, for: target, isDraft: true)
+        if forceOff { f.settings.automation.scope.setEnabled(false, for: target, isDraft: true) }
+        _ = await router.process([], host: target.host, username: target.username, managed: [target])
+
+        #expect(launches == (forceOff ? 0 : 1))
+        #expect(f.settings.mrActionIntents.first?.state == (forceOff ? .pending : .running))
+        let current = try JSONDecoder().decode(GitLabMergeRequest.self, from: Data(contentsOf: file))
+        #expect(current.draft == true)
+    }
+
     private final class Readiness { var ready = false }
     private enum LaunchFailure: Error { case rejected }
     private final class ProbeGate {
@@ -236,8 +270,28 @@ import Testing
         #expect(f.settings.mrActionIntents.first?.state == .running)
     }
 
-    @Test func informationalMentionIsAcknowledgedWithoutAdoptingOrReviewingForeignDraft() async throws {
+    @Test func pausedDraftMentionRemainsUnreadWithoutPaidSemanticAssessment() async throws {
         let f = try fixture(); defer { f.cleanup() }
+        let file = f.root.appending(path: "mr")
+        let text = try String(contentsOf: file, encoding: .utf8)
+        try text.replacingOccurrences(of: #""draft":false"#, with: #""draft":true"#)
+            .write(to: file, atomically: true, encoding: .utf8)
+        try #"[{"id":"d","notes":[{"id":42,"author":{"id":2,"username":"other"},"system":false,"body":"@me informational context."}]}]"#
+            .write(to: f.root.appending(path: "discussions"), atomically: true, encoding: .utf8)
+        var assessments = 0
+        let router = MergeRequestTodoRouter(settings: f.settings, glab: f.glab, canAutomate: { true })
+        router.mentionDisposition = { _, _, _, _ in assessments += 1; return .informational }
+        #expect(await router.process([todo(action: .mentioned, linked: true)], host: target.host,
+                                     username: target.username, managed: []).isEmpty)
+        #expect(assessments == 0)
+        #expect(f.settings.mrActionIntents.isEmpty)
+        #expect(!FileManager.default.fileExists(atPath: f.root.appending(path: "acks").path))
+    }
+
+    @Test func informationalMentionIsAcknowledgedWithoutAdoptingOrReviewingForeignDraft() async throws {
+        // Global Draft automation allows notice classification without adopting the MR.
+        let f = try fixture(); defer { f.cleanup() }
+        f.settings.automation.scope.pauseDraftsByDefault = false
         let file = f.root.appending(path: "mr")
         let text = try String(contentsOf: file, encoding: .utf8)
         try text.replacingOccurrences(of: #""draft":false"#, with: #""draft":true"#)
@@ -306,6 +360,7 @@ import Testing
     @Test(arguments: ["ready", "resolved"])
     func changedReadinessOrThreadStateDuringNoticeAssessmentPreservesUnreadEvent(change: String) async throws {
         let f = try fixture(); defer { f.cleanup() }
+        f.settings.automation.scope.pauseDraftsByDefault = false
         let requestFile = f.root.appending(path: "mr")
         let ready = try String(contentsOf: requestFile, encoding: .utf8)
         let draft = ready.replacingOccurrences(of: #""draft":false"#, with: #""draft":true"#)

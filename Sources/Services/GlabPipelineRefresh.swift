@@ -67,8 +67,9 @@ extension GlabService {
                 && configuration.workflowRules[.pipelineFailure].mode == .assistant
                 && configuration.workflowRules[.pipelineFailure].includes(request)
                 && configuration.scope.permits(request, host: host, username: expectedUser.username)
+                && configuration.scope.permits(proof.request, host: host, username: expectedUser.username)
                 && !settings.ignoredMergeRequests.contains(target)
-                && request.author.id == expectedUser.id && request.draft == false && request.hasConflicts == false
+                && request.author.id == expectedUser.id && request.hasConflicts == false
                 && resolvedHost == host && currentUsername == expectedUser.username
                 && accountRevision == proof.accountRevision && shouldProceed()
         }
@@ -94,7 +95,9 @@ extension GlabService {
             _ = try await verifiedFailedPipeline(for: request, host: host, expectedUser: expectedUser)
             throw CancellationError()
         } catch GitLabPipelineEvidenceError.staleTarget(let latest) {
-            guard latest.targetHeadSHA == proof.targetHeadSHA, latest.user == proof.user else { throw CancellationError() }
+            guard latest.targetHeadSHA == proof.targetHeadSHA, latest.user == proof.user,
+                  configuration.scope.permits(latest.request, host: host, username: expectedUser.username)
+            else { throw CancellationError() }
         }
         guard permitted(), !settings.pipelineRefreshAttempts.contains(attempt) else { throw CancellationError() }
         guard settings.savePipelineRefreshAttempt(attempt) else { throw PipelineRefreshError.persistenceUnavailable }
@@ -127,7 +130,8 @@ extension GlabService {
         let targetHead = try await fetchBranchHeadSHA(projectID: targetProject, branch: request.targetBranch, host: host)
         guard permitted(), user == expectedUser, sourceHead == source, targetHead == proof.targetHeadSHA,
               current.state == "opened", current.author.id == expectedUser.id, current.sha == source,
-              current.draft == false, current.hasConflicts == false,
+              configuration.scope.permits(current, host: host, username: expectedUser.username),
+              current.hasConflicts == false,
               current.sourceProjectID == sourceProject, current.sourceBranch == request.sourceBranch,
               current.targetProjectID == targetProject, current.targetBranch == request.targetBranch,
               confirmed.id == id, confirmed.projectID == targetProject, confirmed.sha == sha,

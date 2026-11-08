@@ -39,6 +39,13 @@ struct AssistantJobHistoryView: View {
 struct AssistantJobRow: View {
     let handoff: AssistantAutomationRunner.Handoff
     let monitor: TodoMonitorService
+    var readOnly = false
+    private var finished: Bool {
+        let target = MRAutomationScope.Target(host: handoff.key.work.host, username: handoff.key.username,
+            projectID: handoff.key.work.projectID, iid: handoff.key.work.iid)
+        return readOnly || MergeRequestFinishedState(monitor.settings.mrLifecycleLedger.request(for: target)
+            ?? monitor.currentRequest(for: handoff)) != nil
+    }
     @State private var isRetrying = false
     @State private var promptExpanded = false
     @State private var transcriptExpanded = false
@@ -56,7 +63,7 @@ struct AssistantJobRow: View {
                     .font(.caption).foregroundStyle(.secondary)
                 }
                 Spacer(minLength: 12)
-                if handoff.execution?.state.isActive == true { ProgressView().controlSize(.small) }
+                if !finished, handoff.execution?.state.isActive == true { ProgressView().controlSize(.small) }
                 Text(stateLabel).font(.caption.weight(.medium))
             }
             DisclosureGroup(isExpanded: $promptExpanded) {
@@ -90,16 +97,16 @@ struct AssistantJobRow: View {
             if let retryError {
                 Text(verbatim: GlabService.redactWorkflowEvidence(retryError)).foregroundStyle(.orange).textSelection(.enabled)
             }
-            AssistantJobPreflightNotice(jobID: handoff.id, monitor: monitor)
+            if !finished { AssistantJobPreflightNotice(jobID: handoff.id, monitor: monitor) }
             HStack {
                 if let execution = handoff.execution {
-                    if execution.state.isActive {
+                    if !finished, execution.state.isActive {
                         Button(role: .destructive) { monitor.cancelAssistantJob(handoff.id) } label: {
                             Text(.AssistantJobs.assistantJobsStop)
                         }
                     } else if PipelineJobReconciliation.isObsolete(handoff, request: monitor.currentRequest(for: handoff)) {
                         Text(.MRFreshness.mrFreshnessHistoricalRun).font(.caption).foregroundStyle(.secondary)
-                    } else if execution.state != .succeeded && !handoff.isObsoleteReminder {
+                    } else if !finished, execution.state != .succeeded && !handoff.isObsoleteReminder {
                         Button {
                             isRetrying = true
                             retryError = nil

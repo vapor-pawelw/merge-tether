@@ -103,7 +103,8 @@ final class AutomaticEnvironmentRecovery {
         return snapshot.user.username == original.key.username && request.author.id == snapshot.user.id
             && request.projectID == original.key.work.projectID && request.iid == original.key.work.iid
             && request.webURL.isGitLabMergeRequest(host: original.key.work.host, iid: request.iid)
-            && request.state == "opened" && request.draft == false
+            && request.state == "opened"
+            && configuration.scope.permits(request, host: original.key.work.host, username: original.key.username)
             && request.sha != nil && request.sha == original.expectedHeadSHA
             && triggerEnabled
     }

@@ -320,7 +320,8 @@ final class MergeRequestTodoRouter {
             let accountRevision = glab.accountRevision
             let discussions = try await glab.fetchMergeRequestDiscussions(projectID: request.projectID, iid: request.iid, host: host)
             if !owned {
-                guard let note = discussions.flatMap(\.notes).first(where: { $0.id == noteID }),
+                guard settings.automation.scope.permits(request, host: host, username: user.username),
+                      let note = discussions.flatMap(\.notes).first(where: { $0.id == noteID }),
                       note.system == false, note.author?.id == todo.author.id, note.body != nil,
                       let fingerprint = MRNoticeClassifier.contextFingerprint(
                         request: request, discussions: discussions, user: user, noteID: noteID),
@@ -332,6 +333,7 @@ final class MergeRequestTodoRouter {
                 guard isCurrent(host, user.username), glab.accountRevision == accountRevision, liveUser == user,
                       live.projectID == request.projectID, live.iid == request.iid, live.webURL == request.webURL,
                       live.author == request.author, live.sha == request.sha, live.state == request.state,
+                      settings.automation.scope.permits(live, host: host, username: user.username),
                       live.semanticContextFingerprint == request.semanticContextFingerprint,
                       MRNoticeClassifier.contextFingerprint(request: live, discussions: liveDiscussions,
                                                             user: liveUser, noteID: noteID) == fingerprint else { return nil }
@@ -405,10 +407,11 @@ final class MergeRequestTodoRouter {
 
     private func shouldRunAutomatically(_ kind: MRTodoIntent.Kind, request: GitLabMergeRequest,
                                         target: MRAutomationScope.Target) -> Bool {
-        request.draft != true && shouldAdoptAutomatically(kind, request: request, target: target)
+        settings.automation.scope.permits(request, host: target.host, username: target.username)
+            && shouldAdoptAutomatically(kind, request: request, target: target)
     }
 
-    /// Adoption follows configured scope; execution also waits for author readiness.
+    /// Tracking follows ordinary scope; execution separately applies the current Draft policy.
     private func shouldAdoptAutomatically(_ kind: MRTodoIntent.Kind, request: GitLabMergeRequest,
                                           target: MRAutomationScope.Target) -> Bool {
         guard settings.automation.packageDecision != .disabled, !settings.ignoredMergeRequests.contains(target),

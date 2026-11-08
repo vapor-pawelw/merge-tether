@@ -1,0 +1,160 @@
+{
+  "sourceLanguage": "en",
+  "strings": {
+    "mrLifecycleBannersMergedTitle": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Merge request merged"
+          }
+        }
+      }
+    },
+    "mrLifecycleBannersMerged": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "The merge request was merged on GitLab."
+          }
+        }
+      }
+    },
+    "mrLifecycleBannersClosedTitle": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Merge request closed"
+          }
+        }
+      }
+    },
+    "mrLifecycleBannersClosed": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "The merge request was closed on GitLab."
+          }
+        }
+      }
+    },
+    "mrLifecycleBannersReadyTitle": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Ready for review"
+          }
+        }
+      }
+    },
+    "mrLifecycleBannersReady": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "The merge request is no longer a Draft."
+          }
+        }
+      }
+    },
+    "mrLifecycleBannersDraftTitle": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Marked as Draft"
+          }
+        }
+      }
+    },
+    "mrLifecycleBannersDraft": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "The merge request is now a Draft."
+          }
+        }
+      }
+    },
+    "mrLifecycleBannersManagementTitle": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Merge request management"
+          }
+        }
+      }
+    },
+    "mrLifecycleBannersAutoRemoveToggle": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Automatically remove merged or closed merge requests from the board"
+          }
+        }
+      }
+    },
+    "mrLifecycleBannersAutoRemoveHelp": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "When off, finished merge requests stay on the board until marked Seen. Event banners work independently of this setting."
+          }
+        }
+      }
+    },
+    "mrLifecycleBannersSection": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Event banners"
+          }
+        }
+      }
+    },
+    "mrLifecycleBannersEnabled": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Show brief in-app event banners"
+          }
+        }
+      }
+    },
+    "mrLifecycleBannersHelp": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Show updates for accepted events, merged or closed merge requests, and Draft status changes. These banners do not require coding automation or automatic removal."
+          }
+        }
+      }
+    }
+  },
+  "version": "1.0"
+}

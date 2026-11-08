@@ -262,8 +262,9 @@ struct MergeRequestsView: View {
             $0.id.host == monitor.glab.resolvedHost && $0.id.projectID == item.id.projectID && $0.id.iid == item.id.iid
         }
         return VStack(alignment: .leading, spacing: 8) {
-            if let target = monitor.scopeTarget(projectID: item.id.projectID, iid: item.id.iid, url: item.url) {
-                let active = monitor.settings.automation.scope.resolve(target).active
+            if monitor.settings.automation.hasEnabledAutomation,
+               let target = monitor.scopeTarget(projectID: item.id.projectID, iid: item.id.iid, url: item.url) {
+                let active = monitor.settings.automation.scope.resolve(target, isDraft: item.section == .draftMergeRequests).active
                 assistantStatus(active ? .Menu.menuMrAutomationActive : .Menu.menuMrAutomationPaused,
                                 icon: active ? "bolt.circle.fill" : "pause.circle.fill",
                                 color: active ? .green : .orange)

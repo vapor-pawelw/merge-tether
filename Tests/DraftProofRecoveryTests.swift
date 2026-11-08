@@ -4,6 +4,79 @@ import Testing
 
 @MainActor
 struct DraftProofRecoveryTests {
+    @Test(arguments: ["default", "forceOn", "revoked"])
+    func draftClaimRecoveryRequiresCurrentEffectivePermission(_ policy: String) async throws {
+        let f = try Fixture()
+        defer { f.clean() }
+        f.snapshot.request = try f.request(draft: true)
+        f.live = f.snapshot
+        let target = MRAutomationScope.Target(host: f.work.host, username: "me", projectID: 1, iid: 2)
+        if policy != "default" { f.settings.automation.scope.setManualChoice(.forceOn, for: target) }
+        f.duringAssessment = {
+            if policy == "revoked" { f.settings.automation.scope.setManualChoice(.paused, for: target) }
+        }
+        let coordinator = f.coordinator()
+        coordinator.schedule(snapshot: f.snapshot, origin: f.proof, configuration: f.settings.automation)
+        try await f.settle(coordinator)
+        #expect(f.assessments == (policy == "default" ? 0 : 1))
+        #expect(f.publication().count == (policy == "forceOn" ? 1 : 0))
+        #expect(f.live.request.draft == true)
+    }
+
+    @Test func draftReplyRepairContextUsesCurrentPolicyWithoutWaivingOwnership() throws {
+        let f = try Fixture()
+        defer { f.clean() }
+        f.snapshot.request = try f.request(draft: true)
+        f.live = f.snapshot
+        let claim = DraftProofRecoveryVerifier.Assessment.Draft(draftID: 12, state: .uncertain, reason: "A reply needs correction")
+        #expect(!DraftReplyRepair.preparationAllowed(f.snapshot.request, configuration: f.settings.automation))
+        #expect(DraftReplyRepair.context(snapshot: f.snapshot, origin: f.proof, rejection: claim, configuration: f.settings.automation) == nil)
+        let target = MRAutomationScope.Target(host: f.work.host, username: "me", projectID: 1, iid: 2)
+        f.settings.automation.scope.setManualChoice(.forceOn, for: target)
+        #expect(DraftReplyRepair.preparationAllowed(f.snapshot.request, configuration: f.settings.automation))
+        let context = try #require(DraftReplyRepair.context(snapshot: f.snapshot, origin: f.proof, rejection: claim, configuration: f.settings.automation))
+        #expect(context.matches(f.snapshot, configuration: f.settings.automation))
+        f.settings.automation.scope.setManualChoice(.paused, for: target)
+        #expect(!context.matches(f.snapshot, configuration: f.settings.automation))
+    }
+
+    @Test(arguments: AutomationAssistant.allCases)
+    func aDraftClaimProviderNeedsTheControllersExactConfiguration(_ assistant: AutomationAssistant) async throws {
+        let f = try Fixture()
+        defer { f.clean() }
+        f.snapshot.request = try f.request(draft: true)
+        let script = f.folder.appending(path: "draft-claim-cli")
+        try Data("""
+            #!/usr/bin/python3
+            import json,sys,pathlib
+            args=sys.argv[1:]
+            pathlib.Path(__file__+'.started').write_text('yes')
+            result={'drafts':[{'draftID':12,'state':'valid','reason':'Exact current source and reply verified.','summary':'Current proof supports this reply.'}]}
+            if args[0]=='exec': json.dump(result,open(args[args.index('-o')+1],'w'))
+            else: print(json.dumps({'is_error':False,'structured_output':result}))
+            """.utf8).write(to: script)
+        try FileManager.default.setAttributes([.posixPermissions: 0o700], ofItemAtPath: script.path)
+        var input = DraftProofRecoveryVerifier.Input(snapshot: f.snapshot, origin: f.proof)
+        do {
+            _ = try await DraftProofRecoveryVerifier.run(input, assistant: assistant, model: "fixture", executable: script)
+            Issue.record("A Draft requires the controller's explicit current policy")
+        } catch DraftProofRecoveryVerifier.Failure.invalidEvidence { }
+        #expect(!FileManager.default.fileExists(atPath: script.path + ".started"))
+        let target = MRAutomationScope.Target(host: f.work.host, username: "me", projectID: 1, iid: 2)
+        f.settings.automation.scope.setManualChoice(.forceOn, for: target)
+        input.configuration = f.settings.automation
+        let result = try await DraftProofRecoveryVerifier.run(input, assistant: assistant, model: "fixture", executable: script)
+        #expect(result.drafts.first?.state == .valid)
+        try FileManager.default.removeItem(atPath: script.path + ".started")
+        f.settings.automation.scope.setManualChoice(.paused, for: target)
+        input.configuration = f.settings.automation
+        do {
+            _ = try await DraftProofRecoveryVerifier.run(input, assistant: assistant, model: "fixture", executable: script)
+            Issue.record("Force off must block the provider before launch")
+        } catch DraftProofRecoveryVerifier.Failure.invalidEvidence { }
+        #expect(!FileManager.default.fileExists(atPath: script.path + ".started"))
+    }
+
     @Test(arguments: VerificationThinking.allCases)
     func passesTheSelectedThinkingToDraftClaimVerification(_ thinking: VerificationThinking) async throws {
         let f = try Fixture()
@@ -1390,11 +1463,11 @@ struct DraftProofRecoveryTests {
             try FileManager.default.createDirectory(at: path.deletingLastPathComponent(), withIntermediateDirectories: true)
             try JSONEncoder().encode(proof).write(to: path)
         }
-        static func requestJSON(head: String = String(repeating: "a", count: 40), title: String = "Example MR", targetBranch: String = "main", targetProjectID: Int = 1) -> String {
-            #"{"project_id":1,"iid":2,"author":{"id":3,"name":"Me","username":"me"},"title":"\#(title)","web_url":"https://gitlab.example.org/group/repo/-/merge_requests/2","state":"opened","draft":false,"sha":"\#(head)","source_project_id":1,"source_branch":"fix","target_branch":"\#(targetBranch)","target_project_id":\#(targetProjectID),"labels":[]}"#
+        static func requestJSON(head: String = String(repeating: "a", count: 40), title: String = "Example MR", targetBranch: String = "main", targetProjectID: Int = 1, draft: Bool = false) -> String {
+            #"{"project_id":1,"iid":2,"author":{"id":3,"name":"Me","username":"me"},"title":"\#(title)","web_url":"https://gitlab.example.org/group/repo/-/merge_requests/2","state":"opened","draft":\#(draft),"sha":"\#(head)","source_project_id":1,"source_branch":"fix","target_branch":"\#(targetBranch)","target_project_id":\#(targetProjectID),"labels":[]}"#
         }
-        func request(head: String = String(repeating: "a", count: 40), title: String = "Example MR", targetBranch: String = "main", targetProjectID: Int = 1) throws -> GitLabMergeRequest {
-            try JSONDecoder().decode(GitLabMergeRequest.self, from: Data(Self.requestJSON(head: head, title: title, targetBranch: targetBranch, targetProjectID: targetProjectID).utf8))
+        func request(head: String = String(repeating: "a", count: 40), title: String = "Example MR", targetBranch: String = "main", targetProjectID: Int = 1, draft: Bool = false) throws -> GitLabMergeRequest {
+            try JSONDecoder().decode(GitLabMergeRequest.self, from: Data(Self.requestJSON(head: head, title: title, targetBranch: targetBranch, targetProjectID: targetProjectID, draft: draft).utf8))
         }
         func receipts() -> [FollowUpVerification] {
             FollowUpVerificationStore.contextReceipts(work: work, username: "me", settings: settings, in: folder)

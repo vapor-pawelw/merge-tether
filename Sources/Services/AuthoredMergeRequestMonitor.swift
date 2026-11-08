@@ -32,6 +32,8 @@ final class AuthoredMergeRequestMonitor {
     /// Missing or incomplete verification cannot authorize merging a reviewer's outstanding conditions.
     var authorFeedbackAllowsMerge: ((GitLabMergeRequest, [GitLabMergeRequestDiscussion], Int) -> Bool)?
     var authorFeedbackStatus: ((GitLabMergeRequest) -> AuthorFeedbackStatus?)?
+    /// Fresh authenticated observations, delivered before optional remote actions.
+    var onObservedMergeRequests: (([GitLabMergeRequest], Date) -> Void)?
     func isMerging(_ request: GitLabMergeRequest) -> Bool {
         let id = MergeRequestAttentionMonitor.Item.ID(projectID: request.projectID, iid: request.iid)
         guard let progress = mergingRequests[id], progress.revision == glab.accountRevision,
@@ -48,6 +50,8 @@ final class AuthoredMergeRequestMonitor {
     private var wasWatchingWorkflow = false
     private var lastAccount: Account?
     private var conflictTask: Task<Void, Never>?
+    private var conflictTaskWork: AssistantAutomationRunner.MergeRequestWork?
+    private var runtimeScope: (account: Account, revision: UInt64, scope: MRAutomationScope)?
     private var failedConflicts: Set<MergeConflictReceipt> = []
     private var notifiedDiscussions: Set<String> = []
     private struct Preparation {
@@ -70,7 +74,7 @@ final class AuthoredMergeRequestMonitor {
     func conflictAutomationState(for request: GitLabMergeRequest) -> ConflictAutomationPolicy.State? {
         guard let host = glab.resolvedHost, let username = glab.currentUsername,
               settings.automation.packageDecision != .disabled, settings.automation.conflictTasksEnabled,
-              request.author.username == username, request.state == "opened", request.draft == false,
+              request.author.username == username, request.state == "opened",
               request.hasMergeConflict, let sha = request.sha, !sha.isEmpty,
               request.sourceProjectID != nil, request.targetProjectID != nil,
               request.webURL.isGitLabMergeRequest(host: host, iid: request.iid),
@@ -91,6 +95,28 @@ final class AuthoredMergeRequestMonitor {
         }
         return ConflictAutomationPolicy.state(previous: receipt, previousJob: previousJob,
             username: username, allowsPush: settings.automation.permitsConflictPush(project: request.webURL.gitLabProjectPath))
+    }
+
+    func cancelRuntimePreparation(outsideScope scope: MRAutomationScope) {
+        guard let host = glab.resolvedHost, let username = glab.currentUsername else {
+            runtimeScope = nil
+            preparingConflicts.removeAll()
+            conflictTask?.cancel()
+            return
+        }
+        let account = Account(host: host, username: username)
+        runtimeScope = (account, glab.accountRevision, scope)
+        for work in Array(preparingConflicts.keys) where !runtimePermits(work, account: account) {
+            // A transferred task owns a persisted lease until its rollback defer finishes.
+            if work != conflictTaskWork { preparingConflicts.removeValue(forKey: work) }
+        }
+        if let work = conflictTaskWork, !runtimePermits(work, account: account) { conflictTask?.cancel() }
+    }
+
+    private func runtimePermits(_ work: AssistantAutomationRunner.MergeRequestWork, account: Account) -> Bool {
+        guard let runtimeScope, runtimeScope.account == account, runtimeScope.revision == glab.accountRevision else { return true }
+        return runtimeScope.scope.resolve(.init(host: work.host, username: account.username,
+            projectID: work.projectID, iid: work.iid)).active
     }
 
     func automationConfigurationChanged(outsideScope scope: MRAutomationScope? = nil) {
@@ -197,13 +223,20 @@ final class AuthoredMergeRequestMonitor {
         let owned = listed.filter {
             $0.state == "opened" && $0.author.id == user.id && $0.webURL.isGitLabMergeRequest(host: host, iid: $0.iid)
         }
+        guard glab.accountRevision == revision else { return }
+        onObservedMergeRequests?(owned, readStartedAt)
         pruneConflictReceipts(owned, account: account, user: user)
         var results: [AuthoredMergeRequestStatus] = []
         var actionFailed = false
         for summary in owned {
             guard isCurrent(account) else { return }
-            let request = (try? await glab.fetchMergeRequest(projectID: summary.projectID, iid: summary.iid, host: host))
-                ?? summary
+            let detailReadStartedAt = Date()
+            let detail = try? await glab.fetchMergeRequest(projectID: summary.projectID, iid: summary.iid, host: host)
+            let request = detail ?? summary
+            guard isCurrent(account), glab.accountRevision == revision else { return }
+            if request.author.id == user.id {
+                onObservedMergeRequests?([request], detail == nil ? readStartedAt : detailReadStartedAt)
+            }
             guard request.state == "opened", request.author.id == user.id,
                   request.webURL.isGitLabMergeRequest(host: host, iid: request.iid)
             else { continue }
@@ -353,13 +386,14 @@ final class AuthoredMergeRequestMonitor {
         guard conflictTask == nil, settings.automation.packageDecision != .disabled,
               settings.automation.conflictTasksEnabled, request.hasMergeConflict,
               settings.automation.scope.permits(request, host: account.host, username: account.username),
-              request.draft == false, let sourceSHA = request.sha,
+              let sourceSHA = request.sha,
               let sourceProjectID = request.sourceProjectID, let targetProjectID = request.targetProjectID
         else { return }
 
         let host = account.host
         let automation = settings.automation
         let work = AssistantAutomationRunner.MergeRequestWork(host: host, projectID: request.projectID, iid: request.iid)
+        guard runtimePermits(work, account: account) else { return }
         let preparation = Preparation(sourceSHA: sourceSHA, configuration: automation)
         preparingConflicts[work] = preparation
         var transferred = false
@@ -369,6 +403,7 @@ final class AuthoredMergeRequestMonitor {
         do {
             let (liveSource, liveTarget) = try await (sourceHead, targetHead)
             guard isCurrent(account), settings.automation == automation, liveSource == sourceSHA,
+                  preparingConflicts[work] != nil, runtimePermits(work, account: account),
                   settings.automation.scope.permits(request, host: host, username: account.username) else { return }
             let allowPush = automation.permitsConflictPush(project: request.webURL.gitLabProjectPath)
             var receipt = MergeConflictReceipt(
@@ -381,6 +416,7 @@ final class AuthoredMergeRequestMonitor {
                 username: account.username, allowsPush: allowPush) else { return }
             guard await canAutomate(automation.assistant), !Task.isCancelled,
                   isCurrent(account), settings.automation == automation,
+                  preparingConflicts[work] != nil, runtimePermits(work, account: account),
                   !AssistantAutomationRunner.isWorking(on: work) else { return }
             // Persist before the agent runs. A failed or interrupted turn may already have pushed.
             let replacedReceipts = settings.conflictReceipts.filter { $0.matches(request, host: host, userID: user.id) }
@@ -393,11 +429,13 @@ final class AuthoredMergeRequestMonitor {
             settings.save()
 
             transferred = true
+            conflictTaskWork = work
             conflictTask = Task {
                 var enteredLauncher = false
                 defer {
                     let restored = !enteredLauncher && restoreUnlaunchedConflict(receipt, replacing: replacedReceipts)
                     conflictTask = nil
+                    conflictTaskWork = nil
                     preparingConflicts.removeValue(forKey: work)
                     if restored && self.isCurrent(account) {
                         if isLoading { refreshAfterLoad = true }
@@ -405,11 +443,13 @@ final class AuthoredMergeRequestMonitor {
                     }
                 }
                 do {
-                    guard self.isCurrent(account), settings.automation == automation else { return }
+                    guard self.isCurrent(account), settings.automation == automation,
+                          runtimePermits(work, account: account) else { return }
                     let evidence = await glab.mergeWorkflowEvidence(projectID: request.projectID, iid: request.iid, host: host)
                     let stackPosition = await glab.stackPosition(for: work)
                     guard await canAutomate(automation.assistant), !Task.isCancelled,
-                          self.isCurrent(account), settings.automation == automation else { throw CancellationError() }
+                          self.isCurrent(account), settings.automation == automation,
+                          runtimePermits(work, account: account) else { throw CancellationError() }
                     let launch = ConflictLaunch(
                         assistant: automation.assistant, title: conflictTitle(request),
                         stackPosition: stackPosition,

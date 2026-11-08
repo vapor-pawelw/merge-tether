@@ -4,6 +4,101 @@ import Testing
 
 @MainActor
 struct MergeWorkflowMonitorTests {
+    @Test func pausedDraftFailureIsNotConsumedBeforeExplicitOptInEvenAcrossRestart() async throws {
+        let directory = FileManager.default.temporaryDirectory.appending(path: UUID().uuidString)
+        try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
+        defer { try? FileManager.default.removeItem(at: directory) }
+        let suite = "DraftWorkflowPause.\(UUID())"
+        let defaults = try #require(UserDefaults(suiteName: suite))
+        defer { defaults.removePersistentDomain(forName: suite) }
+        let executable = directory.appending(path: "glab")
+        try write("""
+        #!/bin/sh
+        case "$2" in
+          */pipelines/310/jobs*) printf '%s' '[{"id":42,"status":"failed","allow_failure":false,"failure_reason":"script_failure"}]' ;;
+          *) exit 20 ;;
+        esac
+        """, to: executable)
+        try FileManager.default.setAttributes([.posixPermissions: 0o700], ofItemAtPath: executable.path)
+        let glab = GlabService()
+        glab.glabPath = executable
+        let failed = try JSONDecoder().decode(GitLabMergeRequest.self, from: Data(
+            mergeRequest(11, sha: String(repeating: "a", count: 40), pipeline: "failed")
+                .replacingOccurrences(of: #""draft":false"#, with: #""draft":true"#).utf8))
+        var scope = MRAutomationScope()
+        let target = MRAutomationScope.Target(host: "gitlab.example.test", username: "owner", projectID: 7, iid: 11)
+        // A legacy active override represents tracking, not explicit Draft permission.
+        scope[target] = .active
+        var events: [MergeWorkflowEvent] = []
+        let monitor = MergeWorkflowMonitor(defaults: defaults)
+        await monitor.poll(glab: glab, host: target.host, user: .init(id: 1, username: target.username),
+            authored: [failed], enabled: [.pipelineFailure], reviewSLA: 7_200, automationScope: scope) { events.append($0) }
+        #expect(events.isEmpty)
+        events.removeAll()
+
+        scope.setEnabled(true, for: target, isDraft: true)
+        let restarted = MergeWorkflowMonitor(defaults: defaults)
+        await restarted.poll(glab: glab, host: target.host, user: .init(id: 1, username: target.username),
+            authored: [failed], enabled: [.pipelineFailure], reviewSLA: 7_200, automationScope: scope) { events.append($0) }
+        #expect(events.count == 1 && events.first?.mergeRequest.draft == true)
+        await restarted.poll(glab: glab, host: target.host, user: .init(id: 1, username: target.username),
+            authored: [failed], enabled: [.pipelineFailure], reviewSLA: 7_200, automationScope: scope) { events.append($0) }
+        #expect(events.count == 1)
+    }
+
+    @Test func optingOutDuringWorkflowReadsPreservesThePendingEventForLaterOptIn() async throws {
+        let directory = FileManager.default.temporaryDirectory.appending(path: UUID().uuidString)
+        try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
+        defer { try? FileManager.default.removeItem(at: directory) }
+        let suite = "DraftWorkflowPolicyRace.\(UUID())"
+        let defaults = try #require(UserDefaults(suiteName: suite))
+        defer { defaults.removePersistentDomain(forName: suite) }
+        let executable = directory.appending(path: "glab")
+        try write("""
+        #!/bin/sh
+        cd "$(dirname "$0")"
+        case "$2" in
+          */pipelines/310/jobs*)
+            touch started
+            while [ ! -e release ]; do sleep 0.02; done
+            printf '%s' '[{"id":42,"status":"failed","allow_failure":false,"failure_reason":"script_failure"}]' ;;
+          *) exit 20 ;;
+        esac
+        """, to: executable)
+        try FileManager.default.setAttributes([.posixPermissions: 0o700], ofItemAtPath: executable.path)
+        let glab = GlabService()
+        glab.glabPath = executable
+        let failed = try JSONDecoder().decode(GitLabMergeRequest.self, from: Data(
+            mergeRequest(11, sha: String(repeating: "a", count: 40), pipeline: "failed")
+                .replacingOccurrences(of: #""draft":false"#, with: #""draft":true"#).utf8))
+        let target = MRAutomationScope.Target(host: "gitlab.example.test", username: "owner", projectID: 7, iid: 11)
+        var scope = MRAutomationScope()
+        scope.setEnabled(true, for: target, isDraft: true)
+        let admittedScope = scope
+        var events: [MergeWorkflowEvent] = []
+        let monitor = MergeWorkflowMonitor(defaults: defaults)
+        let polling = Task {
+            await monitor.poll(glab: glab, host: target.host, user: .init(id: 1, username: target.username),
+                authored: [failed], enabled: [.pipelineFailure], reviewSLA: 7_200, automationScope: admittedScope,
+                isCurrent: { scope == admittedScope }) { events.append($0) }
+        }
+        let started = directory.appending(path: "started")
+        for _ in 0..<500 where !FileManager.default.fileExists(atPath: started.path) {
+            try await Task.sleep(for: .milliseconds(10))
+        }
+        scope.setEnabled(false, for: target, isDraft: true)
+        try Data().write(to: directory.appending(path: "release"))
+        await polling.value
+        #expect(FileManager.default.fileExists(atPath: started.path))
+        #expect(events.isEmpty)
+        events.removeAll()
+        scope.setEnabled(true, for: target, isDraft: true)
+        let restarted = MergeWorkflowMonitor(defaults: defaults)
+        await restarted.poll(glab: glab, host: target.host, user: .init(id: 1, username: target.username),
+            authored: [failed], enabled: [.pipelineFailure], reviewSLA: 7_200, automationScope: scope) { events.append($0) }
+        #expect(events.count == 1)
+    }
+
     @Test func existingFailedPipelineIsDiscoveredOnFirstPollAndNotReplayedAfterRestart() async throws {
         let directory = FileManager.default.temporaryDirectory.appending(path: UUID().uuidString)
         try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)

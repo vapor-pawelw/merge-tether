@@ -28,6 +28,7 @@ private struct CommandCenterMRCardContent: View {
 
     private var item: MergeRequestAttentionMonitor.Item { row.item }
     private var isDraft: Bool { item.section == .draftMergeRequests }
+    private var finishedState: MergeRequestFinishedState? { .init(item.mergeRequest) }
     private var scopeTarget: MRAutomationScope.Target? {
         monitor.scopeTarget(projectID: item.id.projectID, iid: item.id.iid, url: item.url)
     }
@@ -52,48 +53,52 @@ private struct CommandCenterMRCardContent: View {
                 .help(Text(verbatim: "\(item.title)\n\(item.url.gitLabProjectPath)\n") + Text(.Board.boardDetails))
                 moreMenu
             }
-            if humanAction != nil {
-                Text(verbatim: presentation.message).help(Text(verbatim: presentation.message))
-                    .font(.callout).foregroundStyle(isDraft ? Color.secondary : Color.orange)
-                    .lineLimit(2).fixedSize(horizontal: false, vertical: true)
-            }
-            if let retryError {
-                Text(verbatim: retryError).font(.caption).foregroundStyle(.red)
-                    .fixedSize(horizontal: false, vertical: true)
-            }
-            if let job = row.latestJob { AssistantJobPreflightNotice(jobID: job.id, monitor: monitor) }
-            if presentation.working || presentation.refreshFailed || humanAction != nil || neutralStatus != nil {
-                HStack(spacing: 6) {
-                    if presentation.working {
-                        ProgressView().controlSize(.mini)
-                        if let status = presentation.status { Text(verbatim: status) }
-                    } else if presentation.refreshFailed {
-                        Label { Text(.AutomationProgress.progressRefreshFailed) } icon: { Image(systemName: "arrow.clockwise") }
-                    } else if humanAction?.action == .retryRun {
-                        Button { openAttention(.assistantRuns) } label: { Text(.MRHumanAction.mrHumanActionActionReviewRun) }
-                            .buttonStyle(.plain)
-                    } else if humanAction == nil, let status = neutralStatus {
-                        Text(status).font(.callout).foregroundStyle(isDraft ? Color.secondary : Color.primary).lineLimit(1)
-                            .help(Text(reviewingContext.presenceMessage)
-                                  + Text(verbatim: "\n") + Text(reviewingContext.statusMessage))
-                    }
-                    Spacer(minLength: 6)
-                    primaryAction
+            if finishedState != nil {
+                FinishedMergeRequestStatus(item: item, monitor: monitor)
+            } else {
+                if humanAction != nil {
+                    Text(verbatim: presentation.message).help(Text(verbatim: presentation.message))
+                        .font(.callout).foregroundStyle(isDraft ? Color.secondary : Color.orange)
+                        .lineLimit(2).fixedSize(horizontal: false, vertical: true)
                 }
-                .font(.caption).foregroundStyle(.secondary)
-            }
-            if let dependencies = item.dependencies, dependencies.hasPresentation {
-                MRDependencyRow(summary: dependencies, projectID: item.id.projectID).transition(.opacity)
-            }
-            if let nextStep = presentation.nextStep {
-                Text(verbatim: nextStep)
-                    .font(.subheadline).foregroundStyle(.secondary)
-                    .fixedSize(horizontal: false, vertical: true)
-            }
-            if !chips.isEmpty {
-                HStack(spacing: 5) {
-                    ForEach(Array(chips.enumerated()), id: \.offset) { _, chip in
-                        BoardStatusChip(title: chip.title, symbol: chip.symbol)
+                if let retryError {
+                    Text(verbatim: retryError).font(.caption).foregroundStyle(.red)
+                        .fixedSize(horizontal: false, vertical: true)
+                }
+                if let job = row.latestJob { AssistantJobPreflightNotice(jobID: job.id, monitor: monitor) }
+                if presentation.working || presentation.refreshFailed || humanAction != nil || neutralStatus != nil || (isDraft && item.isAuthored) {
+                    HStack(spacing: 6) {
+                        if presentation.working {
+                            ProgressView().controlSize(.mini)
+                            if let status = presentation.status { Text(verbatim: status) }
+                        } else if presentation.refreshFailed {
+                            Label { Text(.AutomationProgress.progressRefreshFailed) } icon: { Image(systemName: "arrow.clockwise") }
+                        } else if humanAction?.action == .retryRun {
+                            Button { openAttention(.assistantRuns) } label: { Text(.MRHumanAction.mrHumanActionActionReviewRun) }
+                                .buttonStyle(.plain)
+                        } else if humanAction == nil, let status = neutralStatus {
+                            Text(status).font(.callout).foregroundStyle(isDraft ? Color.secondary : Color.primary).lineLimit(1)
+                                .help(Text(reviewingContext.presenceMessage)
+                                      + Text(verbatim: "\n") + Text(reviewingContext.statusMessage))
+                        }
+                        Spacer(minLength: 6)
+                        primaryAction
+                    }
+                    .font(.caption).foregroundStyle(.secondary)
+                }
+                if let dependencies = item.dependencies, dependencies.hasPresentation {
+                    MRDependencyRow(summary: dependencies, projectID: item.id.projectID).transition(.opacity)
+                }
+                if let nextStep = presentation.nextStep {
+                    Text(verbatim: nextStep)
+                        .font(.subheadline).foregroundStyle(.secondary)
+                        .fixedSize(horizontal: false, vertical: true)
+                }
+                if !chips.isEmpty {
+                    HStack(spacing: 5) {
+                        ForEach(Array(chips.enumerated()), id: \.offset) { _, chip in
+                            BoardStatusChip(title: chip.title, symbol: chip.symbol)
+                        }
                     }
                 }
             }
@@ -125,11 +130,12 @@ private struct CommandCenterMRCardContent: View {
                     .accessibilityLabel(Text(.ReviewingContext.reviewingAuthorUnknown))
             }
             Spacer(minLength: 4)
-            if isDraft { BoardDraftBadge() }
+            if let finishedState { FinishedMergeRequestBadge(state: finishedState) }
+            else if isDraft { BoardDraftBadge() }
             BoardMRIdentifier(iid: item.id.iid)
-            if let scopeTarget {
+            if finishedState == nil, let scopeTarget {
                 BoardAutomationToggle(settings: monitor.settings, target: scopeTarget,
-                    projectPath: item.url.gitLabProjectPath)
+                    projectPath: item.url.gitLabProjectPath, isDraft: isDraft)
             }
             BoardPinButton(pin: .mergeRequest(host: monitor.glab.resolvedHost,
                 username: monitor.glab.currentUsername, projectID: item.id.projectID, iid: item.id.iid),
@@ -146,9 +152,18 @@ private struct CommandCenterMRCardContent: View {
             Button(role: .destructive) { monitor.cancelAssistantJob(job.id) } label: { Text(.AssistantJobs.assistantJobsStop) }
                 .buttonStyle(.plain)
         } else if let action = humanAction {
-            humanActionButton(action).disabled(busy || presentation.isRefreshingAttention)
+            humanActionButton(action).disabled(actionWaitsForRefresh(action) && (busy || presentation.isRefreshingAttention))
         } else if !busy, allowsRemoval {
             reviewingAction
+        } else if isDraft, item.isAuthored {
+            MarkMergeRequestReadyButton(item: item, monitor: monitor).buttonStyle(.bordered)
+        }
+    }
+
+    private func actionWaitsForRefresh(_ action: MRHumanAction) -> Bool {
+        switch action.action {
+        case .retryRun, .verifyFeedback, .retryDraftVerification, .handleFeedback, .retryIntent: true
+        default: false // Opening existing discussions/results never authorizes a GitLab action.
         }
     }
 
@@ -338,7 +353,7 @@ struct BoardTodoRow: View {
                 }
                 if let scopeTarget {
                     MRAutomationScopeMenu(settings: monitor.settings, target: scopeTarget,
-                        projectPath: todo.project.pathWithNamespace)
+                        projectPath: todo.project.pathWithNamespace, isDraft: todo.isDraft)
                 }
             }
         }
@@ -358,7 +373,7 @@ struct BoardTodoRow: View {
             }
             if let scopeTarget {
                 BoardAutomationToggle(settings: monitor.settings, target: scopeTarget,
-                    projectPath: todo.project.pathWithNamespace)
+                    projectPath: todo.project.pathWithNamespace, isDraft: todo.isDraft)
             }
             BoardPinButton(pin: .todo(host: monitor.glab.resolvedHost,
                 username: monitor.glab.currentUsername, id: todo.id), settings: monitor.settings)
@@ -384,7 +399,7 @@ struct BoardTodoRow: View {
             if let scopeTarget {
                 Divider()
                 MRAutomationScopeMenu(settings: monitor.settings, target: scopeTarget,
-                    projectPath: todo.project.pathWithNamespace)
+                    projectPath: todo.project.pathWithNamespace, isDraft: todo.isDraft)
             }
         } label: { BoardCardActionIcon(systemName: "ellipsis") }
         .menuStyle(.borderlessButton).menuIndicator(.hidden).fixedSize()

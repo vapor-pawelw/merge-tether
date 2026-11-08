@@ -4,8 +4,15 @@ import Testing
 
 @MainActor
 struct ConflictAutomationLifecycleTests {
-    @Test func grantingPushAdvancesThePlanOnceAndDoesNotReplayThePushAttempt() async throws {
-        try await withHarness { harness in
+    @Test(arguments: [false, true])
+    func grantingPushAdvancesThePlanOnceAndDoesNotReplayThePushAttempt(_ isDraft: Bool) async throws {
+        try await withHarness(isDraft: isDraft) { harness in
+            if isDraft {
+                try await harness.poll()
+                #expect(harness.launches.isEmpty && harness.settings.conflictReceipts.isEmpty)
+                harness.settings.automation.scope.setEnabled(true,
+                    for: .init(host: Harness.host, username: "me", projectID: 1, iid: 2), isDraft: true)
+            }
             harness.settings.automation.allowConflictPush = false
             try await harness.poll()
             #expect(harness.launches == [false])
@@ -99,6 +106,28 @@ struct ConflictAutomationLifecycleTests {
         }
     }
 
+    @Test(arguments: ["draft", "closed"])
+    func freshIneligibleObservationCancelsWaitingConflictPreparationWithoutChangingConfiguration(_ state: String) async throws {
+        try await withHarness { harness in
+            try harness.write("pause-stack", "yes")
+            harness.monitor.refreshIfNeeded()
+            try await harness.waitForFile("stack-started")
+            let configuration = harness.settings.automation
+            let original = try String(contentsOf: harness.directory.appending(path: "request.json"), encoding: .utf8)
+            let changed = state == "draft" ? original.replacingOccurrences(of: "\"draft\":false", with: "\"draft\":true")
+                : original.replacingOccurrences(of: "\"state\":\"opened\"", with: "\"state\":\"closed\"")
+            try harness.write("request.json", changed)
+            var projected = configuration.scope
+            projected[.init(host: Harness.host, username: "me", projectID: 1, iid: 2)] = .paused
+            harness.monitor.cancelRuntimePreparation(outsideScope: projected)
+            try harness.write("release-stack", "yes")
+            try await harness.waitUntilIdle()
+            #expect(harness.settings.automation == configuration)
+            #expect(harness.launcherEntries == 0 && harness.settings.assistantHandoffs.isEmpty)
+            #expect(harness.settings.conflictReceipts.isEmpty)
+        }
+    }
+
     @Test func aLauncherErrorKeepsTheReceiptBecauseExternalWorkMayHaveStarted() async throws {
         try await withHarness { harness in
             harness.launchFails = true
@@ -114,8 +143,8 @@ struct ConflictAutomationLifecycleTests {
         }
     }
 
-    private func withHarness(_ body: (Harness) async throws -> Void) async throws {
-        let harness = try Harness()
+    private func withHarness(isDraft: Bool = false, _ body: (Harness) async throws -> Void) async throws {
+        let harness = try Harness(isDraft: isDraft)
         defer { harness.cleanUp() }
         try await body(harness)
     }
@@ -152,7 +181,7 @@ struct ConflictAutomationLifecycleTests {
                 return job
             })
 
-        init() throws {
+        init(isDraft: Bool = false) throws {
             directory = FileManager.default.temporaryDirectory.appending(path: UUID().uuidString)
             try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: false)
             defaults = try #require(UserDefaults(suiteName: suite))
@@ -166,7 +195,7 @@ struct ConflictAutomationLifecycleTests {
             settings.automation.conflictPushProjects = "g/p"
             let json = """
                 {"project_id":1,"iid":2,"author":{"id":3,"username":"me","name":"Me"},"title":"Conflict",
-                 "web_url":"https://\(Self.host)/g/p/-/merge_requests/2","state":"opened","draft":false,
+                 "web_url":"https://\(Self.host)/g/p/-/merge_requests/2","state":"opened","draft":\(isDraft),
                  "sha":"\(Self.source)","source_project_id":1,"source_branch":"feature","target_project_id":1,
                  "target_branch":"main","labels":[],"has_conflicts":true,"detailed_merge_status":"conflict"}
                 """

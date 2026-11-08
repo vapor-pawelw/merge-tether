@@ -53,13 +53,22 @@ struct GeneralSettingsTab: View {
                 Text(.Settings.settingsGeneralNotificationsSection)
             }
             Section {
-                Toggle(isOn: autoHandledEventBannersBinding) {
-                    Text(.Settings.settingsGeneralAutomaticEventBannersToggle)
+                Toggle(isOn: autoRemoveFinishedMRsBinding) {
+                    Text(.MRLifecycleBanners.mrLifecycleBannersAutoRemoveToggle)
                 }
             } header: {
-                Text(.Settings.settingsGeneralAutomaticEventBannersSection)
+                Text(.MRLifecycleBanners.mrLifecycleBannersManagementTitle)
             } footer: {
-                Text(.Settings.settingsGeneralAutomaticEventBannersHelp)
+                Text(.MRLifecycleBanners.mrLifecycleBannersAutoRemoveHelp)
+            }
+            Section {
+                Toggle(isOn: autoHandledEventBannersBinding) {
+                    Text(.MRLifecycleBanners.mrLifecycleBannersEnabled)
+                }
+            } header: {
+                Text(.MRLifecycleBanners.mrLifecycleBannersSection)
+            } footer: {
+                Text(.MRLifecycleBanners.mrLifecycleBannersHelp)
             }
         }
         .formStyle(.grouped)
@@ -85,6 +94,16 @@ struct GeneralSettingsTab: View {
             set: { newValue in
                 monitor.settings.autoHandledEventBannersEnabled = newValue
                 monitor.settings.save()
+            }
+        )
+    }
+
+    private var autoRemoveFinishedMRsBinding: Binding<Bool> {
+        Binding(
+            get: { monitor.settings.autoRemoveFinishedMRs },
+            set: { newValue in
+                monitor.settings.autoRemoveFinishedMRs = newValue
+                monitor.applyFinishedMRRemovalPreference()
             }
         )
     }

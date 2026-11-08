@@ -31,13 +31,21 @@ struct MRCommonMenuItems: View {
     let monitor: TodoMonitorService
     var onRemove: (() -> Void)? = nil
     @State private var startingReview = false
+    private var isFinished: Bool { MergeRequestFinishedState(item.mergeRequest) != nil }
 
     var body: some View {
         Link(destination: item.url) {
             Label { Text(.CommandCenter.commandCenterOpenGitLab) } icon: { Image(systemName: "arrow.up.right.square") }
         }
         GitLabRefreshButton(monitor: monitor, itemID: item.id)
-        if monitor.canRunReview(for: item) {
+        if isFinished {
+            Button { monitor.acknowledgeFinishedMergeRequest(item) } label: {
+                Label { Text(.MRLifecycle.seen) } icon: { Image(systemName: "checkmark") }
+            }
+        } else {
+            MarkMergeRequestReadyButton(item: item, monitor: monitor)
+        }
+        if !isFinished, monitor.canRunReview(for: item) {
             Button {
                 startingReview = true
                 Task {
@@ -51,9 +59,11 @@ struct MRCommonMenuItems: View {
         }
         AssistantContextMenu(mergeRequestURL: item.url, title: item.title,
                              workspace: monitor.settings.automation.assistantWorkspace)
-        if let target = monitor.scopeTarget(projectID: item.id.projectID, iid: item.id.iid, url: item.url) {
+        if !isFinished, monitor.settings.automation.hasEnabledAutomation,
+           let target = monitor.scopeTarget(projectID: item.id.projectID, iid: item.id.iid, url: item.url) {
             Divider()
-            MRAutomationScopeMenu(settings: monitor.settings, target: target, projectPath: item.url.gitLabProjectPath)
+            MRAutomationScopeMenu(settings: monitor.settings, target: target, projectPath: item.url.gitLabProjectPath,
+                isDraft: item.section == .draftMergeRequests)
             if !item.isAuthored, monitor.settings.automation.autoApproveEnabled {
                 Toggle(isOn: Binding(get: { !monitor.settings.autoApproveOptOuts.contains(target) }, set: { enabled in
                     if enabled { monitor.settings.autoApproveOptOuts.remove(target) }
@@ -64,7 +74,7 @@ struct MRCommonMenuItems: View {
                 }
             }
         }
-        if let onRemove {
+        if !isFinished, let onRemove {
             Divider()
             Button(role: .destructive, action: onRemove) {
                 Label { Text(.Board.boardRemove) } icon: { Image(systemName: "minus.circle") }

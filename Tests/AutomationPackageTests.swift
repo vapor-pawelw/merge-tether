@@ -3,6 +3,236 @@ import Testing
 @testable import GitLabTodos
 
 struct AutomationPackageTests {
+    @Test func manualModesPersistAcrossDraftTransitionsAndAutoFollowsReadiness() throws {
+        let target = MRAutomationScope.Target(host: "gitlab.example.test", username: "me", projectID: 1, iid: 42)
+        var scope = MRAutomationScope()
+        #expect(scope.manualChoice(for: target) == .inherit && scope.pauseDraftsByDefault)
+        #expect(!scope.resolve(target, isDraft: true).active && scope.resolve(target, isDraft: false).active)
+        scope.setEnabled(true, for: target, isDraft: false)
+        #expect(scope.manualChoice(for: target) == .forceOn)
+        #expect(scope.resolve(target, isDraft: true).active && scope.resolve(target, isDraft: false).active)
+        scope.setEnabled(false, for: target, isDraft: true)
+        #expect(scope.manualChoice(for: target) == .paused)
+        #expect(!scope.resolve(target, isDraft: true).active && !scope.resolve(target, isDraft: false).active)
+        scope.setManualChoice(.inherit, for: target)
+        #expect(scope.isManaged(target) && !scope.resolve(target, isDraft: true).active)
+        #expect(scope.resolve(target, isDraft: false).active)
+    }
+
+    @Test func globalDraftPauseMigratesToTrueAndCanBeDisabledForAutomaticMRs() throws {
+        let target = MRAutomationScope.Target(host: "gitlab.example.test", username: "me", projectID: 1, iid: 42)
+        var original = MRAutomationScope()
+        original[target] = .active
+        var legacy = try #require(JSONSerialization.jsonObject(with: JSONEncoder().encode(original)) as? [String: Any])
+        legacy.removeValue(forKey: "pauseDraftsByDefault")
+        var scope = try JSONDecoder().decode(MRAutomationScope.self, from: JSONSerialization.data(withJSONObject: legacy))
+        #expect(scope.pauseDraftsByDefault && scope.manualChoice(for: target) == .inherit)
+        #expect(!scope.resolve(target, isDraft: true).active)
+        scope.pauseDraftsByDefault = false
+        #expect(scope.resolve(target, isDraft: true).active)
+        scope.setManualChoice(.paused, for: target)
+        #expect(!scope.resolve(target, isDraft: true).active)
+        let loaded = try JSONDecoder().decode(MRAutomationScope.self, from: JSONEncoder().encode(scope))
+        #expect(!loaded.pauseDraftsByDefault && loaded.manualChoice(for: target) == .paused)
+    }
+
+    @Test func automationControlsDependOnActualEnabledRulesNotProfileNameOrPermissions() {
+        var configuration = AutomationSettings()
+        configuration.applyPreset(.full, for: .codex)
+        #expect(configuration.hasEnabledAutomation)
+        configuration.applyPreset(.manual, for: .codex)
+        #expect(!configuration.hasEnabledAutomation)
+        configuration.packageDecision = .enabled
+        configuration.allowFollowUpPush = true
+        configuration.allowAssistantTools = true
+        #expect(!configuration.hasEnabledAutomation)
+        configuration.autoMergeEnabled = true
+        #expect(configuration.hasEnabledAutomation)
+        configuration.autoMergeEnabled = false
+        configuration.authorFeedback.runner = .shell
+        configuration.authorFeedback.isEnabled = true
+        configuration.authorFeedback.command = "true"
+        #expect(configuration.hasEnabledAutomation)
+        configuration.packageDecision = .disabled
+        #expect(!configuration.hasEnabledAutomation)
+    }
+    @Test func draftsDefaultToTrackingEvenWithLegacyActiveScope() throws {
+        let target = MRAutomationScope.Target(host: "gitlab.example.test", username: "me", projectID: 1, iid: 42)
+        var scope = MRAutomationScope()
+        scope[target] = .active
+        let loaded = try JSONDecoder().decode(MRAutomationScope.self, from: JSONEncoder().encode(scope))
+        let draft = try draftPolicyRequest(draft: true)
+        #expect(loaded.resolve(target).active && loaded.isManaged(target))
+        #expect(!loaded.resolve(target, isDraft: true).active)
+        #expect(loaded.resolve(target, isDraft: true).source == .draft)
+        #expect(!loaded.permits(draft, host: target.host, username: target.username))
+        #expect(loaded.permits(try draftPolicyRequest(draft: false), host: target.host, username: target.username))
+    }
+
+    @Test func draftOptInIsExplicitAccountBoundAndNeverChangesReadiness() throws {
+        let target = MRAutomationScope.Target(host: "gitlab.example.test", username: "me", projectID: 1, iid: 42)
+        let sibling = MRAutomationScope.Target(host: target.host, username: target.username, projectID: 1, iid: 43)
+        var scope = MRAutomationScope()
+        scope.setEnabled(true, for: target, isDraft: true)
+        let request = try draftPolicyRequest(draft: true)
+        #expect(scope.allowsDraftAutomation(for: target) && scope.permits(request, host: target.host, username: target.username))
+        #expect(!scope.resolve(sibling, isDraft: true).active)
+        #expect(!scope.permits(request, host: target.host, username: "other"))
+        #expect(!scope.permits(request, host: "other.example.test", username: target.username))
+        #expect(request.draft == true && !request.isReadyForMergeChecks)
+        let loaded = try JSONDecoder().decode(MRAutomationScope.self, from: JSONEncoder().encode(scope))
+        #expect(loaded.allowsDraftAutomation(for: target))
+    }
+
+    @Test func forcedDraftOptInOverridesRepositoryDefaultAndStillHonorsExplicitPause() throws {
+        let target = MRAutomationScope.Target(host: "gitlab.example.test", username: "me", projectID: 1, iid: 42)
+        var scope = MRAutomationScope()
+        scope.setEnabled(true, for: target, isDraft: true)
+        scope[target.repository] = .paused
+        #expect(scope.allowsDraftAutomation(for: target) && scope.resolve(target, isDraft: true).active)
+        scope.setManualChoice(.inherit, for: target)
+        #expect(!scope.resolve(target, isDraft: true).active)
+        scope.setEnabled(true, for: target, isDraft: true)
+        #expect(scope.resolve(target, isDraft: true).active && scope[target] == .forceOn)
+        scope.setEnabled(false, for: target, isDraft: true)
+        #expect(!scope.resolve(target, isDraft: true).active && scope.isManaged(target))
+        #expect(!scope.permits(try draftPolicyRequest(draft: true), host: target.host, username: target.username))
+        scope[target] = .inherit
+        scope.forgetManaged(target)
+        scope[target.repository] = .inherit
+        #expect(!scope.allowsDraftAutomation(for: target))
+    }
+
+    @Test func unknownDraftReadinessCannotStartAutomaticWork() throws {
+        let scope = MRAutomationScope()
+        #expect(!scope.permits(try draftPolicyRequest(draft: nil), host: "gitlab.example.test", username: "me"))
+        let unknown = try draftPolicyRequest(draft: nil)
+        let target = MRAutomationScope.Target(host: "gitlab.example.test", username: "me", projectID: 1, iid: 42)
+        #expect(!scope.cancellationScope(for: [unknown], host: target.host, username: target.username).resolve(target).active)
+        #expect(scope.resolve(target).active)
+    }
+
+    @Test func aFreshDraftObservationRevokesOnlyItsAutomaticCancellationScope() throws {
+        let target = MRAutomationScope.Target(host: "gitlab.example.test", username: "me", projectID: 1, iid: 42)
+        var scope = MRAutomationScope()
+        let draft = try draftPolicyRequest(draft: true)
+        let paused = scope.cancellationScope(for: [draft], host: target.host, username: target.username)
+        #expect(!paused.resolve(target).active && scope.resolve(target).active)
+        #expect(scope[target] == .inherit && !scope.isManaged(target))
+        #expect(scope.cancellationScope(for: [try draftPolicyRequest(draft: false)],
+            host: target.host, username: target.username) == scope)
+        #expect(scope.cancellationScope(for: [draft], host: "other.example.test", username: target.username) == scope)
+        scope.setEnabled(true, for: target, isDraft: true)
+        #expect(scope.cancellationScope(for: [draft], host: target.host, username: target.username) == scope)
+    }
+
+    @Test(arguments: ["merged", "closed"])
+    func terminalStateRevokesEvenForcedAutomationWithoutChangingItsSavedChoice(_ state: String) throws {
+        let target = MRAutomationScope.Target(host: "gitlab.example.test", username: "me", projectID: 1, iid: 42)
+        var scope = MRAutomationScope()
+        scope.setEnabled(true, for: target)
+        let terminal = try draftPolicyRequest(draft: false, state: state)
+        #expect(!scope.permits(terminal, host: target.host, username: target.username))
+        #expect(!scope.cancellationScope(for: [terminal], host: target.host, username: target.username).resolve(target).active)
+        #expect(scope.manualChoice(for: target) == .forceOn && scope.isManaged(target))
+    }
+
+    @Test func policyOnlyChangesRetainPositionsUntilRealEvidenceOrPinChanges() throws {
+        let target = MRAutomationScope.Target(host: "gitlab.example.test", username: "me", projectID: 1, iid: 42)
+        let id = MergeRequestAttentionMonitor.Item.ID(projectID: 1, iid: 42)
+        let request = try draftPolicyRequest(draft: false)
+        let job = UUID()
+        var order = BoardPolicyOrder()
+        func entry(_ fingerprint: String = "before", pinned: Bool = false, jobID: UUID? = nil) -> BoardPolicyOrder.Entry {
+            .init(target: target, rank: 2, request: request, discussionFingerprint: fingerprint, jobID: jobID ?? job, pinned: pinned)
+        }
+        var before = AutomationSettings()
+        before.applyPreset(.full, for: .codex)
+        var after = before
+        after.scope.setEnabled(false, for: target)
+        order.observe([entry()])
+        order.policyChanged(from: before, to: after)
+        #expect(order.preserved[id] == 2)
+        order.observe([entry()])
+        #expect(order.preserved[id] == 2)
+        order.observe([entry("new reply")])
+        #expect(order.preserved[id] == nil)
+        order.policyChanged(from: after, to: before)
+        #expect(order.preserved[id] == 2)
+        order.observe([entry("new reply", pinned: true)])
+        #expect(order.preserved[id] == nil)
+        order.policyChanged(from: before, to: after)
+        order.observe([entry("new reply", pinned: true, jobID: UUID())])
+        #expect(order.preserved[id] == nil)
+    }
+
+    @MainActor @Test func freshAuthoredObservationRevokesWorkersBeforeAttentionCatalogCatchesUp() throws {
+        let suite = "FreshAuthoredObservation.\(UUID())"
+        let defaults = try #require(UserDefaults(suiteName: suite))
+        defer { defaults.removePersistentDomain(forName: suite) }
+        let settings = SettingsManager(defaults: defaults)
+        settings.glabPath = URL(fileURLWithPath: "/usr/bin/false")
+        settings.resolvedHost = "gitlab.example.test"
+        let glab = GlabService()
+        glab.resolvedHost = "gitlab.example.test"
+        glab.currentUsername = "me"
+        var cancelled: [UUID] = []
+        let monitor = TodoMonitorService(settings: settings, glab: glab, cancelPolicyJob: { id, _ in cancelled.append(id) })
+        defer { monitor.stopTimer() }
+        let autoID = UUID(), manualID = UUID()
+        let work = AssistantAutomationRunner.MergeRequestWork(host: "gitlab.example.test", projectID: 1, iid: 42)
+        settings.assistantHandoffs = [(autoID, false), (manualID, true)].map { id, manual in
+            .init(id: id, key: .init(assistant: .codex, work: work, username: "me", workspace: "", access: .gitLabRead),
+                  title: "Fixture", prompt: "", createdAt: Date(), allowsPush: false,
+                  execution: .init(state: .running), manual: manual)
+        }
+        #expect(monitor.authoredMergeRequests.onObservedMergeRequests != nil)
+        monitor.authoredMergeRequests.onObservedMergeRequests?([try draftPolicyRequest(draft: true)], Date())
+        #expect(cancelled == [autoID])
+        #expect(settings.automation.scope.manualChoice(for: .init(host: work.host, username: "me", projectID: 1, iid: 42)) == .inherit)
+    }
+
+    @MainActor @Test func seenArchivesOnlyTheConfirmedTerminalStateAndNeverIgnoresTheMR() throws {
+        let suite = "SeenLifecycle.\(UUID())"
+        let defaults = try #require(UserDefaults(suiteName: suite))
+        defer { defaults.removePersistentDomain(forName: suite) }
+        let settings = SettingsManager(defaults: defaults)
+        settings.glabPath = URL(fileURLWithPath: "/usr/bin/false")
+        settings.resolvedHost = "gitlab.example.test"
+        let glab = GlabService()
+        glab.resolvedHost = "gitlab.example.test"; glab.currentUsername = "me"
+        let monitor = TodoMonitorService(settings: settings, glab: glab)
+        defer { monitor.stopTimer() }
+        let target = MRAutomationScope.Target(host: "gitlab.example.test", username: "me", projectID: 1, iid: 42)
+        let request = try draftPolicyRequest(draft: false, state: "closed")
+        let item = MergeRequestAttentionMonitor.Item(id: .init(projectID: 1, iid: 42), title: request.title,
+            url: request.webURL, mergeRequest: request, isAuthored: true)
+        settings.mrLifecycleLedger.record(request, for: target, now: Date(timeIntervalSince1970: 1))
+        #expect(monitor.ownMergeRequestItems.map(\.id.iid) == [42])
+        monitor.acknowledgeFinishedMergeRequest(item)
+        #expect(monitor.ownMergeRequestItems.isEmpty && monitor.hiddenBoardTargets.contains(target))
+        #expect(settings.ignoredMergeRequests.isEmpty)
+        #expect(SettingsManager(defaults: defaults).mrLifecycleLedger.isSuppressed(target))
+        settings.mrLifecycleLedger.record(try draftPolicyRequest(draft: false), for: target, now: Date(timeIntervalSince1970: 2))
+        monitor.acknowledgeFinishedMergeRequest(item)
+        #expect(!settings.mrLifecycleLedger.isSuppressed(target) && monitor.ownMergeRequestItems.map(\.id.iid) == [42])
+        settings.autoRemoveFinishedMRs = true
+        settings.mrLifecycleLedger.record(request, for: target, now: Date(timeIntervalSince1970: 3))
+        monitor.applyFinishedMRRemovalPreference()
+        #expect(monitor.ownMergeRequestItems.isEmpty && settings.ignoredMergeRequests.isEmpty)
+        settings.autoRemoveFinishedMRs = false
+        monitor.applyFinishedMRRemovalPreference()
+        #expect(monitor.ownMergeRequestItems.isEmpty)
+    }
+
+    private func draftPolicyRequest(draft: Bool?, state: String = "opened") throws -> GitLabMergeRequest {
+        var object: [String: Any] = ["project_id": 1, "iid": 42, "author": ["id": 7, "name": "Example", "username": "me"],
+            "title": "Example", "web_url": "https://gitlab.example.test/group/repo/-/merge_requests/42", "state": state,
+            "source_branch": "feature", "target_branch": "main", "labels": []]
+        if let draft { object["draft"] = draft }
+        return try JSONDecoder().decode(GitLabMergeRequest.self, from: JSONSerialization.data(withJSONObject: object))
+    }
+
     @Test(arguments: [AutomationPreset.full, .checkpoints, .manual])
     func pipelineOwnershipPermissionFollowsProfileAndPersists(preset: AutomationPreset) throws {
         var settings = AutomationSettings()
@@ -39,7 +269,7 @@ struct AutomationPackageTests {
         #expect(try JSONDecoder().decode(MRAutomationScope.self, from: JSONEncoder().encode(scope)) == scope)
     }
 
-    @Test func aSimpleMRTogglePausesAndReturnsToTheRepositoryDefault() {
+    @Test func aSimpleMRToggleStoresExplicitModesUntilResetToAutomatic() {
         let target = MRAutomationScope.Target(host: "gitlab.example.test", username: "me", projectID: 1, iid: 42)
         let sibling = MRAutomationScope.Target(host: target.host, username: target.username, projectID: 1, iid: 43)
         var scope = MRAutomationScope()
@@ -47,24 +277,26 @@ struct AutomationPackageTests {
         #expect(scope[target] == .paused && !scope.resolve(target).active)
         #expect(scope.resolve(sibling).active)
         scope.setEnabled(true, for: target)
-        #expect(scope[target] == .inherit && scope.resolve(target).active)
+        #expect(scope[target] == .forceOn && scope.resolve(target).active)
+        scope.setManualChoice(.inherit, for: target)
         #expect(scope.individualOverrides(host: target.host, username: target.username).isEmpty)
         scope[target.repository] = .paused
         scope.setEnabled(true, for: target)
-        #expect(scope[target] == .active && scope.resolve(target).active)
+        #expect(scope[target] == .forceOn && scope.resolve(target).active)
         scope.setEnabled(false, for: target)
-        #expect(scope[target] == .inherit && !scope.resolve(target).active)
+        #expect(scope[target] == .paused && !scope.resolve(target).active)
     }
 
-    @Test func aSimpleToggleCanOptIntoSelectedScopeWithoutLeavingRedundantOverrides() {
+    @Test func simpleMRTogglesPersistAndRepositoryTogglesCanReturnToTheGlobalDefault() {
         let target = MRAutomationScope.Target(host: "gitlab.example.test", username: "me", projectID: 1, iid: 42)
         var scope = MRAutomationScope()
         scope.mode = .selected
         scope.setEnabled(true, for: target)
-        #expect(scope[target] == .active && scope.resolve(target).active)
+        #expect(scope[target] == .forceOn && scope.resolve(target).active)
         #expect(!scope.resolve(target.repository).active)
         scope.setEnabled(false, for: target)
-        #expect(scope[target] == .inherit && !scope.resolve(target).active)
+        #expect(scope[target] == .paused && !scope.resolve(target).active)
+        scope.setManualChoice(.inherit, for: target)
         scope.setEnabled(true, for: target.repository)
         #expect(scope[target.repository] == .active && scope.resolve(target).active)
         scope.setEnabled(false, for: target.repository)
@@ -111,7 +343,8 @@ struct AutomationPackageTests {
         scope.setEnabled(false, for: target)
         #expect(scope.isManaged(target) && !scope.resolve(target).active)
         scope.setEnabled(true, for: target)
-        #expect(scope[target] == .inherit && scope.isManaged(target))
+        #expect(scope[target] == .forceOn && scope.isManaged(target))
+        scope.setManualChoice(.inherit, for: target)
         #expect(scope.individualOverrides(host: target.host, username: target.username).isEmpty)
         let loaded = try JSONDecoder().decode(MRAutomationScope.self, from: JSONEncoder().encode(scope))
         #expect(loaded == scope && loaded.isManaged(target) && loaded.resolve(target).active)
@@ -138,7 +371,7 @@ struct AutomationPackageTests {
         var scope = MRAutomationScope()
         scope.setEnabled(true, for: target)
         scope.setEnabled(false, for: untracked)
-        #expect(scope[target] == .inherit && scope.isManaged(target))
+        #expect(scope[target] == .forceOn && scope.isManaged(target))
         #expect(scope[untracked] == .paused && !scope.isManaged(untracked))
         #expect(Set(scope.individualTargets(host: target.host, username: target.username)) == [target, untracked])
         #expect(scope.individualTargets(host: target.host, username: "other").isEmpty)

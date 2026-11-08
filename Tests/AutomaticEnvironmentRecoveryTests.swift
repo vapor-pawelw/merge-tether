@@ -4,9 +4,16 @@ import Testing
 
 @MainActor
 struct AutomaticEnvironmentRecoveryTests {
-    @Test func temporaryFileFailureGetsOneFreshAutomaticAttemptAcrossRestarts() async throws {
-        let f = try Fixture()
+    @Test(arguments: [false, true])
+    func temporaryFileFailureGetsOneFreshAutomaticAttemptAcrossRestarts(_ isDraft: Bool) async throws {
+        let f = try Fixture(isDraft: isDraft)
         defer { f.cleanUp() }
+        if isDraft {
+            await f.coordinator().recover(host: "gitlab.example.test", username: "me")
+            #expect(f.launched == 0 && f.settings.assistantHandoffs.first?.environmentRecoveryAttempted != true)
+            f.settings.automation.scope.setEnabled(true,
+                for: .init(host: "gitlab.example.test", username: "me", projectID: 1, iid: 2), isDraft: true)
+        }
         let recovery = f.coordinator()
         await recovery.recover(host: "gitlab.example.test", username: "me")
         await f.coordinator().recover(host: "gitlab.example.test", username: "me")
@@ -91,13 +98,13 @@ struct AutomaticEnvironmentRecoveryTests {
         var change: String?
         var storedStateDuringFetch: AssistantJobExecution.State?
 
-        init(access: AssistantAutomationRunner.Access = .gitLabRead) throws {
+        init(access: AssistantAutomationRunner.Access = .gitLabRead, isDraft: Bool = false) throws {
             defaults = try #require(UserDefaults(suiteName: suite))
             settings = SettingsManager(defaults: defaults)
             settings.automation.applyPreset(.full, for: .codex)
             request = try JSONDecoder().decode(GitLabMergeRequest.self, from: Data("""
                 {"project_id":1,"iid":2,"author":{"id":3,"username":"me","name":"Me"},"title":"Example MR",
-                 "web_url":"https://gitlab.example.test/group/repo/-/merge_requests/2","state":"opened","draft":false,
+                 "web_url":"https://gitlab.example.test/group/repo/-/merge_requests/2","state":"opened","draft":\(isDraft),
                  "sha":"\(String(repeating: "a", count: 40))","source_branch":"fix","target_branch":"main","labels":[]}
                 """.utf8))
             original = .init(id: UUID(), key: .init(assistant: .codex,

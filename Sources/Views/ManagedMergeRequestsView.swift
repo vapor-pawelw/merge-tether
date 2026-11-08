@@ -144,9 +144,10 @@ struct ManagedMergeRequestsView: View {
                             }
                             HStack {
                                 MRAutomationScopeMenu(settings: monitor.settings, target: row.target,
-                                                      projectPath: row.item.url.gitLabProjectPath)
+                                                      projectPath: row.item.url.gitLabProjectPath,
+                                                      isDraft: row.item.section == .draftMergeRequests)
                                 if !row.item.isAuthored, row.item.mergeRequest != nil,
-                                   monitor.settings.automation.autoApproveEnabled {
+                                   monitor.settings.automation.hasEnabledAutomation, monitor.settings.automation.autoApproveEnabled {
                                     Toggle(isOn: autoApproveBinding(row.target)) {
                                         Text(.Menu.menuScopeAutoApprove)
                                     }

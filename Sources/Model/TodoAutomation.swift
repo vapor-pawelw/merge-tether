@@ -466,6 +466,12 @@ struct AutomationSettings: Codable, Equatable, Sendable {
 
     var canClassifyIncomingNotices: Bool { packageDecision != .disabled && usesAssistant }
 
+    var hasEnabledAutomation: Bool {
+        packageDecision != .disabled && (usesAssistant || reviewRequested.isEnabled || authorFeedback.isEnabled || !workflowRules.enabled.isEmpty
+            || autoMergeEnabled || autoReReviewEnabled || autoApproveEnabled || autoResolveAcceptedFeedback
+            || publicationMode != .manual)
+    }
+
     func preservingScope(from current: Self) -> Self {
         var updated = self
         updated.scope = current.scope

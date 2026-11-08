@@ -57,6 +57,7 @@ extension GlabService {
 
     func retryVerifiedInfrastructureJob(
         _ jobID: Int, pipelineID: Int, projectID: Int, host: String,
+        beforeRetry: @MainActor () async throws -> Void = {},
         shouldProceed: @MainActor () -> Bool
     ) async throws {
         struct Job: Decodable {
@@ -74,6 +75,8 @@ extension GlabService {
               job.failure_reason == "runner_system_failure", job.allow_failure == false,
               shouldProceed()
         else { throw CancellationError() }
+        try await beforeRetry()
+        guard shouldProceed() else { throw CancellationError() }
         let _: Job = try await mergeRequestAPI("\(path)/retry", host: host, arguments: ["--method", "POST"])
     }
 }

@@ -13,6 +13,37 @@ struct FollowUpPushPermissionTests {
               execution: state.map { .init(state: $0) }, manual: manual)
     }
 
+    @Test func draftPermissionTracksExactOptInAndRevocationWithoutGrantingPush() throws {
+        let folder = FileManager.default.temporaryDirectory.appending(path: UUID().uuidString)
+        let suite = "DraftFollowUpPermissionTests.\(UUID())"
+        let defaults = try #require(UserDefaults(suiteName: suite))
+        defer { try? FileManager.default.removeItem(at: folder); defaults.removePersistentDomain(forName: suite) }
+        let settings = SettingsManager(defaults: defaults)
+        settings.automation.assistant = .codex
+        settings.automation.allowFollowUpPush = true
+        let automatic = job()
+        settings.assistantHandoffs = [automatic]
+        let target = MRAutomationScope.Target(host: work.host, username: "me", projectID: work.projectID, iid: work.iid)
+        let status = FollowUpVerificationStore.recordURL(kind: "follow-up-runs", work: work, username: "me", in: folder)
+        func permissions() throws -> [String: Any] {
+            FollowUpVerificationStore.synchronizeRuns(settings: settings, in: folder)
+            return try #require(JSONSerialization.jsonObject(with: Data(contentsOf: status)) as? [String: Any])
+        }
+        #expect(try permissions()["draftAutomationAllowed"] as? Bool == false)
+        settings.automation.scope.setEnabled(true, for: target, isDraft: true)
+        #expect(try permissions()["draftAutomationAllowed"] as? Bool == true)
+        let other = MRAutomationScope.Target(host: work.host, username: "me", projectID: work.projectID, iid: 99)
+        settings.automation.scope.setEnabled(true, for: other, isDraft: true)
+        settings.automation.scope[target] = .paused
+        #expect(try permissions()["draftAutomationAllowed"] as? Bool == false)
+
+        settings.assistantHandoffs = [job(manual: true)]
+        settings.automation.allowFollowUpPush = false
+        let manual = try permissions()
+        #expect(manual["draftAutomationAllowed"] as? Bool == true)
+        #expect(manual["pushAllowed"] as? Bool == false)
+    }
+
     @Test func onlyActiveMatchingProviderAndPermittedScopeMayPush() {
         var configuration = AutomationSettings()
         configuration.assistant = .codex

@@ -407,7 +407,8 @@ final class DraftProofRecoveryCoordinator {
             guard current(input) else { throw CancellationError() }
             guard available else { throw VerifierUnavailable() }
             assessment = try await verify(.init(snapshot: live, origin: input.origin, draftIDs: input.draftIDs,
-                currentFiles: files, thinking: input.configuration.verificationThinking), input.configuration.assistant, model)
+                currentFiles: files, thinking: input.configuration.verificationThinking,
+                configuration: settings.automation), input.configuration.assistant, model)
             try DraftProofRecoveryVerifier.validate(assessment, draftIDs: input.draftIDs)
             guard current(input) else { throw CancellationError() }
             semanticCache[snapshot.work] = (input.id, assessment)
@@ -491,7 +492,8 @@ final class DraftProofRecoveryCoordinator {
     }
 
     private func matchesOwnership(_ snapshot: Snapshot, origin: FollowUpVerification, draftIDs: [Int]) -> Bool {
-        snapshot.request.draft == false && snapshot.request.webURL.isGitLabMergeRequest(host: snapshot.host, iid: snapshot.request.iid)
+        settings.automation.scope.permits(snapshot.request, host: snapshot.host, username: snapshot.user.username)
+            && snapshot.request.webURL.isGitLabMergeRequest(host: snapshot.host, iid: snapshot.request.iid)
             && snapshot.request.state == "opened" && snapshot.request.author.id == snapshot.user.id
             && snapshot.branchHead == snapshot.request.sha && draftIDs.allSatisfy { draftID in
                 let matching = snapshot.drafts.filter { $0.id == draftID }

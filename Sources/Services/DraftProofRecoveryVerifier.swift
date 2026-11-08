@@ -9,6 +9,7 @@ enum DraftProofRecoveryVerifier {
         var draftIDs: [Int]? = nil
         var currentFiles: [FollowUpVerification.FileEvidence]? = nil
         var thinking: VerificationThinking = .high
+        var configuration: AutomationSettings? = nil
         var requestedDraftIDs: [Int] { draftIDs ?? origin.drafts.map(\.id) }
     }
     struct Assessment: Codable, Sendable {
@@ -44,7 +45,9 @@ enum DraftProofRecoveryVerifier {
               drafts.allSatisfy({ origin.owns($0, request: snapshot.request, host: snapshot.host, user: snapshot.user) && AutomaticPublicationPolicy.safeForAutomaticPublication($0) }),
               let head = snapshot.request.sha, snapshot.branchHead == head,
               head == origin.headSHA || input.currentFiles != nil,
-              snapshot.request.draft == false,
+              snapshot.request.state == "opened",
+              input.configuration.map({ $0.scope.permits(snapshot.request, host: snapshot.host, username: snapshot.user.username) })
+                ?? (snapshot.request.draft == false),
               let fingerprint = ReviewVerdict.fingerprint(snapshot.discussions),
               FollowUpVerificationStore.validRecoveryEvidence(headSHA: head, files: input.currentFiles ?? origin.files, origin: origin)
         else { throw Failure.invalidEvidence }
@@ -52,6 +55,7 @@ enum DraftProofRecoveryVerifier {
             "target": ["host": snapshot.host, "projectID": snapshot.request.projectID, "iid": snapshot.request.iid,
                 "url": snapshot.request.webURL.absoluteString, "expectedUsername": snapshot.user.username, "authorID": snapshot.user.id,
                 "headSHA": head, "sourceProjectID": origin.sourceProjectID, "sourceBranch": origin.sourceBranch,
+                "draft": snapshot.request.draft ?? false,
                 "targetProjectID": snapshot.request.targetProjectID ?? snapshot.request.projectID, "targetBranch": snapshot.request.targetBranch],
             "title": GlabService.redactWorkflowEvidence(snapshot.request.title),
             "description": GlabService.redactWorkflowEvidence(snapshot.request.description ?? ""),

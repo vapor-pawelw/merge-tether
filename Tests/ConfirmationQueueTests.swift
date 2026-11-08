@@ -149,7 +149,8 @@ import Testing
                              approvalReadClock: @escaping ReadOnlyAssessmentRetry.Clock = { Date() },
                              assessment: ReReviewAssessment? = nil,
                              assessAIOrigin: AICommentOriginCoordinator.Assess? = nil,
-                             verifyDraftRecovery: DraftProofRecoveryCoordinator.Verify? = nil) throws -> Harness {
+                             verifyDraftRecovery: DraftProofRecoveryCoordinator.Verify? = nil,
+                             reReviewGate: (@MainActor () async throws -> Void)? = nil) throws -> Harness {
         let folder = FileManager.default.temporaryDirectory.appending(path: UUID().uuidString)
         try FileManager.default.createDirectory(at: folder, withIntermediateDirectories: false)
         let suite = "ConfirmationQueueTests.\(UUID())"
@@ -289,7 +290,9 @@ import Testing
                     /usr/bin/python3 -c 'import json,base64; print(json.dumps(dict(file_path="Sources/A.swift",encoding="base64",content=base64.b64encode(open("remote-file-content.txt","rb").read()).decode())))' ;;
                 /projects/99/merge_requests/2|/projects/1/merge_requests/99)
                     /usr/bin/python3 -c 'import json,sys; parts=sys.argv[1].split("/"); p=int(parts[2]); i=int(parts[4]); r=json.load(open("request.json")); r.update(project_id=p,iid=i,state="closed",source_project_id=p,target_project_id=p,web_url="https://gitlab.example.org/g/p/-/merge_requests/"+str(i)); print(json.dumps(r))' "$2" ;;
-                /projects/1/merge_requests/2) cat request.json ;;
+                /projects/1/merge_requests/2)
+                    cat request.json
+                    if [ -f pause-selected-read ]; then touch captured-ready-rereview-mr; fi ;;
                 *) exit 100 ;;
             esac
             """.utf8).write(to: executable)
@@ -318,6 +321,7 @@ import Testing
             },
             approvalReadClock: approvalReadClock, approvalReadWait: { _ in },
             verifyReReview: { input, _, _ in
+                try await reReviewGate?()
                 try JSONEncoder().encode(input).write(to: folder.appending(path: "verifier-input.json"))
                 let log = folder.appending(path: "verification.log")
                 let previous = (try? Data(contentsOf: log)) ?? Data()
@@ -1360,6 +1364,97 @@ import Testing
         try await harness.poll()
         #expect(harness.log("selected.log").isEmpty)
         #expect(harness.monitor.currentItems.first?.draftCount == 2)
+    }
+
+    @Test(arguments: ["draft", "closed"])
+    func runtimeRevocationStopsAPollOwnedReReviewAfterItsFinalReadySnapshot(_ state: String) async throws {
+        var armFinalRead = false
+        let harness = try makeHarness(assistantWorked: true, authored: true, duringAutomationCheck: { folder in
+            if armFinalRead {
+                armFinalRead = false
+                try? Data().write(to: folder.appending(path: "pause-selected-read"))
+            }
+        })
+        defer {
+            try? harness.write("release-selected-read", "yes")
+            harness.monitor.automationConfigurationChanged()
+            harness.cleanUp()
+        }
+        try prepareAuthoredFeedback(harness)
+        try await harness.poll()
+        try harness.write("drafts.json", "[]")
+        try harness.write("discussions.json", harness.log("published-discussions.json"))
+        // Keep the completed assessment while an unavailable dependency prevents its first write.
+        try harness.write("assistant-unavailable", "yes")
+        try await harness.poll()
+        try #require(!harness.monitor.isVerifyingReReview && harness.log("verification.log") == "verified\n")
+        try #require(harness.log("re-review.log").isEmpty)
+        try FileManager.default.removeItem(at: harness.folder.appending(path: "assistant-unavailable"))
+        armFinalRead = true
+        harness.monitor.refresh(host: host, username: "me", todos: [])
+        let deadline = ContinuousClock.now + .seconds(5)
+        while (!FileManager.default.fileExists(atPath: harness.folder.appending(path: "selected-read-entered").path)
+               || !FileManager.default.fileExists(atPath: harness.folder.appending(path: "captured-ready-rereview-mr").path)),
+              ContinuousClock.now < deadline {
+            try await Task.sleep(for: .milliseconds(10))
+        }
+        try #require(FileManager.default.fileExists(atPath: harness.folder.appending(path: "selected-read-entered").path))
+        try #require(FileManager.default.fileExists(atPath: harness.folder.appending(path: "captured-ready-rereview-mr").path))
+        try #require(!harness.monitor.isVerifyingReReview)
+        let original = harness.log("request.json")
+        let current = state == "draft" ? original.replacingOccurrences(of: "\"draft\":false", with: "\"draft\":true")
+            : original.replacingOccurrences(of: "\"state\":\"opened\"", with: "\"state\":\"closed\"")
+        try harness.write("request.json", current)
+        var projected = harness.settings.automation.scope
+        projected[.init(host: host, username: "me", projectID: 1, iid: 2)] = .paused
+        try #require(harness.settings.reReviewReceipts.isEmpty)
+        harness.monitor.cancelRuntimePreparation(outsideScope: projected)
+        try harness.write("release-selected-read", "yes")
+        let settled = ContinuousClock.now + .seconds(5)
+        while harness.monitor.isLoading, ContinuousClock.now < settled { try await Task.sleep(for: .milliseconds(10)) }
+        #expect(!harness.monitor.isLoading)
+        #expect(harness.log("re-review.log").isEmpty)
+        #expect(harness.settings.reReviewReceipts.isEmpty)
+    }
+
+    @Test func runtimeScopeRevocationCancelsReReviewWithoutLosingItsBaselineAndCanResume() async throws {
+        var calls = 0
+        var cancelled = false
+        let harness = try makeHarness(assistantWorked: true, authored: true, reReviewGate: {
+            calls += 1
+            if calls == 1 {
+                do { try await Task.sleep(for: .seconds(60)) }
+                catch { cancelled = true; throw error }
+            }
+        })
+        defer { harness.monitor.automationConfigurationChanged(); harness.cleanUp() }
+        try prepareAuthoredFeedback(harness)
+        try await harness.poll()
+        try harness.write("drafts.json", "[]")
+        try harness.write("discussions.json", harness.log("published-discussions.json"))
+        harness.monitor.refresh(host: host, username: "me", todos: [])
+        let deadline = ContinuousClock.now + .seconds(5)
+        while (calls == 0 || harness.monitor.isLoading), ContinuousClock.now < deadline {
+            try await Task.sleep(for: .milliseconds(20))
+        }
+        try #require(calls == 1 && harness.monitor.isVerifyingReReview)
+        let target = MRAutomationScope.Target(host: host, username: "me", projectID: 1, iid: 2)
+        let baseline = harness.settings.reReviewDraftBaselines[target]
+        let configuration = harness.settings.automation
+        var projected = configuration.scope
+        projected[target] = .paused
+        harness.monitor.cancelRuntimePreparation(outsideScope: projected)
+        for _ in 0..<50 where !cancelled { try await Task.sleep(for: .milliseconds(10)) }
+        #expect(cancelled && !harness.monitor.isVerifyingReReview)
+        #expect(harness.settings.automation == configuration)
+        #expect(harness.settings.reReviewDraftBaselines[target] == baseline)
+        #expect(harness.log("re-review.log").isEmpty)
+        #expect(harness.monitor.currentOpenItems.first?.reReviewReadiness == nil)
+        if !cancelled { return }
+        harness.monitor.cancelRuntimePreparation(outsideScope: configuration.scope)
+        try await harness.poll()
+        #expect(calls == 2)
+        #expect(harness.log("re-review.log") == "requested\n")
     }
 
     private func prepareAuthoredFeedback(_ harness: Harness) throws {

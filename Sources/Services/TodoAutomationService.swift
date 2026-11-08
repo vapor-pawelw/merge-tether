@@ -323,8 +323,8 @@ final class TodoAutomationService {
                                   settings: SettingsManager) -> FeedbackRecovery? {
         let target = MRAutomationScope.Target(host: work.host, username: username, projectID: work.projectID, iid: work.iid)
         guard let residual, settings.automation.allowFollowUpPush, settings.automation.packageDecision != .disabled,
-              settings.automation.scope.resolve(target).active, !settings.ignoredMergeRequests.contains(target),
-              request.draft == false, request.author.username == username else { return nil }
+              settings.automation.scope.permits(request, host: work.host, username: username),
+              !settings.ignoredMergeRequests.contains(target), request.author.username == username else { return nil }
         let attempts = settings.assistantHandoffs.filter { $0.key.work == work && $0.key.username == username && !$0.isObsoleteReminder }
         guard !attempts.contains(where: { $0.operationalExecution?.state.isActive == true }) else { return nil }
         let completed = settings.assistantHandoffs.filter {

@@ -83,6 +83,132 @@ struct GlabMergeRequestAPITests {
         #expect(!unknown.allRequiredRulesApproved)
     }
 
+    @Test func marksOnlyTheCurrentOwnDraftReadyUsingTheDocumentedCLIAction() async throws {
+        try await withReadyGlab(expectWrites: 1) { glab, _ in
+            let updated = try await glab.markMergeRequestReady(projectID: 34, iid: 12, headSHA: sha,
+                host: host, expectedUser: .init(id: 7, username: "author"))
+            #expect(updated.draft == false && updated.sha == sha && updated.author.id == 7)
+        }
+    }
+
+    @Test func markingAnAlreadyReadyOwnMRIsIdempotent() async throws {
+        try await withReadyGlab(overrides: ["draft": false]) { glab, _ in
+            let updated = try await glab.markMergeRequestReady(projectID: 34, iid: 12, headSHA: sha,
+                host: host, expectedUser: .init(id: 7, username: "author"))
+            #expect(updated.draft == false)
+        }
+    }
+
+    @Test(arguments: ["foreign", "closed", "head"])
+    func readyActionRejectsChangedOwnershipStateOrHead(reason: String) async throws {
+        let overrides: [String: Any] = switch reason {
+        case "foreign": ["author": ["id": 8, "username": "someone_else", "name": "Other Author"]]
+        case "closed": ["state": "closed"]
+        default: ["sha": String(repeating: "b", count: 40)]
+        }
+        try await withReadyGlab(overrides: overrides) { glab, _ in
+            await #expect(throws: CancellationError.self) {
+                _ = try await glab.markMergeRequestReady(projectID: 34, iid: 12, headSHA: sha,
+                    host: host, expectedUser: .init(id: 7, username: "author"))
+            }
+        }
+    }
+
+    @Test func readyActionRejectsTheSameUsernameWithAnotherAccountID() async throws {
+        try await withReadyGlab { glab, _ in
+            await #expect(throws: GlabError.notAuthenticated) {
+                _ = try await glab.markMergeRequestReady(projectID: 34, iid: 12, headSHA: sha,
+                    host: host, expectedUser: .init(id: 999, username: "author"))
+            }
+        }
+    }
+
+    @Test func readyActionHonorsTheCallersFinalFence() async throws {
+        try await withReadyGlab { glab, _ in
+            await #expect(throws: CancellationError.self) {
+                _ = try await glab.markMergeRequestReady(projectID: 34, iid: 12, headSHA: sha,
+                    host: host, expectedUser: .init(id: 7, username: "author"), shouldProceed: { false })
+            }
+        }
+    }
+
+    @Test func accountRoundTripDuringTheReadyPreflightCannotWrite() async throws {
+        try await withReadyGlab(gateRead: true) { glab, directory in
+            let release = directory.appending(path: "release")
+            let task = Task { try await glab.markMergeRequestReady(projectID: 34, iid: 12, headSHA: sha,
+                host: host, expectedUser: .init(id: 7, username: "author")) }
+            defer { task.cancel(); try? Data().write(to: release) }
+            let entered = directory.appending(path: "entered")
+            for _ in 0..<200 where !FileManager.default.fileExists(atPath: entered.path) {
+                try await Task.sleep(for: .milliseconds(10))
+            }
+            #expect(FileManager.default.fileExists(atPath: entered.path))
+            glab.currentUsername = "other"
+            glab.currentUsername = "author"
+            try Data().write(to: release)
+            await #expect(throws: GlabError.notAuthenticated) { _ = try await task.value }
+        }
+    }
+
+    @Test func readyActionRequiresLiveConfirmationAfterTheWrite() async throws {
+        try await withReadyGlab(resultStillDraft: true, expectWrites: 1) { glab, _ in
+            await #expect(throws: (any Error).self) {
+                _ = try await glab.markMergeRequestReady(projectID: 34, iid: 12, headSHA: sha,
+                    host: host, expectedUser: .init(id: 7, username: "author"))
+            }
+        }
+    }
+
+    private func withReadyGlab(
+        overrides: [String: Any] = [:], resultStillDraft: Bool = false, gateRead: Bool = false,
+        expectWrites: Int = 0, _ body: (GlabService, URL) async throws -> Void
+    ) async throws {
+        let directory = FileManager.default.temporaryDirectory.appending(path: UUID().uuidString)
+        try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: false)
+        defer { try? FileManager.default.removeItem(at: directory) }
+        var request: [String: Any] = ["project_id": 34, "iid": 12,
+            "author": ["id": 7, "username": "author", "name": "Author"], "title": "Draft: Sample MR",
+            "web_url": "https://\(host)/group/repo/-/merge_requests/12", "state": "opened", "draft": true,
+            "sha": sha, "source_project_id": 34, "source_branch": "feature", "target_branch": "main", "labels": []]
+        for (key, value) in overrides { request[key] = value }
+        try JSONSerialization.data(withJSONObject: request).write(to: directory.appending(path: "mr.json"))
+        request["draft"] = resultStillDraft
+        request["title"] = "Sample MR"
+        try JSONSerialization.data(withJSONObject: request).write(to: directory.appending(path: "ready.json"))
+        if gateRead { try Data().write(to: directory.appending(path: "gate")) }
+        let executable = directory.appending(path: "glab")
+        try Data("""
+        #!/bin/sh
+        set -eu
+        root="$(dirname "$0")"
+        case "$*" in
+          'api /user --hostname \(host)')
+            printf 'x' >> "$root/user-checks"
+            printf '%s' '{"id":7,"username":"author"}' ;;
+          'api /projects/34/merge_requests/12 --hostname \(host)')
+            if [ -f "$root/gate" ]; then
+              touch "$root/entered"
+              while [ ! -f "$root/release" ]; do sleep 0.01; done
+            fi
+            cat "$root/mr.json" ;;
+          'mr update 12 --ready --yes --repo https://\(host)/group/repo')
+            test -s "$root/user-checks"
+            printf '%s\\n' "$*" >> "$root/writes"
+            cp "$root/ready.json" "$root/mr.json"
+            printf '%s' 'Merge request is ready' ;;
+          *) printf '%s' 'Unexpected fake glab command' >&2; exit 20 ;;
+        esac
+        """.utf8).write(to: executable)
+        try FileManager.default.setAttributes([.posixPermissions: 0o700], ofItemAtPath: executable.path)
+        let glab = GlabService()
+        glab.glabPath = executable
+        glab.resolvedHost = host
+        glab.currentUsername = "author"
+        try await body(glab, directory)
+        let writes = (try? String(contentsOf: directory.appending(path: "writes"), encoding: .utf8)) ?? ""
+        #expect(writes.split(separator: "\n").count == expectWrites)
+    }
+
     private func withFakeGlab(
         expectMerge: Bool = false,
         _ body: (GlabService) async throws -> Void

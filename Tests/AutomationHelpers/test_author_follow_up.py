@@ -24,7 +24,7 @@ class AuthorFollowUpTest(unittest.TestCase):
         self.run_path = self.root / "follow-up-runs/gitlab.example.org/1-2-me.json"
         self.run_path.parent.mkdir(parents=True)
         self.save_run()
-        self.mr = {"project_id": 1, "iid": 2, "state": "opened", "author": {"id": 3},
+        self.mr = {"project_id": 1, "iid": 2, "state": "opened", "draft": False, "author": {"id": 3},
                    "sha": self.head, "source_project_id": 4, "source_branch": "fix/test"}
         self.drafts = [{"id": 12, "author_id": 3, "note": "Local-only completion"}]
         self.discussions = []
@@ -53,6 +53,74 @@ class AuthorFollowUpTest(unittest.TestCase):
 
     def verify(self):
         return self.verifier.verify("gitlab.example.org", "1", "2", self.run["runID"], self.head, self.evidence)
+
+    def test_live_draft_requires_exact_run_opt_in_before_status_and_verification(self):
+        self.mr["draft"] = True
+        for permission in (None, False, "true", 1):
+            with self.subTest(permission=permission):
+                if permission is None:
+                    self.run.pop("draftAutomationAllowed", None)
+                else:
+                    self.run["draftAutomationAllowed"] = permission
+                self.save_run()
+                with self.assertRaises(ValueError):
+                    self.verifier.status("gitlab.example.org", "1", "2", self.run["runID"])
+                with self.assertRaises(ValueError):
+                    self.verify()
+        self.assertFalse((self.root / "follow-up-preflight").exists())
+
+    def test_explicit_draft_opt_in_allows_proof_but_revocation_blocks_sealing(self):
+        self.mr["draft"] = True
+        self.run["draftAutomationAllowed"] = True
+        self.save_run()
+        self.assertTrue(self.verifier.status("gitlab.example.org", "1", "2", self.run["runID"])["pushAllowed"])
+        proof = self.verify()
+        self.drafts.append({"id": 13, "author_id": 3, "note": "Verified fix while MR remains Draft"})
+        self.run["draftAutomationAllowed"] = False
+        self.save_run()
+        with self.assertRaises(ValueError):
+            self.verifier.seal("gitlab.example.org", "1", "2", proof["verificationID"], "[13]")
+        self.assertTrue(self.mr["draft"])
+        self.assertFalse((self.root / "follow-up-verifications").exists())
+
+    def test_opted_in_draft_can_seal_and_stays_draft(self):
+        self.mr["draft"] = True
+        self.run["draftAutomationAllowed"] = True
+        self.save_run()
+        proof = self.verify()
+        self.drafts.append({"id": 13, "author_id": 3, "note": "Verified fix without marking the MR ready"})
+        self.assertTrue(self.verifier.seal("gitlab.example.org", "1", "2", proof["verificationID"], "[13]")["sealed"])
+        self.assertTrue(self.mr["draft"])
+
+    def test_unknown_draft_state_is_not_an_implicit_permission_even_with_opt_in(self):
+        self.run["draftAutomationAllowed"] = True
+        self.save_run()
+        for state in (None, "false", "true", 0, 1):
+            with self.subTest(state=state):
+                if state is None:
+                    self.mr.pop("draft", None)
+                else:
+                    self.mr["draft"] = state
+                with self.assertRaises(ValueError):
+                    self.verifier.status("gitlab.example.org", "1", "2", self.run["runID"])
+
+    def test_ready_legacy_run_does_not_need_draft_permission(self):
+        self.run.pop("draftAutomationAllowed", None)
+        self.save_run()
+        self.assertTrue(self.verifier.status("gitlab.example.org", "1", "2", self.run["runID"])["pushAllowed"])
+        self.assertTrue(self.verify()["verified"])
+
+    def test_becoming_draft_during_verification_rechecks_live_permission(self):
+        original = self.verifier.read
+        def read(host, endpoint):
+            result = original(host, endpoint)
+            if endpoint.startswith("/projects/4/repository/files/"):
+                self.mr["draft"] = True
+            return result
+        self.verifier.read = read
+        with self.assertRaises(ValueError):
+            self.verify()
+        self.assertFalse((self.root / "follow-up-preflight").exists())
 
     def test_push_off_cannot_verify_or_seal_a_run(self):
         self.run["pushAllowed"] = False

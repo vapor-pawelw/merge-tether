@@ -27,6 +27,27 @@ struct MergeRequestBoardSnapshotTests {
         .init(own: own, reviewed: reviewed, todos: todos, attention: [], handoffs: handoffs, host: host, username: "me")
     }
 
+    @Test(arguments: ["merged", "closed"])
+    func finishedRowsPrecedePinsAndPreservedNonterminalPositions(_ state: String) throws {
+        var finished = item(2)
+        let json = """
+        {"project_id":1,"iid":2,"author":{"id":3,"username":"me","name":"Me"},"title":"Finished",
+         "web_url":"https://\(host)/g/p/-/merge_requests/2","state":"\(state)","draft":false,
+         "source_branch":"feature","target_branch":"main","labels":[]}
+        """
+        finished.mergeRequest = try JSONDecoder().decode(GitLabMergeRequest.self, from: Data(json.utf8))
+        var oldAttention = finished
+        oldAttention.mergeRequest = try JSONDecoder().decode(GitLabMergeRequest.self,
+            from: Data(json.replacingOccurrences(of: "\"state\":\"\(state)\"", with: "\"state\":\"opened\"").utf8))
+        oldAttention.needsDiscussion = true
+        let pin = try #require(BoardCardPin.mergeRequest(host: host, username: "me", projectID: 1, iid: 1))
+        let board = MergeRequestBoardSnapshot(own: [item(1, attention: true), finished, item(3)], reviewed: [],
+            todos: [], attention: [oldAttention], handoffs: [], host: host, username: "me", pinnedCards: [pin],
+            preservedOrder: [item(3).id: 0, item(1).id: 1])
+        #expect(board.own.map(\.id.iid) == [2, 3, 1])
+        #expect(board.own.first?.item.mergeRequest?.state == state)
+    }
+
     @Test func cancelledRemindersRemainHistoryWithoutOperationalAttentionOrStandaloneRetryCards() throws {
         var reminder = job(42, state: .cancelled)
         reminder.workflow = .draftReply

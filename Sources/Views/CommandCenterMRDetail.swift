@@ -56,6 +56,7 @@ private struct CommandCenterMRDetailContent: View {
 
     private enum Anchor: Hashable { case overview, drafts, comments, details, actions, feedbackStatus, assistantRuns }
 
+    private var finishedState: MergeRequestFinishedState? { .init(item.mergeRequest) }
     private var target: MRAutomationScope.Target? {
         monitor.scopeTarget(projectID: item.id.projectID, iid: item.id.iid, url: item.url)
     }
@@ -64,7 +65,7 @@ private struct CommandCenterMRDetailContent: View {
     }
     private var presentationItem: MergeRequestAttentionMonitor.Item {
         var value = item
-        value.humanActionRequired = needsHumanAttention
+        value.humanActionRequired = finishedState == nil && needsHumanAttention
         return value
     }
     private var jobs: [AssistantAutomationRunner.Handoff] {
@@ -81,7 +82,7 @@ private struct CommandCenterMRDetailContent: View {
         return MRCardPresentation(row: presentationRow, monitor: monitor, allowsRemoval: reviewing).humanAction
     }
 
-    private var showsDecisions: Bool { needsHumanAttention || initialSection == .drafts }
+    private var showsDecisions: Bool { finishedState == nil && (needsHumanAttention || initialSection == .drafts) }
     private var initialDestinationIsReady: Bool {
         guard let anchor = pendingInitialAnchor else { return false }
         // Decisions precede comments, so their position does not depend on the discussion load.
@@ -100,18 +101,20 @@ private struct CommandCenterMRDetailContent: View {
                 VStack(alignment: .leading, spacing: 20) {
                     header.id(Anchor.overview)
                     if showsDecisions { nextStep(proxy: proxy).id(Anchor.drafts) }
-                    supplementaryActions.id(Anchor.actions)
+                    if finishedState == nil { supplementaryActions.id(Anchor.actions) }
                     discussionThreads.id(Anchor.comments)
                     details.id(Anchor.details)
                     MRAutomationEventLogView(target: target, monitor: monitor,
-                        initiallyExpanded: historyExpanded, initiallyExpandedJobID: focusedJobID)
+                        initiallyExpanded: historyExpanded, initiallyExpandedJobID: focusedJobID, readOnly: finishedState != nil)
                         .id(historyNavigationID).id(Anchor.assistantRuns)
                 }
                 .padding(24)
                 .frame(maxWidth: .infinity, alignment: .leading)
             }
             .background(.background)
-            .safeAreaInset(edge: .bottom, spacing: 0) { selectedPublicationActions }
+            .safeAreaInset(edge: .bottom, spacing: 0) {
+                if finishedState == nil { selectedPublicationActions }
+            }
             .task(id: initialSection) {
                 pendingInitialAnchor = nil
                 if needsHumanAttention && item.authorFeedbackStatus?.needsAttention == true { feedbackExpanded = true }
@@ -190,14 +193,17 @@ private struct CommandCenterMRDetailContent: View {
         return VStack(alignment: .leading, spacing: 10) {
             HStack(spacing: 8) {
                 Text(verbatim: "!\(item.id.iid)").monospacedDigit()
+                if let finishedState { FinishedMergeRequestBadge(state: finishedState) }
+                else if item.section == .draftMergeRequests { BoardDraftBadge() }
                 RepositoryPathText(item.url.gitLabProjectPath).lineLimit(1)
                 if let author = item.mergeRequest?.author {
                     AvatarView(url: author.avatarURL, size: 18).accessibilityHidden(true)
                     Text(verbatim: author.name.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty ? author.username : author.name).lineLimit(1)
                         .help(Text(verbatim: "@\(author.username)"))
                 }
-                if let target = monitor.scopeTarget(projectID: item.id.projectID, iid: item.id.iid, url: item.url) {
-                    BoardAutomationToggle(settings: monitor.settings, target: target, projectPath: item.url.gitLabProjectPath)
+                if finishedState == nil, let target = monitor.scopeTarget(projectID: item.id.projectID, iid: item.id.iid, url: item.url) {
+                    BoardAutomationToggle(settings: monitor.settings, target: target, projectPath: item.url.gitLabProjectPath,
+                        isDraft: item.section == .draftMergeRequests)
                 }
                 Spacer()
                 BoardPinButton(pin: .mergeRequest(host: monitor.glab.resolvedHost,
@@ -209,26 +215,36 @@ private struct CommandCenterMRDetailContent: View {
             Text(verbatim: item.title).font(.title2.weight(.semibold)).textSelection(.enabled)
             HStack {
                 VStack(alignment: .leading, spacing: 4) {
-                    if needsHumanAttention || !progress.working {
-                        Label {
-                            Text(needsHumanAttention ? .CommandCenter.commandCenterStatusAttention
-                                 : item.section == .draftMergeRequests ? .CommandCenter.commandCenterStatusDraft
-                                 : .CommandCenter.commandCenterStatusMonitoring)
-                        } icon: { Image(systemName: needsHumanAttention ? "exclamationmark.circle" : "arrow.triangle.pull") }
-                        .font(.subheadline).foregroundStyle(needsHumanAttention ? .orange : .secondary)
-                    }
-                    if progress.working, let status = progress.status {
-                        HStack(spacing: 6) {
-                            ProgressView().controlSize(.mini)
-                            Text(verbatim: status)
+                    if let finishedState {
+                        Text(finishedState.status).font(.subheadline).foregroundStyle(.secondary)
+                    } else {
+                        if needsHumanAttention || !progress.working {
+                            Label {
+                                Text(needsHumanAttention ? .CommandCenter.commandCenterStatusAttention
+                                     : item.section == .draftMergeRequests ? .CommandCenter.commandCenterStatusDraft
+                                     : .CommandCenter.commandCenterStatusMonitoring)
+                            } icon: { Image(systemName: needsHumanAttention ? "exclamationmark.circle" : "arrow.triangle.pull") }
+                            .font(.subheadline).foregroundStyle(needsHumanAttention ? .orange : .secondary)
                         }
-                        .font(.subheadline).foregroundStyle(.secondary)
-                    } else if progress.refreshFailed {
-                        Label { Text(.AutomationProgress.progressRefreshFailed) } icon: { Image(systemName: "arrow.clockwise") }
+                        if progress.working, let status = progress.status {
+                            HStack(spacing: 6) {
+                                ProgressView().controlSize(.mini)
+                                Text(verbatim: status)
+                            }
                             .font(.subheadline).foregroundStyle(.secondary)
+                        } else if progress.refreshFailed {
+                            Label { Text(.AutomationProgress.progressRefreshFailed) } icon: { Image(systemName: "arrow.clockwise") }
+                                .font(.subheadline).foregroundStyle(.secondary)
+                        }
                     }
                 }
                 Spacer()
+                if finishedState != nil {
+                    Button { monitor.acknowledgeFinishedMergeRequest(item) } label: { Text(.MRLifecycle.seen) }
+                        .buttonStyle(.bordered).help(Text(.MRLifecycle.seenHelp))
+                } else {
+                    MarkMergeRequestReadyButton(item: item, monitor: monitor).buttonStyle(.bordered)
+                }
                 GitLabRefreshButton(monitor: monitor, itemID: item.id) {
                     if let target = discussionTarget { await discussionStore.refresh(target: target, glab: monitor.glab) }
                 }
@@ -399,7 +415,7 @@ private struct CommandCenterMRDetailContent: View {
                             value: request.headPipeline?.status.replacingOccurrences(of: "_", with: " ")
                                 ?? String(localized: .CommandCenter.commandCenterNoPipeline))
                     }
-                    statusReasons
+                    if finishedState == nil { statusReasons }
                 }
                 .padding(.top, 12)
             }
@@ -474,7 +490,7 @@ private struct CommandCenterMRDetailContent: View {
             currentUsername: monitor.glab.currentUsername, isLoading: current && discussionStore.isLoading,
             hasError: current && discussionStore.hasError, hasLoaded: current && discussionStore.hasLoaded,
             expandPendingDrafts: initialSection == .drafts,
-            selection: item.needsConfirmation && current ? $draftSelection : nil,
+            selection: finishedState == nil && item.needsConfirmation && current ? $draftSelection : nil,
             selectionDisabled: monitor.attention.confirmationStates[item.id] == .publishing
                 || monitor.attention.confirmationStates[item.id] == .approving,
             onRefresh: refreshDiscussions)
