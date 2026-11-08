@@ -72,8 +72,8 @@ struct AutomaticPublicationPolicy: Equatable, Sendable {
         }
     }
 
-    /// Sources are every external comment after our latest published reply. A human
-    /// follow-up in an AI-started thread must never inherit the first comment's identity.
+    /// Sources are the incoming exchange after our last reply before the newest
+    /// external comment. Our later replies do not erase that exchange.
     static func sourceNotes(for draft: GitLabDraftNote, discussions: [GitLabMergeRequestDiscussion]?,
                             userID: Int) -> [GitLabMergeRequestDiscussion.Note]? {
         guard let threadID = draft.discussionID, !threadID.isEmpty,
@@ -81,7 +81,9 @@ struct AutomaticPublicationPolicy: Equatable, Sendable {
         let notes = threads[0].notes.filter { $0.system != true }
         guard notes.allSatisfy({ ($0.id ?? 0) > 0 && ($0.author?.id ?? 0) > 0 }),
               Set(notes.compactMap(\.id)).count == notes.count else { return nil }
-        let lastReply = notes.filter { $0.author?.id == userID }.compactMap(\.id).max() ?? 0
+        let lastIncoming = notes.filter { $0.author?.id != userID }.compactMap(\.id).max() ?? 0
+        let lastReply = notes.filter { $0.author?.id == userID && ($0.id ?? 0) < lastIncoming }
+            .compactMap(\.id).max() ?? 0
         return notes.filter { $0.author?.id != userID && ($0.id ?? 0) > lastReply }
     }
 }

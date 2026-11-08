@@ -96,6 +96,8 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 
 ### Fixed
 
+- Keep AI and source-author publication checks tied to the latest incoming exchange after your own clarification replies, while retaining checks for every new contributor.
+
 - Reassess completed author follow-ups before handing residual work to a person; distinguish observed defects from suggested remedies and allow one proof-bound, scoped reconciliation of concrete omitted work with a durable retry budget.
 
 - Reconcile stopped feedback follow-ups against current remote evidence without replaying them, retiring obsolete retry prompts and unfinished-work blockers while retaining execution history and live merge checks.

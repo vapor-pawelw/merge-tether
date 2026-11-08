@@ -46,7 +46,7 @@ struct AICommentPublicationTests {
         }
         #expect(try eligible(note))
         #expect(try !eligible(note + "," + human))
-        #expect(try !eligible(note + "," + ownReply))
+        #expect(try eligible(note + "," + ownReply))
         var resolving = draft
         resolving.resolveDiscussion = true
         #expect(try !eligible(note, draft: resolving))

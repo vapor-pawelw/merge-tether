@@ -213,8 +213,8 @@ enum AICommentAssessmentStore {
         AutomaticPublicationPolicy.safeForAutomaticPublication(draft)
     }
 
-    /// Every external comment since the user's last reply must qualify, so a human follow-up
-    /// in an AI-started discussion cannot accidentally inherit the bot's publication permission.
+    /// Every external comment in the latest incoming exchange must qualify, so a later
+    /// nonqualifying follow-up cannot inherit an earlier comment's publication permission.
     nonisolated static func eligible(
         _ draft: GitLabDraftNote, discussions: [GitLabMergeRequestDiscussion], userID: Int,
         duoUserIDs: Set<Int>, host: String, projectID: Int, iid: Int, in directory: URL

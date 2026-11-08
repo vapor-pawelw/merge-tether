@@ -59,12 +59,71 @@ struct AutomaticPublicationPolicyTests {
         #expect(try !allows(.init(mode: .filtered, restrictions: impostor), reply: false))
     }
 
-    @Test func allExternalAuthorsSinceOurLastReplyMustQualify() throws {
+    @Test func allExternalAuthorsInTheLatestIncomingExchangeMustQualify() throws {
         let restrictions = AutomaticPublicationRestrictions(sourceCommentAuthors: [identity(8)])
         let policy = AutomaticPublicationPolicy(mode: .filtered, restrictions: restrictions)
         #expect(try !allows(policy, notes: [note(40, author: 8), note(41, author: 9)]))
         #expect(try allows(policy, notes: [note(40, author: 9), note(41, author: 3), note(42, author: 8)]))
-        #expect(try !allows(policy, notes: [note(40, author: 8), note(41, author: 3)]))
+        #expect(try allows(policy, notes: [note(40, author: 8), note(41, author: 3)]))
+    }
+
+    @Test(arguments: [1, 2])
+    func aiFeedbackRemainsTheSourceAfterOurPublishedClarifications(ownReplies: Int) throws {
+        let notes = [note(40, author: 8)] + (1...ownReplies).map { note(40 + $0, author: 3) }
+        let sources = AutomaticPublicationPolicy.sourceNotes(for: try draft(),
+            discussions: [.init(id: "thread", notes: notes)], userID: 3)
+        #expect(sources?.compactMap(\.id) == [40])
+        #expect(try allows(.init(mode: .aiReplies, restrictions: .init()), notes: notes, ai: [40]))
+    }
+
+    @Test(arguments: [8, 9])
+    func everyLatestIncomingCommentMustQualifyEvenAfterOurReplies(unclassifiedAuthor: Int) throws {
+        let notes = [note(40, author: 8), note(41, author: 3),
+                     note(42, author: unclassifiedAuthor), note(43, author: 8),
+                     note(44, author: 3), note(45, author: 3)]
+        let policy = AutomaticPublicationPolicy(mode: .aiReplies, restrictions: .init())
+        let sources = AutomaticPublicationPolicy.sourceNotes(for: try draft(),
+            discussions: [.init(id: "thread", notes: notes)], userID: 3)
+        #expect(sources?.compactMap(\.id) == [42, 43])
+        #expect(try !allows(policy, notes: notes, ai: [40, 43]))
+        #expect(try allows(policy, notes: notes, ai: [42, 43]))
+    }
+
+    @Test func anEarlierNonqualifyingExchangeDoesNotTaintTheCurrentAIReply() throws {
+        let notes = [note(38, author: 9), note(39, author: 3), note(40, author: 8),
+                     note(41, author: 3), note(42, author: 3)]
+        let sources = AutomaticPublicationPolicy.sourceNotes(for: try draft(),
+            discussions: [.init(id: "thread", notes: notes)], userID: 3)
+        #expect(sources?.compactMap(\.id) == [40])
+        #expect(try allows(.init(mode: .aiReplies, restrictions: .init()), notes: notes, ai: [40]))
+        #expect(try allows(.init(mode: .filtered, restrictions: .init(sourceCommentAuthors: [identity(8)])), notes: notes))
+    }
+
+    @Test func theLatestIncomingExchangeUsesNoteIDsRatherThanResponseOrder() throws {
+        let notes = [note(45, author: 3), note(43, author: 8), note(38, author: 9),
+                     note(41, author: 3), note(42, author: 8), note(39, author: 3), note(44, author: 3)]
+        let sources = AutomaticPublicationPolicy.sourceNotes(for: try draft(),
+            discussions: [.init(id: "thread", notes: notes)], userID: 3)
+        #expect(Set(sources?.compactMap(\.id) ?? []) == [42, 43])
+        let policy = AutomaticPublicationPolicy(mode: .aiReplies, restrictions: .init())
+        #expect(try allows(policy, notes: notes, ai: [42, 43]))
+        #expect(try !allows(policy, notes: notes, ai: [43]))
+    }
+
+    @Test func sourceAuthorFiltersCoverTheWholeIncomingExchangeAfterOurReplies() throws {
+        let notes = [note(40, author: 8), note(41, author: 9), note(42, author: 3), note(43, author: 3)]
+        let onlyOne = AutomaticPublicationRestrictions(sourceCommentAuthors: [identity(8)])
+        let both = AutomaticPublicationRestrictions(sourceCommentAuthors: [identity(8), identity(9)])
+        #expect(try !allows(.init(mode: .filtered, restrictions: onlyOne), notes: notes))
+        #expect(try allows(.init(mode: .filtered, restrictions: both), notes: notes))
+    }
+
+    @Test func aThreadWithoutExternalCommentsCannotQualifyAsAnAIReply() throws {
+        let notes = [note(40, author: 3), note(41, author: 3)]
+        let sources = AutomaticPublicationPolicy.sourceNotes(for: try draft(),
+            discussions: [.init(id: "thread", notes: notes)], userID: 3)
+        #expect(sources?.isEmpty == true)
+        #expect(try !allows(.init(mode: .aiReplies, restrictions: .init()), notes: notes))
     }
 
     @Test func rootDraftsCannotMatchSourceOrAIRestrictions() throws {

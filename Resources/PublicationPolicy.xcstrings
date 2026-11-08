@@ -63,7 +63,7 @@
         "en": {
           "stringUnit": {
             "state": "translated",
-            "value": "Author filters apply to every comment since your last published reply."
+            "value": "Author filters cover the latest comments from others, even after your own replies."
           }
         }
       }
