@@ -40,6 +40,8 @@ final class SettingsManager {
     var mrActionIntents: [MRTodoIntent]
     var routedMRTodoReceipts: Set<MRTodoRouteReceipt>
     var boardPins: Set<BoardCardPin>
+    var boardGrouping: MRBoardGrouping = .withoutAutomation
+    var effectiveBoardGrouping: MRBoardGrouping { boardGrouping.effective(for: automation) }
     var mrLifecycleLedger = MergeRequestLifecycleLedger()
     var autoRemoveFinishedMRs = false
 
@@ -75,6 +77,7 @@ final class SettingsManager {
             .flatMap { try? JSONDecoder().decode([MRTodoIntent].self, from: $0) } ?? []
         routedMRTodoReceipts = defaults.data(forKey: Key.routedMRTodoReceipts)
             .flatMap { try? JSONDecoder().decode(Set<MRTodoRouteReceipt>.self, from: $0) } ?? []
+        boardGrouping = defaults.string(forKey: Key.boardGrouping).flatMap(MRBoardGrouping.init(rawValue:)) ?? .withoutAutomation
         boardPins = defaults.data(forKey: Key.boardPins)
             .flatMap { try? JSONDecoder().decode(Set<BoardCardPin>.self, from: $0) } ?? []
         mrLifecycleLedger = defaults.data(forKey: Key.mrLifecycleLedger)
@@ -172,6 +175,7 @@ final class SettingsManager {
         if let data = try? JSONEncoder().encode(boardPins) { defaults.set(data, forKey: Key.boardPins) }
         if let data = try? JSONEncoder().encode(mrLifecycleLedger) { defaults.set(data, forKey: Key.mrLifecycleLedger) }
         defaults.set(autoRemoveFinishedMRs, forKey: Key.autoRemoveFinishedMRs)
+        defaults.set(boardGrouping.rawValue, forKey: Key.boardGrouping)
         if let data = try? JSONEncoder().encode(conflictReceipts) {
             defaults.set(data, forKey: Key.conflictReceipts)
         }
@@ -264,6 +268,7 @@ final class SettingsManager {
             Key.notificationsEnabled: true,
             Key.autoHandledEventBannersEnabled: true,
             Key.autoRemoveFinishedMRs: false,
+            Key.boardGrouping: MRBoardGrouping.withoutAutomation.rawValue,
             Key.onboardingCompleted: false,
             Key.launchAtLoginPreference: true,
             Key.hasLaunchedBefore: false,
@@ -279,6 +284,7 @@ final class SettingsManager {
         static let pipelineClaimAssessmentAttempts = "pipelineClaimAssessmentAttempts"
         static let pendingTodoAcknowledgements = "pendingTodoAcknowledgements"
         static let boardPins = "boardPins"
+        static let boardGrouping = "boardGrouping"
         static let mrLifecycleLedger = "mrLifecycleLedger"
         static let autoRemoveFinishedMRs = "autoRemoveFinishedMRs"
         static let conflictReceipts = "conflictReceipts"

@@ -13,14 +13,19 @@ struct BoardMRProposalCard: View {
     init(proposal: MergeRequestBoardSnapshot.Proposal, monitor: TodoMonitorService) {
         self.proposal = proposal
         self.monitor = monitor
-        _authorLoader = State(initialValue: ProposalAuthorLoader(glab: monitor.glab))
+        _authorLoader = State(initialValue: ProposalAuthorLoader(glab: monitor.glab) { request, target, url, revision, startedAt in
+            monitor.recordBoardDisplayRequest(request, for: target, url: url, accountRevision: revision, readStartedAt: startedAt)
+        })
     }
 
     private var currentRequest: GitLabMergeRequest? {
-        authorLoader.request(for: proposal) ?? proposal.item?.mergeRequest
-            ?? monitor.settings.mrLifecycleLedger.request(for: proposal.target)
+        monitor.boardDisplayRequest(for: proposal.target, url: proposal.url) ?? proposal.item?.mergeRequest
     }
     private var finishedState: MergeRequestFinishedState? { .init(currentRequest) }
+    private var isMuted: Bool {
+        monitor.boardActivity(projectID: proposal.target.projectID, iid: proposal.target.iid ?? 0,
+            url: proposal.url, isDraft: isDraft, isFinished: finishedState != nil).isMuted
+    }
     private var finishedItem: MergeRequestAttentionMonitor.Item? {
         guard let request = currentRequest, finishedState != nil else { return nil }
         var item = proposal.item ?? .init(id: .init(projectID: request.projectID, iid: request.iid),
@@ -31,7 +36,7 @@ struct BoardMRProposalCard: View {
     }
 
     private var context: ProposalMRContext {
-        ProposalMRContext(proposal: proposal, fetchedRequest: authorLoader.request(for: proposal))
+        ProposalMRContext(proposal: proposal, fetchedRequest: currentRequest)
     }
 
     @ViewBuilder private var dependencyRow: some View {
@@ -41,12 +46,12 @@ struct BoardMRProposalCard: View {
     }
 
     private var authorTaskID: String {
-        "\(proposal.target.host)/\(proposal.target.username)/\(proposal.target.projectID)/\(proposal.target.iid ?? 0)/\(proposal.url)|\(monitor.glab.resolvedHost ?? "")/\(monitor.glab.currentUsername ?? "")"
+        "\(proposal.target.host)/\(proposal.target.username)/\(proposal.target.projectID)/\(proposal.target.iid ?? 0)/\(proposal.url)|\(monitor.glab.resolvedHost ?? "")/\(monitor.glab.currentUsername ?? "")/\(monitor.glab.accountRevision)"
     }
 
     private var isDraft: Bool {
+        if let draft = currentRequest?.draft { return draft }
         if let item = proposal.item { return item.section == .draftMergeRequests }
-        if let draft = authorLoader.request(for: proposal)?.draft { return draft }
         return proposal.todos.contains(where: \.isDraft)
             || proposal.intents.contains {
                 $0.target == proposal.target && ProposalMRContext.matches($0.request, proposal: proposal)
@@ -60,7 +65,7 @@ struct BoardMRProposalCard: View {
             HStack(alignment: .top) {
                 Button { showingDetails = true } label: {
                     BoardCardTitle(title: proposal.title, repositoryPath: proposal.url.gitLabProjectPath,
-                        titleColor: isDraft ? .secondary : .primary)
+                        titleColor: isMuted ? .secondary : .primary)
                 }
                 .buttonStyle(.plain)
                 moreMenu
@@ -94,7 +99,7 @@ struct BoardMRProposalCard: View {
                 }
                 .disabled(isWorking)
                 if failed {
-                    BoardStatusChip(title: .Board.boardCompactBlocked, symbol: "exclamationmark.circle", tint: isDraft ? .secondary : .orange)
+                    BoardStatusChip(title: .Board.boardCompactBlocked, symbol: "exclamationmark.circle", tint: isMuted ? .secondary : .orange)
                         .help(Text(.Menu.menuMrAddFailed))
                 }
                 runResult
@@ -114,7 +119,7 @@ struct BoardMRProposalCard: View {
         .padding(12).frame(maxWidth: .infinity, alignment: .leading)
         .overlay(RoundedRectangle(cornerRadius: 8).stroke(.secondary.opacity(0.12), lineWidth: 0.5))
         .boardCardInteraction { showingDetails = true }
-        .task(id: authorTaskID) { await authorLoader.load(proposal) }
+        .task(id: authorTaskID) { await authorLoader.load(proposal, displayMetadata: true) }
         .sheet(isPresented: $showingDetails) {
             BoardItemDetailSheet {
                 metadataHeader
@@ -203,7 +208,7 @@ struct BoardMRProposalCard: View {
     @ViewBuilder
     private var runResult: some View {
         if let job = proposal.latestJob {
-            BoardJobStatusActions(handoff: job, monitor: monitor, muted: isDraft)
+            BoardJobStatusActions(handoff: job, monitor: monitor, muted: isMuted)
             Button { showingDetails = true } label: {
                 Text(.MRHumanAction.mrHumanActionActionReviewRun)
             }
@@ -222,7 +227,7 @@ struct BoardMRProposalCard: View {
                 .help(Text(.Proposal.proposalMoreReasonsHelp))
             }
         }
-        .font(.callout).foregroundStyle(isDraft ? Color.secondary : Color.primary)
+        .font(.callout).foregroundStyle(isMuted ? Color.secondary : Color.primary)
     }
 
     @ViewBuilder

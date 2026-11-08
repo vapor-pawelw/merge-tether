@@ -19,14 +19,21 @@ struct BoardPolicyOrder {
         latest = current
     }
 
-    mutating func policyChanged(from previous: AutomationSettings, to current: AutomationSettings) {
+    mutating func policyChanged(from previous: AutomationSettings, to current: AutomationSettings,
+                                grouping: MRBoardGrouping = .withoutAutomation) {
         for entry in latest.values where entry.request.state == "opened" {
+            let id = MergeRequestAttentionMonitor.Item.ID(projectID: entry.target.projectID, iid: entry.request.iid)
+            let isDraft = entry.request.draft == true || entry.request.detailedMergeStatus == "draft_status"
+            let oldGroup = MRBoardActivity(automation: previous, target: entry.target, isDraft: isDraft, grouping: grouping).group
+            let newGroup = MRBoardActivity(automation: current, target: entry.target, isDraft: isDraft, grouping: grouping).group
+            // The explicit activity-section move takes precedence over the old absolute-position latch.
+            if oldGroup != newGroup { preserved.removeValue(forKey: id); continue }
             func enabled(_ configuration: AutomationSettings) -> Bool {
                 configuration.hasEnabledAutomation && configuration.scope.permits(entry.request,
                     host: entry.target.host, username: entry.target.username)
             }
             if enabled(previous) != enabled(current) {
-                preserved[.init(projectID: entry.target.projectID, iid: entry.request.iid)] = entry.rank
+                preserved[id] = entry.rank
             }
         }
     }

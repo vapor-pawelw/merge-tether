@@ -9,6 +9,7 @@ final class TodoMonitorService {
     let notifications: NotificationService
     let attention: MergeRequestAttentionMonitor
     let authoredMergeRequests: AuthoredMergeRequestMonitor
+    private var boardDisplayMetadata = MRDisplayMetadataCache()
     let autoHandledEventBanners = AutoHandledEventBannerCenter()
 
     var autoHandledEventBanner: AutoHandledEventBannerCenter.Event? {
@@ -224,6 +225,10 @@ final class TodoMonitorService {
             // Observation's asynchronous invalidation remains responsible for other changes.
             self.confirmedAttention.update(self.pendingUserAttention)
         }
+        attention.onDisplayMetadataObserved = { [weak self] request, target, revision, readStartedAt in
+            self?.recordBoardDisplayRequest(request, for: target, url: request.webURL,
+                accountRevision: revision, readStartedAt: readStartedAt)
+        }
         authoredMergeRequests.onObservedMergeRequests = { [weak self] requests, observedAt in
             self?.recordOwnedLifecycleObservations(requests, observedAt: observedAt)
         }
@@ -417,7 +422,8 @@ final class TodoMonitorService {
         guard let host = glab.resolvedHost, let username = glab.currentUsername else { return nil }
         return MergeRequestBrowserSnapshot(openItems: lifecycleCatalogItems(host: host, username: username),
             authored: authoredMergeRequests.requests, host: host, username: username, scope: settings.automation.scope,
-            ownCatalogIsAuthoritative: attention.hasCurrentOwnListing)
+            ownCatalogIsAuthoritative: attention.hasCurrentOwnListing,
+            draftsLast: settings.effectiveBoardGrouping == .drafts)
     }
 
     var currentMRTodoIntents: [MRTodoIntent] {
@@ -589,8 +595,45 @@ final class TodoMonitorService {
         authoredMergeRequests.workflow.confirmPipelineHandoff(entry.id)
     }
 
+    func recordBoardDisplayRequest(_ request: GitLabMergeRequest, for target: MRAutomationScope.Target,
+                                   url: URL, accountRevision: UInt64, readStartedAt: Date) {
+        guard let current = boardDisplayAccount else { return }
+        let original = MRDisplayMetadataCache.Account(host: target.host, username: target.username, revision: accountRevision)
+        var metadata = boardDisplayMetadata
+        guard metadata.record(request, for: target, url: url, readStartedAt: readStartedAt,
+                              account: original, currentAccount: current) else { return }
+        boardDisplayMetadata = metadata
+    }
+
+    private var boardDisplayAccount: MRDisplayMetadataCache.Account? {
+        guard let host = glab.resolvedHost, let username = glab.currentUsername else { return nil }
+        return .init(host: host, username: username, revision: glab.accountRevision)
+    }
+
+    func boardDisplayRequest(for target: MRAutomationScope.Target, url: URL) -> GitLabMergeRequest? {
+        guard let account = boardDisplayAccount, target.host == account.host, target.username == account.username,
+              let iid = target.iid, iid > 0, target.projectID > 0,
+              url.isGitLabMergeRequest(host: account.host, iid: iid) else { return nil }
+        if let managed = settings.mrLifecycleLedger.request(for: target), managed.webURL == url { return managed }
+        return boardDisplayMetadata.request(for: target, url: url, account: account)
+    }
+
+    var boardDisplayRequests: [GitLabMergeRequest] {
+        guard let account = boardDisplayAccount else { return [] }
+        let managed = settings.mrLifecycleLedger.targets(host: account.host, username: account.username)
+        let records = managed.compactMap { settings.mrLifecycleLedger.request(for: $0) }
+        return records + boardDisplayMetadata.requests(account: account).filter { request in
+            !managed.contains(.init(host: account.host, username: account.username, projectID: request.projectID, iid: request.iid))
+        }
+    }
+
+    func boardActivity(projectID: Int, iid: Int, url: URL, isDraft: Bool, isFinished: Bool = false) -> MRBoardActivity {
+        .init(automation: settings.automation, target: scopeTarget(projectID: projectID, iid: iid, url: url),
+              isDraft: isDraft, isFinished: isFinished, grouping: settings.boardGrouping)
+    }
+
     func scopeTarget(projectID: Int, iid: Int, url: URL) -> MRAutomationScope.Target? {
-        guard let host = glab.resolvedHost, let username = glab.currentUsername,
+        guard projectID > 0, iid > 0, let host = glab.resolvedHost, let username = glab.currentUsername,
               url.isGitLabMergeRequest(host: host, iid: iid) else { return nil }
         return .init(host: host, username: username, projectID: projectID, iid: iid)
     }
@@ -868,7 +911,7 @@ final class TodoMonitorService {
             todos: currentAccountTodos, attention: attentionItems, handoffs: settings.assistantHandoffs,
             host: host, username: username, intents: currentMRTodoIntents, routedTodoIDs: routedMRTodoIDs,
             ignoredTargets: hiddenBoardTargets, pipelineEvidence: currentPipelineEvidence,
-            pipelineEvidenceCheckedAt: currentPipelineEvidenceDate)
+            pipelineEvidenceCheckedAt: currentPipelineEvidenceDate, automation: settings.automation)
         var candidates: [UserAttentionSnapshot.Candidate] = []
         var checkingIDs: Set<String> = []
         var humanActions: [String: MRHumanAction] = [:]
@@ -1325,7 +1368,7 @@ final class TodoMonitorService {
     func automationConfigurationChanged(previous: AutomationSettings) {
         let current = settings.automation
         guard previous != current else { return }
-        boardPolicyOrder.policyChanged(from: previous, to: current)
+        boardPolicyOrder.policyChanged(from: previous, to: current, grouping: settings.boardGrouping)
         let scopeOnly = previous.preservingScope(from: current) == current
         let host = glab.resolvedHost ?? "", username = glab.currentUsername ?? ""
         let targets = Set(previous.scope.individualTargets(host: host, username: username)

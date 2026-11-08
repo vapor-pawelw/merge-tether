@@ -180,8 +180,14 @@ final class MergeRequestAttentionMonitor {
             return needsConfirmation && !hasOpenAction ? .unpublishedComments : .open
         }
 
-        static func ordered(_ items: [Self]) -> [Self] {
-            items.map { (item: $0, order: $0.mergeOrder) }
+        static func ordered(_ items: [Self], draftsLast: Bool = true) -> [Self] {
+            items.map { item in
+                var order = item.mergeOrder
+                if !draftsLast, item.section == .draftMergeRequests {
+                    order.0 = (item.needsConfirmation && !item.hasOpenAction ? Section.unpublishedComments : .open).rawValue
+                }
+                return (item: item, order: order)
+            }
                 .sorted { $0.order < $1.order }
                 .map(\.item)
         }
@@ -272,6 +278,7 @@ final class MergeRequestAttentionMonitor {
     /// Called after MergeTether approved a merge request on its own.
     var onAutoApproved: ((GitLabMergeRequest) -> Void)?
     var onRefreshed: (() -> Void)?
+    var onDisplayMetadataObserved: ((GitLabMergeRequest, MRAutomationScope.Target, UInt64, Date) -> Void)?
     var onAutomationEligibilityObserved: (() -> Void)?
     private var pendingRefresh: (account: Account, todos: [Todo], revision: UInt64)?
     private var account: Account?
@@ -554,7 +561,9 @@ final class MergeRequestAttentionMonitor {
         }
         func remember(_ request: GitLabMergeRequest, readStartedAt: Date) {
             let target = target(for: request)
-            guard !isIgnored(target), isTracked(request) else { return }
+            guard !isIgnored(target) else { return }
+            onDisplayMetadataObserved?(request, target, revision, readStartedAt)
+            guard isTracked(request) else { return }
             settings?.mrLifecycleLedger.record(request, for: target, now: readStartedAt,
                 autoRemoveFinished: settings?.autoRemoveFinishedMRs == true)
             onAutomationEligibilityObserved?()
@@ -624,6 +633,7 @@ final class MergeRequestAttentionMonitor {
                 let alreadyTracked = settings?.mrLifecycleLedger.request(for: target) != nil
                     || settings?.automation.scope.isManaged(target) == true || hasManagedIntent(target)
                 if alreadyTracked { remember(request, readStartedAt: requestReadStartedAt) }
+                else { onDisplayMetadataObserved?(request, target, revision, requestReadStartedAt) }
                 if request.state == "merged" { terminalCatalogRequests.insert(id) }
                 retainedCatalog.removeValue(forKey: id)
             } else {

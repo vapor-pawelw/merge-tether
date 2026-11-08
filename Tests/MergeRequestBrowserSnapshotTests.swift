@@ -29,6 +29,18 @@ struct MergeRequestBrowserSnapshotTests {
                      projectRequiresResolvedDiscussions: true, autoMergeEnabled: false)
     }
 
+    @Test(arguments: ["me", "reviewer"])
+    func normalActivityOrderHasNoHiddenDraftPenalty(_ author: String) throws {
+        let draft = try request(1, username: author, title: "A Draft", draft: true)
+        let ready = try request(2, username: author, title: "Z Ready")
+        let normal = MergeRequestBrowserSnapshot(openItems: [item(ready), item(draft)], authored: [],
+            host: host, username: "me", scope: .init(), draftsLast: false)
+        let manual = MergeRequestBrowserSnapshot(openItems: [item(ready), item(draft)], authored: [],
+            host: host, username: "me", scope: .init())
+        #expect((author == "me" ? normal.own : normal.reviewed).map(\.id.iid) == [1, 2])
+        #expect((author == "me" ? manual.own : manual.reviewed).map(\.id.iid) == [2, 1])
+    }
+
     @Test func automationPolicyChangesPreserveOwnAndReviewedMembershipAndOrder() throws {
         var scope = MRAutomationScope()
         scope.mode = .selected

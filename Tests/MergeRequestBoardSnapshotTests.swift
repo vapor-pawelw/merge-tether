@@ -10,12 +10,12 @@ struct MergeRequestBoardSnapshotTests {
               url: URL(string: "https://\(host)/g/p/-/merge_requests/\(iid)")!, needsDiscussion: attention)
     }
     private func todo(_ id: Int, projectID: Int = 1, iid: Int = 42, host: String = "gitlab.example.org",
-                      type: TargetType = .mergeRequest, action: ActionName = .reviewRequested, suffix: String = "") -> Todo {
+                      type: TargetType = .mergeRequest, action: ActionName = .reviewRequested, suffix: String = "", draft: Bool = false) -> Todo {
         .init(id: id, actionName: action, targetType: type,
               targetURL: URL(string: "https://\(host)/g/p/-/merge_requests/\(iid)" + suffix)!, body: "Review",
               createdAt: Date(), state: "pending", project: .init(id: projectID, nameWithNamespace: "G / P", pathWithNamespace: "g/p"),
               author: .init(id: 9, username: "author", name: "Author", avatarURL: nil),
-              target: .init(id: id, iid: iid, title: "Review", state: "opened", draft: false, workInProgress: false))
+              target: .init(id: id, iid: iid, title: "Review", state: "opened", draft: draft, workInProgress: false))
     }
     private func job(_ iid: Int, state: AssistantJobExecution.State, at: Date = Date()) -> AssistantAutomationRunner.Handoff {
         .init(id: UUID(), key: .init(assistant: .codex, work: .init(host: host, projectID: 1, iid: iid),
@@ -25,6 +25,102 @@ struct MergeRequestBoardSnapshotTests {
     private func snapshot(own: [MergeRequestAttentionMonitor.Item], reviewed: [MergeRequestAttentionMonitor.Item] = [],
                           todos: [Todo] = [], handoffs: [AssistantAutomationRunner.Handoff] = []) -> MergeRequestBoardSnapshot {
         .init(own: own, reviewed: reviewed, todos: todos, attention: [], handoffs: handoffs, host: host, username: "me")
+    }
+
+    @Test(arguments: ["pausedReady", "draft", "closed", "merged"])
+    func pipelineTabNoticesUseCanonicalMRActivityAndDisplayMetadata(_ state: String) throws {
+        let json = """
+        {"project_id":1,"iid":42,"author":{"id":7,"username":"author","name":"Author"},"title":"MR",
+         "web_url":"https://\(host)/g/p/-/merge_requests/42","state":"\(["closed", "merged"].contains(state) ? state : "opened")",
+         "draft":\(state == "draft"),"source_branch":"feature","target_branch":"main","labels":[]}
+        """
+        let request = try JSONDecoder().decode(GitLabMergeRequest.self, from: Data(json.utf8))
+        var configuration = AutomationSettings()
+        configuration.applyPreset(.full, for: .codex)
+        if state == "pausedReady" {
+            configuration.scope.setEnabled(false, for: .init(host: host, username: "me", projectID: 1, iid: 42))
+        }
+        let board = MergeRequestBoardSnapshot(own: [], reviewed: [],
+            todos: [todo(1, action: .unknown("new_event"), suffix: "/pipelines")], attention: [], handoffs: [],
+            host: host, username: "me", automation: configuration, displayRequests: [request])
+        let cards = board.otherCards(jobs: [], host: host, username: "me", pinnedCards: [])
+        #expect(board.otherTodos.count == 1 && board.proposals.isEmpty)
+        #expect(cards.first?.activityGroup == (["closed", "merged"].contains(state) ? .finished : .inactive))
+    }
+
+    @Test(arguments: ["draft", "merged", "closed"])
+    func jobOnlyCardsGroupUsingSharedDisplayMetadata(_ state: String) throws {
+        let json = """
+        {"project_id":1,"iid":42,"author":{"id":7,"username":"author","name":"Author"},"title":"MR",
+         "web_url":"https://\(host)/g/p/-/merge_requests/42","state":"\(state == "draft" ? "opened" : state)","draft":\(state == "draft"),
+         "source_branch":"feature","target_branch":"main","labels":[]}
+        """
+        let request = try JSONDecoder().decode(GitLabMergeRequest.self, from: Data(json.utf8))
+        var configuration = AutomationSettings()
+        configuration.applyPreset(.full, for: .codex)
+        let run = job(42, state: .failed)
+        let board = MergeRequestBoardSnapshot(own: [], reviewed: [], todos: [], attention: [], handoffs: [run],
+            host: host, username: "me", automation: configuration, displayRequests: [request])
+        let cards = board.otherCards(jobs: [run], host: host, username: "me", pinnedCards: [])
+        #expect(cards.count == 1)
+        #expect(cards.first?.activityGroup == (state == "draft" ? .inactive : .finished))
+    }
+
+    @Test(arguments: [false, true])
+    func todoOnlyProposalGroupingUsesFreshDisplayStateInsteadOfTheOlderTodoFlag(_ liveDraft: Bool) throws {
+        let json = """
+        {"project_id":1,"iid":42,"author":{"id":7,"username":"author","name":"Author"},"title":"MR",
+         "web_url":"https://\(host)/g/p/-/merge_requests/42","state":"opened","draft":\(liveDraft),
+         "source_branch":"feature","target_branch":"main","labels":[]}
+        """
+        let request = try JSONDecoder().decode(GitLabMergeRequest.self, from: Data(json.utf8))
+        var configuration = AutomationSettings()
+        configuration.applyPreset(.full, for: .codex)
+        let board = MergeRequestBoardSnapshot(own: [], reviewed: [], todos: [todo(1, draft: !liveDraft)], attention: [],
+            handoffs: [], host: host, username: "me", automation: configuration, displayRequests: [request])
+        let cards = board.otherCards(jobs: [], host: host, username: "me", pinnedCards: [])
+        #expect(board.own.isEmpty && board.reviewed.isEmpty && board.proposals.count == 1)
+        #expect(cards.first?.activityGroup == (liveDraft ? .inactive : .regular))
+    }
+
+    @Test(arguments: [false, true])
+    func automationGroupsReadyAndDraftRowsByEffectiveActivityBeforePins(_ reviewedLane: Bool) throws {
+        func mr(_ iid: Int, draft: Bool, state: String = "opened") throws -> MergeRequestAttentionMonitor.Item {
+            var row = item(iid, attention: iid == 3)
+            let json = """
+            {"project_id":1,"iid":\(iid),"author":{"id":3,"username":"me","name":"Me"},"title":"MR",
+             "web_url":"https://\(host)/g/p/-/merge_requests/\(iid)","state":"\(state)","draft":\(draft),
+             "source_branch":"feature","target_branch":"main","labels":[]}
+            """
+            row.mergeRequest = try JSONDecoder().decode(GitLabMergeRequest.self, from: Data(json.utf8))
+            return row
+        }
+        let rows = try [mr(2, draft: false), mr(4, draft: true), mr(1, draft: false), mr(3, draft: true), mr(5, draft: true, state: "closed")]
+        let inactive = MRAutomationScope.Target(host: host, username: "me", projectID: 1, iid: 2)
+        var configuration = AutomationSettings()
+        configuration.applyPreset(.full, for: .codex)
+        configuration.scope.setEnabled(false, for: inactive)
+        configuration.scope.setEnabled(true, for: .init(host: host, username: "me", projectID: 1, iid: 3))
+        let pin = try #require(BoardCardPin.mergeRequest(host: host, username: "me", projectID: 1, iid: 2))
+        let board = MergeRequestBoardSnapshot(own: reviewedLane ? [] : rows, reviewed: reviewedLane ? rows : [],
+            todos: [], attention: [], handoffs: [], host: host, username: "me", pinnedCards: [pin],
+            preservedOrder: [rows[0].id: 0], automation: configuration)
+        let displayed = reviewedLane ? board.reviewed : board.own
+        #expect(displayed.map(\.id.iid) == [5, 3, 1, 2, 4])
+        #expect(displayed.first { $0.id.iid == 3 }?.item.mergeRequest?.draft == true)
+    }
+
+    @Test func otherItemsUseTheSameInactiveGroupWithoutDimmingNonMRTodos() throws {
+        var configuration = AutomationSettings()
+        configuration.applyPreset(.full, for: .codex)
+        configuration.scope.setEnabled(false, for: .init(host: host, username: "me", projectID: 1, iid: 2))
+        let pin = try #require(BoardCardPin.todo(host: host, username: "me", id: 2))
+        let board = MergeRequestBoardSnapshot(own: [], reviewed: [],
+            todos: [todo(2, iid: 2, action: .mentioned), todo(1, type: .issue)], attention: [], handoffs: [],
+            host: host, username: "me", pinnedCards: [pin], automation: configuration)
+        let cards = board.otherCards(jobs: [], host: host, username: "me", pinnedCards: [pin])
+        #expect(cards.map(\.activityGroup) == [.regular, .inactive])
+        #expect(cards.last?.id == pin)
     }
 
     @Test(arguments: ["merged", "closed"])

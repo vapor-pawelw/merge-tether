@@ -80,6 +80,9 @@ struct MergeRequestBoardSnapshot {
     let proposals: [Proposal]
     let otherTodos: [Todo]
     private let ignoredTargets: Set<MRAutomationScope.Target>
+    private let automation: AutomationSettings?
+    private let grouping: MRBoardGrouping
+    private let knownRequests: [MergeRequestAttentionMonitor.Item.ID: GitLabMergeRequest]
 
     init(own: [MergeRequestAttentionMonitor.Item], reviewed: [MergeRequestAttentionMonitor.Item],
          todos: [Todo], attention: [MergeRequestAttentionMonitor.Item],
@@ -87,8 +90,19 @@ struct MergeRequestBoardSnapshot {
          intents: [MRTodoIntent] = [], routedTodoIDs: Set<Int> = [],
          ignoredTargets: Set<MRAutomationScope.Target> = [], humanAttention: UserAttentionSnapshot? = nil,
          pinnedCards: Set<BoardCardPin> = [], pipelineEvidence: [GitLabMergeRequest] = [],
-         pipelineEvidenceCheckedAt: Date? = nil, preservedOrder: [MergeRequestAttentionMonitor.Item.ID: Int] = [:]) {
+         pipelineEvidenceCheckedAt: Date? = nil, preservedOrder: [MergeRequestAttentionMonitor.Item.ID: Int] = [:],
+         automation: AutomationSettings? = nil, displayRequests: [GitLabMergeRequest] = [],
+         grouping: MRBoardGrouping = .withoutAutomation) {
         self.ignoredTargets = ignoredTargets
+        self.automation = automation
+        self.grouping = grouping
+        let validatedDisplay = displayRequests.filter { request in
+            guard let host, let username, !username.isEmpty, request.projectID > 0, request.iid > 0 else { return false }
+            return request.webURL.isGitLabMergeRequest(host: host, iid: request.iid)
+        }
+        knownRequests = Dictionary((validatedDisplay + (own + reviewed + attention).compactMap(\.mergeRequest)).map {
+            (MergeRequestAttentionMonitor.Item.ID(projectID: $0.projectID, iid: $0.iid), $0)
+        }, uniquingKeysWith: { first, _ in first })
         func target(for todo: Todo) -> MRAutomationScope.Target? {
             guard let host, let username, todo.targetType == .mergeRequest,
                   let iid = todo.target.iid, iid > 0, todo.project.id > 0,
@@ -154,15 +168,15 @@ struct MergeRequestBoardSnapshot {
         }
         let ownRows = own + orphanRows.filter(\.isAuthored)
         let reviewedRows = reviewed + orphanRows.filter { !$0.isAuthored }
-        self.own = Self.ordered(ownRows.map(row), host: host, username: username, pinnedCards: pinnedCards, preservedOrder: preservedOrder)
-        self.reviewed = Self.ordered(reviewedRows.map(row), draftsLast: true, host: host, username: username, pinnedCards: pinnedCards, preservedOrder: preservedOrder)
+        self.own = Self.ordered(ownRows.map(row), host: host, username: username, pinnedCards: pinnedCards, preservedOrder: preservedOrder, automation: automation, grouping: grouping)
+        self.reviewed = Self.ordered(reviewedRows.map(row), draftsLast: true, host: host, username: username, pinnedCards: pinnedCards, preservedOrder: preservedOrder, automation: automation, grouping: grouping)
         let listed = ownRows + reviewedRows
         otherMergeRequests = Self.ordered(attention.filter { candidate in
             guard !listed.contains(where: { sameMergeRequest($0, candidate) }) else { return false }
             guard let host, let username else { return true }
             return !ignoredTargets.contains(.init(host: host, username: username,
                 projectID: candidate.id.projectID, iid: candidate.id.iid))
-        }.map(row), host: host, username: username, pinnedCards: pinnedCards, preservedOrder: preservedOrder)
+        }.map(row), host: host, username: username, pinnedCards: pinnedCards, preservedOrder: preservedOrder, automation: automation, grouping: grouping)
         var grouped: [Proposal] = []
         if let host, let username {
             for row in otherMergeRequests where row.item.url.isGitLabMergeRequest(host: host, iid: row.item.id.iid) {
@@ -209,6 +223,7 @@ struct MergeRequestBoardSnapshot {
         }
         let id: BoardCardPin
         let content: Content
+        var activityGroup: MRBoardActivity.Group = .regular
     }
 
     /// One identity per card, including proposals with a matching agent run.
@@ -241,12 +256,56 @@ struct MergeRequestBoardSnapshot {
                       projectID: job.key.work.projectID, iid: job.key.work.iid) else { continue }
             cards.append(.init(id: pin, content: .job(job)))
         }
-        return Self.pinnedFirst(cards, pins: pinnedCards) { $0.id }
+        for index in cards.indices {
+            cards[index].activityGroup = activityGroup(for: cards[index].content, host: host, username: username)
+        }
+        let pinned = Self.pinnedFirst(cards, pins: pinnedCards) { $0.id }
+        guard automation != nil else { return pinned }
+        return pinned.enumerated().sorted {
+            ($0.element.activityGroup.rawValue, $0.offset) < ($1.element.activityGroup.rawValue, $1.offset)
+        }.map(\.element)
+    }
+
+    private func activityGroup(for content: OtherCard.Content, host: String, username: String) -> MRBoardActivity.Group {
+        guard let automation else { return .regular }
+        let target: MRAutomationScope.Target
+        let isDraft: Bool
+        let finished: Bool
+        switch content {
+        case .proposal(let proposal):
+            target = proposal.target
+            let request = knownRequests[.init(projectID: target.projectID, iid: target.iid ?? 0)]
+                .flatMap { $0.webURL == proposal.url ? $0 : nil }
+            isDraft = request?.draft ?? proposal.item.map { $0.section == .draftMergeRequests }
+                ?? proposal.todos.contains(where: \.isDraft)
+            finished = MergeRequestFinishedState(request ?? proposal.item?.mergeRequest) != nil
+        case .todo(let todo):
+            guard todo.targetType == .mergeRequest, let iid = todo.target.iid,
+                  let url = todo.targetURL.gitLabTodoMergeRequestURL(host: host, iid: iid) else { return .regular }
+            target = .init(host: host, username: username, projectID: todo.project.id, iid: iid)
+            let request = knownRequests[.init(projectID: target.projectID, iid: iid)]
+                .flatMap { $0.webURL == url ? $0 : nil }
+            isDraft = request?.draft ?? todo.isDraft
+            finished = MergeRequestFinishedState(request) != nil
+        case .job(let job):
+            target = .init(host: host, username: username, projectID: job.key.work.projectID, iid: job.key.work.iid)
+            let request = knownRequests[.init(projectID: target.projectID, iid: target.iid ?? 0)]
+            if let url = job.mergeRequestURL {
+                guard url.isGitLabMergeRequest(host: host, iid: job.key.work.iid),
+                      request == nil || request?.webURL == url else { return .regular }
+            }
+            isDraft = request?.draft == true
+            finished = MergeRequestFinishedState(request) != nil
+        }
+        guard target.projectID > 0, let iid = target.iid, iid > 0,
+              target.host == host, target.username == username else { return .regular }
+        return MRBoardActivity(automation: automation, target: target, isDraft: isDraft, isFinished: finished, grouping: grouping).group
     }
 
     private static func ordered(_ rows: [Row], draftsLast: Bool = false, host: String?, username: String?,
                                 pinnedCards: Set<BoardCardPin>,
-                                preservedOrder: [MergeRequestAttentionMonitor.Item.ID: Int]) -> [Row] {
+                                preservedOrder: [MergeRequestAttentionMonitor.Item.ID: Int], automation: AutomationSettings?,
+                                grouping: MRBoardGrouping) -> [Row] {
         func isPinned(_ row: Row) -> Bool {
             guard let host, row.item.url.isGitLabMergeRequest(host: host, iid: row.id.iid),
                   let pin = BoardCardPin.mergeRequest(host: host, username: username,
@@ -256,24 +315,41 @@ struct MergeRequestBoardSnapshot {
         func isFinished(_ row: Row) -> Bool {
             row.item.mergeRequest.map { ["merged", "closed"].contains($0.state) } == true
         }
+        func activityRank(_ row: Row) -> Int {
+            guard let automation, let host, let username else { return 0 }
+            let target: MRAutomationScope.Target? = row.id.projectID > 0 && row.id.iid > 0
+                && row.item.url.isGitLabMergeRequest(host: host, iid: row.id.iid)
+                ? .init(host: host, username: username, projectID: row.id.projectID, iid: row.id.iid) : nil
+            return MRBoardActivity(automation: automation, target: target,
+                isDraft: row.item.section == .draftMergeRequests, isFinished: isFinished(row), grouping: grouping).group.rawValue
+        }
         let normal = rows.enumerated().sorted {
-            (isFinished($0.element) ? 0 : 1, isPinned($0.element) ? 0 : 1,
-             draftsLast && $0.element.item.section == .draftMergeRequests ? 1 : 0,
+            (isFinished($0.element) ? 0 : 1, activityRank($0.element), isPinned($0.element) ? 0 : 1,
+             automation?.hasEnabledAutomation != true && draftsLast && $0.element.item.section == .draftMergeRequests ? 1 : 0,
              $0.element.needsAttention ? 0 : 1, $0.offset)
-                < (isFinished($1.element) ? 0 : 1, isPinned($1.element) ? 0 : 1,
-                   draftsLast && $1.element.item.section == .draftMergeRequests ? 1 : 0,
+                < (isFinished($1.element) ? 0 : 1, activityRank($1.element), isPinned($1.element) ? 0 : 1,
+                   automation?.hasEnabledAutomation != true && draftsLast && $1.element.item.section == .draftMergeRequests ? 1 : 0,
                    $1.element.needsAttention ? 0 : 1, $1.offset)
         }.map(\.element)
         let finished = normal.filter(isFinished)
         let active = normal.filter { !isFinished($0) }
-        let latched = active.enumerated().filter { preservedOrder[$0.element.id] != nil }.sorted {
-            (preservedOrder[$0.element.id] ?? 0, $0.offset) < (preservedOrder[$1.element.id] ?? 0, $1.offset)
-        }.map(\.element)
-        var result = active.filter { preservedOrder[$0.id] == nil }
-        for row in latched {
-            result.insert(row, at: min(max(0, preservedOrder[row.id] ?? 0), result.count))
+        if automation != nil {
+            let regular = active.filter { activityRank($0) == MRBoardActivity.Group.regular.rawValue }
+            let inactive = active.filter { activityRank($0) != MRBoardActivity.Group.regular.rawValue }
+            return finished + restorePositions(regular, offset: 0) + restorePositions(inactive, offset: regular.count)
         }
-        return finished + result
+        return finished + restorePositions(active, offset: 0)
+
+        func restorePositions(_ group: [Row], offset: Int) -> [Row] {
+            let latched = group.enumerated().filter { preservedOrder[$0.element.id] != nil }.sorted {
+                (preservedOrder[$0.element.id] ?? 0, $0.offset) < (preservedOrder[$1.element.id] ?? 0, $1.offset)
+            }.map(\.element)
+            var result = group.filter { preservedOrder[$0.id] == nil }
+            for row in latched {
+                result.insert(row, at: min(max(0, (preservedOrder[row.id] ?? 0) - offset), result.count))
+            }
+            return result
+        }
     }
 
     private static func pinnedFirst<Element>(_ values: [Element], pins: Set<BoardCardPin>,

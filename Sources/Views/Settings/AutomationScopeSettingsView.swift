@@ -15,6 +15,14 @@ struct AutomationScopeSettingsView: View {
                         Text(.Settings.settingsAutomationScopeSelected).tag(MRAutomationScope.Mode.selected)
                     } label: { Text(.Settings.settingsAutomationScopeTitle) }
                     Text(.Settings.settingsAutomationScopeHelp).font(.caption).foregroundStyle(.secondary)
+                    Picker(selection: Binding(
+                        get: { monitor.settings.boardGrouping },
+                        set: { monitor.settings.boardGrouping = $0; monitor.settings.save() }
+                    )) {
+                        Text(.BoardActivity.withoutAutomationChoice).tag(MRBoardGrouping.withoutAutomation)
+                        Text(.BoardActivity.draftsChoice).tag(MRBoardGrouping.drafts)
+                    } label: { Text(.BoardActivity.groupingTitle) }
+                    Text(.BoardActivity.groupingHelp).font(.caption).foregroundStyle(.secondary)
                     Toggle(isOn: Binding(
                         get: { monitor.settings.automation.scope.pauseDraftsByDefault },
                         set: { monitor.settings.automation.scope.pauseDraftsByDefault = $0; monitor.settings.save() }

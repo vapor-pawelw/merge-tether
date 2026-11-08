@@ -3,6 +3,28 @@ import Testing
 @testable import GitLabTodos
 
 struct AutomationPackageTests {
+    @Test func inactivePresentationFollowsAutomationRatherThanDraftStatus() {
+        let target = MRAutomationScope.Target(host: "gitlab.example.test", username: "me", projectID: 1, iid: 42)
+        var settings = AutomationSettings()
+        settings.applyPreset(.full, for: .codex)
+        func activity(_ draft: Bool, finished: Bool = false) -> MRBoardActivity {
+            .init(automation: settings, target: target, isDraft: draft, isFinished: finished)
+        }
+        #expect(activity(true).group == .inactive && activity(true).isMuted)
+        #expect(activity(false).group == .regular && !activity(false).isMuted)
+        settings.scope.setEnabled(true, for: target)
+        #expect(activity(true).group == .regular && !activity(true).isMuted)
+        settings.scope.setEnabled(false, for: target)
+        #expect(activity(false).group == .inactive && activity(false).isMuted)
+        #expect(activity(true, finished: true).group == .finished && !activity(true, finished: true).isMuted)
+        settings.scope.setManualChoice(.inherit, for: target)
+        settings.scope[target.repository] = .paused
+        #expect(activity(false).group == .inactive)
+        settings.applyPreset(.manual, for: .codex)
+        #expect(activity(true).group == .drafts && activity(true).isMuted)
+        #expect(activity(false).group == .regular && !activity(false).isMuted)
+    }
+
     @Test func manualModesPersistAcrossDraftTransitionsAndAutoFollowsReadiness() throws {
         let target = MRAutomationScope.Target(host: "gitlab.example.test", username: "me", projectID: 1, iid: 42)
         var scope = MRAutomationScope()
@@ -137,7 +159,7 @@ struct AutomationPackageTests {
         #expect(scope.manualChoice(for: target) == .forceOn && scope.isManaged(target))
     }
 
-    @Test func policyOnlyChangesRetainPositionsUntilRealEvidenceOrPinChanges() throws {
+    @Test func activityGroupChangesMayMoveRowsButEvidenceStillReleasesSameGroupOrder() throws {
         let target = MRAutomationScope.Target(host: "gitlab.example.test", username: "me", projectID: 1, iid: 42)
         let id = MergeRequestAttentionMonitor.Item.ID(projectID: 1, iid: 42)
         let request = try draftPolicyRequest(draft: false)
@@ -152,16 +174,20 @@ struct AutomationPackageTests {
         after.scope.setEnabled(false, for: target)
         order.observe([entry()])
         order.policyChanged(from: before, to: after)
+        #expect(order.preserved[id] == nil)
+        var manual = before
+        manual.applyPreset(.manual, for: .codex)
+        order.policyChanged(from: before, to: manual)
         #expect(order.preserved[id] == 2)
         order.observe([entry()])
         #expect(order.preserved[id] == 2)
         order.observe([entry("new reply")])
         #expect(order.preserved[id] == nil)
-        order.policyChanged(from: after, to: before)
+        order.policyChanged(from: manual, to: before)
         #expect(order.preserved[id] == 2)
         order.observe([entry("new reply", pinned: true)])
         #expect(order.preserved[id] == nil)
-        order.policyChanged(from: before, to: after)
+        order.policyChanged(from: before, to: manual)
         order.observe([entry("new reply", pinned: true, jobID: UUID())])
         #expect(order.preserved[id] == nil)
     }

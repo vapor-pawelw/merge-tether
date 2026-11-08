@@ -14,10 +14,17 @@ struct BoardCompactJobCard: View {
             projectID: handoff.key.work.projectID, iid: handoff.key.work.iid)
     }
     private var currentRequest: GitLabMergeRequest? {
-        monitor.settings.mrLifecycleLedger.request(for: scopeTarget) ?? monitor.currentRequest(for: handoff)
+        let metadata = monitor.boardDisplayRequests.first { $0.projectID == scopeTarget.projectID && $0.iid == scopeTarget.iid }
+        guard let url = handoff.mergeRequestURL ?? metadata?.webURL ?? monitor.currentRequest(for: handoff)?.webURL else { return nil }
+        return monitor.boardDisplayRequest(for: scopeTarget, url: url) ?? monitor.currentRequest(for: handoff)
     }
     private var isDraft: Bool { currentRequest?.draft == true }
     private var finishedState: MergeRequestFinishedState? { .init(currentRequest) }
+    private var isMuted: Bool {
+        guard let url = currentRequest?.webURL ?? handoff.mergeRequestURL else { return isDraft }
+        return monitor.boardActivity(projectID: handoff.key.work.projectID, iid: handoff.key.work.iid,
+            url: url, isDraft: isDraft, isFinished: finishedState != nil).isMuted
+    }
     private var finishedItem: MergeRequestAttentionMonitor.Item? {
         guard let request = currentRequest, finishedState != nil else { return nil }
         var item = MergeRequestAttentionMonitor.Item(id: .init(projectID: request.projectID, iid: request.iid),
@@ -31,7 +38,8 @@ struct BoardCompactJobCard: View {
         VStack(alignment: .leading, spacing: 9) {
             metadataHeader
             HStack(alignment: .top, spacing: 6) {
-                BoardCardTitle(title: handoff.title, repositoryPath: repositoryPath)
+                BoardCardTitle(title: handoff.title, repositoryPath: repositoryPath,
+                    titleColor: isMuted ? .secondary : .primary)
                 Menu {
                     Button { showingDetails = true } label: {
                         Label { Text(.Board.boardDetails) } icon: { Image(systemName: "rectangle.expand.vertical") }
@@ -58,7 +66,7 @@ struct BoardCompactJobCard: View {
             if let finishedItem {
                 FinishedMergeRequestStatus(item: finishedItem, monitor: monitor)
             } else {
-                BoardJobStatusActions(handoff: handoff, monitor: monitor)
+                BoardJobStatusActions(handoff: handoff, monitor: monitor, muted: isMuted)
                 AssistantJobPreflightNotice(jobID: handoff.id, monitor: monitor)
             }
             Button { showingDetails = true } label: {

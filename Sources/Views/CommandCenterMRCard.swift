@@ -29,6 +29,10 @@ private struct CommandCenterMRCardContent: View {
     private var item: MergeRequestAttentionMonitor.Item { row.item }
     private var isDraft: Bool { item.section == .draftMergeRequests }
     private var finishedState: MergeRequestFinishedState? { .init(item.mergeRequest) }
+    private var isMuted: Bool {
+        monitor.boardActivity(projectID: item.id.projectID, iid: item.id.iid, url: item.url,
+            isDraft: isDraft, isFinished: finishedState != nil).isMuted
+    }
     private var scopeTarget: MRAutomationScope.Target? {
         monitor.scopeTarget(projectID: item.id.projectID, iid: item.id.iid, url: item.url)
     }
@@ -46,7 +50,7 @@ private struct CommandCenterMRCardContent: View {
             HStack(alignment: .top, spacing: 6) {
                 Button(action: onDetails) {
                     BoardCardTitle(title: item.title, repositoryPath: item.url.gitLabProjectPath,
-                        titleColor: isDraft ? .secondary : .primary)
+                        titleColor: isMuted ? .secondary : .primary)
                         .contentShape(Rectangle())
                 }
                 .buttonStyle(.plain)
@@ -58,11 +62,11 @@ private struct CommandCenterMRCardContent: View {
             } else {
                 if humanAction != nil {
                     Text(verbatim: presentation.message).help(Text(verbatim: presentation.message))
-                        .font(.callout).foregroundStyle(isDraft ? Color.secondary : Color.orange)
+                        .font(.callout).foregroundStyle(isMuted ? Color.secondary : Color.orange)
                         .lineLimit(2).fixedSize(horizontal: false, vertical: true)
                 }
                 if let retryError {
-                    Text(verbatim: retryError).font(.caption).foregroundStyle(.red)
+                    Text(verbatim: retryError).font(.caption).foregroundStyle(isMuted ? Color.secondary : Color.red)
                         .fixedSize(horizontal: false, vertical: true)
                 }
                 if let job = row.latestJob { AssistantJobPreflightNotice(jobID: job.id, monitor: monitor) }
@@ -77,7 +81,7 @@ private struct CommandCenterMRCardContent: View {
                             Button { openAttention(.assistantRuns) } label: { Text(.MRHumanAction.mrHumanActionActionReviewRun) }
                                 .buttonStyle(.plain)
                         } else if humanAction == nil, let status = neutralStatus {
-                            Text(status).font(.callout).foregroundStyle(isDraft ? Color.secondary : Color.primary).lineLimit(1)
+                            Text(status).font(.callout).foregroundStyle(isMuted ? Color.secondary : Color.primary).lineLimit(1)
                                 .help(Text(reviewingContext.presenceMessage)
                                       + Text(verbatim: "\n") + Text(reviewingContext.statusMessage))
                         }
@@ -293,9 +297,28 @@ struct BoardTodoRow: View {
     let monitor: TodoMonitorService
     @State private var showingDetails = false
 
+    private var canonicalMRURL: URL? {
+        guard todo.targetType == .mergeRequest, let iid = todo.target.iid,
+              let host = monitor.glab.resolvedHost else { return nil }
+        return todo.targetURL.gitLabTodoMergeRequestURL(host: host, iid: iid)
+    }
+
+    private var displayRequest: GitLabMergeRequest? {
+        guard let scopeTarget, let iid = scopeTarget.iid,
+              let url = todo.targetURL.gitLabTodoMergeRequestURL(host: scopeTarget.host, iid: iid) else { return nil }
+        return monitor.boardDisplayRequest(for: scopeTarget, url: url)
+    }
+    private var isDraft: Bool { displayRequest?.draft ?? todo.isDraft }
+
+    private var isMuted: Bool {
+        guard todo.targetType == .mergeRequest, let iid = todo.target.iid, let url = canonicalMRURL else { return todo.isDraft }
+        return monitor.boardActivity(projectID: todo.project.id, iid: iid, url: url,
+            isDraft: isDraft, isFinished: MergeRequestFinishedState(displayRequest) != nil).isMuted
+    }
+
     private var scopeTarget: MRAutomationScope.Target? {
-        guard todo.targetType == .mergeRequest, let iid = todo.target.iid else { return nil }
-        return monitor.scopeTarget(projectID: todo.project.id, iid: iid, url: todo.targetURL)
+        guard todo.targetType == .mergeRequest, let iid = todo.target.iid, let url = canonicalMRURL else { return nil }
+        return monitor.scopeTarget(projectID: todo.project.id, iid: iid, url: url)
     }
 
     var body: some View {
@@ -305,7 +328,7 @@ struct BoardTodoRow: View {
                 Button { showingDetails = true } label: {
                     ActionDescriptionText(todo: todo, currentUsername: monitor.glab.currentUsername,
                         repositoryPath: todo.project.pathWithNamespace)
-                        .font(.callout).foregroundStyle(todo.isDraft ? Color.secondary : Color.primary)
+                        .font(.callout).foregroundStyle(isMuted ? Color.secondary : Color.primary)
                         .multilineTextAlignment(.leading).lineLimit(2)
                         .fixedSize(horizontal: false, vertical: true)
                         .frame(maxWidth: .infinity, alignment: .leading)
@@ -353,7 +376,7 @@ struct BoardTodoRow: View {
                 }
                 if let scopeTarget {
                     MRAutomationScopeMenu(settings: monitor.settings, target: scopeTarget,
-                        projectPath: todo.project.pathWithNamespace, isDraft: todo.isDraft)
+                        projectPath: todo.project.pathWithNamespace, isDraft: isDraft)
                 }
             }
         }
@@ -365,7 +388,7 @@ struct BoardTodoRow: View {
                 roleLabel: todo.targetType == .mergeRequest && todo.target.author != nil
                     ? .ReviewingContext.reviewingAuthorLabel : nil)
             Spacer(minLength: 4)
-            if todo.isDraft { BoardDraftBadge() }
+            if isDraft { BoardDraftBadge() }
             if todo.targetType == .mergeRequest, let iid = todo.target.iid {
                 BoardMRIdentifier(iid: iid)
             } else if !todo.relativeIdentifier.isEmpty {
@@ -373,7 +396,7 @@ struct BoardTodoRow: View {
             }
             if let scopeTarget {
                 BoardAutomationToggle(settings: monitor.settings, target: scopeTarget,
-                    projectPath: todo.project.pathWithNamespace, isDraft: todo.isDraft)
+                    projectPath: todo.project.pathWithNamespace, isDraft: isDraft)
             }
             BoardPinButton(pin: .todo(host: monitor.glab.resolvedHost,
                 username: monitor.glab.currentUsername, id: todo.id), settings: monitor.settings)
@@ -399,7 +422,7 @@ struct BoardTodoRow: View {
             if let scopeTarget {
                 Divider()
                 MRAutomationScopeMenu(settings: monitor.settings, target: scopeTarget,
-                    projectPath: todo.project.pathWithNamespace, isDraft: todo.isDraft)
+                    projectPath: todo.project.pathWithNamespace, isDraft: isDraft)
             }
         } label: { BoardCardActionIcon(systemName: "ellipsis") }
         .menuStyle(.borderlessButton).menuIndicator(.hidden).fixedSize()

@@ -1,0 +1,61 @@
+{
+  "sourceLanguage": "en",
+  "strings": {
+    "inactiveSection": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Inactive"
+          }
+        }
+      }
+    },
+    "groupingTitle": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Lower board section"
+          }
+        }
+      }
+    },
+    "withoutAutomationChoice": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Without automation"
+          }
+        }
+      }
+    },
+    "draftsChoice": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Drafts"
+          }
+        }
+      }
+    },
+    "groupingHelp": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Choose which merge requests appear below the main group with muted titles and statuses. When all automation is off, Drafts is used and your saved choice is kept."
+          }
+        }
+      }
+    }
+  },
+  "version": "1.0"
+}

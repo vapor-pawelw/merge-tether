@@ -44,8 +44,11 @@ struct CommandCenterBoardView: View {
                 if otherCards.isEmpty {
                     empty(.Board.boardEmptyOtherTitle, message: .Board.boardLaneOtherEmpty, symbol: "checkmark")
                 }
-                ForEach(otherCards) { entry in
-                    otherCard(entry).transition(cardTransition)
+                ForEach(Array(otherCards.enumerated()), id: \.element.id) { index, entry in
+                    VStack(spacing: 10) {
+                        activityDivider(entry.activityGroup, previous: index > 0 ? otherCards[index - 1].activityGroup : nil)
+                        otherCard(entry)
+                    }.transition(cardTransition)
                 }
             }
         }
@@ -95,19 +98,28 @@ struct CommandCenterBoardView: View {
     private func laneCards(_ rows: [MergeRequestBoardSnapshot.Row], removable: Bool = false) -> some View {
         ForEach(Array(rows.enumerated()), id: \.element.id) { index, row in
             VStack(spacing: 10) {
-                if row.item.mergeRequest?.state == "opened", row.item.mergeRequest?.draft == true,
-                   index == 0 || rows[index - 1].item.mergeRequest?.draft != true
-                    || rows[index - 1].item.mergeRequest?.state != "opened" {
-                    HStack(spacing: 10) {
-                        Text(.DraftMR.sectionTitle).font(.caption.weight(.medium)).foregroundStyle(.secondary)
-                        Rectangle().fill(.secondary.opacity(0.16)).frame(height: 0.5)
-                    }
-                    .padding(.top, index == 0 ? 2 : 14)
-                    .padding(.horizontal, 4)
-                }
+                activityDivider(activity(row), previous: index > 0 ? activity(rows[index - 1]) : nil)
                 card(row, removable: removable)
             }
             .transition(cardTransition)
+        }
+    }
+
+    private func activity(_ row: MergeRequestBoardSnapshot.Row) -> MRBoardActivity.Group {
+        monitor.boardActivity(projectID: row.id.projectID, iid: row.id.iid, url: row.item.url,
+            isDraft: row.item.section == .draftMergeRequests,
+            isFinished: MergeRequestFinishedState(row.item.mergeRequest) != nil).group
+    }
+
+    @ViewBuilder private func activityDivider(_ group: MRBoardActivity.Group, previous: MRBoardActivity.Group?) -> some View {
+        if group != previous, group == .inactive || group == .drafts {
+            HStack(spacing: 10) {
+                Text(group == .inactive ? .BoardActivity.inactiveSection : .DraftMR.sectionTitle)
+                    .font(.caption.weight(.medium)).foregroundStyle(.secondary)
+                Rectangle().fill(.secondary.opacity(0.16)).frame(height: 0.5)
+            }
+            .padding(.top, previous == nil ? 2 : 14)
+            .padding(.horizontal, 4)
         }
     }
 

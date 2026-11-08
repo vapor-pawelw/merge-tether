@@ -6,6 +6,8 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 
 ## Unreleased
 
+- Choose Without automation (default) or Drafts for the lower board section, with matching ordering and title/status muting; turning all automation off temporarily uses Drafts without forgetting the saved choice.
+
 - Snap the iOS board to wider lanes with hidden scroll indicators and an adaptive landscape layout; keep connection status stable during refresh while preserving action freshness checks.
 
 - Share Mac card text, status badges and primary CTAs with iOS, highlight attention in orange, and replace unexplained commit hashes with MR numbers.
@@ -21,7 +23,7 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 
 - Add a simple per-MR Automation switch and repository-default toggles, preserving inherited scope and existing action permissions.
 - Keep cached background refreshes silent while showing startup, explicit global and per-MR refresh progress without weakening action freshness checks.
-- Keep draft cards at normal contrast and distinguish them with gray titles and statuses.
+- Keep cards at normal opacity and mute only titles/statuses according to the selected lower-section grouping.
 
 - Compare app-owned coding-agent and verification usage in a dedicated Settings tab, with persistent USD estimates, daily averages/history, hourly through monthly Codex/Claude bars and precise hover details; retain reported tokens and explicit unknown or partial runs.
 
@@ -75,7 +77,7 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 
 - Name current automation stages on MR cards and in Details, distinguish queued agents from running work, and show merge dependencies below status.
 
-- Give empty lanes a centered icon and clear title, distinguish first-load placeholders from empty lists, and dim entire Draft cards consistently.
+- Give empty lanes a centered icon and clear title, distinguish first-load placeholders from empty lists, and mute board titles/statuses according to the selected lower section.
 
 - Open card details by clicking anywhere on a board card, highlight cards on hover, show compact pin controls beside MR numbers and clarify whether automation is enabled or paused.
 
