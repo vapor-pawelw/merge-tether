@@ -52,6 +52,18 @@ enum ClaudeVerificationModel: String, CaseIterable, Codable, Sendable {
     var name: String { self == .haiku ? "Claude Haiku 5.5" : "Claude Sonnet 5.5" }
 }
 
+enum VerificationThinking: String, CaseIterable, Codable, Sendable {
+    case low, medium, high
+
+    var name: LocalizedStringResource {
+        switch self {
+        case .low: .Settings.settingsAutomationThinkingLow
+        case .medium: .Settings.settingsAutomationThinkingMedium
+        case .high: .Settings.settingsAutomationThinkingHigh
+        }
+    }
+}
+
 enum CodexReviewThinking: String, CaseIterable, Codable, Sendable {
     case low, medium, high, xhigh, max
 
@@ -129,6 +141,7 @@ struct AutomationSettings: Codable, Equatable, Sendable {
     var autoVerifyReReview = true
     var codexVerificationModel: CodexReviewModel = .luna
     var claudeVerificationModel: ClaudeVerificationModel = .haiku
+    var verificationThinking: VerificationThinking = .high
     var assistant: AutomationAssistant = .codex
     var codexReviewModel: CodexReviewModel = .sol
     var codexReviewThinking: CodexReviewThinking = .high
@@ -265,6 +278,7 @@ struct AutomationSettings: Codable, Equatable, Sendable {
         autoVerifyReReview = try values.decodeIfPresent(Bool.self, forKey: .autoVerifyReReview) ?? true
         codexVerificationModel = (try? values.decode(CodexReviewModel.self, forKey: .codexVerificationModel)) ?? .luna
         claudeVerificationModel = (try? values.decode(ClaudeVerificationModel.self, forKey: .claudeVerificationModel)) ?? .haiku
+        verificationThinking = (try? values.decode(VerificationThinking.self, forKey: .verificationThinking)) ?? .high
         assistant = try values.decodeIfPresent(AutomationAssistant.self, forKey: .assistant) ?? assistant
         codexReviewModel = (try? values.decode(CodexReviewModel.self, forKey: .codexReviewModel)) ?? codexReviewModel
         codexReviewThinking = (try? values.decode(CodexReviewThinking.self, forKey: .codexReviewThinking)) ?? codexReviewThinking
@@ -347,7 +361,7 @@ struct AutomationSettings: Codable, Equatable, Sendable {
         case allowAssistantTools, assistantToolProjects, packageDecision, workflowRules
         case autoMergeProjects, allowConflictPush, allowFollowUpPush, conflictPushProjects, autoReReviewEnabled, publishDraftsWithoutConfirmation, publishAIRepliesWithoutConfirmation, autoApproveEnabled, autoResolveOwnReviewThreads
         case codexReviewModel, codexReviewThinking, assistantDefaultsVersion, scope
-        case autoVerifyReReview, codexVerificationModel, claudeVerificationModel
+        case autoVerifyReReview, codexVerificationModel, claudeVerificationModel, verificationThinking
         case autoResolveAcceptedFeedback, publicationRestrictions, publicationPolicyMode, baselinePreset, projectPermissionsVersion, autoClaimPipelineFailures
     }
 

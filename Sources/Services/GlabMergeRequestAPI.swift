@@ -139,6 +139,24 @@ extension GlabService {
         )
     }
 
+    /// Read stable account metadata rather than inferring identity from names or AI-like prose.
+    func feedbackAccountKind(userID: Int, host: String) async throws -> AuthorFeedbackPolicy.AccountKind {
+        struct Account: Decodable {
+            let id: Int
+            let bot: Bool?
+            let userType: String?
+            enum CodingKeys: String, CodingKey { case id, bot; case userType = "user_type" }
+        }
+        guard userID > 0 else { return .unknown }
+        let account: Account = try await mergeRequestAPI("/users/\(userID)", host: host)
+        guard account.id == userID else { return .unknown }
+        if account.bot == true || account.userType.map({ ["service_account", "project_bot", "group_bot"].contains($0) }) == true {
+            return .automation
+        }
+        guard account.bot == false, account.userType == nil || account.userType == "human" else { return .unknown }
+        return .regular
+    }
+
     func isGitLabDuo(userID: Int, host: String) async throws -> Bool {
         struct User: Decodable { let id: Int; let username: String; let bot: Bool? }
         let user: User = try await mergeRequestAPI("/users/\(userID)", host: host)

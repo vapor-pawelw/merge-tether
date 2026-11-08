@@ -91,6 +91,45 @@ struct AssistantDependenciesTests {
         #expect(disabled.autoVerifyReReview)
     }
 
+    @Test(arguments: AutomationAssistant.allCases)
+    func verifierThinkingDefaultsAndLegacySettingsUseHigh(_ assistant: AutomationAssistant) throws {
+        func thinking(_ settings: AutomationSettings) throws -> String? {
+            let object = try #require(JSONSerialization.jsonObject(with: JSONEncoder().encode(settings)) as? [String: Any])
+            return object["verificationThinking"] as? String
+        }
+        #expect(try thinking(AutomationSettings()) == "high")
+        for legacy in [#"{}"#, #"{"verificationThinking":"unsupported"}"#] {
+            let decoded = try JSONDecoder().decode(AutomationSettings.self, from: Data(legacy.utf8))
+            #expect(try thinking(decoded) == "high")
+        }
+        var configured = try JSONDecoder().decode(AutomationSettings.self,
+            from: Data(#"{"verificationThinking":"low"}"#.utf8))
+        configured.applyRecommended(for: assistant)
+        #expect(try thinking(configured) == "high")
+        for preset in [AutomationPreset.full, .checkpoints] {
+            configured = try JSONDecoder().decode(AutomationSettings.self,
+                from: Data(#"{"verificationThinking":"low"}"#.utf8))
+            configured.applyPreset(preset, for: assistant)
+            #expect(try thinking(configured) == "high")
+        }
+    }
+
+    @MainActor @Test(arguments: ["low", "medium", "high"], AutomationAssistant.allCases)
+    func explicitVerifierThinkingPersistsAcrossSettingsReload(_ thinking: String, _ assistant: AutomationAssistant) throws {
+        let suite = "VerifierThinkingTests.\(UUID())"
+        let defaults = try #require(UserDefaults(suiteName: suite))
+        defer { defaults.removePersistentDomain(forName: suite) }
+        let manager = SettingsManager(defaults: defaults)
+        manager.automation = try JSONDecoder().decode(AutomationSettings.self,
+            from: Data(#"{"assistant":"\#(assistant.rawValue)","verificationThinking":"\#(thinking)"}"#.utf8))
+        manager.save()
+
+        let restored = SettingsManager(defaults: defaults)
+        let encoded = try #require(JSONSerialization.jsonObject(with: JSONEncoder().encode(restored.automation)) as? [String: Any])
+        #expect(encoded["verificationThinking"] as? String == thinking)
+        #expect(restored.automation.assistant == assistant)
+    }
+
     @MainActor @Test func cancellingSelectionRejectsLateSuccessfulProbe() async {
         var resume: CheckedContinuation<AssistantDependencyStatus, Never>?
         let setup = AssistantSetupSession(assistant: .claude, requireCLI: true, probe: { _, _ in

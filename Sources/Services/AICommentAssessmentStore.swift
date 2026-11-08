@@ -15,11 +15,14 @@ struct AICommentAssessment: Codable, Sendable, Equatable {
     var provider: String? = nil
     var model: String? = nil
     var criteriaVersion: Int? = nil
+    var username: String? = nil
+    var authorID: Int? = nil
+    var thinking: VerificationThinking? = nil
 
     var qualifiesAsAI: Bool { classification == "ai_assisted" && ["high", "very_high"].contains(confidence) }
 
     private enum CodingKeys: String, CodingKey {
-        case version, host, projectID, iid, noteID, bodySHA256, confidence, evidence, classification, provider, model, criteriaVersion
+        case version, host, projectID, iid, noteID, bodySHA256, confidence, evidence, classification, provider, model, criteriaVersion, username, authorID, thinking
     }
 
     init(from decoder: Decoder) throws {
@@ -37,13 +40,18 @@ struct AICommentAssessment: Codable, Sendable, Equatable {
         provider = try values.decodeIfPresent(String.self, forKey: .provider)
         model = try values.decodeIfPresent(String.self, forKey: .model)
         criteriaVersion = try values.decodeIfPresent(Int.self, forKey: .criteriaVersion)
+        username = try values.decodeIfPresent(String.self, forKey: .username)
+        authorID = try values.decodeIfPresent(Int.self, forKey: .authorID)
+        thinking = try values.decodeIfPresent(VerificationThinking.self, forKey: .thinking)
     }
 
     init(version: Int, host: String, projectID: Int, iid: Int, noteID: Int, bodySHA256: String, confidence: String,
-         evidence: String, classification: String = "ai_assisted", provider: String? = nil, model: String? = nil, criteriaVersion: Int? = nil) {
+         evidence: String, classification: String = "ai_assisted", provider: String? = nil, model: String? = nil, criteriaVersion: Int? = nil,
+         username: String? = nil, authorID: Int? = nil, thinking: VerificationThinking? = nil) {
         self.version = version; self.host = host; self.projectID = projectID; self.iid = iid; self.noteID = noteID
         self.bodySHA256 = bodySHA256; self.confidence = confidence; self.evidence = evidence
         self.classification = classification; self.provider = provider; self.model = model; self.criteriaVersion = criteriaVersion
+        self.username = username; self.authorID = authorID; self.thinking = thinking
     }
 }
 
@@ -56,6 +64,7 @@ enum AICommentAssessmentStore {
         let provider: String
         let model: String
         let criteriaVersion: Int
+        var thinking: VerificationThinking? = nil
     }
 
     private struct PendingVerdict: Codable, Sendable {
@@ -65,14 +74,14 @@ enum AICommentAssessmentStore {
     }
 
     nonisolated private static func pendingContext(for note: GitLabMergeRequestDiscussion.Note, target: MRAutomationScope.Target,
-        assistant: AutomationAssistant, model: String) throws -> PendingContext {
+        assistant: AutomationAssistant, model: String, thinking: VerificationThinking?) throws -> PendingContext {
         guard let id = note.id, id > 0, let authorID = note.author?.id, authorID > 0,
               let body = note.body, !body.isEmpty, let iid = target.iid, iid > 0,
               target.projectID > 0, !target.host.isEmpty, !target.username.isEmpty else {
             throw AICommentOriginAssessor.AssessmentError.invalidEvidence
         }
         return .init(target: target, noteID: id, authorID: authorID, bodySHA256: digest(body),
-            provider: assistant.rawValue, model: model, criteriaVersion: AICommentOriginAssessor.criteriaVersion)
+            provider: assistant.rawValue, model: model, criteriaVersion: AICommentOriginAssessor.criteriaVersion, thinking: thinking)
     }
 
     nonisolated private static func pendingURL(_ context: PendingContext, in directory: URL) throws -> URL {
@@ -82,29 +91,41 @@ enum AICommentAssessmentStore {
         return directory.appending(path: ".pending-origin-verdicts").appending(path: identity + ".json")
     }
 
+    nonisolated private static func pendingContexts(for note: GitLabMergeRequestDiscussion.Note, target: MRAutomationScope.Target,
+        assistant: AutomationAssistant, model: String, thinking: VerificationThinking) throws -> [PendingContext] {
+        let current = try pendingContext(for: note, target: target, assistant: assistant, model: model, thinking: thinking)
+        guard thinking == .medium else { return [current] }
+        // Earlier app versions always used medium and omitted effort from their journal identity.
+        var legacy = current
+        legacy.thinking = nil
+        return [current, legacy]
+    }
+
     /// Pending verdicts preserve a completed opinion, but are never read by publication eligibility.
     nonisolated static func pendingVerdict(for note: GitLabMergeRequestDiscussion.Note, target: MRAutomationScope.Target,
-        assistant: AutomationAssistant, model: String, in directory: URL) throws -> AICommentOriginAssessment.Note? {
-        let context = try pendingContext(for: note, target: target, assistant: assistant, model: model)
-        let path = try pendingURL(context, in: directory)
-        let data: Data
-        do { data = try Data(contentsOf: path) }
-        catch let error as CocoaError where error.code == .fileReadNoSuchFile { return nil }
-        guard data.count < 16384 else { throw AICommentOriginAssessor.AssessmentError.invalidEvidence }
-        let pending = try JSONDecoder().decode(PendingVerdict.self, from: data)
-        guard pending.version == 1, pending.context == context else { throw AICommentOriginAssessor.AssessmentError.invalidEvidence }
-        try AICommentOriginAssessor.validate(.init(notes: [pending.verdict]), noteIDs: [context.noteID])
-        return pending.verdict
+        assistant: AutomationAssistant, model: String, thinking: VerificationThinking = .high, in directory: URL) throws -> AICommentOriginAssessment.Note? {
+        for context in try pendingContexts(for: note, target: target, assistant: assistant, model: model, thinking: thinking) {
+            let path = try pendingURL(context, in: directory)
+            let data: Data
+            do { data = try Data(contentsOf: path) }
+            catch let error as CocoaError where error.code == .fileReadNoSuchFile { continue }
+            guard data.count < 16384 else { throw AICommentOriginAssessor.AssessmentError.invalidEvidence }
+            let pending = try JSONDecoder().decode(PendingVerdict.self, from: data)
+            guard pending.version == 1, pending.context == context else { throw AICommentOriginAssessor.AssessmentError.invalidEvidence }
+            try AICommentOriginAssessor.validate(.init(notes: [pending.verdict]), noteIDs: [context.noteID])
+            return pending.verdict
+        }
+        return nil
     }
 
     @discardableResult
     nonisolated static func preservePendingVerdict(_ verdict: AICommentOriginAssessment.Note,
         for note: GitLabMergeRequestDiscussion.Note, target: MRAutomationScope.Target,
-        assistant: AutomationAssistant, model: String, in directory: URL) throws -> AICommentOriginAssessment.Note {
-        if let existing = try pendingVerdict(for: note, target: target, assistant: assistant, model: model, in: directory) {
+        assistant: AutomationAssistant, model: String, thinking: VerificationThinking = .high, in directory: URL) throws -> AICommentOriginAssessment.Note {
+        if let existing = try pendingVerdict(for: note, target: target, assistant: assistant, model: model, thinking: thinking, in: directory) {
             return existing
         }
-        let context = try pendingContext(for: note, target: target, assistant: assistant, model: model)
+        let context = try pendingContext(for: note, target: target, assistant: assistant, model: model, thinking: thinking)
         try AICommentOriginAssessor.validate(.init(notes: [verdict]), noteIDs: [context.noteID])
         let path = try pendingURL(context, in: directory)
         try FileManager.default.createDirectory(at: path.deletingLastPathComponent(), withIntermediateDirectories: true,
@@ -117,11 +138,12 @@ enum AICommentAssessmentStore {
     }
 
     nonisolated static func removePendingVerdict(for note: GitLabMergeRequestDiscussion.Note, target: MRAutomationScope.Target,
-        assistant: AutomationAssistant, model: String, in directory: URL) throws {
-        let context = try pendingContext(for: note, target: target, assistant: assistant, model: model)
-        let path = try pendingURL(context, in: directory)
-        do { try FileManager.default.removeItem(at: path) }
-        catch let error as CocoaError where error.code == .fileNoSuchFile || error.code == .fileReadNoSuchFile {}
+        assistant: AutomationAssistant, model: String, thinking: VerificationThinking = .high, in directory: URL) throws {
+        for context in try pendingContexts(for: note, target: target, assistant: assistant, model: model, thinking: thinking) {
+            let path = try pendingURL(context, in: directory)
+            do { try FileManager.default.removeItem(at: path) }
+            catch let error as CocoaError where error.code == .fileNoSuchFile || error.code == .fileReadNoSuchFile {}
+        }
     }
 
     nonisolated static let directory = ReviewVerdictStore.directory.deletingLastPathComponent()
@@ -160,13 +182,14 @@ enum AICommentAssessmentStore {
             && record.noteID == id && AICommentOriginAssessment.Classification(rawValue: record.classification) != nil
             && AICommentOriginAssessment.Confidence(rawValue: record.confidence) != nil
             && !record.evidence.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+            && (record.authorID == nil || record.authorID == note.author?.id)
             && record.bodySHA256 == digest(body)
         else { return nil }
         return record
     }
 
     nonisolated static func persist(_ assessment: AICommentOriginAssessment, target: MRAutomationScope.Target,
-        notes: [GitLabMergeRequestDiscussion.Note], assistant: AutomationAssistant, model: String, in directory: URL) throws {
+        notes: [GitLabMergeRequestDiscussion.Note], assistant: AutomationAssistant, model: String, thinking: VerificationThinking = .high, in directory: URL) throws {
         try AICommentOriginAssessor.validate(assessment, noteIDs: notes.compactMap(\.id))
         guard let iid = target.iid else { throw AICommentOriginAssessor.AssessmentError.invalidEvidence }
         for result in assessment.notes {
@@ -177,7 +200,8 @@ enum AICommentAssessmentStore {
             let record = AICommentAssessment(version: 2, host: target.host, projectID: target.projectID, iid: iid,
                 noteID: result.noteID, bodySHA256: digest(body), confidence: result.confidence.rawValue,
                 evidence: GlabService.redactWorkflowEvidence(result.evidence), classification: result.classification.rawValue,
-                provider: assistant.rawValue, model: model, criteriaVersion: AICommentOriginAssessor.criteriaVersion)
+                provider: assistant.rawValue, model: model, criteriaVersion: AICommentOriginAssessor.criteriaVersion,
+                username: target.username, authorID: note.author?.id, thinking: thinking)
             let path = fileURL(host: target.host, projectID: target.projectID, iid: iid, noteID: result.noteID, in: directory)
             try FileManager.default.createDirectory(at: path.deletingLastPathComponent(), withIntermediateDirectories: true, attributes: [.posixPermissions: 0o700])
             try JSONEncoder().encode(record).write(to: path, options: .atomic)

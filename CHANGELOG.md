@@ -56,6 +56,8 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 
 ### Changed
 
+- Default feedback, draft-claim and AI-assistance verification to High reasoning for Codex and Claude, with a shared Low, Medium or High setting independent of coding reasoning.
+
 - Identify rejected prepared replies by their exact text and source discussion, with a direct review action and expandable technical evidence.
 
 - Separate plain-language attention explanations from technical verifier evidence, keep diagnostics collapsed in Details, and use readable fallbacks for older cached results.
@@ -91,6 +93,10 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 - Refresh public documentation and use the retro painted-style MergeTether icon.
 
 ### Fixed
+
+- Correlate review summaries with answered findings across threads without requiring duplicate replies, while preserving outstanding conditions and reviewer consent.
+
+- Keep courtesy thumbs-ups for human feedback, including AI-assisted comments, while skipping generic bot and automated workflow reports; concrete bot review feedback remains eligible without affecting safe thread closure.
 
 - Preserve pending verifier decisions across restarts and defer automatic publication during active agent work without discarding unrelated reply evidence.
 

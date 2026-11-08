@@ -336,7 +336,7 @@ import Testing
                 })
             },
             verifyDraftProofRecovery: verifyDraftRecovery ?? { _, _, _ in throw DraftProofRecoveryVerifier.Failure.failed },
-            assessAIOrigin: assessAIOrigin ?? { _, notes, _, _ in
+            assessAIOrigin: assessAIOrigin ?? { _, notes, _, _, _ in
                 .init(notes: notes.compactMap { note in note.id.map {
                     .init(noteID: $0, classification: .uncertain, confidence: .uncertain, evidence: "No AI provenance in this fixture.")
                 } })
@@ -1376,6 +1376,7 @@ import Testing
         let harness = try makeHarness(assistantWorked: true, authored: true)
         defer { harness.cleanUp() }
         try prepareAuthoredFeedback(harness)
+        harness.settings.automation.verificationThinking = .low
         try harness.write("fail-verification", "yes")
         let original = harness.log("request.json").replacingOccurrences(of: "\"title\":\"Fix\"",
             with: "\"title\":\"Fix\",\"description\":\"Current fallback documented\"")
@@ -1387,6 +1388,7 @@ import Testing
         try await harness.poll()
         let input = try #require(JSONSerialization.jsonObject(with: Data(harness.log("verifier-input.json").utf8)) as? [String: Any])
         #expect(input["description"] as? String == "Current fallback documented")
+        #expect(input["thinking"] as? String == "low")
         let target = input["target"] as? [String: Any]
         #expect(target?["host"] as? String == host)
         #expect(target?["projectID"] as? Int == 1)
@@ -2124,7 +2126,7 @@ import Testing
         let probe = OriginProbe()
         defer { probe.finish(ai: false) }
         let harness = try makeHarness(assistantWorked: outcome != "noWorker", authored: true,
-            assessAIOrigin: { _, notes, _, _ in await probe.assess(notes) })
+            assessAIOrigin: { _, notes, _, _, _ in await probe.assess(notes) })
         defer { harness.cleanUp() }
         harness.settings.automation.publicationMode = .aiReplies
         try harness.write("drafts.json", #"[{"id":12,"author_id":3,"note":"Verified fix","discussion_id":"human"}]"#)

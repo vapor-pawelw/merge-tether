@@ -4,6 +4,33 @@ import Testing
 
 @MainActor
 struct DraftProofRecoveryTests {
+    @Test(arguments: VerificationThinking.allCases)
+    func passesTheSelectedThinkingToDraftClaimVerification(_ thinking: VerificationThinking) async throws {
+        let f = try Fixture()
+        defer { f.clean() }
+        f.settings.automation.verificationThinking = thinking
+        let coordinator = f.coordinator()
+        coordinator.schedule(snapshot: f.snapshot, origin: f.proof, configuration: f.settings.automation)
+        try await f.settle(coordinator)
+        #expect(f.verifierThinking == [thinking])
+    }
+
+    @Test func changingThinkingDoesNotSolicitAnotherOpinionOnARejectedDraft() async throws {
+        let f = try Fixture()
+        defer { f.clean() }
+        f.settings.automation.verificationThinking = .medium
+        f.claimState = .uncertain
+        let coordinator = f.coordinator()
+        coordinator.schedule(snapshot: f.snapshot, origin: f.proof, configuration: f.settings.automation)
+        try await f.settle(coordinator)
+        f.settings.automation.verificationThinking = .high
+        let restarted = f.coordinator()
+        restarted.schedule(snapshot: f.snapshot, origin: f.proof, configuration: f.settings.automation)
+        try await f.settle(restarted)
+        #expect(f.assessments == 1)
+        #expect(f.publication().isEmpty)
+    }
+
     @Test(arguments: ["cooldown", "providerRecovered"])
     func unavailableProviderCanRecoverWithoutManuallyResettingDraftEvidence(_ recovery: String) async throws {
         let f = try Fixture()
@@ -1172,8 +1199,8 @@ struct DraftProofRecoveryTests {
         #expect(f.receipts().isEmpty)
     }
 
-    @Test(arguments: AutomationAssistant.allCases)
-    func headlessClaimVerifierReceivesTheCurrentHeadInsteadOfTheHistoricalHead(_ assistant: AutomationAssistant) async throws {
+    @Test(arguments: AutomationAssistant.allCases, VerificationThinking.allCases)
+    func headlessClaimVerifierReceivesTheCurrentHeadInsteadOfTheHistoricalHead(_ assistant: AutomationAssistant, _ thinking: VerificationThinking) async throws {
         let f = try Fixture()
         defer { f.clean() }
         f.snapshot.request = try f.request(head: String(repeating: "b", count: 40))
@@ -1185,6 +1212,7 @@ struct DraftProofRecoveryTests {
             args=sys.argv[1:]; raw=sys.stdin.read(); codex=args[0]=='exec'
             evidence=json.loads(raw[raw.index('{'):]) if codex else json.loads(raw)
             pathlib.Path(__file__+'.capture').write_text(json.dumps(evidence))
+            pathlib.Path(__file__+'.arguments').write_text(json.dumps(args))
             result={'drafts':[{'draftID':12,'state':'valid','reason':'Current source and regression tests checked.','summary':'The reply is supported by the current code and tests.'}]}
             if codex: json.dump(result,open(args[args.index('-o')+1],'w'))
             else: print(json.dumps({'is_error':False,'structured_output':result}))
@@ -1192,10 +1220,21 @@ struct DraftProofRecoveryTests {
         try FileManager.default.setAttributes([.posixPermissions: 0o700], ofItemAtPath: script.path)
         let currentFiles = [FollowUpVerification.FileEvidence(path: "Sources/Fixed.swift",
             sha256: AICommentAssessmentStore.digest("new committed source and tests"))]
-        let result = try await DraftProofRecoveryVerifier.run(.init(snapshot: f.snapshot, origin: f.proof, currentFiles: currentFiles),
+        var input = DraftProofRecoveryVerifier.Input(snapshot: f.snapshot, origin: f.proof, currentFiles: currentFiles)
+        #expect(input.thinking == .high)
+        input.thinking = thinking
+        let result = try await DraftProofRecoveryVerifier.run(input,
             assistant: assistant, model: "fixture", executable: script)
         #expect(result.drafts.first?.state == .valid)
         #expect(result.drafts.first?.summary == "The reply is supported by the current code and tests.")
+        let arguments = try JSONDecoder().decode([String].self,
+            from: Data(contentsOf: URL(fileURLWithPath: script.path + ".arguments")))
+        if assistant == .codex {
+            #expect(arguments.contains("model_reasoning_effort=\"\(thinking.rawValue)\""))
+        } else {
+            let effortIndex = try #require(arguments.firstIndex(of: "--effort"))
+            #expect(arguments[effortIndex + 1] == thinking.rawValue)
+        }
         let payload = try #require(JSONSerialization.jsonObject(with: Data(contentsOf: URL(fileURLWithPath: script.path + ".capture"))) as? [String: Any])
         let target = try #require(payload["target"] as? [String: Any])
         #expect(target["headSHA"] as? String == f.snapshot.request.sha)
@@ -1320,6 +1359,7 @@ struct DraftProofRecoveryTests {
         var snapshot: DraftProofRecoveryCoordinator.Snapshot
         var live: DraftProofRecoveryCoordinator.Snapshot
         var assessments = 0
+        var verifierThinking: [VerificationThinking] = []
         var automationAvailable = true
         var verifyFails = false
         var verifyFailuresRemaining = 0
@@ -1454,6 +1494,7 @@ struct DraftProofRecoveryTests {
                     return remoteHash
                 }, verify: { [self] input, _, _ in
                     assessments += 1
+                    verifierThinking.append(input.thinking)
                     if verifyFails { throw DraftProofRecoveryVerifier.Failure.failed }
                     if verifyFailuresRemaining > 0 { verifyFailuresRemaining -= 1; throw DraftProofRecoveryVerifier.Failure.failed }
                     duringAssessment?()

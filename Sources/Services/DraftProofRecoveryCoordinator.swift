@@ -406,7 +406,8 @@ final class DraftProofRecoveryCoordinator {
             let available = await canAutomate(input.configuration.assistant)
             guard current(input) else { throw CancellationError() }
             guard available else { throw VerifierUnavailable() }
-            assessment = try await verify(.init(snapshot: live, origin: input.origin, draftIDs: input.draftIDs, currentFiles: files), input.configuration.assistant, model)
+            assessment = try await verify(.init(snapshot: live, origin: input.origin, draftIDs: input.draftIDs,
+                currentFiles: files, thinking: input.configuration.verificationThinking), input.configuration.assistant, model)
             try DraftProofRecoveryVerifier.validate(assessment, draftIDs: input.draftIDs)
             guard current(input) else { throw CancellationError() }
             semanticCache[snapshot.work] = (input.id, assessment)

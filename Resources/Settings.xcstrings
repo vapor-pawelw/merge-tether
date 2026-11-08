@@ -1882,6 +1882,17 @@
         }
       }
     },
+    "settings.verification.thinking": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Verification reasoning"
+          }
+        }
+      }
+    },
     "settings.verification.model": {
       "extractionState": "manual",
       "localizations": {

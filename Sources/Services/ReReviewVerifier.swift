@@ -5,7 +5,7 @@ import Foundation
 enum ReReviewVerifier {
     enum VerificationError: Error, Equatable { case unavailable, failed, incompleteEvidence }
 
-    static let schema = #"{"type":"object","additionalProperties":false,"properties":{"notes":{"type":"array","items":{"type":"object","additionalProperties":false,"properties":{"noteID":{"type":"integer"},"state":{"type":"string","enum":["addressed","informational","blocking","uncertain"]},"reason":{"type":"string"},"summary":{"type":"string","minLength":1,"maxLength":200},"acceptanceNoteID":{"type":["integer","null"]},"informationalAcknowledgementSafe":{"type":"boolean"}},"required":["noteID","state","reason","summary","acceptanceNoteID","informationalAcknowledgementSafe"]}}},"required":["notes"]}"#
+    static let schema = #"{"type":"object","additionalProperties":false,"properties":{"notes":{"type":"array","items":{"type":"object","additionalProperties":false,"properties":{"noteID":{"type":"integer"},"state":{"type":"string","enum":["addressed","informational","blocking","uncertain"]},"reason":{"type":"string"},"summary":{"type":"string","minLength":1,"maxLength":200},"acceptanceNoteID":{"type":["integer","null"]},"informationalAcknowledgementSafe":{"type":"boolean"},"informationalPurpose":{"type":"string","enum":["concreteCodeReviewFeedback","reviewSummary","automatedReviewReport","other"]}},"required":["noteID","state","reason","summary","acceptanceNoteID","informationalAcknowledgementSafe","informationalPurpose"]}}},"required":["notes"]}"#
 
     private static func outputSchema(noteIDs: [Int]) throws -> String {
         guard var document = try JSONSerialization.jsonObject(with: Data(schema.utf8)) as? [String: Any],
@@ -46,6 +46,7 @@ enum ReReviewVerifier {
         let discussions: [GitLabMergeRequestDiscussion]
         var target: Target? = nil
         var semanticContextFingerprint: String? = nil
+        var thinking: VerificationThinking = .high
     }
 
     @MainActor
@@ -92,12 +93,14 @@ enum ReReviewVerifier {
                               title: GlabService.redactWorkflowEvidence(input.title),
                               description: input.description.map(GlabService.redactWorkflowEvidence),
                               diff: GlabService.redactWorkflowEvidence(input.diff), discussions: discussions,
-                              target: input.target, semanticContextFingerprint: input.semanticContextFingerprint)
+                              target: input.target, semanticContextFingerprint: input.semanticContextFingerprint,
+                              thinking: input.thinking)
         var encoded = try JSONEncoder().encode(sanitized)
         if encoded.count > 180_000, let target = input.target {
             // Retain exact output scope and identity; fetch large MR content through glab.
             let metadata = Input(authorID: input.authorID, headSHA: input.headSHA, title: sanitized.title,
-                diff: "", discussions: [], target: target, semanticContextFingerprint: input.semanticContextFingerprint)
+                diff: "", discussions: [], target: target, semanticContextFingerprint: input.semanticContextFingerprint,
+                thinking: input.thinking)
             encoded = try JSONEncoder().encode(metadata)
         }
         guard encoded.count <= 180_000 else { throw VerificationError.incompleteEvidence }
@@ -144,6 +147,17 @@ enum ReReviewVerifier {
             informational thread; it never approves a reviewer or accepts their other findings.
             Other threads do not prevent acknowledging this independently pure informational one.
             Do not add reactions or resolve threads yourself. When unsure, return false.
+            Separately classify informationalPurpose from the note's content, without inferring the
+            posting account's identity or whether a human used AI to write it. Return
+            concreteCodeReviewFeedback for specific, concrete feedback about code behavior, a finding,
+            or its verified correction; code references alone do not qualify a general summary.
+            Return reviewSummary for general review, no-findings or code-shape summaries. Return
+            automatedReviewReport for such a generic report with explicit automated-process provenance,
+            such as a generated-by workflow and pipeline/job reference. Merely mentioning AI assistance,
+            polished prose, tables or an AI-authorship assessment is not automated-process provenance.
+            Concrete feedback remains concreteCodeReviewFeedback even when an automated process posted
+            it. Return other for unrelated purposes, non-informational states or unclear purpose.
+            Purpose never makes an unsafe thread safe and never grants reviewer acceptance.
             addressed: the current diff, title or description proves the requested correction in that
             artifact, or a substantive reply explains
             why the concern does not apply and is ready for the reviewer to reconsider. An author's
@@ -153,6 +167,17 @@ enum ReReviewVerifier {
             the concern was addressed. The current description is supplied as data, not a change diff;
             inspect it directly for requests concerning the description. A description's claim of a
             code fix does not prove that the code was changed.
+            Correlate review summaries with the concrete findings they reference across ALL discussions.
+            A substantive author answer or verified correction in another thread can address the same
+            concern; do not require a duplicate answer in the summary's own thread. A summary that only
+            reports or repeats findings already addressed elsewhere is informational, even when it
+            mentions their original questions. Identify the matching finding and evidence in reason.
+            A summary's distinct request, changed expectation or remaining condition stays blocking or
+            uncertain until supported by current evidence; do not dismiss it merely because it is a
+            summary, a bot wrote it, another thread is resolved, or a later review sounds positive.
+            Referenced findings awaiting reviewer acceptance make informationalAcknowledgementSafe false.
+            An informational summary classification does not accept the referenced corrections or
+            authorize closing their original threads.
             Read every discussion together with its author replies. Do not require a reply to an
             informational note. A remaining unrelated concern from another reviewer does not block a
             reviewer whose own concerns are addressed. If a shared prerequisite is missing, classify the
@@ -185,7 +210,7 @@ enum ReReviewVerifier {
             try Data(constrainedSchema.utf8).write(to: schemaURL)
             output = try await ProcessRunner.run(executable, arguments: ["exec", "--ignore-user-config", "--ignore-rules",
                 "--ephemeral", "--skip-git-repo-check", "--dangerously-bypass-approvals-and-sandbox", "--model", model,
-                "-c", "model_reasoning_effort=\"medium\"", "-c", "web_search=\"disabled\"",
+                "-c", "model_reasoning_effort=\"\(input.thinking.rawValue)\"", "-c", "web_search=\"disabled\"",
                 "-c", "agents.enabled=false", "--disable", "apps", "--disable", "plugins",
                 "--disable", "memories", "--output-schema", schemaURL.path, "-o", outputURL.path, "-"],
                 environment: environment, currentDirectory: folder, timeout: 180,
@@ -193,7 +218,7 @@ enum ReReviewVerifier {
             guard output.exitCode == 0, !Task.isCancelled else { throw VerificationError.failed }
             result = try Data(contentsOf: outputURL)
         } else {
-            output = try await ProcessRunner.run(executable, arguments: ["-p", prompt, "--model", model, "--effort", "medium",
+            output = try await ProcessRunner.run(executable, arguments: ["-p", prompt, "--model", model, "--effort", input.thinking.rawValue,
                 "--dangerously-skip-permissions", "--permission-prompts", "none", "--tools", "default",
                 "--settings", #"{"sandbox":{"enabled":false}}"#,
                 "--strict-mcp-config", "--mcp-config", #"{"mcpServers":{}}"#,
@@ -219,7 +244,8 @@ enum ReReviewVerifier {
             .init(noteID: note.noteID, state: note.state,
                 reason: GlabService.redactWorkflowEvidence(note.reason),
                 summary: note.summary.map(GlabService.redactWorkflowEvidence), acceptanceNoteID: note.acceptanceNoteID,
-                informationalAcknowledgementSafe: note.informationalAcknowledgementSafe)
+                informationalAcknowledgementSafe: note.informationalAcknowledgementSafe,
+                informationalPurpose: note.informationalPurpose)
         })
     }
 

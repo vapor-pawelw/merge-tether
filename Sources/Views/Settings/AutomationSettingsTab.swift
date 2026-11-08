@@ -242,6 +242,11 @@ struct AutomationSettingsTab: View {
                 } label: { Text(.Settings.settingsVerificationModel) }
                 .disabled(!draft.autoVerifyReReview)
             }
+            Picker(selection: $draft.verificationThinking) {
+                ForEach(VerificationThinking.allCases, id: \.self) { thinking in
+                    Text(thinking.name).tag(thinking)
+                }
+            } label: { Text(.Settings.settingsVerificationThinking) }
         } header: { Text(.Settings.settingsVerificationTitle) }
 
         Section {

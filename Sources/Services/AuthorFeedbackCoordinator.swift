@@ -248,7 +248,8 @@ final class AuthorFeedbackCoordinator {
                 diff: String(decoding: diff, as: UTF8.self), discussions: input.discussions,
                 target: .init(host: host, projectID: request.projectID, iid: request.iid,
                     url: request.webURL, expectedUsername: input.user.username),
-                semanticContextFingerprint: request.semanticContextFingerprint), input.configuration.assistant, model)
+                semanticContextFingerprint: request.semanticContextFingerprint,
+                thinking: input.configuration.verificationThinking), input.configuration.assistant, model)
             _ = try assessment.reviewers(in: input.discussions, authorID: input.user.id)
             guard isCurrent(input) else { throw CancellationError() }
             cache[input.target] = (key, assessment)
@@ -427,6 +428,8 @@ final class AuthorFeedbackCoordinator {
         var threads = discussions
         var changed = false
         var freshCandidates = 0
+        var accountKinds: [Int: AuthorFeedbackPolicy.AccountKind] = [:]
+        let verdicts = Dictionary(uniqueKeysWithValues: assessment.notes.map { ($0.noteID, $0) })
         for candidate in candidates {
             guard let rootID = candidate.noteIDs.first,
                   let thread = discussions.first(where: { $0.id == candidate.discussionID && $0.notes.contains(where: { $0.id == rootID }) }),
@@ -460,6 +463,15 @@ final class AuthorFeedbackCoordinator {
                 for noteID in pendingReactions {
                     acknowledgementAttempts[input.target]?.reactions.insert(noteID)
                     do {
+                        guard let reviewerID = thread.notes.first(where: { $0.id == noteID })?.author?.id,
+                              let verdict = verdicts[noteID] else { continue }
+                        let kind: AuthorFeedbackPolicy.AccountKind
+                        if let cached = accountKinds[reviewerID] { kind = cached }
+                        else {
+                            kind = try await glab.feedbackAccountKind(userID: reviewerID, host: input.target.host)
+                            accountKinds[reviewerID] = kind
+                        }
+                        guard AuthorFeedbackPolicy.permitsInformationalReaction(verdict, accountKind: kind) else { continue }
                         let exists = try await glab.hasOwnThumbsUp(projectID: input.request.projectID, iid: input.request.iid,
                             noteID: noteID, host: input.target.host, userID: input.user.id)
                         if !exists {

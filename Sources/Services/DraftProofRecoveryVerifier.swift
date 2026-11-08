@@ -8,6 +8,7 @@ enum DraftProofRecoveryVerifier {
         let origin: FollowUpVerification
         var draftIDs: [Int]? = nil
         var currentFiles: [FollowUpVerification.FileEvidence]? = nil
+        var thinking: VerificationThinking = .high
         var requestedDraftIDs: [Int] { draftIDs ?? origin.drafts.map(\.id) }
     }
     struct Assessment: Codable, Sendable {
@@ -139,14 +140,14 @@ enum DraftProofRecoveryVerifier {
             try schemaData.write(to: schemaURL)
             output = try await ProcessRunner.run(executable, arguments: ["exec", "--ignore-user-config", "--ignore-rules", "--ephemeral",
                 "--skip-git-repo-check", "--dangerously-bypass-approvals-and-sandbox", "--model", model,
-                "-c", "model_reasoning_effort=\"medium\"", "-c", "web_search=\"disabled\"", "-c", "agents.enabled=false",
+                "-c", "model_reasoning_effort=\"\(input.thinking.rawValue)\"", "-c", "web_search=\"disabled\"", "-c", "agents.enabled=false",
                 "--disable", "apps", "--disable", "plugins", "--disable", "memories", "--output-schema", schemaURL.path, "-o", resultURL.path, "-"],
                 environment: environment, currentDirectory: folder, timeout: 240,
                 input: Data((prompt + "\n\n" + String(decoding: data, as: UTF8.self)).utf8))
             guard output.exitCode == 0, !Task.isCancelled else { throw Failure.failed }
             result = try Data(contentsOf: resultURL)
         } else {
-            output = try await ProcessRunner.run(executable, arguments: ["-p", prompt, "--model", model, "--effort", "medium",
+            output = try await ProcessRunner.run(executable, arguments: ["-p", prompt, "--model", model, "--effort", input.thinking.rawValue,
                 "--dangerously-skip-permissions", "--permission-prompts", "none", "--tools", "default",
                 "--settings", #"{"sandbox":{"enabled":false}}"#, "--strict-mcp-config", "--mcp-config", #"{"mcpServers":{}}"#,
                 "--setting-sources", "", "--no-session-persistence", "--output-format", "json", "--json-schema", String(decoding: schemaData, as: UTF8.self)],

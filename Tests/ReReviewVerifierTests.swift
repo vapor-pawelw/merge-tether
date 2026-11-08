@@ -24,7 +24,7 @@ struct ReReviewVerifierTests {
             import json,sys
             args=sys.argv[1:]
             sys.stdin.read()
-            result={'notes':[{'noteID':10,'state':'informational','reason':'Pure positive acknowledgement with no outstanding request','summary':'The reviewer has no remaining requests.','acceptanceNoteID':None,'informationalAcknowledgementSafe':True}]}
+            result={'notes':[{'noteID':10,'state':'informational','reason':'Pure positive acknowledgement with no outstanding request','summary':'The reviewer has no remaining requests.','acceptanceNoteID':None,'informationalAcknowledgementSafe':True,'informationalPurpose':'concreteCodeReviewFeedback'}]}
             if args[0]=='exec': json.dump(result,open(args[args.index('-o')+1],'w'))
             else: print(json.dumps({'is_error':False,'structured_output':result}))
             """.utf8).write(to: script)
@@ -37,16 +37,71 @@ struct ReReviewVerifierTests {
         let assessment = try await ReReviewVerifier.run(input, assistant: assistant, model: "fixture", executable: script)
 
         #expect(assessment.notes.first?.informationalAcknowledgementSafe == true)
+        let encoded = try #require(JSONSerialization.jsonObject(with: JSONEncoder().encode(assessment)) as? [String: Any])
+        let note = try #require((encoded["notes"] as? [[String: Any]])?.first)
+        #expect(note["informationalPurpose"] as? String == "concreteCodeReviewFeedback")
         #expect(assessment.notes.first?.summary == "The reviewer has no remaining requests.")
         let schema = try #require(JSONSerialization.jsonObject(with: Data(ReReviewVerifier.schema.utf8)) as? [String: Any])
         let properties = try #require(schema["properties"] as? [String: Any])
         let notes = try #require(properties["notes"] as? [String: Any])
         let fields = try #require(notes["items"] as? [String: Any])
         #expect((fields["required"] as? [String])?.contains("informationalAcknowledgementSafe") == true)
+        #expect((fields["required"] as? [String])?.contains("informationalPurpose") == true)
     }
 
     @Test(arguments: AutomationAssistant.allCases)
-    func verifierCanReadTheTargetWithFullCLIToolsWhileItsRoleStaysReadOnly(_ assistant: AutomationAssistant) async throws {
+    func summaryAssessmentInstructionsUseRelatedThreadEvidenceWithoutDiscardingDistinctRequests(_ assistant: AutomationAssistant) async throws {
+        // given
+        let folder = FileManager.default.temporaryDirectory.appending(path: UUID().uuidString)
+        try FileManager.default.createDirectory(at: folder, withIntermediateDirectories: false)
+        defer { try? FileManager.default.removeItem(at: folder) }
+        let script = folder.appending(path: "cli")
+        try Data("""
+            #!/usr/bin/python3
+            import json,pathlib,sys
+            args=sys.argv[1:]
+            incoming=sys.stdin.read()
+            codex=args[0]=='exec'
+            instructions=incoming[:incoming.index('{')] if codex else args[args.index('-p')+1]
+            evidence=json.loads(incoming[incoming.index('{'):])
+            pathlib.Path(__file__+'.capture').write_text(json.dumps({'instructions':instructions,'evidence':evidence}))
+            result={'notes':[{'noteID':n,'state':state,'reason':'Synthetic result for prompt contract verification','acceptanceNoteID':None} for n,state in [(10,'informational'),(20,'addressed'),(30,'blocking')]]}
+            if codex: json.dump(result,open(args[args.index('-o')+1],'w'))
+            else: print(json.dumps({'is_error':False,'structured_output':result}))
+            """.utf8).write(to: script)
+        try FileManager.default.setAttributes([.posixPermissions: 0o700], ofItemAtPath: script.path)
+        let discussions = try JSONDecoder().decode([GitLabMergeRequestDiscussion].self, from: Data("""
+            [{"id":"summary","notes":[{"id":10,"author":{"id":7},"system":false,"resolvable":false,
+              "body":"I left a question about the supported release in the inline review."}]},
+             {"id":"release-finding","notes":[{"id":20,"author":{"id":7},"system":false,"resolvable":true,"resolved":true,
+              "body":"Please confirm the supported release."},{"id":21,"author":{"id":3},"system":false,
+              "body":"The published release tag contains the endpoint; the rollout section matches it."}]},
+             {"id":"mixed-summary","notes":[{"id":30,"author":{"id":7},"system":false,"resolvable":false,
+              "body":"The release question is fixed. Also document the rollback procedure before merging."}]}]
+            """.utf8))
+        let input = ReReviewVerifier.Input(authorID: 3, headSHA: String(repeating: "a", count: 40),
+            title: "Synthetic release requirement", description: "Rollout uses the supported release", diff: "Current diff", discussions: discussions)
+
+        // when
+        _ = try await ReReviewVerifier.run(input, assistant: assistant, model: "fixture", executable: script)
+
+        // then
+        let captured = try #require(JSONSerialization.jsonObject(with: Data(contentsOf: URL(fileURLWithPath: script.path + ".capture"))) as? [String: Any])
+        let instructions = try #require(captured["instructions"] as? String)
+            .split(whereSeparator: \.isWhitespace).joined(separator: " ")
+        #expect(instructions.contains("Correlate review summaries with the concrete findings they reference across ALL discussions"))
+        #expect(instructions.contains("do not require a duplicate answer in the summary's own thread"))
+        #expect(instructions.contains("A summary's distinct request, changed expectation or remaining condition stays blocking or uncertain"))
+        #expect(instructions.contains("Identify the matching finding and evidence in reason"))
+        #expect(instructions.contains("Referenced findings awaiting reviewer acceptance make informationalAcknowledgementSafe false"))
+        let evidence = try #require(captured["evidence"] as? [String: Any])
+        let sent = try JSONSerialization.data(withJSONObject: try #require(evidence["discussions"]))
+        let received = try JSONDecoder().decode([GitLabMergeRequestDiscussion].self, from: sent)
+        #expect(received.flatMap(\.notes).compactMap(\.id) == [10, 20, 21, 30])
+    }
+
+    @Test(arguments: AutomationAssistant.allCases, VerificationThinking.allCases)
+    func verifierCanReadTheTargetWithFullCLIToolsWhileItsRoleStaysReadOnly(_ assistant: AutomationAssistant, _ thinking: VerificationThinking) async throws {
         let folder = FileManager.default.temporaryDirectory.appending(path: UUID().uuidString)
         try FileManager.default.createDirectory(at: folder, withIntermediateDirectories: false)
         defer { try? FileManager.default.removeItem(at: folder) }
@@ -80,22 +135,32 @@ struct ReReviewVerifierTests {
         try FileManager.default.setAttributes([.posixPermissions: 0o700], ofItemAtPath: script.path)
         let discussions = try JSONDecoder().decode([GitLabMergeRequestDiscussion].self,
             from: Data(#"[{"id":"thread","notes":[{"id":10,"author":{"id":7},"system":false,"body":"Please document the fallback"}]}]"#.utf8))
-        let input = ReReviewVerifier.Input(authorID: 3, headSHA: String(repeating: "a", count: 40),
+        var input = ReReviewVerifier.Input(authorID: 3, headSHA: String(repeating: "a", count: 40),
             title: "Synthetic MR", description: "Fallback is documented", diff: "No code changes", discussions: discussions,
             target: .init(host: "gitlab.example.test", projectID: 1, iid: 2,
                 url: URL(string: "https://gitlab.example.test/group/repo/-/merge_requests/2")!, expectedUsername: "me"),
             semanticContextFingerprint: "expected-context")
+        #expect(input.thinking == .high)
+        input.thinking = thinking
 
         let assessment = try await ReReviewVerifier.run(input, assistant: assistant, model: "fixture", executable: script)
 
         #expect(assessment.notes.first?.state == .addressed)
         let captured = try #require(JSONSerialization.jsonObject(with: Data(contentsOf: URL(fileURLWithPath: script.path + ".capture"))) as? [String: Any])
+        let arguments = try #require(captured["args"] as? [String])
+        if assistant == .codex {
+            #expect(arguments.contains("model_reasoning_effort=\"\(thinking.rawValue)\""))
+        } else {
+            let effortIndex = try #require(arguments.firstIndex(of: "--effort"))
+            #expect(arguments[effortIndex + 1] == thinking.rawValue)
+        }
         let instructions = try #require(captured["instructions"] as? String)
         #expect(instructions.contains("Do not perform a fresh general code review or introduce new findings"))
         let evidence = try #require(captured["evidence"] as? [String: Any])
         let target = try #require(evidence["target"] as? [String: Any])
         #expect(target["url"] as? String == input.target?.url.absoluteString)
         #expect(evidence["headSHA"] as? String == input.headSHA)
+        #expect(evidence["thinking"] as? String == thinking.rawValue)
     }
 
     @Test(arguments: AutomationAssistant.allCases)
@@ -127,6 +192,7 @@ struct ReReviewVerifierTests {
         input.target = .init(host: "gitlab.example.test", projectID: 1, iid: 2,
             url: URL(string: "https://gitlab.example.test/group/repo/-/merge_requests/2")!, expectedUsername: "me")
         input.semanticContextFingerprint = "expected-context"
+        input.thinking = .low
 
         let assessment = try await ReReviewVerifier.run(input, assistant: assistant, model: "fixture", executable: script)
 
@@ -137,6 +203,7 @@ struct ReReviewVerifierTests {
         #expect(evidence["target"] != nil)
         #expect(evidence["headSHA"] as? String == input.headSHA)
         #expect(evidence["semanticContextFingerprint"] as? String == "expected-context")
+        #expect(evidence["thinking"] as? String == "low")
     }
 
     @Test(arguments: AutomationAssistant.allCases)

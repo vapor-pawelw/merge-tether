@@ -304,7 +304,7 @@ final class MergeRequestAttentionMonitor {
             try await DraftProofRecoveryVerifier.verify($0, assistant: $1, model: $2)
         },
         assessAIOrigin: @escaping AICommentOriginCoordinator.Assess = {
-            try await AICommentOriginAssessor.verify(target: $0, notes: $1, assistant: $2, model: $3)
+            try await AICommentOriginAssessor.verify(target: $0, notes: $1, assistant: $2, model: $3, thinking: $4)
         }
     ) {
         self.glab = glab
@@ -325,7 +325,7 @@ final class MergeRequestAttentionMonitor {
                 let request = try await glab.fetchMergeRequest(projectID: target.projectID, iid: iid, host: target.host)
                 guard request.state == "opened", request.webURL.isGitLabMergeRequest(host: target.host, iid: iid) else { throw CancellationError() }
                 return try await glab.fetchMergeRequestDiscussions(projectID: target.projectID, iid: iid, host: target.host).flatMap(\.notes)
-            }, isCurrent: { target, assistant, model in
+            }, isCurrent: { target, assistant, model, thinking in
                 guard let settings, glab.resolvedHost == target.host, glab.currentUsername == target.username,
                       settings.automation.packageDecision != .disabled,
                       settings.automation.assistant == assistant, settings.automation.publicationMode != .manual,
@@ -333,7 +333,7 @@ final class MergeRequestAttentionMonitor {
                       settings.automation.scope.resolve(target).active else { return false }
                 let configured = assistant == .codex ? settings.automation.codexVerificationModel.rawValue
                     : settings.automation.claudeVerificationModel.rawValue
-                return model == configured
+                return model == configured && settings.automation.verificationThinking == thinking
             })
         self.draftProofRecoveryCoordinator = settings.map { settings in
             DraftProofRecoveryCoordinator(settings: settings, directory: followUpDirectory, verdictDirectory: verdictDirectory, canAutomate: canAutomate,
@@ -1371,7 +1371,7 @@ final class MergeRequestAttentionMonitor {
         let model = configuration.assistant == .codex ? configuration.codexVerificationModel.rawValue
             : configuration.claudeVerificationModel.rawValue
         aiOriginCoordinator.schedule(target: .init(host: account.host, username: account.username,
-            projectID: request.projectID, iid: request.iid), notes: unknown, assistant: configuration.assistant, model: model)
+            projectID: request.projectID, iid: request.iid), notes: unknown, assistant: configuration.assistant, model: model, thinking: configuration.verificationThinking)
     }
 
     /// Every automatic publication needs current discussion evidence. Author replies
@@ -1744,7 +1744,8 @@ final class MergeRequestAttentionMonitor {
         let configuration = settings.automation
         return [account.host, account.username, String(request.projectID), String(request.iid), request.sha ?? "",
             fingerprint, request.semanticContextFingerprint, configuration.assistant.rawValue, configuration.autoVerifyReReview.description,
-            configuration.assistant == .codex ? configuration.codexVerificationModel.rawValue : configuration.claudeVerificationModel.rawValue]
+            configuration.assistant == .codex ? configuration.codexVerificationModel.rawValue : configuration.claudeVerificationModel.rawValue,
+            configuration.verificationThinking.rawValue]
             .joined(separator: "|")
     }
 
@@ -1918,6 +1919,7 @@ final class MergeRequestAttentionMonitor {
                 reReviewChecks[id] = ReReviewCheck(key: key, fingerprint: fingerprint, state: .checking)
                 let assistant = settings.automation.assistant
                 let model = assistant == .codex ? settings.automation.codexVerificationModel.rawValue : settings.automation.claudeVerificationModel.rawValue
+                let thinking = settings.automation.verificationThinking
                 reReviewTasks[id] = Task { [weak self] in
                     guard let self else { return }
                     do {
@@ -1927,7 +1929,8 @@ final class MergeRequestAttentionMonitor {
                                                           diff: String(decoding: diff, as: UTF8.self), discussions: discussions,
                                                           target: .init(host: host, projectID: request.projectID, iid: request.iid,
                                                               url: request.webURL, expectedUsername: account.username),
-                                                          semanticContextFingerprint: request.semanticContextFingerprint)
+                                                          semanticContextFingerprint: request.semanticContextFingerprint,
+                                                          thinking: thinking)
                         let assessment = try await verifyReReview(input, assistant, model)
                         _ = try assessment.reviewers(in: discussions, authorID: user.id)
                         guard !Task.isCancelled, isCurrent(account), reReviewChecks[id]?.key == key else { return }

@@ -56,6 +56,20 @@ struct AuthorFeedbackPolicy {
         }
     }
 
+    /// GitLab's regular account type does not prove who operated it. Explicit automated-report
+    /// provenance therefore remains a separate content classification, independent of AI assistance.
+    enum AccountKind: Sendable { case regular, automation, unknown }
+
+    static func permitsInformationalReaction(_ note: ReReviewAssessment.Note, accountKind: AccountKind) -> Bool {
+        guard note.state == .informational, note.informationalAcknowledgementSafe == true,
+              let purpose = note.informationalPurpose, purpose != .automatedReviewReport else { return false }
+        switch accountKind {
+        case .regular: return true
+        case .automation: return purpose == .concreteCodeReviewFeedback
+        case .unknown: return false
+        }
+    }
+
     private typealias Note = GitLabMergeRequestDiscussion.Note
     private typealias Verdict = ReReviewAssessment.Note
 

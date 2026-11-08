@@ -5,6 +5,9 @@ import Foundation
 struct ReReviewAssessment: Codable, Sendable {
     struct Note: Codable, Sendable {
         enum State: String, Codable, Sendable { case addressed, informational, blocking, uncertain }
+        enum InformationalPurpose: String, Codable, Sendable {
+            case concreteCodeReviewFeedback, reviewSummary, automatedReviewReport, other
+        }
         let noteID: Int
         let state: State
         let reason: String
@@ -12,6 +15,8 @@ struct ReReviewAssessment: Codable, Sendable {
         var acceptanceNoteID: Int? = nil
         // Legacy assessments omit this field and never authorize a reaction or informational closure.
         var informationalAcknowledgementSafe: Bool? = nil
+        // Purpose describes the note, never whether a human used AI to write it.
+        var informationalPurpose: InformationalPurpose? = nil
     }
     let notes: [Note]
 

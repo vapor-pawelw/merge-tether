@@ -68,13 +68,13 @@ enum AICommentOriginAssessor {
     }
 
     @MainActor static func verify(target: MRAutomationScope.Target, notes: [Note],
-                                 assistant: AutomationAssistant, model: String) async throws -> AICommentOriginAssessment {
+                                 assistant: AutomationAssistant, model: String, thinking: VerificationThinking = .high) async throws -> AICommentOriginAssessment {
         guard case .ready(let executable) = await AssistantCLI.detect(assistant, requireCLI: true) else { throw AssessmentError.unavailable }
-        return try await run(target: target, notes: notes, assistant: assistant, model: model, executable: executable)
+        return try await run(target: target, notes: notes, assistant: assistant, model: model, thinking: thinking, executable: executable)
     }
 
     static func run(target: MRAutomationScope.Target, notes: [Note], assistant: AutomationAssistant,
-                    model: String, executable: URL) async throws -> AICommentOriginAssessment {
+                    model: String, thinking: VerificationThinking = .high, executable: URL) async throws -> AICommentOriginAssessment {
         guard target.projectID > 0, (target.iid ?? 0) > 0, !target.host.isEmpty, !target.username.isEmpty,
               !notes.isEmpty, notes.count <= 100, notes.allSatisfy({ ($0.id ?? 0) > 0 && $0.body != nil }),
               Set(notes.compactMap(\.id)).count == notes.count else { throw AssessmentError.invalidEvidence }
@@ -116,13 +116,13 @@ enum AICommentOriginAssessor {
             try schemaData.write(to: schemaURL)
             output = try await ProcessRunner.run(executable, arguments: ["exec", "--ignore-user-config", "--ignore-rules", "--ephemeral",
                 "--skip-git-repo-check", "--dangerously-bypass-approvals-and-sandbox", "--model", model,
-                "-c", "model_reasoning_effort=\"medium\"", "-c", "web_search=\"disabled\"", "-c", "agents.enabled=false",
+                "-c", "model_reasoning_effort=\"\(thinking.rawValue)\"", "-c", "web_search=\"disabled\"", "-c", "agents.enabled=false",
                 "--disable", "apps", "--disable", "plugins", "--disable", "memories", "--output-schema", schemaURL.path, "-o", resultURL.path, "-"],
                 environment: processEnvironment, currentDirectory: folder, timeout: 90, input: Data((prompt + "\n\n" + String(decoding: data, as: UTF8.self)).utf8))
             guard output.exitCode == 0, !Task.isCancelled else { throw AssessmentError.failed }
             result = try Data(contentsOf: resultURL)
         } else {
-            output = try await ProcessRunner.run(executable, arguments: ["-p", prompt, "--model", model, "--effort", "medium",
+            output = try await ProcessRunner.run(executable, arguments: ["-p", prompt, "--model", model, "--effort", thinking.rawValue,
                 "--dangerously-skip-permissions", "--permission-prompts", "none", "--tools", "default", "--settings", #"{"sandbox":{"enabled":false}}"#,
                 "--strict-mcp-config", "--mcp-config", #"{"mcpServers":{}}"#, "--setting-sources", "", "--no-session-persistence",
                 "--output-format", "json", "--json-schema", String(decoding: schemaData, as: UTF8.self)],
