@@ -4,6 +4,95 @@ import Testing
 
 @MainActor
 struct AuthorFeedbackCoordinatorTests {
+    @Test func changedBlockedStepRequiresANewAssessmentAtTheSameHeadAndDiscussions() async throws {
+        try await withFixture { fixture in
+            fixture.settings.automation.autoResolveAcceptedFeedback = false
+            fixture.settings.automation.authorFeedback.isEnabled = true
+            let request = try JSONDecoder().decode(GitLabMergeRequest.self, from: Data(Fixture.request.utf8))
+            let job = AssistantAutomationRunner.Handoff(id: UUID(), key: .init(assistant: .codex,
+                work: .init(host: Fixture.host, projectID: 1, iid: 2), username: "me", workspace: "", access: .gitLabRead),
+                title: "Feedback", prompt: "Handle selected feedback", createdAt: Date(timeIntervalSince1970: 1),
+                allowsPush: false, feedbackNoteIDs: [10], followUpPushAllowed: true,
+                execution: .init(state: .blocked, finishedAt: Date(timeIntervalSince1970: 2),
+                    summary: "Selected feedback is complete.", blocker: "Later release confirmation is absent."),
+                workflow: .followUp, expectedHeadSHA: request.sha)
+            fixture.settings.assistantHandoffs = [job]
+            let coordinator = AuthorFeedbackCoordinator(settings: fixture.settings, glab: fixture.glab,
+                canAutomate: { _ in true }, verify: { input, _, _ in
+                    fixture.inputs.append(input)
+                    return .init(notes: [.init(noteID: 10, state: .addressed, reason: "Current correction verified")],
+                        completedBlockedRunIDs: fixture.inputs.count == 1 ? [job.id] : nil)
+                })
+            try await fixture.run(coordinator)
+            fixture.settings.assistantHandoffs[0].execution?.blocker = "A required current-task verification command failed."
+
+            try fixture.start(coordinator)
+
+            let deadline = ContinuousClock.now + .seconds(5)
+            while fixture.inputs.count < 2 || coordinator.status(projectID: 1, iid: 2)?.phase == .checking,
+                  ContinuousClock.now < deadline {
+                try await Task.sleep(for: .milliseconds(20))
+            }
+            #expect(fixture.inputs.count == 2)
+            let status = try #require(coordinator.status(projectID: 1, iid: 2))
+            let current = try #require(fixture.settings.assistantHandoffs.first)
+            #expect(!status.reconciles(current, request: request,
+                discussionFingerprint: ReviewVerdict.fingerprint(try fixture.discussions())))
+        }
+    }
+
+    @Test(arguments: ["exact", "missingProof", "wrongRun", "changedHead", "changedContext", "changedDiscussions", "changedBlocker", "missingReply", "unverifiedTool", "nonfeedback", "wrongAccount"])
+    func blockedFeedbackRequiresFreshExactRunCompletionProof(_ scenario: String) async throws {
+        try await withFixture { fixture in
+            fixture.settings.automation.autoResolveAcceptedFeedback = false
+            fixture.settings.automation.authorFeedback.isEnabled = true
+            try fixture.write("approvals.json", #"{"approved_by":[]}"#)
+            if scenario == "missingReply" {
+                try fixture.write("discussions.json", #"[{"id":"thread-a","notes":[{"id":10,"author":{"id":7,"username":"alice"},"system":false,"body":"Fix A and explain it.","resolvable":true,"resolved":false}]}]"#)
+            }
+            let request = try JSONDecoder().decode(GitLabMergeRequest.self, from: Data(Fixture.request.utf8))
+            let job = AssistantAutomationRunner.Handoff(id: UUID(), key: .init(assistant: .codex,
+                work: .init(host: Fixture.host, projectID: 1, iid: 2), username: scenario == "wrongAccount" ? "other" : "me",
+                workspace: "", access: .gitLabRead), title: "Feedback correction", prompt: "Handle selected feedback",
+                createdAt: Date(timeIntervalSince1970: 1), allowsPush: false, feedbackNoteIDs: [10],
+                followUpPushAllowed: true, execution: .init(state: .blocked, finishedAt: Date(timeIntervalSince1970: 2),
+                    summary: "The current correction and published explanation are complete.",
+                    blocker: scenario == "unverifiedTool" ? "Required verification tool is unavailable." : "Confirm a later release dependency with its owner."),
+                taskPrompt: "Handle selected feedback", mergeRequestURL: request.webURL,
+                workflow: scenario == "nonfeedback" ? .review : .followUp, expectedHeadSHA: request.sha)
+            fixture.settings.assistantHandoffs = [job]
+            let proof: [UUID]? = ["missingProof", "unverifiedTool"].contains(scenario) ? nil : [scenario == "wrongRun" ? UUID() : job.id]
+            let coordinator = fixture.coordinator(assessment: .init(notes: [
+                .init(noteID: 10, state: .addressed, reason: "The current correction and published answer satisfy the assigned feedback.")
+            ], completedBlockedRunIDs: proof), duringVerification: {
+                if scenario == "changedBlocker" { fixture.settings.assistantHandoffs[0].execution?.blocker = "A newly failed required verification step." }
+            })
+            var dispatched = false
+            coordinator.onNeedsWork = { _, _, _, _ in dispatched = true }
+
+            try await fixture.run(coordinator)
+
+            let status = try #require(coordinator.status(projectID: 1, iid: 2))
+            let checkedRequest = try JSONDecoder().decode(GitLabMergeRequest.self, from: Data(
+                (scenario == "changedHead" ? Fixture.request.replacingOccurrences(of: Fixture.sha, with: String(repeating: "b", count: 40))
+                 : scenario == "changedContext" ? Fixture.request.replacingOccurrences(of: "Example MR", with: "Changed requirement")
+                 : Fixture.request).utf8))
+            let fingerprint = scenario == "changedDiscussions" ? "different-discussions" : ReviewVerdict.fingerprint(try fixture.discussions())
+            #expect(status.reconciles(job, request: checkedRequest, discussionFingerprint: fingerprint) == (scenario == "exact"))
+            if scenario == "exact" {
+                let context = try #require(fixture.inputs.last?.blockedFollowUps.first)
+                #expect(context.runID == job.id && context.selectedFeedbackIDs == [10])
+                #expect(context.blocker == job.execution?.blocker)
+                #expect(status.findings.first?.state == .waitingAcceptance)
+                #expect(!dispatched)
+                #expect(!AssistantJobExecution.hasUnfinishedWork(in: [job], for: job.key.work, username: "me",
+                    currentRequest: request, feedbackStatus: status, discussionFingerprint: fingerprint))
+            }
+            #expect(fixture.settings.assistantHandoffs[0].execution?.state == .blocked)
+            #expect(fixture.resolutionPosts == 0 && fixture.reactionPosts == 0)
+        }
+    }
+
     @Test func aDefaultDraftDoesNotStartPaidFeedbackVerification() async throws {
         try await withFixture { fixture in
             let draft = Fixture.request.replacingOccurrences(of: "\"draft\":false", with: "\"draft\":true")

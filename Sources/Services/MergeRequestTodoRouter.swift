@@ -17,6 +17,7 @@ final class MergeRequestTodoRouter {
     var onAcceptedIntent: (@MainActor (MRTodoIntent) -> Void)?
     var followUpAssessment: (@MainActor (GitLabMergeRequest, [GitLabMergeRequestDiscussion]) -> ReReviewAssessment?)?
     var followUpVerificationPending: (@MainActor (GitLabMergeRequest, [GitLabMergeRequestDiscussion]) -> Bool)?
+    var blockedFollowUpCompletionProof: (@MainActor (AssistantAutomationRunner.Handoff, GitLabMergeRequest, [GitLabMergeRequestDiscussion]) -> Bool)?
     var mentionDisposition: (@MainActor (GitLabMergeRequest, [GitLabMergeRequestDiscussion], GitLabAuthenticatedUser, Int) async -> MRTodoMentionDisposition)?
 
     /// Reconcile app evidence without receiving events, starting workers or writing to GitLab.
@@ -497,7 +498,8 @@ final class MergeRequestTodoRouter {
             // independent evidence can finish it without replaying that attempt.
             let unboundFollowUp = original.jobID == nil
             if original.kind == .followUp, job?.execution?.state == .succeeded || unboundFollowUp || stoppedFollowUp, !provedFollowUp {
-                switch await followUpNeedsNoWork(original, request: request, requireNoDrafts: stoppedFollowUp) {
+                switch await followUpNeedsNoWork(original, request: request, requireNoDrafts: stoppedFollowUp,
+                    stoppedJob: stoppedFollowUp ? job : nil) {
                 case .proved: provedFollowUp = true
                 case .checking: checkingFollowUp = true
                 case .unverified: break
@@ -528,7 +530,15 @@ final class MergeRequestTodoRouter {
               current.jobID == original.jobID, current.headSHA == original.headSHA,
               current.noteIDs == original.noteIDs, current.state == original.state else { return false }
         let currentJob = original.jobID.flatMap { id in settings.assistantHandoffs.first { $0.id == id } }
-        return currentJob?.id == job?.id && currentJob?.execution?.state == job?.execution?.state
+        guard currentJob?.id == job?.id && currentJob?.execution?.state == job?.execution?.state else { return false }
+        if let job, job.execution?.state == .blocked {
+            guard let currentJob, currentJob.key == job.key, currentJob.workflow == job.workflow,
+                  currentJob.expectedHeadSHA == job.expectedHeadSHA, currentJob.feedbackNoteIDs == job.feedbackNoteIDs,
+                  currentJob.allowsPush == job.allowsPush, currentJob.pipelineReservation == nil,
+                  AuthorFeedbackStatus.blockedContext(for: currentJob) == AuthorFeedbackStatus.blockedContext(for: job)
+            else { return false }
+        }
+        return true
     }
 
     private func reviewMatches(_ job: AssistantAutomationRunner.Handoff, request: GitLabMergeRequest) async -> Bool {
@@ -557,7 +567,8 @@ final class MergeRequestTodoRouter {
     private enum FollowUpCompletion { case proved, checking, unverified }
 
     private func followUpNeedsNoWork(_ intent: MRTodoIntent, request: GitLabMergeRequest,
-                                     requireNoDrafts: Bool = false) async -> FollowUpCompletion {
+                                     requireNoDrafts: Bool = false,
+                                     stoppedJob: AssistantAutomationRunner.Handoff? = nil) async -> FollowUpCompletion {
         let accountRevision = glab.accountRevision
         guard let iid = intent.target.iid, request.author.username == intent.target.username,
               let head = request.sha, !head.isEmpty,
@@ -586,6 +597,9 @@ final class MergeRequestTodoRouter {
               live.author == request.author, live.state == "opened", live.draft == request.draft, live.sha == head,
               live.semanticContextFingerprint == request.semanticContextFingerprint,
               ReviewVerdict.fingerprint(liveDiscussions) == fingerprint else { return .unverified }
+        if let stoppedJob, stoppedJob.execution?.state == .blocked {
+            guard blockedFollowUpCompletionProof?(stoppedJob, live, liveDiscussions) == true else { return .unverified }
+        }
         return .proved
     }
 

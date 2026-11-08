@@ -18,17 +18,27 @@ struct AuthorFeedbackStatus: Equatable, Sendable {
     var isReadOnlyFailure = false
     /// Exact stopped attempts observed before the current remote preflight; never persisted as worker success.
     var reconciledFollowUpJobIDs: Set<UUID> = []
+    var reconciledBlockedContexts: [UUID: ReReviewVerifier.Input.BlockedFollowUp] = [:]
     /// Binds checking and failed attempts even when no successful assessment was cached.
     var completedFollowUpJobID: UUID? = nil
 
     static func canReconcile(_ job: AssistantAutomationRunner.Handoff, request: GitLabMergeRequest) -> Bool {
         guard job.workflow == .followUp, job.pipelineReservation == nil, !job.allowsPush,
-              let state = job.operationalExecution?.state, [.failed, .interrupted, .cancelled].contains(state),
+              let state = job.operationalExecution?.state, [.failed, .interrupted, .cancelled, .blocked].contains(state),
               let selected = job.feedbackNoteIDs, !selected.isEmpty, selected.allSatisfy({ $0 > 0 }),
               job.key.work.projectID == request.projectID, job.key.work.iid == request.iid,
               request.author.username == job.key.username, request.state == "opened",
               request.webURL.isGitLabMergeRequest(host: job.key.work.host, iid: request.iid) else { return false }
-        return true
+        return state != .blocked || (job.expectedHeadSHA == request.sha && job.draftRepair == nil
+            && job.execution?.finishedAt != nil && blockedContext(for: job) != nil)
+    }
+
+    static func blockedContext(for job: AssistantAutomationRunner.Handoff) -> ReReviewVerifier.Input.BlockedFollowUp? {
+        guard job.execution?.state == .blocked, let selected = job.feedbackNoteIDs,
+              !selected.isEmpty, selected.count <= 12, Set(selected).count == selected.count,
+              let blocker = job.execution?.blocker, !blocker.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty,
+              blocker.count <= 600, let summary = job.execution?.summary, summary.count <= 2_000 else { return nil }
+        return .init(runID: job.id, selectedFeedbackIDs: selected.sorted(), blocker: blocker, summary: summary)
     }
 
     func reconciles(_ job: AssistantAutomationRunner.Handoff, request: GitLabMergeRequest,
@@ -37,6 +47,9 @@ struct AuthorFeedbackStatus: Equatable, Sendable {
               phase == .complete || phase == .waitingPublication,
               head == request.sha, !head.isEmpty, fingerprint == discussionFingerprint,
               semanticContextFingerprint == request.semanticContextFingerprint else { return false }
+        if job.execution?.state == .blocked {
+            guard let context = Self.blockedContext(for: job), reconciledBlockedContexts[job.id] == context else { return false }
+        }
         let selected = Set(job.feedbackNoteIDs ?? [])
         return selected.isSubset(of: addressedNoteIDs) && selected.isDisjoint(with: followUpNoteIDs)
     }
@@ -295,14 +308,29 @@ final class AuthorFeedbackCoordinator {
             semanticContextFingerprint: input.request.semanticContextFingerprint)
     }
 
+    private func latestBlockedFollowUp(_ input: Input) -> AssistantAutomationRunner.Handoff? {
+        let latest = settings.assistantHandoffs.filter {
+            !$0.isObsoleteReminder && $0.key.work.host == input.target.host && $0.key.username == input.target.username
+                && $0.key.work.projectID == input.target.projectID && $0.key.work.iid == input.target.iid
+        }.max {
+            $0.createdAt == $1.createdAt ? $0.id.uuidString < $1.id.uuidString : $0.createdAt < $1.createdAt
+        }
+        guard let latest, latest.execution?.state == .blocked,
+              AuthorFeedbackStatus.canReconcile(latest, request: input.request) else { return nil }
+        return latest
+    }
+
     private func prepare(_ input: Input) async throws -> Preparation {
         guard isCurrent(input) else { throw CancellationError() }
         // Capture attempt identity before reading remote postconditions. A later run
         // cannot inherit proof produced for an earlier stopped attempt.
-        let stoppedFollowUps = settings.assistantHandoffs.filter {
+        var stoppedFollowUps = settings.assistantHandoffs.filter {
             $0.key.work.host == input.target.host && $0.key.username == input.target.username
+                && $0.execution?.state != .blocked
                 && AuthorFeedbackStatus.canReconcile($0, request: input.request)
         }
+        if let blocked = latestBlockedFollowUp(input) { stoppedFollowUps.append(blocked) }
+        let blockedContexts = stoppedFollowUps.compactMap { AuthorFeedbackStatus.blockedContext(for: $0) }
         guard await canAutomate(input.configuration.assistant) else { throw ReReviewVerifier.VerificationError.unavailable }
         guard isCurrent(input) else { throw CancellationError() }
         let request = input.request
@@ -310,10 +338,11 @@ final class AuthorFeedbackCoordinator {
         let diff: Data = try await glab.mergeRequestAPI("/projects/\(request.projectID)/merge_requests/\(request.iid)/raw_diffs", host: host, decode: { $0 })
         let encoder = JSONEncoder()
         encoder.outputFormatting = [.sortedKeys]
-        let key = (request.sha ?? "") + "|" + input.fingerprint + "|" + request.semanticContextFingerprint
+        let key = ReReviewVerifier.policyVersion + "|" + (request.sha ?? "") + "|" + input.fingerprint + "|" + request.semanticContextFingerprint
             + "|" + UserAttentionSnapshot.digest(String(decoding: diff, as: UTF8.self))
             + "|" + (input.completedFollowUpJobID?.uuidString ?? "")
             + "|" + String(decoding: try encoder.encode(input.configuration), as: UTF8.self)
+            + "|" + UserAttentionSnapshot.digest(String(decoding: try encoder.encode(blockedContexts), as: UTF8.self))
         let assessment: ReReviewAssessment
         if let stored = cache[input.target], stored.0 == key { assessment = stored.1 }
         else {
@@ -325,7 +354,7 @@ final class AuthorFeedbackCoordinator {
                 target: .init(host: host, projectID: request.projectID, iid: request.iid,
                     url: request.webURL, expectedUsername: input.user.username),
                 semanticContextFingerprint: request.semanticContextFingerprint,
-                thinking: input.configuration.verificationThinking), input.configuration.assistant, model)
+                thinking: input.configuration.verificationThinking, blockedFollowUps: blockedContexts), input.configuration.assistant, model)
             _ = try assessment.reviewers(in: input.discussions, authorID: input.user.id)
             guard isCurrent(input) else { throw CancellationError() }
             cache[input.target] = (key, assessment, input.completedFollowUpJobID)
@@ -491,10 +520,19 @@ final class AuthorFeedbackCoordinator {
                   current.execution?.state == candidate.execution?.state,
                   current.feedbackNoteIDs == candidate.feedbackNoteIDs,
                   current.pipelineReservation == nil, candidate.pipelineReservation == nil,
-                  current.allowsPush == candidate.allowsPush else { continue }
+                  current.allowsPush == candidate.allowsPush,
+                  current.expectedHeadSHA == candidate.expectedHeadSHA else { continue }
             let selected = Set(candidate.feedbackNoteIDs ?? [])
             guard selected.isSubset(of: status.addressedNoteIDs), selected.isDisjoint(with: status.followUpNoteIDs),
                   selected.isDisjoint(with: missingReplies) else { continue }
+            if candidate.execution?.state == .blocked {
+                let addressed = Set(prepared.assessment.notes.filter { $0.state == .addressed }.map(\.noteID))
+                guard prepared.assessment.completedBlockedRunIDs?.contains(candidate.id) == true,
+                      let context = AuthorFeedbackStatus.blockedContext(for: candidate),
+                      AuthorFeedbackStatus.blockedContext(for: current) == context,
+                      selected.isSubset(of: addressed) else { continue }
+                status.reconciledBlockedContexts[candidate.id] = context
+            }
             status.reconciledFollowUpJobIDs.insert(candidate.id)
         }
     }

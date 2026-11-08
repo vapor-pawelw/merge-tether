@@ -157,6 +157,14 @@ final class TodoMonitorService {
             guard let fingerprint = ReviewVerdict.fingerprint(discussions) else { return nil }
             return self?.attention.authorFeedbackCoordinator?.assessment(for: request, fingerprint: fingerprint)
         }
+        router.blockedFollowUpCompletionProof = { [weak self] job, request, discussions in
+            guard let self, self.glab.resolvedHost == job.key.work.host,
+                  self.glab.currentUsername == job.key.username,
+                  let fingerprint = ReviewVerdict.fingerprint(discussions),
+                  let status = self.attention.authorFeedbackCoordinator?.status(projectID: request.projectID, iid: request.iid)
+            else { return false }
+            return status.reconciles(job, request: request, discussionFingerprint: fingerprint)
+        }
         router.followUpVerificationPending = { [weak self] request, discussions in
             guard let fingerprint = ReviewVerdict.fingerprint(discussions) else { return false }
             return self?.attention.authorFeedbackCoordinator?.isChecking(for: request, fingerprint: fingerprint) == true

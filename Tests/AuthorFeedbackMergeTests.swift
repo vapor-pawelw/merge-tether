@@ -4,6 +4,64 @@ import Testing
 
 @MainActor
 struct AuthorFeedbackMergeTests {
+    @Test(arguments: ["missingProof", "eligible", "draft", "approval", "pipeline", "scope", "changedDiscussion"])
+    func exactBlockedWorkProofLiftsOnlyItsOwnAutomaticMergeStop(_ gate: String) async throws {
+        var settings: SettingsManager?
+        try await withFixture(configure: { settings = $0 }) { monitor, folder, _ in
+            let settings = try #require(settings)
+            let file = folder.appending(path: "request.json")
+            if gate == "draft" || gate == "pipeline" {
+                let raw = try String(contentsOf: file, encoding: .utf8)
+                try raw.replacingOccurrences(of: gate == "draft" ? #""draft":false"# : #""has_conflicts":false"#,
+                    with: gate == "draft" ? #""draft":true"# : #""has_conflicts":false,"head_pipeline":{"id":8,"sha":"0123456789012345678901234567890123456789","status":"failed"}"#)
+                    .write(to: file, atomically: true, encoding: .utf8)
+            }
+            if gate == "approval" {
+                let executable = folder.appending(path: "glab")
+                try String(contentsOf: executable, encoding: .utf8)
+                    .replacingOccurrences(of: #""approvals_required":1,"approved":true"#, with: #""approvals_required":1,"approved":false"#)
+                    .write(to: executable, atomically: true, encoding: .utf8)
+                try FileManager.default.setAttributes([.posixPermissions: 0o700], ofItemAtPath: executable.path)
+            }
+            let request = try JSONDecoder().decode(GitLabMergeRequest.self, from: Data(contentsOf: file))
+            let discussions = try JSONDecoder().decode([GitLabMergeRequestDiscussion].self,
+                from: Data(contentsOf: folder.appending(path: "discussions.json")))
+            let job = AssistantAutomationRunner.Handoff(id: UUID(), key: .init(assistant: .codex,
+                work: .init(host: "gitlab.example.org", projectID: 1, iid: 2), username: "me", workspace: "", access: .gitLabRead),
+                title: "Feedback", prompt: "Complete assigned feedback", createdAt: Date(), allowsPush: false,
+                feedbackNoteIDs: [10], execution: .init(state: .blocked, finishedAt: Date(),
+                    summary: "The assigned correction is complete.", blocker: "Later release confirmation is absent."),
+                workflow: .followUp, expectedHeadSHA: request.sha)
+            settings.assistantHandoffs = [job]
+            var proof = AuthorFeedbackStatus(head: request.sha!, fingerprint: ReviewVerdict.fingerprint(discussions)!,
+                semanticContextFingerprint: request.semanticContextFingerprint, phase: .complete, addressedNoteIDs: [10])
+            if gate != "missingProof" {
+                proof.reconciledFollowUpJobIDs = [job.id]
+                let context = try #require(AuthorFeedbackStatus.blockedContext(for: job))
+                proof.reconciledBlockedContexts[job.id] = context
+            }
+            if gate == "scope" {
+                settings.automation.scope.setEnabled(false,
+                    for: .init(host: job.key.work.host, username: "me", projectID: 1, iid: 2))
+            }
+            if gate == "changedDiscussion" {
+                let discussionFile = folder.appending(path: "discussions.json")
+                try String(contentsOf: discussionFile, encoding: .utf8)
+                    .replacingOccurrences(of: "regression test.", with: "regression test and another requirement.")
+                    .write(to: discussionFile, atomically: true, encoding: .utf8)
+            }
+            monitor.authorFeedbackStatus = { _ in proof }
+            monitor.authorFeedbackAllowsMerge = { _, _, _ in true }
+            #expect(AssistantJobExecution.hasUnfinishedWork(in: [job], for: job.key.work, username: "me",
+                currentRequest: request, feedbackStatus: proof, discussionFingerprint: proof.fingerprint) == (gate == "missingProof"))
+
+            try await refresh(monitor)
+
+            #expect(FileManager.default.fileExists(atPath: folder.appending(path: "merged").path) == (gate == "eligible"))
+            #expect(settings.assistantHandoffs[0].execution?.state == .blocked)
+        }
+    }
+
     @Test func actualAutomaticMergeIsReportedOnlyWhileTheWriteIsInFlight() async throws {
         try await withFixture { monitor, folder, _ in
             let request = try JSONDecoder().decode(GitLabMergeRequest.self,
@@ -133,7 +191,8 @@ struct AuthorFeedbackMergeTests {
         try #require(!monitor.isLoading)
     }
 
-    private func withFixture(_ body: (AuthoredMergeRequestMonitor, URL, GlabService) async throws -> Void) async throws {
+    private func withFixture(configure: (SettingsManager) -> Void = { _ in },
+                             _ body: (AuthoredMergeRequestMonitor, URL, GlabService) async throws -> Void) async throws {
         let folder = FileManager.default.temporaryDirectory.appending(path: UUID().uuidString)
         try FileManager.default.createDirectory(at: folder, withIntermediateDirectories: false)
         let suite = "AuthorFeedbackMergeTests.\(UUID())"
@@ -182,6 +241,7 @@ struct AuthorFeedbackMergeTests {
         let settings = SettingsManager(defaults: defaults)
         settings.onboardingCompleted = true; settings.notificationsEnabled = false
         settings.automation.autoMergeEnabled = true; settings.automation.autoMergeProjects = "g/p"
+        configure(settings)
         let monitor = AuthoredMergeRequestMonitor(settings: settings, glab: glab, notifications: NotificationService(), canAutomate: { _ in true })
         let listed = try await glab.fetchAuthoredMergeRequests(host: "gitlab.example.org")
         try #require(listed.count == 1)

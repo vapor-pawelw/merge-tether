@@ -4,6 +4,86 @@ import Testing
 
 @Suite("Headless re-review verification")
 struct ReReviewVerifierTests {
+    @Test(arguments: AutomationAssistant.allCases, [false, true])
+    func completedBlockedRunProofMustNameAnExactSuppliedAttempt(_ assistant: AutomationAssistant, wrongRun: Bool) async throws {
+        let folder = FileManager.default.temporaryDirectory.appending(path: UUID().uuidString)
+        try FileManager.default.createDirectory(at: folder, withIntermediateDirectories: false)
+        defer { try? FileManager.default.removeItem(at: folder) }
+        let runID = UUID()
+        let returnedID = wrongRun ? UUID() : runID
+        let script = folder.appending(path: "cli")
+        try Data("""
+            #!/usr/bin/python3
+            import json,pathlib,sys
+            args=sys.argv[1:]
+            incoming=sys.stdin.read()
+            evidence=json.loads(incoming[incoming.index('{'):])
+            pathlib.Path(__file__+'.capture').write_text(json.dumps(evidence))
+            result={'notes':[{'noteID':10,'state':'addressed','reason':'The current correction and published reply satisfy the assigned feedback.','acceptanceNoteID':None}],'completedBlockedRunIDs':['\(returnedID.uuidString)']}
+            if args[0]=='exec': json.dump(result,open(args[args.index('-o')+1],'w'))
+            else: print(json.dumps({'is_error':False,'structured_output':result}))
+            """.utf8).write(to: script)
+        try FileManager.default.setAttributes([.posixPermissions: 0o700], ofItemAtPath: script.path)
+        let discussions = try JSONDecoder().decode([GitLabMergeRequestDiscussion].self, from: Data(#"[{"id":"thread","notes":[{"id":10,"author":{"id":7},"system":false,"body":"Correct the error behavior; confirm release readiness before deployment."},{"id":11,"author":{"id":3},"system":false,"body":"The correction is verified and release readiness is documented as a later prerequisite."}]}]"#.utf8))
+        var input = ReReviewVerifier.Input(authorID: 3, headSHA: String(repeating: "a", count: 40), title: "Synthetic correction",
+            diff: "Current verified source", discussions: discussions,
+            target: .init(host: "gitlab.example.test", projectID: 1, iid: 2,
+                url: URL(string: "https://gitlab.example.test/group/repo/-/merge_requests/2")!, expectedUsername: "me"))
+        input.blockedFollowUps = [.init(runID: runID, selectedFeedbackIDs: [10],
+            blocker: "External release confirmation is absent. token=glpat-syntheticblocked12345",
+            summary: "The selected correction and published reply are complete.")]
+        if wrongRun {
+            await #expect(throws: ReReviewVerifier.VerificationError.incompleteEvidence) {
+                _ = try await ReReviewVerifier.run(input, assistant: assistant, model: "fixture", executable: script)
+            }
+        } else {
+            let assessment = try await ReReviewVerifier.run(input, assistant: assistant, model: "fixture", executable: script)
+            #expect(assessment.completedBlockedRunIDs == [runID])
+            let captured = try String(contentsOf: URL(fileURLWithPath: script.path + ".capture"), encoding: .utf8)
+            #expect(captured.contains(runID.uuidString))
+            #expect(!captured.contains("glpat-syntheticblocked12345"))
+        }
+    }
+
+    @Test(arguments: AutomationAssistant.allCases)
+    func externalSignoffInstructionsSeparateLaterDeploymentFromExplicitMergeConditions(_ assistant: AutomationAssistant) async throws {
+        let folder = FileManager.default.temporaryDirectory.appending(path: UUID().uuidString)
+        try FileManager.default.createDirectory(at: folder, withIntermediateDirectories: false)
+        defer { try? FileManager.default.removeItem(at: folder) }
+        let script = folder.appending(path: "cli")
+        try Data("""
+            #!/usr/bin/python3
+            import json,pathlib,sys
+            args=sys.argv[1:]
+            incoming=sys.stdin.read()
+            codex=args[0]=='exec'
+            instructions=incoming[:incoming.index('{')] if codex else args[args.index('-p')+1]
+            pathlib.Path(__file__+'.capture').write_text(instructions)
+            result={'notes':[{'noteID':n,'state':state,'reason':'Synthetic prompt-contract result','acceptanceNoteID':None} for n,state in [(10,'addressed'),(20,'blocking')]]}
+            if codex: json.dump(result,open(args[args.index('-o')+1],'w'))
+            else: print(json.dumps({'is_error':False,'structured_output':result}))
+            """.utf8).write(to: script)
+        try FileManager.default.setAttributes([.posixPermissions: 0o700], ofItemAtPath: script.path)
+        let discussions = try JSONDecoder().decode([GitLabMergeRequestDiscussion].self, from: Data(#"[{"id":"later-release","notes":[{"id":10,"author":{"id":7,"username":"alice"},"system":false,"body":"The corrected failure behavior is intentional. It is worth confirming the dependency with the release owner before deployment.","resolvable":true,"resolved":false},{"id":11,"author":{"id":3},"system":false,"body":"The verified correction returns the documented error and the deployment dependency is documented."}]},{"id":"merge-condition","notes":[{"id":20,"author":{"id":8,"username":"bob"},"system":false,"body":"Before merging, record the owner's required compatibility decision; the intended behavior is still undecided.","resolvable":true,"resolved":false}]}]"#.utf8))
+        let input = ReReviewVerifier.Input(authorID: 3, headSHA: String(repeating: "a", count: 40),
+            title: "Synthetic consumer correction", description: "Deployment configuration is a later task.",
+            diff: "The current correction preserves the documented error behavior.", discussions: discussions)
+
+        let assessment = try await ReReviewVerifier.run(input, assistant: assistant, model: "fixture", executable: script)
+
+        let instructions = try String(contentsOf: URL(fileURLWithPath: script.path + ".capture"), encoding: .utf8)
+            .split(whereSeparator: \.isWhitespace).joined(separator: " ")
+        #expect(instructions.contains("An external rollout, deployment or organizational signoff is not remaining author work solely because third-party confirmation is absent"))
+        #expect(instructions.contains("Distinguish an explicit requirement before merge from a suggestion or a prerequisite before deployment"))
+        #expect(instructions.contains("classify it addressed when no explicit in-MR action remains"))
+        #expect(instructions.contains("Do not invent approval, erase a real defect, or waive an explicit before-merge condition"))
+        let findings = AuthorFeedbackPolicy.evaluate(discussions: discussions, assessment: assessment,
+            authorID: 3, approvedReviewerIDs: [])
+        #expect(findings.first(where: { $0.id == 10 })?.state == .waitingAcceptance)
+        #expect(findings.first(where: { $0.id == 20 })?.state == .needsChanges)
+        #expect(assessment.missingPublishedReplyNoteIDs(in: discussions, authorID: 3).isEmpty)
+    }
+
     @Test func verifierOutputSeparatesAHumanExplanationFromTechnicalEvidence() throws {
         let data = Data(#"{"notes":[{"noteID":10,"state":"uncertain","reason":"Current account and commit match; missing independent regression evidence.","summary":"The reported fix could not be confirmed. Check the response before publishing."}]}"#.utf8)
         let assessment = try JSONDecoder().decode(ReReviewAssessment.self, from: data)

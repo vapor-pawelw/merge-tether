@@ -4,10 +4,11 @@ import Foundation
 /// Supplied evidence is supplementary; absent proof must produce `uncertain`.
 enum ReReviewVerifier {
     enum VerificationError: Error, Equatable { case unavailable, failed, incompleteEvidence }
+    static let policyVersion = "author-obligation-scope-2"
 
     static let schema = #"{"type":"object","additionalProperties":false,"properties":{"notes":{"type":"array","items":{"type":"object","additionalProperties":false,"properties":{"noteID":{"type":"integer"},"state":{"type":"string","enum":["addressed","informational","blocking","uncertain"]},"reason":{"type":"string"},"summary":{"type":"string","minLength":1,"maxLength":200},"acceptanceNoteID":{"type":["integer","null"]},"informationalAcknowledgementSafe":{"type":"boolean"},"informationalPurpose":{"type":"string","enum":["concreteCodeReviewFeedback","reviewSummary","automatedReviewReport","other"]}},"required":["noteID","state","reason","summary","acceptanceNoteID","informationalAcknowledgementSafe","informationalPurpose"]}}},"required":["notes"]}"#
 
-    private static func outputSchema(noteIDs: [Int]) throws -> String {
+    private static func outputSchema(noteIDs: [Int], blockedRunIDs: [UUID]) throws -> String {
         guard var document = try JSONSerialization.jsonObject(with: Data(schema.utf8)) as? [String: Any],
               var properties = document["properties"] as? [String: Any],
               var notes = properties["notes"] as? [String: Any],
@@ -20,7 +21,12 @@ enum ReReviewVerifier {
         item["properties"] = fields
         notes["items"] = item
         properties["notes"] = notes
+        var completedIDs: [String: Any] = ["type": "string"]
+        if !blockedRunIDs.isEmpty { completedIDs["enum"] = blockedRunIDs.map(\.uuidString) }
+        properties["completedBlockedRunIDs"] = ["type": ["array", "null"], "items": completedIDs,
+            "maxItems": blockedRunIDs.count]
         document["properties"] = properties
+        document["required"] = ["notes", "completedBlockedRunIDs"]
         return String(decoding: try JSONSerialization.data(withJSONObject: document, options: [.sortedKeys]), as: UTF8.self)
     }
 
@@ -38,6 +44,12 @@ enum ReReviewVerifier {
     }
 
     struct Input: Encodable, Sendable {
+        struct BlockedFollowUp: Codable, Equatable, Sendable {
+            let runID: UUID
+            let selectedFeedbackIDs: [Int]
+            let blocker: String
+            let summary: String
+        }
         let authorID: Int
         let headSHA: String
         let title: String
@@ -47,6 +59,7 @@ enum ReReviewVerifier {
         var target: Target? = nil
         var semanticContextFingerprint: String? = nil
         var thinking: VerificationThinking = .high
+        var blockedFollowUps: [BlockedFollowUp] = []
     }
 
     @MainActor
@@ -80,8 +93,16 @@ enum ReReviewVerifier {
               noteIDs.allSatisfy({ $0 > 0 }), external.allSatisfy({ ($0.author?.id ?? 0) > 0 }) else {
             throw VerificationError.incompleteEvidence
         }
+        guard input.blockedFollowUps.count <= 1,
+              input.blockedFollowUps.isEmpty || input.target != nil,
+              input.blockedFollowUps.allSatisfy({ context in
+                  !context.selectedFeedbackIDs.isEmpty && Set(context.selectedFeedbackIDs).count == context.selectedFeedbackIDs.count
+                      && Set(context.selectedFeedbackIDs).isSubset(of: Set(noteIDs))
+                      && !context.blocker.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+                      && context.blocker.count <= 600 && context.summary.count <= 2_000
+              }) else { throw VerificationError.incompleteEvidence }
         guard !noteIDs.isEmpty else { return .init(notes: []) }
-        let constrainedSchema = try outputSchema(noteIDs: noteIDs)
+        let constrainedSchema = try outputSchema(noteIDs: noteIDs, blockedRunIDs: input.blockedFollowUps.map(\.runID))
         let discussions = input.discussions.map { discussion in
             GitLabMergeRequestDiscussion(id: discussion.id, notes: discussion.notes.map { note in
                 var sanitized = note
@@ -94,13 +115,17 @@ enum ReReviewVerifier {
                               description: input.description.map(GlabService.redactWorkflowEvidence),
                               diff: GlabService.redactWorkflowEvidence(input.diff), discussions: discussions,
                               target: input.target, semanticContextFingerprint: input.semanticContextFingerprint,
-                              thinking: input.thinking)
+                              thinking: input.thinking,
+                              blockedFollowUps: input.blockedFollowUps.map { .init(runID: $0.runID,
+                                  selectedFeedbackIDs: $0.selectedFeedbackIDs,
+                                  blocker: GlabService.redactWorkflowEvidence($0.blocker),
+                                  summary: GlabService.redactWorkflowEvidence($0.summary)) })
         var encoded = try JSONEncoder().encode(sanitized)
         if encoded.count > 180_000, let target = input.target {
             // Retain exact output scope and identity; fetch large MR content through glab.
             let metadata = Input(authorID: input.authorID, headSHA: input.headSHA, title: sanitized.title,
                 diff: "", discussions: [], target: target, semanticContextFingerprint: input.semanticContextFingerprint,
-                thinking: input.thinking)
+                thinking: input.thinking, blockedFollowUps: sanitized.blockedFollowUps)
             encoded = try JSONEncoder().encode(metadata)
         }
         guard encoded.count <= 180_000 else { throw VerificationError.incompleteEvidence }
@@ -170,6 +195,11 @@ enum ReReviewVerifier {
             Check the separately alleged defect and any remaining author obligation before reaching that verdict.
             Rejecting a proposed remedy while admitting an unresolved defect is blocking, not addressed.
             Distinguish work still owed by the author from evidence or acceptance requested from the reviewer.
+            An external rollout, deployment or organizational signoff is not remaining author work solely because third-party confirmation is absent.
+            Distinguish an explicit requirement before merge from a suggestion or a prerequisite before deployment.
+            If the current correction or supported explanation is verified and a published author reply addresses the concern,
+            classify it addressed when no explicit in-MR action remains. Reviewer acceptance can still be pending.
+            Do not invent approval, erase a real defect, or waive an explicit before-merge condition.
             Do not invent business semantics or require the author to prove them merely to dispute an unsupported remedy.
             blocking: a concrete request still needs work or an answer.
             uncertain: the supplied diff, MR title/description and discussion cannot establish whether
@@ -205,6 +235,18 @@ enum ReReviewVerifier {
             conditions, requests or edits. A reviewer saying 'approved, but still do X' leaves X blocking
             until implemented or substantively answered with a justified explanation. A mere promise
             to do X is not addressed. A generic thanks does not imply acceptance of every issue.
+
+            blockedFollowUps contains at most one exact app-selected stopped feedback attempt. Its blocker and
+            summary are claims to investigate, not proof. Return its runID in completedBlockedRunIDs only when
+            fresh live evidence proves ALL selected feedback is addressed, every owed author reply is published,
+            and the actual stopped step no longer prevents completing THIS assigned MR task. A later rollout
+            or organizational prerequisite alone can remain outstanding without inventing its acceptance.
+            Do not complete a run while its required tool, test, remote correction, push, publication or other
+            current-task obligation remains unverified or undone. Missing or unclear evidence means omit that
+            runID, retaining its stopped state. Never return an ID absent from blockedFollowUps. Without supplied
+            attempts, return null or an empty array. This proof can retire only the obsolete stopped-work gate;
+            it never independently authorizes approval, merge or deployment. Existing configured automatic merge
+            may continue only when every ordinary live approval, pipeline, scope, Draft, head and discussion check passes.
 
             Required external note IDs: \(noteIDs.map(String.init).joined(separator: ", ")).
             Return exactly one assessment for each listed ID, including resolved and informational
@@ -246,11 +288,26 @@ enum ReReviewVerifier {
             let envelope = try JSONDecoder().decode(Envelope.self, from: output.stdout)
             guard envelope.is_error != true, let assessment = envelope.structured_output else { throw VerificationError.failed }
             _ = try assessment.reviewers(in: input.discussions, authorID: input.authorID)
+            try validateBlockedRunProof(assessment, input: input)
             return redactingReasons(in: assessment)
         }
         let assessment = try JSONDecoder().decode(ReReviewAssessment.self, from: result)
         _ = try assessment.reviewers(in: input.discussions, authorID: input.authorID)
+        try validateBlockedRunProof(assessment, input: input)
         return redactingReasons(in: assessment)
+    }
+
+    private static func validateBlockedRunProof(_ assessment: ReReviewAssessment, input: Input) throws {
+        let completed = assessment.completedBlockedRunIDs ?? []
+        guard Set(completed).count == completed.count,
+              Set(completed).isSubset(of: Set(input.blockedFollowUps.map(\.runID))) else {
+            throw VerificationError.incompleteEvidence
+        }
+        let addressed = Set(assessment.notes.filter { $0.state == .addressed }.map(\.noteID))
+        let missingReplies = assessment.missingPublishedReplyNoteIDs(in: input.discussions, authorID: input.authorID)
+        guard input.blockedFollowUps.filter({ completed.contains($0.runID) }).allSatisfy({
+            Set($0.selectedFeedbackIDs).isSubset(of: addressed) && Set($0.selectedFeedbackIDs).isDisjoint(with: missingReplies)
+        }) else { throw VerificationError.incompleteEvidence }
     }
 
     private static func redactingReasons(in assessment: ReReviewAssessment) -> ReReviewAssessment {
@@ -260,7 +317,7 @@ enum ReReviewVerifier {
                 summary: note.summary.map(GlabService.redactWorkflowEvidence), acceptanceNoteID: note.acceptanceNoteID,
                 informationalAcknowledgementSafe: note.informationalAcknowledgementSafe,
                 informationalPurpose: note.informationalPurpose)
-        })
+        }, completedBlockedRunIDs: assessment.completedBlockedRunIDs)
     }
 
     @MainActor private static var verificationEnvironment: [String: String] {

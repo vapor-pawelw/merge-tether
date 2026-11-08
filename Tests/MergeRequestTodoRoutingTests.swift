@@ -4,6 +4,57 @@ import Testing
 
 @MainActor
 @Suite struct MergeRequestTodoRoutingTests {
+    @Test(arguments: ["exact", "missingCallback", "missingProof", "wrongRun", "changedBlocker", "changedBlockerDuringRead", "changedContext", "changedHead", "changedDiscussion", "unverifiedTool"])
+    func blockedIntentCompletionRequiresTheExactFreshRunProof(_ scenario: String) async throws {
+        let f = try fixture(owned: true); defer { f.cleanup() }
+        try completedFollowUp(f)
+        f.settings.assistantHandoffs[0].execution = .init(state: .blocked, finishedAt: Date(),
+            summary: "The assigned correction and published explanation are complete.",
+            blocker: scenario == "unverifiedTool" ? "A required current verification tool is unavailable." : "Confirm a dependency before a later deployment.")
+        f.settings.mrActionIntents[0].state = .failed
+        let job = try #require(f.settings.assistantHandoffs.first)
+        let request = try JSONDecoder().decode(GitLabMergeRequest.self, from: Data(contentsOf: f.root.appending(path: "mr")))
+        let discussions = try JSONDecoder().decode([GitLabMergeRequestDiscussion].self, from: Data(contentsOf: f.root.appending(path: "discussions")))
+        var proof = AuthorFeedbackStatus(head: request.sha!, fingerprint: ReviewVerdict.fingerprint(discussions)!,
+            semanticContextFingerprint: request.semanticContextFingerprint, phase: .complete, addressedNoteIDs: [42])
+        if !["missingProof", "unverifiedTool"].contains(scenario) {
+            proof.reconciledFollowUpJobIDs = [scenario == "wrongRun" ? UUID() : job.id]
+            let context = try #require(AuthorFeedbackStatus.blockedContext(for: job))
+            proof.reconciledBlockedContexts[job.id] = context
+        }
+        if scenario == "changedBlocker" { f.settings.assistantHandoffs[0].execution?.blocker = "A newly failed required verification step." }
+        if scenario == "changedContext" || scenario == "changedHead" {
+            let file = f.root.appending(path: "mr")
+            let value = try String(contentsOf: file, encoding: .utf8)
+            try value.replacingOccurrences(of: scenario == "changedHead" ? request.sha! : "Example MR",
+                with: scenario == "changedHead" ? String(repeating: "b", count: 40) : "Changed requirement")
+                .write(to: file, atomically: true, encoding: .utf8)
+        }
+        if scenario == "changedDiscussion" {
+            let file = f.root.appending(path: "discussions")
+            try String(contentsOf: file, encoding: .utf8).replacingOccurrences(of: "Please fix this.", with: "Please also correct another case.")
+                .write(to: file, atomically: true, encoding: .utf8)
+        }
+        let router = MergeRequestTodoRouter(settings: f.settings, glab: f.glab, canAutomate: { false })
+        router.followUpAssessment = { _, _ in
+            if scenario == "changedBlockerDuringRead" {
+                f.settings.assistantHandoffs[0].execution?.blocker = "A newly failed required verification step."
+            }
+            return .init(notes: [.init(noteID: 42, state: .addressed, reason: "Current correction and published reply verified.")])
+        }
+        if scenario != "missingCallback" {
+            router.blockedFollowUpCompletionProof = { checkedJob, live, liveDiscussions in
+                proof.reconciles(checkedJob, request: live, discussionFingerprint: ReviewVerdict.fingerprint(liveDiscussions))
+            }
+        }
+
+        await router.refreshCompletionEvidence(host: target.host, username: target.username)
+
+        #expect((f.settings.mrActionIntents[0].state == .completed) == (scenario == "exact"))
+        #expect(f.settings.assistantHandoffs[0].execution?.state == .blocked)
+        #expect(!FileManager.default.fileExists(atPath: f.root.appending(path: "acks").path))
+    }
+
     @Test(arguments: [false, true], [false, true])
     func trackedDraftStartsItsConfiguredWorkOnlyAfterExplicitOptIn(owned: Bool, forceOff: Bool) async throws {
         let f = try fixture(owned: owned); defer { f.cleanup() }

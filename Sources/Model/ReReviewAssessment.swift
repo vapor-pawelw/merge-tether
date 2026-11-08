@@ -19,6 +19,7 @@ struct ReReviewAssessment: Codable, Sendable {
         var informationalPurpose: InformationalPurpose? = nil
     }
     let notes: [Note]
+    var completedBlockedRunIDs: [UUID]? = nil
 
     /// Addressed code does not replace an explanation still owed in an open thread.
     /// Discussion notes are published evidence; private drafts never satisfy it.

@@ -1830,7 +1830,7 @@ final class MergeRequestAttentionMonitor {
     private func reReviewKey(_ request: GitLabMergeRequest, fingerprint: String, account: Account) -> String {
         guard let settings else { return "" }
         let configuration = settings.automation
-        return [account.host, account.username, String(request.projectID), String(request.iid), request.sha ?? "",
+        return [ReReviewVerifier.policyVersion, account.host, account.username, String(request.projectID), String(request.iid), request.sha ?? "",
             fingerprint, request.semanticContextFingerprint, configuration.assistant.rawValue, configuration.autoVerifyReReview.description,
             configuration.assistant == .codex ? configuration.codexVerificationModel.rawValue : configuration.claudeVerificationModel.rawValue,
             configuration.verificationThinking.rawValue]

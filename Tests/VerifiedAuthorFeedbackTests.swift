@@ -132,6 +132,9 @@ struct VerifiedAuthorFeedbackTests {
             #expect(successor.feedbackNoteIDs == [20])
             #expect(successor.prompt.contains("The observed defect remains after rejecting the proposed remedy"))
             #expect(successor.prompt.contains("Reconcile prior remote work and existing published replies before changing code or drafting"))
+            #expect(successor.prompt.contains("reported possible remaining author work"))
+            #expect(successor.prompt.contains("Determine whether each claim is a current in-scope author obligation or a prerequisite for a later lifecycle step"))
+            #expect(!successor.prompt.contains("identified concrete remaining author work"))
             let stillBlocking = AuthorFeedbackResidual(assessedRunID: successor.id, notes: residual.notes)
 
             try await fixture.prepare(residual: stillBlocking)
@@ -215,6 +218,8 @@ struct VerifiedAuthorFeedbackTests {
             #expect(handoff.prompt.contains("Research accessible authoritative contracts, relevant callers and tests"))
             #expect(handoff.prompt.contains("Rejecting an unsupported remedy does not address an independently supported defect"))
             #expect(handoff.prompt.contains("identify the exact missing external fact, the evidence checked and why it prevents the remaining work"))
+            #expect(handoff.prompt.contains("Do not return blocked solely because approval for a later deployment or organizational step is absent"))
+            #expect(handoff.prompt.contains("Return succeeded when the assigned correction or explanation is complete and any required reply is already published"))
             #expect(handoff.followUpPushAllowed == false)
             try await fixture.waitForJob()
             try await fixture.prepare()
