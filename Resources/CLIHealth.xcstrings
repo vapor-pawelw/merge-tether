@@ -1,0 +1,105 @@
+{
+  "sourceLanguage": "en",
+  "strings": {
+    "cli.health.loginTitle": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "%@ needs you to sign in again"
+          }
+        }
+      }
+    },
+    "cli.health.limitTitle": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "%@ has reached its usage limit"
+          }
+        }
+      }
+    },
+    "cli.health.loginHelp": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Work using this CLI is paused. Sign in in your terminal, then check access again. Completed work is kept."
+          }
+        }
+      }
+    },
+    "cli.health.limitHelp": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "New work using this CLI is paused. After access is restored, retry queued work. Stopped runs still need an explicit retry."
+          }
+        }
+      }
+    },
+    "cli.health.reset": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Reset time reported by the CLI: %@"
+          }
+        }
+      }
+    },
+    "cli.health.signIn": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Sign in…"
+          }
+        }
+      }
+    },
+    "cli.health.recheck": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Check access"
+          }
+        }
+      }
+    },
+    "cli.health.retry": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Retry queued work"
+          }
+        }
+      }
+    },
+    "cli.health.actionFailed": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Access is still unavailable. Finish signing in or check the CLI in Settings."
+          }
+        }
+      }
+    }
+  },
+  "version": "1.0"
+}

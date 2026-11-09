@@ -209,6 +209,17 @@
           }
         }
       }
+    },
+    "assistant.jobs.interruptedHelp": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Work stopped. Some commits, pushes or replies may already exist. Run files are retained; retry checks the current MR and existing actions before continuing."
+          }
+        }
+      }
     }
   },
   "version": "1.0"

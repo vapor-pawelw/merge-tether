@@ -57,6 +57,30 @@ struct CommandCenterView: View {
                 .pickerStyle(.segmented).labelsHidden().fixedSize()
             }
             ToolbarItemGroup(placement: .primaryAction) {
+                Button { openWindow(id: "remote-access") } label: {
+                    Label { Text(.Remote.remoteMacPairPhone) } icon: { Image(systemName: "iphone") }
+                }
+            }
+            if #available(macOS 26.0, *) {
+                ToolbarSpacer(.fixed, placement: .primaryAction)
+            }
+            ToolbarItemGroup(placement: .primaryAction) {
+                Button { showingAdd = true } label: {
+                    Label { Text(.Board.boardAdd) } icon: { Image(systemName: "plus") }
+                }
+                Button { Task { await monitor.refreshManually() } } label: {
+                    Label { Text(.CommandCenter.commandCenterRefresh) } icon: {
+                        if monitor.showsGlobalRefreshProgress { ProgressView().controlSize(.small) }
+                        else { Image(systemName: "arrow.clockwise") }
+                    }
+                }
+                .keyboardShortcut("r", modifiers: .command)
+                .disabled(monitor.showsGlobalRefreshProgress)
+            }
+            if #available(macOS 26.0, *) {
+                ToolbarSpacer(.fixed, placement: .primaryAction)
+            }
+            ToolbarItemGroup(placement: .primaryAction) {
                 Button { showingInbox.toggle() } label: {
                     Label {
                         Text(.Board.boardInboxButton)
@@ -82,20 +106,6 @@ struct CommandCenterView: View {
                 .popover(isPresented: $showingInbox, arrowEdge: .top) {
                     CommandCenterInboxView(monitor: monitor)
                 }
-                Button { openWindow(id: "remote-access") } label: {
-                    Label { Text(.Remote.remoteMacPairPhone) } icon: { Image(systemName: "iphone") }
-                }
-                Button { showingAdd = true } label: {
-                    Label { Text(.Board.boardAdd) } icon: { Image(systemName: "plus") }
-                }
-                Button { Task { await monitor.refreshManually() } } label: {
-                    Label { Text(.CommandCenter.commandCenterRefresh) } icon: {
-                        if monitor.showsGlobalRefreshProgress { ProgressView().controlSize(.small) }
-                        else { Image(systemName: "arrow.clockwise") }
-                    }
-                }
-                .keyboardShortcut("r", modifiers: .command)
-                .disabled(monitor.showsGlobalRefreshProgress)
                 Button { openSettings() } label: {
                     Label { Text(.CommandCenter.commandCenterSettings) } icon: { Image(systemName: "gearshape") }
                 }
@@ -143,7 +153,11 @@ struct CommandCenterView: View {
                 .font(.caption).foregroundStyle(.orange).padding(10)
                 .frame(maxWidth: .infinity, alignment: .leading)
         }
-        if let warning = monitor.assistantDependencyWarning {
+        AssistantCLIHealthBanner(monitor: monitor)
+        if let warning = monitor.assistantDependencyWarning,
+           monitor.assistantDependencies.statuses[monitor.settings.automation.assistant].map({
+               if case .loginRequired = $0 { return false }; return true
+           }) != false {
             HStack {
                 Label { Text(warning) } icon: { Image(systemName: "exclamationmark.triangle") }
                 Spacer()

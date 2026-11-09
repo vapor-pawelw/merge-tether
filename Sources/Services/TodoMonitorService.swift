@@ -5,6 +5,7 @@ import Observation
 @Observable
 final class TodoMonitorService {
     let settings: SettingsManager
+    let cliHealth = AssistantCLIHealthStore.shared
     let glab: GlabService
     let notifications: NotificationService
     let attention: MergeRequestAttentionMonitor
@@ -87,7 +88,9 @@ final class TodoMonitorService {
     private(set) var assistantJobActionNotices: [UUID: String] = [:]
     private(set) var desktopHandoffError = false
     let assistantDependencies = AssistantDependencyMonitor()
-    var availableAssistants: Set<AutomationAssistant> { assistantDependencies.available }
+    var availableAssistants: Set<AutomationAssistant> {
+        assistantDependencies.available.filter { cliHealth.hold(for: $0) == nil }
+    }
     private(set) var codexListenerHealth: CodexDesktopRelay.ListenerHealth = .off
     private(set) var codexPluginInstallation: CodexPluginInstaller.Installation?
     private var lastListenerCheck: Date?
@@ -507,7 +510,7 @@ final class TodoMonitorService {
     func reviewingContext(for row: MergeRequestBoardSnapshot.Row) -> ReviewingContext {
         ReviewingContext(row: row,
             workflowState: ReviewingContext.workflowState(for: row, entries: authoredMergeRequests.workflow.entries),
-            assistantReady: availableAssistants.contains(settings.automation.assistant),
+            assistantReady: assistantDependencies.available.contains(settings.automation.assistant),
             assistantChecking: assistantDependencies.isChecking,
             draftAutomationAllowed: settings.automation.hasEnabledAutomation && row.item.mergeRequest.map {
                 settings.automation.scope.permits($0, host: glab.resolvedHost ?? "", username: glab.currentUsername ?? "")

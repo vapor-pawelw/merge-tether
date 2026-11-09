@@ -123,6 +123,7 @@ enum AssistantJobExecutor {
             step and its actual cause, so the MR card explains why automatic progress stopped.
             Do not use a generic status such as "blocked" as the explanation. For succeeded, set blocker to null.
             """ + ignoredFeedback.instructions
+        try AssistantJobJournal.prepare(handoff.id)
         let input = Data(instructions.utf8)
         let instructionsURL = folder.appending(path: "instructions.txt")
         try input.write(to: instructionsURL, options: .atomic)
@@ -140,6 +141,7 @@ enum AssistantJobExecutor {
                 thinking: handoff.codingThinking ?? handoff.reviewThinking)
             output = try await AssistantUsageRunner.run(executable, arguments: arguments, environment: invocation.childEnvironment(environment),
                                                   currentDirectory: folder, timeout: 1_800, input: input,
+                                                  outputDirectory: folder.appendingPathComponent("cli-output"),
                                                   usage: .init(role: .codingAgent, assistant: handoff.key.assistant,
                                                     model: (handoff.codingModel ?? handoff.reviewModel)?.rawValue,
                                                     mergeRequest: usageMergeRequest))
@@ -152,6 +154,7 @@ enum AssistantJobExecutor {
             let arguments = invocation.claudeArguments
             output = try await AssistantUsageRunner.run(executable, arguments: arguments, environment: invocation.childEnvironment(environment),
                                                   currentDirectory: folder, timeout: 1_800, input: input,
+                                                  outputDirectory: folder.appendingPathComponent("cli-output"),
                                                   usage: .init(role: .codingAgent, assistant: handoff.key.assistant,
                                                     model: (handoff.codingModel ?? handoff.reviewModel)?.rawValue,
                                                     mergeRequest: usageMergeRequest))
@@ -159,7 +162,6 @@ enum AssistantJobExecutor {
             guard output.exitCode == 0 else { throw CLIProcessError(exitCode: output.exitCode, diagnostic: output.stderr) }
             result = try AssistantJobResult.claude(output.stdout)
         }
-        try Task.checkCancellation()
         } catch {
             if let capturedOutput, !(error is CancellationError) {
                 throw AssistantJobFailure(error: error, output: capturedOutput)
@@ -167,7 +169,11 @@ enum AssistantJobExecutor {
             throw error
         }
         let transcript = GlabService.redactWorkflowEvidence(String(decoding: output.stdout, as: UTF8.self) + "\n" + output.stderr)
-        return .init(result: result, output: transcript)
+        let outcome = AssistantJobCoordinator.Outcome(result: result, output: transcript)
+        do { try await AssistantJobJournal.save(outcome, for: handoff) }
+        catch { Log.monitor.error("Could not checkpoint worker completion: \(String(describing: error), privacy: .private)") }
+        try Task.checkCancellation()
+        return outcome
     }
 
     @MainActor

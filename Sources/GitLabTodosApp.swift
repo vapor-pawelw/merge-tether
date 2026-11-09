@@ -40,14 +40,22 @@ final class GitLabTodosAppDelegate: NSObject, NSApplicationDelegate {
     let avatarCache = AvatarCache()
     let updates = UpdateService()
     lazy var remote = RemoteHostController(monitor: monitor)
+    private var terminating = false
     func applicationDidFinishLaunching(_ notification: Notification) {
         _ = remote
         NSApplication.shared.setActivationPolicy(.regular)
         monitor.notifications.onOpenMainWindow = { MainWindowPresentation.show() }
     }
 
-    func applicationWillTerminate(_ notification: Notification) {
+    func applicationShouldTerminate(_ sender: NSApplication) -> NSApplication.TerminateReply {
+        guard !terminating else { return .terminateLater }
+        terminating = true
         monitor.prepareForTermination()
+        Task { @MainActor in
+            await AssistantAutomationRunner.waitForTermination()
+            sender.reply(toApplicationShouldTerminate: true)
+        }
+        return .terminateLater
     }
 
     func applicationShouldTerminateAfterLastWindowClosed(_ sender: NSApplication) -> Bool {

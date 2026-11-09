@@ -1,4 +1,5 @@
 import Foundation
+import Observation
 
 /// Owns live tasks only. Persisted queued/running records are never replayed after restart.
 @MainActor
@@ -14,13 +15,27 @@ final class AssistantJobCoordinator {
     private var work: [UUID: AssistantAutomationRunner.MergeRequestWork] = [:]
     private let execute: Executor
     private let maximumConcurrentJobs: Int
+    private let healthStore: AssistantCLIHealthStore
     private var pending: [(handoff: Handoff, settings: SettingsManager)] = []
     var onFinished: ((Handoff) -> Void)?
     private var terminating = false
+    private var restoringCheckpointKey = false
 
-    init(maximumConcurrentJobs: Int = 2, execute: @escaping Executor = AssistantJobExecutor.execute) {
+    init(maximumConcurrentJobs: Int = 4, healthStore: AssistantCLIHealthStore? = nil,
+         execute: @escaping Executor = AssistantJobExecutor.execute) {
         self.maximumConcurrentJobs = max(1, maximumConcurrentJobs)
+        self.healthStore = healthStore ?? .shared
         self.execute = execute
+        observeHealth()
+    }
+
+
+    private func observeHealth() {
+        withObservationTracking {
+            for assistant in AutomationAssistant.allCases { _ = healthStore.hold(for: assistant) }
+        } onChange: { [weak self] in
+            Task { @MainActor in self?.observeHealth(); self?.startPendingJobs() }
+        }
     }
 
     func isWorking(on target: AssistantAutomationRunner.MergeRequestWork) -> Bool {
@@ -28,6 +43,8 @@ final class AssistantJobCoordinator {
     }
 
     func isRunning(_ id: UUID) -> Bool { work[id] != nil }
+
+    func resumePendingJobs() { startPendingJobs() }
 
     @discardableResult
     func schedule(_ handoff: Handoff, settings: SettingsManager) -> Bool {
@@ -41,7 +58,8 @@ final class AssistantJobCoordinator {
 
     private func startPendingJobs() {
         while !terminating, tasks.count < maximumConcurrentJobs, !pending.isEmpty {
-            let next = pending.removeFirst()
+            guard let index = pending.firstIndex(where: { healthStore.hold(for: $0.handoff.key.assistant) == nil }) else { break }
+            let next = pending.remove(at: index)
             start(next.handoff, settings: next.settings)
         }
     }
@@ -65,12 +83,30 @@ final class AssistantJobCoordinator {
                     $0.output = String(outcome.output.prefix(262_144))
                     $0.finishedAt = Date()
                 }
+            } catch AssistantUsageRunner.AccessError.temporarilyUnavailable {
+                if !terminating && !Task.isCancelled {
+                    self.update(handoff.id, settings: settings) { $0.state = .queued; $0.startedAt = nil }
+                    pending.append((handoff, settings))
+                    tasks[handoff.id] = nil
+                    startPendingJobs()
+                    return
+                }
+                self.update(handoff.id, settings: settings) {
+                    $0.state = terminating ? .interrupted : .cancelled
+                    $0.finishedAt = Date()
+                }
             } catch {
                 self.update(handoff.id, settings: settings) {
                     $0.state = terminating ? .interrupted : (error is CancellationError ? .cancelled : .failed)
                     $0.error = GlabService.redactWorkflowEvidence(String(describing: error))
                     if let failure = error as? AssistantJobFailure { $0.output = failure.transcript }
                     $0.finishedAt = Date()
+                }
+                if let index = settings.assistantHandoffs.firstIndex(where: { $0.id == handoff.id }),
+                   let recovered = AssistantJobJournal.recover(settings.assistantHandoffs[index],
+                        allowCompletion: error is CancellationError && AssistantJobJournal.didSave(handoff.id)) {
+                    settings.assistantHandoffs[index].execution = recovered
+                    settings.save()
                 }
             }
             tasks[handoff.id] = nil
@@ -108,11 +144,33 @@ final class AssistantJobCoordinator {
         var changed = false
         for index in settings.assistantHandoffs.indices {
             guard let execution = settings.assistantHandoffs[index].execution,
-                  execution.state.isActive, work[settings.assistantHandoffs[index].id] == nil else { continue }
-            settings.assistantHandoffs[index].execution = execution.recoverAfterRestart()
-            changed = true
+                  execution.state.isActive || execution.state == .interrupted,
+                  work[settings.assistantHandoffs[index].id] == nil else { continue }
+            let recovered = AssistantJobJournal.recover(settings.assistantHandoffs[index])
+                ?? execution.recoverAfterRestart()
+            if recovered != execution { settings.assistantHandoffs[index].execution = recovered; changed = true }
         }
         if changed { settings.save() }
+        if !restoringCheckpointKey, !AssistantJobJournal.isKeyReady,
+           settings.assistantHandoffs.contains(where: {
+               ($0.execution?.state.isActive == true || $0.execution?.state == .interrupted)
+                   && work[$0.id] == nil && AssistantJobJournal.hasCheckpoint($0.id)
+           }) {
+            restoringCheckpointKey = true
+            Task { @MainActor [weak self, weak settings] in
+                let ready = await AssistantJobJournal.loadKey()
+                guard let self, let settings else { return }
+                restoringCheckpointKey = false
+                if ready { synchronizeInterruptedRuns(settings: settings) }
+            }
+        }
+    }
+
+    func waitForTermination(timeout: Duration = .seconds(15)) async {
+        let clock = ContinuousClock(), deadline = ContinuousClock.now.advanced(by: timeout)
+        while !tasks.isEmpty && clock.now < deadline {
+            try? await Task.sleep(for: .milliseconds(10))
+        }
     }
 
     private func update(_ id: UUID, settings: SettingsManager, mutate: (inout AssistantJobExecution) -> Void) {

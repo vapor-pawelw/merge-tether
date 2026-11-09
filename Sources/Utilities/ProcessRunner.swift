@@ -20,6 +20,7 @@ enum ProcessRunner {
         currentDirectory: URL? = nil,
         timeout: TimeInterval = 30,
         input: Data? = nil,
+        outputDirectory: URL? = nil,
         onOutput: (@Sendable (Output) -> Void)? = nil
     ) async throws -> Output {
         let process = Process()
@@ -39,7 +40,7 @@ enum ProcessRunner {
 
         let outputCollector: ProcessOutputCollector
         do {
-            outputCollector = try ProcessOutputCollector()
+            outputCollector = try ProcessOutputCollector(directory: outputDirectory)
         } catch {
             throw RunError.outputCaptureFailed(error.localizedDescription)
         }
@@ -188,16 +189,16 @@ private struct ProcessOutputCollector: Sendable {
     let stdout: Stream
     let stderr: Stream
 
-    init() throws {
+    init(directory persistentDirectory: URL? = nil) throws {
         let files = FileManager.default
-        let directory = files.temporaryDirectory.appendingPathComponent(UUID().uuidString, isDirectory: true)
+        let directory = persistentDirectory ?? files.temporaryDirectory.appendingPathComponent(UUID().uuidString, isDirectory: true)
         try files.createDirectory(
             at: directory,
-            withIntermediateDirectories: false,
+            withIntermediateDirectories: persistentDirectory != nil,
             attributes: [.posixPermissions: 0o700]
         )
         // Open descriptors stay valid after unlinking the files.
-        defer { try? files.removeItem(at: directory) }
+        defer { if persistentDirectory == nil { try? files.removeItem(at: directory) } }
         stdout = try Stream(url: directory.appendingPathComponent("stdout"))
         stderr = try Stream(url: directory.appendingPathComponent("stderr"))
     }
@@ -208,6 +209,7 @@ private struct ProcessOutputCollector: Sendable {
 
         init(url: URL) throws {
             try Data().write(to: url)
+            try FileManager.default.setAttributes([.posixPermissions: 0o600], ofItemAtPath: url.path)
             reader = try FileHandle(forReadingFrom: url)
             writer = try FileHandle(forWritingTo: url)
         }

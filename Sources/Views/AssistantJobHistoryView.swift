@@ -74,6 +74,9 @@ struct AssistantJobRow: View {
                 }
             } label: { Text(.AssistantJobs.assistantJobsPrompt) }
             if let execution = handoff.execution {
+                if execution.state == .interrupted || execution.state == .cancelled {
+                    Text(.AssistantJobs.assistantJobsInterruptedHelp).font(.caption).foregroundStyle(.secondary)
+                }
                 if let blocker = execution.attentionExplanation {
                     Text(verbatim: blocker).foregroundStyle(.orange).textSelection(.enabled)
                 }

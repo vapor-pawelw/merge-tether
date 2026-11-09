@@ -5,6 +5,28 @@ import Testing
 
 @Suite("ProcessRunner")
 struct ProcessRunnerTests {
+    @Test("durable output is readable while running and survives cancellation")
+    func durableOutputSurvivesCancellation() async throws {
+        let folder = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
+        defer { try? FileManager.default.removeItem(at: folder) }
+        let task = Task {
+            try await ProcessRunner.run(URL(fileURLWithPath: "/bin/sh"),
+                arguments: ["-c", "printf 'completed step'; printf 'diagnostic' >&2; /bin/sleep 20"],
+                environment: [:], timeout: 30, outputDirectory: folder)
+        }
+        let stdout = folder.appendingPathComponent("stdout")
+        for _ in 0..<100 where (try? Data(contentsOf: stdout).count) != 14 {
+            try await Task.sleep(for: .milliseconds(10))
+        }
+        #expect(try String(contentsOf: stdout, encoding: .utf8) == "completed step")
+        task.cancel()
+        do { _ = try await task.value; Issue.record("Expected cancellation") } catch is CancellationError {}
+        #expect(try String(contentsOf: stdout, encoding: .utf8) == "completed step")
+        #expect(try String(contentsOf: folder.appendingPathComponent("stderr"), encoding: .utf8) == "diagnostic")
+        let attributes = try FileManager.default.attributesOfItem(atPath: stdout.path)
+        #expect((attributes[.posixPermissions] as? NSNumber)?.intValue == 0o600)
+    }
+
     @Test("drains output while the process is running")
     func drainsLargeOutput() async throws {
         let output = try await ProcessRunner.run(

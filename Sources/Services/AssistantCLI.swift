@@ -1,3 +1,4 @@
+import AppKit
 import Foundation
 
 enum AssistantDependencyStatus: Equatable, Sendable {
@@ -101,11 +102,15 @@ enum AssistantCLI {
 
     @MainActor
     static func openLogin(_ assistant: AutomationAssistant, executable: URL) async throws {
-        let command = "'" + executable.path.replacingOccurrences(of: "'", with: "'\\''") + "' "
-            + (assistant == .codex ? "login" : "auth login")
-        let literal = AssistantLaunchContext.appleScriptLiteral(command)
-        let result = try await ProcessRunner.run(URL(fileURLWithPath: "/usr/bin/osascript"), arguments: ["-e",
-            "tell application \"Terminal\"\nactivate\ndo script \(literal)\nend tell"], environment: environment)
-        guard result.exitCode == 0 else { throw SetupError.installationFailed }
+        let folder = URL.homeDirectory.appending(path: "Library/Application Support/MergeTether/CLI Login")
+        try FileManager.default.createDirectory(at: folder, withIntermediateDirectories: true,
+            attributes: [.posixPermissions: 0o700])
+        let script = folder.appending(path: "Sign in to \(assistant.rawValue).command")
+        let command = "#!/bin/zsh\nexec " + AssistantLaunchContext.shellQuote(executable.path)
+            + (assistant == .codex ? " login\n" : " auth login\n")
+        try Data(command.utf8).write(to: script, options: .atomic)
+        try FileManager.default.setAttributes([.posixPermissions: 0o700], ofItemAtPath: script.path)
+        // .command uses the user's macOS file association for terminal scripts.
+        guard NSWorkspace.shared.open(script) else { throw SetupError.installationFailed }
     }
 }

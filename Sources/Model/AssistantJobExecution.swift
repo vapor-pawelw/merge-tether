@@ -58,8 +58,8 @@ struct AssistantJobExecution: Codable, Equatable, Sendable {
     }
 }
 
-struct AssistantJobResult: Decodable, Equatable, Sendable {
-    enum Status: String, Decodable, Sendable { case succeeded, blocked }
+struct AssistantJobResult: Codable, Equatable, Sendable {
+    enum Status: String, Codable, Sendable { case succeeded, blocked }
     enum Error: Swift.Error { case invalidResult, assistantFailed }
 
     let status: Status
