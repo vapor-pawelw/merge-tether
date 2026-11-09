@@ -20,8 +20,10 @@ macOS GitLab inbox and MR automation. Read [README.md](README.md) for behavior,
 - Run executable MR workers with full tool access in both Codex CLI and Claude CLI.
   Diagnostic, planning and semantic-verifier tasks need live tools too. The verifier
   only reads evidence; keep GitLab action permissions independent of tool access.
-- Isolate test-runner home/preferences from a running installation; otherwise the
-  single-instance lock can make tests exit before running. See the build guide.
+- Keep one interactive MergeTether instance across installed and development copies;
+  inspect running bundle paths before relaunching and use the intended installation.
+  Test hosts must stay headless without production services and use isolated
+  home/preferences. See the build guide.
 - `glab` subprocesses need an explicit environment containing `HOME` and `PATH`.
   Use the signed-in account and default host; never inherit the entire environment.
 - Publishing Draft Notes executes GitLab quick actions. Automatic publishing must

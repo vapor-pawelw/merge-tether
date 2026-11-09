@@ -112,6 +112,7 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 
 ### Fixed
 
+- Keep app-hosted tests invisible and separate from production monitoring, notifications and remote access; refuse development relaunches while another app or test host is running instead of stopping it or forcing an extra copy.
 
 - Distinguish later deployment approvals from unfinished MR corrections, and retire obsolete blocked feedback attention only with fresh proof for the exact run while preserving genuine verification failures and execution history.
 - Keep AI and source-author publication checks tied to the latest incoming exchange after your own clarification replies, while retaining checks for every new contributor.

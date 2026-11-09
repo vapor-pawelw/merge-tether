@@ -4,12 +4,33 @@ import SwiftUI
 @main
 enum MergeTetherMain {
     @MainActor static func main() {
+        if ApplicationLaunchMode.resolve(environment: ProcessInfo.processInfo.environment) == .testHost {
+            let application = NSApplication.shared
+            let delegate = MergeTetherTestHostDelegate()
+            application.delegate = delegate
+            application.setActivationPolicy(.prohibited)
+            // NSApplicationMain would load Tuist's default Main storyboard;
+            // this host needs only launch notifications and the XCTest event loop.
+            withExtendedLifetime(delegate) { application.run() }
+            return
+        }
         do {
             guard let lock = try SingleInstanceLock.acquire() else { return }
             withExtendedLifetime(lock) { GitLabTodosApp.main() }
         } catch {
             Log.monitor.error("Cannot acquire MergeTether instance lock: \(error.localizedDescription, privacy: .private)")
         }
+    }
+}
+
+@MainActor
+private final class MergeTetherTestHostDelegate: NSObject, NSApplicationDelegate {
+    func applicationWillFinishLaunching(_ notification: Notification) {
+        NSApplication.shared.setActivationPolicy(.prohibited)
+    }
+
+    func applicationDidFinishLaunching(_ notification: Notification) {
+        NSApplication.shared.setActivationPolicy(.prohibited)
     }
 }
 

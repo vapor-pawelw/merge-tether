@@ -45,12 +45,15 @@ A development installation may use a separate `PRODUCT_BUNDLE_IDENTIFIER` suppli
 
 For a local installation paired with iOS, also keep a consistent certificate-backed signing identity, such as Apple Development, across rebuilds. An ad hoc signature uses a changing code hash as its designated requirement, so Keychain’s Always Allow does not carry across changed builds. Switching from an ad hoc build to a certificate-signed build can require one new Keychain approval; keep the existing pairing and its Keychain access controls.
 
-`scripts/rebuild-and-relaunch.sh` regenerates, builds and launches a Debug app from its build directory. It stops processes matching the legacy executable name and uses the project’s default bundle identifier; it is not an installer for an existing custom-identifier app. Use an explicit build and copy step when preserving such an installation.
+`scripts/rebuild-and-relaunch.sh` regenerates, builds and launches a Debug app from its build directory. It refuses while a MergeTether app or app-hosted test is running and prints the running executable paths; finish active work/tests and quit the intended app before retrying. It never kills another process or forces an additional instance. Use `--help` for its options. The helper uses the project's default bundle identifier and is not an installer for a custom-identifier app. Use an explicit build and copy step when preserving an existing installation, including its bundle identifier, certificate-backed signing identity and installation path. Launch that installed path once rather than also opening a scratch build.
 
 ## Running tests
 
-Keep the test runner's home separate from a running installation. MergeTether has a
-single-instance lock; sharing its home can make the test host exit before tests run.
+Keep the test runner's home/preferences separate from a running installation so
+test fixtures cannot use that installation's saved state. Injected XCTest hosts
+use an invisible application without production windows, monitoring, notifications
+or remote access. Ordinary installed and development launches share the same
+single-instance lock regardless of bundle identifier.
 
 ```bash
 test_home="$(mktemp -d)"
