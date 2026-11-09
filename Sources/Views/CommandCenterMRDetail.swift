@@ -261,15 +261,17 @@ private struct CommandCenterMRDetailContent: View {
                     Text(verbatim: author.name.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty ? author.username : author.name).lineLimit(1)
                         .help(Text(verbatim: "@\(author.username)"))
                 }
-                if finishedState == nil, let target = monitor.scopeTarget(projectID: item.id.projectID, iid: item.id.iid, url: item.url) {
-                    BoardAutomationToggle(settings: monitor.settings, target: target, projectPath: item.url.gitLabProjectPath,
-                        isDraft: item.section == .draftMergeRequests)
-                }
                 Spacer()
-                BoardPinButton(pin: .mergeRequest(host: monitor.glab.resolvedHost,
-                    username: monitor.glab.currentUsername, projectID: item.id.projectID, iid: item.id.iid),
-                    settings: monitor.settings)
-                headerMenu
+                HStack(spacing: 0) {
+                    if finishedState == nil, let target = monitor.scopeTarget(projectID: item.id.projectID, iid: item.id.iid, url: item.url) {
+                        BoardAutomationToggle(settings: monitor.settings, target: target, projectPath: item.url.gitLabProjectPath,
+                            isDraft: item.section == .draftMergeRequests)
+                    }
+                    BoardPinButton(pin: .mergeRequest(host: monitor.glab.resolvedHost,
+                        username: monitor.glab.currentUsername, projectID: item.id.projectID, iid: item.id.iid),
+                        settings: monitor.settings)
+                    headerMenu
+                }
             }
             .font(.subheadline).foregroundStyle(.secondary)
             Text(verbatim: item.title).font(.title2.weight(.semibold)).textSelection(.enabled)
@@ -321,13 +323,11 @@ private struct CommandCenterMRDetailContent: View {
     }
 
     private var headerMenu: some View {
-        Menu {
+        BoardActionsMenu {
             MRCommonMenuItems(item: item, monitor: monitor,
                 onRemove: monitor.reviewedMergeRequestItems.contains(where: { $0.id == item.id && $0.url == item.url })
                     ? { confirmRemoval = true } : nil)
-        } label: { Image(systemName: "ellipsis") }
-        .menuStyle(.borderlessButton).menuIndicator(.hidden).fixedSize()
-        .accessibilityLabel(Text(.CommandCenter.commandCenterActions))
+        }
     }
 
     private func nextStep(proxy: ScrollViewProxy, citationContext: MRCommentCitation.Context?) -> some View {

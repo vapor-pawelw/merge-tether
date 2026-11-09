@@ -142,14 +142,16 @@ private struct CommandCenterMRCardContent: View {
             if finishedState == nil {
                 BoardApprovalProgressBadge(progress: item.approvalProgress, reviewers: item.mergeRequest?.reviewers ?? [])
             }
-            if finishedState == nil, let scopeTarget {
-                BoardAutomationToggle(settings: monitor.settings, target: scopeTarget,
-                    projectPath: item.url.gitLabProjectPath, isDraft: isDraft)
+            HStack(spacing: 0) {
+                if finishedState == nil, let scopeTarget {
+                    BoardAutomationToggle(settings: monitor.settings, target: scopeTarget,
+                        projectPath: item.url.gitLabProjectPath, isDraft: isDraft)
+                }
+                BoardPinButton(pin: .mergeRequest(host: monitor.glab.resolvedHost,
+                    username: monitor.glab.currentUsername, projectID: item.id.projectID, iid: item.id.iid),
+                    settings: monitor.settings)
+                moreMenu
             }
-            BoardPinButton(pin: .mergeRequest(host: monitor.glab.resolvedHost,
-                username: monitor.glab.currentUsername, projectID: item.id.projectID, iid: item.id.iid),
-                settings: monitor.settings)
-            moreMenu
         }
     }
 
@@ -412,13 +414,15 @@ struct BoardTodoRow: View {
             if todo.targetType != .mergeRequest, !todo.relativeIdentifier.isEmpty {
                 Text(verbatim: todo.relativeIdentifier).font(.caption).foregroundStyle(.secondary)
             }
-            if let scopeTarget {
-                BoardAutomationToggle(settings: monitor.settings, target: scopeTarget,
-                    projectPath: todo.project.pathWithNamespace, isDraft: isDraft)
+            HStack(spacing: 0) {
+                if let scopeTarget {
+                    BoardAutomationToggle(settings: monitor.settings, target: scopeTarget,
+                        projectPath: todo.project.pathWithNamespace, isDraft: isDraft)
+                }
+                BoardPinButton(pin: .todo(host: monitor.glab.resolvedHost,
+                    username: monitor.glab.currentUsername, id: todo.id), settings: monitor.settings)
+                moreMenu
             }
-            BoardPinButton(pin: .todo(host: monitor.glab.resolvedHost,
-                username: monitor.glab.currentUsername, id: todo.id), settings: monitor.settings)
-            moreMenu
         }
     }
 

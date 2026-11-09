@@ -1,3 +1,4 @@
+import AppKit
 import SwiftUI
 
 struct BoardAutomationToggle: View {
@@ -11,8 +12,16 @@ struct BoardAutomationToggle: View {
             let status = settings.automation.scope.resolve(target, isDraft: isDraft)
             let choice = settings.automation.scope.manualChoice(for: target)
             Button {
-                scopeEnabledBinding(settings: settings, target: target, projectPath: projectPath,
-                                    isDraft: isDraft).wrappedValue.toggle()
+                if isDraft && !status.active {
+                    Task {
+                        guard confirmDraftAutomation(message: draftAutomationMessage(target: target, projectPath: projectPath)) else { return }
+                        scopeEnabledBinding(settings: settings, target: target, projectPath: projectPath,
+                                            isDraft: isDraft).wrappedValue = true
+                    }
+                } else {
+                    scopeEnabledBinding(settings: settings, target: target, projectPath: projectPath,
+                                        isDraft: isDraft).wrappedValue.toggle()
+                }
             } label: {
                 Image(systemName: status.active ? "bolt.fill" : "bolt.slash")
                     .font(.system(size: 11, weight: .medium))
@@ -64,15 +73,21 @@ struct MRAutomationScopeMenu: View {
                     }
                     Divider()
                 }
-                Toggle(isOn: scopeEnabledBinding(settings: settings, target: target.repository,
-                                                  projectPath: projectPath)) {
+                Toggle(isOn: Binding(get: {
+                    settings.automation.scope.resolve(target.repository).active
+                }, set: { enabled in
+                    changeScope(for: target.repository, message: repositoryConfirmationMessage) {
+                        $0.setEnabled(enabled, for: target.repository)
+                    }
+                })) {
                     Label { Text(.Menu.menuScopeRepositoryDefault) } icon: { Image(systemName: "folder") }
                 }
                 .help(Text(.Menu.menuScopeRepositoryDefaultHelp))
                 if settings.automation.scope[target.repository] != .inherit {
                     Button {
-                        settings.automation.scope.setManualChoice(.inherit, for: target.repository)
-                        settings.save()
+                        changeScope(for: target.repository, message: repositoryConfirmationMessage) {
+                            $0.setManualChoice(.inherit, for: target.repository)
+                        }
                     } label: { Text(.Menu.menuScopeFollowGlobal) }
                 }
             } label: {
@@ -106,11 +121,40 @@ struct MRAutomationScopeMenu: View {
         }
     }
 
+    private var repositoryConfirmationMessage: LocalizedStringResource {
+        .Menu.menuScopeDraftConfirmationRepositoryMessage(
+            projectPath ?? settings.automation.scope.repositoryLabel(for: target) ?? String(target.projectID))
+    }
+
+    private func changeScope(for key: MRAutomationScope.Target, message: LocalizedStringResource,
+                             change: @escaping (inout MRAutomationScope) -> Void) {
+        var proposed = settings.automation.scope
+        change(&proposed)
+        let enablesThisDraft = isDraft && !settings.automation.scope.resolve(target, isDraft: true).active
+            && proposed.resolve(target, isDraft: true).active
+        let enablesRepositoryDrafts = key.iid == nil && !proposed.pauseDraftsByDefault
+            && !settings.automation.scope.resolve(key).active && proposed.resolve(key).active
+        let save = {
+            change(&settings.automation.scope)
+            if let projectPath { settings.automation.scope.rememberRepository(projectPath, for: key) }
+            settings.save()
+        }
+        if enablesThisDraft || enablesRepositoryDrafts {
+            Task {
+                guard confirmDraftAutomation(message: message) else { return }
+                save()
+            }
+        } else {
+            save()
+        }
+    }
+
     private func choiceButton(_ choice: MRAutomationScope.Choice) -> some View {
         Button {
-            settings.automation.scope.setManualChoice(choice, for: target)
-            if let projectPath { settings.automation.scope.rememberRepository(projectPath, for: target) }
-            settings.save()
+            changeScope(for: target,
+                message: draftAutomationMessage(target: target, projectPath: projectPath, followsDefaults: choice == .inherit)) {
+                $0.setManualChoice(choice, for: target)
+            }
         } label: {
             Label { Text(scopeChoiceLabel(choice)) } icon: {
                 if settings.automation.scope.manualChoice(for: target) == choice {
@@ -162,4 +206,21 @@ private func scopeSourceLabel(_ source: MRAutomationScope.Source) -> LocalizedSt
     case .mergeRequest: .Menu.menuScopeSourceMR
     case .draft: .Menu.menuScopeSourceDraft
     }
+}
+
+private func draftAutomationMessage(target: MRAutomationScope.Target, projectPath: String?, followsDefaults: Bool = false) -> LocalizedStringResource {
+    let reference = "\(projectPath ?? String(target.projectID)) !\(target.iid ?? 0)"
+    return followsDefaults ? .Menu.menuScopeDraftConfirmationAutoMessage(reference) : .Menu.menuScopeDraftConfirmationMessage(reference)
+}
+
+/// Native menus dispose their SwiftUI content after a selection; the alert owns its window.
+@MainActor
+func confirmDraftAutomation(message: LocalizedStringResource) -> Bool {
+    let alert = NSAlert()
+    alert.messageText = String(localized: .Menu.menuScopeDraftConfirmationTitle)
+    alert.informativeText = String(localized: message)
+    alert.addButton(withTitle: String(localized: .Menu.menuScopeDraftConfirmationEnable))
+    alert.addButton(withTitle: String(localized: .Menu.menuScopeCancel))
+    NSApp.activate()
+    return alert.runModal() == .alertFirstButtonReturn
 }

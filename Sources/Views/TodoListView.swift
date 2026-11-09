@@ -183,7 +183,7 @@ struct TodoListView: View {
                 todo: todo, currentUsername: monitor.glab.currentUsername,
                 automationState: monitor.automationAction(for: todo),
                 scopeMenu: todo.targetType == .mergeRequest ? todo.target.iid.flatMap {
-                    scopeMenu(projectID: todo.project.id, iid: $0, url: todo.targetURL)
+                    scopeMenu(projectID: todo.project.id, iid: $0, url: todo.targetURL, isDraft: todo.isDraft)
                 } : nil,
                 onAutomation: { Task { await monitor.runAutomationManually(for: todo) } },
                 onMarkDone: { withAnimation { monitor.markDoneWithUndo(todo) } },
@@ -222,9 +222,9 @@ struct TodoListView: View {
         .font(.caption).controlSize(.small).padding(.horizontal, 12)
     }
 
-    private func scopeMenu(projectID: Int, iid: Int, url: URL) -> MRAutomationScopeMenu? {
+    private func scopeMenu(projectID: Int, iid: Int, url: URL, isDraft: Bool) -> MRAutomationScopeMenu? {
         monitor.scopeTarget(projectID: projectID, iid: iid, url: url).map {
-            MRAutomationScopeMenu(monitor: monitor, target: $0, projectPath: url.gitLabProjectPath)
+            MRAutomationScopeMenu(monitor: monitor, target: $0, projectPath: url.gitLabProjectPath, isDraft: isDraft)
         }
     }
 
