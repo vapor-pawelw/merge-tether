@@ -4,6 +4,35 @@ import Testing
 
 @MainActor
 @Suite struct MergeRequestTodoRoutingTests {
+    @Test(arguments: ["ignoredOnly", "sameNoteRemaining", "restored"])
+    func unboundFollowUpCanUseOnlyACurrentExactConcernDecision(_ scenario: String) async throws {
+        let f = try fixture(owned: true); defer { f.cleanup() }
+        try completedFollowUp(f, withReply: false)
+        f.settings.mrActionIntents[0].jobID = nil
+        f.settings.mrActionIntents[0].state = .pending
+        let discussions = try JSONDecoder().decode([GitLabMergeRequestDiscussion].self,
+            from: Data(contentsOf: f.root.appending(path: "discussions")))
+        let note = try #require(discussions.first?.notes.first)
+        let decision = IgnoredFeedbackSuggestion(id: UUID(), target: target, sourceNoteID: note.id!, sourceAuthorID: note.author!.id,
+            sourceBody: note.body!, sourceRevision: UserAttentionSnapshot.digest("\(note.author!.id)\n" + note.body!),
+            concernSummary: "Decline this specific assumption.", concernReason: "All other comment obligations remain.", createdAt: Date())
+        if scenario != "restored" {
+            f.settings.feedbackSuggestionDecisions = try JSONDecoder().decode(FeedbackSuggestionDecisions.self,
+                from: JSONEncoder().encode(["decisions": [decision]]))
+        }
+        let router = MergeRequestTodoRouter(settings: f.settings, glab: f.glab, canAutomate: { false })
+        router.followUpAssessment = { _, _ in .init(notes: [.init(noteID: 42,
+            state: scenario == "sameNoteRemaining" ? .blocking : .ignoredByUser,
+            reason: scenario == "sameNoteRemaining" ? "Another obligation in the same note remains." : "Only the declined precise concern remained.",
+            ignoredDecisionIDs: [decision.id])]) }
+
+        await router.refreshCompletionEvidence(host: target.host, username: target.username)
+
+        #expect((f.settings.mrActionIntents[0].state == .completed) == (scenario == "ignoredOnly"))
+        #expect(f.settings.assistantHandoffs[0].execution?.state == .succeeded)
+        #expect(!FileManager.default.fileExists(atPath: f.root.appending(path: "acks").path))
+    }
+
     @Test(arguments: ["exact", "missingCallback", "missingProof", "wrongRun", "changedBlocker", "changedBlockerDuringRead", "changedContext", "changedHead", "changedDiscussion", "unverifiedTool"])
     func blockedIntentCompletionRequiresTheExactFreshRunProof(_ scenario: String) async throws {
         let f = try fixture(owned: true); defer { f.cleanup() }

@@ -42,6 +42,9 @@ final class MergeRequestAttentionMonitor {
         /// The assistant has no objections to the current head and the user has nothing open,
         /// but automatic approval does not apply, so the user approves in Ready for your OK.
         var canApprove = false
+        /// Deliberate automatic-approval opt-out is not a human checkpoint until
+        /// every discussion permits that automatic action. Manual approval stays available.
+        var approvalWaitingForReadiness = false
         /// Automatic approval applies and every discussion is resolved.
         var autoApproveReady = false
         var needsDiscussion = false
@@ -69,8 +72,8 @@ final class MergeRequestAttentionMonitor {
         var authoredRequest: GitLabMergeRequest? { isAuthored ? mergeRequest : nil }
 
         func draftIDsHandledAutomatically(automation: AutomationSettings, target: MRAutomationScope.Target,
-                                          assistantPreparing: Bool) -> Set<Int> {
-            guard assistantPreparing, automation.publicationMode != .manual, let request = mergeRequest,
+                                          assistantPreparing: Bool, publicationAutomatic: Bool = true) -> Set<Int> {
+            guard publicationAutomatic, assistantPreparing, automation.publicationMode != .manual, let request = mergeRequest,
                   automaticPublicationPolicy == automation.automaticPublicationPolicy,
                   automation.scope.permits(request, host: target.host, username: target.username),
                   !isAuthored || automation.allowFollowUpPush else { return [] }
@@ -91,14 +94,14 @@ final class MergeRequestAttentionMonitor {
                 visible.authorFeedbackStatus = nil
                 return visible
             }
-            let addressed = status.addressedNoteIDs.subtracting(status.replyNoteIDs)
+            let addressed = status.addressedNoteIDs.subtracting(status.replyNoteIDs).union(status.ignoredNoteIDs)
             visible.feedback.removeAll { $0.id.map(addressed.contains) == true }
             if visible.feedback.count != feedback.count && visible.feedback.isEmpty {
                 visible.needsDiscussion = hasOtherUnresolvedDiscussions
             }
             if status.semanticContextFingerprint == mergeRequest?.semanticContextFingerprint,
                status.semanticContextFingerprint != nil,
-               status.waitingForReviewer, !status.needsAttention,
+               (status.waitingForReviewer || !status.ignoredNoteIDs.isEmpty), !status.needsAttention,
                status.followUpNoteIDs.isEmpty, status.replyNoteIDs.isEmpty,
                status.pendingDraftCount == 0, draftCount == 0, drafts.isEmpty {
                 // GitLab may still block merging until acceptance; that is reviewer work.
@@ -172,7 +175,7 @@ final class MergeRequestAttentionMonitor {
         var needsAttention: Bool { humanActionRequired ?? (needsConfirmation || hasOpenAction) }
 
         /// Something the user must confirm before it reaches other people.
-        var needsConfirmation: Bool { draftCount > 0 || canApprove || canConfirmReReview }
+        var needsConfirmation: Bool { draftCount > 0 || (canApprove && !approvalWaitingForReadiness) || canConfirmReReview }
 
         var section: Section {
             if mergeRequest?.detailedMergeStatus == "draft_status" || (mergeRequest?.draft ?? draftFromTodo) {
@@ -246,6 +249,13 @@ final class MergeRequestAttentionMonitor {
     /// after an open listing makes them current again, or after an account change.
     private var terminalCatalogRequests: Set<Item.ID> = []
     private(set) var isLoading = false
+    private struct AutomaticResumeKey: Hashable {
+        let target: MRAutomationScope.Target
+        let action: MRAutomaticAction
+        let revision: UInt64
+    }
+    @ObservationIgnored private var automaticResumeTasks: [AutomaticResumeKey: Task<Void, Never>] = [:]
+    @ObservationIgnored private var automaticActionIdleWaiters: [CheckedContinuation<Void, Never>] = []
     private(set) var hasError = false
     /// Initial catalog readiness is sticky within this account session. Later
     /// metadata or transport failures retain the last authoritative catalog.
@@ -286,6 +296,7 @@ final class MergeRequestAttentionMonitor {
     private var accountGeneration = 0
     private var refreshGeneration = 0
     private var recentTodos: [Item] = []
+    private var latestTodoSnapshot: (account: Account, revision: UInt64, todos: [Todo])?
     let authorFeedbackCoordinator: AuthorFeedbackCoordinator?
     let aiOriginCoordinator: AICommentOriginCoordinator
     let draftProofRecoveryCoordinator: DraftProofRecoveryCoordinator?
@@ -469,6 +480,7 @@ final class MergeRequestAttentionMonitor {
         let account = Account(host: host, username: username)
         guard isCurrent(account) else { return }
         let revision = glab.accountRevision
+        latestTodoSnapshot = (account, revision, todos)
         if isLoading {
             pendingRefresh = (account, todos, revision)
             return
@@ -516,6 +528,7 @@ final class MergeRequestAttentionMonitor {
                     feedbackNeedsRefresh = false
                     refresh(host: account.host, username: account.username, todos: [])
                 }
+                signalAutomaticActionIdle()
             }
             do {
                 try await poll(account, todos: todos, revision: revision)
@@ -533,7 +546,61 @@ final class MergeRequestAttentionMonitor {
         glab.resolvedHost == account.host && glab.currentUsername == account.username
     }
 
-    private func poll(_ account: Account, todos: [Todo], revision: UInt64) async throws {
+    /// A policy restoration reads current evidence and enters the automatic executor only.
+    /// It deliberately does not reset verdicts, delivery proof or failed coding attempts.
+    func resumeAutomaticAction(_ action: MRAutomaticAction, for target: MRAutomationScope.Target) async {
+        let account = Account(host: target.host, username: target.username)
+        guard action != .merge, target.iid != nil, isCurrent(account), self.account == account,
+              settings?.actionIsAutomatic(action, for: target) == true else { return }
+        let key = AutomaticResumeKey(target: target, action: action, revision: glab.accountRevision)
+        if let task = automaticResumeTasks[key] { await task.value; return }
+        let task = Task { await self.performAutomaticResume(key, account: account) }
+        automaticResumeTasks[key] = task
+        await task.value
+    }
+
+    private func performAutomaticResume(_ key: AutomaticResumeKey, account: Account) async {
+        defer { automaticResumeTasks[key] = nil }
+        let id = Item.ID(projectID: key.target.projectID, iid: key.target.iid ?? 0)
+        while isLoading || isRefreshingDrafts || isConfirming(id) {
+            await withCheckedContinuation { automaticActionIdleWaiters.append($0) }
+        }
+        guard isCurrent(account), self.account == account, glab.accountRevision == key.revision,
+              settings?.actionIsAutomatic(key.action, for: key.target) == true else { return }
+        refreshGeneration += 1
+        isLoading = true
+        defer {
+            isLoading = false
+            onRefreshed?()
+            let pending = pendingRefresh
+            pendingRefresh = nil
+            if let pending, pending.revision == glab.accountRevision, isCurrent(pending.account) {
+                feedbackNeedsRefresh = false
+                refresh(host: pending.account.host, username: pending.account.username, todos: pending.todos)
+            } else if feedbackNeedsRefresh, isCurrent(account) {
+                feedbackNeedsRefresh = false
+                refresh(host: account.host, username: account.username, todos: [])
+            }
+            signalAutomaticActionIdle()
+        }
+        do {
+            let todos = latestTodoSnapshot.flatMap {
+                $0.account == account && $0.revision == key.revision ? $0.todos : nil
+            } ?? []
+            try await poll(account, todos: todos, revision: key.revision, automaticResume: (id, key.action))
+        } catch {
+            if isCurrent(account), glab.accountRevision == key.revision { hasError = true }
+        }
+    }
+
+    private func signalAutomaticActionIdle() {
+        let waiting = automaticActionIdleWaiters
+        automaticActionIdleWaiters = []
+        for continuation in waiting { continuation.resume() }
+    }
+
+    private func poll(_ account: Account, todos: [Todo], revision: UInt64,
+                      automaticResume: (id: Item.ID, action: MRAutomaticAction)? = nil) async throws {
         let host = account.host
         let user = try await glab.fetchAuthenticatedUser(host: host, expectedUsername: account.username)
         self.user = user
@@ -723,6 +790,8 @@ final class MergeRequestAttentionMonitor {
                     let autoApproves = item.mergeRequest.map {
                         autoApproveApplies(to: $0, host: host, username: account.username)
                     } ?? false
+                    let approvalOptedOut = settings?.actionIsAutomatic(.approval,
+                        for: .init(host: host, username: account.username, projectID: item.id.projectID, iid: item.id.iid)) == false
                     let followUpReceipts = contextReceipts(projectID: item.id.projectID, iid: item.id.iid,
                         host: host, username: user.username)
                     group.addTask { [glab] in
@@ -741,6 +810,7 @@ final class MergeRequestAttentionMonitor {
                                                               iid: item.id.iid, in: verdictDirectory)
                         }
                         updated.canApprove = false
+                        updated.approvalWaitingForReadiness = false
                         updated.autoApproveReady = false
                         if drafts?.isEmpty == true, !item.isAuthored,
                            let request = item.mergeRequest, request.author.id != user.id, request.draft != nil,
@@ -759,6 +829,7 @@ final class MergeRequestAttentionMonitor {
                             // After GitLab refused an automatic approval, offer the button instead of retrying.
                             let automatic = autoApproves && head != failedHead
                             updated.canApprove = currentVerdict && check.ownReady && !automatic
+                            updated.approvalWaitingForReadiness = updated.canApprove && approvalOptedOut && !check.allResolved
                             updated.autoApproveReady = currentVerdict && check.ownReady && check.allResolved && automatic
                         }
                         let hasDrafts = !(drafts ?? item.drafts).isEmpty
@@ -856,7 +927,8 @@ final class MergeRequestAttentionMonitor {
                         let verificationCandidates = item.mergeRequest.map { request in
                             DraftReplyRepair.preparationAllowed(request, configuration: settings.automation) ? item.drafts : candidates
                         } ?? candidates
-                        if success, let request = item.mergeRequest, let discussions, let head = request.sha,
+                        if automaticResume == nil || (automaticResume?.action == .commentPublication && automaticResume?.id == item.id),
+                           success, let request = item.mergeRequest, let discussions, let head = request.sha,
                            !verificationCandidates.isEmpty, settings.automation.allowFollowUpPush,
                            verificationCandidates.contains(where: { draft in
                                Self.followUpReceipt(for: draft, request: request, discussions: discussions,
@@ -902,11 +974,11 @@ final class MergeRequestAttentionMonitor {
                             }.compactMap(\.id))
                         }
                     }
-                    if success, let request = item.authoredRequest, let discussions {
+                    if automaticResume == nil, success, let request = item.authoredRequest, let discussions {
                         authorFeedbackCoordinator?.refresh(request: request, discussions: discussions,
                             drafts: item.draftCount, host: host, user: user)
                     }
-                    if success, let feedback, let request = item.authoredRequest {
+                    if automaticResume == nil, success, let feedback, let request = item.authoredRequest {
                         await requestReReviewsIfReady(for: request, feedback: feedback, draftCount: item.draftCount,
                                                       account: account, user: user)
                     }
@@ -984,8 +1056,11 @@ final class MergeRequestAttentionMonitor {
         // new publication, approval or re-review action candidates.
         openItems = Item.ordered(Array(retainedCatalog.values))
         if owned != nil, assigned != nil, !explicitFetchFailed { syncedCatalogRevision = revision }
-        await publishSettledDrafts(agentWorks: agentWorks, account: account)
-        for item in results where item.autoApproveReady {
+        if automaticResume == nil || automaticResume?.action == .commentPublication {
+            await publishSettledDrafts(agentWorks: agentWorks, account: account, only: automaticResume?.id)
+        }
+        for item in results where item.autoApproveReady
+            && (automaticResume == nil || (automaticResume?.action == .approval && automaticResume?.id == item.id)) {
             guard let request = item.mergeRequest, let head = request.sha else { continue }
             if await performApproval(of: item.id, head: head, requireAllResolved: true) {
                 onAutoApproved?(request)
@@ -1120,10 +1195,15 @@ final class MergeRequestAttentionMonitor {
     }
 
     func autoApproveApplies(to request: GitLabMergeRequest, host: String, username: String) -> Bool {
-        guard let settings, settings.automation.autoApproveEnabled,
-              settings.automation.scope.permits(request, host: host, username: username) else { return false }
+        guard let settings else { return false }
         let target = MRAutomationScope.Target(host: host, username: username, projectID: request.projectID, iid: request.iid)
-        return !settings.autoApproveOptOuts.contains(target)
+        return settings.permitsAutomaticAction(.approval, for: request, target: target)
+    }
+
+    private func permitsAutomaticPublication(of request: GitLabMergeRequest, account: Account) -> Bool {
+        let target = MRAutomationScope.Target(host: account.host, username: account.username,
+            projectID: request.projectID, iid: request.iid)
+        return settings?.permitsAutomaticAction(.commentPublication, for: request, target: target) == true
     }
 
     private struct ApprovalCheck {
@@ -1162,15 +1242,15 @@ final class MergeRequestAttentionMonitor {
     /// With "Publish comments without confirmation" on, publishes assistant drafts once they are
     /// unchanged across two polls, so a draft the assistant is still writing is never sent.
     private func publishSettledDrafts(
-        agentWorks: Set<AssistantAutomationRunner.MergeRequestWork>, account: Account
+        agentWorks: Set<AssistantAutomationRunner.MergeRequestWork>, account: Account, only id: Item.ID? = nil
     ) async {
         let earlier = previousDrafts
         previousDrafts = Dictionary(uniqueKeysWithValues: items.filter { !$0.drafts.isEmpty }.map { ($0.id, $0.drafts) })
         guard let settings, settings.automation.publishDraftsWithoutConfirmation || settings.automation.publishAIRepliesWithoutConfirmation else { return }
-        for item in items where !item.drafts.isEmpty && earlier[item.id] == item.drafts {
+        for item in items where !item.drafts.isEmpty && earlier[item.id] == item.drafts && (id == nil || id == item.id) {
             let work = AssistantAutomationRunner.MergeRequestWork(host: account.host, projectID: item.id.projectID, iid: item.id.iid)
             guard agentWorks.contains(work), !hasActiveWorker(for: item.id, account: account), let request = item.mergeRequest,
-                  settings.automation.scope.permits(request, host: account.host, username: account.username)
+                  permitsAutomaticPublication(of: request, account: account)
             else { continue }
             let checkedDraftIDs = item.automaticDraftIDs
             guard item.automaticPublicationPolicy == settings.automation.automaticPublicationPolicy,
@@ -1211,26 +1291,29 @@ final class MergeRequestAttentionMonitor {
         guard !eligible.isEmpty, isCurrent(account), !isConfirming(id) else { return }
         let generation = accountGeneration
         confirmationStates[id] = .publishing
-        defer { if generation == accountGeneration, confirmationStates[id] == .publishing { confirmationStates[id] = nil } }
+        defer {
+            if generation == accountGeneration, confirmationStates[id] == .publishing { confirmationStates[id] = nil }
+            signalAutomaticActionIdle()
+        }
         var published = false
         var attemptedPublish = false
         do {
             for draft in eligible {
                 guard isCurrent(account), let settings, settings.automation.publishAIRepliesWithoutConfirmation,
                       let request = item.mergeRequest,
-                      settings.automation.scope.permits(request, host: account.host, username: account.username)
+                      permitsAutomaticPublication(of: request, account: account)
                 else { break }
                 let liveDiscussions = try await glab.fetchMergeRequestDiscussions(projectID: id.projectID, iid: id.iid, host: account.host)
                 let latest = try await glab.fetchOwnDraftNotes(projectID: id.projectID, iid: id.iid, host: account.host, userID: user.id)
                 guard latest.contains(draft), let draftID = draft.id, qualifies(draft, in: liveDiscussions),
                       isCurrent(account), settings.automation.publishAIRepliesWithoutConfirmation,
-                      settings.automation.scope.permits(request, host: account.host, username: account.username) else { continue }
+                      permitsAutomaticPublication(of: request, account: account) else { continue }
                 let configuration = settings.automation
                 guard await permitsAssistantAutomation(for: account),
                       await permitsAutomaticPublication(draft, id: id, account: account),
                       isCurrent(account), settings.automation == configuration,
                       settings.automation.publishAIRepliesWithoutConfirmation,
-                      settings.automation.scope.permits(request, host: account.host, username: account.username),
+                      permitsAutomaticPublication(of: request, account: account),
                       !hasActiveWorker(for: id, account: account) else { continue }
                 attemptedPublish = true
                 try await glab.publishDraftNote(projectID: id.projectID, iid: id.iid, draftID: draftID, host: account.host)
@@ -1276,7 +1359,10 @@ final class MergeRequestAttentionMonitor {
             updateItem(id) { $0.drafts = visible; $0.draftCount = visible.count }
         }
         confirmationStates[id] = .publishing
-        defer { if currentContext(), confirmationStates[id] == .publishing { confirmationStates[id] = nil } }
+        defer {
+            if currentContext(), confirmationStates[id] == .publishing { confirmationStates[id] = nil }
+            signalAutomaticActionIdle()
+        }
         var remaining = selected
         var publishedAny = false
         var attemptedWrite = false
@@ -1346,7 +1432,10 @@ final class MergeRequestAttentionMonitor {
         guard !automatic || !hasActiveWorker(for: id, account: account) else { return }
         let generation = accountGeneration
         confirmationStates[id] = .publishing
-        defer { if generation == accountGeneration, confirmationStates[id] == .publishing { confirmationStates[id] = nil } }
+        defer {
+            if generation == accountGeneration, confirmationStates[id] == .publishing { confirmationStates[id] = nil }
+            signalAutomaticActionIdle()
+        }
         var publishedAny = false
         var attemptedPublish = false
         do {
@@ -1365,7 +1454,7 @@ final class MergeRequestAttentionMonitor {
             if automatic {
                 guard let settings, settings.automation.publishDraftsWithoutConfirmation,
                       let request = openItems.first(where: { $0.id == id })?.mergeRequest,
-                      settings.automation.scope.permits(request, host: account.host, username: account.username) else {
+                      permitsAutomaticPublication(of: request, account: account) else {
                     confirmationStates[id] = nil
                     return
                 }
@@ -1377,14 +1466,14 @@ final class MergeRequestAttentionMonitor {
                     guard latest.contains(draft), let draftID = draft.id, isCurrent(account),
                           let settings, settings.automation.publishDraftsWithoutConfirmation,
                           let request = openItems.first(where: { $0.id == id })?.mergeRequest,
-                          settings.automation.scope.permits(request, host: account.host, username: account.username),
+                          permitsAutomaticPublication(of: request, account: account),
                           AICommentAssessmentStore.safeForAutomaticPublication(draft) else { continue }
                     let configuration = settings.automation
                     guard await permitsAssistantAutomation(for: account),
                           await permitsAutomaticPublication(draft, id: id, account: account),
                           isCurrent(account), settings.automation == configuration,
                           settings.automation.publishDraftsWithoutConfirmation,
-                          settings.automation.scope.permits(request, host: account.host, username: account.username),
+                          permitsAutomaticPublication(of: request, account: account),
                           !hasActiveWorker(for: id, account: account) else { continue }
                     attemptedPublish = true
                     try await glab.publishDraftNote(projectID: id.projectID, iid: id.iid, draftID: draftID, host: account.host)
@@ -1497,7 +1586,7 @@ final class MergeRequestAttentionMonitor {
         let aiIDs = await aiNoteIDs(in: discussions, policy: policy, host: account.host,
                                    projectID: id.projectID, iid: id.iid)
         guard isCurrent(account), settings.automation.automaticPublicationPolicy == policy,
-              settings.automation.scope.permits(live, host: account.host, username: account.username),
+              permitsAutomaticPublication(of: live, account: account),
               policy.allows(draft, request: live, discussions: discussions, userID: user.id,
                             host: account.host, aiNoteIDs: aiIDs) else { return false }
         if live.author.id != user.id {
@@ -1506,7 +1595,7 @@ final class MergeRequestAttentionMonitor {
             guard let latest = try? await glab.fetchOwnDraftNotes(
                 projectID: id.projectID, iid: id.iid, host: account.host, userID: user.id
             ), latest.contains(draft), AICommentAssessmentStore.safeForAutomaticPublication(draft),
-                  isCurrent(account) else { return false }
+                  isCurrent(account), permitsAutomaticPublication(of: live, account: account) else { return false }
             permitted = true
             return true
         }
@@ -1542,7 +1631,7 @@ final class MergeRequestAttentionMonitor {
                   receipt.covers(draft, request: currentMR, host: account.host, user: currentUser, runID: receipt.runID),
                   isCurrent(account), settings.automation.allowFollowUpPush,
                   publicationReceipts(projectID: id.projectID, iid: id.iid, host: account.host, username: user.username).contains(receipt),
-                  settings.automation.scope.permits(currentMR, host: account.host, username: account.username) else { return blocked() }
+                  permitsAutomaticPublication(of: currentMR, account: account) else { return blocked() }
             let freshAIIDs = await aiNoteIDs(in: freshDiscussions, policy: policy, host: account.host,
                                             projectID: id.projectID, iid: id.iid)
             // Identity verification can await GitLab after the proof snapshot's draft
@@ -1554,7 +1643,7 @@ final class MergeRequestAttentionMonitor {
                   isCurrent(account), settings.automation.automaticPublicationPolicy == policy,
                   settings.automation.allowFollowUpPush,
                   publicationReceipts(projectID: id.projectID, iid: id.iid, host: account.host, username: user.username).contains(receipt),
-                  settings.automation.scope.permits(currentMR, host: account.host, username: account.username) else { return false }
+                  permitsAutomaticPublication(of: currentMR, account: account) else { return false }
             guard isCurrent(account), settings.automation.automaticPublicationPolicy == policy,
                   policy.allows(draft, request: currentMR, discussions: freshDiscussions, userID: currentUser.id,
                                 host: account.host, aiNoteIDs: freshAIIDs) else { return false }
@@ -1567,7 +1656,7 @@ final class MergeRequestAttentionMonitor {
     }
 
     func approve(_ id: Item.ID) async {
-        guard let item = items.first(where: { $0.id == id }), item.canApprove,
+        guard let item = (items + openItems).first(where: { $0.id == id }), item.canApprove,
               let head = item.mergeRequest?.sha else { return }
         _ = await performApproval(of: id, head: head, requireAllResolved: false)
     }
@@ -1582,7 +1671,10 @@ final class MergeRequestAttentionMonitor {
               items.first(where: { $0.id == id })?.drafts == expectedDrafts else { return .changed }
         let generation = accountGeneration
         confirmationStates[id] = .publishing
-        defer { if generation == accountGeneration, confirmationStates[id] == .publishing { confirmationStates[id] = nil } }
+        defer {
+            if generation == accountGeneration, confirmationStates[id] == .publishing { confirmationStates[id] = nil }
+            signalAutomaticActionIdle()
+        }
         var remaining = expectedDrafts
         var attemptedWrite = false
         var publishedAny = false
@@ -1616,7 +1708,7 @@ final class MergeRequestAttentionMonitor {
     }
 
     func approveRemotely(_ id: Item.ID, expectedHead: String) async -> Bool {
-        guard let item = currentItems.first(where: { $0.id == id }), item.canApprove,
+        guard let item = (currentItems + currentOpenItems).first(where: { $0.id == id }), item.canApprove,
               item.mergeRequest?.sha == expectedHead else { return false }
         return await performApproval(of: id, head: expectedHead, requireAllResolved: false)
     }
@@ -1671,6 +1763,7 @@ final class MergeRequestAttentionMonitor {
         confirmationStates[id] = .approving
         defer {
             if generation == accountGeneration, confirmationStates[id] == .approving { confirmationStates[id] = nil }
+            signalAutomaticActionIdle()
         }
         do {
             let evidence = try await ReadOnlyAssessmentRetry.run(isCurrent: currentAccount, wait: approvalReadWait, operation: readEvidence)
@@ -1760,7 +1853,7 @@ final class MergeRequestAttentionMonitor {
         guard !isLoading, !isRefreshingDrafts, let account, isCurrent(account), let user else { return }
         let generation = refreshGeneration
         isRefreshingDrafts = true
-        defer { isRefreshingDrafts = false }
+        defer { isRefreshingDrafts = false; signalAutomaticActionIdle() }
         for item in items where item.needsConfirmation && !isConfirming(item.id) {
             let fetched = try? await glab.fetchOwnDraftNotes(
                 projectID: item.id.projectID, iid: item.id.iid, host: account.host, userID: user.id
@@ -1842,7 +1935,9 @@ final class MergeRequestAttentionMonitor {
         return [ReReviewVerifier.policyVersion, account.host, account.username, String(request.projectID), String(request.iid), request.sha ?? "",
             fingerprint, request.semanticContextFingerprint, configuration.assistant.rawValue, configuration.autoVerifyReReview.description,
             configuration.assistant == .codex ? configuration.codexVerificationModel.rawValue : configuration.claudeVerificationModel.rawValue,
-            configuration.verificationThinking.rawValue]
+            configuration.verificationThinking.rawValue,
+            settings.feedbackSuggestionDecisions.revision(for: .init(host: account.host, username: account.username,
+                projectID: request.projectID, iid: request.iid))]
             .joined(separator: "|")
     }
 
@@ -1993,6 +2088,7 @@ final class MergeRequestAttentionMonitor {
         guard !Task.isCancelled, isCurrent(account), runtimePermitsReReview(id, account: account),
               settings.automation.scope.permits(request, host: host, username: account.username) else { return }
         guard let fingerprint = ReviewVerdict.fingerprint(discussions) else { return }
+        let activeIgnored = settings.feedbackSuggestionDecisions.applicable(in: discussions, for: target)
         let sharedAssessment = authorFeedbackCoordinator?.assessment(for: request, fingerprint: fingerprint)
         guard usedAssistant || observedPublication || manualReReviewApprovals[id] != nil
                 || sharedAssessment != nil else { return }
@@ -2056,9 +2152,9 @@ final class MergeRequestAttentionMonitor {
                                                           target: .init(host: host, projectID: request.projectID, iid: request.iid,
                                                               url: request.webURL, expectedUsername: account.username),
                                                           semanticContextFingerprint: request.semanticContextFingerprint,
-                                                          thinking: thinking)
+                                                          thinking: thinking, ignoredSuggestions: activeIgnored)
                         let assessment = try await verifyReReview(input, assistant, model)
-                        _ = try assessment.reviewers(in: discussions, authorID: user.id)
+                        _ = try assessment.reviewers(in: discussions, authorID: user.id, ignoredSuggestions: activeIgnored)
                         guard !Task.isCancelled, isCurrent(account), reReviewChecks[id]?.key == key,
                               runtimePermitsReReview(id, account: account) else { return }
                         reReviewChecks[id]?.assessment = assessment
@@ -2074,7 +2170,7 @@ final class MergeRequestAttentionMonitor {
                 return
             }
             guard let assessment = reReviewChecks[id]?.assessment,
-                  let assessed = try? assessment.reviewers(in: discussions, authorID: user.id) else { return }
+                  let assessed = try? assessment.reviewers(in: discussions, authorID: user.id, ignoredSuggestions: activeIgnored) else { return }
             recipients = pendingReviewers.filter { assessed[$0.key] != nil }
             let blockers = assessment.notes.filter { $0.state == .blocking || $0.state == .uncertain }
                 .map { ReReviewReadiness.Blocker(noteID: $0.noteID, reason: $0.reason, summary: $0.summary) }
@@ -2085,6 +2181,13 @@ final class MergeRequestAttentionMonitor {
                     assessment.notes.first { $0.noteID == note.id }?.state == .informational
                 }
             }
+            let ignoredOnlyReviewers = pendingReviewers.keys.filter { reviewerID in
+                let theirIDs = Set(discussions.flatMap(\.notes).filter { $0.author?.id == reviewerID && $0.system != true }.compactMap(\.id))
+                let verdicts = assessment.notes.filter { theirIDs.contains($0.noteID) }
+                return verdicts.contains { $0.state == .ignoredByUser }
+                    && verdicts.allSatisfy { $0.state == .ignoredByUser || $0.state == .informational }
+            }
+            for reviewerID in ignoredOnlyReviewers { pendingReviewers.removeValue(forKey: reviewerID) }
             for reviewerID in informationalReviewers {
                 let receipt = ReReviewReceipt.Key(host: host, authorID: user.id, projectID: request.projectID, iid: request.iid, reviewerID: reviewerID)
                 if let noteID = pendingReviewers.removeValue(forKey: reviewerID) {

@@ -2293,6 +2293,233 @@ import Testing
         #expect(harness.monitor.currentItems.first?.awaitingRemoteVerification == true)
     }
 
+    @Test func restoringAutomaticPublicationResumesOnlyEligibleAIRepliesWithoutAnotherPoll() async throws {
+        let harness = try makeHarness(assistantWorked: true)
+        defer { harness.cleanUp() }
+        let target = MRAutomationScope.Target(host: host, username: "me", projectID: 1, iid: 2)
+        harness.settings.autoPublishOptOuts.insert(target)
+        harness.settings.automation.publishDraftsWithoutConfirmation = false
+        harness.settings.automation.publishAIRepliesWithoutConfirmation = true
+        try harness.write("drafts.json", draftJSON)
+        try harness.write("discussions.json", duoDiscussion)
+        try harness.recordVerdict("objections", head: head)
+        try await harness.poll()
+        try await harness.poll()
+        #expect(harness.log("selected.log").isEmpty && harness.log("publish.log").isEmpty)
+        #expect(harness.monitor.currentItems.first?.drafts.count == 2)
+
+        harness.settings.autoPublishOptOuts.remove(target)
+        harness.settings.save()
+        await harness.monitor.resumeAutomaticAction(.commentPublication, for: target)
+        #expect(harness.log("selected.log").contains("/draft_notes/12/publish"))
+        #expect(!harness.log("selected.log").contains("/draft_notes/11/publish"))
+        #expect(harness.log("publish.log").isEmpty)
+        #expect(harness.monitor.currentItems.first?.drafts.map(\.id) == [11])
+    }
+
+    @Test func restoringAutomaticApprovalRechecksAndApprovesWithoutAnotherPoll() async throws {
+        let harness = try makeHarness(assistantWorked: true)
+        defer { harness.cleanUp() }
+        let target = MRAutomationScope.Target(host: host, username: "me", projectID: 1, iid: 2)
+        harness.settings.autoApproveOptOuts.insert(target)
+        try harness.recordVerdict("no_objections", head: head)
+        try await harness.poll()
+        #expect(harness.monitor.currentItems.first?.canApprove == true)
+        harness.settings.autoApproveOptOuts.remove(target)
+        harness.settings.save()
+        await harness.monitor.resumeAutomaticAction(.approval, for: target)
+        #expect(harness.log("approve.log").contains("sha=\(head)"))
+        #expect(harness.monitor.currentItems.first?.canApprove != true)
+    }
+
+    @Test func automaticPublicationOptOutDuringFinalAsyncChecksStopsOnlyTheWrite() async throws {
+        var settings: SettingsManager?
+        let target = MRAutomationScope.Target(host: host, username: "me", projectID: 1, iid: 2)
+        let harness = try makeHarness(assistantWorked: true, duringAutomationCheck: { _ in
+            settings?.autoPublishOptOuts.insert(target)
+        })
+        defer { harness.cleanUp() }
+        settings = harness.settings
+        harness.settings.automation.publishDraftsWithoutConfirmation = true
+        try harness.write("drafts.json", draftJSON)
+        try harness.recordVerdict("objections", head: head)
+        try await harness.poll()
+        try await harness.poll()
+        #expect(harness.settings.autoPublishOptOuts.contains(target))
+        #expect(harness.log("selected.log").isEmpty && harness.log("publish.log").isEmpty)
+        #expect(harness.monitor.currentItems.first?.drafts.count == 2)
+        #expect(harness.settings.automation.publishDraftsWithoutConfirmation)
+    }
+
+    @Test func restoringAutoDuringARefreshWaitsForFreshSelectiveCompletionAndDoesNotDuplicateWrites() async throws {
+        let harness = try makeHarness(assistantWorked: true)
+        defer { harness.cleanUp() }
+        let target = MRAutomationScope.Target(host: host, username: "me", projectID: 1, iid: 2)
+        try harness.write("drafts.json", draftJSON)
+        try harness.write("discussions.json", duoDiscussion)
+        try harness.recordVerdict("objections", head: head)
+        try await harness.poll()
+        try harness.write("slow-user-check", "yes")
+        let polling = Task { try await harness.poll() }
+        let deadline = ContinuousClock.now + .seconds(5)
+        while harness.log("user-check.log").isEmpty, ContinuousClock.now < deadline {
+            try await Task.sleep(for: .milliseconds(10))
+        }
+        try #require(!harness.log("user-check.log").isEmpty)
+        harness.settings.autoPublishOptOuts.insert(target)
+        harness.settings.autoPublishOptOuts.remove(target)
+        async let first: Void = harness.monitor.resumeAutomaticAction(.commentPublication, for: target)
+        async let second: Void = harness.monitor.resumeAutomaticAction(.commentPublication, for: target)
+        _ = await (first, second)
+        #expect(harness.log("selected.log").split(separator: "\n").count == 1)
+        #expect(harness.log("selected.log").contains("/draft_notes/12/publish"))
+        #expect(harness.log("publish.log").isEmpty)
+        try await polling.value
+    }
+
+    @Test func optedOutApprovalWaitsForAutomaticReadinessButKeepsDeliberateManualApproval() async throws {
+        let harness = try makeHarness(assistantWorked: true)
+        defer { harness.cleanUp() }
+        harness.settings.autoApproveOptOuts.insert(.init(host: host, username: "me", projectID: 1, iid: 2))
+        try harness.write("discussions.json", othersThread)
+        try harness.recordVerdict("no_objections", head: head)
+        try await harness.poll()
+        #expect(!harness.monitor.currentItems.contains { $0.id == .init(projectID: 1, iid: 2) && $0.needsAttention })
+        #expect(harness.monitor.currentOpenItems.first?.canApprove == true)
+        await harness.monitor.approve(.init(projectID: 1, iid: 2))
+        #expect(harness.log("approve.log").contains("sha=\(head)"))
+    }
+
+    @Test func publicationOptOutDoesNotRestrictExplicitManualPublication() async throws {
+        let harness = try makeHarness(assistantWorked: true)
+        defer { harness.cleanUp() }
+        harness.settings.autoPublishOptOuts.insert(.init(host: host, username: "me", projectID: 1, iid: 2))
+        try harness.write("drafts.json", draftJSON)
+        try harness.recordVerdict("objections", head: head)
+        try await harness.poll()
+        await harness.monitor.publishDrafts(of: .init(projectID: 1, iid: 2))
+        #expect(harness.log("publish.log") == "published\n")
+        #expect(harness.monitor.currentItems.first?.drafts.isEmpty != false)
+    }
+
+    @Test func restoringPublicationRechecksItsOwnStaleProofAndAutomaticallyPublishesOnlyTheEligibleAIReply() async throws {
+        var verifiedHeads: [String] = []
+        let harness = try makeHarness(assistantWorked: true, authored: true, verifyDraftRecovery: { input, _, _ in
+            verifiedHeads.append(input.snapshot.request.sha ?? "")
+            return .init(drafts: input.requestedDraftIDs.map {
+                .init(draftID: $0, state: .valid, reason: "Verified this reply against the current source")
+            })
+        })
+        defer { harness.monitor.draftProofRecoveryCoordinator?.cancel(); harness.cleanUp() }
+        let target = MRAutomationScope.Target(host: host, username: "me", projectID: 1, iid: 2)
+        harness.settings.automation.publicationMode = .aiReplies
+        harness.settings.automation.allowFollowUpPush = true
+        harness.settings.autoPublishOptOuts.insert(target)
+        try harness.write("drafts.json", draftJSON)
+        try harness.write("discussions.json", duoDiscussion)
+        try harness.verifyFollowUpDrafts()
+        try harness.assessFollowUpClaims(draftIDs: [12])
+        try await harness.poll()
+        try await harness.poll()
+        #expect(verifiedHeads.isEmpty && harness.log("selected.log").isEmpty)
+
+        let currentHead = String(repeating: "b", count: 40)
+        for file in ["request.json", "authored.json"] {
+            try harness.write(file, harness.log(file).replacingOccurrences(of: head, with: currentHead))
+        }
+        try harness.write("remote-head.txt", currentHead)
+        try harness.write("remote-file-content.txt", "verified updated source\n")
+        harness.settings.autoPublishOptOuts.remove(target)
+        harness.settings.save()
+
+        await harness.monitor.resumeAutomaticAction(.commentPublication, for: target)
+        let deadline = ContinuousClock.now + .seconds(5)
+        while (!harness.log("selected.log").contains("/draft_notes/12/publish")
+                || harness.monitor.currentOpenItems.first?.drafts.map(\.id) != [11]
+                || harness.monitor.isLoading), ContinuousClock.now < deadline {
+            try await Task.sleep(for: .milliseconds(20))
+        }
+        #expect(verifiedHeads == [currentHead])
+        #expect(harness.log("selected.log").contains("/draft_notes/12/publish"))
+        #expect(!harness.log("selected.log").contains("/draft_notes/11/publish"))
+        #expect(harness.log("publish.log").isEmpty)
+        #expect(harness.monitor.currentOpenItems.first?.drafts.map(\.id) == [11])
+    }
+
+    @Test func restoringApprovalForOneMRDoesNotStartAnotherMRsDraftRecoveryOrRepair() async throws {
+        var assessedMRs: [Int] = []
+        var repairedMRs: [Int] = []
+        let harness = try makeHarness(assistantWorked: true, authored: true, verifyDraftRecovery: { input, _, _ in
+            assessedMRs.append(input.snapshot.request.iid)
+            return .init(drafts: input.requestedDraftIDs.map {
+                .init(draftID: $0, state: .uncertain, reason: "This reply needs a separate correction")
+            })
+        })
+        defer { harness.monitor.draftProofRecoveryCoordinator?.cancel(); harness.cleanUp() }
+        let approvalTarget = MRAutomationScope.Target(host: host, username: "me", projectID: 1, iid: 3)
+        harness.settings.autoApproveOptOuts.insert(approvalTarget)
+        var reviewerMR = try #require(JSONSerialization.jsonObject(with: Data(harness.log("request.json").utf8)) as? [String: Any])
+        reviewerMR["iid"] = 3
+        reviewerMR["author"] = ["id": 9, "username": "alice", "name": "Alice"]
+        reviewerMR["web_url"] = "https://gitlab.example.org/g/p/-/merge_requests/3"
+        let reviewerJSON = String(decoding: try JSONSerialization.data(withJSONObject: reviewerMR), as: UTF8.self)
+        try harness.write("reviewing.json", "[" + reviewerJSON + "]")
+        try harness.write("request-3.json", reviewerJSON)
+        let executable = harness.folder.appending(path: "glab")
+        let script = try String(contentsOf: executable, encoding: .utf8)
+        try script.replacingOccurrences(of: "case \"$2\" in", with: """
+        case "$2" in
+            /projects/1/merge_requests/3) cat request-3.json; exit 0 ;;
+            /projects/1/merge_requests/3/draft_notes*|/projects/1/merge_requests/3/discussions*) echo '[]'; exit 0 ;;
+        """)
+            .write(to: executable, atomically: true, encoding: .utf8)
+        try FileManager.default.setAttributes([.posixPermissions: 0o700], ofItemAtPath: executable.path)
+        let verdict = ReviewVerdict(version: 1, host: host, projectID: 1, iid: 3, headSHA: head,
+            verdict: try #require(ReviewVerdict.Kind(rawValue: "no_objections")),
+            discussionFingerprint: ReviewVerdict.fingerprint([]))
+        let verdictURL = harness.folder.appending(path: "verdicts/gitlab.example.org/1-3.json")
+        try FileManager.default.createDirectory(at: verdictURL.deletingLastPathComponent(), withIntermediateDirectories: true)
+        try JSONEncoder().encode(verdict).write(to: verdictURL)
+        try await harness.poll()
+        #expect(harness.monitor.currentOpenItems.first { $0.id.iid == 3 }?.canApprove == true)
+
+        // MR !2 becomes independently eligible for a recovery after the last normal poll.
+        harness.settings.automation.allowFollowUpPush = true
+        harness.settings.automation.authorFeedback.isEnabled = true
+        try harness.write("drafts.json", #"[{"id":12,"author_id":3,"note":"Unsupported prepared reply","discussion_id":"abc"}]"#)
+        try harness.write("discussions.json", duoDiscussion)
+        try harness.verifyFollowUpDrafts()
+        let newHead = String(repeating: "b", count: 40)
+        for file in ["request.json", "authored.json"] {
+            try harness.write(file, harness.log(file).replacingOccurrences(of: head, with: newHead))
+        }
+        try harness.write("remote-head.txt", newHead)
+        harness.monitor.draftProofRecoveryCoordinator?.onChange = nil
+        harness.monitor.draftProofRecoveryCoordinator?.onNeedsRepair = { snapshot, _, _ in
+            repairedMRs.append(snapshot.request.iid)
+            return nil
+        }
+        harness.settings.autoApproveOptOuts.remove(approvalTarget)
+        harness.settings.save()
+
+        await harness.monitor.resumeAutomaticAction(.approval, for: approvalTarget)
+        let unrelatedWork = AssistantAutomationRunner.MergeRequestWork(host: host, projectID: 1, iid: 2)
+        let deadline = ContinuousClock.now + .seconds(5)
+        while harness.monitor.draftProofRecoveryCoordinator?.isChecking(work: unrelatedWork) == true,
+              ContinuousClock.now < deadline { try await Task.sleep(for: .milliseconds(20)) }
+
+        #expect(harness.log("approve.log").contains("/merge_requests/3/approve"))
+        #expect(assessedMRs.isEmpty && repairedMRs.isEmpty)
+        #expect(harness.log("selected.log").isEmpty && harness.log("publish.log").isEmpty)
+
+        // Normal monitoring still owns and can start the independent recovery.
+        try await harness.poll()
+        let normalDeadline = ContinuousClock.now + .seconds(5)
+        while harness.monitor.draftProofRecoveryCoordinator?.isChecking(work: unrelatedWork) == true,
+              ContinuousClock.now < normalDeadline { try await Task.sleep(for: .milliseconds(20)) }
+        #expect(assessedMRs == [2] && repairedMRs == [2])
+    }
+
     @Test func approvalRechecksTheLiveGitLabAccountBeforePosting() async throws {
         let harness = try makeHarness(assistantWorked: true)
         defer { harness.cleanUp() }

@@ -146,7 +146,7 @@ struct BoardMRProposalCard: View {
                 if let finishedItem { FinishedMergeRequestStatus(item: finishedItem, monitor: monitor) }
                 if let job = proposal.latestJob { AssistantJobRow(handoff: job, monitor: monitor, readOnly: finishedState != nil) }
                 if finishedState == nil {
-                    MRAutomationScopeMenu(settings: monitor.settings, target: proposal.target,
+                    MRAutomationScopeMenu(monitor: monitor, target: proposal.target,
                         projectPath: proposal.url.gitLabProjectPath, isDraft: isDraft)
                 }
             }
@@ -188,7 +188,7 @@ struct BoardMRProposalCard: View {
                 workspace: monitor.settings.automation.assistantWorkspace)
             if finishedState == nil {
                 Divider()
-                MRAutomationScopeMenu(settings: monitor.settings, target: proposal.target,
+                MRAutomationScopeMenu(monitor: monitor, target: proposal.target,
                     projectPath: proposal.url.gitLabProjectPath, isDraft: isDraft)
             }
         } label: { BoardCardActionIcon(systemName: "ellipsis") }

@@ -62,17 +62,8 @@ struct MRCommonMenuItems: View {
         if !isFinished, monitor.settings.automation.hasEnabledAutomation,
            let target = monitor.scopeTarget(projectID: item.id.projectID, iid: item.id.iid, url: item.url) {
             Divider()
-            MRAutomationScopeMenu(settings: monitor.settings, target: target, projectPath: item.url.gitLabProjectPath,
+            MRAutomationScopeMenu(monitor: monitor, target: target, projectPath: item.url.gitLabProjectPath,
                 isDraft: item.section == .draftMergeRequests)
-            if !item.isAuthored, monitor.settings.automation.autoApproveEnabled {
-                Toggle(isOn: Binding(get: { !monitor.settings.autoApproveOptOuts.contains(target) }, set: { enabled in
-                    if enabled { monitor.settings.autoApproveOptOuts.remove(target) }
-                    else { monitor.settings.autoApproveOptOuts.insert(target) }
-                    monitor.settings.save()
-                })) {
-                    Label { Text(.CommandCenter.commandCenterAutoApprove) } icon: { Image(systemName: "checkmark.seal") }
-                }
-            }
         }
         if !isFinished, let onRemove {
             Divider()

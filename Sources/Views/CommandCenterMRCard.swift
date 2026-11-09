@@ -375,7 +375,7 @@ struct BoardTodoRow: View {
                     Label { Text(.Board.boardEventOpen) } icon: { Image(systemName: "arrow.up.right.square") }
                 }
                 if let scopeTarget {
-                    MRAutomationScopeMenu(settings: monitor.settings, target: scopeTarget,
+                    MRAutomationScopeMenu(monitor: monitor, target: scopeTarget,
                         projectPath: todo.project.pathWithNamespace, isDraft: isDraft)
                 }
             }
@@ -421,7 +421,7 @@ struct BoardTodoRow: View {
             }
             if let scopeTarget {
                 Divider()
-                MRAutomationScopeMenu(settings: monitor.settings, target: scopeTarget,
+                MRAutomationScopeMenu(monitor: monitor, target: scopeTarget,
                     projectPath: todo.project.pathWithNamespace, isDraft: isDraft)
             }
         } label: { BoardCardActionIcon(systemName: "ellipsis") }

@@ -107,7 +107,7 @@ struct ManagedMergeRequestsView: View {
                                 Text(.Menu.menuAuthoredProject(target.projectID))
                             }
                             Spacer()
-                            MRAutomationScopeMenu(settings: monitor.settings, target: target)
+                            MRAutomationScopeMenu(monitor: monitor, target: target)
                         }
                         .font(.caption)
                         .mrRowContentPadding()
@@ -143,18 +143,9 @@ struct ManagedMergeRequestsView: View {
                                 .font(.caption).foregroundStyle(.secondary)
                             }
                             HStack {
-                                MRAutomationScopeMenu(settings: monitor.settings, target: row.target,
+                                MRAutomationScopeMenu(monitor: monitor, target: row.target,
                                                       projectPath: row.item.url.gitLabProjectPath,
                                                       isDraft: row.item.section == .draftMergeRequests)
-                                if !row.item.isAuthored, row.item.mergeRequest != nil,
-                                   monitor.settings.automation.hasEnabledAutomation, monitor.settings.automation.autoApproveEnabled {
-                                    Toggle(isOn: autoApproveBinding(row.target)) {
-                                        Text(.Menu.menuScopeAutoApprove)
-                                    }
-                                    .toggleStyle(.checkbox)
-                                    .font(.caption)
-                                    .help(Text(.Menu.menuScopeAutoApproveHelp))
-                                }
                                 Spacer()
                                 if let chat = monitor.existingCodexChat(for: row.target) {
                                     Link(destination: chat) {
@@ -177,7 +168,7 @@ struct ManagedMergeRequestsView: View {
                                 Text(.Menu.menuAuthoredProject(target.projectID))
                             }
                             Text(.Menu.menuScopeNotOpen).foregroundStyle(.secondary)
-                            MRAutomationScopeMenu(settings: monitor.settings, target: target)
+                            MRAutomationScopeMenu(monitor: monitor, target: target)
                         }
                         .font(.caption).mrRowContentPadding()
                         Divider()
@@ -187,19 +178,6 @@ struct ManagedMergeRequestsView: View {
         }
     }
 
-    private func autoApproveBinding(_ target: MRAutomationScope.Target) -> Binding<Bool> {
-        Binding(
-            get: { !monitor.settings.autoApproveOptOuts.contains(target) },
-            set: { enabled in
-                if enabled {
-                    monitor.settings.autoApproveOptOuts.remove(target)
-                } else {
-                    monitor.settings.autoApproveOptOuts.insert(target)
-                }
-                monitor.settings.save()
-            }
-        )
-    }
 
     private struct Row: Identifiable {
         let item: MergeRequestAttentionMonitor.Item

@@ -61,6 +61,12 @@ final class AuthoredMergeRequestMonitor {
     private var preparingConflicts: [AssistantAutomationRunner.MergeRequestWork: Preparation] = [:]
     private var failedPreparations: [AssistantAutomationRunner.MergeRequestWork: Preparation] = [:]
     private var refreshAfterLoad = false
+    private struct AutomaticMergeResumeKey: Hashable {
+        let target: MRAutomationScope.Target
+        let revision: UInt64
+    }
+    @ObservationIgnored private var automaticMergeResumes: [AutomaticMergeResumeKey: Task<Void, Never>] = [:]
+    @ObservationIgnored private var automaticMergeIdleWaiters: [CheckedContinuation<Void, Never>] = []
 
     func conflictTaskFailed(for request: GitLabMergeRequest) -> Bool {
         if conflictAutomationState(for: request) == .requiresAttention { return true }
@@ -195,6 +201,7 @@ final class AuthoredMergeRequestMonitor {
             defer {
                 isLoading = false
                 if refreshAfterLoad { refreshAfterLoad = false; refreshIfNeeded() }
+                signalAutomaticMergeIdle()
             }
             do {
                 try await refresh(account, revision: revision)
@@ -210,7 +217,57 @@ final class AuthoredMergeRequestMonitor {
         account.host == glab.resolvedHost && account.username == glab.currentUsername
     }
 
-    private func refresh(_ account: Account, revision: UInt64) async throws {
+    /// A restored merge preference queues behind current reads and uses the same
+    /// automatic executor and final GitLab gates, without replaying a coding job.
+    func resumeAutomaticMerge(for target: MRAutomationScope.Target) async {
+        let account = Account(host: target.host, username: target.username)
+        guard target.iid != nil, isCurrent(account), settings.actionIsAutomatic(.merge, for: target) else { return }
+        let key = AutomaticMergeResumeKey(target: target, revision: glab.accountRevision)
+        if let task = automaticMergeResumes[key] { await task.value; return }
+        let task = Task { await self.performAutomaticMergeResume(key, account: account) }
+        automaticMergeResumes[key] = task
+        await task.value
+    }
+
+    private func performAutomaticMergeResume(_ key: AutomaticMergeResumeKey, account: Account) async {
+        defer { automaticMergeResumes[key] = nil }
+        while isLoading {
+            await withCheckedContinuation { automaticMergeIdleWaiters.append($0) }
+        }
+        guard settings.onboardingCompleted, isCurrent(account), glab.accountRevision == key.revision,
+              settings.actionIsAutomatic(.merge, for: key.target), settings.automation.autoMergeEnabled else { return }
+        if lastAccount != account {
+            syncedCatalogRevision = nil
+            requests = []
+            notifiedDiscussions = []
+            lastAccount = account
+        }
+        isLoading = true
+        defer {
+            isLoading = false
+            if refreshAfterLoad { refreshAfterLoad = false; refreshIfNeeded() }
+            signalAutomaticMergeIdle()
+        }
+        do {
+            try await refresh(account, revision: key.revision, automaticMergeTarget: key.target)
+        } catch {
+            if isCurrent(account), glab.accountRevision == key.revision { hasError = true }
+        }
+    }
+
+    private func signalAutomaticMergeIdle() {
+        let waiting = automaticMergeIdleWaiters
+        automaticMergeIdleWaiters = []
+        for continuation in waiting { continuation.resume() }
+    }
+
+    private func permitsAutomaticMerge(_ request: GitLabMergeRequest, account: Account) -> Bool {
+        settings.permitsAutomaticAction(.merge, for: request, target: .init(host: account.host,
+            username: account.username, projectID: request.projectID, iid: request.iid))
+    }
+
+    private func refresh(_ account: Account, revision: UInt64,
+                         automaticMergeTarget: MRAutomationScope.Target? = nil) async throws {
         // A conservative lower bound also covers summaries used when a detail
         // read fails. Keep completion time separate for normal refresh cadence.
         let readStartedAt = Date()
@@ -252,11 +309,10 @@ final class AuthoredMergeRequestMonitor {
                 request, approvals: approvals, resolved: discussionsResolved, account: account, user: user
             )
 
-            let project = request.webURL.gitLabProjectPath
             let work = AssistantAutomationRunner.MergeRequestWork(host: host, projectID: request.projectID, iid: request.iid)
             if status.mayAutoMerge, let sha = request.sha,
-               isCurrent(account), settings.automation.permitsAutoMerge(project: project),
-               settings.automation.scope.permits(request, host: host, username: account.username),
+               automaticMergeTarget == nil || (automaticMergeTarget?.projectID == request.projectID && automaticMergeTarget?.iid == request.iid),
+               isCurrent(account), permitsAutomaticMerge(request, account: account),
                !AssistantAutomationRunner.isWorking(on: work),
                !hasUnfinishedAssistantWork(on: work, username: user.username, currentRequest: request) {
                 let configuration = settings.automation
@@ -287,8 +343,7 @@ final class AuthoredMergeRequestMonitor {
                         expectedSemanticContextFingerprint: requiresSemanticAssessment ? request.semanticContextFingerprint : nil,
                         shouldProceed: {
                             self.isCurrent(account) && self.settings.automation == configuration
-                                && self.settings.automation.permitsAutoMerge(project: project)
-                                && self.settings.automation.scope.permits(request, host: host, username: account.username)
+                                && self.permitsAutomaticMerge(request, account: account)
                                 && !AssistantAutomationRunner.isWorking(on: work)
                                 && !self.hasUnfinishedAssistantWork(on: work, username: user.username,
                                     currentRequest: request, discussions: discussions)
@@ -304,7 +359,7 @@ final class AuthoredMergeRequestMonitor {
             }
 
             results.append(status)
-            await scheduleConflictIfNeeded(request, account: account, user: user)
+            if automaticMergeTarget == nil { await scheduleConflictIfNeeded(request, account: account, user: user) }
         }
 
         guard isCurrent(account) else { return }
@@ -313,12 +368,14 @@ final class AuthoredMergeRequestMonitor {
         catalogReadStartedAt = readStartedAt
         hasError = actionFailed
         lastRefresh = Date()
-        notifyUnresolvedDiscussions(results)
-        let isWatchingWorkflow = !settings.automation.workflowRules.enabled.isEmpty
-        if isWatchingWorkflow || wasWatchingWorkflow {
-            workflow.observe(results.map(\.request), host: host, user: user)
+        if automaticMergeTarget == nil {
+            notifyUnresolvedDiscussions(results)
+            let isWatchingWorkflow = !settings.automation.workflowRules.enabled.isEmpty
+            if isWatchingWorkflow || wasWatchingWorkflow {
+                workflow.observe(results.map(\.request), host: host, user: user)
+            }
+            wasWatchingWorkflow = isWatchingWorkflow
         }
-        wasWatchingWorkflow = isWatchingWorkflow
     }
 
     private func hasUnfinishedAssistantWork(on work: AssistantAutomationRunner.MergeRequestWork, username: String,

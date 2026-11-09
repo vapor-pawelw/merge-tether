@@ -2,7 +2,7 @@ import Foundation
 
 /// Application decisions that cannot be reconstructed from a worker's persisted execution.
 struct MRAutomationEvent: Codable, Identifiable, Equatable, Sendable {
-    enum Action: String, Codable, Sendable { case retry, review, followUp, draftReply, verification, pipeline, conflict, refresh }
+    enum Action: String, Codable, Sendable { case retry, review, followUp, draftReply, verification, feedbackDecision, pipeline, conflict, refresh }
     enum Origin: String, Codable, Sendable { case manual, automatic }
     enum State: String, Codable, Sendable { case requested, queued, failed, completed, blocked }
     let id: UUID

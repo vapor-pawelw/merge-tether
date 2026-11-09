@@ -34,6 +34,8 @@ struct MRHumanAction {
     let detail: String?
     let summary: String?
     let preparedReply: PreparedReplyContext?
+    /// A fresh remaining feedback concern can lead while the stopped run stays in history.
+    var sourceNoteID: Int? = nil
     var explanation: String {
         let explanation = AgentExplanation.summary(summary) ?? String(localized: message)
         guard preparedReply != nil else { return explanation }
@@ -80,9 +82,17 @@ struct MRHumanAction {
         if let execution = stoppedRun, !stoppedOnOlderHead {
             let interrupted = execution.state == .interrupted || execution.state == .cancelled
             let executable = row.latestJob?.taskPrompt != nil && row.latestJob?.mergeRequestURL != nil
+            let remaining = Self.remainingConcern(in: row)
+            // A different feedback finding is not proof that an independent tool
+            // or delivery failure has gone away. Keep that cause visible first.
+            let currentSummary = remaining?.summary.map { summary in
+                let cause = execution.attentionExplanation
+                return cause == summary ? summary : [cause, summary].compactMap { $0 }.joined(separator: "\n")
+            } ?? execution.blocker
             self.init(kind: interrupted ? .interruptedRun : .blockedRun, action: executable ? .retryRun : .reviewRun,
                       message: interrupted ? .MRHumanAction.mrHumanActionInterruptedRun : .MRHumanAction.mrHumanActionBlockedRun,
-                      detail: execution.attentionExplanation, summary: execution.blocker)
+                      detail: execution.attentionExplanation, summary: currentSummary)
+            sourceNoteID = remaining?.sourceNoteID
             return
         }
 
@@ -128,7 +138,7 @@ struct MRHumanAction {
         if item.canConfirmReReview {
             self.init(kind: .reviewDecision, action: .reviewDecision, message: Self.reviewDecisionMessage(item),
                       detail: Self.feedbackDetail(item), summary: Self.feedbackSummary(item))
-        } else if item.canApprove {
+        } else if item.canApprove && !item.approvalWaitingForReadiness {
             self.init(kind: .approval, action: .reviewApproval, message: .MRHumanAction.mrHumanActionApproval)
         } else if item.needsPipelineHandoff {
             self.init(kind: .pipelineHandoff, action: .reviewHandoff, message: .MRHumanAction.mrHumanActionPipelineHandoff)
@@ -183,6 +193,26 @@ struct MRHumanAction {
         switch item.reReviewReadiness {
         case .blocked(let blockers), .uncertain(let blockers): return blockers.first?.summary
         default: return nil
+        }
+    }
+
+    private static func remainingConcern(in row: MergeRequestBoardSnapshot.Row) -> AuthorFeedbackPolicy.Finding? {
+        let item = row.item
+        guard let job = row.latestJob, job.workflow == .followUp,
+              job.key.work.projectID == item.id.projectID, job.key.work.iid == item.id.iid,
+              let request = item.mergeRequest, request.author.username == job.key.username,
+              item.url.isGitLabMergeRequest(host: job.key.work.host, iid: item.id.iid),
+              let status = item.authorFeedbackStatus, status.phase == .complete,
+              status.head == request.sha, status.fingerprint == item.observedDiscussionFingerprint,
+              status.semanticContextFingerprint == request.semanticContextFingerprint else { return nil }
+        let selected = Set(job.feedbackNoteIDs ?? [])
+        guard !selected.isDisjoint(with: status.ignoredNoteIDs) else { return nil }
+        return status.findings.first { finding in
+            guard let source = finding.sourceNoteID, selected.contains(source),
+                  status.followUpNoteIDs.contains(source), !status.ignoredNoteIDs.contains(source),
+                  [.needsChanges, .needsVerification].contains(finding.state),
+                  AgentExplanation.summary(finding.summary) != nil else { return false }
+            return true
         }
     }
 

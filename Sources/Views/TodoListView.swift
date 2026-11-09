@@ -224,7 +224,7 @@ struct TodoListView: View {
 
     private func scopeMenu(projectID: Int, iid: Int, url: URL) -> MRAutomationScopeMenu? {
         monitor.scopeTarget(projectID: projectID, iid: iid, url: url).map {
-            MRAutomationScopeMenu(settings: monitor.settings, target: $0, projectPath: url.gitLabProjectPath)
+            MRAutomationScopeMenu(monitor: monitor, target: $0, projectPath: url.gitLabProjectPath)
         }
     }
 

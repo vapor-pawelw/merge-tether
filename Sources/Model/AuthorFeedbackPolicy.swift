@@ -5,6 +5,7 @@ struct AuthorFeedbackAttempt: Codable, Hashable {
     let noteID: Int
     let revision: String
     var recoveryRootID: UUID? = nil
+    var decisionRevision: String? = nil
 }
 
 /// Concrete residual work assessed after a completed follow-up. The run ID
@@ -32,6 +33,8 @@ struct AuthorFeedbackPolicy {
         let reason: String?
         let waitingForReviewers: [String]
         var summary: String? = nil
+        /// Exact assessment note whose explanation is displayed; the thread root can differ.
+        var sourceNoteID: Int? = nil
         var canResolve: Bool { state == .ready && discussionID != nil }
     }
 
@@ -45,9 +48,10 @@ struct AuthorFeedbackPolicy {
     /// Every external note needs explicit proof that the entire thread has no remaining expectation.
     static func informationalAcknowledgements(discussions: [GitLabMergeRequestDiscussion], assessment: ReReviewAssessment,
                                               authorID: Int, enabled: Bool = true,
-                                              pendingDraftCount: Int = 0) -> [InformationalAcknowledgement] {
+                                              pendingDraftCount: Int = 0,
+                                              ignoredSuggestions: [IgnoredFeedbackSuggestion] = []) -> [InformationalAcknowledgement] {
         guard enabled, pendingDraftCount == 0,
-              (try? assessment.reviewers(in: discussions, authorID: authorID)) != nil else { return [] }
+              (try? assessment.reviewers(in: discussions, authorID: authorID, ignoredSuggestions: ignoredSuggestions)) != nil else { return [] }
         let verdicts = Dictionary(uniqueKeysWithValues: assessment.notes.map { ($0.noteID, $0) })
         return discussions.compactMap { discussion in
             let relevant = discussion.notes.filter { $0.system != true }
@@ -83,12 +87,13 @@ struct AuthorFeedbackPolicy {
     private typealias Verdict = ReReviewAssessment.Note
 
     static func evaluate(discussions: [GitLabMergeRequestDiscussion], assessment: ReReviewAssessment?, authorID: Int,
-                         approvedReviewerIDs: Set<Int>, enabled: Bool = true, pendingDraftCount: Int = 0) -> [Finding] {
+                         approvedReviewerIDs: Set<Int>, enabled: Bool = true, pendingDraftCount: Int = 0,
+                         ignoredSuggestions: [IgnoredFeedbackSuggestion] = []) -> [Finding] {
         let gate: State? = !enabled ? .disabled : pendingDraftCount > 0 ? .waitingPublication : nil
-        let verified = assessment.flatMap { (try? $0.reviewers(in: discussions, authorID: authorID)) == nil ? nil : $0 }
+        let verified = assessment.flatMap { (try? $0.reviewers(in: discussions, authorID: authorID, ignoredSuggestions: ignoredSuggestions)) == nil ? nil : $0 }
         let verdicts = Dictionary(uniqueKeysWithValues: (verified?.notes ?? []).map { ($0.noteID, $0) })
         let informationalThreads = Set(verified.map {
-            informationalAcknowledgements(discussions: discussions, assessment: $0, authorID: authorID)
+            informationalAcknowledgements(discussions: discussions, assessment: $0, authorID: authorID, ignoredSuggestions: ignoredSuggestions)
                 .filter(\.canResolve).compactMap(\.discussionID)
         } ?? [])
         let published = discussions.flatMap(\.notes).filter { $0.system == false }
@@ -124,6 +129,9 @@ struct AuthorFeedbackPolicy {
             }
             let purelyInformational = informationalThreads.contains(discussionID)
             let blocked = purelyInformational ? [] : participants.filter { blockers[$0.id] != nil }
+            // A user decision retires local suggestion work. It is neither reviewer
+            // consent nor permission to resolve the original GitLab discussion.
+            if blocked.isEmpty, thread.contains(where: { !(verdicts[$0.id ?? 0]?.ignoredDecisionIDs ?? []).isEmpty }) { continue }
             let waiting = purelyInformational ? [] : participants.filter { participant in
                 blockers[participant.id] != nil || !approvedReviewerIDs.contains(participant.id) && !thread.filter {
                     $0.author?.id == participant.id && ($0.id == rootID || verdicts[$0.id ?? 0]?.state == .addressed)
@@ -138,7 +146,8 @@ struct AuthorFeedbackPolicy {
                 : (threadBlocker ?? blockers[blocked[0].id])
             findings.append(Finding(id: rootID, discussionID: discussionID, reviewerID: owner.id,
                                     reviewerUsername: handle(owner), state: state, reason: explanation?.reason,
-                                    waitingForReviewers: verified == nil ? [] : waiting.map(handle), summary: explanation?.summary))
+                                    waitingForReviewers: verified == nil ? [] : waiting.map(handle), summary: explanation?.summary,
+                                    sourceNoteID: explanation?.noteID))
         }
 
         for (index, discussion) in discussions.enumerated() where !represented.contains(index) {
@@ -147,7 +156,7 @@ struct AuthorFeedbackPolicy {
                 findings.append(Finding(id: id, discussionID: note.resolvable == true ? discussion.id : nil,
                                         reviewerID: author.id, reviewerUsername: handle(author),
                                         state: pendingDraftCount > 0 ? .waitingPublication : .needsChanges,
-                                        reason: verdict.reason, waitingForReviewers: [handle(author)], summary: verdict.summary))
+                                        reason: verdict.reason, waitingForReviewers: [handle(author)], summary: verdict.summary, sourceNoteID: verdict.noteID))
             }
         }
         return findings
@@ -160,8 +169,9 @@ struct AuthorFeedbackPolicy {
     /// Closed threads still carry consent, so a later poll does not ask the same
     /// reviewer to re-review a fix they have already explicitly accepted.
     static func acceptedReviewers(discussions: [GitLabMergeRequestDiscussion], assessment: ReReviewAssessment,
-                                  authorID: Int, approvedReviewerIDs: Set<Int>) -> Set<Int> {
-        guard (try? assessment.reviewers(in: discussions, authorID: authorID)) != nil else { return [] }
+                                  authorID: Int, approvedReviewerIDs: Set<Int>,
+                                  ignoredSuggestions: [IgnoredFeedbackSuggestion] = []) -> Set<Int> {
+        guard (try? assessment.reviewers(in: discussions, authorID: authorID, ignoredSuggestions: ignoredSuggestions)) != nil else { return [] }
         let verdicts = Dictionary(uniqueKeysWithValues: assessment.notes.map { ($0.noteID, $0) })
         let external = discussions.flatMap(\.notes).filter { $0.system == false && $0.author?.id != authorID }
         let byID = Dictionary(uniqueKeysWithValues: external.compactMap { note in note.id.map { ($0, note) } })

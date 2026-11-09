@@ -4,6 +4,92 @@ import Testing
 
 @MainActor
 struct AuthorFeedbackCoordinatorTests {
+    @Test(arguments: [false, true])
+    func addressingAnotherConcernInAnIgnoredSourceStillRequiresItsPublishedReply(_ withReply: Bool) async throws {
+        try await withFixture { fixture in
+            fixture.settings.automation.authorFeedback.isEnabled = true
+            let source = try #require(fixture.discussions().first?.notes.first)
+            let target = MRAutomationScope.Target(host: Fixture.host, username: "me", projectID: 1, iid: 2)
+            let entry = IgnoredFeedbackSuggestion(id: UUID(), target: target, sourceNoteID: source.id!, sourceAuthorID: source.author!.id,
+                sourceBody: source.body!, sourceRevision: UserAttentionSnapshot.digest("\(source.author!.id)\n" + source.body!),
+                concernSummary: "Decline only the optional assumption.", concernReason: "Another correction is still required.", createdAt: Date())
+            fixture.settings.feedbackSuggestionDecisions = try JSONDecoder().decode(FeedbackSuggestionDecisions.self,
+                from: JSONEncoder().encode(["decisions": [entry]]))
+            if !withReply {
+                let discussion = GitLabMergeRequestDiscussion(id: "thread-a", notes: [source])
+                try fixture.write("discussions.json", String(decoding: JSONEncoder().encode([discussion]), as: UTF8.self))
+            }
+            let coordinator = fixture.coordinator(assessment: .init(notes: [.init(noteID: 10, state: .addressed,
+                reason: "A different concern in this note is fixed; the optional assumption was user-declined.", ignoredDecisionIDs: [entry.id])]))
+
+            try await fixture.run(coordinator)
+
+            let status = try #require(coordinator.status(projectID: 1, iid: 2))
+            #expect(status.phase == .complete)
+            #expect(status.replyNoteIDs == (withReply ? [] : [10]))
+            #expect(!fixture.resolved && fixture.resolutionPosts == 0 && fixture.reactionPosts == 0)
+        }
+    }
+
+    @Test(arguments: ["ignoredOnly", "sameNoteRemaining", "siblingRemaining", "restoredDuringVerification", "addedDuringVerification", "editedSource"])
+    func preciseUserDecisionsDoNotBecomeSuccessfulFixesOrHideRemainingWork(_ scenario: String) async throws {
+        try await withFixture { fixture in
+            fixture.settings.automation.authorFeedback.isEnabled = true
+            let target = MRAutomationScope.Target(host: Fixture.host, username: "me", projectID: 1, iid: 2)
+            let source = try #require(fixture.discussions().first?.notes.first)
+            let entry = IgnoredFeedbackSuggestion(id: UUID(), target: target, sourceNoteID: source.id!, sourceAuthorID: source.author!.id,
+                sourceBody: source.body!, sourceRevision: UserAttentionSnapshot.digest("\(source.author!.id)\n" + source.body!),
+                concernSummary: "Decline only this optional assumption.", concernReason: "Other requested corrections remain required.", createdAt: Date())
+            if scenario != "addedDuringVerification" {
+                fixture.settings.feedbackSuggestionDecisions = try JSONDecoder().decode(FeedbackSuggestionDecisions.self,
+                    from: JSONEncoder().encode(["decisions": [entry]]))
+            }
+            if scenario == "editedSource" {
+                try fixture.write("discussions.json", "[" + Fixture.thread.replacingOccurrences(of: "Fix A", with: "A newly edited request") + "]")
+            }
+            var notes = [ReReviewAssessment.Note(noteID: 10,
+                state: ["sameNoteRemaining", "addedDuringVerification"].contains(scenario) ? .blocking : .ignoredByUser,
+                reason: scenario == "sameNoteRemaining" ? "Another obligation in this same comment remains." : "Only the precise declined concern remains.",
+                ignoredDecisionIDs: scenario == "addedDuringVerification" ? nil : [entry.id])]
+            if scenario == "siblingRemaining" {
+                try fixture.write("discussions.json", "[" + Fixture.thread + "," + Fixture.condition.replacingOccurrences(of: "\"id\":7", with: "\"id\":8") + "]")
+                notes.append(.init(noteID: 20, state: .blocking, reason: "A separate comment still requires correction."))
+            }
+            let coordinator = fixture.coordinator(assessment: .init(notes: notes), duringVerification: {
+                if scenario == "restoredDuringVerification" { fixture.settings.feedbackSuggestionDecisions.remove(entry.id, for: target) }
+                if scenario == "addedDuringVerification" {
+                    fixture.settings.feedbackSuggestionDecisions.ignore(source, concernSummary: entry.concernSummary,
+                        concernReason: entry.concernReason, for: target)
+                }
+            })
+            var requested: Set<Int> = []
+            coordinator.onNeedsWork = { _, ids, _, _ in requested.formUnion(ids) }
+
+            if ["restoredDuringVerification", "addedDuringVerification"].contains(scenario) {
+                try fixture.start(coordinator)
+                try await fixture.waitForVerification()
+                try await Task.sleep(for: .milliseconds(100))
+            } else {
+                try await fixture.run(coordinator)
+            }
+
+            let status = coordinator.status(projectID: 1, iid: 2)
+            if ["restoredDuringVerification", "addedDuringVerification"].contains(scenario) {
+                #expect(status?.phase != .complete)
+                #expect(requested.isEmpty)
+            } else if scenario == "editedSource" {
+                #expect(status?.ignoredNoteIDs.isEmpty != false)
+                #expect(status?.phase != .complete)
+            } else {
+                #expect(requested == (scenario == "sameNoteRemaining" ? [10] : scenario == "siblingRemaining" ? [20] : []))
+                #expect(status?.ignoredNoteIDs == (scenario == "sameNoteRemaining" ? [] : [10]))
+                #expect(status?.addressedNoteIDs.contains(10) == false)
+                #expect(fixture.inputs.first?.ignoredSuggestions.map(\.id) == [entry.id])
+            }
+            #expect(!fixture.resolved && fixture.resolutionPosts == 0 && fixture.reactionPosts == 0)
+        }
+    }
+
     @Test func changedBlockedStepRequiresANewAssessmentAtTheSameHeadAndDiscussions() async throws {
         try await withFixture { fixture in
             fixture.settings.automation.autoResolveAcceptedFeedback = false

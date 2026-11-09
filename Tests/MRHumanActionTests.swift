@@ -43,6 +43,67 @@ struct MRHumanActionTests {
         return .init(item: item, latestJob: job, intents: intents)
     }
 
+    private func partiallyIgnoredStoppedRow(blocker: String = "The old contract suggestion is unresolved") throws -> MergeRequestBoardSnapshot.Row {
+        var item = item()
+        let request = try JSONDecoder().decode(GitLabMergeRequest.self, from: Data(#"{"project_id":1,"iid":2,"author":{"id":3,"username":"me","name":"Me"},"title":"Example","web_url":"https://gitlab.example.test/group/repo/-/merge_requests/2","state":"opened","draft":false,"sha":"head","source_branch":"feature","target_branch":"main","labels":[]}"#.utf8))
+        item.mergeRequest = request
+        item.isAuthored = true
+        item.observedDiscussionFingerprint = "current comments"
+        item.authorFeedbackStatus = .init(head: "head", fingerprint: "current comments",
+            semanticContextFingerprint: request.semanticContextFingerprint, phase: .complete,
+            findings: [.init(id: 20, discussionID: "remaining", reviewerID: 8, reviewerUsername: "bob", state: .needsChanges,
+                reason: "The independent timeout still needs handling", waitingForReviewers: [],
+                summary: "Handle the independent timeout", sourceNoteID: 20)], followUpNoteIDs: [20], ignoredNoteIDs: [10])
+        let base = row(item, execution: .init(state: .blocked, finishedAt: Date(), summary: "The run stopped", blocker: blocker),
+                       expectedHead: "head")
+        var job = try #require(base.latestJob)
+        job.workflow = .followUp
+        job.feedbackNoteIDs = [10, 20]
+        return .init(item: item, latestJob: job, intents: [])
+    }
+
+    @Test(arguments: ["The old contract suggestion is unresolved", "The test runner could not start", "The source push failed"])
+    func freshRemainingFeedbackKeepsTheIndependentStoppedCauseVisible(_ blocker: String) throws {
+        let row = try partiallyIgnoredStoppedRow(blocker: blocker)
+        let action = try #require(MRHumanAction(row: row, assistantReady: true))
+        #expect(action.explanation.contains("Handle the independent timeout"))
+        #expect(action.explanation.contains(blocker))
+        #expect(action.sourceNoteID == 20)
+        #expect(action.kind == .blockedRun && action.action == .retryRun)
+        #expect(action.detail == blocker)
+        #expect(row.latestJob?.execution?.state == .blocked && row.stoppedJobNeedsAttention)
+    }
+
+    @Test(arguments: ["head", "comments", "description", "missingSource", "otherSource", "unrelatedIgnore"])
+    func staleOrUnrelatedFeedbackCannotReplaceTheStoppedRunExplanation(_ change: String) throws {
+        let original = try partiallyIgnoredStoppedRow()
+        var item = original.item
+        if change == "head" { item.authorFeedbackStatus = .init(head: "old", fingerprint: "current comments", phase: .complete) }
+        if change == "comments" { item.observedDiscussionFingerprint = "new comments" }
+        if change == "description" { item.authorFeedbackStatus?.semanticContextFingerprint = "old description" }
+        if change == "missingSource" { item.authorFeedbackStatus?.findings[0].sourceNoteID = nil }
+        if change == "otherSource" { item.authorFeedbackStatus?.findings[0].sourceNoteID = 99 }
+        if change == "unrelatedIgnore" { item.authorFeedbackStatus?.ignoredNoteIDs = [99] }
+        let row = MergeRequestBoardSnapshot.Row(item: item, latestJob: original.latestJob, intents: [])
+        let action = try #require(MRHumanAction(row: row, assistantReady: true))
+        #expect(action.explanation == "The old contract suggestion is unresolved")
+        #expect(action.sourceNoteID == nil)
+    }
+
+    @Test(arguments: ["The test runner could not start", "The source push failed"])
+    func ignoringAllFeedbackDoesNotHideAnIndependentToolOrDeliveryStop(_ blocker: String) throws {
+        let original = try partiallyIgnoredStoppedRow(blocker: blocker)
+        var item = original.item
+        item.authorFeedbackStatus?.findings = []
+        item.authorFeedbackStatus?.followUpNoteIDs = []
+        item.authorFeedbackStatus?.ignoredNoteIDs = [10, 20]
+        let row = MergeRequestBoardSnapshot.Row(item: item, latestJob: original.latestJob, intents: [])
+        let action = try #require(MRHumanAction(row: row, assistantReady: true))
+        #expect(action.explanation == blocker && action.detail == blocker)
+        #expect(action.sourceNoteID == nil && action.action == .retryRun)
+        #expect(row.stoppedJobNeedsAttention)
+    }
+
     @Test(arguments: [AssistantJobExecution.State.failed, .blocked], [false, true])
     func completedHistoricalJobCannotReviveAttentionOrReplaceManualDraftPublication(state: AssistantJobExecution.State,
                                                                                    manualDraft: Bool) throws {

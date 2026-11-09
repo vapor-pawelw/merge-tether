@@ -128,9 +128,19 @@ Scope is always required. Empty additional project lists mean all repositories p
 
 Manage global scope and repository/MR overrides in **Settings → Automation → Scope**. Scope changes save immediately. Other automation pages use **Apply Changes**, preserving scope edits made in the meantime. Paused and closed MR overrides remain editable.
 
+An MR's **… → Automation** menu can independently opt out of automatic comment publication, merging or approval. A checked action inherits global rules; an unchecked action is deliberately manual for that MR. These choices neither add the MR to management nor change whole-MR scope. Globally disabled actions remain disabled. Other automatic work continues, and the checkpoint appears only after that action's normal evidence and readiness conditions are met. Restoring Auto immediately joins or queues a fresh automatic check, including while a refresh or confirmation is already running. Publication resumes only individually eligible checked drafts under the current publication policy; it never uses the manual Publish all bypass. Completion of verification is still a normal background refresh event, so other independently enabled automation may continue under its own global and per-MR permissions.
+
 ## Board grouping
 
 In **Settings → Automation → Scope**, choose the lower board section: **Without automation** (the default) or **Drafts**. The same choice controls ordering and muted titles/statuses across the board. Without automation uses effective MR/repository scope, including the Draft default; opted-in Drafts remain in the main group and keep their Draft title and badge. Drafts groups every Draft below Ready MRs, without changing action permissions. Pins and normal priority ordering apply within each group; finished MRs remain first. When all automatic features are off, the picker is hidden and Drafts is used temporarily. Re-enabling automation restores your saved choice.
+
+## Local feedback decisions
+
+Details shows the exact author, quotation and note link behind a current feedback finding. Thread roots are not substituted for a different comment that supplied the finding. A stopped worker's selected comments are labelled as scope; a tool failure or failed push is not itself an ignorable reviewer suggestion.
+
+**Ignore this suggestion** opens a confirmation containing the precise concern and source. The saved decision applies to that concern, not the whole comment. Future verifier and coding-agent invocations receive the current list; another requirement in the same comment still needs work or a supported reply. Decisions bind the GitLab account, MR and exact source text, survive restarts and commit changes, and stop applying when that comment is edited. They do not authorize GitLab resolution, approval or publication, nor waive factual reply checks or ordinary merge gates.
+
+The **Ignored suggestions** list appears in Details only when nonempty. **Restore** removes one exception; **Reset all** clears this MR's list. Both start a fresh check and retain history. A deliberate decision change starts a fresh bounded assessment/work context, while ordinary polling retains existing retry limits. A queued worker builds its exception context at execution time; removed decisions are not embedded in stored task prompts, and running coding workers are not cancelled.
 
 ## Attention and notifications
 
@@ -142,7 +152,7 @@ Merged and closed observations create durable, account-scoped completion updates
 
 **Settings → General → Merge request management** controls lane cleanup and the independent Merged/Closed display filters, both enabled by default. Hiding a kind retains its saved unseen updates for later. With cleanup off, finished MR cards remain above open MRs; their Seen action acknowledges the same completion. Enabling cleanup also moves currently retained terminal rows to completion updates at their original observation time. Already suppressed historical rows do not reappear.
 
-Explicitly applying Full automation or completing Full onboarding enables cleanup without changing the separate automatic-merge prerequisites. Other profiles and upgrades retain existing cleanup preferences. Cleanup is local board management and never merges or closes a GitLab MR. Eligible own-MR automatic merging remains controlled by its existing global permission.
+Explicitly applying Full automation or completing Full onboarding enables cleanup without changing the separate automatic-merge prerequisites. Other profiles and upgrades retain existing cleanup preferences. Cleanup is local board management and never merges or closes a GitLab MR. Eligible own-MR automatic merging remains controlled by its existing global permission and per-MR action choice.
 
 **Settings → General → Event banners** controls brief banners for automatically accepted GitLab events and observed MR lifecycle changes. This is enabled by default for new and existing installations, while an explicit opt-out is preserved. Banners identify the update, appear in sequence, expire automatically and do not repeat on polling or acknowledgement retries. They contain repository/MR context without the review body. Lifecycle banners remain independent of automatic removal, so merged or closed transitions can be announced even when their rows are removed. This setting is independent of macOS notifications.
 

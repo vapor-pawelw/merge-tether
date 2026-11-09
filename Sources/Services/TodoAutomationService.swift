@@ -202,6 +202,7 @@ final class TodoAutomationService {
         shouldProceed: @MainActor () -> Bool
     ) async throws {
         let configuration = settings.automation
+        let decisionContext = AssistantAutomationRunner.feedbackDecisionRevision(work: work, username: username, settings: settings)
         let rule = configuration.authorFeedback
         guard rule.runner == .assistant, rule.isConfigured, shouldProceed() else { return }
         let request = try await glab.fetchMergeRequest(projectID: work.projectID, iid: work.iid, host: work.host)
@@ -227,11 +228,14 @@ final class TodoAutomationService {
         }
         var recovery: FeedbackRecovery?
         if verifiedFingerprint != nil {
-            let attempts = settings.assistantHandoffs.filter { $0.key.work == work && $0.key.username == username }
+            let attempts = settings.assistantHandoffs.filter {
+                $0.key.work == work && $0.key.username == username && $0.feedbackDecisionRevision == decisionContext
+            }
             let target = MRAutomationScope.Target(host: work.host, username: username, projectID: work.projectID, iid: work.iid)
             let attempted = Set(candidates.compactMap { note -> Int? in
                 guard let id = note.id else { return nil }
-                let receipt = AuthorFeedbackAttempt(target: target, noteID: id, revision: revision(note))
+                let receipt = AuthorFeedbackAttempt(target: target, noteID: id, revision: revision(note),
+                    decisionRevision: decisionContext)
                 guard settings.authorFeedbackAttempts.contains(receipt)
                     || attempts.contains(where: { $0.verifiedFeedbackNotes?[id] == receipt.revision }) else { return nil }
                 return id
@@ -267,6 +271,7 @@ final class TodoAutomationService {
             if let verifiedResidual, verifiedResidual.semanticContextFingerprint != latest.semanticContextFingerprint { return }
         }
         guard shouldProceed(), settings.automation == configuration,
+              AssistantAutomationRunner.feedbackDecisionRevision(work: work, username: username, settings: settings) == decisionContext,
               (verifiedFingerprint != nil || AssistantAutomationRunner.unhandledFeedback(ids, work: work, username: username, settings: settings) == ids.sorted())
         else { return }
         if let recovery {
@@ -325,13 +330,16 @@ final class TodoAutomationService {
                                   work: AssistantAutomationRunner.MergeRequestWork, username: String,
                                   settings: SettingsManager) -> FeedbackRecovery? {
         let target = MRAutomationScope.Target(host: work.host, username: username, projectID: work.projectID, iid: work.iid)
+        let decisionContext = AssistantAutomationRunner.feedbackDecisionRevision(work: work, username: username, settings: settings)
         guard let residual, settings.automation.allowFollowUpPush, settings.automation.packageDecision != .disabled,
               settings.automation.scope.permits(request, host: work.host, username: username),
               !settings.ignoredMergeRequests.contains(target), request.author.username == username else { return nil }
-        let attempts = settings.assistantHandoffs.filter { $0.key.work == work && $0.key.username == username && !$0.isObsoleteReminder }
-        guard !attempts.contains(where: { $0.operationalExecution?.state.isActive == true }) else { return nil }
+        let allAttempts = settings.assistantHandoffs.filter { $0.key.work == work && $0.key.username == username && !$0.isObsoleteReminder }
+        let attempts = allAttempts.filter { $0.feedbackDecisionRevision == decisionContext }
+        guard !allAttempts.contains(where: { $0.operationalExecution?.state.isActive == true }) else { return nil }
         let completed = settings.assistantHandoffs.filter {
             $0.key.work == work && $0.key.username == username && $0.workflow == .followUp && $0.draftRepair == nil
+                && $0.feedbackDecisionRevision == decisionContext
                 && $0.execution?.state == .succeeded && $0.execution?.finishedAt != nil
                 && !($0.feedbackNoteIDs ?? []).isEmpty
         }.sorted {
@@ -362,9 +370,11 @@ final class TodoAutomationService {
                     $0.createdAt == $1.createdAt ? $0.id.uuidString < $1.id.uuidString : $0.createdAt < $1.createdAt
                 }
                 guard latest?.id == origin.id else { return false }
-                let receipt = AuthorFeedbackAttempt(target: target, noteID: note.noteID, revision: revision, recoveryRootID: rootID)
+                let receipt = AuthorFeedbackAttempt(target: target, noteID: note.noteID, revision: revision, recoveryRootID: rootID,
+                    decisionRevision: decisionContext)
                 return !settings.authorFeedbackAttempts.contains(receipt) && !settings.assistantHandoffs.contains {
                     $0.key.work == work && $0.key.username == username && $0.feedbackRecoveryRootID == rootID
+                        && $0.feedbackDecisionRevision == decisionContext
                         && $0.verifiedFeedbackNotes?[note.noteID] == revision
                 }
             }.sorted { $0.noteID < $1.noteID }

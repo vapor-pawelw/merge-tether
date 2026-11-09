@@ -118,6 +118,7 @@ private struct MRAutomationEventLogRow: View {
             case .followUp: .AutomationHistory.automationHistoryActionFollowUp
             case .draftReply: .AutomationHistory.automationHistoryActionDraftReply
             case .verification: .AutomationHistory.automationHistoryActionVerification
+            case .feedbackDecision: .FeedbackDecisionActions.historyTitle
             case .pipeline: .Settings.settingsAutomationWorkflowPipelineFailure
             case .conflict: .AutomationHistory.automationHistoryActionConflict
             case .refresh: .AutomationHistory.automationHistoryActionRefresh

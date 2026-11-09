@@ -1,0 +1,26 @@
+{
+  "sourceLanguage": "en",
+  "strings": {
+    "automaticActions.publication": {
+      "extractionState": "manual",
+      "localizations": { "en": { "stringUnit": { "state": "translated", "value": "Automatic comment publication" } } }
+    },
+    "automaticActions.merge": {
+      "extractionState": "manual",
+      "localizations": { "en": { "stringUnit": { "state": "translated", "value": "Automatic merge" } } }
+    },
+    "automaticActions.approval": {
+      "extractionState": "manual",
+      "localizations": { "en": { "stringUnit": { "state": "translated", "value": "Automatic approval" } } }
+    },
+    "automaticActions.inheritHelp": {
+      "extractionState": "manual",
+      "localizations": { "en": { "stringUnit": { "state": "translated", "value": "Checked: Auto, following your global permissions and MR automation scope. Unchecked: off for this MR. Globally disabled actions stay off; manual actions remain available." } } }
+    },
+    "automaticActions.exceptionsHelp": {
+      "extractionState": "manual",
+      "localizations": { "en": { "stringUnit": { "state": "translated", "value": "Some automatic actions are off for this MR. Review Automation in the … menu." } } }
+    }
+  },
+  "version": "1.0"
+}

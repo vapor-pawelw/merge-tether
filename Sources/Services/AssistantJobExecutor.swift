@@ -50,6 +50,7 @@ enum AssistantJobExecutor {
                   reservation.mergeRequestIID == request.iid else { throw ExecutionError.inactiveMergeRequest }
             _ = try await glab.verifiedFailedPipeline(for: request, host: handoff.key.work.host, expectedUser: user)
         }
+        let ignoredFeedback = try await IgnoredFeedbackWorkerInstructions.load(for: handoff, settings: settings, glab: glab)
         try validateConfiguration(handoff, automation: settings.automation)
         try validateIgnoredTarget(handoff, ignored: settings.ignoredMergeRequests)
         let project = request.webURL.gitLabProjectPath
@@ -67,6 +68,7 @@ enum AssistantJobExecutor {
         // Keep run files inspectable rather than deleting them at subprocess exit.
         if let index = settings.assistantHandoffs.firstIndex(where: { $0.id == handoff.id }) {
             settings.assistantHandoffs[index].execution?.workingDirectory = folder.path
+            recordFeedbackContext(ignoredFeedback.decisionRevision, for: handoff, at: index, settings: settings)
             settings.save()
         }
         let evidenceDirectory = ReviewVerdictStore.directory.deletingLastPathComponent()
@@ -120,8 +122,11 @@ enum AssistantJobExecutor {
             For a blocked result, set blocker to one concise English sentence naming the exact stopped
             step and its actual cause, so the MR card explains why automatic progress stopped.
             Do not use a generic status such as "blocked" as the explanation. For succeeded, set blocker to null.
-            """
+            """ + ignoredFeedback.instructions
         let input = Data(instructions.utf8)
+        let instructionsURL = folder.appending(path: "instructions.txt")
+        try input.write(to: instructionsURL, options: .atomic)
+        try FileManager.default.setAttributes([.posixPermissions: 0o600], ofItemAtPath: instructionsURL.path)
         let output: ProcessRunner.Output
         var capturedOutput: ProcessRunner.Output?
         let result: AssistantJobResult
@@ -163,6 +168,33 @@ enum AssistantJobExecutor {
         }
         let transcript = GlabService.redactWorkflowEvidence(String(decoding: output.stdout, as: UTF8.self) + "\n" + output.stderr)
         return .init(result: result, output: transcript)
+    }
+
+    @MainActor
+    private static func recordFeedbackContext(_ revision: String?, for handoff: AssistantAutomationRunner.Handoff,
+                                              at index: Int, settings: SettingsManager) {
+        let previous = settings.assistantHandoffs[index].feedbackDecisionRevision
+        settings.assistantHandoffs[index].feedbackDecisionRevision = revision
+        guard previous != revision else { return }
+        let target = MRAutomationScope.Target(host: handoff.key.work.host, username: handoff.key.username,
+            projectID: handoff.key.work.projectID, iid: handoff.key.work.iid)
+        let notes = handoff.verifiedFeedbackNotes ?? [:]
+        let corresponding = settings.authorFeedbackAttempts.filter {
+            $0.target == target && notes[$0.noteID] == $0.revision && $0.decisionRevision == previous
+                && ($0.recoveryRootID == nil || $0.recoveryRootID == handoff.feedbackRecoveryRootID)
+        }
+        for receipt in corresponding {
+            // A receipt can also belong to another historical or running invocation.
+            let shared = settings.assistantHandoffs.contains { other in
+                other.id != handoff.id && other.key.work == handoff.key.work && other.key.username == handoff.key.username
+                    && other.feedbackDecisionRevision == previous && other.verifiedFeedbackNotes?[receipt.noteID] == receipt.revision
+                    && (receipt.recoveryRootID == nil || other.feedbackRecoveryRootID == receipt.recoveryRootID)
+            }
+            if !shared { settings.authorFeedbackAttempts.remove(receipt) }
+            var current = receipt
+            current.decisionRevision = revision
+            settings.authorFeedbackAttempts.insert(current)
+        }
     }
 
     static func validateIgnoredTarget(_ handoff: AssistantAutomationRunner.Handoff, ignored: Set<MRAutomationScope.Target>) throws {

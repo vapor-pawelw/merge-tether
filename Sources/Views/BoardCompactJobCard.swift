@@ -60,7 +60,7 @@ struct BoardCompactJobCard: View {
                     }
                     if finishedState == nil {
                         Divider()
-                        MRAutomationScopeMenu(settings: monitor.settings, target: scopeTarget,
+                        MRAutomationScopeMenu(monitor: monitor, target: scopeTarget,
                             projectPath: repositoryPath, isDraft: isDraft)
                     }
                 } label: { BoardCardActionIcon(systemName: "ellipsis") }
@@ -90,7 +90,7 @@ struct BoardCompactJobCard: View {
                 if let finishedItem { FinishedMergeRequestStatus(item: finishedItem, monitor: monitor) }
                 AssistantJobRow(handoff: handoff, monitor: monitor, readOnly: finishedState != nil)
                 if finishedState == nil {
-                    MRAutomationScopeMenu(settings: monitor.settings, target: scopeTarget, projectPath: repositoryPath, isDraft: isDraft)
+                    MRAutomationScopeMenu(monitor: monitor, target: scopeTarget, projectPath: repositoryPath, isDraft: isDraft)
                 }
             }
         }

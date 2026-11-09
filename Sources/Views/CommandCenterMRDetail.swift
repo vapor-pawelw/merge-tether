@@ -53,6 +53,9 @@ private struct CommandCenterMRDetailContent: View {
     @State private var historyNavigationID = UUID()
     @State private var pendingInitialAnchor: Anchor?
     @State private var initialDiscussionAttemptFinished = false
+    @State private var feedbackDecisionConfirmation: FeedbackDecisionConfirmation?
+    @State private var isUpdatingFeedbackDecision = false
+    @State private var feedbackDecisionError: String?
 
     private enum Anchor: Hashable { case overview, drafts, comments, details, actions, feedbackStatus, assistantRuns }
 
@@ -87,6 +90,35 @@ private struct CommandCenterMRDetailContent: View {
         return MRCardPresentation(row: presentationRow, monitor: monitor, allowsRemoval: reviewing).humanAction
     }
 
+    private struct FeedbackDecisionConfirmation {
+        let target: MRAutomationScope.Target
+        var note: GitLabMergeRequestDiscussion.Note? = nil
+        var summary = ""
+        var reason = ""
+        var isReset: Bool { note == nil }
+
+        var message: String {
+            guard let note else { return String(localized: .FeedbackSuggestions.feedbackSuggestionsResetExplanation) }
+            let quote = note.body ?? ""
+            let preview = quote.count > 600 ? String(quote.prefix(600)) + "…" : quote
+            let author = note.author?.username.map { "@" + $0 } ?? note.author?.name ?? ""
+            let concern = summary == reason ? summary : summary + "\n" + reason
+            return String(localized: .FeedbackSuggestions.feedbackSuggestionsConcern) + "\n" + concern
+                + "\n\n" + String(localized: .FeedbackSuggestions.feedbackSuggestionsComment)
+                + " · " + author + " · #" + String(note.id ?? 0) + "\n" + preview
+                + "\n\n" + String(localized: .FeedbackSuggestions.feedbackSuggestionsIgnoreExplanation)
+        }
+    }
+
+    private var citationContext: MRCommentCitation.Context? {
+        guard let target = discussionTarget else { return nil }
+        return .init(target: target, loadedTarget: discussionStore.target, request: item.mergeRequest,
+            discussions: discussionStore.discussions, hasLoaded: discussionStore.hasLoaded, hasError: discussionStore.hasError)
+    }
+    private var ignoredSuggestions: [IgnoredFeedbackSuggestion] {
+        target.map { monitor.settings.feedbackSuggestionDecisions.entries(for: $0) } ?? []
+    }
+
     private var showsDecisions: Bool { finishedState == nil && (needsHumanAttention || initialSection == .drafts) }
     private var initialDestinationIsReady: Bool {
         guard let anchor = pendingInitialAnchor else { return false }
@@ -101,12 +133,13 @@ private struct CommandCenterMRDetailContent: View {
     }
 
     var body: some View {
+        let citationContext = self.citationContext
         ScrollViewReader { proxy in
             ScrollView {
                 VStack(alignment: .leading, spacing: 20) {
                     header.id(Anchor.overview)
-                    if showsDecisions { nextStep(proxy: proxy).id(Anchor.drafts) }
-                    if finishedState == nil { supplementaryActions.id(Anchor.actions) }
+                    if showsDecisions { nextStep(proxy: proxy, citationContext: citationContext).id(Anchor.drafts) }
+                    if finishedState == nil { supplementaryActions(citationContext: citationContext).id(Anchor.actions) }
                     discussionThreads.id(Anchor.comments)
                     details.id(Anchor.details)
                     MRAutomationEventLogView(target: target, monitor: monitor,
@@ -169,11 +202,26 @@ private struct CommandCenterMRDetailContent: View {
             .onChange(of: discussionTarget) { _, _ in
                 draftSelection = DraftPublicationSelection()
                 reviewStartError = nil
+                feedbackDecisionConfirmation = nil
+                feedbackDecisionError = nil
             }
             .onChange(of: needsHumanAttention) { _, required in
                 if required && item.authorFeedbackStatus?.needsAttention == true { feedbackExpanded = true }
             }
             .onDisappear { discussionStore.cancel() }
+            .alert(Text(feedbackDecisionConfirmation?.isReset == true
+                ? .FeedbackSuggestions.feedbackSuggestionsResetTitle : .FeedbackSuggestions.feedbackSuggestionsIgnoreTitle),
+                isPresented: Binding(get: { feedbackDecisionConfirmation != nil },
+                    set: { if !$0 { feedbackDecisionConfirmation = nil } }), presenting: feedbackDecisionConfirmation) { choice in
+                Button(role: .cancel) { feedbackDecisionConfirmation = nil } label: {
+                    Text(.FeedbackSuggestions.feedbackSuggestionsCancel)
+                }
+                .keyboardShortcut(.defaultAction)
+                Button(role: .destructive) { confirmFeedbackDecision(choice) } label: {
+                    Text(choice.isReset ? .FeedbackSuggestions.feedbackSuggestionsResetConfirm
+                         : .FeedbackSuggestions.feedbackSuggestionsIgnoreConfirm)
+                }
+            } message: { choice in Text(verbatim: choice.message) }
             .confirmationDialog(Text(.Board.boardRemove), isPresented: $confirmRemoval, titleVisibility: .visible) {
                 Button(role: .destructive) { monitor.removeReviewedMergeRequest(item) } label: { Text(.Board.boardRemove) }
             } message: { Text(.Board.boardRemoveExplanation) }
@@ -275,7 +323,7 @@ private struct CommandCenterMRDetailContent: View {
         .accessibilityLabel(Text(.CommandCenter.commandCenterActions))
     }
 
-    private func nextStep(proxy: ScrollViewProxy) -> some View {
+    private func nextStep(proxy: ScrollViewProxy, citationContext: MRCommentCitation.Context?) -> some View {
         GroupBox {
             VStack(alignment: .leading, spacing: 12) {
                 if let action = humanAction {
@@ -285,6 +333,7 @@ private struct CommandCenterMRDetailContent: View {
                     if let detail = action.detail, detail != action.explanation, action.preparedReply == nil {
                         AgentDiagnosticDetails(reason: detail)
                     }
+                    attentionSourceEvidence(for: action, citationContext: citationContext)
                     if action.action == .retryRun, let job = jobs.first {
                         HStack {
                             Button {
@@ -336,9 +385,12 @@ private struct CommandCenterMRDetailContent: View {
                 if let retryError {
                     Text(verbatim: retryError).foregroundStyle(.red).fixedSize(horizontal: false, vertical: true)
                 }
+                if let feedbackDecisionError {
+                    Text(verbatim: feedbackDecisionError).foregroundStyle(.orange).fixedSize(horizontal: false, vertical: true)
+                }
                 if item.needsConfirmation { confirmationControls }
                 decisionActions
-                if item.authorFeedbackStatus != nil { feedbackCheck.id(Anchor.feedbackStatus) }
+                if item.authorFeedbackStatus != nil { feedbackCheck(citationContext: citationContext).id(Anchor.feedbackStatus) }
             }
             .font(.subheadline).padding(8).frame(maxWidth: .infinity, alignment: .leading)
         } label: { Text(.CommandCenter.commandCenterNextStep).font(.headline) }
@@ -394,10 +446,11 @@ private struct CommandCenterMRDetailContent: View {
         }
     }
 
-    private var feedbackCheck: some View {
+    private func feedbackCheck(citationContext: MRCommentCitation.Context?) -> some View {
         DisclosureGroup(isExpanded: $feedbackExpanded) {
             if feedbackExpanded {
-                AuthorFeedbackView(item: presentationItem, monitor: monitor).padding(.top, 8)
+                AuthorFeedbackView(item: presentationItem, monitor: monitor, citationContext: citationContext,
+                    decisionUpdating: isUpdatingFeedbackDecision, onIgnoreSuggestion: presentIgnoreSuggestion).padding(.top, 8)
             }
         } label: { Text(.CommandCenter.commandCenterFeedbackCheck).font(.subheadline.weight(.medium)) }
     }
@@ -422,6 +475,14 @@ private struct CommandCenterMRDetailContent: View {
                                 ?? String(localized: .CommandCenter.commandCenterNoPipeline))
                     }
                     if finishedState == nil { statusReasons }
+                    IgnoredFeedbackSuggestionsView(entries: ignoredSuggestions, mergeRequestURL: item.url,
+                        isUpdating: isUpdatingFeedbackDecision, onRestore: restoreSuggestion, onReset: {
+                            guard let target else { return }
+                            feedbackDecisionConfirmation = .init(target: target)
+                        })
+                    if let feedbackDecisionError {
+                        Text(verbatim: feedbackDecisionError).font(.caption).foregroundStyle(.orange)
+                    }
                 }
                 .padding(.top, 12)
             }
@@ -429,11 +490,11 @@ private struct CommandCenterMRDetailContent: View {
     }
 
     @ViewBuilder
-    private var supplementaryActions: some View {
+    private func supplementaryActions(citationContext: MRCommentCitation.Context?) -> some View {
         if !showsDecisions {
             if item.needsConfirmation { confirmationControls }
             decisionActions
-            if item.authorFeedbackStatus != nil { feedbackCheck.id(Anchor.feedbackStatus) }
+            if item.authorFeedbackStatus != nil { feedbackCheck(citationContext: citationContext).id(Anchor.feedbackStatus) }
         }
         if !item.isAuthored && !monitor.mrTodoIntents(for: item).contains(where: { $0.kind == .review }) {
             Button {
@@ -486,6 +547,101 @@ private struct CommandCenterMRDetailContent: View {
 
     private func reason(_ text: LocalizedStringResource) -> some View {
         Label { Text(text) } icon: { Image(systemName: "info.circle") }.font(.subheadline).foregroundStyle(.secondary)
+    }
+
+    @ViewBuilder
+    private func attentionSourceEvidence(for action: MRHumanAction, citationContext: MRCommentCitation.Context?) -> some View {
+        if let reply = action.preparedReply,
+           let draft = item.drafts.first(where: { $0.id == reply.draftID }) {
+            let root = item.rejectedDrafts.first { $0.draftID == reply.draftID }?.discussionRootNoteID
+            if let source = citationContext?.reply(to: draft, rootNoteID: root) {
+                // A source quotation never waives a rejected reply's factual checks.
+                MRCommentCitationView(citation: source, relation: .FeedbackSuggestions.feedbackSuggestionsSourceReply)
+            } else { sourceUnavailable }
+        } else if let noteID = action.sourceNoteID, let status = item.authorFeedbackStatus,
+                  let finding = status.findings.first(where: { $0.sourceNoteID == noteID }) {
+            if let source = citationContext?.finding(finding, status: status) {
+                if !feedbackExpanded {
+                    MRCommentCitationView(citation: source, relation: .FeedbackSuggestions.feedbackSuggestionsSourceAssessment)
+                    if let reason = finding.reason, !reason.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
+                        ignoreSuggestionButton(source, summary: AgentExplanation.summary(finding.summary) ?? reason, reason: reason)
+                    }
+                }
+            } else { sourceUnavailable }
+        } else if [.blockedRun, .interruptedRun].contains(action.kind), let job = jobs.first,
+                  job.workflow == .followUp, !(job.feedbackNoteIDs ?? []).isEmpty {
+            let sources = citationContext?.followUp(job) ?? []
+            if sources.isEmpty { sourceUnavailable }
+            ForEach(sources) { source in
+                MRCommentCitationView(citation: source, relation: .FeedbackSuggestions.feedbackSuggestionsSourceRun)
+            }
+        } else if [.feedback, .reviewDecision].contains(action.kind), let status = item.authorFeedbackStatus,
+                  let finding = status.findings.first(where: {
+                      [.needsChanges, .needsVerification].contains($0.state) || status.replyNoteIDs.contains($0.id)
+                  }) {
+            if let source = citationContext?.finding(finding, status: status) {
+                if !feedbackExpanded {
+                    MRCommentCitationView(citation: source, relation: .FeedbackSuggestions.feedbackSuggestionsSourceAssessment)
+                    if let reason = finding.reason, !reason.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
+                        ignoreSuggestionButton(source, summary: AgentExplanation.summary(finding.summary) ?? reason, reason: reason)
+                    }
+                }
+            } else { sourceUnavailable }
+        }
+    }
+
+    private var sourceUnavailable: some View {
+        Text(.FeedbackSuggestions.feedbackSuggestionsSourceUnavailable).font(.caption).foregroundStyle(.secondary)
+    }
+
+    private func ignoreSuggestionButton(_ source: MRCommentCitation, summary: String, reason: String) -> some View {
+        Button { presentIgnoreSuggestion(source, summary, reason) } label: {
+            Text(.FeedbackSuggestions.feedbackSuggestionsIgnore)
+        }
+        .buttonStyle(.plain).foregroundStyle(.orange).disabled(isUpdatingFeedbackDecision)
+    }
+
+    private func presentIgnoreSuggestion(_ source: MRCommentCitation, _ summary: String, _ reason: String) {
+        guard let target, !isUpdatingFeedbackDecision else { return }
+        feedbackDecisionError = nil
+        feedbackDecisionConfirmation = .init(target: target, note: source.note, summary: summary, reason: reason)
+    }
+
+    private func confirmFeedbackDecision(_ choice: FeedbackDecisionConfirmation) {
+        feedbackDecisionConfirmation = nil
+        updateFeedbackDecision {
+            if let note = choice.note {
+                try await monitor.ignoreFeedbackSuggestion(note, concernSummary: choice.summary,
+                    concernReason: choice.reason, for: choice.target)
+            } else {
+                try await monitor.resetFeedbackSuggestionDecisions(for: choice.target)
+            }
+        }
+    }
+
+    private func restoreSuggestion(_ decision: IgnoredFeedbackSuggestion) {
+        updateFeedbackDecision { try await monitor.restoreFeedbackSuggestion(decision.id, for: decision.target) }
+    }
+
+    private func updateFeedbackDecision(_ operation: @escaping @MainActor () async throws -> Void) {
+        guard !isUpdatingFeedbackDecision else { return }
+        isUpdatingFeedbackDecision = true
+        feedbackDecisionError = nil
+        Task {
+            defer { isUpdatingFeedbackDecision = false }
+            do { try await operation() }
+            catch {
+                let message: LocalizedStringResource
+                switch error as? FeedbackSuggestionDecisionError {
+                case .sourceChanged?: message = .FeedbackSuggestions.feedbackSuggestionsSourceChanged
+                case .accountChanged?, .invalidTarget?: message = .FeedbackSuggestions.feedbackSuggestionsAccountChanged
+                case .invalidConcern?: message = .FeedbackSuggestions.feedbackSuggestionsInvalidConcern
+                default: message = .FeedbackSuggestions.feedbackSuggestionsUpdateFailed
+                }
+                feedbackDecisionError = String(localized: message)
+            }
+            refreshDiscussions()
+        }
     }
 
     private var discussionThreads: some View {

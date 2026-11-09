@@ -570,6 +570,7 @@ final class MergeRequestTodoRouter {
                                      requireNoDrafts: Bool = false,
                                      stoppedJob: AssistantAutomationRunner.Handoff? = nil) async -> FollowUpCompletion {
         let accountRevision = glab.accountRevision
+        let decisionRevision = settings.feedbackSuggestionDecisions.revision(for: intent.target)
         guard let iid = intent.target.iid, request.author.username == intent.target.username,
               let head = request.sha, !head.isEmpty,
               let discussions = try? await glab.fetchMergeRequestDiscussions(projectID: request.projectID, iid: iid, host: intent.target.host),
@@ -577,11 +578,12 @@ final class MergeRequestTodoRouter {
         guard let assessment = followUpAssessment?(request, discussions) else {
             return followUpVerificationPending?(request, discussions) == true ? .checking : .unverified
         }
-        guard (try? assessment.reviewers(in: discussions, authorID: request.author.id)) != nil else { return .unverified }
+        let ignored = settings.feedbackSuggestionDecisions.applicable(in: discussions, for: intent.target)
+        guard (try? assessment.reviewers(in: discussions, authorID: request.author.id, ignoredSuggestions: ignored)) != nil else { return .unverified }
         let assessed = Dictionary(uniqueKeysWithValues: assessment.notes.map { ($0.noteID, $0.state) })
         let selected = intent.noteIDs.isEmpty ? Set(assessed.keys) : intent.noteIDs
         guard !selected.isEmpty,
-              selected.allSatisfy({ assessed[$0] == .addressed || assessed[$0] == .informational }) else { return .unverified }
+              selected.allSatisfy({ assessed[$0] == .addressed || assessed[$0] == .informational || assessed[$0] == .ignoredByUser }) else { return .unverified }
         guard assessment.missingPublishedReplyNoteIDs(in: discussions, authorID: request.author.id).isDisjoint(with: selected)
         else { return .unverified }
         if requireNoDrafts {
@@ -593,6 +595,7 @@ final class MergeRequestTodoRouter {
               let liveUser = try? await glab.fetchAuthenticatedUser(host: intent.target.host, expectedUsername: intent.target.username),
               isCurrent(intent.target.host, intent.target.username),
               glab.accountRevision == accountRevision, liveUser.id == request.author.id,
+              settings.feedbackSuggestionDecisions.revision(for: intent.target) == decisionRevision,
               live.projectID == request.projectID, live.iid == request.iid, live.webURL == request.webURL,
               live.author == request.author, live.state == "opened", live.draft == request.draft, live.sha == head,
               live.semanticContextFingerprint == request.semanticContextFingerprint,

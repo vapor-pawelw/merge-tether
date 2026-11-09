@@ -26,7 +26,7 @@ struct BoardAutomationToggle: View {
                     .contentShape(Rectangle())
             }
             .buttonStyle(.plain)
-            .help(scopeHelp(status, choice: choice))
+            .help(scopeHelp(status, choice: choice, hasActionExceptions: hasActionExceptions(settings, target: target)))
             .accessibilityLabel(Text(.Menu.menuScopeTitle))
             .accessibilityValue(Text(scopeChoiceLabel(choice)) + Text(", ")
                 + Text(status.active ? .Menu.menuScopeActive : .Menu.menuScopePaused))
@@ -35,10 +35,11 @@ struct BoardAutomationToggle: View {
 }
 
 struct MRAutomationScopeMenu: View {
-    let settings: SettingsManager
+    let monitor: TodoMonitorService
     let target: MRAutomationScope.Target
     var projectPath: String? = nil
     var isDraft = false
+    private var settings: SettingsManager { monitor.settings }
 
     var body: some View {
         if settings.automation.hasEnabledAutomation {
@@ -49,6 +50,17 @@ struct MRAutomationScopeMenu: View {
                     choiceButton(.inherit)
                     choiceButton(.forceOn)
                     choiceButton(.paused)
+                    Divider()
+                    ForEach(applicableActions, id: \.self) { action in
+                        Toggle(isOn: Binding(get: {
+                            settings.actionIsAutomatic(action, for: target)
+                        }, set: { enabled in
+                            Task { await monitor.setAutomaticAction(action, enabled: enabled, for: target) }
+                        })) {
+                            Text(actionLabel(action))
+                        }
+                        .help(Text(.AutomaticActions.automaticActionsInheritHelp))
+                    }
                     Divider()
                 }
                 Toggle(isOn: scopeEnabledBinding(settings: settings, target: target.repository,
@@ -70,7 +82,26 @@ struct MRAutomationScopeMenu: View {
             .menuStyle(.borderlessButton)
             .fixedSize()
             .font(.caption)
-            .help(scopeHelp(status, choice: choice))
+            .help(scopeHelp(status, choice: choice, hasActionExceptions: hasActionExceptions(settings, target: target)))
+        }
+    }
+
+    /// Cached, account-bound metadata only: rendering a menu never starts a read.
+    private var applicableActions: [MRAutomaticAction] {
+        guard let iid = target.iid, monitor.glab.resolvedHost == target.host,
+              monitor.glab.currentUsername == target.username,
+              let request = monitor.boardDisplayRequests.first(where: {
+                  $0.projectID == target.projectID && $0.iid == iid
+                      && $0.webURL.isGitLabMergeRequest(host: target.host, iid: iid)
+              }), !request.author.username.isEmpty else { return [.commentPublication] }
+        return [.commentPublication, request.author.username == target.username ? .merge : .approval]
+    }
+
+    private func actionLabel(_ action: MRAutomaticAction) -> LocalizedStringResource {
+        switch action {
+        case .commentPublication: .AutomaticActions.automaticActionsPublication
+        case .merge: .AutomaticActions.automaticActionsMerge
+        case .approval: .AutomaticActions.automaticActionsApproval
         }
     }
 
@@ -101,12 +132,18 @@ private func scopeEnabledBinding(settings: SettingsManager, target: MRAutomation
     })
 }
 
+@MainActor
+private func hasActionExceptions(_ settings: SettingsManager, target: MRAutomationScope.Target) -> Bool {
+    target.iid != nil && MRAutomaticAction.allCases.contains { !settings.actionIsAutomatic($0, for: target) }
+}
+
 private func scopeHelp(_ status: (active: Bool, source: MRAutomationScope.Source),
-                       choice: MRAutomationScope.Choice) -> Text {
+                       choice: MRAutomationScope.Choice, hasActionExceptions: Bool = false) -> Text {
     let source = String(localized: scopeSourceLabel(status.source))
     return Text(scopeChoiceLabel(choice)) + Text("\n")
         + Text(status.active ? .Menu.menuScopeEnabledHelp(source) : .Menu.menuScopePausedHelp(source))
         + Text("\n") + Text(.Menu.menuScopeDraftSafetyHelp)
+        + (hasActionExceptions ? Text("\n") + Text(.AutomaticActions.automaticActionsExceptionsHelp) : Text(""))
 }
 
 private func scopeChoiceLabel(_ choice: MRAutomationScope.Choice) -> LocalizedStringResource {

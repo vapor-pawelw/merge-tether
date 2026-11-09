@@ -4,6 +4,50 @@ import Testing
 
 @Suite("Headless re-review verification")
 struct ReReviewVerifierTests {
+    @Test(arguments: AutomationAssistant.allCases, ["exact", "missingIDs", "wrongID", "restored", "editedSource"])
+    func ignoredConcernVerdictsRemainBoundToCurrentSourceAndActiveDecision(_ assistant: AutomationAssistant, _ scenario: String) async throws {
+        let folder = FileManager.default.temporaryDirectory.appending(path: UUID().uuidString)
+        try FileManager.default.createDirectory(at: folder, withIntermediateDirectories: false)
+        defer { try? FileManager.default.removeItem(at: folder) }
+        let id = UUID()
+        let script = folder.appending(path: "cli")
+        let returnedIDs = scenario == "missingIDs" ? "None" : "['\(scenario == "wrongID" ? UUID().uuidString : id.uuidString)']"
+        try Data("""
+            #!/usr/bin/python3
+            import json,pathlib,sys
+            args=sys.argv[1:]
+            incoming=sys.stdin.read()
+            evidence=json.loads(incoming[incoming.index('{'):])
+            pathlib.Path(__file__+'.capture').write_text(json.dumps(evidence))
+            result={'notes':[{'noteID':10,'state':'ignoredByUser','reason':'No other author obligation remains after the exact user decision.','ignoredDecisionIDs':\(returnedIDs),'acceptanceNoteID':None}]}
+            if args[0]=='exec': json.dump(result,open(args[args.index('-o')+1],'w'))
+            else: print(json.dumps({'is_error':False,'structured_output':result}))
+            """.utf8).write(to: script)
+        try FileManager.default.setAttributes([.posixPermissions: 0o700], ofItemAtPath: script.path)
+        let body = "Confirm the optional release assumption. Other corrections must still be checked."
+        let discussions = try JSONDecoder().decode([GitLabMergeRequestDiscussion].self, from: Data(#"[{"id":"thread","notes":[{"id":10,"author":{"id":7,"username":"reviewer"},"system":false,"body":"\#(scenario == "editedSource" ? "A newly edited obligation" : body)"}]}]"#.utf8))
+        let target = MRAutomationScope.Target(host: "gitlab.example.test", username: "me", projectID: 1, iid: 2)
+        let decision = IgnoredFeedbackSuggestion(id: id, target: target, sourceNoteID: 10, sourceAuthorID: 7,
+            sourceBody: body, sourceRevision: UserAttentionSnapshot.digest("7\n" + body),
+            concernSummary: "Decline only the optional release assumption.", concernReason: "No other obligation is waived.", createdAt: Date())
+        var input = ReReviewVerifier.Input(authorID: 3, headSHA: String(repeating: "a", count: 40), title: "Synthetic precise concern",
+            diff: "The current correction is present.", discussions: discussions,
+            target: .init(host: target.host, projectID: 1, iid: 2,
+                url: URL(string: "https://gitlab.example.test/group/repo/-/merge_requests/2")!, expectedUsername: "me"))
+        input.ignoredSuggestions = scenario == "restored" ? [] : [decision]
+        if scenario == "exact" {
+            let assessment = try await ReReviewVerifier.run(input, assistant: assistant, model: "fixture", executable: script)
+            #expect(assessment.notes.first?.state == .ignoredByUser)
+            #expect(assessment.notes.first?.ignoredDecisionIDs == [id])
+            let captured = try String(contentsOf: URL(fileURLWithPath: script.path + ".capture"), encoding: .utf8)
+            #expect(captured.contains(id.uuidString) && captured.contains(decision.concernReason))
+        } else {
+            await #expect(throws: (any Error).self) {
+                _ = try await ReReviewVerifier.run(input, assistant: assistant, model: "fixture", executable: script)
+            }
+        }
+    }
+
     @Test(arguments: AutomationAssistant.allCases, [false, true])
     func completedBlockedRunProofMustNameAnExactSuppliedAttempt(_ assistant: AutomationAssistant, wrongRun: Bool) async throws {
         let folder = FileManager.default.temporaryDirectory.appending(path: UUID().uuidString)

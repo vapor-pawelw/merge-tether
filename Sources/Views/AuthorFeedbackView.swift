@@ -3,6 +3,9 @@ import SwiftUI
 struct AuthorFeedbackView: View {
     let item: MergeRequestAttentionMonitor.Item
     let monitor: TodoMonitorService
+    var citationContext: MRCommentCitation.Context?
+    var decisionUpdating = false
+    var onIgnoreSuggestion: ((MRCommentCitation, String, String) -> Void)?
     @State private var starting = false
 
     var body: some View {
@@ -14,16 +17,23 @@ struct AuthorFeedbackView: View {
                         HStack { ProgressView().controlSize(.small); Text(.AuthorFeedback.authorFeedbackChecking) }
                     case .failed: Text(.AuthorFeedback.authorFeedbackFailed).foregroundStyle(.orange)
                     case .waitingPublication: Text(.AuthorFeedback.authorFeedbackWaitingPublication(status.pendingDraftCount))
-                    case .complete:
+                    case .complete: EmptyView()
+                    }
+                    if status.phase == .complete || status.phase == .waitingPublication {
                         ForEach(status.findings) { finding in
+                            let source = citationContext?.finding(finding, status: status)
                             VStack(alignment: .leading, spacing: 4) {
-                                Link(destination: noteURL(finding.id)) {
-                                    Text(verbatim: "@\(finding.reviewerUsername)").fontWeight(.medium)
+                                if source?.id != finding.id, let url = noteURL(finding.id) {
+                                    Link(destination: url) {
+                                        Text(.FeedbackSuggestions.feedbackSuggestionsThreadOpenedBy("@" + finding.reviewerUsername))
+                                            .fontWeight(.medium)
+                                    }
                                 }
                                 Text(message(finding))
                                 if status.replyNoteIDs.contains(finding.id) { Text(.AuthorFeedback.authorFeedbackReplyNeeded) }
                                 if let summary = AgentExplanation.summary(finding.summary) { Text(verbatim: summary).textSelection(.enabled) }
                                 if let reason = finding.reason { AgentDiagnosticDetails(reason: reason) }
+                                sourceEvidence(for: finding, status: status, source: source)
                             }
                         }
                     }
@@ -53,6 +63,25 @@ struct AuthorFeedbackView: View {
         }
     }
 
+    @ViewBuilder
+    private func sourceEvidence(for finding: AuthorFeedbackPolicy.Finding, status: AuthorFeedbackStatus,
+                                source: MRCommentCitation?) -> some View {
+        if let source {
+            MRCommentCitationView(citation: source, relation: .FeedbackSuggestions.feedbackSuggestionsSourceAssessment)
+            if let onIgnoreSuggestion, let reason = finding.reason,
+               !reason.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty,
+               finding.state == .needsChanges || finding.state == .needsVerification
+                || status.followUpNoteIDs.contains(source.id) || status.replyNoteIDs.contains(source.id) {
+                Button {
+                    onIgnoreSuggestion(source, AgentExplanation.summary(finding.summary) ?? reason, reason)
+                } label: { Text(.FeedbackSuggestions.feedbackSuggestionsIgnore) }
+                    .buttonStyle(.plain).foregroundStyle(.orange).disabled(decisionUpdating)
+            }
+        } else {
+            Text(.FeedbackSuggestions.feedbackSuggestionsSourceUnavailable).font(.caption).foregroundStyle(.secondary)
+        }
+    }
+
     private func message(_ finding: AuthorFeedbackPolicy.Finding) -> LocalizedStringResource {
         switch finding.state {
         case .waitingAcceptance: .AuthorFeedback.authorFeedbackWaitingAcceptance(finding.waitingForReviewers.map { "@" + $0 }.joined(separator: ", "))
@@ -71,9 +100,10 @@ struct AuthorFeedbackView: View {
         return configuration.authorFeedback.isEnabled || (workflow.mode == .assistant && workflow.includes(request))
     }
 
-    private func noteURL(_ id: Int) -> URL {
+    private func noteURL(_ id: Int) -> URL? {
+        guard id > 0 else { return nil }
         var components = URLComponents(url: item.url, resolvingAgainstBaseURL: false)
         components?.fragment = "note_\(id)"
-        return components?.url ?? item.url
+        return components?.url
     }
 }

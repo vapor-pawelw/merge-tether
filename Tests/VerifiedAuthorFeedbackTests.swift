@@ -4,6 +4,58 @@ import Testing
 
 @MainActor
 struct VerifiedAuthorFeedbackTests {
+    @Test(arguments: [AssistantJobExecution.State.succeeded, .blocked])
+    func decisionChangesDoNotReplayHandledNotesThroughUnverifiedEntryPoints(_ state: AssistantJobExecution.State) async throws {
+        try await withFixture { fixture in
+            fixture.resultStatus = .succeeded
+            try await fixture.prepare()
+            try await fixture.waitForJob()
+            fixture.settings.assistantHandoffs[0].execution?.state = state
+            let target = MRAutomationScope.Target(host: Fixture.host, username: "me", projectID: 1, iid: 2)
+            let another = GitLabMergeRequestDiscussion.Note(id: 21,
+                author: .init(id: 7, username: "alice", name: "Alice"), system: false,
+                resolvable: false, resolved: false, resolvedBy: nil, body: "A separate suggestion")
+            _ = fixture.settings.feedbackSuggestionDecisions.ignore(another, concernSummary: "Separate suggestion",
+                concernReason: "This is unrelated to the already handled note.", for: target)
+            #expect(AssistantAutomationRunner.unhandledFeedback([20, 21], work: fixture.work,
+                username: "me", settings: fixture.settings) == [21])
+            #expect(AssistantAutomationRunner.attachFeedbackTodo(nil, noteIDs: [20], work: fixture.work,
+                username: "me", settings: fixture.settings))
+            try await fixture.service.prepareFeedback(work: fixture.work, noteIDs: [20], username: "me",
+                settings: fixture.settings, glab: fixture.glab, manual: false, shouldProceed: { true })
+            try await fixture.waitForJob()
+            #expect(fixture.settings.assistantHandoffs.count == 1)
+        }
+    }
+
+    @Test func restoringAUserConcernStartsOneFreshContextWithoutReplayingTheOldAttemptBudget() async throws {
+        try await withFixture { fixture in
+            try await fixture.prepare()
+            try await fixture.waitForJob()
+            #expect(fixture.settings.assistantHandoffs.count == 1)
+            let target = MRAutomationScope.Target(host: Fixture.host, username: "me", projectID: 1, iid: 2)
+            let discussions = try JSONDecoder().decode([GitLabMergeRequestDiscussion].self,
+                from: Data(Fixture.discussions.utf8))
+            let note = try #require(discussions.first?.notes.first)
+            let stored = fixture.settings.feedbackSuggestionDecisions.ignore(note,
+                concernSummary: "Rename X", concernReason: "The exact rename suggestion is declined.", for: target)
+            let decision = try #require(stored)
+            _ = fixture.settings.feedbackSuggestionDecisions.remove(decision.id, for: target)
+            fixture.settings.save()
+
+            try await fixture.prepare()
+            try await fixture.waitForJob()
+
+            #expect(fixture.settings.assistantHandoffs.count == 2)
+            let context = fixture.settings.feedbackSuggestionDecisions.revision(for: target)
+            #expect(!context.isEmpty)
+            #expect(fixture.settings.assistantHandoffs.last?.feedbackDecisionRevision == context)
+            try await fixture.prepare()
+            try await fixture.waitForJob()
+            #expect(fixture.settings.assistantHandoffs.count == 2)
+        }
+    }
+
     @Test(arguments: ["beforeRead", "duringStack"])
     func residualEvidenceCannotOutliveTheAssessedTitleAndDescription(_ edit: String) async throws {
         try await withFixture { fixture in

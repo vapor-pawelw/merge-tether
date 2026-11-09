@@ -239,10 +239,12 @@ final class TodoMonitorService {
             Task { await self?.refreshNow() }
         }
         authoredMergeRequests.authorFeedbackAllowsMerge = { [weak self] request, discussions, authorID in
-            guard let self, let fingerprint = ReviewVerdict.fingerprint(discussions),
-                  let assessment = self.attention.authorFeedbackCoordinator?.assessment(for: request, fingerprint: fingerprint),
-                  (try? assessment.reviewers(in: discussions, authorID: authorID)) != nil else { return false }
-            return assessment.notes.allSatisfy { $0.state == .addressed || $0.state == .informational }
+            guard let self, let host = self.glab.resolvedHost, let username = self.glab.currentUsername,
+                  let fingerprint = ReviewVerdict.fingerprint(discussions),
+                  let assessment = self.attention.authorFeedbackCoordinator?.assessment(for: request, fingerprint: fingerprint) else { return false }
+            let target = MRAutomationScope.Target(host: host, username: username, projectID: request.projectID, iid: request.iid)
+            return assessment.hasNoRemainingAuthorWork(in: discussions, authorID: authorID,
+                ignoredSuggestions: self.settings.feedbackSuggestionDecisions.applicable(in: discussions, for: target))
         }
         authoredMergeRequests.authorFeedbackStatus = { [weak self] request in
             self?.attention.authorFeedbackCoordinator?.status(projectID: request.projectID, iid: request.iid)
@@ -805,8 +807,8 @@ final class TodoMonitorService {
                 let id = MergeRequestAttentionMonitor.Item.ID(projectID: request.projectID, iid: request.iid)
                 guard (items.first(where: { $0.id == id })?.draftCount ?? 0) == 0 else { continue }
                 let automatic = (availableAssistants.contains(settings.automation.assistant) || assistantDependencies.isChecking)
-                    && status.mayAutoMerge && settings.automation.permitsAutoMerge(project: request.webURL.gitLabProjectPath)
-                    && settings.automation.scope.permits(request, host: host, username: username)
+                    && status.mayAutoMerge && settings.permitsAutomaticAction(.merge, for: request,
+                        target: .init(host: host, username: username, projectID: request.projectID, iid: request.iid))
                     && !AssistantJobExecution.hasUnfinishedWork(in: settings.assistantHandoffs,
                         for: .init(host: host, projectID: id.projectID, iid: id.iid), username: username,
                         currentRequest: request, feedbackStatus: current.authorFeedbackStatus,
@@ -941,11 +943,14 @@ final class TodoMonitorService {
                 actions.append(.init(reason: reason, token: token, automatic: automatic))
             }
             let automaticDrafts = item.draftIDsHandledAutomatically(automation: settings.automation,
-                target: target, assistantPreparing: preparing)
+                target: target, assistantPreparing: preparing,
+                publicationAutomatic: settings.actionIsAutomatic(.commentPublication, for: target))
             let drafts = item.drafts.filter { !automaticDrafts.contains($0.id ?? -1) }
             for draft in drafts { add(.drafts, "\(draft.id ?? -1):" + UserAttentionSnapshot.digest(draft.note ?? "")) }
             if item.draftCount > 0 && item.drafts.isEmpty { add(.drafts, "unread-drafts") }
-            if item.canApprove || (item.autoApproveReady && !preparing) { add(.approval, item.mergeRequest?.sha ?? "approval") }
+            if (item.canApprove && !item.approvalWaitingForReadiness) || (item.autoApproveReady && !preparing) {
+                add(.approval, item.mergeRequest?.sha ?? "approval")
+            }
             if item.needsPipelineHandoff { add(.pipelineHandoff, String(item.mergeRequest?.headPipeline?.id ?? 0)) }
             if item.failedPipeline && !item.needsPipelineHandoff { add(.pipeline, String(item.mergeRequest?.headPipeline?.id ?? 0)) }
             if item.hasConflict { add(.conflict, item.mergeRequest?.sha ?? "conflict") }

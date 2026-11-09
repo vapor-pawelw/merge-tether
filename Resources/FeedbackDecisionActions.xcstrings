@@ -1,0 +1,22 @@
+{
+  "sourceLanguage": "en",
+  "strings": {
+    "historyTitle": {
+      "extractionState": "manual",
+      "localizations": { "en": { "stringUnit": { "state": "translated", "value": "Feedback decision" } } }
+    },
+    "ignoredEvent": {
+      "extractionState": "manual",
+      "localizations": { "en": { "stringUnit": { "state": "translated", "value": "Ignored a suggestion from comment #%lld: %@" } } }
+    },
+    "restoredEvent": {
+      "extractionState": "manual",
+      "localizations": { "en": { "stringUnit": { "state": "translated", "value": "Restored a suggestion from comment #%lld: %@" } } }
+    },
+    "resetEvent": {
+      "extractionState": "manual",
+      "localizations": { "en": { "stringUnit": { "state": "translated", "value": "Reset %lld ignored suggestions for this merge request." } } }
+    }
+  },
+  "version": "1.0"
+}

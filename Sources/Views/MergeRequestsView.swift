@@ -225,35 +225,15 @@ struct MergeRequestsView: View {
             assistantDetails(item)
                 .padding(.horizontal, 12)
                 .padding(.bottom, 10)
-            if selection == .reviewed, let target = autoApproveTarget(for: item) {
-                Toggle(isOn: autoApproveBinding(target)) { Text(.Menu.menuScopeAutoApprove) }
-                    .toggleStyle(.checkbox)
+            if item.mergeRequest?.state == "opened",
+               let target = monitor.scopeTarget(projectID: item.id.projectID, iid: item.id.iid, url: item.url) {
+                MRAutomationScopeMenu(monitor: monitor, target: target, projectPath: item.url.gitLabProjectPath,
+                    isDraft: item.section == .draftMergeRequests)
                     .font(.caption)
-                    .help(Text(.Menu.menuScopeAutoApproveHelp))
                     .padding(.horizontal, 12)
                     .padding(.bottom, 10)
             }
         }
-    }
-
-    /// Per-MR opt-out from automatic approval, shown where the MR is, not only in Settings.
-    private func autoApproveTarget(for item: MergeRequestAttentionMonitor.Item) -> MRAutomationScope.Target? {
-        guard monitor.settings.automation.autoApproveEnabled, let request = item.mergeRequest,
-              let host = monitor.glab.resolvedHost, let username = monitor.glab.currentUsername,
-              request.author.username != username,
-              monitor.settings.automation.scope.permits(request, host: host, username: username) else { return nil }
-        return MRAutomationScope.Target(host: host, username: username, projectID: item.id.projectID, iid: item.id.iid)
-    }
-
-    private func autoApproveBinding(_ target: MRAutomationScope.Target) -> Binding<Bool> {
-        Binding(
-            get: { !monitor.settings.autoApproveOptOuts.contains(target) },
-            set: { enabled in
-                if enabled { monitor.settings.autoApproveOptOuts.remove(target) }
-                else { monitor.settings.autoApproveOptOuts.insert(target) }
-                monitor.settings.save()
-            }
-        )
     }
 
     private func assistantDetails(_ item: MergeRequestAttentionMonitor.Item) -> some View {

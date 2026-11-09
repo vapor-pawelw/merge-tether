@@ -22,11 +22,14 @@ final class SettingsManager {
     var lastMenuSection: String?
     /// Managed MRs where the user turned off automatic approval.
     var autoApproveOptOuts: Set<MRAutomationScope.Target>
+    var autoPublishOptOuts: Set<MRAutomationScope.Target> = []
+    var autoMergeOptOuts: Set<MRAutomationScope.Target> = []
     var ignoredMergeRequests: Set<MRAutomationScope.Target>
     var automation: AutomationSettings
     var automationReceipts: Set<TodoAutomationReceipt>
     var automationAttemptReceipts: Set<TodoAutomationReceipt>
     var authorFeedbackAttempts: Set<AuthorFeedbackAttempt>
+    var feedbackSuggestionDecisions = FeedbackSuggestionDecisions()
     var pipelineRefreshAttempts: Set<PipelineRefreshAttempt>
     var pipelineClaimAssessmentAttempts: [PipelineClaimAssessmentAttempt]
     var pendingTodoAcknowledgements: Set<TodoActionAcknowledgement>
@@ -65,6 +68,8 @@ final class SettingsManager {
             .flatMap { try? JSONDecoder().decode(Set<TodoAutomationReceipt>.self, from: $0) } ?? []
         authorFeedbackAttempts = defaults.data(forKey: Key.authorFeedbackAttempts)
             .flatMap { try? JSONDecoder().decode(Set<AuthorFeedbackAttempt>.self, from: $0) } ?? []
+        feedbackSuggestionDecisions = defaults.data(forKey: Key.feedbackSuggestionDecisions)
+            .flatMap { try? JSONDecoder().decode(FeedbackSuggestionDecisions.self, from: $0) } ?? FeedbackSuggestionDecisions()
         pipelineRefreshAttempts = defaults.data(forKey: Key.pipelineRefreshAttempts)
             .flatMap { try? JSONDecoder().decode(Set<PipelineRefreshAttempt>.self, from: $0) } ?? []
         pipelineClaimAssessmentAttempts = defaults.data(forKey: Key.pipelineClaimAssessmentAttempts)
@@ -120,6 +125,10 @@ final class SettingsManager {
             .flatMap { try? JSONDecoder().decode(Set<MRAutomationScope.Target>.self, from: $0) } ?? []
         self.autoApproveOptOuts = defaults.data(forKey: Key.autoApproveOptOuts)
             .flatMap { try? JSONDecoder().decode(Set<MRAutomationScope.Target>.self, from: $0) } ?? []
+        self.autoPublishOptOuts = defaults.data(forKey: Key.autoPublishOptOuts)
+            .flatMap { try? JSONDecoder().decode(Set<MRAutomationScope.Target>.self, from: $0) } ?? []
+        self.autoMergeOptOuts = defaults.data(forKey: Key.autoMergeOptOuts)
+            .flatMap { try? JSONDecoder().decode(Set<MRAutomationScope.Target>.self, from: $0) } ?? []
 
         if let pathString = defaults.string(forKey: Key.glabPath), !pathString.isEmpty {
             self.glabPath = URL(fileURLWithPath: pathString)
@@ -158,6 +167,9 @@ final class SettingsManager {
         }
         if let data = try? JSONEncoder().encode(authorFeedbackAttempts) {
             defaults.set(data, forKey: Key.authorFeedbackAttempts)
+        }
+        if let data = try? JSONEncoder().encode(feedbackSuggestionDecisions) {
+            defaults.set(data, forKey: Key.feedbackSuggestionDecisions)
         }
         if let data = try? JSONEncoder().encode(pipelineRefreshAttempts) {
             defaults.set(data, forKey: Key.pipelineRefreshAttempts)
@@ -225,6 +237,12 @@ final class SettingsManager {
         }
         if let data = try? JSONEncoder().encode(autoApproveOptOuts) {
             defaults.set(data, forKey: Key.autoApproveOptOuts)
+        }
+        if let data = try? JSONEncoder().encode(autoPublishOptOuts) {
+            defaults.set(data, forKey: Key.autoPublishOptOuts)
+        }
+        if let data = try? JSONEncoder().encode(autoMergeOptOuts) {
+            defaults.set(data, forKey: Key.autoMergeOptOuts)
         }
         if let lastMenuSection {
             defaults.set(lastMenuSection, forKey: Key.lastMenuSection)
@@ -324,6 +342,9 @@ final class SettingsManager {
         static let lastMenuOpenedAt = "lastMenuOpenedAt"
         static let lastMenuSection = "lastMenuSection"
         static let autoApproveOptOuts = "autoApproveOptOuts"
+        static let autoPublishOptOuts = "autoPublishOptOuts"
+        static let autoMergeOptOuts = "autoMergeOptOuts"
         static let ignoredMergeRequests = "ignoredMergeRequests"
+        static let feedbackSuggestionDecisions = "feedbackSuggestionDecisions"
     }
 }

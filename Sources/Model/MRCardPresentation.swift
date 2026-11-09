@@ -57,7 +57,8 @@ struct MRCardPresentation {
         let target = monitor.scopeTarget(projectID: row.id.projectID, iid: row.id.iid, url: row.item.url)
         let automatic = target.map {
             row.item.draftIDsHandledAutomatically(automation: monitor.settings.automation, target: $0,
-                assistantPreparing: ready || monitor.assistantDependencies.isChecking)
+                assistantPreparing: ready || monitor.assistantDependencies.isChecking,
+                publicationAutomatic: monitor.settings.actionIsAutomatic(.commentPublication, for: $0))
         } ?? []
         self.init(row: row, reviewingContext: monitor.reviewingContext(for: row), allowsRemoval: allowsRemoval,
             assistantReady: ready, confirmationState: monitor.attention.confirmationStates[row.id],

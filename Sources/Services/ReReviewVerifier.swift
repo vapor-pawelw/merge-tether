@@ -4,11 +4,11 @@ import Foundation
 /// Supplied evidence is supplementary; absent proof must produce `uncertain`.
 enum ReReviewVerifier {
     enum VerificationError: Error, Equatable { case unavailable, failed, incompleteEvidence }
-    static let policyVersion = "author-obligation-scope-2"
+    static let policyVersion = "precise-user-decisions-3"
 
     static let schema = #"{"type":"object","additionalProperties":false,"properties":{"notes":{"type":"array","items":{"type":"object","additionalProperties":false,"properties":{"noteID":{"type":"integer"},"state":{"type":"string","enum":["addressed","informational","blocking","uncertain"]},"reason":{"type":"string"},"summary":{"type":"string","minLength":1,"maxLength":200},"acceptanceNoteID":{"type":["integer","null"]},"informationalAcknowledgementSafe":{"type":"boolean"},"informationalPurpose":{"type":"string","enum":["concreteCodeReviewFeedback","reviewSummary","automatedReviewReport","other"]}},"required":["noteID","state","reason","summary","acceptanceNoteID","informationalAcknowledgementSafe","informationalPurpose"]}}},"required":["notes"]}"#
 
-    private static func outputSchema(noteIDs: [Int], blockedRunIDs: [UUID]) throws -> String {
+    private static func outputSchema(noteIDs: [Int], blockedRunIDs: [UUID], decisionIDs: [UUID]) throws -> String {
         guard var document = try JSONSerialization.jsonObject(with: Data(schema.utf8)) as? [String: Any],
               var properties = document["properties"] as? [String: Any],
               var notes = properties["notes"] as? [String: Any],
@@ -16,6 +16,11 @@ enum ReReviewVerifier {
               var fields = item["properties"] as? [String: Any] else { throw VerificationError.incompleteEvidence }
         let identity: [String: Any] = ["type": "integer", "enum": noteIDs]
         fields["noteID"] = identity
+        fields["state"] = ["type": "string", "enum": ["addressed", "informational", "blocking", "uncertain", "ignoredByUser"]]
+        var decisionIdentity: [String: Any] = ["type": "string"]
+        if !decisionIDs.isEmpty { decisionIdentity["enum"] = decisionIDs.map(\.uuidString) }
+        fields["ignoredDecisionIDs"] = ["type": ["array", "null"], "items": decisionIdentity, "maxItems": decisionIDs.count]
+        item["required"] = (item["required"] as? [String] ?? []) + ["ignoredDecisionIDs"]
         notes["minItems"] = noteIDs.count
         notes["maxItems"] = noteIDs.count
         item["properties"] = fields
@@ -60,6 +65,7 @@ enum ReReviewVerifier {
         var semanticContextFingerprint: String? = nil
         var thinking: VerificationThinking = .high
         var blockedFollowUps: [BlockedFollowUp] = []
+        var ignoredSuggestions: [IgnoredFeedbackSuggestion] = []
     }
 
     @MainActor
@@ -101,8 +107,18 @@ enum ReReviewVerifier {
                       && !context.blocker.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
                       && context.blocker.count <= 600 && context.summary.count <= 2_000
               }) else { throw VerificationError.incompleteEvidence }
+        guard Set(input.ignoredSuggestions.map(\.id)).count == input.ignoredSuggestions.count,
+              input.ignoredSuggestions.isEmpty || input.target != nil,
+              input.ignoredSuggestions.allSatisfy({ decision in
+                  guard let target = input.target else { return false }
+                  return decision.target.host == target.host && decision.target.username == target.expectedUsername
+                      && decision.target.projectID == target.projectID && decision.target.iid == target.iid
+                      && decision.sourceAuthorID != input.authorID && !decision.concernSummary.isEmpty && !decision.concernReason.isEmpty
+                      && external.contains(where: decision.matches)
+              }) else { throw VerificationError.incompleteEvidence }
         guard !noteIDs.isEmpty else { return .init(notes: []) }
-        let constrainedSchema = try outputSchema(noteIDs: noteIDs, blockedRunIDs: input.blockedFollowUps.map(\.runID))
+        let constrainedSchema = try outputSchema(noteIDs: noteIDs, blockedRunIDs: input.blockedFollowUps.map(\.runID),
+            decisionIDs: input.ignoredSuggestions.map(\.id))
         let discussions = input.discussions.map { discussion in
             GitLabMergeRequestDiscussion(id: discussion.id, notes: discussion.notes.map { note in
                 var sanitized = note
@@ -119,13 +135,20 @@ enum ReReviewVerifier {
                               blockedFollowUps: input.blockedFollowUps.map { .init(runID: $0.runID,
                                   selectedFeedbackIDs: $0.selectedFeedbackIDs,
                                   blocker: GlabService.redactWorkflowEvidence($0.blocker),
-                                  summary: GlabService.redactWorkflowEvidence($0.summary)) })
+                                  summary: GlabService.redactWorkflowEvidence($0.summary)) },
+                              ignoredSuggestions: input.ignoredSuggestions.map { decision in
+                                  .init(id: decision.id, target: decision.target, sourceNoteID: decision.sourceNoteID,
+                                      sourceAuthorID: decision.sourceAuthorID, sourceAuthorUsername: decision.sourceAuthorUsername,
+                                      sourceAuthorName: decision.sourceAuthorName, sourceBody: GlabService.redactWorkflowEvidence(decision.sourceBody),
+                                      sourceRevision: decision.sourceRevision, concernSummary: GlabService.redactWorkflowEvidence(decision.concernSummary),
+                                      concernReason: GlabService.redactWorkflowEvidence(decision.concernReason), createdAt: decision.createdAt)
+                              })
         var encoded = try JSONEncoder().encode(sanitized)
         if encoded.count > 180_000, let target = input.target {
             // Retain exact output scope and identity; fetch large MR content through glab.
             let metadata = Input(authorID: input.authorID, headSHA: input.headSHA, title: sanitized.title,
                 diff: "", discussions: [], target: target, semanticContextFingerprint: input.semanticContextFingerprint,
-                thinking: input.thinking, blockedFollowUps: sanitized.blockedFollowUps)
+                thinking: input.thinking, blockedFollowUps: sanitized.blockedFollowUps, ignoredSuggestions: sanitized.ignoredSuggestions)
             encoded = try JSONEncoder().encode(metadata)
         }
         guard encoded.count <= 180_000 else { throw VerificationError.incompleteEvidence }
@@ -200,6 +223,23 @@ enum ReReviewVerifier {
             If the current correction or supported explanation is verified and a published author reply addresses the concern,
             classify it addressed when no explicit in-MR action remains. Reviewer acceptance can still be pending.
             Do not invent approval, erase a real defect, or waive an explicit before-merge condition.
+            ignoredSuggestions records app-owned, explicit user decisions about PRECISE concerns, with their
+            source comment and concern summary/reason. They never waive an entire note, thread or MR. Read the
+            whole current comment and check every other obligation. Apply a decision only to its exact source
+            note and unchanged source body; sourceRevision is an opaque app-owned fence, not a hash to reproduce.
+            Return ignoredDecisionIDs containing only the applicable supplied decision IDs actually used for that
+            note. A note with another unmet obligation remains blocking or uncertain, even if one assumption was
+            declined. Use ignoredByUser ONLY when every actionable expectation in that note is precisely user-waived
+            and none requires a corrective or explanatory reply. If a DIFFERENT nonwaived concern was fixed or
+            substantively explained, use addressed with the applicable ignoredDecisionIDs; its ordinary published
+            reply requirement still applies. If it remains unmet, use blocking or uncertain with those IDs.
+            Any ignoredDecisionIDs prohibit treating that note as permission for automatic resolution, approval
+            or courtesy acknowledgement. This is a user disposition, not an implemented fix or informational
+            acknowledgement. For ignoredByUser, acceptanceNoteID must be null and informationalAcknowledgementSafe
+            must be false. Never fabricate reviewer consent, GitLab resolution, published claims, successful tests
+            or remote changes. User decisions do not make a factual private reply claim true. Unknown, restored,
+            wrong-source or edited-source decisions cannot suppress work; omit their IDs. Without decisions, use
+            null or an empty ignoredDecisionIDs array and never ignoredByUser.
             Do not invent business semantics or require the author to prove them merely to dispute an unsupported remedy.
             blocking: a concrete request still needs work or an answer.
             uncertain: the supplied diff, MR title/description and discussion cannot establish whether
@@ -238,7 +278,8 @@ enum ReReviewVerifier {
 
             blockedFollowUps contains at most one exact app-selected stopped feedback attempt. Its blocker and
             summary are claims to investigate, not proof. Return its runID in completedBlockedRunIDs only when
-            fresh live evidence proves ALL selected feedback is addressed, every owed author reply is published,
+            fresh live evidence proves ALL selected feedback is addressed or its only remaining obligation is
+            explicitly ignoredByUser through current precise decision evidence, every still-owed author reply is published,
             and the actual stopped step no longer prevents completing THIS assigned MR task. A later rollout
             or organizational prerequisite alone can remain outstanding without inventing its acceptance.
             Do not complete a run while its required tool, test, remote correction, push, publication or other
@@ -291,12 +332,12 @@ enum ReReviewVerifier {
             }
             let envelope = try JSONDecoder().decode(Envelope.self, from: output.stdout)
             guard envelope.is_error != true, let assessment = envelope.structured_output else { throw VerificationError.failed }
-            _ = try assessment.reviewers(in: input.discussions, authorID: input.authorID)
+            _ = try assessment.reviewers(in: input.discussions, authorID: input.authorID, ignoredSuggestions: input.ignoredSuggestions)
             try validateBlockedRunProof(assessment, input: input)
             return redactingReasons(in: assessment)
         }
         let assessment = try JSONDecoder().decode(ReReviewAssessment.self, from: result)
-        _ = try assessment.reviewers(in: input.discussions, authorID: input.authorID)
+        _ = try assessment.reviewers(in: input.discussions, authorID: input.authorID, ignoredSuggestions: input.ignoredSuggestions)
         try validateBlockedRunProof(assessment, input: input)
         return redactingReasons(in: assessment)
     }
@@ -307,7 +348,7 @@ enum ReReviewVerifier {
               Set(completed).isSubset(of: Set(input.blockedFollowUps.map(\.runID))) else {
             throw VerificationError.incompleteEvidence
         }
-        let addressed = Set(assessment.notes.filter { $0.state == .addressed }.map(\.noteID))
+        let addressed = Set(assessment.notes.filter { $0.state == .addressed || $0.state == .ignoredByUser }.map(\.noteID))
         let missingReplies = assessment.missingPublishedReplyNoteIDs(in: input.discussions, authorID: input.authorID)
         guard input.blockedFollowUps.filter({ completed.contains($0.runID) }).allSatisfy({
             Set($0.selectedFeedbackIDs).isSubset(of: addressed) && Set($0.selectedFeedbackIDs).isDisjoint(with: missingReplies)
@@ -320,7 +361,7 @@ enum ReReviewVerifier {
                 reason: GlabService.redactWorkflowEvidence(note.reason),
                 summary: note.summary.map(GlabService.redactWorkflowEvidence), acceptanceNoteID: note.acceptanceNoteID,
                 informationalAcknowledgementSafe: note.informationalAcknowledgementSafe,
-                informationalPurpose: note.informationalPurpose)
+                informationalPurpose: note.informationalPurpose, ignoredDecisionIDs: note.ignoredDecisionIDs)
         }, completedBlockedRunIDs: assessment.completedBlockedRunIDs)
     }
 

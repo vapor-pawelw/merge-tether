@@ -1,0 +1,325 @@
+{
+  "sourceLanguage": "en",
+  "strings": {
+    "feedbackSuggestions.sourceAssessment": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Comment behind this assessment"
+          }
+        }
+      }
+    },
+    "feedbackSuggestions.sourceReply": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Comment this draft replies to"
+          }
+        }
+      }
+    },
+    "feedbackSuggestions.sourceRun": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Comment selected for this run"
+          }
+        }
+      }
+    },
+    "feedbackSuggestions.sourceSaved": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Comment version saved with this decision"
+          }
+        }
+      }
+    },
+    "feedbackSuggestions.openComment": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Open comment in GitLab"
+          }
+        }
+      }
+    },
+    "feedbackSuggestions.expandComment": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Show full comment"
+          }
+        }
+      }
+    },
+    "feedbackSuggestions.collapseComment": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Show less"
+          }
+        }
+      }
+    },
+    "feedbackSuggestions.commentExpanded": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Expanded"
+          }
+        }
+      }
+    },
+    "feedbackSuggestions.commentCollapsed": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Collapsed"
+          }
+        }
+      }
+    },
+    "feedbackSuggestions.sourceUnavailable": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "The exact source comment is unavailable or no longer matches this check. Refresh the discussions to load current context."
+          }
+        }
+      }
+    },
+    "feedbackSuggestions.authorIdentifier": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "GitLab user #%lld"
+          }
+        }
+      }
+    },
+    "feedbackSuggestions.threadOpenedBy": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Thread opened by %@"
+          }
+        }
+      }
+    },
+    "feedbackSuggestions.ignore": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Ignore this suggestion"
+          }
+        }
+      }
+    },
+    "feedbackSuggestions.ignoreTitle": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Ignore this suggestion?"
+          }
+        }
+      }
+    },
+    "feedbackSuggestions.ignoreConfirm": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Ignore suggestion"
+          }
+        }
+      }
+    },
+    "feedbackSuggestions.ignoreExplanation": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "This ignores only the displayed suggestion for this version of the source comment. Other requirements in the comment still apply. No GitLab discussion will be resolved. You can restore the suggestion in Details → Ignored suggestions."
+          }
+        }
+      }
+    },
+    "feedbackSuggestions.concern": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Suggestion"
+          }
+        }
+      }
+    },
+    "feedbackSuggestions.comment": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Source comment"
+          }
+        }
+      }
+    },
+    "feedbackSuggestions.ignored": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Ignored suggestions"
+          }
+        }
+      }
+    },
+    "feedbackSuggestions.restore": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Restore"
+          }
+        }
+      }
+    },
+    "feedbackSuggestions.reset": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Reset all decisions for this MR"
+          }
+        }
+      }
+    },
+    "feedbackSuggestions.resetTitle": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Reset all decisions for this MR?"
+          }
+        }
+      }
+    },
+    "feedbackSuggestions.resetExplanation": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Restore all ignored suggestions for this MR and request a fresh assessment. GitLab discussions and saved task history remain unchanged."
+          }
+        }
+      }
+    },
+    "feedbackSuggestions.resetConfirm": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Reset decisions"
+          }
+        }
+      }
+    },
+    "feedbackSuggestions.cancel": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Cancel"
+          }
+        }
+      }
+    },
+    "feedbackSuggestions.updateFailed": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Could not update this decision. Try refreshing the MR."
+          }
+        }
+      }
+    },
+    "feedbackSuggestions.sourceChanged": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "The source comment changed. Review its current version before ignoring this suggestion."
+          }
+        }
+      }
+    },
+    "feedbackSuggestions.accountChanged": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Your GitLab account changed. Reopen this MR before updating its decisions."
+          }
+        }
+      }
+    },
+    "feedbackSuggestions.invalidConcern": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "This suggestion could not be verified. Refresh its assessment before deciding."
+          }
+        }
+      }
+    }
+  },
+  "version": "1.0"
+}

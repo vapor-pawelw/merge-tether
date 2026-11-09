@@ -4,6 +4,25 @@ import Testing
 
 @MainActor
 struct AuthorFeedbackMergeTests {
+    @Test(arguments: ["current", "restored", "wrongDecision", "missingIDs", "remainingInSameNote", "editedSource"])
+    func onlyAnActivePreciseDecisionCanSatisfyTheSemanticFeedbackGate(_ scenario: String) throws {
+        let target = MRAutomationScope.Target(host: "gitlab.example.test", username: "me", projectID: 1, iid: 2)
+        let body = "Please fix the regression and consider an optional later rollout approval."
+        let discussions = try JSONDecoder().decode([GitLabMergeRequestDiscussion].self, from: Data(#"[{"id":"thread","notes":[{"id":10,"author":{"id":7,"username":"reviewer"},"system":false,"resolvable":true,"resolved":false,"body":"\#(scenario == "editedSource" ? "An edited requirement" : body)"}]}]"#.utf8))
+        let decision = IgnoredFeedbackSuggestion(id: UUID(), target: target, sourceNoteID: 10, sourceAuthorID: 7,
+            sourceBody: body, sourceRevision: UserAttentionSnapshot.digest("7\n" + body),
+            concernSummary: "Decline only the optional rollout approval.", concernReason: "The verified regression correction remains required.", createdAt: Date())
+        let assessment = ReReviewAssessment(notes: [.init(noteID: 10,
+            state: scenario == "remainingInSameNote" ? .blocking : .ignoredByUser,
+            reason: scenario == "remainingInSameNote" ? "The regression is still unfixed." : "The code correction is verified; only the user-declined assumption remained.",
+            ignoredDecisionIDs: scenario == "missingIDs" ? nil : [scenario == "wrongDecision" ? UUID() : decision.id])])
+
+        #expect(assessment.hasNoRemainingAuthorWork(in: discussions, authorID: 3,
+            ignoredSuggestions: scenario == "restored" ? [] : [decision]) == (scenario == "current"))
+        #expect(AuthorFeedbackPolicy.evaluate(discussions: discussions, assessment: assessment, authorID: 3,
+            approvedReviewerIDs: [7], ignoredSuggestions: scenario == "restored" ? [] : [decision]).allSatisfy { !$0.canResolve })
+    }
+
     @Test(arguments: ["missingProof", "eligible", "draft", "approval", "pipeline", "scope", "changedDiscussion"])
     func exactBlockedWorkProofLiftsOnlyItsOwnAutomaticMergeStop(_ gate: String) async throws {
         var settings: SettingsManager?
@@ -181,6 +200,48 @@ struct AuthorFeedbackMergeTests {
             #expect(FileManager.default.fileExists(atPath: folder.appending(path: "description-edited-during-auth").path))
             #expect(!FileManager.default.fileExists(atPath: folder.appending(path: "merged").path))
             #expect(monitor.requests.count == 1)
+        }
+    }
+
+    @Test(arguments: ["ready", "pipeline", "global", "scope", "discussion"])
+    func restoringMergeAutoUsesFreshAutomaticGatesWithoutAnotherRefresh(_ gate: String) async throws {
+        var state: SettingsManager?
+        let target = MRAutomationScope.Target(host: "gitlab.example.org", username: "me", projectID: 1, iid: 2)
+        try await withFixture(configure: { settings in
+            state = settings
+            settings.autoMergeOptOuts.insert(target)
+        }) { monitor, folder, _ in
+            let settings = try #require(state)
+            monitor.authorFeedbackAllowsMerge = { _, _, _ in true }
+            try await refresh(monitor)
+            #expect(!FileManager.default.fileExists(atPath: folder.appending(path: "merged").path))
+            #expect(monitor.requests.first?.mayAutoMerge == true)
+            settings.autoMergeOptOuts.remove(target)
+            if gate == "global" { settings.automation.autoMergeEnabled = false }
+            if gate == "scope" { settings.automation.scope.setManualChoice(.paused, for: target) }
+            if gate == "discussion" { monitor.authorFeedbackAllowsMerge = { _, _, _ in false } }
+            if gate == "pipeline" {
+                let file = folder.appending(path: "request.json")
+                try String(contentsOf: file, encoding: .utf8)
+                    .replacingOccurrences(of: #""has_conflicts":false"#,
+                        with: #""has_conflicts":false,"head_pipeline":{"id":8,"status":"running"}"#)
+                    .write(to: file, atomically: true, encoding: .utf8)
+            }
+            settings.save()
+            await monitor.resumeAutomaticMerge(for: target)
+            #expect(FileManager.default.fileExists(atPath: folder.appending(path: "merged").path) == (gate == "ready"))
+        }
+    }
+
+    @Test func mergeOptOutDuringFinalSemanticReadPreventsTheAutomaticWrite() async throws {
+        var state: SettingsManager?
+        try await withFixture(configure: { state = $0 }) { monitor, folder, _ in
+            monitor.authorFeedbackAllowsMerge = { _, _, _ in
+                state?.autoMergeOptOuts.insert(.init(host: "gitlab.example.org", username: "me", projectID: 1, iid: 2))
+                return true
+            }
+            try await refresh(monitor)
+            #expect(!FileManager.default.fileExists(atPath: folder.appending(path: "merged").path))
         }
     }
 

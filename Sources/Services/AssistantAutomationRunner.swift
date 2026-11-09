@@ -116,6 +116,7 @@ enum AssistantAutomationRunner {
         var retryOf: UUID?
         /// Durable lineage for the single automatic reconciliation of a reviewer revision.
         var feedbackRecoveryRootID: UUID? = nil
+        var feedbackDecisionRevision: String? = nil
 
         var supportsCodexRelay: Bool {
             false
@@ -170,17 +171,26 @@ enum AssistantAutomationRunner {
     }
 
     static func unhandledFeedback(_ ids: [Int], work: MergeRequestWork, username: String, settings: SettingsManager) -> [Int] {
-        // Every attempted snapshot is deduplicated, including failed/interrupted
-        // work. Only the explicit retry action may replay potentially remote work.
-        let handled = Set(settings.assistantHandoffs.lazy.filter { $0.key.work == work && $0.key.username == username }
+        // Generic event paths must not replay handled notes while a changed decision
+        // awaits assessment. Only a fresh verified request opens a new bounded context.
+        let handled = Set(settings.assistantHandoffs.lazy.filter {
+            $0.key.work == work && $0.key.username == username
+        }
             .flatMap { $0.feedbackNoteIDs ?? [] })
         return Array(Set(ids).subtracting(handled)).sorted()
+    }
+
+    static func feedbackDecisionRevision(work: MergeRequestWork, username: String, settings: SettingsManager) -> String? {
+        let target = MRAutomationScope.Target(host: work.host, username: username, projectID: work.projectID, iid: work.iid)
+        let revision = settings.feedbackSuggestionDecisions.revision(for: target)
+        return revision.isEmpty ? nil : revision
     }
 
     static func attachFeedbackTodo(_ todo: Todo.FeedbackIdentity?, noteIDs: [Int], work: MergeRequestWork,
                                    username: String, settings: SettingsManager) -> Bool {
         guard let index = settings.assistantHandoffs.firstIndex(where: {
-            $0.key.work == work && $0.key.username == username && Set(noteIDs).isSubset(of: Set($0.feedbackNoteIDs ?? []))
+            $0.key.work == work && $0.key.username == username
+                && Set(noteIDs).isSubset(of: Set($0.feedbackNoteIDs ?? []))
         }) else { return false }
         if let todo, settings.assistantHandoffs[index].feedbackTodos?.contains(todo) != true {
             settings.assistantHandoffs[index].feedbackTodos = (settings.assistantHandoffs[index].feedbackTodos ?? []) + [todo]
@@ -314,6 +324,7 @@ enum AssistantAutomationRunner {
         let followUpProof = mrWorkflow == .followUp && settings.automation.allowFollowUpPush
             ? "\n\n" + FollowUpVerificationStore.recordingInstructions(work: work, runID: id) : ""
         let useReviewModel = assistant == .codex && isReview
+        let decisionContext = feedbackDecisionRevision(work: work, username: username, settings: settings)
         let handoff = Handoff(
             id: id, key: key, title: name,
             prompt: """
@@ -346,13 +357,14 @@ enum AssistantAutomationRunner {
             mergeRequestURL: mergeRequestURL, workflow: mrWorkflow,
             resolvesOwnThreads: (isReview || mrWorkflow == .review) ? settings.automation.autoResolveOwnReviewThreads : nil,
             manual: manual, expectedHeadSHA: headSHA, configurationSnapshot: manual ? settings.automation : automaticConfiguration,
-            retryOf: retryOf, feedbackRecoveryRootID: feedbackRecoveryRootID
+            retryOf: retryOf, feedbackRecoveryRootID: feedbackRecoveryRootID, feedbackDecisionRevision: decisionContext
         )
         for (noteID, revision) in verifiedFeedbackNotes ?? [:] {
-            settings.authorFeedbackAttempts.insert(.init(target: target, noteID: noteID, revision: revision))
+            settings.authorFeedbackAttempts.insert(.init(target: target, noteID: noteID, revision: revision,
+                decisionRevision: decisionContext))
             if let feedbackRecoveryRootID {
                 settings.authorFeedbackAttempts.insert(.init(target: target, noteID: noteID, revision: revision,
-                    recoveryRootID: feedbackRecoveryRootID))
+                    recoveryRootID: feedbackRecoveryRootID, decisionRevision: decisionContext))
             }
         }
         settings.assistantHandoffs.append(handoff)

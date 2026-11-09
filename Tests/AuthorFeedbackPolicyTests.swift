@@ -36,10 +36,21 @@ struct AuthorFeedbackPolicyTests {
                                       pendingDraftCount: drafts)
     }
 
+    @Test func findingQuotesTheActualBlockingAssessmentNoteRatherThanItsThreadRoot() throws {
+        let findings = try evaluate([thread("scope", note(10, by: 7, "Original concern", resolvable: true),
+                                                  note(11, by: 8, "Specific remaining requirement"))], [
+            .init(noteID: 10, state: .addressed, reason: "Original concern was fixed"),
+            .init(noteID: 11, state: .blocking, reason: "The additional requirement remains")
+        ])
+        #expect(findings.first?.id == 10)
+        #expect(findings.first?.reason == "The additional requirement remains")
+        #expect(findings.first?.sourceNoteID == 11)
+    }
+
     @Test func verifiedFixApprovedBySameReviewerIsReady() throws {
         let findings = try evaluate([alicesThread], [fixedA], approved: [7])
         #expect(findings == [.init(id: 10, discussionID: "d1", reviewerID: 7, reviewerUsername: "alice", state: .ready,
-                                   reason: "Current diff fixes A", waitingForReviewers: [])])
+                                   reason: "Current diff fixes A", waitingForReviewers: [], sourceNoteID: 10)])
         #expect(findings.first?.canResolve == true)
     }
 
