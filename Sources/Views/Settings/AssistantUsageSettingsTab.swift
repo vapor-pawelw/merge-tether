@@ -10,6 +10,7 @@ struct AssistantUsageSettingsTab: View {
     @State private var loadFailed = false
     @State private var summary = AssistantUsageSummary()
     @State private var chartData = AssistantUsageChartData()
+    @State private var mergeRequestRanking: [AssistantUsageMergeRequestTotal] = []
 
     var body: some View {
         ScrollView {
@@ -91,6 +92,7 @@ struct AssistantUsageSettingsTab: View {
             if !chartData.buckets.isEmpty {
                 AssistantUsageProviderChart(data: chartData, granularity: $granularity)
             }
+            AssistantUsageMergeRequestRanking(rows: mergeRequestRanking)
             if !summary.days.isEmpty {
                 AssistantUsageDailyHistory(days: summary.days)
             }
@@ -128,6 +130,8 @@ struct AssistantUsageSettingsTab: View {
         let interval = period.interval(at: now)
         summary = snapshot.summary(interval: interval, now: now)
         chartData = snapshot.chartData(granularity: granularity, interval: interval, now: now)
+        mergeRequestRanking = Array(snapshot.mergeRequestTotals(interval: interval, now: now)
+            .filter { $0.total.hasKnownEstimate }.prefix(5))
     }
 
     private func rebuildChart() {
@@ -403,7 +407,7 @@ private struct AssistantUsageDailyHistory: View {
     }
 }
 
-private struct AssistantUsageTotalAmount: View {
+struct AssistantUsageTotalAmount: View {
     let total: AssistantUsageTotal
     var noActivity = false
     var precise = false
@@ -423,7 +427,7 @@ private struct AssistantUsageTotalAmount: View {
     }
 }
 
-private struct AssistantUsageAmount: View {
+struct AssistantUsageAmount: View {
     let value: Double
     var precise = false
     private var threshold: Double { precise ? 0.00000001 : 0.0001 }
@@ -436,6 +440,52 @@ private struct AssistantUsageAmount: View {
     }
     private func usd(_ amount: Double) -> String {
         amount.formatted(.currency(code: "USD").precision(.fractionLength(precise ? 8 : 4)))
+    }
+}
+
+private struct AssistantUsageMergeRequestRanking: View {
+    let rows: [AssistantUsageMergeRequestTotal]
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 10) {
+            Text(.AssistantUsage.assistantUsageMRRankingTitle).font(.headline)
+            Text(.AssistantUsage.assistantUsageMRRankingHelp)
+                .font(.caption).foregroundStyle(.secondary)
+            if rows.isEmpty {
+                Text(.AssistantUsage.assistantUsageMRRankingEmpty)
+                    .font(.caption).foregroundStyle(.secondary)
+            } else {
+                ForEach(rows.indices, id: \.self) { index in
+                    let row = rows[index]
+                    HStack(alignment: .firstTextBaseline, spacing: 12) {
+                        Text(verbatim: "\(index + 1).")
+                            .foregroundStyle(.secondary).monospacedDigit().frame(width: 24, alignment: .trailing)
+                        VStack(alignment: .leading, spacing: 3) {
+                            if let urlString = row.mergeRequest.url, let url = URL(string: urlString) {
+                                Link(destination: url) {
+                                    Text(verbatim: "!\(row.mergeRequest.iid) · \(row.mergeRequest.title ?? row.mergeRequest.id)")
+                                        .lineLimit(1)
+                                }
+                            } else {
+                                Text(verbatim: "!\(row.mergeRequest.iid) · \(row.mergeRequest.title ?? row.mergeRequest.id)")
+                                    .lineLimit(1)
+                            }
+                            if row.total.unknownCostRuns > 0 {
+                                Text(.AssistantUsage.assistantUsageMRUnknownRuns(row.total.unknownCostRuns))
+                                    .font(.caption).foregroundStyle(.secondary)
+                            }
+                        }
+                        Spacer(minLength: 8)
+                        AssistantUsageTotalAmount(total: row.total, precise: true)
+                    }
+                    .font(.subheadline)
+                    if row.id != rows.last?.id { Divider() }
+                }
+            }
+        }
+        .padding(14)
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .background(Color.secondary.opacity(0.06), in: RoundedRectangle(cornerRadius: 10))
     }
 }
 

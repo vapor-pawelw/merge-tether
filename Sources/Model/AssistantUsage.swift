@@ -4,6 +4,26 @@ enum AssistantUsageRole: String, Codable, CaseIterable, Sendable {
     case codingAgent, verifier
 }
 
+struct AssistantUsageMergeRequest: Codable, Hashable, Sendable, Identifiable {
+    let host: String
+    var username: String?
+    let projectID: Int
+    let iid: Int
+    var title: String?
+    var url: String?
+
+    var id: String { "\(host)/\(username ?? "")/\(projectID)!\(iid)" }
+
+    init(host: String, username: String? = nil, projectID: Int, iid: Int, title: String? = nil, url: String? = nil) {
+        self.host = host
+        self.username = username
+        self.projectID = projectID
+        self.iid = iid
+        self.title = title
+        self.url = url
+    }
+}
+
 struct AssistantTokenUsage: Codable, Equatable, Sendable {
     let input: Int
     let cachedInput: Int

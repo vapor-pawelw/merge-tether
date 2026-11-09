@@ -6,13 +6,15 @@ enum AssistantUsageRunner {
         let role: AssistantUsageRole
         let assistant: AutomationAssistant
         var model: String?
+        var mergeRequest: AssistantUsageMergeRequest?
     }
 
     static func run(_ executable: URL, arguments: [String] = [], environment: [String: String],
                     currentDirectory: URL? = nil, timeout: TimeInterval = 30, input: Data? = nil,
                     usage: Context, store: AssistantUsageStore = .shared) async throws -> ProcessRunner.Output {
         do {
-            try await store.begin(id: usage.id, role: usage.role, assistant: usage.assistant, date: Date())
+            try await store.begin(id: usage.id, role: usage.role, assistant: usage.assistant, date: Date(),
+                mergeRequest: usage.mergeRequest)
         } catch {
             Log.monitor.error("Could not start agent usage receipt: \(String(describing: error), privacy: .private)")
         }

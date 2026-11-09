@@ -4,6 +4,88 @@ import Testing
 
 @Suite("Assistant usage persistence")
 struct AssistantUsageStoreTests {
+    @Test("Compacted MR costs retain display metadata and coding/verifier totals after restart")
+    func compactedMergeRequestCostsPreserveMetadataAndTotals() async throws {
+        let file = temporaryFile()
+        defer { try? FileManager.default.removeItem(at: file.deletingLastPathComponent()) }
+        let store = AssistantUsageStore(file: file, receiptLimit: 1)
+        let original = usageMR(title: "Original MR title")
+        let updated = usageMR(title: "Updated MR title")
+        let otherAccount = usageMR(username: "another", title: "Other account's MR")
+        try await record(store, at: "2026-11-04T08:05:00Z", role: .codingAgent, cost: 1, mergeRequest: original)
+        try await record(store, at: "2026-11-04T08:10:00Z", role: .codingAgent, cost: 2, mergeRequest: updated)
+        try await record(store, at: "2026-11-04T08:15:00Z", role: .codingAgent, cost: 4, mergeRequest: otherAccount)
+        try await record(store, at: "2026-11-04T08:20:00Z", role: .verifier, cost: 8, assistant: .codex, mergeRequest: updated)
+        try await record(store, at: "2026-11-04T08:25:00Z", role: .codingAgent, cost: 16)
+
+        let restarted = AssistantUsageStore(file: file, receiptLimit: 1)
+        let snapshot = try await restarted.snapshot()
+        let lifetime = snapshot.total(for: original)
+        #expect(lifetime.estimatedUSD == 11 && lifetime.runs == 3 && lifetime.unknownCostRuns == 0)
+        #expect(snapshot.total(for: otherAccount).estimatedUSD == 4)
+        let ranking = snapshot.mergeRequestTotals(interval: nil, now: try instant("2026-11-04T12:00:00Z"))
+        #expect(ranking.map(\.id) == [original.id, otherAccount.id])
+        #expect(ranking.first?.mergeRequest.title == updated.title)
+        #expect(ranking.first?.mergeRequest.url == updated.url)
+        let chart = snapshot.chartData(granularity: .hour, now: try instant("2026-11-04T12:00:00Z"))
+        #expect(chart.buckets.first?.overall.estimatedUSD == 31)
+        #expect(snapshot.total(for: .codingAgent).estimatedUSD == 23 && snapshot.total(for: .verifier).estimatedUSD == 8)
+        let json = try #require(JSONSerialization.jsonObject(with: Data(contentsOf: file)) as? [String: Any])
+        #expect((json["receipts"] as? [Any])?.count == 1)
+        #expect((json["archived"] as? [Any])?.count == 3)
+    }
+
+    @Test("Hourly compaction never merges distinct MR account, host, project or IID identities")
+    func compactedMergeRequestsKeepEveryIdentityAxis() async throws {
+        let file = temporaryFile()
+        defer { try? FileManager.default.removeItem(at: file.deletingLastPathComponent()) }
+        let store = AssistantUsageStore(file: file, receiptLimit: 1)
+        let identities = [usageMR(), usageMR(host: "other.example.test"), usageMR(username: "another"),
+            usageMR(projectID: 8), usageMR(iid: 12), usageMR(username: nil)]
+        for (index, identity) in identities.enumerated() {
+            try await record(store, at: "2026-11-04T08:05:00Z", role: .codingAgent,
+                cost: Double(1 << index), mergeRequest: identity)
+        }
+        try await record(store, at: "2026-11-04T08:06:00Z", role: .codingAgent, cost: 64)
+        let snapshot = try await AssistantUsageStore(file: file, receiptLimit: 1).snapshot()
+        for (index, identity) in identities.enumerated() {
+            let total = snapshot.total(for: identity)
+            #expect(total.runs == 1 && total.estimatedUSD == Double(1 << index))
+        }
+        #expect(snapshot.mergeRequestTotals(interval: nil, now: try instant("2026-11-04T12:00:00Z")).count == 6)
+        #expect(snapshot.total(for: .codingAgent).estimatedUSD == 127)
+    }
+
+    @Test("Legacy receipts and archives without MR metadata stay unattributed through later writes")
+    func legacyUsageJSONDoesNotAssignOldCostsToNewMR() async throws {
+        let file = temporaryFile()
+        defer { try? FileManager.default.removeItem(at: file.deletingLastPathComponent()) }
+        try FileManager.default.createDirectory(at: file.deletingLastPathComponent(), withIntermediateDirectories: true)
+        let date = try instant("2026-11-04T08:00:00Z")
+        let oldState: [String: Any] = [
+            "version": 1, "startedAt": date.timeIntervalSinceReferenceDate,
+            "receipts": [["id": UUID().uuidString, "date": date.timeIntervalSinceReferenceDate,
+                "role": "codingAgent", "assistant": "claude", "finished": true, "complete": true,
+                "measurement": ["estimatedUSD": 2, "pricingVersion": "claude-cli"]]],
+            "archived": [["hour": date.timeIntervalSinceReferenceDate, "role": "codingAgent", "assistant": "claude",
+                "pricingVersion": "claude-cli", "total": ["runs": 1, "estimatedUSD": 3, "unknownCostRuns": 0,
+                    "inputTokens": 0, "cachedInputTokens": 0, "outputTokens": 0]]]
+        ]
+        try JSONSerialization.data(withJSONObject: oldState).write(to: file)
+        let store = AssistantUsageStore(file: file, receiptLimit: 1)
+        let legacy = try await store.snapshot()
+        let target = usageMR()
+        #expect(legacy.total(for: .codingAgent).estimatedUSD == 5)
+        #expect(legacy.entries.allSatisfy { $0.mergeRequest == nil })
+        #expect(legacy.total(for: target).runs == 0)
+        #expect(legacy.mergeRequestTotals(interval: nil, now: try instant("2026-11-04T12:00:00Z")).isEmpty)
+        try await record(store, at: "2026-11-04T08:05:00Z", role: .codingAgent, cost: 4, mergeRequest: target)
+        let persisted = try await AssistantUsageStore(file: file, receiptLimit: 1).snapshot()
+        #expect(persisted.total(for: .codingAgent).estimatedUSD == 9)
+        #expect(persisted.total(for: target).estimatedUSD == 4 && persisted.total(for: target).runs == 1)
+        #expect(persisted.mergeRequestTotals(interval: nil, now: try instant("2026-11-04T12:00:00Z")).map(\.id) == [target.id])
+    }
+
     @Test("Idle dashboard refresh waits for the next UTC hour, including day and month boundaries")
     func dashboardRefreshBoundaries() throws {
         for (input, expected) in [
@@ -340,9 +422,16 @@ struct AssistantUsageStoreTests {
         try #require(ISO8601DateFormatter().date(from: value))
     }
 
-    private func record(_ store: AssistantUsageStore, at date: String, role: AssistantUsageRole, cost: Double?, assistant: AutomationAssistant = .claude) async throws {
+    private func record(_ store: AssistantUsageStore, at date: String, role: AssistantUsageRole, cost: Double?,
+                        assistant: AutomationAssistant = .claude, mergeRequest: AssistantUsageMergeRequest? = nil) async throws {
         let id = UUID()
-        try await store.begin(id: id, role: role, assistant: assistant, date: instant(date))
+        try await store.begin(id: id, role: role, assistant: assistant, date: instant(date), mergeRequest: mergeRequest)
         try await store.finish(id: id, measurement: .init(tokens: nil, estimatedUSD: cost, pricingVersion: cost == nil ? nil : "claude-cli"), complete: true)
+    }
+
+    private func usageMR(host: String = "gitlab.example.test", username: String? = "me", projectID: Int = 7,
+                         iid: Int = 11, title: String = "Synthetic MR") -> AssistantUsageMergeRequest {
+        .init(host: host, username: username, projectID: projectID, iid: iid,
+            title: title, url: "https://\(host)/team/repo/-/merge_requests/\(iid)")
     }
 }

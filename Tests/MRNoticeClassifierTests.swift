@@ -6,6 +6,72 @@ import Testing
 @MainActor
 @Suite(.serialized)
 struct MRNoticeClassifierTests {
+    @Test(arguments: AutomationAssistant.allCases)
+    func nondefaultPortUsesExactSelectedHostForPromptAndUsage(_ assistant: AutomationAssistant) async throws {
+        let host = "GitLab.Port.Example.Test:8443"
+        let projectID = assistant == .codex ? 934_771 : 934_772
+        let fixture = try Fixture(host: host, projectID: projectID)
+        defer { fixture.cleanUp() }
+        let usageFile = await AssistantUsageStore.shared.file
+        try #require(!usageFile.path.contains("Library/Application Support/com.vaporpw.GitLabTodos/Assistant Usage"))
+
+        let result = try await MRNoticeClassifier.run(request: fixture.request, discussions: fixture.discussions,
+            user: .init(id: 3, username: "me"), noteID: 10, assistant: assistant,
+            model: "fixture", executable: fixture.script, expectedHost: host)
+        #expect(result == .informational)
+        let captured = try String(contentsOf: fixture.directory.appending(path: "capture"), encoding: .utf8)
+        #expect(captured.contains("--hostname \(host)\n"))
+        let snapshot = try await AssistantUsageStore.shared.snapshot()
+        let entries = snapshot.entries.filter { $0.mergeRequest?.projectID == projectID && $0.mergeRequest?.iid == 2 }
+        #expect(entries.count == 1)
+        let attribution = try #require(entries.first?.mergeRequest)
+        #expect(attribution.host == host && attribution.username == "me")
+        #expect(attribution.id == "\(host)/me/\(projectID)!2")
+    }
+
+    @Test func selectedHostMismatchRejectsEvidenceBeforeLaunchingClassifier() async throws {
+        let fixture = try Fixture(projectID: 934_773)
+        defer { fixture.cleanUp() }
+        await #expect(throws: (any Error).self) {
+            _ = try await MRNoticeClassifier.run(request: fixture.request, discussions: fixture.discussions,
+                user: .init(id: 3, username: "me"), noteID: 10, assistant: .codex,
+                model: "fixture", executable: fixture.script, expectedHost: "other.example.test:8443")
+        }
+        #expect(!FileManager.default.fileExists(atPath: fixture.directory.appending(path: "capture").path))
+    }
+
+    @Test func omittedSelectedHostStillPreservesTheURLPort() async throws {
+        let host = "gitlab.port.example.test:8443"
+        let fixture = try Fixture(host: host, projectID: 934_774)
+        defer { fixture.cleanUp() }
+        let result = try await MRNoticeClassifier.run(request: fixture.request, discussions: fixture.discussions,
+            user: .init(id: 3, username: "me"), noteID: 10, assistant: .codex,
+            model: "fixture", executable: fixture.script)
+        #expect(result == .informational)
+        let captured = try String(contentsOf: fixture.directory.appending(path: "capture"), encoding: .utf8)
+        #expect(captured.contains("--hostname \(host)\n"))
+        let snapshot = try await AssistantUsageStore.shared.snapshot()
+        let attribution = try #require(snapshot.entries.first { $0.mergeRequest?.projectID == 934_774 }?.mergeRequest)
+        #expect(attribution.host == host && attribution.username == "me")
+    }
+
+    @Test func cachedDispositionIsScopedToTheExactSelectedHost() async throws {
+        let fixture = try Fixture()
+        defer { fixture.cleanUp() }
+        let installed = try fixture.installClassifier(mode: "ready")
+        defer { installed.restore() }
+        let model = UUID().uuidString
+        let first = await MRNoticeClassifier.classify(request: fixture.request, discussions: fixture.discussions,
+            user: .init(id: 3, username: "me"), noteID: 10, assistant: .claude, model: model,
+            expectedHost: "GitLab.Example.Test")
+        let second = await MRNoticeClassifier.classify(request: fixture.request, discussions: fixture.discussions,
+            user: .init(id: 3, username: "me"), noteID: 10, assistant: .claude, model: model,
+            expectedHost: "gitlab.example.test")
+        #expect(first == .informational && second == .informational)
+        let calls = try String(contentsOf: fixture.directory.appending(path: "classification-count"), encoding: .utf8)
+        #expect(calls == "2")
+    }
+
     @Test func transientClassifierFailureDoesNotCacheAnUncertainResult() async throws {
         let fixture = try Fixture()
         defer { fixture.cleanUp() }
@@ -90,13 +156,13 @@ struct MRNoticeClassifierTests {
         let request: GitLabMergeRequest
         let discussions: [GitLabMergeRequestDiscussion]
 
-        init(noteID: Int = 10) throws {
+        init(noteID: Int = 10, host: String = "gitlab.example.test", projectID: Int = 1) throws {
             directory = FileManager.default.temporaryDirectory.appending(path: UUID().uuidString)
             try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: false)
             script = directory.appending(path: "cli")
             request = try JSONDecoder().decode(GitLabMergeRequest.self, from: Data("""
-                {"project_id":1,"iid":2,"author":{"id":7,"username":"other","name":"Other"},
-                 "title":"Unfinished work","web_url":"https://gitlab.example.test/group/repo/-/merge_requests/2",
+                {"project_id":\(projectID),"iid":2,"author":{"id":7,"username":"other","name":"Other"},
+                 "title":"Unfinished work","web_url":"https://\(host)/group/repo/-/merge_requests/2",
                  "state":"opened","draft":true,"sha":"\(String(repeating: "a", count: 40))",
                  "source_branch":"feature","target_branch":"main","labels":[]}
                 """.utf8))

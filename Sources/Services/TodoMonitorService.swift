@@ -184,7 +184,7 @@ final class TodoMonitorService {
             self.assessingMentionNoteIDs.insert(noteID)
             defer { self.assessingMentionNoteIDs.remove(noteID) }
             let disposition = await MRNoticeClassifier.classify(request: request, discussions: discussions,
-                user: user, noteID: noteID, assistant: configuration.assistant, model: model)
+                user: user, noteID: noteID, assistant: configuration.assistant, model: model, expectedHost: host)
             guard self.glab.resolvedHost == host, self.glab.currentUsername == user.username,
                   self.glab.accountRevision == revision, self.settings.automation == configuration,
                   !self.settings.ignoredMergeRequests.contains(target) else { return .uncertain }

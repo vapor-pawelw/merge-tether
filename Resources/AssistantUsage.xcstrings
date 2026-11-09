@@ -474,6 +474,72 @@
         }
       }
     },
+    "assistantUsageMRRankingTitle": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Top 5 merge requests"
+          }
+        }
+      }
+    },
+    "assistantUsageMRRankingHelp": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Estimated cost for the selected usage period."
+          }
+        }
+      }
+    },
+    "assistantUsageMRRankingEmpty": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "No merge request runs with a known cost in this period."
+          }
+        }
+      }
+    },
+    "assistantUsageMRUnknownRuns": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "%lld runs have unknown or partial cost; amount is the known subtotal."
+          }
+        }
+      }
+    },
+    "assistantUsageMRLifetimeCost": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Tracked total · estimated USD"
+          }
+        }
+      }
+    },
+    "assistantUsageMRNotTrackedYet": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "MR-linked totals include usage tracked from this version onward."
+          }
+        }
+      }
+    },
     "assistantUsageHours": {
       "extractionState": "manual",
       "localizations": {

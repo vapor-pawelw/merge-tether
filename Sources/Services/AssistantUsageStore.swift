@@ -1,7 +1,7 @@
 import Foundation
 
-/// Stores only numeric usage receipts. Recent IDs deduplicate completion callbacks;
-/// older receipts become small hourly UTC totals, retaining their pricing snapshot.
+/// Stores numeric usage receipts and MR identity. Recent IDs deduplicate completion callbacks;
+/// older receipts become small hourly UTC totals, retaining price and MR attribution.
 actor AssistantUsageStore {
     static let didChange = Notification.Name("MergeTetherAssistantUsageDidChange")
     static let shared: AssistantUsageStore = {
@@ -31,11 +31,12 @@ actor AssistantUsageStore {
         self.receiptLimit = max(1, receiptLimit)
     }
 
-    func begin(id: UUID, role: AssistantUsageRole, assistant: AutomationAssistant, date: Date) throws {
+    func begin(id: UUID, role: AssistantUsageRole, assistant: AutomationAssistant, date: Date,
+               mergeRequest: AssistantUsageMergeRequest? = nil) throws {
         var state = try load()
         guard !state.receipts.contains(where: { $0.id == id }) else { return }
         state.startedAt = min(state.startedAt ?? date, date)
-        state.receipts.append(.init(id: id, date: date, role: role, assistant: assistant))
+        state.receipts.append(.init(id: id, date: date, role: role, assistant: assistant, mergeRequest: mergeRequest))
         compact(&state)
         try save(state)
     }
@@ -63,9 +64,11 @@ actor AssistantUsageStore {
         guard !writeFailed else { throw StoreError.writeFailed }
         let state = try load()
         let entries = state.archived.map {
-            AssistantUsageEntry(date: $0.hour, role: $0.role, assistant: $0.assistant, total: $0.total)
+            AssistantUsageEntry(date: $0.hour, role: $0.role, assistant: $0.assistant, total: $0.total,
+                mergeRequest: $0.mergeRequest)
         } + state.receipts.map {
-            AssistantUsageEntry(date: $0.date, role: $0.role, assistant: $0.assistant, total: $0.total)
+            AssistantUsageEntry(date: $0.date, role: $0.role, assistant: $0.assistant, total: $0.total,
+                mergeRequest: $0.mergeRequest)
         }
         return .init(startedAt: state.startedAt, entries: entries)
     }
@@ -112,11 +115,15 @@ actor AssistantUsageStore {
             let version = receipt.measurement?.pricingVersion
             if let bucket = state.archived.firstIndex(where: {
                 $0.hour == hour && $0.role == receipt.role && $0.assistant == receipt.assistant && $0.pricingVersion == version
+                    && $0.mergeRequest?.id == receipt.mergeRequest?.id
             }) {
                 state.archived[bucket].total.add(receipt.total)
+                if receipt.mergeRequest?.title != nil || receipt.mergeRequest?.url != nil {
+                    state.archived[bucket].mergeRequest = receipt.mergeRequest
+                }
             } else {
                 state.archived.append(.init(hour: hour, role: receipt.role, assistant: receipt.assistant,
-                    pricingVersion: version, total: receipt.total))
+                    pricingVersion: version, total: receipt.total, mergeRequest: receipt.mergeRequest))
             }
         }
     }
@@ -127,6 +134,7 @@ fileprivate struct AssistantUsageReceipt: Codable, Sendable {
     let date: Date
     let role: AssistantUsageRole
     let assistant: AutomationAssistant
+    var mergeRequest: AssistantUsageMergeRequest? = nil
     var measurement: AssistantUsageMeasurement?
     var finished = false
     var complete = false
@@ -146,4 +154,5 @@ fileprivate struct AssistantUsageBucket: Codable, Sendable {
     let assistant: AutomationAssistant
     let pricingVersion: String?
     var total: AssistantUsageTotal
+    var mergeRequest: AssistantUsageMergeRequest? = nil
 }

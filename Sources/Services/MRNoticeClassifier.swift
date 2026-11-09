@@ -33,14 +33,15 @@ enum MRNoticeClassifier {
     @MainActor
     static func classify(request: GitLabMergeRequest, discussions: [GitLabMergeRequestDiscussion],
                          user: GitLabAuthenticatedUser, noteID: Int, assistant: AutomationAssistant,
-                         model: String) async -> MRTodoMentionDisposition {
-        guard let fingerprint = contextFingerprint(request: request, discussions: discussions, user: user, noteID: noteID)
+                         model: String, expectedHost: String? = nil) async -> MRTodoMentionDisposition {
+        guard let host = selectedHost(for: request, expectedHost: expectedHost),
+              let fingerprint = contextFingerprint(request: request, discussions: discussions, user: user, noteID: noteID)
         else { return .uncertain }
-        let key = "\(fingerprint)/\(assistant.rawValue)/\(model)"
+        let key = "\(host)/\(fingerprint)/\(assistant.rawValue)/\(model)"
         if let known = cache[key] { return known }
         guard case .ready(let executable) = await AssistantCLI.detect(assistant, requireCLI: true) else { return .uncertain }
         let result = (try? await run(request: request, discussions: discussions, user: user, noteID: noteID,
-            assistant: assistant, model: model, executable: executable)) ?? .uncertain
+            assistant: assistant, model: model, executable: executable, expectedHost: host)) ?? .uncertain
         guard !Task.isCancelled else { return .uncertain }
         guard result != .uncertain else { return result }
         if cache.count >= 200 { cache.removeAll() }
@@ -50,11 +51,11 @@ enum MRNoticeClassifier {
 
     static func run(request: GitLabMergeRequest, discussions: [GitLabMergeRequestDiscussion],
                     user: GitLabAuthenticatedUser, noteID: Int, assistant: AutomationAssistant,
-                    model: String, executable: URL) async throws -> MRTodoMentionDisposition {
+                    model: String, executable: URL, expectedHost: String? = nil) async throws -> MRTodoMentionDisposition {
         let selected = discussions.flatMap(\.notes).filter { $0.id == noteID && $0.system != true }
         guard selected.count == 1, let body = selected.first?.body, !body.isEmpty,
               request.state == "opened", let head = request.sha, !head.isEmpty, user.id > 0, !user.username.isEmpty,
-              let host = request.webURL.host, request.webURL.isGitLabMergeRequest(host: host, iid: request.iid),
+              let host = selectedHost(for: request, expectedHost: expectedHost),
               ReviewVerdict.fingerprint(discussions) != nil else { throw Failure.invalidEvidence }
         let input = Input(request: request, discussions: discussions, user: user, selectedNoteID: noteID)
         let encoded = try JSONEncoder().encode(input)
@@ -88,6 +89,9 @@ enum MRNoticeClassifier {
         let environment = await verificationEnvironment
         let output: ProcessRunner.Output
         let result: Result
+        let usageMergeRequest = AssistantUsageMergeRequest(host: host, username: user.username,
+            projectID: request.projectID,
+            iid: request.iid, title: request.title, url: request.webURL.absoluteString)
         if assistant == .codex {
             let schemaURL = folder.appending(path: "schema.json"), resultURL = folder.appending(path: "result.json")
             try Data(schema.utf8).write(to: schemaURL)
@@ -97,7 +101,7 @@ enum MRNoticeClassifier {
                 "-c", "model_reasoning_effort=\"medium\"", "--output-schema", schemaURL.path, "-o", resultURL.path, "-"],
                 environment: environment, currentDirectory: folder, timeout: 120,
                 input: Data((prompt + "\n\n" + String(decoding: encoded, as: UTF8.self)).utf8),
-                usage: .init(role: .verifier, assistant: assistant, model: model))
+                usage: .init(role: .verifier, assistant: assistant, model: model, mergeRequest: usageMergeRequest))
             guard output.exitCode == 0, !Task.isCancelled else { throw Failure.failed }
             result = try JSONDecoder().decode(Result.self, from: Data(contentsOf: resultURL))
         } else {
@@ -106,7 +110,7 @@ enum MRNoticeClassifier {
                 "--settings", #"{"sandbox":{"enabled":false}}"#, "--strict-mcp-config", "--mcp-config", #"{"mcpServers":{}}"#,
                 "--setting-sources", "", "--no-session-persistence", "--output-format", "json", "--json-schema", schema],
                 environment: environment, currentDirectory: folder, timeout: 120, input: encoded,
-                usage: .init(role: .verifier, assistant: assistant, model: model))
+                usage: .init(role: .verifier, assistant: assistant, model: model, mergeRequest: usageMergeRequest))
             struct Envelope: Decodable { let is_error: Bool?; let structured_output: Result? }
             let envelope = try JSONDecoder().decode(Envelope.self, from: output.stdout)
             guard output.exitCode == 0, envelope.is_error == false, !Task.isCancelled,
@@ -121,6 +125,20 @@ enum MRNoticeClassifier {
         case "uncertain": return .uncertain
         default: throw Failure.invalidEvidence
         }
+    }
+
+    private static func selectedHost(for request: GitLabMergeRequest, expectedHost: String?) -> String? {
+        let host: String
+        if let expectedHost {
+            host = expectedHost
+        } else {
+            guard let components = URLComponents(url: request.webURL, resolvingAgainstBaseURL: false),
+                  let hostname = components.host, !hostname.isEmpty else { return nil }
+            let authority = hostname.contains(":") && !hostname.hasPrefix("[") ? "[\(hostname)]" : hostname
+            host = authority + (components.port.map { ":\($0)" } ?? "")
+        }
+        guard request.webURL.isGitLabMergeRequest(host: host, iid: request.iid) else { return nil }
+        return host
     }
 
     @MainActor private static var verificationEnvironment: [String: String] {

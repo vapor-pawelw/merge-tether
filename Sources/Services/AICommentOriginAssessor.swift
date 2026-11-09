@@ -111,6 +111,9 @@ enum AICommentOriginAssessor {
         let processEnvironment = await environment
         let output: ProcessRunner.Output
         let result: Data
+        let usageMergeRequest = AssistantUsageMergeRequest(host: target.host, username: target.username,
+            projectID: target.projectID,
+            iid: target.iid!, url: nil)
         if assistant == .codex {
             let schemaURL = folder.appending(path: "schema.json"), resultURL = folder.appending(path: "result.json")
             try schemaData.write(to: schemaURL)
@@ -119,7 +122,7 @@ enum AICommentOriginAssessor {
                 "-c", "model_reasoning_effort=\"\(thinking.rawValue)\"", "-c", "web_search=\"disabled\"", "-c", "agents.enabled=false",
                 "--disable", "apps", "--disable", "plugins", "--disable", "memories", "--output-schema", schemaURL.path, "-o", resultURL.path, "-"],
                 environment: processEnvironment, currentDirectory: folder, timeout: 90, input: Data((prompt + "\n\n" + String(decoding: data, as: UTF8.self)).utf8),
-                usage: .init(role: .verifier, assistant: assistant, model: model))
+                usage: .init(role: .verifier, assistant: assistant, model: model, mergeRequest: usageMergeRequest))
             guard output.exitCode == 0, !Task.isCancelled else { throw AssessmentError.failed }
             result = try Data(contentsOf: resultURL)
         } else {
@@ -128,7 +131,7 @@ enum AICommentOriginAssessor {
                 "--strict-mcp-config", "--mcp-config", #"{"mcpServers":{}}"#, "--setting-sources", "", "--no-session-persistence",
                 "--output-format", "json", "--json-schema", String(decoding: schemaData, as: UTF8.self)],
                 environment: processEnvironment, currentDirectory: folder, timeout: 90, input: data,
-                usage: .init(role: .verifier, assistant: assistant, model: model))
+                usage: .init(role: .verifier, assistant: assistant, model: model, mergeRequest: usageMergeRequest))
             guard output.exitCode == 0, !Task.isCancelled else { throw AssessmentError.failed }
             struct Envelope: Decodable { let is_error: Bool?; let structured_output: AICommentOriginAssessment? }
             let envelope = try JSONDecoder().decode(Envelope.self, from: output.stdout)

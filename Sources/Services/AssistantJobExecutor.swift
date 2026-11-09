@@ -125,6 +125,9 @@ enum AssistantJobExecutor {
         let output: ProcessRunner.Output
         var capturedOutput: ProcessRunner.Output?
         let result: AssistantJobResult
+        let usageMergeRequest = AssistantUsageMergeRequest(host: handoff.key.work.host, username: handoff.key.username,
+            projectID: handoff.key.work.projectID, iid: handoff.key.work.iid, title: request.title,
+            url: request.webURL.absoluteString)
         do {
         if handoff.key.assistant == .codex {
             try Data(AssistantJobResult.schema.utf8).write(to: invocation.schemaURL, options: .atomic)
@@ -133,7 +136,8 @@ enum AssistantJobExecutor {
             output = try await AssistantUsageRunner.run(executable, arguments: arguments, environment: invocation.childEnvironment(environment),
                                                   currentDirectory: folder, timeout: 1_800, input: input,
                                                   usage: .init(role: .codingAgent, assistant: handoff.key.assistant,
-                                                    model: (handoff.codingModel ?? handoff.reviewModel)?.rawValue))
+                                                    model: (handoff.codingModel ?? handoff.reviewModel)?.rawValue,
+                                                    mergeRequest: usageMergeRequest))
             capturedOutput = output
             guard output.exitCode == 0 else { throw CLIProcessError(exitCode: output.exitCode, diagnostic: output.stderr) }
             try AssistantJobResult.validateCodexEvents(output.stdout)
@@ -144,7 +148,8 @@ enum AssistantJobExecutor {
             output = try await AssistantUsageRunner.run(executable, arguments: arguments, environment: invocation.childEnvironment(environment),
                                                   currentDirectory: folder, timeout: 1_800, input: input,
                                                   usage: .init(role: .codingAgent, assistant: handoff.key.assistant,
-                                                    model: (handoff.codingModel ?? handoff.reviewModel)?.rawValue))
+                                                    model: (handoff.codingModel ?? handoff.reviewModel)?.rawValue,
+                                                    mergeRequest: usageMergeRequest))
             capturedOutput = output
             guard output.exitCode == 0 else { throw CLIProcessError(exitCode: output.exitCode, diagnostic: output.stderr) }
             result = try AssistantJobResult.claude(output.stdout)

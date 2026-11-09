@@ -139,6 +139,10 @@ enum DraftProofRecoveryVerifier {
         let environment = await processEnvironment
         let output: ProcessRunner.Output
         let result: Data
+        let request = snapshot.request
+        let usageMergeRequest = AssistantUsageMergeRequest(host: snapshot.host, username: snapshot.user.username,
+            projectID: request.projectID,
+            iid: request.iid, title: request.title, url: request.webURL.absoluteString)
         if assistant == .codex {
             let schemaURL = folder.appending(path: "schema.json"), resultURL = folder.appending(path: "result.json")
             try schemaData.write(to: schemaURL)
@@ -148,7 +152,7 @@ enum DraftProofRecoveryVerifier {
                 "--disable", "apps", "--disable", "plugins", "--disable", "memories", "--output-schema", schemaURL.path, "-o", resultURL.path, "-"],
                 environment: environment, currentDirectory: folder, timeout: 240,
                 input: Data((prompt + "\n\n" + String(decoding: data, as: UTF8.self)).utf8),
-                usage: .init(role: .verifier, assistant: assistant, model: model))
+                usage: .init(role: .verifier, assistant: assistant, model: model, mergeRequest: usageMergeRequest))
             guard output.exitCode == 0, !Task.isCancelled else { throw Failure.failed }
             result = try Data(contentsOf: resultURL)
         } else {
@@ -157,7 +161,7 @@ enum DraftProofRecoveryVerifier {
                 "--settings", #"{"sandbox":{"enabled":false}}"#, "--strict-mcp-config", "--mcp-config", #"{"mcpServers":{}}"#,
                 "--setting-sources", "", "--no-session-persistence", "--output-format", "json", "--json-schema", String(decoding: schemaData, as: UTF8.self)],
                 environment: environment, currentDirectory: folder, timeout: 240, input: data,
-                usage: .init(role: .verifier, assistant: assistant, model: model))
+                usage: .init(role: .verifier, assistant: assistant, model: model, mergeRequest: usageMergeRequest))
             guard output.exitCode == 0, !Task.isCancelled else { throw Failure.failed }
             struct Envelope: Decodable { let is_error: Bool?; let structured_output: Assessment? }
             let envelope = try JSONDecoder().decode(Envelope.self, from: output.stdout)

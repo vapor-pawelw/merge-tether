@@ -16,6 +16,7 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 
 ### Added
 
+- Rank the five highest-cost MRs within the Agent Usage date range and show each MR’s all-time tracked cost, preserving account identity and explicitly unattributed historical records.
 - Keep merged/closed completion updates in Other items until Seen, independently of banners and lane cleanup; apply cleanup with Full onboarding/profile defaults while preserving saved upgrade preferences.
 
 - Track MR lifecycle changes independently of coding automation, announce merged, closed and Draft/Ready transitions, and retain completion feedback until Seen independently of automatic lane cleanup.

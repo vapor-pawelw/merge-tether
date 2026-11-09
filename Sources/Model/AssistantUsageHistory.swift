@@ -45,6 +45,13 @@ struct AssistantUsageEntry: Sendable {
     let role: AssistantUsageRole
     let assistant: AutomationAssistant
     let total: AssistantUsageTotal
+    var mergeRequest: AssistantUsageMergeRequest? = nil
+}
+
+struct AssistantUsageMergeRequestTotal: Identifiable, Sendable {
+    let mergeRequest: AssistantUsageMergeRequest
+    var total: AssistantUsageTotal
+    var id: String { mergeRequest.id }
 }
 
 struct AssistantUsageSnapshot: Sendable {
@@ -58,6 +65,30 @@ struct AssistantUsageSnapshot: Sendable {
             result.add(entry.total)
         }
         return result
+    }
+
+    func total(for mergeRequest: AssistantUsageMergeRequest) -> AssistantUsageTotal {
+        var result = AssistantUsageTotal()
+        for entry in entries where entry.mergeRequest?.id == mergeRequest.id {
+            result.add(entry.total)
+        }
+        return result
+    }
+
+    func mergeRequestTotals(interval: DateInterval?, now: Date = Date()) -> [AssistantUsageMergeRequestTotal] {
+        guard let range = accountingRange(interval: interval, now: now, through: .hour) else { return [] }
+        var totals: [String: AssistantUsageMergeRequestTotal] = [:]
+        for entry in entries where Self.contains(entry.date, in: range) {
+            guard let mergeRequest = entry.mergeRequest else { continue }
+            var value = totals[mergeRequest.id] ?? .init(mergeRequest: mergeRequest, total: .init())
+            value.total.add(entry.total)
+            if mergeRequest.title != nil || mergeRequest.url != nil { value = .init(mergeRequest: mergeRequest, total: value.total) }
+            totals[mergeRequest.id] = value
+        }
+        return totals.values.sorted {
+            if $0.total.estimatedUSD != $1.total.estimatedUSD { return $0.total.estimatedUSD > $1.total.estimatedUSD }
+            return $0.id < $1.id
+        }
     }
 
     func summary(interval: DateInterval? = nil, now: Date = Date()) -> AssistantUsageSummary {

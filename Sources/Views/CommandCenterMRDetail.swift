@@ -60,6 +60,11 @@ private struct CommandCenterMRDetailContent: View {
     private var target: MRAutomationScope.Target? {
         monitor.scopeTarget(projectID: item.id.projectID, iid: item.id.iid, url: item.url)
     }
+    private var usageMergeRequest: AssistantUsageMergeRequest? {
+        guard let target, let request = item.mergeRequest else { return nil }
+        return .init(host: target.host, username: target.username, projectID: item.id.projectID, iid: item.id.iid,
+            title: request.title, url: item.url.absoluteString)
+    }
     private var work: AssistantAutomationRunner.MergeRequestWork? {
         target.map { .init(host: $0.host, projectID: item.id.projectID, iid: item.id.iid) }
     }
@@ -401,6 +406,7 @@ private struct CommandCenterMRDetailContent: View {
         DisclosureGroup(isExpanded: $detailsExpanded) {
             if detailsExpanded {
                 VStack(alignment: .leading, spacing: 10) {
+                    AssistantUsageMRDetailCost(mergeRequest: usageMergeRequest)
                     if let request = item.mergeRequest {
                         metadata(.CommandCenter.commandCenterAuthor,
                             value: request.author.name.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty ? request.author.username : request.author.name)

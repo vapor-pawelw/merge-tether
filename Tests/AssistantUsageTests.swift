@@ -4,6 +4,89 @@ import Testing
 
 @Suite("Assistant usage")
 struct AssistantUsageTests {
+    @Test("MR ranking uses the chart's selected range and current UTC hour cutoff")
+    func mergeRequestRankingMatchesChartRange() throws {
+        let first = usageMR(iid: 1), second = usageMR(iid: 2), future = usageMR(iid: 3)
+        let snapshot = AssistantUsageSnapshot(startedAt: try usageDate("2026-11-01T00:00:00Z"), entries: [
+            try usageEntry(at: "2026-11-02T23:59:59Z", cost: 100, mergeRequest: first),
+            try usageEntry(at: "2026-11-03T00:00:00Z", cost: 2, mergeRequest: first),
+            try usageEntry(at: "2026-11-04T08:00:00Z", cost: 5, mergeRequest: second),
+            try usageEntry(at: "2026-11-04T12:05:00Z", cost: 1, mergeRequest: first),
+            try usageEntry(at: "2026-11-04T15:00:00Z", cost: 40, mergeRequest: future),
+            try usageEntry(at: "2026-11-05T00:00:00Z", cost: 80, mergeRequest: second)
+        ])
+        let range = DateInterval(start: try usageDate("2026-11-03T00:00:00Z"), end: try usageDate("2026-11-05T00:00:00Z"))
+        let now = try usageDate("2026-11-04T12:30:00Z")
+        let chart = snapshot.chartData(granularity: .hour, interval: range, now: now)
+        let ranking = snapshot.mergeRequestTotals(interval: range, now: now)
+        #expect(chart.buckets.reduce(0) { $0 + $1.overall.estimatedUSD } == 8)
+        #expect(ranking.map(\.id) == [second.id, first.id])
+        #expect(ranking.map(\.total.estimatedUSD) == [5, 3])
+        #expect(ranking.reduce(0) { $0 + $1.total.estimatedUSD } == chart.buckets.reduce(0) { $0 + $1.overall.estimatedUSD })
+    }
+
+    @Test("MR costs distinguish host, account, project and IID without adopting unattributed history")
+    func mergeRequestIdentityIsolation() throws {
+        let target = usageMR()
+        let identities = [target,
+            usageMR(host: "other.example.test"), usageMR(username: "another"),
+            usageMR(projectID: 8), usageMR(iid: 12), usageMR(username: nil)]
+        var entries: [AssistantUsageEntry] = []
+        for (index, identity) in identities.enumerated() {
+            entries.append(try usageEntry(at: "2026-11-04T08:00:00Z", cost: Double(1 << index), mergeRequest: identity))
+        }
+        entries.append(try usageEntry(at: "2026-11-04T08:00:00Z", cost: 64, mergeRequest: nil))
+        let snapshot = AssistantUsageSnapshot(startedAt: try usageDate("2026-11-04T08:00:00Z"), entries: entries)
+        let ranking = snapshot.mergeRequestTotals(interval: nil, now: try usageDate("2026-11-04T12:00:00Z"))
+        #expect(ranking.count == identities.count)
+        #expect(ranking.reduce(0) { $0 + $1.total.estimatedUSD } == 63)
+        for (index, identity) in identities.enumerated() {
+            #expect(snapshot.total(for: identity).estimatedUSD == Double(1 << index))
+        }
+        var renamedTarget = target
+        renamedTarget.title = "Updated display title"
+        renamedTarget.url = "https://gitlab.example.test/team/renamed/-/merge_requests/11"
+        #expect(snapshot.total(for: renamedTarget).estimatedUSD == 1)
+    }
+
+    @Test("MR Details totals span all tracked time, providers and roles while preserving unknown runs")
+    func mergeRequestLifetimeTotalIsIndependentOfDashboardRange() throws {
+        let target = usageMR()
+        let snapshot = AssistantUsageSnapshot(startedAt: try usageDate("2026-10-01T08:00:00Z"), entries: [
+            try usageEntry(at: "2026-10-01T08:00:00Z", cost: 2, mergeRequest: target, role: .codingAgent, assistant: .claude),
+            try usageEntry(at: "2026-10-02T09:00:00Z", cost: nil, mergeRequest: target, role: .verifier),
+            try usageEntry(at: "2026-11-04T08:00:00Z", cost: 3, mergeRequest: target, role: .verifier),
+            try usageEntry(at: "2026-11-04T09:00:00Z", cost: 99, mergeRequest: usageMR(iid: 12))
+        ])
+        let range = DateInterval(start: try usageDate("2026-11-04T00:00:00Z"), end: try usageDate("2026-11-05T00:00:00Z"))
+        let filtered = snapshot.mergeRequestTotals(interval: range, now: try usageDate("2026-11-04T12:00:00Z"))
+        #expect(filtered.first { $0.id == target.id }?.total.estimatedUSD == 3)
+        let lifetime = snapshot.total(for: target)
+        #expect(lifetime.runs == 3 && lifetime.estimatedUSD == 5 && lifetime.unknownCostRuns == 1)
+    }
+
+    @Test("MR ranking combines changed display metadata and leaves unknown-only costs explicitly unknown")
+    func mergeRequestRankingGroupsByIdentityAndRetainsUnknownCostRuns() throws {
+        let target = usageMR()
+        var updated = target
+        updated.title = "Updated MR title"
+        let unknown = usageMR(iid: 12)
+        let snapshot = AssistantUsageSnapshot(startedAt: try usageDate("2026-11-04T08:00:00Z"), entries: [
+            try usageEntry(at: "2026-11-04T08:00:00Z", cost: 2, mergeRequest: target),
+            try usageEntry(at: "2026-11-04T09:00:00Z", cost: 3, mergeRequest: updated, role: .verifier, assistant: .claude),
+            try usageEntry(at: "2026-11-04T10:00:00Z", cost: nil, mergeRequest: updated),
+            try usageEntry(at: "2026-11-04T10:00:00Z", cost: nil, mergeRequest: unknown)
+        ])
+        let ranking = snapshot.mergeRequestTotals(interval: nil, now: try usageDate("2026-11-04T12:00:00Z"))
+        #expect(ranking.count == 2 && ranking.first?.id == target.id)
+        let known = try #require(ranking.first)
+        #expect(known.total.estimatedUSD == 5 && known.total.runs == 3 && known.total.unknownCostRuns == 1)
+        #expect(known.mergeRequest.title == "Updated MR title")
+        let unknownOnly = try #require(ranking.first { $0.id == unknown.id })
+        #expect(unknownOnly.total.runs == 1 && unknownOnly.total.unknownCostRuns == 1)
+        #expect(unknownOnly.total.estimatedUSD == 0)
+    }
+
     @Test("Malformed nonempty Codex events leave the available subtotal explicitly incomplete")
     func malformedJSONEvent() {
         let data = Data("""
@@ -76,5 +159,20 @@ struct AssistantUsageTests {
         #expect(AssistantUsageParser.parse(valid, assistant: .claude, model: nil).estimatedUSD == 0.5)
         let missing = Data(#"{"modelUsage":{"a":{"costUSD":0.2},"b":{}}}"#.utf8)
         #expect(AssistantUsageParser.parse(missing, assistant: .claude, model: nil).estimatedUSD == nil)
+    }
+
+    private func usageMR(host: String = "gitlab.example.test", username: String? = "me", projectID: Int = 7, iid: Int = 11) -> AssistantUsageMergeRequest {
+        .init(host: host, username: username, projectID: projectID, iid: iid,
+            title: "Synthetic MR", url: "https://\(host)/team/repo/-/merge_requests/\(iid)")
+    }
+
+    private func usageDate(_ value: String) throws -> Date {
+        try #require(ISO8601DateFormatter().date(from: value))
+    }
+
+    private func usageEntry(at date: String, cost: Double?, mergeRequest: AssistantUsageMergeRequest?,
+                            role: AssistantUsageRole = .codingAgent, assistant: AutomationAssistant = .codex) throws -> AssistantUsageEntry {
+        .init(date: try usageDate(date), role: role, assistant: assistant,
+            total: .init(runs: 1, estimatedUSD: cost ?? 0, unknownCostRuns: cost == nil ? 1 : 0), mergeRequest: mergeRequest)
     }
 }

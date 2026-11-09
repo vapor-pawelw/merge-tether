@@ -86,11 +86,15 @@ Agent setup checks CLI compatibility and sign-in before accepting your choice. I
 
 Choose **Start a conversation with an agent…** from an MR’s **…** menu to select an installed desktop app or CLI. MergeTether passes an MR context prompt through a desktop deep link or opens the CLI in Terminal; very long desktop prompts are copied for pasting instead. These actions do not enable automatic desktop dispatch or track the resulting conversation. See [all permissions, defaults and limits](docs/automation.md).
 
+## Agent usage
+
+**Settings → Agent Usage** shows only CLI runs started by MergeTether, with estimated costs split between coding agents and verifiers, provider breakdowns and a chart by hour, day, week or month. Its top-five MR ranking follows the selected date range. Each MR's Details also shows its all-time tracked cost. Estimates are not subscription consumption or invoices; unknown and partial measurements remain labelled. Older records without an MR identity contribute to overall totals but are not assigned to an MR retrospectively.
+
 ## Privacy
 
 MergeTether runs locally, without a hosted MergeTether service or remote analytics. It uses your local `glab` credentials, stores settings and activity on your Mac, downloads avatars directly and checks GitHub for releases. Agent workers can read local files, run commands and access the network; task content and data they read can reach the provider you choose. Credential filtering applies to prepared excerpts, not every live tool read. Scope automation to repositories you are allowed to share.
 
-Settings compares local usage estimates for coding-agent work and verification. Tracking starts with new app-owned runs; these estimates are not billing receipts. The usage ledger stores numeric metadata without prompts or transcripts. See [how estimates work](docs/automation.md#agent-usage-estimates).
+Settings compares local usage estimates for coding-agent work and verification. Tracking starts with new app-owned runs; these estimates are not billing receipts. The usage ledger stores counts, estimates and optional MR identity, title and URL, without prompts or transcripts. See [how estimates work](docs/automation.md#agent-usage-estimates).
 
 ## Contributing
 
