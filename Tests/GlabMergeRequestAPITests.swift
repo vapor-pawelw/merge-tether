@@ -4,6 +4,13 @@ import Testing
 
 @MainActor
 struct GlabMergeRequestAPITests {
+    @Test func unavailableApprovalsStillDeduplicateAssignedReviewers() {
+        let reviewer = Todo.Author(id: 8, username: "waiting", name: "Waiting", avatarURL: nil)
+        let invalid = Todo.Author(id: 0, username: "invalid", name: "Invalid", avatarURL: nil)
+        let people = MergeRequestApprovalProgress.participants(reviewers: [reviewer, reviewer, invalid])
+        #expect(people.map(\.author.id) == [8])
+        #expect(people.map(\.approved) == [false])
+    }
     @Test(arguments: [(0, 0, false), (2, 0, true), (0, 2, false), (1, 2, false), (2, 2, true)])
     func approvalSatisfactionDependsOnlyOnTheApprovalRequirement(_ example: (Int, Int, Bool)) throws {
         let progress = try #require(MergeRequestApprovalProgress(completed: example.0, required: example.1))

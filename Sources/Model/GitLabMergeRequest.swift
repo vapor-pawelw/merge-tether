@@ -18,6 +18,10 @@ struct MergeRequestApprovalProgress: Equatable, Sendable {
     }
 
     func participants(reviewers: [Todo.Author]) -> [Participant] {
+        Self.participants(approvedBy: approvedBy, reviewers: reviewers)
+    }
+
+    static func participants(approvedBy: [Todo.Author] = [], reviewers: [Todo.Author]) -> [Participant] {
         var seen: Set<Int> = []
         let people = approvedBy.map { Participant(author: $0, approved: true) }
             + reviewers.map { Participant(author: $0, approved: false) }

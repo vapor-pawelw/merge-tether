@@ -9,7 +9,7 @@ struct BoardApprovalProgressBadge: View {
     @State private var hoverTask: Task<Void, Never>?
 
     private var people: [MergeRequestApprovalProgress.Participant] {
-        progress?.participants(reviewers: reviewers) ?? reviewers.map { .init(author: $0, approved: false) }
+        progress?.participants(reviewers: reviewers) ?? MergeRequestApprovalProgress.participants(reviewers: reviewers)
     }
     private var satisfied: Bool {
         progress?.isSatisfied ?? false
