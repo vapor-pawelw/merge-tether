@@ -1,6 +1,72 @@
 {
   "sourceLanguage": "en",
   "strings": {
+    "menu.scope.draftConfirmationRepositoryMessage.%@": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "This enables automation for MRs in %@ that follow the repository default, including existing and future Draft MRs. Enabled rules may start agent reviews, feedback fixes, pipeline or conflict work. Your current permissions also control pushes, comment publication, approvals and discussion resolution.\n\nExplicit Always on/off choices, global action permissions and filters still apply. MRs stay Draft and cannot merge automatically until Ready."
+          }
+        }
+      }
+    },
+    "menu.scope.draftConfirmationAutoMessage.%@": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Automation will resume for %@ while it is Draft. Enabled rules may start agent reviews, feedback fixes, pipeline or conflict work. Your current permissions also control pushes, comment publication, approvals and discussion resolution.\n\nThis MR returns to Auto and follows repository and global defaults, including future changes to the Draft pause. Global action permissions and filters still apply. The MR stays Draft and cannot merge automatically until Ready."
+          }
+        }
+      }
+    },
+    "menu.scope.draftConfirmationTitle": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Enable automation while Draft?"
+          }
+        }
+      }
+    },
+    "menu.scope.draftConfirmationEnable": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Enable automation"
+          }
+        }
+      }
+    },
+    "menu.scope.draftConfirmationMessage.%@": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Automation will be enabled for %@ while it is Draft. Enabled rules may start agent reviews, feedback fixes, pipeline or conflict work. Your current permissions also control pushes, comment publication, approvals and discussion resolution.\n\nThis sets Always on for this MR and keeps that choice when it becomes Ready. Global action permissions and filters still apply. The MR stays Draft and cannot merge automatically until Ready."
+          }
+        }
+      }
+    },
+    "menu.scope.draftConfirmationGlobalMessage": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Draft merge requests in your automation scope will follow the same enabled rules as Ready MRs. This may start agent reviews, feedback fixes, pipeline or conflict work. Your current permissions also control pushes, comment publication, approvals and discussion resolution.\n\nThis applies to existing and future drafts in Auto. Explicit Always on/off choices, global action permissions and filters still apply. MRs stay Draft and cannot merge automatically until Ready."
+          }
+        }
+      }
+    },
     "menu.scope.enabledHelp.%@": {
       "extractionState": "manual",
       "localizations": {

@@ -2,6 +2,7 @@ import SwiftUI
 
 struct AutomationScopeSettingsView: View {
     let monitor: TodoMonitorService
+    @State private var confirmingDraftAutomation = false
 
     var body: some View {
         VStack(spacing: 10) {
@@ -25,8 +26,22 @@ struct AutomationScopeSettingsView: View {
                     Text(.BoardActivity.groupingHelp).font(.caption).foregroundStyle(.secondary)
                     Toggle(isOn: Binding(
                         get: { monitor.settings.automation.scope.pauseDraftsByDefault },
-                        set: { monitor.settings.automation.scope.pauseDraftsByDefault = $0; monitor.settings.save() }
+                        set: { paused in
+                            if paused {
+                                monitor.settings.automation.scope.pauseDraftsByDefault = true
+                                monitor.settings.save()
+                            } else {
+                                confirmingDraftAutomation = true
+                                Task {
+                                    defer { confirmingDraftAutomation = false }
+                                    guard confirmDraftAutomation(message: .Menu.menuScopeDraftConfirmationGlobalMessage) else { return }
+                                    monitor.settings.automation.scope.pauseDraftsByDefault = false
+                                    monitor.settings.save()
+                                }
+                            }
+                        }
                     )) { Text(.Menu.menuScopePauseDrafts) }
+                    .disabled(confirmingDraftAutomation)
                     Text(.Menu.menuScopePauseDraftsHelp).font(.caption).foregroundStyle(.secondary)
                 }
                 .padding(.horizontal, 20).padding(.top, 12)

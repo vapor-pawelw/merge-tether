@@ -105,13 +105,15 @@ struct BoardCompactJobCard: View {
             Spacer(minLength: 4)
             if let finishedState { FinishedMergeRequestBadge(state: finishedState) }
             else if isDraft { BoardDraftBadge() }
-            if finishedState == nil {
-                BoardAutomationToggle(settings: monitor.settings, target: scopeTarget, projectPath: repositoryPath, isDraft: isDraft)
+            HStack(spacing: 0) {
+                if finishedState == nil {
+                    BoardAutomationToggle(settings: monitor.settings, target: scopeTarget, projectPath: repositoryPath, isDraft: isDraft)
+                }
+                BoardPinButton(pin: .mergeRequest(host: handoff.key.work.host,
+                    username: handoff.key.username, projectID: handoff.key.work.projectID, iid: handoff.key.work.iid),
+                    settings: monitor.settings)
+                BoardActionsMenu { menuItems }
             }
-            BoardPinButton(pin: .mergeRequest(host: handoff.key.work.host,
-                username: handoff.key.username, projectID: handoff.key.work.projectID, iid: handoff.key.work.iid),
-                settings: monitor.settings)
-            BoardActionsMenu { menuItems }
         }
         .font(.caption).foregroundStyle(.secondary)
     }
