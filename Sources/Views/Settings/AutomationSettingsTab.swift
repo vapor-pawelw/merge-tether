@@ -9,7 +9,6 @@ struct AutomationSettingsTab: View {
     @State private var trigger: Trigger = .reviewRequested
     @State private var page: Page = .checkpoints
     @State private var packageChoice: AutomationPackageChoice?
-    @State private var pendingCompletionPreset: AutomationPreset?
     @State private var isChoosingWorkspace = false
     @State private var showTemplates = false
     @State private var setupAction: SetupAction?
@@ -105,7 +104,7 @@ struct AutomationSettingsTab: View {
                     } label: {
                         Text(.Settings.settingsAutomationApply)
                     }
-                    .disabled((draft == settings.automation && !hasPendingCompletionChange) || hasIncompleteRule)
+                    .disabled((draft == settings.automation) || hasIncompleteRule)
                 }
                 .padding(.horizontal, 20)
                 .padding(.vertical, 12)
@@ -123,13 +122,7 @@ struct AutomationSettingsTab: View {
 
     private func applyDraft() {
         settings.automation = draft.preservingScope(from: settings.automation)
-        if let pendingCompletionPreset { settings.applyCompletionDefaults(for: pendingCompletionPreset) }
-        pendingCompletionPreset = nil
-        monitor.applyFinishedMRRemovalPreference()
-    }
-
-    private var hasPendingCompletionChange: Bool {
-        pendingCompletionPreset == .full && !settings.autoRemoveFinishedMRs
+        monitor.applySettings()
     }
 
     private var hasIncompleteRule: Bool {
@@ -208,7 +201,6 @@ struct AutomationSettingsTab: View {
                     if let packageChoice {
                         let assistant = draft.assistant
                         packageChoice.apply(to: &draft, assistant: assistant)
-                        pendingCompletionPreset = packageChoice
                     }
                 } label: { Text(.Settings.settingsAutomationPackageUseSelection) }
                     .disabled(packageChoice == nil || (packageChoice?.requiresCLI == true

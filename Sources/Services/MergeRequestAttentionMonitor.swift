@@ -648,7 +648,7 @@ final class MergeRequestAttentionMonitor {
             onDisplayMetadataObserved?(request, target, revision, readStartedAt)
             guard isTracked(request) else { return }
             settings?.mrLifecycleLedger.record(request, for: target, now: readStartedAt,
-                autoRemoveFinished: settings?.autoRemoveFinishedMRs == true)
+                autoRemoveFinished: true)
             onAutomationEligibilityObserved?()
         }
         guard revision == glab.accountRevision else { return }
@@ -1066,9 +1066,7 @@ final class MergeRequestAttentionMonitor {
             retainedCatalog[id] = item
         }
         if let settings {
-            if settings.autoRemoveFinishedMRs {
-                settings.mrLifecycleLedger.prepareFinishedRemoval(host: host, username: user.username)
-            }
+            settings.mrLifecycleLedger.prepareFinishedRemoval(host: host, username: user.username)
             for target in settings.mrLifecycleLedger.targets(host: host, username: user.username) {
                 let id = Item.ID(projectID: target.projectID, iid: target.iid ?? 0)
                 if settings.mrLifecycleLedger.isSuppressed(target) || settings.ignoredMergeRequests.contains(target) {

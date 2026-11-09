@@ -68,25 +68,9 @@ struct GeneralSettingsTab: View {
                 Text(.Settings.settingsGeneralNotificationsSection)
             }
             Section {
-                Toggle(isOn: autoRemoveFinishedMRsBinding) {
-                    Text(.MRLifecycleBanners.mrLifecycleBannersAutoRemoveToggle)
-                }
-            } header: {
-                Text(.MRLifecycleBanners.mrLifecycleBannersManagementTitle)
-            } footer: {
-                Text(.MRLifecycleBanners.mrLifecycleBannersAutoRemoveHelp)
-            }
-            Section {
-                Toggle(isOn: completionBinding(\.showMergedMRCompletions)) {
-                    Text(.MRLifecycle.completionShowMerged)
-                }
-                Toggle(isOn: completionBinding(\.showClosedMRCompletions)) {
-                    Text(.MRLifecycle.completionShowClosed)
-                }
+                Text(.MRLifecycle.completionSettingsHelp).font(.caption).foregroundStyle(.secondary)
             } header: {
                 Text(.MRLifecycle.completionSettingsTitle)
-            } footer: {
-                Text(.MRLifecycle.completionSettingsHelp)
             }
             Section {
                 Toggle(isOn: autoHandledEventBannersBinding) {
@@ -121,23 +105,6 @@ struct GeneralSettingsTab: View {
             set: { newValue in
                 monitor.settings.autoHandledEventBannersEnabled = newValue
                 monitor.settings.save()
-            }
-        )
-    }
-
-    private func completionBinding(_ keyPath: ReferenceWritableKeyPath<SettingsManager, Bool>) -> Binding<Bool> {
-        Binding(get: { monitor.settings[keyPath: keyPath] }, set: {
-            monitor.settings[keyPath: keyPath] = $0
-            monitor.settings.save()
-        })
-    }
-
-    private var autoRemoveFinishedMRsBinding: Binding<Bool> {
-        Binding(
-            get: { monitor.settings.autoRemoveFinishedMRs },
-            set: { newValue in
-                monitor.settings.autoRemoveFinishedMRs = newValue
-                monitor.applyFinishedMRRemovalPreference()
             }
         )
     }

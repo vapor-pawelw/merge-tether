@@ -6,11 +6,19 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 
 ## Unreleased
 
-- Show a compact received/required approval counter beside the MR number on Mac and iOS, using GitLab's required-approval progress and an explicit unknown state when counts cannot be read.
+- Run up to four MR workers concurrently, retain persistent CLI login/quota banners, group toolbar actions and highlight clickable pin/automation controls.
+- Retain headless worker output and validated completion checkpoints across restarts, wait for worker cleanup on Quit, and reconcile previous work on deliberate retries.
+- Always show MR monitoring or current-check status instead of empty cards.
+
+- Always move merged and closed MR updates to Inbox until Seen, removing obsolete board-cleanup and completion visibility switches.
+
+- Put MR numbers and merge dependencies directly below card titles, restore compact header menus, link queued follow-ups to their exact reviewer comments, and explain why automatic follow-up is waiting.
+
+- Show a compact received/required approval counter on Mac and iOS, using GitLab's required-approval progress and an explicit unknown state when counts cannot be read.
 
 - Show exact comment quotations and links for open feedback and re-review blockers, distinguish unverified concerns and missing replies from confirmed corrections, and keep verified reviewer-waiting states neutral without dismissing independent GitLab change requests.
 
-- Share MR card actions between right-click and a bottom-right Actions button. Configure the default conversation app, hold Option for a one-time alternative, and open desktop conversations with a minimal MR context attachment and an empty message field.
+- Share MR card actions between right-click and a compact top-right ellipsis menu. Configure the default conversation app, hold Option for a one-time alternative, and open desktop conversations with a minimal MR context attachment and an empty message field.
 
 - Move transient proposals, unmatched GitLab to-dos, assistant runs and completion updates from the board into a spacious toolbar Inbox popover, keeping My merge requests and Reviewing as the board's persistent lanes.
 
@@ -27,7 +35,7 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 - Rank the five highest-cost MRs within the Agent Usage date range and show each MR’s all-time tracked cost, preserving account identity and explicitly unattributed historical records.
 - Quote and link the exact feedback comment behind a decision; save precise ignored suggestions with confirmation, a conditional Details list, Restore and Reset, and current-context prompts for verifiers and coding agents.
 - Offer independent per-MR automatic publication, merge and approval opt-outs, with ready-only checkpoints and fresh automatic resumption when restored to Auto.
-- Keep merged/closed completion updates in Other items until Seen, independently of banners and lane cleanup; apply cleanup with Full onboarding/profile defaults while preserving saved upgrade preferences.
+- Keep merged/closed completion updates in Inbox until Seen, independently of banners, and automatically remove finished MRs from the board.
 
 - Track MR lifecycle changes independently of coding automation, announce merged, closed and Draft/Ready transitions, and retain completion feedback until Seen independently of automatic lane cleanup.
 - Mark your own Draft merge requests ready from their card, menu and Details, with fresh account, ownership and revision checks.
@@ -35,7 +43,7 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 - Apply Draft policy across agent checks, feedback, publication, CI and conflicts, retain pending events while paused, and keep Draft/Ready changes from overriding forced choices. Drafts still never merge automatically.
 
 - Add a simple per-MR Automation switch and repository-default toggles, preserving inherited scope and existing action permissions.
-- Keep cached background refreshes silent while showing startup, explicit global and per-MR refresh progress without weakening action freshness checks.
+- Avoid spinner churn during cached background checks while retaining factual status text and showing startup, explicit global and per-MR refresh progress without weakening action freshness checks.
 - Keep cards at normal opacity and mute only titles/statuses according to the selected lower-section grouping.
 
 - Compare app-owned coding-agent and verification usage in a dedicated Settings tab, with persistent USD estimates, daily averages/history, hourly through monthly Codex/Claude bars and precise hover details; retain reported tokens and explicit unknown or partial runs.

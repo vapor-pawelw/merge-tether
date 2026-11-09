@@ -3,84 +3,37 @@ import Testing
 @testable import GitLabTodos
 
 @MainActor
-@Suite("Lifecycle completion settings")
+@Suite("Lifecycle completion migration")
 struct LifecycleCompletionSettingsTests {
-    @Test func completionDisplayFiltersDefaultOnAndPersistIndependentlyFromBannersAndNotifications() {
-        let (defaults, suite) = makeDefaults()
-        defer { defaults.removePersistentDomain(forName: suite) }
-        let settings = SettingsManager(defaults: defaults)
-        #expect(settings.showMergedMRCompletions)
-        #expect(settings.showClosedMRCompletions)
-        settings.showMergedMRCompletions = false
-        settings.showClosedMRCompletions = true
-        settings.autoHandledEventBannersEnabled = false
-        settings.notificationsEnabled = false
-        settings.save()
-        let reloaded = SettingsManager(defaults: defaults)
-        #expect(!reloaded.showMergedMRCompletions)
-        #expect(reloaded.showClosedMRCompletions)
-        #expect(!reloaded.autoHandledEventBannersEnabled && !reloaded.notificationsEnabled)
-        reloaded.showMergedMRCompletions = true
-        reloaded.showClosedMRCompletions = false
-        reloaded.save()
-        let again = SettingsManager(defaults: defaults)
-        #expect(again.showMergedMRCompletions && !again.showClosedMRCompletions)
-    }
-
-    @Test func explicitFullCleanupDefaultsChangeNoAutomationPermissionsOrPublicationMode() {
-        let (defaults, suite) = makeDefaults()
-        defer { defaults.removePersistentDomain(forName: suite) }
-        let settings = SettingsManager(defaults: defaults)
-        settings.automation.applyPreset(.full, for: .codex)
-        settings.automation.publicationMode = .aiReplies
-        settings.automation.autoMergeEnabled = false
-        settings.automation.allowFollowUpPush = false
-        settings.showMergedMRCompletions = false
-        let before = settings.automation
-        settings.applyCompletionDefaults(for: .full)
-        #expect(settings.autoRemoveFinishedMRs)
-        #expect(settings.automation == before)
-        #expect(!settings.showMergedMRCompletions)
-        settings.save()
-        let reloaded = SettingsManager(defaults: defaults)
-        #expect(reloaded.autoRemoveFinishedMRs)
-        #expect(reloaded.automation == before)
-    }
-
-    @Test(arguments: [AutomationPreset.manual, .checkpoints], [false, true])
-    func otherProfilesPreserveCleanupAndReceiptPreferences(_ preset: AutomationPreset, _ cleanup: Bool) {
-        let (defaults, suite) = makeDefaults()
-        defer { defaults.removePersistentDomain(forName: suite) }
-        let settings = SettingsManager(defaults: defaults)
-        settings.autoRemoveFinishedMRs = cleanup
-        settings.showClosedMRCompletions = false
-        settings.applyCompletionDefaults(for: preset)
-        #expect(settings.autoRemoveFinishedMRs == cleanup)
-        #expect(!settings.showClosedMRCompletions)
-    }
-
     @Test(arguments: [false, true])
-    func loadingLegacyFullPreservesStoredCleanupAndAllCustomPermissions(_ cleanup: Bool) throws {
-        let (defaults, suite) = makeDefaults()
+    func legacyFiltersDoNotHideReceiptsOrChangeAutomation(_ oldPreference: Bool) throws {
+        // given
+        let suite = "LifecycleCompletionSettings.\(UUID())"
+        let defaults = try #require(UserDefaults(suiteName: suite))
         defer { defaults.removePersistentDomain(forName: suite) }
+        let target = MRAutomationScope.Target(host: "gitlab.example.test", username: "author7", projectID: 1, iid: 2)
+        let fixture = MRDependencyPresentationTests()
+        var ledger = MergeRequestLifecycleLedger()
+        ledger.record(try fixture.request(2, project: 1), for: target, now: Date(timeIntervalSince1970: 1))
+        ledger.record(try fixture.request(2, project: 1, state: "closed"), for: target, now: Date(timeIntervalSince1970: 2))
+        let receipt = try #require(ledger.unreadCompletions(host: target.host, username: target.username, showMerged: true, showClosed: true).first)
+        defaults.set(try JSONEncoder().encode(ledger), forKey: "mrLifecycleLedger")
+        for key in ["autoRemoveFinishedMRs", "showMergedMRCompletions", "showClosedMRCompletions"] {
+            defaults.set(oldPreference, forKey: key)
+        }
         var automation = AutomationSettings()
         automation.applyPreset(.full, for: .codex)
-        automation.publicationMode = .aiReplies
         automation.autoMergeEnabled = false
+        automation.allowFollowUpPush = false
         defaults.set(try JSONEncoder().encode(automation), forKey: "automation")
-        defaults.set(cleanup, forKey: "autoRemoveFinishedMRs")
+        // when
         let settings = SettingsManager(defaults: defaults)
-        #expect(settings.autoRemoveFinishedMRs == cleanup)
-        #expect(settings.automation == automation)
-        #expect(settings.showMergedMRCompletions && settings.showClosedMRCompletions)
         settings.save()
-        #expect(SettingsManager(defaults: defaults).automation == automation)
-    }
-
-    private func makeDefaults() -> (UserDefaults, String) {
-        let suite = "LifecycleCompletionSettings.\(UUID().uuidString)"
-        let defaults = UserDefaults(suiteName: suite)!
-        defaults.removePersistentDomain(forName: suite)
-        return (defaults, suite)
+        let reloaded = SettingsManager(defaults: defaults)
+        // then
+        #expect(reloaded.mrLifecycleLedger.isSuppressed(target))
+        #expect(reloaded.mrLifecycleLedger.unreadCompletions(host: target.host, username: target.username, showMerged: true, showClosed: true).map(\.id) == [receipt.id])
+        #expect(reloaded.automation == automation)
+        #expect(defaults.object(forKey: "showClosedMRCompletions") == nil)
     }
 }

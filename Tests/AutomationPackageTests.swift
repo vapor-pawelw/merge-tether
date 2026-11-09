@@ -234,7 +234,7 @@ struct AutomationPackageTests {
         let item = MergeRequestAttentionMonitor.Item(id: .init(projectID: 1, iid: 42), title: request.title,
             url: request.webURL, mergeRequest: request, isAuthored: true)
         settings.mrLifecycleLedger.record(request, for: target, now: Date(timeIntervalSince1970: 1))
-        #expect(monitor.ownMergeRequestItems.map(\.id.iid) == [42])
+        #expect(monitor.ownMergeRequestItems.isEmpty)
         monitor.acknowledgeFinishedMergeRequest(item)
         #expect(monitor.ownMergeRequestItems.isEmpty && monitor.hiddenBoardTargets.contains(target))
         #expect(settings.ignoredMergeRequests.isEmpty)
@@ -242,12 +242,10 @@ struct AutomationPackageTests {
         settings.mrLifecycleLedger.record(try draftPolicyRequest(draft: false), for: target, now: Date(timeIntervalSince1970: 2))
         monitor.acknowledgeFinishedMergeRequest(item)
         #expect(!settings.mrLifecycleLedger.isSuppressed(target) && monitor.ownMergeRequestItems.map(\.id.iid) == [42])
-        settings.autoRemoveFinishedMRs = true
         settings.mrLifecycleLedger.record(request, for: target, now: Date(timeIntervalSince1970: 3))
-        monitor.applyFinishedMRRemovalPreference()
+        monitor.applySettings()
         #expect(monitor.ownMergeRequestItems.isEmpty && settings.ignoredMergeRequests.isEmpty)
-        settings.autoRemoveFinishedMRs = false
-        monitor.applyFinishedMRRemovalPreference()
+        monitor.applySettings()
         #expect(monitor.ownMergeRequestItems.isEmpty)
     }
 

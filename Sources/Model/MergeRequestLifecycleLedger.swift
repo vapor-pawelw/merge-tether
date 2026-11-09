@@ -71,8 +71,9 @@ struct MergeRequestLifecycleLedger: Codable, Sendable {
         entries[target]?.acknowledgedTerminalState = entry.request.state
     }
 
-    mutating func prepareFinishedRemoval(host: String, username: String) {
-        for target in targets(host: host, username: username) where !isSuppressed(target) {
+    mutating func prepareFinishedRemoval(host: String? = nil, username: String? = nil) {
+        for target in Set(entries.keys) where (host == nil || target.host == host)
+            && (username == nil || target.username == username) && !isSuppressed(target) {
             guard let entry = entries[target], Self.isFinished(entry.request) else { continue }
             retainCompletion(entry.request, for: target, id: UUID(), observedAt: entry.terminalObservedAt ?? entry.observedAt,
                 replacing: false)

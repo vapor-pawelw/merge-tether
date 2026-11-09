@@ -1429,7 +1429,10 @@ final class TodoMonitorService {
     var hiddenBoardTargets: Set<MRAutomationScope.Target> {
         guard let host = glab.resolvedHost, let username = glab.currentUsername else { return settings.ignoredMergeRequests }
         return settings.ignoredMergeRequests.union(settings.mrLifecycleLedger.targets(host: host, username: username)
-            .filter { settings.mrLifecycleLedger.isSuppressed($0) })
+            .filter { target in
+                let state = settings.mrLifecycleLedger.request(for: target)?.state
+                return state == "merged" || state == "closed"
+            })
     }
 
     private func lifecycleCatalogItems(host: String, username: String) -> [MergeRequestAttentionMonitor.Item] {
@@ -1458,7 +1461,7 @@ final class TodoMonitorService {
             let target = MRAutomationScope.Target(host: host, username: username, projectID: request.projectID, iid: request.iid)
             guard !settings.ignoredMergeRequests.contains(target) else { continue }
             settings.mrLifecycleLedger.record(request, for: target, now: observedAt,
-                autoRemoveFinished: settings.autoRemoveFinishedMRs)
+                autoRemoveFinished: true)
         }
         settings.save()
         deliverLifecycleTransitions()
@@ -1493,8 +1496,8 @@ final class TodoMonitorService {
         confirmedAttention.update(pendingUserAttention)
     }
 
-    func applyFinishedMRRemovalPreference() {
-        if settings.autoRemoveFinishedMRs, let host = glab.resolvedHost, let username = glab.currentUsername {
+    func applySettings() {
+        if let host = glab.resolvedHost, let username = glab.currentUsername {
             settings.mrLifecycleLedger.prepareFinishedRemoval(host: host, username: username)
         }
         settings.save()
@@ -1504,7 +1507,7 @@ final class TodoMonitorService {
     var lifecycleCompletions: [MergeRequestLifecycleLedger.CompletionReceipt] {
         guard let host = glab.resolvedHost, let username = glab.currentUsername else { return [] }
         return settings.mrLifecycleLedger.unreadCompletions(host: host, username: username,
-            showMerged: settings.showMergedMRCompletions, showClosed: settings.showClosedMRCompletions)
+            showMerged: true, showClosed: true)
     }
 
     @discardableResult

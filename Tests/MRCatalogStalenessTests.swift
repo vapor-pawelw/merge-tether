@@ -491,12 +491,14 @@ struct MRCatalogStalenessTests {
         try h.write("explicit.json", request(3, owned: false, state: state))
         try await h.poll()
         #expect(!h.monitor.hasError)
-        #expect(h.monitor.currentOpenItems.map(\.id.iid) == [3])
-        #expect(h.monitor.currentOpenItems.first?.mergeRequest?.state == state)
+        #expect(h.monitor.currentOpenItems.isEmpty)
+        #expect(h.settings.mrLifecycleLedger.request(for: target)?.state == state)
         #expect(h.settings.automation.scope[target] == .active)
         #expect(h.settings.automation.scope.isManaged(target))
         let restartedSettings = SettingsManager(defaults: h.defaults)
-        #expect(restartedSettings.mrLifecycleLedger.retainedRequests(host: host, username: "me").first?.state == state)
+        #expect(restartedSettings.mrLifecycleLedger.retainedRequests(host: host, username: "me").isEmpty)
+        #expect(restartedSettings.mrLifecycleLedger.unreadCompletions(host: host, username: "me",
+            showMerged: true, showClosed: true).first?.kind.rawValue == state)
     }
 
     @Test func aMissingManagedOwnListingRequiresAFreshStateReadAndDoesNotInferClosureOnFailure() async throws {

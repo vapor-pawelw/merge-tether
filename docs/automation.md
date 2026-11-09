@@ -1,6 +1,8 @@
 # Automation and permissions
 
-MergeTether is a local MR command center. Manual GitLab management works without a coding agent. All agent automation requires a compatible, signed-in Codex CLI or Claude CLI; the desktop applications are optional. Tasks run headlessly, with their progress, results and failures available in the main window.
+MergeTether is a local MR command center. Manual GitLab management works without a coding agent. All agent automation requires a compatible, signed-in Codex CLI or Claude CLI; the desktop applications are optional. Tasks run headlessly, with their progress, results and failures available in the main window. Up to four different MR workers run concurrently, with a single worker per MR. Persistent login and quota banners pause unstarted work for the affected provider. Login opens in the default terminal; explicit retry releases queued work, while stopped runs require their own deliberate retry.
+
+Worker output is written to private files throughout execution. Validated complete results receive an account/run/head-bound completion checkpoint authenticated with a Keychain-held signing key and stored outside the worker directory, recoverable at startup. Ordinary Quit cancels worker process trees and waits for cleanup and persistence. Incomplete work remains Interrupted with retained files; raw partial output never establishes success or authorizes a remote write. CLI session persistence is disabled. Retry starts a fresh task, inspects the previous run and re-fetches current GitLab commits, discussions and drafts before continuing; existing work must not be duplicated. Force Quit bypasses that shutdown sequence.
 
 ## How a merge request moves through MergeTether
 
@@ -102,11 +104,11 @@ Opening an external destination is not proof that its work completed. A manual s
 
 To-dos are incoming events. A recognized update for an MR already on the board updates its action state and is acknowledged after that state is persisted. The card shows the resulting action, rather than a separate to-do row. The action and any running or failed agent task remain visible after the GitLab to-do disappears.
 
-A new foreign MR is proposed in **Other items** with **Add and handle** or **Ignore this MR**. With matching enabled automation, active scope and a ready selected CLI, eligible MRs are adopted and handled automatically. Explicitly ignored or paused MRs are not silently re-adopted. Manual re-addition restores an ignored MR.
+A new foreign MR is proposed in **Inbox** with **Add and handle** or **Ignore this MR**. With matching enabled automation, active scope and a ready selected CLI, eligible MRs are adopted and handled automatically. Explicitly ignored or paused MRs are not silently re-adopted. Manual re-addition restores an ignored MR.
 
 A submitted review is handled by its event type and live MR evidence, regardless of the reviewer identity. Open threads on your MR enter the configured follow-up action. General reviewer comments are assessed by the shared semantic verifier before it starts warranted follow-up work; informational summaries do not require code changes. Reviews with no open threads refresh the durable MR state. A failed evidence read leaves the event unread.
 
-Events that cannot be classified safely remain in **Other items** for manual reading; they are never acknowledged as understood. Marking a routed event read does not prove a review finished, a fix was pushed or a draft can be published. Those outcomes keep their separate execution and remote-evidence checks.
+Events that cannot be classified safely remain in **Inbox** for manual reading; they are never acknowledged as understood. Marking a routed event read does not prove a review finished, a fix was pushed or a draft can be published. Those outcomes keep their separate execution and remote-evidence checks.
 
 ## Automation profiles
 
@@ -150,9 +152,9 @@ The menu-bar indicator is neutral when there is no human action waiting and ambe
 
 Tracked MR lifecycle monitoring continues while coding automation is paused or every automatic feature is off. Successful observations record account-specific state across restarts; only a change from a previously observed state emits a merged, closed, Draft-to-ready or ready-to-Draft event. Initial catalogs, missing list entries and failed reads do not create lifecycle events. Reopened MRs resume normal tracking.
 
-Merged and closed observations create durable, account-scoped completion updates in Other items. They survive restart, banner consumption and main-lane cleanup until **Seen**. Only the latest unseen terminal event for each MR is shown; a later close after reopening has a new identity. An old Seen action cannot acknowledge a newer event or remove a reopened MR. Draft/Ready changes remain banners only.
+Merged and closed observations create durable, account-scoped completion updates in Inbox. They survive restart, banner consumption and main-lane cleanup until **Seen**. Only the latest unseen terminal event for each MR is shown; a later close after reopening has a new identity. An old Seen action cannot acknowledge a newer event or remove a reopened MR. Draft/Ready changes remain banners only.
 
-**Settings → General → Merge request management** controls lane cleanup and the independent Merged/Closed display filters, both enabled by default. Hiding a kind retains its saved unseen updates for later. With cleanup off, finished MR cards remain above open MRs; their Seen action acknowledges the same completion. Enabling cleanup also moves currently retained terminal rows to completion updates at their original observation time. Already suppressed historical rows do not reappear.
+Finished MRs always leave the active board and keep their unread completion in Inbox until **Seen**. Old cleanup and Merged/Closed display preferences no longer hide these updates. Previously retained terminal rows move to Inbox with their original observation time; already acknowledged history does not reappear. Event banners remain independently configurable.
 
 Explicitly applying Full automation or completing Full onboarding enables cleanup without changing the separate automatic-merge prerequisites. Other profiles and upgrades retain existing cleanup preferences. Cleanup is local board management and never merges or closes a GitLab MR. Eligible own-MR automatic merging remains controlled by its existing global permission and per-MR action choice.
 

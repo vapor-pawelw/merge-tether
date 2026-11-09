@@ -89,39 +89,6 @@
         }
       }
     },
-    "mrLifecycleBannersManagementTitle": {
-      "extractionState": "manual",
-      "localizations": {
-        "en": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "Merge request management"
-          }
-        }
-      }
-    },
-    "mrLifecycleBannersAutoRemoveToggle": {
-      "extractionState": "manual",
-      "localizations": {
-        "en": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "Automatically remove merged or closed merge requests from the board"
-          }
-        }
-      }
-    },
-    "mrLifecycleBannersAutoRemoveHelp": {
-      "extractionState": "manual",
-      "localizations": {
-        "en": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "Full automation enables removal when selected. When off, finished merge requests stay on the board until Seen. Completion items and event banners work independently."
-          }
-        }
-      }
-    },
     "mrLifecycleBannersSection": {
       "extractionState": "manual",
       "localizations": {

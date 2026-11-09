@@ -9,13 +9,27 @@ struct LifecycleCompletionIntegrationTests {
     private let target = MRAutomationScope.Target(host: "gitlab.example.test", username: "me", projectID: 7, iid: 11)
     private let start = Date(timeIntervalSince1970: 1_000)
 
+    @Test func obsoletePreferencesCannotHideCompletionsOrKeepFinishedMRsOnTheBoard() throws {
+        try fixture(legacyPreferences: true) { monitor, settings in
+            // given
+            try close(settings)
+            // when
+            let receipt = try #require(monitor.lifecycleCompletions.first)
+            // then
+            #expect(monitor.ownMergeRequestItems.isEmpty)
+            let seen = monitor.acknowledgeLifecycleCompletion(id: receipt.id)
+            #expect(seen && monitor.lifecycleCompletions.isEmpty)
+            settings.mrLifecycleLedger.record(try request(), for: target, now: start.addingTimeInterval(2))
+            #expect(monitor.ownMergeRequestItems.map(\.id.iid) == [11])
+        }
+    }
+
     @Test func automaticCleanupKeepsUnreadReceiptEvenAfterMRIsRemovedFromManagement() throws {
         try fixture { monitor, settings in
             try close(settings)
             let event = try #require(monitor.lifecycleCompletions.first)
-            settings.autoRemoveFinishedMRs = true
             let before = settings.automation
-            monitor.applyFinishedMRRemovalPreference()
+            monitor.applySettings()
             #expect(monitor.ownMergeRequestItems.isEmpty)
             #expect(monitor.lifecycleCompletions.map(\.id) == [event.id])
             settings.ignoredMergeRequests.insert(target)
@@ -27,36 +41,25 @@ struct LifecycleCompletionIntegrationTests {
         }
     }
 
-    @Test func oldRetainedCardSeenCannotAcknowledgeLaterClosureOfSameMRAndHead() throws {
+    @Test func staleSeenCannotAcknowledgeLaterClosureOfSameMRAndHead() throws {
         try fixture { monitor, settings in
             try close(settings)
-            let oldItem = try #require(monitor.ownMergeRequestItems.first)
             let old = try #require(monitor.lifecycleCompletions.first)
-            #expect(oldItem.lifecycleCompletionID == old.id)
             settings.mrLifecycleLedger.record(try request(), for: target, now: start.addingTimeInterval(2))
             settings.mrLifecycleLedger.record(try request(state: "closed"), for: target, now: start.addingTimeInterval(3))
             let current = try #require(monitor.lifecycleCompletions.first)
-            #expect(current.id != old.id)
-            #expect(!monitor.canAcknowledgeFinishedMergeRequest(oldItem))
-            monitor.acknowledgeFinishedMergeRequest(oldItem)
-            #expect(monitor.lifecycleCompletions.map(\.id) == [current.id])
-            let currentItem = try #require(monitor.ownMergeRequestItems.first)
-            monitor.acknowledgeFinishedMergeRequest(currentItem)
-            #expect(monitor.lifecycleCompletions.isEmpty && monitor.ownMergeRequestItems.isEmpty)
-            #expect(settings.ignoredMergeRequests.isEmpty)
+            #expect(current.id != old.id && monitor.ownMergeRequestItems.isEmpty)
+            let stale = monitor.acknowledgeLifecycleCompletion(id: old.id)
+            #expect(!stale && monitor.lifecycleCompletions.map(\.id) == [current.id])
+            let seen = monitor.acknowledgeLifecycleCompletion(id: current.id)
+            #expect(seen && monitor.lifecycleCompletions.isEmpty && settings.ignoredMergeRequests.isEmpty)
         }
     }
 
-    @Test func filtersHideStoredReceiptAndRejectStaleUIAcknowledgementUntilShownAgain() throws {
+    @Test func completionVisibilityAndAcknowledgementRemainAccountScoped() throws {
         try fixture { monitor, settings in
             try close(settings)
             let event = try #require(monitor.lifecycleCompletions.first)
-            settings.showClosedMRCompletions = false
-            #expect(monitor.lifecycleCompletions.isEmpty)
-            let hiddenResult = monitor.acknowledgeLifecycleCompletion(id: event.id)
-            #expect(!hiddenResult)
-            settings.showClosedMRCompletions = true
-            #expect(monitor.lifecycleCompletions.map(\.id) == [event.id])
             monitor.glab.currentUsername = "other"
             let wrongAccount = monitor.acknowledgeLifecycleCompletion(id: event.id)
             #expect(!wrongAccount && monitor.lifecycleCompletions.isEmpty)
@@ -121,10 +124,15 @@ struct LifecycleCompletionIntegrationTests {
         settings.mrLifecycleLedger.record(try request(state: "closed"), for: target, now: start.addingTimeInterval(1))
     }
 
-    private func fixture(_ body: (TodoMonitorService, SettingsManager) throws -> Void) throws {
+    private func fixture(legacyPreferences: Bool = false, _ body: (TodoMonitorService, SettingsManager) throws -> Void) throws {
         let suite = "LifecycleCompletionIntegration.\(UUID())"
         let defaults = try #require(UserDefaults(suiteName: suite))
         defer { defaults.removePersistentDomain(forName: suite) }
+        if legacyPreferences {
+            defaults.set(false, forKey: "autoRemoveFinishedMRs")
+            defaults.set(false, forKey: "showMergedMRCompletions")
+            defaults.set(false, forKey: "showClosedMRCompletions")
+        }
         let settings = SettingsManager(defaults: defaults)
         settings.glabPath = URL(fileURLWithPath: "/usr/bin/false")
         settings.resolvedHost = target.host

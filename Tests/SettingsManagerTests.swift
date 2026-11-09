@@ -41,15 +41,18 @@ struct SettingsManagerTests {
         #expect(settings.isFirstLaunch == true)
     }
 
-    @Test func finishedMRAutomaticRemovalDefaultsOffAndPersistsSeparatelyFromAutomation() {
+    @Test func obsoleteCompletionPreferencesAreRemovedWithoutChangingAutomation() {
         let defaults = makeDefaults()
+        defaults.set(false, forKey: "autoRemoveFinishedMRs")
+        defaults.set(false, forKey: "showMergedMRCompletions")
+        defaults.set(false, forKey: "showClosedMRCompletions")
         let settings = SettingsManager(defaults: defaults)
-        #expect(!settings.autoRemoveFinishedMRs)
-        settings.automation.applyPreset(.full, for: .codex)
-        #expect(!settings.autoRemoveFinishedMRs)
-        settings.autoRemoveFinishedMRs = true
+        let automation = settings.automation
         settings.save()
-        #expect(SettingsManager(defaults: defaults).autoRemoveFinishedMRs)
+        #expect(defaults.object(forKey: "autoRemoveFinishedMRs") == nil)
+        #expect(defaults.object(forKey: "showMergedMRCompletions") == nil)
+        #expect(defaults.object(forKey: "showClosedMRCompletions") == nil)
+        #expect(SettingsManager(defaults: defaults).automation == automation)
     }
 
     @Test("round-trips mutated state through save/reload")
