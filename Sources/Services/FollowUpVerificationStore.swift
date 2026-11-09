@@ -257,7 +257,7 @@ extension FollowUpVerificationStore {
         }
         let origins = runs.filter { origin in
             origin.followUpPushAllowed == true
-                && (origin.execution == nil || origin.execution?.state == .succeeded)
+                && (origin.execution == nil || origin.execution?.state == .succeeded || origin.execution?.state == .blocked)
         }
         guard !origins.isEmpty else { return [] }
         var paths = [recordURL(kind: "follow-up-verifications", work: work, username: username, in: directory)]
@@ -279,13 +279,7 @@ extension FollowUpVerificationStore {
                   let proof = readPublicationReceipt(at: path, requiresFingerprint: false),
                   proof.host == work.host, proof.projectID == work.projectID, proof.iid == work.iid,
                   proof.username == username, let origin = origins.first(where: { $0.id == proof.runID }),
-                  !runs.contains(where: { later in
-                      later.draftRepair == nil && later.createdAt > origin.createdAt && later.execution?.state != .succeeded
-                          && !hasSuccessfulEnvironmentReplacement(for: later, runs: runs, headSHA: proof.headSHA)
-                          && !hasSuccessfulManualReplacement(for: later, runs: runs,
-                              events: settings.automationEvents, headSHA: proof.headSHA)
-                          && !hasSuccessfulRepairReplacement(for: later, runs: runs)
-                  }) else { continue }
+                  origin.execution?.state != .blocked || proof.discussionFingerprint != nil else { continue }
             if let repair = origin.draftRepair {
                 guard proof.drafts.count == 1, proof.drafts[0].id == repair.draftID,
                       proof.drafts[0].bodySHA256 != repair.bodySHA256,
@@ -301,7 +295,21 @@ extension FollowUpVerificationStore {
             if let previous = unique[proof.verificationID], previous != proof { ambiguous.insert(proof.verificationID) }
             else { unique[proof.verificationID] = proof }
         }
-        let candidates = unique.values.filter { !ambiguous.contains($0.verificationID) }
+        let sealed = unique.values.filter { !ambiguous.contains($0.verificationID) }
+        // A worker can finish its sealed replies while reporting publication as blocked.
+        // Admit that ownership to read-only recovery, never directly to publication.
+        // A newer sealed result at the same source revision must not strand sibling replies.
+        let candidates = sealed.filter { proof in
+            guard let origin = origins.first(where: { $0.id == proof.runID }) else { return false }
+            return !runs.contains { later in
+                later.draftRepair == nil && later.createdAt > origin.createdAt && later.execution?.state != .succeeded
+                    && !hasSealedBlockedResult(later, matching: proof, assistant: origin.key.assistant, proofs: sealed)
+                    && !hasSuccessfulEnvironmentReplacement(for: later, runs: runs, headSHA: proof.headSHA)
+                    && !hasSuccessfulManualReplacement(for: later, runs: runs,
+                        events: settings.automationEvents, headSHA: proof.headSHA)
+                    && !hasSuccessfulRepairReplacement(for: later, runs: runs)
+            }
+        }
         // A repair's declaration cannot manufacture provenance for an arbitrary existing user draft.
         // Its complete ancestry must lead back to an independently known ordinary app-owned seal.
         var trusted = candidates.filter { proof in origins.first(where: { $0.id == proof.runID })?.draftRepair == nil }
@@ -315,6 +323,17 @@ extension FollowUpVerificationStore {
             }
         }
         return trusted.sorted { $0.verificationID.uuidString < $1.verificationID.uuidString }
+    }
+
+    private static func hasSealedBlockedResult(_ run: AssistantAutomationRunner.Handoff,
+                                               matching proof: FollowUpVerification, assistant: AutomationAssistant,
+                                               proofs: [FollowUpVerification]) -> Bool {
+        run.execution?.state == .blocked && run.key.assistant == assistant
+            && proofs.contains {
+                $0.runID == run.id && $0.discussionFingerprint != nil && $0.userID == proof.userID
+                    && $0.headSHA == proof.headSHA && $0.sourceProjectID == proof.sourceProjectID
+                    && $0.sourceBranch == proof.sourceBranch
+            }
     }
 
     private static func hasSuccessfulEnvironmentReplacement(for stopped: AssistantAutomationRunner.Handoff,

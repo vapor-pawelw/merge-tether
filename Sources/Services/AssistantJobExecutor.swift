@@ -115,7 +115,12 @@ enum AssistantJobExecutor {
             The verified account is \(handoff.key.username) on \(handoff.key.work.host); recheck before remote writes.
             Use only the task's explicit permissions. If a command needs unavailable approval or evidence, stop with status blocked.
             In your final structured result, status succeeded means the assigned work finished; it never substitutes for remote verification receipts.
-            Return status blocked if any requested work remains undone, a required tool was denied, or meaningful verification is missing.
+            For an author follow-up, implementing and verifying the warranted fix and saving, re-fetching and sealing its
+            private reply completes the worker's part. Publication belongs to MergeTether's separate policy checks.
+            When only publication, reviewer acceptance, approval or merge is pending, report succeeded with those next
+            steps in summary; do not wait for publication or classify that wait as unfinished worker work.
+            Return status blocked if assigned code, tests, remote delivery or reply preparation remains unfinished,
+            a required tool was denied, or meaningful verification is missing.
             Include the MR link, actions, verification and remaining blockers in summary. Do not claim private drafts were saved unless re-fetched.
             \(AgentExplanation.instructions(for: "blocker"))
             Keep the detailed run evidence and completed actions in summary and the transcript.

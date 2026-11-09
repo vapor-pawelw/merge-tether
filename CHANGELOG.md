@@ -6,6 +6,8 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 
 ## Unreleased
 
+- Recover sealed draft replies from blocked author follow-ups through independent current-source verification, without waiting for publication to mark the worker complete.
+
 - Quote comments in Next step only when they support the displayed concern; keep general worker and publication blockers free of unrelated task comments.
 
 - Confirm enabling Draft MR automation with an explanation of enabled work, existing permissions and persistent scope; group automation, pin and action controls more tightly on cards and in Details.
