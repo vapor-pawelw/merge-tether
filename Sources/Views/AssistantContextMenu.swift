@@ -114,7 +114,7 @@ struct AssistantContextMenu: View {
 
     private func present(_ alert: NSAlert) async -> NSApplication.ModalResponse {
         NSApp.activate()
-        if let window = NSApp.keyWindow ?? NSApp.mainWindow { return await alert.beginSheetModal(for: window) }
+        // Inbox popovers can close with the menu. An app-modal alert owns its window.
         return alert.runModal()
     }
 }
