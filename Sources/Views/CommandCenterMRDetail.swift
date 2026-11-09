@@ -573,17 +573,6 @@ private struct CommandCenterMRDetailContent: View {
             if let source = citationContext?.reply(to: draft, rootNoteID: root) {
                 MRCommentCitationView(citation: source, relation: .FeedbackSuggestions.feedbackSuggestionsSourceReply)
             } else { unavailableSource(root) }
-        } else if [.blockedRun, .interruptedRun].contains(action.kind), action.sourceNoteID == nil,
-                  let job = jobs.first, job.workflow == .followUp, !(job.feedbackNoteIDs ?? []).isEmpty {
-            let sources = citationContext?.followUp(job) ?? []
-            if sources.isEmpty {
-                ForEach(Array(Set(job.feedbackNoteIDs ?? [])).filter { $0 > 0 }.sorted(), id: \.self) { id in
-                    unavailableSource(id)
-                }
-            }
-            ForEach(sources) { source in
-                MRCommentCitationView(citation: source, relation: .FeedbackSuggestions.feedbackSuggestionsSourceRun)
-            }
         } else {
             switch action.feedbackEvidence(for: item) {
             case .finding(let finding):

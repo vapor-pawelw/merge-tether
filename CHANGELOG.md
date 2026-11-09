@@ -6,6 +6,8 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 
 ## Unreleased
 
+- Quote comments in Next step only when they support the displayed concern; keep general worker and publication blockers free of unrelated task comments.
+
 - Hide empty optional approvals, show received-only counts without a denominator, fill satisfied approval icons in green, and show approvers and assigned reviewers with avatars on hover.
 
 - Expose draft replies and their threads below the Details publication button, default all current drafts to checked per window, publish the checked count, and keep direct MR publication as Publish all comments.
