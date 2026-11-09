@@ -28,6 +28,21 @@ struct GeneralSettingsTab: View {
             }
 
             Section {
+                Picker(selection: Binding(
+                    get: { monitor.settings.conversationDestination },
+                    set: { monitor.settings.conversationDestination = $0; monitor.settings.save() }
+                )) {
+                    ForEach(AssistantContextLauncher.Destination.allCases) { destination in
+                        Text(destination.label).tag(destination)
+                    }
+                } label: { Text(.AssistantContext.assistantContextDefault) }
+            } header: {
+                Text(.AssistantContext.assistantContextSettingsTitle)
+            } footer: {
+                Text(.AssistantContext.assistantContextSettingsHelp)
+            }
+
+            Section {
                 Picker(selection: refreshIntervalBinding) {
                     ForEach(RefreshInterval.allCases) { interval in
                         Text(interval.displayLabel)

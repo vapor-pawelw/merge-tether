@@ -55,7 +55,6 @@ private struct CommandCenterMRCardContent: View {
                 }
                 .buttonStyle(.plain)
                 .help(Text(verbatim: "\(item.title)\n\(item.url.gitLabProjectPath)\n") + Text(.Board.boardDetails))
-                moreMenu
             }
             if finishedState != nil {
                 FinishedMergeRequestStatus(item: item, monitor: monitor)
@@ -106,6 +105,7 @@ private struct CommandCenterMRCardContent: View {
                     }
                 }
             }
+            HStack { Spacer(minLength: 0); moreMenu }
         }
         .onChange(of: row.latestJob?.id) { _, _ in retryError = nil }
         .controlSize(.small)
@@ -119,6 +119,7 @@ private struct CommandCenterMRCardContent: View {
             }
         }
         .boardCardInteraction(onDetails: onDetails)
+        .contextMenu { menuItems }
         .confirmationDialog(Text(.Board.boardRemove), isPresented: $confirmRemoval, titleVisibility: .visible) {
             Button(role: .destructive) { monitor.removeReviewedMergeRequest(item) } label: { Text(.Board.boardRemove) }
         } message: { Text(.Board.boardRemoveExplanation) }
@@ -263,14 +264,13 @@ private struct CommandCenterMRCardContent: View {
     }
 
     private var moreMenu: some View {
-        Menu {
-            Button(action: onDetails) { Label { Text(.Board.boardDetails) } icon: { Image(systemName: "rectangle.expand.vertical") } }
-            MRCommonMenuItems(item: item, monitor: monitor,
-                onRemove: allowsRemoval ? { confirmRemoval = true } : nil)
-        } label: { BoardCardActionIcon(systemName: "ellipsis") }
-        .menuStyle(.borderlessButton).menuIndicator(.hidden).fixedSize()
-        .frame(width: 24, height: 24)
-        .accessibilityLabel(Text(.CommandCenter.commandCenterActions))
+        BoardActionsMenu { menuItems }
+    }
+
+    @ViewBuilder private var menuItems: some View {
+        Button(action: onDetails) { Label { Text(.Board.boardDetails) } icon: { Image(systemName: "rectangle.expand.vertical") } }
+        MRCommonMenuItems(item: item, monitor: monitor,
+            onRemove: allowsRemoval ? { confirmRemoval = true } : nil)
     }
 
     private var chips: [MRCardPresentation.Chip] { presentation.chips }
@@ -336,7 +336,6 @@ struct BoardTodoRow: View {
                 }
                 .buttonStyle(.plain)
                 .help(Text(verbatim: "\(todo.displayTitle)\n\(todo.project.pathWithNamespace)"))
-                moreMenu
             }
             if let title = todo.target.title ?? (todo.body.isEmpty ? nil : todo.body), !title.isEmpty {
                 Text(verbatim: title).font(.caption).foregroundStyle(.secondary)
@@ -356,11 +355,13 @@ struct BoardTodoRow: View {
                     .disabled(monitor.isAssessingNotice(todo))
             }
             .font(.caption)
+            HStack { Spacer(minLength: 0); moreMenu }
         }
         .controlSize(.small)
         .padding(10)
         .frame(maxWidth: .infinity, alignment: .leading)
         .boardCardInteraction { showingDetails = true }
+        .contextMenu { menuItems }
         .sheet(isPresented: $showingDetails) {
             BoardItemDetailSheet {
                 metadataHeader
@@ -405,29 +406,28 @@ struct BoardTodoRow: View {
     }
 
     private var moreMenu: some View {
-        Menu {
-            Button { showingDetails = true } label: {
-                Label { Text(.Board.boardDetails) } icon: { Image(systemName: "rectangle.expand.vertical") }
-            }
-            Link(destination: todo.targetURL) {
-                Label { Text(.Board.boardEventOpen) } icon: { Image(systemName: "arrow.up.right.square") }
-            }
-            Button { monitor.markDoneWithUndo(todo) } label: {
-                Label { Text(.Board.boardEventMarkRead) } icon: { Image(systemName: "checkmark") }
-            }
-            .disabled(monitor.isAssessingNotice(todo))
-            if todo.targetType == .mergeRequest {
-                AssistantContextMenu(mergeRequestURL: todo.targetURL, title: todo.displayTitle,
-                    workspace: monitor.settings.automation.assistantWorkspace)
-            }
-            if let scopeTarget {
-                Divider()
-                MRAutomationScopeMenu(monitor: monitor, target: scopeTarget,
-                    projectPath: todo.project.pathWithNamespace, isDraft: isDraft)
-            }
-        } label: { BoardCardActionIcon(systemName: "ellipsis") }
-        .menuStyle(.borderlessButton).menuIndicator(.hidden).fixedSize()
-        .frame(width: 24, height: 24)
-        .accessibilityLabel(Text(.CommandCenter.commandCenterActions))
+        BoardActionsMenu { menuItems }
+    }
+
+    @ViewBuilder private var menuItems: some View {
+        Button { showingDetails = true } label: {
+            Label { Text(.Board.boardDetails) } icon: { Image(systemName: "rectangle.expand.vertical") }
+        }
+        Link(destination: todo.targetURL) {
+            Label { Text(.Board.boardEventOpen) } icon: { Image(systemName: "arrow.up.right.square") }
+        }
+        Button { monitor.markDoneWithUndo(todo) } label: {
+            Label { Text(.Board.boardEventMarkRead) } icon: { Image(systemName: "checkmark") }
+        }
+        .disabled(monitor.isAssessingNotice(todo))
+        if todo.targetType == .mergeRequest {
+            AssistantContextMenu(mergeRequestURL: todo.targetURL, title: todo.displayTitle,
+                settings: monitor.settings)
+        }
+        if let scopeTarget {
+            Divider()
+            MRAutomationScopeMenu(monitor: monitor, target: scopeTarget,
+                projectPath: todo.project.pathWithNamespace, isDraft: isDraft)
+        }
     }
 }

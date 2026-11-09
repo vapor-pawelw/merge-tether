@@ -45,28 +45,6 @@ struct BoardCompactJobCard: View {
             HStack(alignment: .top, spacing: 6) {
                 BoardCardTitle(title: handoff.title, repositoryPath: repositoryPath,
                     titleColor: isMuted ? .secondary : .primary)
-                Menu {
-                    Button { showingDetails = true } label: {
-                        Label { Text(.Board.boardDetails) } icon: { Image(systemName: "rectangle.expand.vertical") }
-                    }
-                    GitLabRefreshButton(monitor: monitor,
-                        itemID: .init(projectID: handoff.key.work.projectID, iid: handoff.key.work.iid))
-                    if let url = handoff.mergeRequestURL {
-                        Link(destination: url) {
-                            Label { Text(.CommandCenter.commandCenterOpenGitLab) } icon: { Image(systemName: "arrow.up.right.square") }
-                        }
-                        AssistantContextMenu(mergeRequestURL: url, title: handoff.title,
-                            workspace: monitor.settings.automation.assistantWorkspace)
-                    }
-                    if finishedState == nil {
-                        Divider()
-                        MRAutomationScopeMenu(monitor: monitor, target: scopeTarget,
-                            projectPath: repositoryPath, isDraft: isDraft)
-                    }
-                } label: { BoardCardActionIcon(systemName: "ellipsis") }
-                .menuStyle(.borderlessButton).menuIndicator(.hidden).fixedSize()
-                .frame(width: 24, height: 24)
-                .accessibilityLabel(Text(.CommandCenter.commandCenterActions))
             }
             if let finishedItem {
                 FinishedMergeRequestStatus(item: finishedItem, monitor: monitor)
@@ -78,10 +56,12 @@ struct BoardCompactJobCard: View {
                 Text(.MRHumanAction.mrHumanActionActionReviewRun)
             }
             .buttonStyle(.plain).font(.caption).foregroundStyle(.secondary)
+            HStack { Spacer(minLength: 0); BoardActionsMenu { menuItems } }
         }
         .padding(12).controlSize(.small)
         .frame(maxWidth: .infinity, alignment: .leading)
         .boardCardInteraction { showingDetails = true }
+        .contextMenu { menuItems }
         .sheet(isPresented: $showingDetails) {
             BoardItemDetailSheet {
                 metadataHeader
@@ -93,6 +73,26 @@ struct BoardCompactJobCard: View {
                     MRAutomationScopeMenu(monitor: monitor, target: scopeTarget, projectPath: repositoryPath, isDraft: isDraft)
                 }
             }
+        }
+    }
+
+    @ViewBuilder private var menuItems: some View {
+        Button { showingDetails = true } label: {
+            Label { Text(.Board.boardDetails) } icon: { Image(systemName: "rectangle.expand.vertical") }
+        }
+        GitLabRefreshButton(monitor: monitor,
+            itemID: .init(projectID: handoff.key.work.projectID, iid: handoff.key.work.iid))
+        if let url = handoff.mergeRequestURL {
+            Link(destination: url) {
+                Label { Text(.CommandCenter.commandCenterOpenGitLab) } icon: { Image(systemName: "arrow.up.right.square") }
+            }
+            AssistantContextMenu(mergeRequestURL: url, title: handoff.title,
+                settings: monitor.settings)
+        }
+        if finishedState == nil {
+            Divider()
+            MRAutomationScopeMenu(monitor: monitor, target: scopeTarget,
+                projectPath: repositoryPath, isDraft: isDraft)
         }
     }
 

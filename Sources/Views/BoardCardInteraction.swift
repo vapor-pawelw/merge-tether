@@ -1,5 +1,17 @@
 import SwiftUI
 
+struct BoardActionsMenu<Content: View>: View {
+    @ViewBuilder var content: () -> Content
+
+    var body: some View {
+        Menu(content: content) {
+            Label { Text(.CommandCenter.commandCenterActions) } icon: { Image(systemName: "ellipsis") }
+        }
+        .menuStyle(.button).menuIndicator(.hidden).fixedSize()
+        .controlSize(.small)
+    }
+}
+
 /// The background exposes a keyboard action; the fallback tap also covers static text.
 private struct BoardCardInteraction: ViewModifier {
     let onDetails: () -> Void

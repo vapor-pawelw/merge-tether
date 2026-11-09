@@ -12,6 +12,7 @@ final class SettingsManager {
     var unreadReminderInterval: UnreadReminderInterval
     var unreadReminderSound: ReminderSound
     var notificationsEnabled: Bool
+    var conversationDestination: AssistantContextLauncher.Destination
     var autoHandledEventBannersEnabled: Bool
     var lastSeenTodoIDs: Set<Int>
     var onboardingCompleted: Bool
@@ -57,6 +58,8 @@ final class SettingsManager {
     init(defaults: UserDefaults = .standard) {
         self.defaults = defaults
         Self.registerDefaults(in: defaults)
+        conversationDestination = defaults.string(forKey: Key.conversationDestination)
+            .flatMap(AssistantContextLauncher.Destination.init(rawValue:)) ?? .codexApp
 
         automation = defaults.data(forKey: Key.automation)
             .flatMap { try? JSONDecoder().decode(AutomationSettings.self, from: $0) }
@@ -154,6 +157,7 @@ final class SettingsManager {
     }
 
     func save() {
+        defaults.set(conversationDestination.rawValue, forKey: Key.conversationDestination)
         let previousAutomation = lastSavedAutomation ?? automation
         lastSavedAutomation = automation
         if let data = try? JSONEncoder().encode(automation) {
@@ -306,6 +310,7 @@ final class SettingsManager {
     }
 
     private enum Key {
+        static let conversationDestination = "conversationDestination"
         static let automation = "automation"
         static let automationReceipts = "automationReceipts"
         static let automationAttemptReceipts = "automationAttemptReceipts"

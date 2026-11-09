@@ -7,7 +7,7 @@
         "en": {
           "stringUnit": {
             "state": "translated",
-            "value": "Start a conversation with an agent…"
+            "value": "Start conversation with…"
           }
         }
       }
@@ -18,7 +18,7 @@
         "en": {
           "stringUnit": {
             "state": "translated",
-            "value": "Codex app"
+            "value": "ChatGPT app"
           }
         }
       }
@@ -106,7 +106,106 @@
         "en": {
           "stringUnit": {
             "state": "translated",
-            "value": "Open a separate conversation with this MR’s context. MergeTether does not track that conversation."
+            "value": "Open a separate conversation with this MR’s context. Desktop apps attach it with an empty message field. Hold Option to choose another app."
+          }
+        }
+      }
+    },
+    "assistant.context.startIn": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Start conversation in %@"
+          }
+        }
+      }
+    },
+    "assistant.context.cancel": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Cancel"
+          }
+        }
+      }
+    },
+    "assistant.context.chooseHelp": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Choose an app for this conversation only. Your default stays unchanged."
+          }
+        }
+      }
+    },
+    "assistant.context.default": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Default app"
+          }
+        }
+      }
+    },
+    "assistant.context.settingsTitle": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "MR conversations"
+          }
+        }
+      }
+    },
+    "assistant.context.settingsHelp": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Start a separate conversation with MR context attached. Hold Option when selecting the menu action to choose another app for one conversation."
+          }
+        }
+      }
+    },
+    "assistant.context.chooseOpen": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Open conversation"
+          }
+        }
+      }
+    },
+    "assistant.context.messageTitle": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "What would you like to discuss?"
+          }
+        }
+      }
+    },
+    "assistant.context.messageHelp": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "The MR context below is included automatically. Write your own message to start the terminal conversation."
           }
         }
       }

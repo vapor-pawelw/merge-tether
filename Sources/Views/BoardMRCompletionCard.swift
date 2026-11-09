@@ -26,7 +26,6 @@ struct BoardMRCompletionCard: View {
                     BoardCardTitle(title: completion.title, repositoryPath: completion.url.gitLabProjectPath)
                 }
                 .buttonStyle(.plain)
-                moreMenu
             }
             HStack(spacing: 8) {
                 Text(completion.kind == .merged ? .MRLifecycle.completionMerged : .MRLifecycle.completionClosed)
@@ -35,11 +34,13 @@ struct BoardMRCompletionCard: View {
                 seenButton
             }
             .font(.caption)
+            HStack { Spacer(minLength: 0); moreMenu }
         }
         .controlSize(.small)
         .padding(12).frame(maxWidth: .infinity, alignment: .leading)
         .overlay(RoundedRectangle(cornerRadius: 8).stroke(.secondary.opacity(0.12), lineWidth: 0.5))
         .boardCardInteraction(onDetails: openDetails)
+        .contextMenu { menuItems }
         .onChange(of: isCurrentAccount) { _, current in
             if !current { showingDetails = false }
         }
@@ -90,27 +91,26 @@ struct BoardMRCompletionCard: View {
     }
 
     private var moreMenu: some View {
-        Menu {
-            Button(action: openDetails) {
-                Label { Text(.Board.boardDetails) } icon: { Image(systemName: "rectangle.expand.vertical") }
-            }
-            Link(destination: completion.url) {
-                Label { Text(.CommandCenter.commandCenterOpenGitLab) } icon: { Image(systemName: "arrow.up.right.square") }
-            }
-            AssistantContextMenu(mergeRequestURL: completion.url, title: completion.title,
-                workspace: monitor.settings.automation.assistantWorkspace)
-            Divider()
-            Button {
-                guard canAcknowledge else { return }
-                _ = monitor.acknowledgeLifecycleCompletion(id: completion.id)
-            } label: {
-                Label { Text(.MRLifecycle.seen) } icon: { Image(systemName: "checkmark") }
-            }
-            .disabled(!canAcknowledge)
-        } label: { BoardCardActionIcon(systemName: "ellipsis") }
-        .menuStyle(.borderlessButton).menuIndicator(.hidden).fixedSize()
-        .frame(width: 24, height: 24)
-        .accessibilityLabel(Text(.CommandCenter.commandCenterActions))
+        BoardActionsMenu { menuItems }
+    }
+
+    @ViewBuilder private var menuItems: some View {
+        Button(action: openDetails) {
+            Label { Text(.Board.boardDetails) } icon: { Image(systemName: "rectangle.expand.vertical") }
+        }
+        Link(destination: completion.url) {
+            Label { Text(.CommandCenter.commandCenterOpenGitLab) } icon: { Image(systemName: "arrow.up.right.square") }
+        }
+        AssistantContextMenu(mergeRequestURL: completion.url, title: completion.title,
+            settings: monitor.settings)
+        Divider()
+        Button {
+            guard canAcknowledge else { return }
+            _ = monitor.acknowledgeLifecycleCompletion(id: completion.id)
+        } label: {
+            Label { Text(.MRLifecycle.seen) } icon: { Image(systemName: "checkmark") }
+        }
+        .disabled(!canAcknowledge)
     }
 
 }

@@ -58,7 +58,7 @@ struct MRCommonMenuItems: View {
             .disabled(startingReview || !monitor.canRunReview(for: item))
         }
         AssistantContextMenu(mergeRequestURL: item.url, title: item.title,
-                             workspace: monitor.settings.automation.assistantWorkspace)
+                             settings: monitor.settings)
         if !isFinished, monitor.settings.automation.hasEnabledAutomation,
            let target = monitor.scopeTarget(projectID: item.id.projectID, iid: item.id.iid, url: item.url) {
             Divider()
