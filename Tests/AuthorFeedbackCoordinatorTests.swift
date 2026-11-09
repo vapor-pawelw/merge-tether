@@ -80,6 +80,8 @@ struct AuthorFeedbackCoordinatorTests {
             } else if scenario == "editedSource" {
                 #expect(status?.ignoredNoteIDs.isEmpty != false)
                 #expect(status?.phase != .complete)
+                #expect(fixture.inputs.count == 3)
+                #expect(fixture.retryDelays == [.seconds(2), .seconds(8)])
             } else {
                 #expect(requested == (scenario == "sameNoteRemaining" ? [10] : scenario == "siblingRemaining" ? [20] : []))
                 #expect(status?.ignoredNoteIDs == (scenario == "sameNoteRemaining" ? [] : [10]))
@@ -1346,6 +1348,7 @@ struct AuthorFeedbackCoordinatorTests {
         let glab: GlabService
         var verified = false
         var inputs: [ReReviewVerifier.Input] = []
+        var retryDelays: [Duration] = []
         var reactionPosts: Int { count("reaction-posts") }
         var awardReads: Int { count("award-reads") }
         var userReads: Int { count("user-reads") }
@@ -1437,7 +1440,7 @@ struct AuthorFeedbackCoordinatorTests {
                 duringVerification?()
                 verified = true
                 return assessment ?? .init(notes: [.init(noteID: 10, state: .addressed, reason: "Current diff fixes A")])
-            })
+            }, retryWait: { [self] in retryDelays.append($0) })
         }
 
         func start(_ coordinator: AuthorFeedbackCoordinator, initialDiscussions: [GitLabMergeRequestDiscussion]? = nil,

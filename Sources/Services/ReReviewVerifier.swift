@@ -76,14 +76,15 @@ enum ReReviewVerifier {
         return try await run(input, assistant: assistant, model: model, executable: executable)
     }
 
-    static func run(_ input: Input, assistant: AutomationAssistant, model: String, executable: URL) async throws -> ReReviewAssessment {
+    static func run(_ input: Input, assistant: AutomationAssistant, model: String, executable: URL,
+                    retryWait: @Sendable (Duration) async throws -> Void = { try await Task.sleep(for: $0) }) async throws -> ReReviewAssessment {
         do { return try await runOnce(input, assistant: assistant, model: model, executable: executable) }
         catch {
             guard !Task.isCancelled, !(error is CancellationError),
                   error as? VerificationError != .unavailable else { throw error }
             // The role permits reads only. One bounded retry can recover incomplete
             // provider output without replaying an assistant's executable MR work.
-            try await Task.sleep(for: .seconds(1))
+            try await retryWait(.seconds(1))
             return try await runOnce(input, assistant: assistant, model: model, executable: executable)
         }
     }

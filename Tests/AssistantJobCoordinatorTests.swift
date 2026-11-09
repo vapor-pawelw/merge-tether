@@ -27,14 +27,17 @@ import Testing
     }
 
     @Test func unavailableCheckpointKeyCannotBlockTheMainActorOrTheCaller() async throws {
+        let releaseKey = DispatchSemaphore(value: 0)
+        defer { releaseKey.signal() }
         let loader = AssistantCheckpointKeyLoader {
-            Thread.sleep(forTimeInterval: 0.2)
+            releaseKey.wait()
             return Data(repeating: 1, count: 32)
         }
         var mainActorRan = false
         Task { @MainActor in mainActorRan = true }
         let first = await loader.key(timeout: .milliseconds(30))
         #expect(first == nil && mainActorRan)
+        releaseKey.signal()
         let recovered = await loader.key(timeout: .seconds(1))
         #expect(recovered == Data(repeating: 1, count: 32))
     }

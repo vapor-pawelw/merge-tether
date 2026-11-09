@@ -306,7 +306,11 @@ import Testing
                         /usr/bin/python3 -c 'import json; p="drafts.json"; a=json.load(open(p)); [d.update(note="/merge") for d in a if d["id"]==12]; json.dump(a,open(p,"w"))'
                         touch edited-after-proof-draft-read
                     fi
-                    if [ -f slow-user-check ]; then echo entered >> user-check.log; sleep 0.5; fi
+                    if [ -f pause-user-check ]; then
+                        rm pause-user-check
+                        echo entered >> user-check.log
+                        while [ -d "$PWD" ] && [ ! -f release-user-check ]; do sleep 0.01; done
+                    fi
                     cat duo.json ;;
                 /users/9|/users/10)
                     user="${2##*/}"
@@ -1965,7 +1969,8 @@ import Testing
         defer { harness.cleanUp() }
         try prepareAuthoredFeedback(harness)
         try await harness.poll()
-        try harness.write("slow-user-check", "yes")
+        try harness.write("pause-user-check", "yes")
+        defer { try? harness.write("release-user-check", "") }
         let publisher = Task { await harness.monitor.publishDrafts(of: .init(projectID: 1, iid: 2)) }
         let deadline = ContinuousClock.now + .seconds(5)
         while harness.log("user-check.log").isEmpty, ContinuousClock.now < deadline {
@@ -1973,6 +1978,7 @@ import Testing
         }
         try #require(!harness.log("user-check.log").isEmpty)
         try await harness.poll()
+        try harness.write("release-user-check", "")
         await publisher.value
         try await harness.settleVerification()
         #expect(harness.log("re-review.log") == "requested\n")
@@ -2479,7 +2485,8 @@ import Testing
         try harness.write("discussions.json", duoDiscussion)
         try harness.recordVerdict("objections", head: head)
         try await harness.poll()
-        try harness.write("slow-user-check", "yes")
+        try harness.write("pause-user-check", "yes")
+        defer { try? harness.write("release-user-check", "") }
         let polling = Task { try await harness.poll() }
         let deadline = ContinuousClock.now + .seconds(5)
         while harness.log("user-check.log").isEmpty, ContinuousClock.now < deadline {
@@ -2488,9 +2495,15 @@ import Testing
         try #require(!harness.log("user-check.log").isEmpty)
         harness.settings.autoPublishOptOuts.insert(target)
         harness.settings.autoPublishOptOuts.remove(target)
-        async let first: Void = harness.monitor.resumeAutomaticAction(.commentPublication, for: target)
-        async let second: Void = harness.monitor.resumeAutomaticAction(.commentPublication, for: target)
-        _ = await (first, second)
+        var startedResumes = 0
+        let first = Task { @MainActor in startedResumes += 1; await harness.monitor.resumeAutomaticAction(.commentPublication, for: target) }
+        let second = Task { @MainActor in startedResumes += 1; await harness.monitor.resumeAutomaticAction(.commentPublication, for: target) }
+        let resumeDeadline = ContinuousClock.now + .seconds(5)
+        while startedResumes < 2, ContinuousClock.now < resumeDeadline { try await Task.sleep(for: .milliseconds(10)) }
+        try #require(startedResumes == 2)
+        #expect(harness.monitor.isLoading && harness.log("selected.log").isEmpty)
+        try harness.write("release-user-check", "")
+        _ = await (first.value, second.value)
         #expect(harness.log("selected.log").split(separator: "\n").count == 1)
         #expect(harness.log("selected.log").contains("/draft_notes/12/publish"))
         #expect(harness.log("publish.log").isEmpty)
@@ -2635,9 +2648,10 @@ import Testing
         // Normal monitoring still owns and can start the independent recovery.
         try await harness.poll()
         let normalDeadline = ContinuousClock.now + .seconds(5)
-        while harness.monitor.draftProofRecoveryCoordinator?.isChecking(work: unrelatedWork) == true,
+        while repairedMRs.isEmpty,
               ContinuousClock.now < normalDeadline { try await Task.sleep(for: .milliseconds(20)) }
         #expect(assessedMRs == [2] && repairedMRs == [2])
+        #expect(harness.monitor.draftProofRecoveryCoordinator?.isChecking(work: unrelatedWork) == true)
     }
 
     @Test func approvalRechecksTheLiveGitLabAccountBeforePosting() async throws {

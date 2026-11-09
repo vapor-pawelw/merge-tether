@@ -36,14 +36,14 @@ struct ReReviewVerifierTests {
                 url: URL(string: "https://gitlab.example.test/group/repo/-/merge_requests/2")!, expectedUsername: "me"))
         input.ignoredSuggestions = scenario == "restored" ? [] : [decision]
         if scenario == "exact" {
-            let assessment = try await ReReviewVerifier.run(input, assistant: assistant, model: "fixture", executable: script)
+            let assessment = try await ReReviewVerifier.run(input, assistant: assistant, model: "fixture", executable: script, retryWait: { _ in })
             #expect(assessment.notes.first?.state == .ignoredByUser)
             #expect(assessment.notes.first?.ignoredDecisionIDs == [id])
             let captured = try String(contentsOf: URL(fileURLWithPath: script.path + ".capture"), encoding: .utf8)
             #expect(captured.contains(id.uuidString) && captured.contains(decision.concernReason))
         } else {
             await #expect(throws: (any Error).self) {
-                _ = try await ReReviewVerifier.run(input, assistant: assistant, model: "fixture", executable: script)
+                _ = try await ReReviewVerifier.run(input, assistant: assistant, model: "fixture", executable: script, retryWait: { _ in })
             }
         }
     }
@@ -78,10 +78,10 @@ struct ReReviewVerifierTests {
             summary: "The selected correction and published reply are complete.")]
         if wrongRun {
             await #expect(throws: ReReviewVerifier.VerificationError.incompleteEvidence) {
-                _ = try await ReReviewVerifier.run(input, assistant: assistant, model: "fixture", executable: script)
+                _ = try await ReReviewVerifier.run(input, assistant: assistant, model: "fixture", executable: script, retryWait: { _ in })
             }
         } else {
-            let assessment = try await ReReviewVerifier.run(input, assistant: assistant, model: "fixture", executable: script)
+            let assessment = try await ReReviewVerifier.run(input, assistant: assistant, model: "fixture", executable: script, retryWait: { _ in })
             #expect(assessment.completedBlockedRunIDs == [runID])
             let captured = try String(contentsOf: URL(fileURLWithPath: script.path + ".capture"), encoding: .utf8)
             #expect(captured.contains(runID.uuidString))
@@ -113,7 +113,7 @@ struct ReReviewVerifierTests {
             title: "Synthetic consumer correction", description: "Deployment configuration is a later task.",
             diff: "The current correction preserves the documented error behavior.", discussions: discussions)
 
-        let assessment = try await ReReviewVerifier.run(input, assistant: assistant, model: "fixture", executable: script)
+        let assessment = try await ReReviewVerifier.run(input, assistant: assistant, model: "fixture", executable: script, retryWait: { _ in })
 
         let instructions = try String(contentsOf: URL(fileURLWithPath: script.path + ".capture"), encoding: .utf8)
             .split(whereSeparator: \.isWhitespace).joined(separator: " ")
@@ -158,7 +158,7 @@ struct ReReviewVerifierTests {
         let input = ReReviewVerifier.Input(authorID: 3, headSHA: String(repeating: "a", count: 40),
             title: "Synthetic MR", description: nil, diff: "Current diff", discussions: discussions)
 
-        let assessment = try await ReReviewVerifier.run(input, assistant: assistant, model: "fixture", executable: script)
+        let assessment = try await ReReviewVerifier.run(input, assistant: assistant, model: "fixture", executable: script, retryWait: { _ in })
 
         #expect(assessment.notes.first?.informationalAcknowledgementSafe == true)
         let encoded = try #require(JSONSerialization.jsonObject(with: JSONEncoder().encode(assessment)) as? [String: Any])
@@ -207,7 +207,7 @@ struct ReReviewVerifierTests {
             title: "Synthetic release requirement", description: "Rollout uses the supported release", diff: "Current diff", discussions: discussions)
 
         // when
-        _ = try await ReReviewVerifier.run(input, assistant: assistant, model: "fixture", executable: script)
+        _ = try await ReReviewVerifier.run(input, assistant: assistant, model: "fixture", executable: script, retryWait: { _ in })
 
         // then
         let captured = try #require(JSONSerialization.jsonObject(with: Data(contentsOf: URL(fileURLWithPath: script.path + ".capture"))) as? [String: Any])
@@ -267,7 +267,7 @@ struct ReReviewVerifierTests {
         #expect(input.thinking == .high)
         input.thinking = thinking
 
-        let assessment = try await ReReviewVerifier.run(input, assistant: assistant, model: "fixture", executable: script)
+        let assessment = try await ReReviewVerifier.run(input, assistant: assistant, model: "fixture", executable: script, retryWait: { _ in })
 
         #expect(assessment.notes.first?.state == .addressed)
         let captured = try #require(JSONSerialization.jsonObject(with: Data(contentsOf: URL(fileURLWithPath: script.path + ".capture"))) as? [String: Any])
@@ -317,14 +317,14 @@ struct ReReviewVerifierTests {
             title: "Large MR", description: String(repeating: "Documented requirements\n", count: 12_000),
             diff: "Current diff", discussions: discussions)
         await #expect(throws: ReReviewVerifier.VerificationError.incompleteEvidence) {
-            _ = try await ReReviewVerifier.run(input, assistant: assistant, model: "fixture", executable: script)
+            _ = try await ReReviewVerifier.run(input, assistant: assistant, model: "fixture", executable: script, retryWait: { _ in })
         }
         input.target = .init(host: "gitlab.example.test", projectID: 1, iid: 2,
             url: URL(string: "https://gitlab.example.test/group/repo/-/merge_requests/2")!, expectedUsername: "me")
         input.semanticContextFingerprint = "expected-context"
         input.thinking = .low
 
-        let assessment = try await ReReviewVerifier.run(input, assistant: assistant, model: "fixture", executable: script)
+        let assessment = try await ReReviewVerifier.run(input, assistant: assistant, model: "fixture", executable: script, retryWait: { _ in })
 
         #expect(assessment.notes.first?.state == .addressed)
         let sent = try Data(contentsOf: URL(fileURLWithPath: script.path + ".capture"))
@@ -364,7 +364,7 @@ struct ReReviewVerifierTests {
             from: Data("[{\"notes\":[\(notes)]}]".utf8))
         let input = ReReviewVerifier.Input(authorID: 3, headSHA: String(repeating: "a", count: 40),
             title: "Synthetic review", diff: "Verified corrections", discussions: discussions)
-        let assessment = try await ReReviewVerifier.run(input, assistant: assistant, model: "fixture", executable: script)
+        let assessment = try await ReReviewVerifier.run(input, assistant: assistant, model: "fixture", executable: script, retryWait: { _ in })
         #expect(Set(assessment.notes.map(\.noteID)) == Set(100...110))
         #expect(try assessment.reviewers(in: discussions, authorID: 3) == [7: 110])
     }
@@ -394,7 +394,7 @@ struct ReReviewVerifierTests {
         let input = ReReviewVerifier.Input(authorID: 3, headSHA: String(repeating: "a", count: 40), title: "Example",
             description: "Fallback documented here. token=glpat-description123456789", diff: "Example diff", discussions: discussions)
 
-        let assessment = try await ReReviewVerifier.run(input, assistant: assistant, model: "fixture-model", executable: script)
+        let assessment = try await ReReviewVerifier.run(input, assistant: assistant, model: "fixture-model", executable: script, retryWait: { _ in })
 
         #expect(try assessment.reviewers(in: discussions, authorID: 3) == [7: 10])
         #expect(!assessment.notes[0].reason.contains("glpat-output123456789"))
@@ -410,20 +410,40 @@ struct ReReviewVerifierTests {
     @Test(arguments: AutomationAssistant.allCases)
     func incompleteProviderResultGetsOneRetryWithCompleteCoverage(_ assistant: AutomationAssistant) async throws {
         try await withRetryFixture(alwaysIncomplete: false) { script, input, counter in
-            let assessment = try await ReReviewVerifier.run(input, assistant: assistant, model: "fixture", executable: script)
+            let delays = RetryDelays()
+            let assessment = try await ReReviewVerifier.run(input, assistant: assistant, model: "fixture", executable: script,
+                                                           retryWait: { await delays.record($0) })
             let reviewers = try assessment.reviewers(in: input.discussions, authorID: input.authorID)
             let count = try String(contentsOf: counter, encoding: .utf8)
             #expect(Set(assessment.notes.map(\.noteID)) == [10, 20])
             #expect(reviewers == [7: 20])
             #expect(count == "2")
+            #expect(await delays.values == [.seconds(1)])
         }
+    }
+
+    @Test(arguments: AutomationAssistant.allCases)
+    func cancellationDuringRetryWaitPreventsAnotherProviderInvocation(_ assistant: AutomationAssistant) async throws {
+        try await withRetryFixture(alwaysIncomplete: false) { script, input, counter in
+            await #expect(throws: CancellationError.self) {
+                _ = try await ReReviewVerifier.run(input, assistant: assistant, model: "fixture", executable: script,
+                                                   retryWait: { _ in throw CancellationError() })
+            }
+            let count = try String(contentsOf: counter, encoding: .utf8)
+            #expect(count == "1")
+        }
+    }
+
+    private actor RetryDelays {
+        var values: [Duration] = []
+        func record(_ delay: Duration) { values.append(delay) }
     }
 
     @Test(arguments: AutomationAssistant.allCases)
     func consistentlyIncompleteProviderStopsAfterTwoAttempts(_ assistant: AutomationAssistant) async throws {
         try await withRetryFixture(alwaysIncomplete: true) { script, input, counter in
             await #expect(throws: ReReviewAssessment.ValidationError.self) {
-                _ = try await ReReviewVerifier.run(input, assistant: assistant, model: "fixture", executable: script)
+                _ = try await ReReviewVerifier.run(input, assistant: assistant, model: "fixture", executable: script, retryWait: { _ in })
             }
             let count = try String(contentsOf: counter, encoding: .utf8)
             #expect(count == "2")

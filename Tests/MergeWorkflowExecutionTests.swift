@@ -858,8 +858,9 @@ import Testing
             glab.glabPath = executable
             glab.resolvedHost = host
             glab.currentUsername = "me"
+            var retryDelays: [Duration] = []
             let automation = MergeWorkflowAutomation(settings: settings, glab: glab, notifications: NotificationService(),
-                                                    detector: .init(directory: claims))
+                                                    detector: .init(directory: claims), retryWait: { retryDelays.append($0) })
             var remoteChanges = 0
             automation.onRemoteChange = { remoteChanges += 1 }
             automation.receive(event, host: host, user: .init(id: 1, username: "me"))
@@ -868,6 +869,7 @@ import Testing
                 try await Task.sleep(for: .milliseconds(10))
             }
             #expect(settings.assistantHandoffs.isEmpty)
+            if prelaunchFailures > 0 { #expect(retryDelays == (attemptIndex == 0 ? [.seconds(2)] : [])) }
             if attemptIndex == 0 {
                 let expected: MergeWorkflowActivityState = draftPaused ? .skipped : ownershipRace ? .alreadyRegistered
                     : ambiguousResponse || wrongCreatedParents ? .failed : .completed
