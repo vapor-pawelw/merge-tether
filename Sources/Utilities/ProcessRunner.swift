@@ -1,6 +1,23 @@
 import Foundation
 
 enum ProcessRunner {
+    #if DEBUG
+    static func permitsTestExecutable(_ executable: URL, environment: [String: String], temporaryDirectory: URL) -> Bool {
+        guard ApplicationLaunchMode.resolve(environment: environment) == .testHost else { return true }
+        let resolved = executable.resolvingSymlinksInPath()
+        let serviceCLIs: Set<String> = ["glab", "codex", "claude"]
+        guard serviceCLIs.contains(executable.lastPathComponent.lowercased())
+                || serviceCLIs.contains(resolved.lastPathComponent.lowercased()) else { return true }
+        if resolved.path.hasPrefix(temporaryDirectory.resolvingSymlinksInPath().path + "/") { return true }
+        guard let home = environment["MERGETETHER_TEST_FIXTURE_HOME"], !home.isEmpty,
+              environment["HOME"] == home, environment["CFFIXED_USER_HOME"] == home else { return false }
+        let fixtureHome = URL(fileURLWithPath: home).resolvingSymlinksInPath()
+        guard (try? String(contentsOf: fixtureHome.appendingPathComponent(".mergetether-test-home"), encoding: .utf8))
+                == "MergeTether test home\n" else { return false }
+        return resolved.path.hasPrefix(fixtureHome.path + "/")
+    }
+    #endif
+
     struct Output: Sendable {
         let stdout: Data
         let stderr: String
@@ -23,6 +40,13 @@ enum ProcessRunner {
         outputDirectory: URL? = nil,
         onOutput: (@Sendable (Output) -> Void)? = nil
     ) async throws -> Output {
+        #if DEBUG
+        guard permitsTestExecutable(executable, environment: ProcessInfo.processInfo.environment,
+                                    temporaryDirectory: FileManager.default.temporaryDirectory) else {
+            try? FileHandle.standardError.write(contentsOf: Data("MergeTether test guard rejected service CLI \(executable.path)\n".utf8))
+            throw RunError.launchFailed("Test hosts must use temporary service CLI fixtures: \(executable.path)")
+        }
+        #endif
         let process = Process()
         process.executableURL = executable
         process.arguments = arguments

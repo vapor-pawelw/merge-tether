@@ -12,6 +12,9 @@ enum OnboardingDetector {
     /// Probes the well-known install locations first, then falls back to a
     /// login-interactive shell so PATH entries from zprofile/zshrc apply.
     static func findGlabExecutable() async -> URL? {
+        #if DEBUG
+        guard ApplicationLaunchMode.resolve(environment: ProcessInfo.processInfo.environment) == .application else { return nil }
+        #endif
         for path in defaultCandidates where FileManager.default.isExecutableFile(atPath: path) {
             return URL(fileURLWithPath: path)
         }

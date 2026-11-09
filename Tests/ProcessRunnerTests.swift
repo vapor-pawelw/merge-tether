@@ -5,6 +5,54 @@ import Testing
 
 @Suite("ProcessRunner")
 struct ProcessRunnerTests {
+    #if DEBUG
+    @Test(arguments: ["glab", "codex", "claude", "GLAB"])
+    func testHostsRejectInstalledServiceCLIsButAllowTemporaryFixtures(_ name: String) throws {
+        let testEnvironment = ["XCTestSessionIdentifier": "fixture-session"]
+        let root = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
+        let installed = URL(fileURLWithPath: "/opt/homebrew/bin/\(name)")
+        #expect(!ProcessRunner.permitsTestExecutable(installed, environment: testEnvironment, temporaryDirectory: root))
+        #expect(ProcessRunner.permitsTestExecutable(root.appendingPathComponent(name), environment: testEnvironment,
+                                                   temporaryDirectory: root))
+        #expect(ProcessRunner.permitsTestExecutable(installed, environment: [:], temporaryDirectory: root))
+        #expect(ProcessRunner.permitsTestExecutable(URL(fileURLWithPath: "/bin/sh"), environment: testEnvironment,
+                                                   temporaryDirectory: root))
+    }
+
+    @Test func testHostCannotBypassTheServiceCLIGuardWithASymlink() throws {
+        let root = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
+        try FileManager.default.createDirectory(at: root, withIntermediateDirectories: false)
+        defer { try? FileManager.default.removeItem(at: root) }
+        let fixtures = root.appendingPathComponent("fixtures")
+        try FileManager.default.createDirectory(at: fixtures, withIntermediateDirectories: false)
+        let link = fixtures.appendingPathComponent("cli")
+        let forbidden = root.appendingPathComponent("glab")
+        try Data("#!/bin/sh\nexit 0\n".utf8).write(to: forbidden)
+        try FileManager.default.createSymbolicLink(at: link, withDestinationURL: forbidden)
+        #expect(!ProcessRunner.permitsTestExecutable(link, environment: ["XCTestSessionIdentifier": "fixture-session"],
+                                                    temporaryDirectory: fixtures))
+    }
+
+    @Test func serviceFixturesInAnExplicitlyIsolatedHomeRemainUsable() throws {
+        let home = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
+        try FileManager.default.createDirectory(at: home, withIntermediateDirectories: false)
+        defer { try? FileManager.default.removeItem(at: home) }
+        let environment = ["XCTestSessionIdentifier": "fixture-session", "HOME": home.path,
+                           "CFFIXED_USER_HOME": home.path, "MERGETETHER_TEST_FIXTURE_HOME": home.path]
+        let otherTemporary = home.appendingPathComponent("other-temporary")
+        let fixture = home.appendingPathComponent(".local/bin/claude")
+        #expect(!ProcessRunner.permitsTestExecutable(fixture, environment: environment, temporaryDirectory: otherTemporary))
+        try Data("MergeTether test home\n".utf8).write(to: home.appendingPathComponent(".mergetether-test-home"))
+        #expect(ProcessRunner.permitsTestExecutable(fixture, environment: environment, temporaryDirectory: otherTemporary))
+        #expect(!ProcessRunner.permitsTestExecutable(URL(fileURLWithPath: "/opt/homebrew/bin/glab"),
+                                                     environment: environment, temporaryDirectory: otherTemporary))
+    }
+
+    @Test func testHostsDoNotDiscoverAnInstalledGlabOrProbeTheLoginShell() async {
+        #expect(await OnboardingDetector.findGlabExecutable() == nil)
+    }
+    #endif
+
     @Test("durable output is readable while running and survives cancellation")
     func durableOutputSurvivesCancellation() async throws {
         let folder = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)

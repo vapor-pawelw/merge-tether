@@ -4,6 +4,19 @@ import Testing
 
 @Suite("Assistant dependencies")
 struct AssistantDependenciesTests {
+    #if DEBUG
+    @MainActor @Test(arguments: AutomationAssistant.allCases)
+    func testHostDiscoveryCannotFallBackToInstalledAssistants(_ assistant: AutomationAssistant) async {
+        let status = await AssistantCLI.detect(assistant, requireCLI: true)
+        switch status {
+        case .missingCLI: break
+        case .ready(let executable), .loginRequired(let executable):
+            #expect(executable.path.hasPrefix(URL.homeDirectory.appending(path: ".local/bin").path + "/"))
+        default: Issue.record("Test-host discovery must use an isolated-home fixture or report a missing CLI")
+        }
+    }
+    #endif
+
     @Test(arguments: AutomationAssistant.allCases)
     func workingHeadlessCLIIsReadyWithoutDesktop(_ assistant: AutomationAssistant) async throws {
         let folder = FileManager.default.temporaryDirectory.appending(path: UUID().uuidString)

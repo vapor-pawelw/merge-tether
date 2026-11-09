@@ -25,6 +25,12 @@ enum AssistantCLI {
 
     @MainActor
     static func detect(_ assistant: AutomationAssistant, requireCLI: Bool) async -> AssistantDependencyStatus {
+        #if DEBUG
+        if ApplicationLaunchMode.resolve(environment: ProcessInfo.processInfo.environment) == .testHost {
+            return await check(assistant, desktopURL: nil,
+                               candidates: [URL.homeDirectory.appending(path: ".local/bin/\(assistant.rawValue)")])
+        }
+        #endif
         let optionalApp = AssistantAutomationRunner.desktopApplication(assistant)
         return await check(assistant, desktopURL: nil, candidates: candidates(for: assistant, desktopURL: optionalApp))
     }
