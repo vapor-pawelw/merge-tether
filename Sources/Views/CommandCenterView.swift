@@ -6,6 +6,7 @@ struct CommandCenterView: View {
     let updates: UpdateService
     @SceneStorage("commandCenter.showActivity") private var showActivity = false
     @State private var showingAdd = false
+    @State private var showingInbox = false
     @Environment(\.openSettings) private var openSettings
     @Environment(\.openWindow) private var openWindow
 
@@ -56,6 +57,31 @@ struct CommandCenterView: View {
                 .pickerStyle(.segmented).labelsHidden().fixedSize()
             }
             ToolbarItemGroup(placement: .primaryAction) {
+                Button { showingInbox.toggle() } label: {
+                    Label {
+                        Text(.Board.boardInboxButton)
+                    } icon: {
+                        Image(systemName: "tray")
+                            .overlay(alignment: .topTrailing) {
+                                let count = monitor.inboxItems.count
+                                if count > 0 {
+                                    Text(count > 99 ? "99+" : String(count))
+                                        .font(.system(size: 9, weight: .bold, design: .rounded))
+                                        .foregroundStyle(.white)
+                                        .padding(.horizontal, 3)
+                                        .frame(minWidth: 14, minHeight: 14)
+                                        .background(.red, in: Capsule())
+                                        .offset(x: 7, y: -7)
+                                        .accessibilityHidden(true)
+                                }
+                            }
+                    }
+                }
+                .help(Text(.Board.boardInboxButton))
+                .accessibilityLabel(Text(.Board.boardInboxAccessibilityCount(monitor.inboxItems.count)))
+                .popover(isPresented: $showingInbox, arrowEdge: .top) {
+                    CommandCenterInboxView(monitor: monitor)
+                }
                 Button { openWindow(id: "remote-access") } label: {
                     Label { Text(.Remote.remoteMacPairPhone) } icon: { Image(systemName: "iphone") }
                 }

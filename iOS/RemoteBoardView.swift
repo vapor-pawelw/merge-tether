@@ -5,6 +5,8 @@ struct RemoteBoardView: View {
     @Bindable var model: RemotePhoneModel
     @State private var pairingSheet = false
     @State private var selected: RemoteCard?
+    @State private var showingInbox = false
+    @State private var pendingInboxCard: RemoteCard?
     var body: some View {
         NavigationStack {
             Group {
@@ -13,7 +15,7 @@ struct RemoteBoardView: View {
                     VStack(alignment: .leading, spacing: 12) {
                         connectionStatus
                         if board.partial { Text(.Remote.remotePartial).font(.caption).foregroundStyle(.orange).padding(.horizontal) }
-                        RemoteLaneBoard(lanes: board.lanes) { selected = $0 }
+                        RemoteLaneBoard(lanes: board.lanes.filter { $0.id != .other }) { selected = $0 }
                         if let updated = board.updatedAt {
                             HStack { Text(.Remote.remoteUpdated); Text(updated, style: .relative) }
                                 .font(.caption2).foregroundStyle(.secondary).padding(.horizontal).padding(.bottom, 4)
@@ -31,7 +33,28 @@ struct RemoteBoardView: View {
             .toolbar {
                 if model.paired {
                     ToolbarItem(placement: .topBarTrailing) {
-                        Button { Task { await model.refresh() } } label: { Image(systemName: "arrow.clockwise") }.accessibilityLabel(Text(.Remote.remoteRefresh)).accessibilityIdentifier("remote.refresh")
+                        HStack(spacing: 16) {
+                            Button { showingInbox = true } label: {
+                                Image(systemName: "tray")
+                                    .overlay(alignment: .topTrailing) {
+                                        if inboxCards.count > 0 {
+                                            Text(inboxCards.count, format: .number)
+                                                .font(.system(size: 9, weight: .bold))
+                                                .foregroundStyle(.white)
+                                                .padding(.horizontal, 4)
+                                                .frame(minWidth: 16, minHeight: 16)
+                                                .background(.red, in: Capsule())
+                                                .offset(x: 9, y: -8)
+                                        }
+                                    }
+                            }
+                            .accessibilityLabel(Text(.Board.boardInboxButton))
+                            .accessibilityValue(Text(.Board.boardInboxAccessibilityCount(inboxCards.count)))
+                            .accessibilityIdentifier("remote.inbox")
+                            Button { Task { await model.refresh() } } label: { Image(systemName: "arrow.clockwise") }
+                                .accessibilityLabel(Text(.Remote.remoteRefresh))
+                                .accessibilityIdentifier("remote.refresh")
+                        }
                     }
                     ToolbarItem(placement: .topBarLeading) {
                         Button { pairingSheet = true } label: { Image(systemName: "qrcode.viewfinder") }.accessibilityLabel(Text(.Remote.remoteReplace))
@@ -49,11 +72,26 @@ struct RemoteBoardView: View {
             }
             .sheet(isPresented: $pairingSheet) { NavigationStack { RemotePairingView(model: model) }.presentationDetents([.medium, .large]) }
             .onChange(of: model.state.board?.hostSession) { pairingSheet = false }
+            .popover(isPresented: $showingInbox, attachmentAnchor: .rect(.bounds), arrowEdge: .top) {
+                RemoteInboxView(cards: inboxCards) { pendingInboxCard = $0; showingInbox = false }
+                    .frame(idealWidth: 520, idealHeight: 680)
+                    .presentationCompactAdaptation(.sheet)
+                    .presentationDetents([.medium, .large])
+            }
+            .onChange(of: showingInbox) { _, isPresented in
+                if !isPresented, let pendingInboxCard {
+                    selected = pendingInboxCard
+                    self.pendingInboxCard = nil
+                }
+            }
             .sheet(item: $selected) { card in RemoteCardDetail(model: model, original: card) }
             .alert(Text(model.state.result?.status.title ?? .Remote.remoteCompleted), isPresented: Binding(
                 get: { model.state.result != nil }, set: { if !$0 { model.state.acknowledgeResult() } }
             )) { Button(.Remote.remoteClose) { model.state.acknowledgeResult() } }
         }
+    }
+    private var inboxCards: [RemoteCard] {
+        model.state.board?.lanes.first(where: { $0.id == .other })?.cards ?? []
     }
     private var connectionStatus: some View {
         TimelineView(.periodic(from: .now, by: 1)) { context in

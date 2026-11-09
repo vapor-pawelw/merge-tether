@@ -22,8 +22,6 @@ struct CommandCenterBoardView: View {
 
     var body: some View {
         let board = snapshot
-        let otherCards = board.otherCards(jobs: monitor.assistantHandoffs, host: account?.host, username: account?.username,
-            pinnedCards: monitor.settings.boardPins)
         HStack(alignment: .top, spacing: 18) {
             lane(title: .Board.boardLaneOwn, symbol: "arrow.triangle.pull", cardIDs: board.own.map(\.id), dependencies: board.own.map { $0.item.dependencies }) {
                 if board.own.isEmpty {
@@ -36,20 +34,6 @@ struct CommandCenterBoardView: View {
                     empty(.Board.boardEmptyReviewingTitle, message: .Board.boardLaneReviewingEmpty, symbol: "text.magnifyingglass")
                 }
                 laneCards(board.reviewed, removable: true)
-            }
-            lane(title: .Board.boardLaneOther, symbol: "tray", cardIDs: otherCards.map(\.id), dependencies: otherCards.map {
-                if case .proposal(let proposal) = $0.content { return proposal.item?.dependencies }
-                return nil
-            }) {
-                if otherCards.isEmpty {
-                    empty(.Board.boardEmptyOtherTitle, message: .Board.boardLaneOtherEmpty, symbol: "checkmark")
-                }
-                ForEach(Array(otherCards.enumerated()), id: \.element.id) { index, entry in
-                    VStack(spacing: 10) {
-                        activityDivider(entry.activityGroup, previous: index > 0 ? otherCards[index - 1].activityGroup : nil)
-                        otherCard(entry)
-                    }.transition(cardTransition)
-                }
             }
         }
         .id(account)
@@ -120,17 +104,6 @@ struct CommandCenterBoardView: View {
             }
             .padding(.top, previous == nil ? 2 : 14)
             .padding(.horizontal, 4)
-        }
-    }
-
-    @ViewBuilder
-    private func otherCard(_ card: MergeRequestBoardSnapshot.OtherCard) -> some View {
-        switch card.content {
-        case .completion(let completion): BoardMRCompletionCard(completion: completion, monitor: monitor)
-        case .proposal(let proposal): BoardMRProposalCard(proposal: proposal, monitor: monitor)
-        case .todo(let todo):
-            BoardTodoRow(todo: todo, monitor: monitor)
-        case .job(let job): BoardCompactJobCard(handoff: job, monitor: monitor)
         }
     }
 

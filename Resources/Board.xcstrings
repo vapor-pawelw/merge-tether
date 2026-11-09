@@ -13,6 +13,62 @@
         }
       }
     },
+    "board.inbox.button": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": { "stringUnit": { "state": "translated", "value": "Inbox" } },
+        "pl": { "stringUnit": { "state": "translated", "value": "Skrzynka" } }
+      }
+    },
+    "board.inbox.close": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": { "stringUnit": { "state": "translated", "value": "Close Inbox" } },
+        "pl": { "stringUnit": { "state": "translated", "value": "Zamknij skrzynkę" } }
+      }
+    },
+    "board.inbox.accessibilityCount": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": { "stringUnit": { "state": "translated", "value": "%lld items waiting in Inbox" } },
+        "pl": { "stringUnit": { "state": "translated", "value": "%lld elementów czeka w skrzynce" } }
+      }
+    },
+    "board.inbox.emptyTitle": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": { "stringUnit": { "state": "translated", "value": "Nothing waiting" } },
+        "pl": { "stringUnit": { "state": "translated", "value": "Nic nie czeka" } }
+      }
+    },
+    "board.inbox.emptyMessage": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": { "stringUnit": { "state": "translated", "value": "New proposals, unrecognized GitLab to-dos, assistant issues and finished-MR updates will show up here." } },
+        "pl": { "stringUnit": { "state": "translated", "value": "Pojawią się tu nowe propozycje, nierozpoznane zadania GitLaba, problemy asystenta i informacje o zakończonych MR-ach." } }
+      }
+    },
+    "board.inbox.triage": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": { "stringUnit": { "state": "translated", "value": "Needs a decision" } },
+        "pl": { "stringUnit": { "state": "translated", "value": "Wymaga decyzji" } }
+      }
+    },
+    "board.inbox.assistantJobs": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": { "stringUnit": { "state": "translated", "value": "Assistant work" } },
+        "pl": { "stringUnit": { "state": "translated", "value": "Praca asystenta" } }
+      }
+    },
+    "board.inbox.updates": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": { "stringUnit": { "state": "translated", "value": "Updates" } },
+        "pl": { "stringUnit": { "state": "translated", "value": "Aktualizacje" } }
+      }
+    },
     "board.tab.board": {
       "extractionState": "manual",
       "localizations": {
@@ -57,17 +113,6 @@
         }
       }
     },
-    "board.lane.other": {
-      "extractionState": "manual",
-      "localizations": {
-        "en": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "Other items"
-          }
-        }
-      }
-    },
     "board.lane.ownEmpty": {
       "extractionState": "manual",
       "localizations": {
@@ -86,17 +131,6 @@
           "stringUnit": {
             "state": "translated",
             "value": "Merge requests you manage as a reviewer will appear here."
-          }
-        }
-      }
-    },
-    "board.lane.otherEmpty": {
-      "extractionState": "manual",
-      "localizations": {
-        "en": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "No other items need your attention."
           }
         }
       }
