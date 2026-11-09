@@ -139,9 +139,21 @@ struct BoardJobStatusActions: View {
         if !isFinished && (active || (MergeRequestBoardSnapshot.Row.jobNeedsAttention(handoff.operationalExecution?.state)
             && !PipelineJobReconciliation.isObsolete(handoff, request: monitor.currentRequest(for: handoff)))) {
             HStack {
-                BoardStatusChip(title: active ? handoff.progressTitle(intents: monitor.settings.mrActionIntents, conflictReceipts: monitor.settings.conflictReceipts) : .Board.boardCompactBlocked,
-                    symbol: active ? "arrow.triangle.2.circlepath" : "exclamationmark.circle",
-                    tint: muted ? .secondary : active ? .blue : .orange)
+                if active, handoff.execution?.state == .queued,
+                   let hold = monitor.cliHealth.hold(for: handoff.key.assistant) {
+                    Text(hold.issue.kind == .loginRequired
+                        ? .AutomationProgress.progressPausedLogin : .AutomationProgress.progressPausedLimit)
+                        .font(.caption).foregroundStyle(.secondary)
+                } else if active {
+                    MRActivityStatus(status: String(localized: handoff.progressTitle(intents: monitor.settings.mrActionIntents,
+                        conflictReceipts: monitor.settings.conflictReceipts)),
+                        startedAt: handoff.execution?.state == .running
+                            ? handoff.execution?.startedAt ?? handoff.createdAt : handoff.createdAt)
+                        .font(.caption).foregroundStyle(muted ? Color.secondary : Color.blue)
+                } else {
+                    BoardStatusChip(title: .Board.boardCompactBlocked, symbol: "exclamationmark.circle",
+                        tint: muted ? .secondary : .orange)
+                }
                 Spacer(minLength: 6)
                 if active {
                     Button(role: .destructive) { monitor.cancelAssistantJob(handoff.id) } label: {

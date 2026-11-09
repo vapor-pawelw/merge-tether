@@ -21,6 +21,7 @@ final class TodoMonitorService {
     func dismissAutoHandledEventBanner(_ id: UUID) { autoHandledEventBanners.dismiss(id) }
 
     private var confirmedAttention = ConfirmedAttentionSnapshot()
+    private var mrActivityTimeline = MRActivityTimeline()
     private var attentionPresentationAccount: String? {
         guard let host = glab.resolvedHost, let username = glab.currentUsername else { return nil }
         return "\(host)/\(username)/\(glab.accountRevision)"
@@ -295,6 +296,7 @@ final class TodoMonitorService {
             self?.automationConfigurationChanged(previous: previous)
         }
         observeUserAttentionChanges()
+        observeMRActivityChanges()
         Task { [weak self] in
             await self?.bootstrap()
         }
@@ -316,6 +318,31 @@ final class TodoMonitorService {
         }
         confirmedAttention.update(input)
         boardPolicyOrder.observe(boardOrderingEntries(boardSnapshot))
+    }
+
+    private func observeMRActivityChanges() {
+        let activities = withObservationTracking {
+            let board = boardSnapshot
+            var activities: [MRAutomationScope.Target: MRActivity] = [:]
+            for row in board.own + board.reviewed + board.otherMergeRequests {
+                guard let target = scopeTarget(projectID: row.id.projectID, iid: row.id.iid, url: row.item.url),
+                      let activity = MRCardPresentation(row: row, monitor: self,
+                          allowsRemoval: board.reviewed.contains { $0.id == row.id }).activity else { continue }
+                activities[target] = activity
+            }
+            return activities
+        } onChange: { [weak self] in
+            Task { @MainActor [weak self] in self?.observeMRActivityChanges() }
+        }
+        var updated = mrActivityTimeline
+        updated.update(activities)
+        if updated != mrActivityTimeline { mrActivityTimeline = updated }
+    }
+
+    func activityStartedAt(for item: MergeRequestAttentionMonitor.Item, activity: MRActivity?) -> Date? {
+        guard let activity,
+              let target = scopeTarget(projectID: item.id.projectID, iid: item.id.iid, url: item.url) else { return nil }
+        return mrActivityTimeline.startedAt(for: target, activity: activity) ?? activity.startedAt
     }
 
     private var userAttentionAccount: String? {

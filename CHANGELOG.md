@@ -6,6 +6,8 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 
 ## Unreleased
 
+- Show progress indicators and elapsed stage time on busy MR cards and in Details, while routine background polling and reviewer waits stay quiet.
+
 - Recover sealed draft replies from blocked author follow-ups through independent current-source verification, without waiting for publication to mark the worker complete.
 
 - Quote comments in Next step only when they support the displayed concern; keep general worker and publication blockers free of unrelated task comments.

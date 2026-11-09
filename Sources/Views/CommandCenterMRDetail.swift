@@ -289,10 +289,8 @@ private struct CommandCenterMRDetailContent: View {
                             .font(.subheadline).foregroundStyle(needsHumanAttention ? .orange : .secondary)
                         }
                         if progress.working, let status = progress.status {
-                            HStack(spacing: 6) {
-                                ProgressView().controlSize(.mini)
-                                Text(verbatim: status)
-                            }
+                            MRActivityStatus(status: status,
+                                startedAt: monitor.activityStartedAt(for: item, activity: progress.activity))
                             .font(.subheadline).foregroundStyle(.secondary)
                         } else if progress.refreshFailed {
                             Label { Text(.AutomationProgress.progressRefreshFailed) } icon: { Image(systemName: "arrow.clockwise") }

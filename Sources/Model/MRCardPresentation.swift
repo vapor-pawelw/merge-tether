@@ -106,7 +106,19 @@ struct MRCardPresentation {
             || (allowsRemoval && [.runReview, .automaticReview, .verifying].contains(reviewingContext.nextStep))
             || row.attentionIntents.contains { ($0.kind == .review || $0.kind == .followUp) && $0.state == .pending }
     }
-    var working: Bool { finishedState == nil && !waitingOnCLI && (executingWork || (showsReadProgress && (busy || isRefreshingAttention))) }
+    var working: Bool {
+        finishedState == nil && !waitingOnCLI && (executingWork || busy
+            || item.draftProofRecoveryChecking || item.authorFeedbackStatus?.phase == .checking
+            || (showsReadProgress && isRefreshingAttention))
+    }
+    var activity: MRActivity? {
+        guard working, let status else { return nil }
+        if let job = row.latestJob, job.operationalExecution?.state.isActive == true {
+            return .init(status: status, jobID: job.id,
+                startedAt: job.execution?.state == .running ? job.execution?.startedAt ?? job.createdAt : job.createdAt)
+        }
+        return .init(status: status)
+    }
     var actionsBlocked: Bool { finishedState != nil || busy || isRefreshingAttention || row.latestJob?.execution?.state.isActive == true }
     private var preservesConfirmedAttention: Bool {
         (isRefreshingAttention || refreshFailed) && row.needsAttention && preservedHumanAction != nil
@@ -153,6 +165,7 @@ struct MRCardPresentation {
         if automaticMergeProgress { return .AutomationProgress.progressMerging }
         if item.draftProofRecoveryChecking, !row.hasIndependentStoppedWork { return .AutomationProgress.progressReplies }
         if item.aiOriginChecking { return .AutomationProgress.progressAIAssistance }
+        if item.draftProofRecoveryChecking { return .AutomationProgress.progressReplies }
         if item.authorFeedbackStatus?.phase == .checking { return .AutomationProgress.progressFeedbackCheck }
         if item.reReviewReadiness == .checking { return .AutomationProgress.progressReviewReadiness }
         if automaticPipelineProgress { return .AutomationProgress.progressPipeline }

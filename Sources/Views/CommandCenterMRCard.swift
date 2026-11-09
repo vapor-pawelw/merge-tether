@@ -78,8 +78,10 @@ private struct CommandCenterMRCardContent: View {
                 if presentation.working || presentation.refreshFailed || humanAction != nil || neutralStatus != nil || (isDraft && item.isAuthored) {
                     HStack(spacing: 6) {
                         if presentation.working {
-                            ProgressView().controlSize(.mini)
-                            if let status = presentation.status { Text(verbatim: status) }
+                            if let status = presentation.status {
+                                MRActivityStatus(status: status,
+                                    startedAt: monitor.activityStartedAt(for: item, activity: presentation.activity))
+                            }
                         } else if presentation.refreshFailed {
                             Label { Text(.AutomationProgress.progressRefreshFailed) } icon: { Image(systemName: "arrow.clockwise") }
                         } else if humanAction?.action == .retryRun {
