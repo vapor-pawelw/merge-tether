@@ -2,6 +2,32 @@ import Foundation
 import MergeTetherRemote
 
 @MainActor enum RemoteBoardAdapter {
+    static func card(_ completion: MergeRequestLifecycleLedger.CompletionReceipt, account: String) -> RemoteCard {
+        let state = completion.kind == .merged ? MergeRequestFinishedState.merged : .closed
+        var card = RemoteCard(id: "completion:\(completion.id)", title: completion.title,
+            project: completion.url.gitLabProjectPath, url: completion.url,
+            detail: String(localized: completion.kind == .merged ? .MRLifecycle.completionMerged : .MRLifecycle.completionClosed),
+            needsAttention: false, mergeRequestIID: completion.target.iid,
+            presentation: .init(author: completion.author?.name,
+                repository: completion.url.gitLabProjectPath.split(separator: "/").last.map(String.init) ?? "",
+                draftBadge: String(localized: state.badge)))
+        if let token = try? RemoteDigest.token([account, try RemoteDigest.token(completion)]) {
+            card.actions = [.init(id: "seen", kind: .markDone, token: token)]
+        }
+        return card
+    }
+
+    static func acknowledgeCompletion(_ card: RemoteCard, action: RemoteAction,
+                                      monitor: TodoMonitorService, account: String) -> Bool {
+        guard action.kind == .markDone, action.id == "seen", card.id.hasPrefix("completion:"),
+              let id = UUID(uuidString: String(card.id.dropFirst("completion:".count))),
+              let host = monitor.glab.resolvedHost, let username = monitor.glab.currentUsername,
+              account == "\(username)@\(host)",
+              let completion = monitor.lifecycleCompletions.first(where: { $0.id == id }),
+              self.card(completion, account: account) == card, card.actions.contains(action) else { return false }
+        return monitor.acknowledgeLifecycleCompletion(id: id)
+    }
+
     static func card(_ item: MergeRequestAttentionMonitor.Item, account: String,
                      extraActions: [RemoteActionKind] = [], context: [String] = []) -> RemoteCard {
         let drafts = item.drafts.enumerated().map { index, draft in
@@ -107,6 +133,7 @@ import MergeTetherRemote
                         intents: [MRTodoIntent] = [], conflictReceipts: Set<MergeConflictReceipt> = []) -> RemoteBoard {
         let others = other.compactMap { entry -> RemoteCard? in
             switch entry.content {
+            case .completion(let completion): return card(completion, account: account)
             case .proposal(let proposal):
                 var card = proposal.item.map { self.card($0, account: account) }
                     ?? RemoteCard(id: "mr:\(proposal.target.projectID):\(proposal.target.iid ?? 0)", title: proposal.title,

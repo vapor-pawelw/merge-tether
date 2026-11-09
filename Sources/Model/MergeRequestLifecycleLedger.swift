@@ -12,15 +12,75 @@ struct MergeRequestLifecycleLedger: Codable, Sendable {
         let observedAt: Date
     }
 
+    struct CompletionReceipt: Codable, Identifiable, Sendable {
+        let id: UUID
+        let target: MRAutomationScope.Target
+        let kind: Transition.Kind
+        let title: String
+        let url: URL
+        let observedAt: Date
+        let author: Todo.Author?
+    }
+
     private struct Entry: Codable, Sendable {
         var request: GitLabMergeRequest
         var observedAt: Date
         var acknowledgedTerminalState: String?
+        var terminalObservedAt: Date?
+        var terminalReceiptRecorded: Bool?
     }
     private var entries: [MRAutomationScope.Target: Entry] = [:]
     private var pendingTransitions: [Transition] = []
+    private var completions: [MRAutomationScope.Target: CompletionReceipt] = [:]
 
     init() {}
+
+    private enum CodingKeys: String, CodingKey { case entries, pendingTransitions, completions }
+
+    init(from decoder: Decoder) throws {
+        let values = try decoder.container(keyedBy: CodingKeys.self)
+        entries = try values.decodeIfPresent([MRAutomationScope.Target: Entry].self, forKey: .entries) ?? [:]
+        pendingTransitions = try values.decodeIfPresent([Transition].self, forKey: .pendingTransitions) ?? []
+        completions = try values.decodeIfPresent([MRAutomationScope.Target: CompletionReceipt].self, forKey: .completions) ?? [:]
+    }
+
+    func unreadCompletions(host: String, username: String, showMerged: Bool, showClosed: Bool) -> [CompletionReceipt] {
+        completions.values.filter {
+            $0.target.host == host && $0.target.username == username
+                && (($0.kind == .merged && showMerged) || ($0.kind == .closed && showClosed))
+        }.sorted {
+            $0.observedAt == $1.observedAt ? $0.id.uuidString < $1.id.uuidString : $0.observedAt > $1.observedAt
+        }
+    }
+
+    @discardableResult
+    mutating func acknowledgeCompletion(id: UUID, host: String, username: String) -> Bool {
+        guard let receipt = completions.values.first(where: {
+            $0.id == id && $0.target.host == host && $0.target.username == username
+        }) else { return false }
+        completions.removeValue(forKey: receipt.target)
+        if entries[receipt.target]?.request.state == receipt.kind.rawValue {
+            entries[receipt.target]?.terminalReceiptRecorded = true
+            suppressFinished(receipt.target)
+        }
+        return true
+    }
+
+    mutating func suppressFinished(_ target: MRAutomationScope.Target) {
+        guard let entry = entries[target], Self.isFinished(entry.request) else { return }
+        entries[target]?.acknowledgedTerminalState = entry.request.state
+    }
+
+    mutating func prepareFinishedRemoval(host: String, username: String) {
+        for target in targets(host: host, username: username) where !isSuppressed(target) {
+            guard let entry = entries[target], Self.isFinished(entry.request) else { continue }
+            retainCompletion(entry.request, for: target, id: UUID(), observedAt: entry.terminalObservedAt ?? entry.observedAt,
+                replacing: false)
+            suppressFinished(target)
+        }
+    }
+
+    func completionID(for target: MRAutomationScope.Target) -> UUID? { completions[target]?.id }
 
     func request(for target: MRAutomationScope.Target) -> GitLabMergeRequest? { entries[target]?.request }
 
@@ -41,7 +101,9 @@ struct MergeRequestLifecycleLedger: Codable, Sendable {
 
     mutating func acknowledgeFinished(_ target: MRAutomationScope.Target) {
         guard let entry = entries[target], Self.isFinished(entry.request) else { return }
-        entries[target]?.acknowledgedTerminalState = entry.request.state
+        if completions[target]?.kind.rawValue == entry.request.state { completions.removeValue(forKey: target) }
+        entries[target]?.terminalReceiptRecorded = true
+        suppressFinished(target)
     }
 
     mutating func restore(_ target: MRAutomationScope.Target) {
@@ -66,12 +128,33 @@ struct MergeRequestLifecycleLedger: Codable, Sendable {
             }
         }
         if let kind {
-            pendingTransitions.append(.init(id: UUID(), target: target, kind: kind, title: request.title,
+            let id = UUID()
+            pendingTransitions.append(.init(id: id, target: target, kind: kind, title: request.title,
                 url: request.webURL, observedAt: now))
+            if Self.isFinished(request) { retainCompletion(request, for: target, id: id, observedAt: now) }
+        } else if autoRemoveFinished, Self.isFinished(request), let previous,
+                  Self.isFinished(previous.request), !isSuppressed(target) {
+            // Upgrading a retained terminal row must preserve when it was observed,
+            // without inventing a fresh lifecycle banner or reviving suppressed history.
+            retainCompletion(previous.request, for: target, id: UUID(),
+                observedAt: previous.terminalObservedAt ?? previous.observedAt, replacing: false)
         }
         let acknowledgement = Self.isFinished(request)
             ? (autoRemoveFinished ? request.state : previous?.acknowledgedTerminalState) : nil
-        entries[target] = .init(request: request, observedAt: now, acknowledgedTerminalState: acknowledgement)
+        let terminalTime = Self.isFinished(request)
+            ? (previous?.request.state == request.state ? previous?.terminalObservedAt ?? previous?.observedAt ?? now : now) : nil
+        entries[target] = .init(request: request, observedAt: now, acknowledgedTerminalState: acknowledgement,
+            terminalObservedAt: terminalTime,
+            terminalReceiptRecorded: Self.isFinished(request) ? entries[target]?.terminalReceiptRecorded : nil)
+    }
+
+    private mutating func retainCompletion(_ request: GitLabMergeRequest, for target: MRAutomationScope.Target,
+                                          id: UUID, observedAt: Date, replacing: Bool = true) {
+        guard Self.isFinished(request), replacing || (completions[target] == nil && entries[target]?.terminalReceiptRecorded != true) else { return }
+        completions[target] = .init(id: id, target: target, kind: request.state == "merged" ? .merged : .closed,
+            title: request.title, url: request.webURL, observedAt: observedAt, author: request.author)
+        // Receipt acknowledgement survives restoring a finished row to the board.
+        entries[target]?.terminalReceiptRecorded = true
     }
 
     mutating func takeTransitions(host: String, username: String) -> [Transition] {

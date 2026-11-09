@@ -117,7 +117,7 @@
         "en": {
           "stringUnit": {
             "state": "translated",
-            "value": "When off, finished merge requests stay on the board until marked Seen. Event banners work independently of this setting."
+            "value": "Full automation enables removal when selected. When off, finished merge requests stay on the board until Seen. Completion items and event banners work independently."
           }
         }
       }

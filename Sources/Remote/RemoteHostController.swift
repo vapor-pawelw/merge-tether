@@ -153,6 +153,10 @@ import MergeTetherRemote
         return RemoteBoardAdapter.board(monitor: monitor, session: hostSession, account: account)
     }
     private func execute(_ card: RemoteCard, action: RemoteAction) async -> RemoteCommandResult.Status {
+        if card.id.hasPrefix("completion:") {
+            return RemoteBoardAdapter.acknowledgeCompletion(card, action: action, monitor: monitor, account: account)
+                ? .completed : .changed
+        }
         if action.id.hasPrefix("intent:"), let id = UUID(uuidString: String(action.id.dropFirst(7))) {
             await monitor.runMRTodoIntent(id: id)
             return monitor.currentMRTodoIntents.first(where: { $0.id == id })?.state == .failed ? .failed : .completed

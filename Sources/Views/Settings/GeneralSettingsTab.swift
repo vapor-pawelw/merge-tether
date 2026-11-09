@@ -62,6 +62,18 @@ struct GeneralSettingsTab: View {
                 Text(.MRLifecycleBanners.mrLifecycleBannersAutoRemoveHelp)
             }
             Section {
+                Toggle(isOn: completionBinding(\.showMergedMRCompletions)) {
+                    Text(.MRLifecycle.completionShowMerged)
+                }
+                Toggle(isOn: completionBinding(\.showClosedMRCompletions)) {
+                    Text(.MRLifecycle.completionShowClosed)
+                }
+            } header: {
+                Text(.MRLifecycle.completionSettingsTitle)
+            } footer: {
+                Text(.MRLifecycle.completionSettingsHelp)
+            }
+            Section {
                 Toggle(isOn: autoHandledEventBannersBinding) {
                     Text(.MRLifecycleBanners.mrLifecycleBannersEnabled)
                 }
@@ -96,6 +108,13 @@ struct GeneralSettingsTab: View {
                 monitor.settings.save()
             }
         )
+    }
+
+    private func completionBinding(_ keyPath: ReferenceWritableKeyPath<SettingsManager, Bool>) -> Binding<Bool> {
+        Binding(get: { monitor.settings[keyPath: keyPath] }, set: {
+            monitor.settings[keyPath: keyPath] = $0
+            monitor.settings.save()
+        })
     }
 
     private var autoRemoveFinishedMRsBinding: Binding<Bool> {

@@ -66,6 +66,94 @@
           }
         }
       }
+    },
+    "completionMerged": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "This merge request was merged."
+          }
+        }
+      }
+    },
+    "completionClosed": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "This merge request was closed."
+          }
+        }
+      }
+    },
+    "completionObserved": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Observed:"
+          }
+        }
+      }
+    },
+    "completionSeenHelp": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Acknowledge this completion and remove it from Other items."
+          }
+        }
+      }
+    },
+    "completionSettingsTitle": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Completed merge requests"
+          }
+        }
+      }
+    },
+    "completionShowMerged": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Show merged merge requests in Other items"
+          }
+        }
+      }
+    },
+    "completionShowClosed": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Show closed merge requests in Other items"
+          }
+        }
+      }
+    },
+    "completionSettingsHelp": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Completion items stay until marked Seen. Turning a kind off hides its unread items; turning it on shows them again. Event banners work independently."
+          }
+        }
+      }
     }
   },
   "version": "1.0"

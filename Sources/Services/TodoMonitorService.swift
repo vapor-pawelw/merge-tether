@@ -1428,11 +1428,16 @@ final class TodoMonitorService {
         var rows = Dictionary(attention.currentOpenItems.map { ($0.id, $0) }, uniquingKeysWith: { first, _ in first })
         for request in settings.mrLifecycleLedger.retainedRequests(host: host, username: username) {
             let id = MergeRequestAttentionMonitor.Item.ID(projectID: request.projectID, iid: request.iid)
+            let target = MRAutomationScope.Target(host: host, username: username, projectID: request.projectID, iid: request.iid)
             if let original = rows[id]?.mergeRequest, original.sha == request.sha,
-               original.state == request.state, original.draft == request.draft { continue }
+               original.state == request.state, original.draft == request.draft {
+                rows[id]?.lifecycleCompletionID = settings.mrLifecycleLedger.completionID(for: target)
+                continue
+            }
             // Never attach old publication/feedback proof to newly observed source or lifecycle state.
             rows[id] = .init(id: id, title: request.title, url: request.webURL,
                 mergeRequest: request, isAuthored: request.author.username == username)
+            rows[id]?.lifecycleCompletionID = settings.mrLifecycleLedger.completionID(for: target)
         }
         return rows.values.filter {
             !hiddenBoardTargets.contains(.init(host: host, username: username, projectID: $0.id.projectID, iid: $0.id.iid))
@@ -1467,6 +1472,7 @@ final class TodoMonitorService {
         guard let target = scopeTarget(projectID: item.id.projectID, iid: item.id.iid, url: item.url),
               let current = settings.mrLifecycleLedger.request(for: target), current.webURL == item.url,
               current.state == item.mergeRequest?.state,
+              settings.mrLifecycleLedger.completionID(for: target) == item.lifecycleCompletionID,
               current.state == "merged" || current.state == "closed" else { return false }
         return !settings.mrLifecycleLedger.isSuppressed(target)
     }
@@ -1481,12 +1487,26 @@ final class TodoMonitorService {
 
     func applyFinishedMRRemovalPreference() {
         if settings.autoRemoveFinishedMRs, let host = glab.resolvedHost, let username = glab.currentUsername {
-            for target in settings.mrLifecycleLedger.targets(host: host, username: username) {
-                settings.mrLifecycleLedger.acknowledgeFinished(target)
-            }
+            settings.mrLifecycleLedger.prepareFinishedRemoval(host: host, username: username)
         }
         settings.save()
         confirmedAttention.update(pendingUserAttention)
+    }
+
+    var lifecycleCompletions: [MergeRequestLifecycleLedger.CompletionReceipt] {
+        guard let host = glab.resolvedHost, let username = glab.currentUsername else { return [] }
+        return settings.mrLifecycleLedger.unreadCompletions(host: host, username: username,
+            showMerged: settings.showMergedMRCompletions, showClosed: settings.showClosedMRCompletions)
+    }
+
+    @discardableResult
+    func acknowledgeLifecycleCompletion(id: UUID) -> Bool {
+        guard let host = glab.resolvedHost, let username = glab.currentUsername,
+              lifecycleCompletions.contains(where: { $0.id == id }),
+              settings.mrLifecycleLedger.acknowledgeCompletion(id: id, host: host, username: username) else { return false }
+        settings.save()
+        confirmedAttention.update(pendingUserAttention)
+        return true
     }
 
     func boardOrderingEntries(_ board: MergeRequestBoardSnapshot) -> [BoardPolicyOrder.Entry] {

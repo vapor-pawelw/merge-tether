@@ -27,11 +27,16 @@ struct BoardMRProposalCard: View {
             url: proposal.url, isDraft: isDraft, isFinished: finishedState != nil).isMuted
     }
     private var finishedItem: MergeRequestAttentionMonitor.Item? {
-        guard let request = currentRequest, finishedState != nil else { return nil }
+        guard monitor.glab.resolvedHost == proposal.target.host,
+              monitor.glab.currentUsername == proposal.target.username,
+              let request = currentRequest, finishedState != nil,
+              request.projectID == proposal.target.projectID, request.iid == proposal.target.iid,
+              request.webURL == proposal.url else { return nil }
         var item = proposal.item ?? .init(id: .init(projectID: request.projectID, iid: request.iid),
             title: request.title, url: request.webURL)
         item.mergeRequest = request
         item.isAuthored = request.author.username == proposal.target.username
+        item.lifecycleCompletionID = monitor.settings.mrLifecycleLedger.completionID(for: proposal.target)
         return item
     }
 

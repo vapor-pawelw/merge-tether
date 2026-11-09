@@ -15,6 +15,7 @@ import Foundation
             ignoredTargets: hiddenBoardTargets, humanAttention: userAttention,
             pinnedCards: settings.boardPins, pipelineEvidence: currentPipelineEvidence,
             pipelineEvidenceCheckedAt: currentPipelineEvidenceDate, preservedOrder: preservedOrder,
-            automation: settings.automation, displayRequests: boardDisplayRequests, grouping: settings.boardGrouping)
+            automation: settings.automation, displayRequests: boardDisplayRequests, grouping: settings.boardGrouping,
+            completions: lifecycleCompletions)
     }
 }

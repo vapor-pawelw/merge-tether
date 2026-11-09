@@ -63,7 +63,12 @@ xcodebuild \
 rm -rf "$test_home"
 ```
 
-Tests use Swift Testing. The standalone proof helpers have separate tests that run without live GitLab writes:
+Tests use Swift Testing. Evaluate mutating struct methods into local values before passing their results to
+`#expect` or `#require`. The macros can otherwise capture an immutable argument and
+fail to compile. Construct throwing fixtures before value assertions; use
+`#expect(throws:)` for the throwing operation being tested.
+
+The standalone proof helpers have separate tests that run without live GitLab writes:
 
 ```bash
 PYTHONDONTWRITEBYTECODE=1 PYTHONPATH=Helpers/Automation \

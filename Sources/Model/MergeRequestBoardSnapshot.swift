@@ -79,6 +79,7 @@ struct MergeRequestBoardSnapshot {
     let otherMergeRequests: [Row]
     let proposals: [Proposal]
     let otherTodos: [Todo]
+    let completions: [MergeRequestLifecycleLedger.CompletionReceipt]
     private let ignoredTargets: Set<MRAutomationScope.Target>
     private let automation: AutomationSettings?
     private let grouping: MRBoardGrouping
@@ -92,10 +93,17 @@ struct MergeRequestBoardSnapshot {
          pinnedCards: Set<BoardCardPin> = [], pipelineEvidence: [GitLabMergeRequest] = [],
          pipelineEvidenceCheckedAt: Date? = nil, preservedOrder: [MergeRequestAttentionMonitor.Item.ID: Int] = [:],
          automation: AutomationSettings? = nil, displayRequests: [GitLabMergeRequest] = [],
-         grouping: MRBoardGrouping = .withoutAutomation) {
+         grouping: MRBoardGrouping = .withoutAutomation,
+         completions: [MergeRequestLifecycleLedger.CompletionReceipt] = []) {
         self.ignoredTargets = ignoredTargets
         self.automation = automation
         self.grouping = grouping
+        self.completions = completions.filter { receipt in
+            guard let iid = receipt.target.iid, iid > 0 else { return false }
+            return receipt.target.host == host && receipt.target.username == username
+                && receipt.target.projectID > 0 && (receipt.kind == .merged || receipt.kind == .closed)
+                && receipt.url.isGitLabMergeRequest(host: receipt.target.host, iid: iid)
+        }
         let validatedDisplay = displayRequests.filter { request in
             guard let host, let username, !username.isEmpty, request.projectID > 0, request.iid > 0 else { return false }
             return request.webURL.isGitLabMergeRequest(host: host, iid: request.iid)
@@ -220,6 +228,7 @@ struct MergeRequestBoardSnapshot {
             case proposal(Proposal)
             case todo(Todo)
             case job(AssistantAutomationRunner.Handoff)
+            case completion(MergeRequestLifecycleLedger.CompletionReceipt)
         }
         let id: BoardCardPin
         let content: Content
@@ -238,6 +247,9 @@ struct MergeRequestBoardSnapshot {
         }
         cards += otherTodos.compactMap { todo in
             BoardCardPin.todo(host: host, username: username, id: todo.id).map { .init(id: $0, content: .todo(todo)) }
+        }
+        cards += completions.filter { $0.target.host == host && $0.target.username == username }.map {
+            .init(id: .init(host: host, username: username, item: .completion($0.id)), content: .completion($0))
         }
         let rows = own + reviewed + otherMergeRequests
         let latest = Dictionary(grouping: jobs.filter { !$0.isObsoleteReminder && $0.key.work.host == host && $0.key.username == username }, by: \.key.work)
@@ -272,6 +284,7 @@ struct MergeRequestBoardSnapshot {
         let isDraft: Bool
         let finished: Bool
         switch content {
+        case .completion: return .regular
         case .proposal(let proposal):
             target = proposal.target
             let request = knownRequests[.init(projectID: target.projectID, iid: target.iid ?? 0)]

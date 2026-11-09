@@ -44,6 +44,12 @@ final class SettingsManager {
     var effectiveBoardGrouping: MRBoardGrouping { boardGrouping.effective(for: automation) }
     var mrLifecycleLedger = MergeRequestLifecycleLedger()
     var autoRemoveFinishedMRs = false
+    var showMergedMRCompletions = true
+    var showClosedMRCompletions = true
+
+    func applyCompletionDefaults(for preset: AutomationPreset) {
+        if preset == .full { autoRemoveFinishedMRs = true }
+    }
 
     init(defaults: UserDefaults = .standard) {
         self.defaults = defaults
@@ -83,6 +89,8 @@ final class SettingsManager {
         mrLifecycleLedger = defaults.data(forKey: Key.mrLifecycleLedger)
             .flatMap { try? JSONDecoder().decode(MergeRequestLifecycleLedger.self, from: $0) } ?? .init()
         autoRemoveFinishedMRs = defaults.bool(forKey: Key.autoRemoveFinishedMRs)
+        showMergedMRCompletions = defaults.bool(forKey: Key.showMergedMRCompletions)
+        showClosedMRCompletions = defaults.bool(forKey: Key.showClosedMRCompletions)
         conflictReceipts = defaults.data(forKey: Key.conflictReceipts)
             .flatMap { try? JSONDecoder().decode(Set<MergeConflictReceipt>.self, from: $0) }
             ?? []
@@ -175,6 +183,8 @@ final class SettingsManager {
         if let data = try? JSONEncoder().encode(boardPins) { defaults.set(data, forKey: Key.boardPins) }
         if let data = try? JSONEncoder().encode(mrLifecycleLedger) { defaults.set(data, forKey: Key.mrLifecycleLedger) }
         defaults.set(autoRemoveFinishedMRs, forKey: Key.autoRemoveFinishedMRs)
+        defaults.set(showMergedMRCompletions, forKey: Key.showMergedMRCompletions)
+        defaults.set(showClosedMRCompletions, forKey: Key.showClosedMRCompletions)
         defaults.set(boardGrouping.rawValue, forKey: Key.boardGrouping)
         if let data = try? JSONEncoder().encode(conflictReceipts) {
             defaults.set(data, forKey: Key.conflictReceipts)
@@ -268,6 +278,8 @@ final class SettingsManager {
             Key.notificationsEnabled: true,
             Key.autoHandledEventBannersEnabled: true,
             Key.autoRemoveFinishedMRs: false,
+            Key.showMergedMRCompletions: true,
+            Key.showClosedMRCompletions: true,
             Key.boardGrouping: MRBoardGrouping.withoutAutomation.rawValue,
             Key.onboardingCompleted: false,
             Key.launchAtLoginPreference: true,
@@ -287,6 +299,8 @@ final class SettingsManager {
         static let boardGrouping = "boardGrouping"
         static let mrLifecycleLedger = "mrLifecycleLedger"
         static let autoRemoveFinishedMRs = "autoRemoveFinishedMRs"
+        static let showMergedMRCompletions = "showMergedMRCompletions"
+        static let showClosedMRCompletions = "showClosedMRCompletions"
         static let conflictReceipts = "conflictReceipts"
         static let reReviewReceipts = "reReviewReceipts"
         static let reReviewDraftBaselines = "reReviewDraftBaselines"

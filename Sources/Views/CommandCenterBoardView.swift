@@ -126,6 +126,7 @@ struct CommandCenterBoardView: View {
     @ViewBuilder
     private func otherCard(_ card: MergeRequestBoardSnapshot.OtherCard) -> some View {
         switch card.content {
+        case .completion(let completion): BoardMRCompletionCard(completion: completion, monitor: monitor)
         case .proposal(let proposal): BoardMRProposalCard(proposal: proposal, monitor: monitor)
         case .todo(let todo):
             BoardTodoRow(todo: todo, monitor: monitor)

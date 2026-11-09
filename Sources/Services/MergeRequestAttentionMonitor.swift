@@ -17,6 +17,7 @@ final class MergeRequestAttentionMonitor {
         let id: ID
         let title: String
         let url: URL
+        var lifecycleCompletionID: UUID?
         var draftCount = 0
         /// The current user's unpublished drafts, shown in Ready for your OK.
         var drafts: [GitLabDraftNote] = []
@@ -958,9 +959,7 @@ final class MergeRequestAttentionMonitor {
         }
         if let settings {
             if settings.autoRemoveFinishedMRs {
-                for target in settings.mrLifecycleLedger.targets(host: host, username: user.username) {
-                    settings.mrLifecycleLedger.acknowledgeFinished(target)
-                }
+                settings.mrLifecycleLedger.prepareFinishedRemoval(host: host, username: user.username)
             }
             for target in settings.mrLifecycleLedger.targets(host: host, username: user.username) {
                 let id = Item.ID(projectID: target.projectID, iid: target.iid ?? 0)

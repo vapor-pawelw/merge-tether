@@ -26,11 +26,16 @@ struct BoardCompactJobCard: View {
             url: url, isDraft: isDraft, isFinished: finishedState != nil).isMuted
     }
     private var finishedItem: MergeRequestAttentionMonitor.Item? {
-        guard let request = currentRequest, finishedState != nil else { return nil }
+        guard monitor.glab.resolvedHost == scopeTarget.host,
+              monitor.glab.currentUsername == scopeTarget.username,
+              let request = currentRequest, finishedState != nil,
+              request.projectID == scopeTarget.projectID, request.iid == scopeTarget.iid,
+              request.webURL.isGitLabMergeRequest(host: scopeTarget.host, iid: request.iid) else { return nil }
         var item = MergeRequestAttentionMonitor.Item(id: .init(projectID: request.projectID, iid: request.iid),
             title: request.title, url: request.webURL)
         item.mergeRequest = request
         item.isAuthored = request.author.username == handoff.key.username
+        item.lifecycleCompletionID = monitor.settings.mrLifecycleLedger.completionID(for: scopeTarget)
         return item
     }
 

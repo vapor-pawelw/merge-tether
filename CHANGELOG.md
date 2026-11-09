@@ -16,7 +16,9 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 
 ### Added
 
-- Track MR lifecycle changes independently of coding automation, announce merged, closed and Draft/Ready transitions, and retain finished cards until Seen by default, with a separate optional automatic-removal setting.
+- Keep merged/closed completion updates in Other items until Seen, independently of banners and lane cleanup; apply cleanup with Full onboarding/profile defaults while preserving saved upgrade preferences.
+
+- Track MR lifecycle changes independently of coding automation, announce merged, closed and Draft/Ready transitions, and retain completion feedback until Seen independently of automatic lane cleanup.
 - Mark your own Draft merge requests ready from their card, menu and Details, with fresh account, ownership and revision checks.
 - Add Auto/Always on/Always off per-MR automation and a migrated default-on Draft pause; track paused Drafts, retain ordinary manual actions, and hide automation controls when all automatic features are off.
 - Apply Draft policy across agent checks, feedback, publication, CI and conflicts, retain pending events while paused, and keep Draft/Ready changes from overriding forced choices. Drafts still never merge automatically.

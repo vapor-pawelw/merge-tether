@@ -109,9 +109,12 @@ struct OnboardingView: View {
     }
 
     private func complete(automation: AutomationSettings) {
+        if monitor.settings.automation.packageDecision == .undecided, let preset = automation.baselinePreset {
+            monitor.settings.applyCompletionDefaults(for: preset)
+        }
         monitor.settings.automation = automation
         monitor.settings.onboardingCompleted = true
-        monitor.settings.save()
+        monitor.applyFinishedMRRemovalPreference()
         monitor.start()
         dismissWindow(id: "onboarding")
     }
