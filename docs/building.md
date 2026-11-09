@@ -56,15 +56,99 @@ or remote access. Ordinary installed and development launches share the same
 single-instance lock regardless of bundle identifier.
 
 ```bash
-test_home="$(mktemp -d)"
-TEST_RUNNER_HOME="$test_home" TEST_RUNNER_CFFIXED_USER_HOME="$test_home" \
-xcodebuild \
-  -project GitLabTodos.xcodeproj \
-  -scheme GitLabTodos \
-  -destination "platform=macOS" \
-  test
-rm -rf "$test_home"
+mise exec -- tuist generate --no-open
+python3 scripts/run-tests.py
 ```
+
+The repository runner uses `xcodebuild build-for-testing` followed by
+`test-without-building`, with a fresh isolated test home on every invocation.
+It never launches or replaces the installed app. It requires Python 3 and Xcode
+26+, and uses `xcresulttool` to retain results and diagnostic timing events.
+Use this command for performance investigations: the installed XcodeBuildMCP test
+wrapper currently exports only a summary and deletes its temporary result bundle.
+Passing an additional result-bundle argument to that wrapper does not fix this.
+
+Each timestamped run under the ignored `.test-results/` directory contains:
+
+- `timings.csv`: one row per execution, including parameterized cases and
+  repetitions, with its test ID, suite, execution number, Xcode argument identity,
+  outcome and numeric seconds. Parent totals are excluded to avoid double counting.
+  Xcode 26.3's result APIs round case durations to whole seconds and omit many
+  fast-case durations. The runner instead pairs start/finish events in exported
+  diagnostic session logs, at millisecond resolution. These measure Xcode event
+  receipt intervals, including event-delivery overhead; they are not CPU time.
+  Argument identities may contain Xcode's abbreviated byte descriptions; occurrence
+  numbers keep repeated cases distinct. `case_key` hashes the test ID, argument
+  identity and occurrence within that identity for comparisons across runs.
+  `repeated_identity_groups` records repeated opaque identities; use method totals
+  for cross-run comparisons if different argument values have colliding byte descriptions.
+  Overlapping identical identities are flagged as ambiguous rather than silently
+  accepted. Missing durations, ambiguity, missing execution counts or a row-count mismatch
+  against Xcode's per-device execution counts make reporting fail explicitly.
+- `summary.txt`: total counts, phase durations, slowest cases and suites.
+- `report.json`: commit/dirty state, tracked-diff and untracked-file hashes,
+  runner hash, Xcode version, exact commands, exit codes,
+  build/test wall times and summed case time. The Swift Testing execution span
+  from the console and the remaining test-command overhead are separate fields.
+  Summed case times may overlap and
+  are **not** elapsed time. The raw result summary's elapsed interval is retained
+  separately when available. `derived_data_preexisting` and `reuse_build_requested`
+  distinguish incremental and clean builds. The generated project hash and pinned
+  Tuist requirement are recorded; untracked nested repositories are listed separately.
+- `summary.json`, `tests.json`, compressed build/test and diagnostic session logs,
+  and `Tests.xcresult`.
+  Test failures preserve their original nonzero exit code and still export
+  available timings and diagnostics. Build failures retain their log and metadata.
+
+By default the latest ten report directories and two result bundles are retained;
+older owned runs are pruned, including failed runs. Copy important evidence outside
+this directory before it ages out. `--keep-reports` and `--keep-bundles` adjust
+retention (`--keep-bundles 0` retains only compact evidence). Logs are compressed;
+raw bundles can be opened in Xcode while retained. The runner serializes access to
+its results directory and removes its test home and scratch Derived Data on normal
+exit and handled interruption. Ctrl-C, SIGTERM and SIGHUP stop the active command
+and retain an interrupted, nonzero report. Cleanup ignores additional interrupts
+until the process group has been stopped and evidence saved. Build/test deadlines default to 600/1200
+seconds (`--build-timeout` / `--test-timeout`); expiry returns 124. SIGKILL cannot be
+handled and may leave partial artifacts; inspect any surviving owned test processes
+before removing those artifacts or starting another run against the same directory.
+
+For a baseline and comparison, reuse the same owned Derived Data directory and
+keep identical filters and runner settings. Separate clean-build time from the
+test-command wall time; rebuilding unchanged code is usually much cheaper.
+
+```bash
+python3 scripts/run-tests.py --reuse-build
+# Make the scoped change, then run affected suites (the flag is repeatable):
+python3 scripts/run-tests.py --reuse-build \
+  --only-testing GitLabTodosTests/AssistantJobCoordinatorTests
+# Comparable full run, then automatically remove the reused scratch build:
+python3 scripts/run-tests.py
+```
+
+`--results-dir PATH` selects a directory owned by this runner, including its
+`DerivedData` child. A new location must be empty; the runner records an ownership
+marker and refuses nonempty, unmarked directories. The default always belongs to
+the repository, even when the command is invoked elsewhere. Project
+generation remains explicit. Run `python3 scripts/run-tests.py --help` for options.
+The report/retention tests run without Xcode or GitLab:
+
+```bash
+PYTHONDONTWRITEBYTECODE=1 python3 -m unittest discover -s Tests/TestTools
+```
+
+GitLab tests inject temporary `glab` scripts returning synthetic local data, or
+leave the executable unset. Paths to installed CLIs in settings tests are only
+persistence fixtures. Assistant CLI tests likewise inject local scripts/probes.
+Real shell/Python processes remain in adapter tests to cover pipe capture, exit
+codes, timeouts, cancellation and descendant cleanup. No live GitLab account or
+installed `glab` is required. Debug test hosts reject direct launches of `glab`,
+`codex` and `claude` outside the temporary fixture directory, including symlinked
+paths. The runner also marks its isolated HOME explicitly to permit classifier
+fixtures installed there. Discovery does not probe installed `glab` or a login
+shell in a test host, and assistant discovery considers only its isolated HOME
+fixture rather than desktop bundles or global binaries. Guard rejections make the runner fail even if application
+code catches the launch error. Ordinary application launches retain their existing behavior.
 
 Tests use Swift Testing. Evaluate mutating struct methods into local values before passing their results to
 `#expect` or `#require`. The macros can otherwise capture an immutable argument and
