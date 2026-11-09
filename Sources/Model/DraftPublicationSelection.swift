@@ -4,6 +4,13 @@ import Foundation
 struct DraftPublicationSelection {
     private var selected: [Int: GitLabDraftNote] = [:]
 
+    init() {}
+
+    init(selectingAll drafts: [GitLabDraftNote]) {
+        for draft in drafts { setSelected(true, draft: draft) }
+        reconcile(with: drafts)
+    }
+
     static func canSelect(_ draft: GitLabDraftNote) -> Bool {
         (draft.id ?? 0) > 0 && draft.authorID > 0
             && draft.note?.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty == false
@@ -32,4 +39,20 @@ struct DraftPublicationSelection {
             draft.id.map { ($0, draft) }
         })
     }
+}
+
+/// Selection defaults belong to one presentation, never a poll or an account refresh.
+struct DraftPublicationSession {
+    var selection = DraftPublicationSelection()
+    private var isOpen = false
+
+    mutating func open(with drafts: [GitLabDraftNote], accountAvailable: Bool = true) {
+        guard !isOpen else { return }
+        isOpen = true
+        selection = accountAvailable ? DraftPublicationSelection(selectingAll: drafts) : DraftPublicationSelection()
+    }
+
+    mutating func draftsChanged(_ drafts: [GitLabDraftNote]) { selection.reconcile(with: drafts) }
+    mutating func clearSelection() { selection = DraftPublicationSelection() }
+    mutating func close() { clearSelection(); isOpen = false }
 }

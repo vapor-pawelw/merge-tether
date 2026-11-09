@@ -69,6 +69,11 @@ private struct CommandCenterMRCardContent: View {
                     Text(verbatim: retryError).font(.caption).foregroundStyle(isMuted ? Color.secondary : Color.red)
                         .fixedSize(horizontal: false, vertical: true)
                 }
+                if let state = monitor.attention.confirmationStates[item.id], state == .failed || state == .changed {
+                    Text(state == .failed ? .Menu.menuConfirmFailed : .Menu.menuConfirmChanged)
+                        .font(.caption).foregroundStyle(isMuted ? Color.secondary : Color.orange)
+                        .fixedSize(horizontal: false, vertical: true)
+                }
                 if let job = row.latestJob { AssistantJobPreflightNotice(jobID: job.id, monitor: monitor) }
                 if presentation.working || presentation.refreshFailed || humanAction != nil || neutralStatus != nil || (isDraft && item.isAuthored) {
                     HStack(spacing: 6) {
@@ -165,6 +170,7 @@ private struct CommandCenterMRCardContent: View {
 
     private func actionWaitsForRefresh(_ action: MRHumanAction) -> Bool {
         switch action.action {
+        case .reviewDrafts where action.showsDirectPublication && !item.drafts.isEmpty: true
         case .retryRun, .verifyFeedback, .retryDraftVerification, .handleFeedback, .retryIntent: true
         default: false // Opening existing discussions/results never authorizes a GitLab action.
         }
@@ -211,7 +217,15 @@ private struct CommandCenterMRCardContent: View {
                     }
                 }
             }
-        case .reviewDrafts, .reviewApproval:
+        case .reviewDrafts:
+            if action.showsDirectPublication && !item.drafts.isEmpty {
+                primary(.Menu.menuConfirmPublish, enabled: scopeTarget != nil) {
+                    start { await monitor.attention.publishDrafts(of: item.id) }
+                }
+            } else {
+                primary(action.actionLabel) { openAttention(.drafts) }
+            }
+        case .reviewApproval:
             primary(action.actionLabel) { openAttention(.drafts) }
         case .verifyFeedback:
             primary(action.actionLabel) { monitor.attention.retryAuthorFeedback(item.id) }

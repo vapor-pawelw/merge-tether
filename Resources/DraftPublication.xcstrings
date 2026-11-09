@@ -16,9 +16,21 @@
       "extractionState": "manual",
       "localizations": {
         "en": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "Publish selected (%lld)"
+          "variations": {
+            "plural": {
+              "one": {
+                "stringUnit": {
+                  "state": "translated",
+                  "value": "Publish %lld comment"
+                }
+              },
+              "other": {
+                "stringUnit": {
+                  "state": "translated",
+                  "value": "Publish %lld comments"
+                }
+              }
+            }
           }
         }
       }
@@ -41,6 +53,28 @@
           "stringUnit": {
             "state": "translated",
             "value": "Clear selection"
+          }
+        }
+      }
+    },
+    "draftPublication.threads": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Drafts and their threads"
+          }
+        }
+      }
+    },
+    "draftPublication.unavailable": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Connect to the GitLab account for this merge request to select and publish comments."
           }
         }
       }

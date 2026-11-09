@@ -1,3 +1,4 @@
+import AppKit
 import SwiftUI
 
 struct CommandCenterBoardView: View {
@@ -58,6 +59,9 @@ struct CommandCenterBoardView: View {
             .frame(minWidth: 700, idealWidth: 820, minHeight: 600, idealHeight: 780)
         }
         .onChange(of: account) { _, _ in selected = nil }
+        .onReceive(NotificationCenter.default.publisher(for: NSWindow.willCloseNotification)) { notification in
+            if (notification.object as? NSWindow)?.identifier?.rawValue == "main" { selected = nil }
+        }
         .task {
             while !Task.isCancelled {
                 await monitor.attention.refreshPendingDrafts()

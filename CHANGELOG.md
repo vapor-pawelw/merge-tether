@@ -6,6 +6,8 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 
 ## Unreleased
 
+- Expose draft replies and their threads below the Details publication button, default all current drafts to checked per window, publish the checked count, and keep direct MR publication as Publish all comments.
+
 - Run up to four MR workers concurrently, retain persistent CLI login/quota banners, group toolbar actions and highlight clickable pin/automation controls.
 - Retain headless worker output and validated completion checkpoints across restarts, wait for worker cleanup on Quit, and reconcile previous work on deliberate retries.
 - Always show MR monitoring or current-check status instead of empty cards.

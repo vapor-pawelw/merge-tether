@@ -13,6 +13,7 @@ struct ConfirmationQueueRow<AdditionalActions: View>: View {
     var showHeader = true
     var selection: Binding<DraftPublicationSelection>? = nil
     var onPublishSelected: (([GitLabDraftNote]) -> Void)? = nil
+    var requiresSelection = false
     let additionalActions: AdditionalActions
 
     @State private var showsComments = false
@@ -80,15 +81,13 @@ struct ConfirmationQueueRow<AdditionalActions: View>: View {
             HStack(spacing: 8) {
                 if !item.drafts.isEmpty {
                     let selected = draftSelection.wrappedValue.selectedDrafts(from: item.drafts)
-                    if let onPublishSelected, !selected.isEmpty {
-                        Button { onPublishSelected(selected) } label: {
+                    if requiresSelection {
+                        Button { onPublishSelected?(selected) } label: {
                             Text(.DraftPublication.draftPublicationPublishSelected(selected.count))
                         }
                         .help(Text(.DraftPublication.draftPublicationPublishSelectedHelp))
                         .buttonStyle(.borderedProminent)
-                        Button(action: onPublish) { Text(.Menu.menuConfirmPublish) }
-                            .help(Text(.Menu.menuConfirmPublishHelp))
-                            .buttonStyle(.bordered)
+                        .disabled(selected.isEmpty || onPublishSelected == nil)
                     } else {
                         Button(action: onPublish) { Text(.Menu.menuConfirmPublish) }
                             .help(Text(.Menu.menuConfirmPublishHelp))
@@ -141,7 +140,7 @@ struct ConfirmationQueueRow<AdditionalActions: View>: View {
 
     private func draftPreview(_ draft: GitLabDraftNote) -> some View {
         HStack(alignment: .top, spacing: 8) {
-            if onPublishSelected != nil {
+            if requiresSelection && onPublishSelected != nil {
                 DraftPublicationCheckbox(draft: draft, selection: draftSelection, disabled: isBusy)
             }
             draftContent(draft)

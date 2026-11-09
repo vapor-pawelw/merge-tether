@@ -465,6 +465,39 @@ import Testing
         return try [11, 14].map { id in try #require(drafts.first { $0.id == id }) }
     }
 
+    @Test func detailsCheckboxesPublishOnlyTheRemainingCheckedDraftAndIgnoreLaterArrivals() async throws {
+        // given
+        let harness = try await manualHarness(); defer { harness.cleanUp() }
+        let drafts = try #require(harness.monitor.currentOpenItems.first?.drafts)
+        var selection = DraftPublicationSelection(selectingAll: drafts)
+        for draft in drafts where draft.id != 14 { selection.setSelected(false, draft: draft) }
+        let checked = selection.selectedDrafts(from: drafts)
+        #expect(checked.compactMap(\.id) == [14])
+        try harness.write("drafts.json", manualDrafts.replacingOccurrences(of: "]",
+            with: #",{"id":15,"author_id":3,"note":"Later arrival"}]"#))
+        // when
+        await harness.monitor.publishDrafts(checked, for: manualTarget)
+        // then
+        #expect(harness.log("selected.log").split(separator: "\n").count == 1)
+        #expect(harness.log("selected.log").contains("/draft_notes/14/publish"))
+        #expect(harness.log("publish.log").isEmpty)
+        #expect(harness.monitor.currentOpenItems.first?.drafts.compactMap(\.id) == [11, 12, 15])
+    }
+
+    @Test func directMRPublicationPublishesAllDespiteAWindowSpecificSubset() async throws {
+        // given
+        let harness = try await manualHarness(); defer { harness.cleanUp() }
+        let item = try #require(harness.monitor.currentOpenItems.first)
+        var selection = DraftPublicationSelection(selectingAll: item.drafts)
+        for draft in item.drafts where draft.id != 14 { selection.setSelected(false, draft: draft) }
+        #expect(selection.selectedDrafts(from: item.drafts).count == 1)
+        // when
+        await harness.monitor.publishDrafts(of: item.id)
+        // then
+        #expect(!harness.log("publish.log").isEmpty)
+        #expect(harness.monitor.currentOpenItems.first?.drafts.isEmpty == true)
+    }
+
     @Test(arguments: [false, true])
     func selectedManualDraftsPublishOnlyTheReviewedSubsetWithoutAutomationOrCLI(authored: Bool) async throws {
         let harness = try await manualHarness(authored: authored); defer { harness.cleanUp() }

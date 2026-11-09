@@ -3,6 +3,23 @@ import Testing
 @testable import GitLabTodos
 
 struct MRDiscussionSnapshotTests {
+    @Test func publicationContextAndOtherDiscussionsPartitionThePageWithoutDuplicateDrafts() throws {
+        // given
+        let drafts = try JSONDecoder().decode([GitLabDraftNote].self, from: Data(#"[{"id":10,"author_id":9,"note":"Pending reply","discussion_id":"active"},{"id":11,"author_id":9,"note":"General draft"},{"id":12,"author_id":9,"note":"Orphan reply","discussion_id":"missing"}]"#.utf8))
+        let snapshot = MRDiscussionSnapshot(discussions: try threads(), drafts: drafts,
+            origins: [2: .assessed(evidence: "Recorded assessment")])
+        // when
+        let publication = snapshot.pendingPublication
+        let other = snapshot.remainingDiscussions
+        // then
+        #expect(publication.threads.map(\.discussionID) == ["active"])
+        #expect(publication.threads.first?.notes.compactMap(\.id) == [2, 3])
+        #expect(publication.threads.first?.origins[2] != nil)
+        #expect(publication.threads.flatMap(\.drafts) + publication.standaloneDrafts == drafts)
+        #expect(other.threads.map(\.discussionID) == ["done", "general"])
+        #expect(other.threads.flatMap(\.drafts).isEmpty && other.standaloneDrafts.isEmpty)
+    }
+
     private func threads() throws -> [GitLabMergeRequestDiscussion] {
         try JSONDecoder().decode([GitLabMergeRequestDiscussion].self, from: Data(#"[{"id":"done","notes":[{"id":1,"author":{"id":7,"username":"alice"},"body":"First finding","system":false,"resolvable":true,"resolved":true}]},{"id":"active","notes":[{"id":2,"author":{"id":7,"username":"alice"},"body":"Please check","system":false,"resolvable":true,"resolved":false,"position":{"new_path":"src/File.swift","new_line":12}},{"id":3,"author":{"id":9,"username":"me"},"body":"Author reply","system":false}]},{"id":"general","notes":[{"id":4,"author":{"id":7},"body":"Summary","system":false}]},{"id":"system","notes":[{"id":5,"system":true,"body":"pushed new commits"}]}]"#.utf8))
     }
@@ -28,6 +45,8 @@ struct MRDiscussionSnapshotTests {
         let drafts = try JSONDecoder().decode([GitLabDraftNote].self, from: Data(#"[{"id":10,"author_id":9,"note":"Pending reply","discussion_id":"missing"}]"#.utf8))
         let snapshot = MRDiscussionSnapshot(discussions: [], drafts: drafts, origins: [:])
         #expect(snapshot.standaloneDrafts == drafts)
+        #expect(snapshot.pendingPublication.standaloneDrafts == drafts)
+        #expect(snapshot.remainingDiscussions.standaloneDrafts.isEmpty)
     }
 
     @Test func onlyCurrentQualifyingConfidenceEvidenceCanLabelANote() throws {

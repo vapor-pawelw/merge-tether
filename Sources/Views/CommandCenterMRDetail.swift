@@ -45,7 +45,7 @@ private struct CommandCenterMRDetailContent: View {
     @State private var retryError: String?
     @State private var confirmRemoval = false
     @State private var discussionStore = MRDiscussionStore()
-    @State private var draftSelection = DraftPublicationSelection()
+    @State private var publicationSession = DraftPublicationSession()
     @State private var detailsExpanded = false
     @State private var feedbackExpanded = false
     @State private var historyExpanded = false
@@ -119,7 +119,8 @@ private struct CommandCenterMRDetailContent: View {
         target.map { monitor.settings.feedbackSuggestionDecisions.entries(for: $0) } ?? []
     }
 
-    private var showsDecisions: Bool { finishedState == nil && (needsHumanAttention || initialSection == .drafts) }
+    private var showsPublication: Bool { finishedState == nil && !item.drafts.isEmpty }
+    private var showsDecisions: Bool { finishedState == nil && (needsHumanAttention || initialSection == .drafts || showsPublication) }
     private var initialDestinationIsReady: Bool {
         guard let anchor = pendingInitialAnchor else { return false }
         // Decisions precede comments, so their position does not depend on the discussion load.
@@ -198,9 +199,12 @@ private struct CommandCenterMRDetailContent: View {
                 if old == .publishing && current != .publishing { refreshDiscussions() }
             }
             .onChange(of: jobs.first?.id) { _, _ in retryError = nil }
-            .onChange(of: item.drafts) { _, drafts in draftSelection.reconcile(with: drafts) }
+            .onAppear { publicationSession.open(with: item.drafts, accountAvailable: discussionTarget != nil) }
+            .onChange(of: item.drafts) { _, drafts in
+                publicationSession.draftsChanged(drafts)
+            }
             .onChange(of: discussionTarget) { _, _ in
-                draftSelection = DraftPublicationSelection()
+                publicationSession.clearSelection()
                 reviewStartError = nil
                 feedbackDecisionConfirmation = nil
                 feedbackDecisionError = nil
@@ -208,7 +212,10 @@ private struct CommandCenterMRDetailContent: View {
             .onChange(of: needsHumanAttention) { _, required in
                 if required && item.authorFeedbackStatus?.needsAttention == true { feedbackExpanded = true }
             }
-            .onDisappear { discussionStore.cancel() }
+            .onDisappear {
+                discussionStore.cancel()
+                publicationSession.close()
+            }
             .alert(Text(feedbackDecisionConfirmation?.isReset == true
                 ? .FeedbackSuggestions.feedbackSuggestionsResetTitle : .FeedbackSuggestions.feedbackSuggestionsIgnoreTitle),
                 isPresented: Binding(get: { feedbackDecisionConfirmation != nil },
@@ -379,7 +386,7 @@ private struct CommandCenterMRDetailContent: View {
                             Text(action.actionLabel)
                         }
                     }
-                } else if !needsHumanAttention && !item.needsConfirmation {
+                } else if !needsHumanAttention && !item.needsConfirmation && !showsPublication {
                     Text(.CommandCenter.commandCenterNoPendingDecision).foregroundStyle(.secondary)
                 }
                 if let job = jobs.first { AssistantJobPreflightNotice(jobID: job.id, monitor: monitor) }
@@ -389,7 +396,13 @@ private struct CommandCenterMRDetailContent: View {
                 if let feedbackDecisionError {
                     Text(verbatim: feedbackDecisionError).foregroundStyle(.orange).fixedSize(horizontal: false, vertical: true)
                 }
-                if item.needsConfirmation { confirmationControls }
+                if item.needsConfirmation || showsPublication { confirmationControls }
+                if showsPublication {
+                    if discussionTarget == nil {
+                        Text(.DraftPublication.draftPublicationUnavailable).font(.caption).foregroundStyle(.secondary)
+                    }
+                    publicationThreads
+                }
                 decisionActions
                 FollowUpAutomationHoldView(row: presentationRow, monitor: monitor)
                 if item.authorFeedbackStatus != nil { feedbackCheck(citationContext: citationContext).id(Anchor.feedbackStatus) }
@@ -406,18 +419,18 @@ private struct CommandCenterMRDetailContent: View {
             onPublish: { Task { await monitor.attention.publishDrafts(of: item.id) } },
             onApprove: { Task { await monitor.attention.approve(item.id) } },
             onOpen: { NSWorkspace.shared.open(item.url) }, initiallyExpanded: initialSection == .drafts,
-            showDraftPreview: false, showHeader: false, selection: $draftSelection,
-            onPublishSelected: publishSelected, additionalActions: EmptyView())
+            showDraftPreview: false, showHeader: false, selection: $publicationSession.selection,
+            onPublishSelected: publishSelected, requiresSelection: true, additionalActions: EmptyView())
     }
 
     @ViewBuilder
     private var selectedPublicationActions: some View {
-        let selected = draftSelection.selectedDrafts(from: item.drafts)
+        let selected = publicationSession.selection.selectedDrafts(from: item.drafts)
         if !selected.isEmpty, let target = discussionTarget {
             let state = monitor.attention.confirmationStates[item.id]
             let busy = state == .publishing || state == .approving
             HStack(spacing: 12) {
-                Button { draftSelection = DraftPublicationSelection() } label: {
+                Button { publicationSession.clearSelection() } label: {
                     Text(.DraftPublication.draftPublicationClearSelection)
                 }
                 .buttonStyle(.borderless)
@@ -697,18 +710,32 @@ private struct CommandCenterMRDetailContent: View {
         }
     }
 
-    private var discussionThreads: some View {
+    private var discussionSnapshot: MRDiscussionSnapshot {
         let current = discussionTarget != nil && discussionStore.target == discussionTarget
-        let snapshot = MRDiscussionSnapshot(discussions: current ? discussionStore.discussions : [], drafts: item.drafts,
-                                            origins: current ? discussionStore.origins : [:])
-        return MRDiscussionThreadsView(snapshot: snapshot, mergeRequestURL: item.url,
+        return MRDiscussionSnapshot(discussions: current ? discussionStore.discussions : [], drafts: item.drafts,
+            origins: current ? discussionStore.origins : [:])
+    }
+
+    private var publicationThreads: some View {
+        let current = discussionTarget != nil && discussionStore.target == discussionTarget
+        return MRDiscussionThreadsView(snapshot: discussionSnapshot.pendingPublication, mergeRequestURL: item.url,
             currentUsername: monitor.glab.currentUsername, isLoading: current && discussionStore.isLoading,
             hasError: current && discussionStore.hasError, hasLoaded: current && discussionStore.hasLoaded,
-            expandPendingDrafts: initialSection == .drafts,
-            selection: finishedState == nil && item.needsConfirmation && current ? $draftSelection : nil,
-            selectionDisabled: monitor.attention.confirmationStates[item.id] == .publishing
+            expandPendingDrafts: true, selection: $publicationSession.selection,
+            selectionDisabled: discussionTarget == nil || monitor.attention.confirmationStates[item.id] == .publishing
                 || monitor.attention.confirmationStates[item.id] == .approving,
+            title: .DraftPublication.draftPublicationThreads, draftsFirst: true, onRefresh: refreshDiscussions)
+    }
+
+    @ViewBuilder private var discussionThreads: some View {
+        let current = discussionTarget != nil && discussionStore.target == discussionTarget
+        let snapshot = showsPublication ? discussionSnapshot.remainingDiscussions : discussionSnapshot
+        if !showsPublication || !snapshot.threads.isEmpty {
+            MRDiscussionThreadsView(snapshot: snapshot, mergeRequestURL: item.url,
+            currentUsername: monitor.glab.currentUsername, isLoading: current && discussionStore.isLoading,
+            hasError: current && discussionStore.hasError, hasLoaded: current && discussionStore.hasLoaded,
             onRefresh: refreshDiscussions)
+        }
     }
 
     private func refreshDiscussions() {

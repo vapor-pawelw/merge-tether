@@ -27,6 +27,19 @@ struct MRDiscussionSnapshot {
     var threads: [Thread] = []
     var standaloneDrafts: [GitLabDraftNote] = []
 
+    var pendingPublication: Self {
+        var snapshot = self
+        snapshot.threads = threads.filter { !$0.drafts.isEmpty }
+        return snapshot
+    }
+
+    var remainingDiscussions: Self {
+        var snapshot = self
+        snapshot.threads = threads.filter { $0.drafts.isEmpty }
+        snapshot.standaloneDrafts = []
+        return snapshot
+    }
+
     init(discussions: [GitLabMergeRequestDiscussion], drafts: [GitLabDraftNote], origins: [Int: Origin]) {
         var matchedDrafts: Set<Int> = []
         for (index, discussion) in discussions.enumerated() {

@@ -4,6 +4,18 @@ import Testing
 
 @MainActor
 struct MRHumanActionTests {
+    @Test(arguments: ["ready", "verification", "discussion", "changed"])
+    func directPublicationRequiresTheNormalPublicationCheckpoint(_ state: String) throws {
+        var value = item()
+        value.draftCount = 1
+        value.drafts = [.init(id: 11, authorID: 3, note: "Reply", discussionID: nil, position: nil)]
+        value.awaitingRemoteVerification = state == "verification"
+        value.requiresDiscussionRecheck = state == "discussion"
+        let action = try #require(MRHumanAction(row: row(value), assistantReady: true,
+            confirmationState: state == "changed" ? .changed : nil))
+        #expect(action.showsDirectPublication == (state == "ready"))
+    }
+
     @Test(arguments: [MRTodoIntent.Kind.followUp, .pipeline])
     func aPendingFollowUpQuotesItsSelectedCommentsInsteadOfUnrelatedFeedback(_ kind: MRTodoIntent.Kind) throws {
         // given

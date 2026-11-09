@@ -142,6 +142,10 @@ struct MRHumanAction {
         }
     }
 
+    var showsDirectPublication: Bool {
+        kind == .publication && action == .reviewDrafts && preparedReply == nil
+    }
+
     init?(row: MergeRequestBoardSnapshot.Row, assistantReady: Bool,
           confirmationState: MergeRequestAttentionMonitor.ConfirmationState? = nil,
           automaticallyPublishedDraftIDs: Set<Int> = []) {

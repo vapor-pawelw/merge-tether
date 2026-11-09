@@ -12,6 +12,8 @@ struct MRDiscussionThreadsView: View {
     var expandPendingDrafts = false
     var selection: Binding<DraftPublicationSelection>? = nil
     var selectionDisabled = false
+    var title: LocalizedStringResource = .MRDiscussions.mrDiscussionsTitle
+    var draftsFirst = false
     let onRefresh: () -> Void
 
     private var pendingThreads: [MRDiscussionSnapshot.Thread] { snapshot.threads.filter { !$0.drafts.isEmpty } }
@@ -20,7 +22,7 @@ struct MRDiscussionThreadsView: View {
     var body: some View {
         VStack(alignment: .leading, spacing: 12) {
             HStack {
-                Text(.MRDiscussions.mrDiscussionsTitle).font(.headline)
+                Text(title).font(.headline)
                 Image(systemName: "info.circle")
                     .foregroundStyle(.secondary)
                     .help(Text(.MRDiscussions.mrDiscussionsAiLegend))
@@ -62,7 +64,7 @@ struct MRDiscussionThreadsView: View {
     private func threadView(_ thread: MRDiscussionSnapshot.Thread) -> some View {
         MRDiscussionThreadView(thread: thread, mergeRequestURL: mergeRequestURL,
                                currentUsername: currentUsername, initiallyExpanded: expandPendingDrafts && !thread.drafts.isEmpty,
-                               selection: selection, selectionDisabled: selectionDisabled)
+                               selection: selection, selectionDisabled: selectionDisabled, draftsFirst: draftsFirst)
     }
 }
 
@@ -73,6 +75,7 @@ private struct MRDiscussionThreadView: View {
     let initiallyExpanded: Bool
     let selection: Binding<DraftPublicationSelection>?
     let selectionDisabled: Bool
+    let draftsFirst: Bool
     @State private var isExpanded = false
 
     private var comments: [GitLabMergeRequestDiscussion.Note] { thread.notes.filter { $0.system != true } }
@@ -85,44 +88,51 @@ private struct MRDiscussionThreadView: View {
     }
 
     var body: some View {
-        DisclosureGroup(isExpanded: $isExpanded) {
-            if isExpanded {
-                VStack(alignment: .leading, spacing: 12) {
-                    ForEach(Array(comments.enumerated()), id: \.offset) { _, note in
-                        MRDiscussionNoteView(note: note, origin: note.id.flatMap { thread.origins[$0] },
-                                             mergeRequestURL: mergeRequestURL, threadLocation: thread.location)
+        VStack(alignment: .leading, spacing: 12) {
+            if draftsFirst { draftRows }
+            DisclosureGroup(isExpanded: $isExpanded) {
+                if isExpanded {
+                    VStack(alignment: .leading, spacing: 12) {
+                        ForEach(Array(comments.enumerated()), id: \.offset) { _, note in
+                            MRDiscussionNoteView(note: note, origin: note.id.flatMap { thread.origins[$0] },
+                                                 mergeRequestURL: mergeRequestURL, threadLocation: thread.location)
+                        }
+                        if !draftsFirst { draftRows }
                     }
-                    ForEach(Array(thread.drafts.enumerated()), id: \.offset) { _, draft in
-                        MRDiscussionDraftView(draft: draft, username: currentUsername, threadLocation: thread.location,
-                            selection: selection, selectionDisabled: selectionDisabled)
+                    .padding(.top, 10)
+                }
+            } label: {
+                VStack(alignment: .leading, spacing: 5) {
+                    HStack(alignment: .firstTextBaseline, spacing: 8) {
+                        Text(verbatim: discussionAuthor(comments.first?.author)).fontWeight(.medium)
+                        Text(stateLabel).foregroundStyle(thread.state == .resolved ? .green : .secondary)
+                        Spacer(minLength: 4)
+                        if !thread.drafts.isEmpty {
+                            Text(.MRDiscussions.mrDiscussionsDraftCount(thread.drafts.count)).foregroundStyle(Color.accentColor)
+                        }
+                    }
+                    .font(.caption)
+                    if let location = thread.location {
+                        Text(verbatim: location).font(.caption.monospaced()).foregroundStyle(.secondary)
+                    }
+                    if !isExpanded, let body = comments.first?.body {
+                        Text(verbatim: body).font(.subheadline).foregroundStyle(.secondary).lineLimit(2)
                     }
                 }
-                .padding(.top, 10)
             }
-        } label: {
-            VStack(alignment: .leading, spacing: 5) {
-                HStack(alignment: .firstTextBaseline, spacing: 8) {
-                    Text(verbatim: discussionAuthor(comments.first?.author)).fontWeight(.medium)
-                    Text(stateLabel).foregroundStyle(thread.state == .resolved ? .green : .secondary)
-                    Spacer(minLength: 4)
-                    if !thread.drafts.isEmpty {
-                        Text(.MRDiscussions.mrDiscussionsDraftCount(thread.drafts.count)).foregroundStyle(Color.accentColor)
-                    }
-                }
-                .font(.caption)
-                if let location = thread.location {
-                    Text(verbatim: location).font(.caption.monospaced()).foregroundStyle(.secondary)
-                }
-                if !isExpanded, let body = comments.first?.body {
-                    Text(verbatim: body).font(.subheadline).foregroundStyle(.secondary).lineLimit(2)
-                }
-            }
+            .disclosureGroupStyle(MRDiscussionDisclosureStyle())
         }
-        .disclosureGroupStyle(MRDiscussionDisclosureStyle())
         .padding(12)
         .frame(maxWidth: .infinity, alignment: .leading)
         .background(Color.secondary.opacity(0.045), in: RoundedRectangle(cornerRadius: 8))
         .onAppear { if initiallyExpanded { isExpanded = true } }
+    }
+
+    private var draftRows: some View {
+        ForEach(Array(thread.drafts.enumerated()), id: \.offset) { _, draft in
+            MRDiscussionDraftView(draft: draft, username: currentUsername, threadLocation: thread.location,
+                selection: selection, selectionDisabled: selectionDisabled)
+        }
     }
 }
 
