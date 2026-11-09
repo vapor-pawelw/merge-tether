@@ -62,6 +62,7 @@ import MergeTetherRemote
                 RemoteActionKind(rawValue: raw).map { RemoteAction(id: raw, kind: $0, token: token) }
             }
         }
+        card.approvals = item.approvalProgress.flatMap { .init(completed: $0.completed, required: $0.required) }
         return card
     }
 

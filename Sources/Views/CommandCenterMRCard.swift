@@ -136,6 +136,7 @@ private struct CommandCenterMRCardContent: View {
             Spacer(minLength: 4)
             if let finishedState { FinishedMergeRequestBadge(state: finishedState) }
             else if isDraft { BoardDraftBadge() }
+            if finishedState == nil { BoardApprovalProgressBadge(progress: item.approvalProgress) }
             BoardMRIdentifier(iid: item.id.iid)
             if finishedState == nil, let scopeTarget {
                 BoardAutomationToggle(settings: monitor.settings, target: scopeTarget,

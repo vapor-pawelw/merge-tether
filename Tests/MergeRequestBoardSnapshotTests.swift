@@ -4,6 +4,18 @@ import Testing
 
 @MainActor
 struct MergeRequestBoardSnapshotTests {
+    @Test func aSyntheticMergeCheckpointKeepsTheCatalogsApprovalProgress() throws {
+        var original = item(42)
+        original.approvalProgress = MergeRequestApprovalProgress(completed: 1, required: 2)
+        var checkpoint = original
+        checkpoint.approvalProgress = nil
+        checkpoint.needsMerge = true
+        let board = MergeRequestBoardSnapshot(own: [original], reviewed: [], todos: [], attention: [checkpoint],
+            handoffs: [], host: host, username: "me")
+        let row = try #require(board.own.first)
+        #expect(row.item.needsMerge)
+        #expect(row.item.approvalProgress == original.approvalProgress)
+    }
     private let host = "gitlab.example.org"
     private func item(_ iid: Int, attention: Bool = false) -> MergeRequestAttentionMonitor.Item {
         .init(id: .init(projectID: 1, iid: iid), title: "MR \(iid)",

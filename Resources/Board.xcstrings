@@ -839,6 +839,50 @@
           }
         }
       }
+    },
+    "board.approvalRatio": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "%lld/%lld"
+          }
+        }
+      }
+    },
+    "board.approvalsHelp": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Required approvals: %lld of %lld"
+          }
+        }
+      }
+    },
+    "board.approvalsUnavailable": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Required approval counts are unavailable."
+          }
+        }
+      }
+    },
+    "board.approvalsUnknownRatio": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "–/–"
+          }
+        }
+      }
     }
   }
 }

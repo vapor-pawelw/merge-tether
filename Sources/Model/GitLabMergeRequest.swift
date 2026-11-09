@@ -1,5 +1,30 @@
 import Foundation
 
+struct MergeRequestApprovalProgress: Equatable, Sendable {
+    let completed: Int
+    let required: Int
+    init?(completed: Int, required: Int) {
+        guard required >= 0, completed >= 0, completed <= required else { return nil }
+        self.completed = completed; self.required = required
+    }
+}
+
+struct GitLabMergeRequestApprovalCounts: Decodable, Sendable {
+    private let required: Int?
+    private let remaining: Int?
+    private let projectID: Int?
+    private let iid: Int?
+    enum CodingKeys: String, CodingKey {
+        case required = "approvals_required", remaining = "approvals_left", projectID = "project_id", iid
+    }
+    func progress(projectID: Int, iid: Int) -> MergeRequestApprovalProgress? {
+        guard projectID > 0, iid > 0, self.projectID == nil || self.projectID == projectID,
+              self.iid == nil || self.iid == iid, let required, let remaining,
+              required >= 0, remaining >= 0, remaining <= required else { return nil }
+        return .init(completed: required - remaining, required: required)
+    }
+}
+
 struct GitLabAuthenticatedUser: Codable, Equatable, Sendable {
     let id: Int
     let username: String

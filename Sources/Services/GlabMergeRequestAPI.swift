@@ -2,6 +2,12 @@ import CryptoKit
 import Foundation
 
 extension GlabService {
+    func fetchMergeRequestApprovalProgress(projectID: Int, iid: Int, host: String) async throws -> MergeRequestApprovalProgress? {
+        let counts: GitLabMergeRequestApprovalCounts = try await mergeRequestAPI(
+            "/projects/\(projectID)/merge_requests/\(iid)/approvals", host: host)
+        return counts.progress(projectID: projectID, iid: iid)
+    }
+
     func fetchAuthenticatedUser(host: String, expectedUsername: String) async throws -> GitLabAuthenticatedUser {
         let user: GitLabAuthenticatedUser = try await mergeRequestAPI("/user", host: host)
         guard user.id > 0, user.username == expectedUsername else { throw GlabError.notAuthenticated }

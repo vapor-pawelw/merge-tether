@@ -153,7 +153,10 @@ struct RemoteCardView: View {
                 else if card.presentation == nil { Text(verbatim: card.project).lineLimit(1) }
                 Spacer(minLength: 4)
                 if let badge = card.presentation?.draftBadge { Text(verbatim: badge).fontWeight(.semibold) }
-                if let iid = card.mergeRequestIID { Text(verbatim: "!\(iid)") }
+                if let iid = card.mergeRequestIID {
+                    if card.id.hasPrefix("mr:") { RemoteApprovalProgressBadge(progress: card.approvals) }
+                    Text(verbatim: "!\(iid)").monospacedDigit().fixedSize()
+                }
             }.font(.caption).foregroundStyle(.secondary)
             title
         }.frame(maxWidth: .infinity, alignment: .leading)
@@ -227,6 +230,28 @@ private struct RemoteMRDependencyRow: View {
             }
         }
         return text
+    }
+}
+
+private struct RemoteApprovalProgressBadge: View {
+    let progress: RemoteApprovalProgress?
+
+    private var explanation: Text {
+        if let progress { Text(.Board.boardApprovalsHelp(progress.completed, progress.required)) }
+        else { Text(.Board.boardApprovalsUnavailable) }
+    }
+    private var complete: Bool { progress.map { $0.required > 0 && $0.completed == $0.required } ?? false }
+
+    var body: some View {
+        HStack(spacing: 3) {
+            Image(systemName: "checkmark.seal").accessibilityHidden(true)
+            if let progress { Text(.Board.boardApprovalRatio(progress.completed, progress.required)) }
+            else { Text(.Board.boardApprovalsUnknownRatio) }
+        }
+        .font(.caption2).monospacedDigit().foregroundStyle(complete ? Color.green : .secondary)
+        .padding(.horizontal, 5).padding(.vertical, 2)
+        .background(.secondary.opacity(0.08), in: Capsule()).fixedSize()
+        .accessibilityElement(children: .ignore).accessibilityLabel(explanation)
     }
 }
 

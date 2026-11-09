@@ -53,6 +53,7 @@ final class MergeRequestAttentionMonitor {
         var needsChanges = false
         /// nil means the current reviewer states could not be read.
         var changeRequestReviewers: Set<String>?
+        var approvalProgress: MergeRequestApprovalProgress?
         var needsMerge = false
         var failedPipeline = false
         var needsPipelineHandoff = false
@@ -542,6 +543,7 @@ final class MergeRequestAttentionMonitor {
                     hasError = true
                     for index in items.indices { items[index].reviewingProgress = nil }
                     for index in openItems.indices { openItems[index].reviewingProgress = nil }
+                    clearApprovalProgress()
                 }
             }
         }
@@ -549,6 +551,11 @@ final class MergeRequestAttentionMonitor {
 
     private func isCurrent(_ account: Account) -> Bool {
         glab.resolvedHost == account.host && glab.currentUsername == account.username
+    }
+
+    private func clearApprovalProgress() {
+        for index in items.indices { items[index].approvalProgress = nil }
+        for index in openItems.indices { openItems[index].approvalProgress = nil }
     }
 
     /// A policy restoration reads current evidence and enters the automatic executor only.
@@ -594,7 +601,10 @@ final class MergeRequestAttentionMonitor {
             } ?? []
             try await poll(account, todos: todos, revision: key.revision, automaticResume: (id, key.action))
         } catch {
-            if isCurrent(account), glab.accountRevision == key.revision { hasError = true }
+            if isCurrent(account), glab.accountRevision == key.revision {
+                hasError = true
+                clearApprovalProgress()
+            }
         }
     }
 
@@ -665,6 +675,10 @@ final class MergeRequestAttentionMonitor {
         var retainedCatalog = previousCatalog.filter { _, item in
             let tracked = item.mergeRequest.map { settings?.mrLifecycleLedger.request(for: target(for: $0)) != nil } == true
             return tracked || (item.mergeRequest?.author.id == user.id ? owned == nil : assigned == nil)
+        }.mapValues { item in
+            var item = item
+            item.approvalProgress = nil
+            return item
         }
         for request in listed where request.state == "closed" || request.state == "merged" {
             retainedCatalog.removeValue(forKey: .init(projectID: request.projectID, iid: request.iid))
@@ -692,7 +706,10 @@ final class MergeRequestAttentionMonitor {
             let requestReadStartedAt = Date()
             guard let request = try? await glab.fetchMergeRequest(projectID: target.projectID, iid: iid, host: host) else {
                 explicitFetchFailed = true
-                if let previous = previousCatalog[id] { retainedCatalog[id] = previous }
+                if var previous = previousCatalog[id] {
+                    previous.approvalProgress = nil
+                    retainedCatalog[id] = previous
+                }
                 continue
             }
             guard isCurrent(account), revision == glab.accountRevision else { return }
@@ -805,6 +822,9 @@ final class MergeRequestAttentionMonitor {
                         var recoveryRequest: GitLabMergeRequest?
                         var recoveryReadStartedAt: Date?
                         updated.reviewingProgress = nil
+                        updated.approvalProgress = if item.mergeRequest != nil {
+                            try? await glab.fetchMergeRequestApprovalProgress(projectID: item.id.projectID, iid: item.id.iid, host: host)
+                        } else { nil }
                         let drafts = try? await glab.fetchOwnDraftNotes(
                             projectID: item.id.projectID, iid: item.id.iid, host: host, userID: user.id
                         )
@@ -1040,7 +1060,10 @@ final class MergeRequestAttentionMonitor {
         }
         for request in recordedReviews {
             let id = Item.ID(projectID: request.projectID, iid: request.iid)
-            retainedCatalog[id] = Item(id: id, title: request.title, url: request.webURL, mergeRequest: request)
+            var item = Item(id: id, title: request.title, url: request.webURL, mergeRequest: request)
+            item.approvalProgress = try? await glab.fetchMergeRequestApprovalProgress(projectID: request.projectID, iid: request.iid, host: host)
+            guard isCurrent(account), revision == glab.accountRevision else { return }
+            retainedCatalog[id] = item
         }
         if let settings {
             if settings.autoRemoveFinishedMRs {
@@ -1056,6 +1079,7 @@ final class MergeRequestAttentionMonitor {
                 where !settings.ignoredMergeRequests.contains(target(for: request)) {
                 let id = Item.ID(projectID: request.projectID, iid: request.iid)
                 if request.state == "opened", var item = retainedCatalog[id] {
+                    if item.mergeRequest?.sha != request.sha { item.approvalProgress = nil }
                     item.mergeRequest = request
                     retainedCatalog[id] = item
                 } else {

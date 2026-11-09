@@ -76,6 +76,25 @@ public struct RemoteMRDependencies: Codable, Equatable, Sendable {
     }
 }
 
+public struct RemoteApprovalProgress: Codable, Equatable, Sendable {
+    public let completed: Int
+    public let required: Int
+    public init?(completed: Int, required: Int) {
+        guard required >= 0, completed >= 0, completed <= required else { return nil }
+        self.completed = completed; self.required = required
+    }
+    private enum CodingKeys: String, CodingKey { case completed, required }
+    public init(from decoder: Decoder) throws {
+        let values = try decoder.container(keyedBy: CodingKeys.self)
+        let completed = try values.decode(Int.self, forKey: .completed)
+        let required = try values.decode(Int.self, forKey: .required)
+        guard let progress = Self(completed: completed, required: required) else {
+            throw DecodingError.dataCorruptedError(forKey: .completed, in: values, debugDescription: "Invalid required approval progress")
+        }
+        self = progress
+    }
+}
+
 public struct RemoteCard: Codable, Equatable, Identifiable, Sendable {
     public var id: String
     public var title: String
@@ -91,12 +110,14 @@ public struct RemoteCard: Codable, Equatable, Identifiable, Sendable {
     public var primaryCTA: RemoteCardCTA?
     public var presentation: RemoteCardText?
     public var dependencies: RemoteMRDependencies?
+    public var approvals: RemoteApprovalProgress?
     public init(id: String, title: String, project: String, url: URL?, head: String? = nil,
                 detail: String = "", drafts: [RemoteDraft] = [], actions: [RemoteAction] = [],
-                needsAttention: Bool? = nil, mergeRequestIID: Int? = nil, primaryCTA: RemoteCardCTA? = nil, presentation: RemoteCardText? = nil, dependencies: RemoteMRDependencies? = nil) {
+                needsAttention: Bool? = nil, mergeRequestIID: Int? = nil, primaryCTA: RemoteCardCTA? = nil, presentation: RemoteCardText? = nil, dependencies: RemoteMRDependencies? = nil, approvals: RemoteApprovalProgress? = nil) {
         self.id = id; self.title = title; self.project = project; self.url = url; self.head = head
         self.detail = detail; self.drafts = drafts; self.actions = actions
         self.needsAttention = needsAttention; self.mergeRequestIID = mergeRequestIID; self.primaryCTA = primaryCTA; self.presentation = presentation; self.dependencies = dependencies
+        self.approvals = approvals
     }
 }
 

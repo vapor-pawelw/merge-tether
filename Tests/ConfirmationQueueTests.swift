@@ -4,6 +4,86 @@ import Testing
 
 @MainActor
 @Suite struct ConfirmationQueueTests {
+    @Test func failedExactLookupClearsCountsOnRetainedTrackedReviews() async throws {
+        let harness = try makeHarness(assistantWorked: true)
+        defer { harness.cleanUp() }
+        try harness.write("approvals.json", #"{"approvals_required":2,"approvals_left":0}"#)
+        try await harness.poll()
+        let initial = try #require(harness.monitor.currentOpenItems.first)
+        #expect(initial.approvalProgress?.completed == 2)
+        try harness.write("reviewing.json", "[]")
+        try FileManager.default.removeItem(at: harness.folder.appending(path: "request.json"))
+        harness.monitor.refresh(host: host, username: "me", todos: [])
+        for _ in 0..<250 where harness.monitor.isLoading { try await Task.sleep(for: .milliseconds(20)) }
+        #expect(!harness.monitor.isLoading && harness.monitor.hasError)
+        let retained = try #require(harness.monitor.currentOpenItems.first)
+        #expect(retained.approvalProgress == nil && retained.url == initial.url)
+    }
+
+    @Test func newerLifecycleHeadInvalidatesCountsReadForThePreviousHead() async throws {
+        let harness = try makeHarness(assistantWorked: true)
+        defer { harness.cleanUp() }
+        try harness.write("approvals.json", #"{"approvals_required":2,"approvals_left":0}"#)
+        try harness.write("reviewing.json", "[]")
+        try harness.write("pause-approval-read", "")
+        harness.monitor.refresh(host: host, username: "me", todos: [])
+        for _ in 0..<250 where !FileManager.default.fileExists(atPath: harness.folder.appending(path: "approval-read-entered").path) {
+            try await Task.sleep(for: .milliseconds(20))
+        }
+        try #require(FileManager.default.fileExists(atPath: harness.folder.appending(path: "approval-read-entered").path))
+        let nextHead = String(repeating: "b", count: 40)
+        let newer = try JSONDecoder().decode(GitLabMergeRequest.self,
+            from: Data(harness.log("request.json").replacingOccurrences(of: head, with: nextHead).utf8))
+        let target = MRAutomationScope.Target(host: host, username: "me", projectID: 1, iid: 2)
+        harness.settings.mrLifecycleLedger.record(newer, for: target, now: Date())
+        try harness.write("release-approval-read", "")
+        for _ in 0..<250 where harness.monitor.isLoading { try await Task.sleep(for: .milliseconds(20)) }
+        try #require(!harness.monitor.isLoading && !harness.monitor.hasError)
+        let item = try #require(harness.monitor.currentOpenItems.first)
+        #expect(item.mergeRequest?.sha == nextHead)
+        #expect(item.approvalProgress == nil)
+    }
+
+    @Test func trackedReviewsKeepTheirApprovalCountsAfterReviewerAssignmentIsRemoved() async throws {
+        let harness = try makeHarness(assistantWorked: true)
+        defer { harness.cleanUp() }
+        try harness.write("reviewing.json", "[]")
+        try harness.write("approvals.json", #"{"approvals_required":2,"approvals_left":1,"approved_by":[]}"#)
+        try await harness.poll()
+        let item = try #require(harness.monitor.currentOpenItems.first)
+        #expect(item.approvalProgress?.completed == 1 && item.approvalProgress?.required == 2)
+    }
+
+    @Test func anEarlyRefreshFailureDropsOnlyTheApprovalCounterAndKeepsTheMR() async throws {
+        let harness = try makeHarness(assistantWorked: false, authored: true)
+        defer { harness.cleanUp() }
+        try harness.write("approvals.json", #"{"approvals_required":2,"approvals_left":0,"approved_by":[]}"#)
+        try await harness.poll()
+        let initial = try #require(harness.monitor.currentOpenItems.first)
+        #expect(initial.approvalProgress?.completed == 2)
+        try harness.write("fail-next-approval-user", "")
+        harness.monitor.refresh(host: host, username: "me", todos: [])
+        for _ in 0..<200 where harness.monitor.isLoading { try await Task.sleep(for: .milliseconds(20)) }
+        #expect(!harness.monitor.isLoading && harness.monitor.hasError)
+        let retained = try #require(harness.monitor.currentOpenItems.first)
+        #expect(retained.approvalProgress == nil && retained.url == initial.url)
+    }
+    @Test func requiredApprovalCountsRefreshAndBecomeUnknownAfterAReadFailure() async throws {
+        let harness = try makeHarness(assistantWorked: false, authored: true)
+        defer { harness.cleanUp() }
+        try harness.write("drafts.json", "[]")
+        try harness.write("approvals.json", #"{"approvals_required":2,"approvals_left":1,"approved_by":[]}"#)
+        try await harness.poll()
+        let initial = try #require(harness.monitor.currentOpenItems.first)
+        #expect(initial.approvalProgress?.completed == 1 && initial.approvalProgress?.required == 2)
+        try harness.write("approvals.json", #"{"approvals_required":2,"approvals_left":0,"approved_by":[]}"#)
+        try await harness.poll()
+        #expect(harness.monitor.currentOpenItems.first?.approvalProgress?.completed == 2)
+        try harness.write("fail-approvals", "")
+        try await harness.poll()
+        let failed = try #require(harness.monitor.currentOpenItems.first)
+        #expect(failed.approvalProgress == nil && failed.url == initial.url)
+    }
     private let host = "gitlab.example.org"
     private let head = "0123456789012345678901234567890123456789"
 
@@ -253,6 +333,11 @@ import Testing
                     if [ -f approval-preflight-failures ]; then touch approval-preflight-armed; fi
                     cat reviewers.json ;;
                 */approvals)
+                    if [ -f fail-approvals ]; then exit 1; fi
+                    if [ -f pause-approval-read ]; then
+                        touch approval-read-entered
+                        while [ ! -f release-approval-read ]; do sleep 0.02; done
+                    fi
                     if [ -f approvals.json ]; then cat approvals.json; else echo '{"approved_by":[]}'; fi ;;
                 */discussions*)
                     if [ -f fail-discussion-read ]; then exit 1; fi

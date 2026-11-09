@@ -4,6 +4,37 @@ import Testing
 
 @MainActor
 struct GlabMergeRequestAPITests {
+    @Test func requiredApprovalProgressUsesGitLabsRemainingCountInsteadOfAllApprovers() throws {
+        let data = Data(#"{"project_id":34,"iid":12,"approvals_required":2,"approvals_left":1,"approved_by":[{"user":{"id":1}},{"user":{"id":2}},{"user":{"id":3}}]}"#.utf8)
+        let counts = try JSONDecoder().decode(GitLabMergeRequestApprovalCounts.self, from: data)
+        let progress = try #require(counts.progress(projectID: 34, iid: 12))
+        #expect(progress.completed == 1 && progress.required == 2)
+        #expect(counts.progress(projectID: 35, iid: 12) == nil)
+        #expect(counts.progress(projectID: 34, iid: 13) == nil)
+    }
+
+    @Test func noRequiredApprovalsIsKnownZeroRatherThanUnavailableData() throws {
+        let counts = try JSONDecoder().decode(GitLabMergeRequestApprovalCounts.self,
+            from: Data(#"{"approvals_required":0,"approvals_left":0}"#.utf8))
+        let progress = try #require(counts.progress(projectID: 34, iid: 12))
+        #expect(progress.completed == 0 && progress.required == 0)
+    }
+
+    @Test(arguments: [#"{}"#, #"{"approvals_required":2}"#, #"{"approvals_left":1}"#,
+        #"{"approvals_required":-1,"approvals_left":0}"#, #"{"approvals_required":2,"approvals_left":-1}"#,
+        #"{"approvals_required":2,"approvals_left":3}"#])
+    func unavailableOrInvalidApprovalCountsNeverInventProgress(_ json: String) throws {
+        let counts = try JSONDecoder().decode(GitLabMergeRequestApprovalCounts.self, from: Data(json.utf8))
+        #expect(counts.progress(projectID: 34, iid: 12) == nil)
+    }
+
+    @Test func approvalProgressUsesTheReadOnlyMRApprovalEndpointAndExplicitHost() async throws {
+        try await withFakeGlab { glab in
+            let result = try await glab.fetchMergeRequestApprovalProgress(projectID: 34, iid: 12, host: host)
+            let progress = try #require(result)
+            #expect(progress.completed == 1 && progress.required == 2)
+        }
+    }
     private let host = "gitlab.example.test"
     private let sha = "0123456789abcdef0123456789abcdef01234567"
 
@@ -241,6 +272,9 @@ struct GlabMergeRequestAPITests {
             ;;
           'api /projects/34/merge_requests/12/approval_state --hostname \(host)')
             printf '%s' '{"rules":[{"approvals_required":1,"approved":true},{"approvals_required":0,"approved":false}]}'
+            ;;
+          'api /projects/34/merge_requests/12/approvals --hostname \(host)')
+            printf '%s' '{"project_id":34,"iid":12,"approvals_required":2,"approvals_left":1,"approved_by":[]}'
             ;;
           'api /projects/34/merge_requests/12/closes_issues?per_page=100 --hostname \(host) --paginate')
             printf '%s' '[]'

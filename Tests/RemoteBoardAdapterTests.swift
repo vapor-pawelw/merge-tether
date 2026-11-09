@@ -4,6 +4,28 @@ import MergeTetherRemote
 @testable import GitLabTodos
 
 @MainActor @Suite struct RemoteBoardAdapterTests {
+    @Test func approvalCountChangesCannotInvalidateAnOtherwiseCurrentPhoneAction() throws {
+        var item = MergeRequestAttentionMonitor.Item(id: .init(projectID: 1, iid: 2), title: "Example",
+            url: URL(string: "https://gitlab.example.org/g/p/-/merge_requests/2")!)
+        item.approvalProgress = MergeRequestApprovalProgress(completed: 1, required: 2)
+        let before = RemoteBoardAdapter.card(item, account: "me@gitlab.example.org", extraActions: [.markDone])
+        item.approvalProgress = MergeRequestApprovalProgress(completed: 2, required: 2)
+        let after = RemoteBoardAdapter.card(item, account: "me@gitlab.example.org", extraActions: [.markDone])
+        #expect(before.approvals != after.approvals)
+        #expect(!before.actions.isEmpty && before.actions == after.actions)
+        item.approvalProgress = nil
+        #expect(RemoteBoardAdapter.card(item, account: "me@gitlab.example.org", extraActions: [.markDone]).actions == before.actions)
+    }
+    @Test func requiredApprovalProgressReachesThePhoneAsReadOnlyMetadata() throws {
+        var item = MergeRequestAttentionMonitor.Item(id: .init(projectID: 1, iid: 2), title: "Example",
+            url: URL(string: "https://gitlab.example.org/g/p/-/merge_requests/2")!)
+        item.approvalProgress = MergeRequestApprovalProgress(completed: 1, required: 2)
+        let card = RemoteBoardAdapter.card(item, account: "me@gitlab.example.org")
+        #expect(card.approvals?.completed == 1 && card.approvals?.required == 2)
+        #expect(card.actions.isEmpty)
+        let decoded = try JSONDecoder().decode(RemoteCard.self, from: JSONEncoder().encode(card))
+        #expect(decoded.approvals == card.approvals)
+    }
     @Test(arguments: [AssistantJobExecution.State.failed, .blocked], ["completed", "unrelatedCompleted", "independentFailure", "obsoletePipeline", "obsoleteWithIndependentIntent"])
     func phoneActionsRespectCompletedHistoricalJobs(state: AssistantJobExecution.State, scenario: String) async throws {
         let directory = FileManager.default.temporaryDirectory.appending(path: UUID().uuidString)

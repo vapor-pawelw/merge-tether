@@ -12,7 +12,7 @@ import MergeTetherRemote
                 actions: [.init(id: "publish", kind: .publish, token: "preview")],
                 needsAttention: true, mergeRequestIID: 42,
                 primaryCTA: .init(title: String(localized: .MRHumanAction.mrHumanActionActionReviewDrafts), destination: .drafts),
-                presentation: .init(author: "Alex Example", repository: "payments-api")),
+                presentation: .init(author: "Alex Example", repository: "payments-api"), approvals: .init(completed: 1, required: 2)),
             .init(id: "mr:1:43", title: "Keep cached account details available", project: "example/payments-api",
                 url: URL(string: "https://gitlab.example.org/example/payments-api/-/merge_requests/43"),
                 head: "b1c2d3e4", needsAttention: false, mergeRequestIID: 43,
@@ -25,7 +25,7 @@ import MergeTetherRemote
                 actions: [.init(id: "approve", kind: .approve, token: "preview")],
                 needsAttention: true, mergeRequestIID: 17,
                 primaryCTA: .init(title: String(localized: .MRHumanAction.mrHumanActionActionReviewApproval), destination: .actions),
-                presentation: .init(author: "Sam Example", repository: "mobile-app")),
+                presentation: .init(author: "Sam Example", repository: "mobile-app"), approvals: .init(completed: 2, required: 2)),
         ]),
         .init(id: .other, cards: []),
     ])

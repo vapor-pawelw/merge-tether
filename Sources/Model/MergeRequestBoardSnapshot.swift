@@ -142,6 +142,7 @@ struct MergeRequestBoardSnapshot {
                 }
             }
             if item.mergeRequest == nil { item.mergeRequest = original.mergeRequest }
+            item.approvalProgress = item.mergeRequest?.sha == original.mergeRequest?.sha ? original.approvalProgress : nil
             if let request = original.mergeRequest, let displayed = item.mergeRequest,
                MergeRequestDependencySummary.Context(request) == MergeRequestDependencySummary.Context(displayed) {
                 item.dependencies = original.dependencies ?? item.dependencies
