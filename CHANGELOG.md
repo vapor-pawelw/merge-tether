@@ -6,6 +6,8 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 
 ## Unreleased
 
+- Share MR card actions between right-click and a bottom-right Actions button. Configure the default conversation app, hold Option for a one-time alternative, and open desktop conversations with a minimal MR context attachment and an empty message field.
+
 - Move transient proposals, unmatched GitLab to-dos, assistant runs and completion updates from the board into a spacious toolbar Inbox popover, keeping My merge requests and Reviewing as the board's persistent lanes.
 
 - Choose Without automation (default) or Drafts for the lower board section, with matching ordering and title/status muting; turning all automation off temporarily uses Drafts without forgetting the saved choice.

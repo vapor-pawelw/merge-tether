@@ -194,7 +194,7 @@ struct TodoListView: View {
             )
             if todo.targetType == .mergeRequest {
                 AssistantContextMenu(mergeRequestURL: todo.targetURL, title: todo.displayTitle,
-                                     workspace: monitor.settings.automation.assistantWorkspace)
+                                     settings: monitor.settings)
                     .padding(.horizontal, 12)
             }
             if let id = inbox.todoApprovals[todo.id] {
@@ -334,7 +334,7 @@ struct TodoListView: View {
     private func attentionActions(_ item: MergeRequestAttentionMonitor.Item) -> some View {
         VStack(alignment: .leading, spacing: 5) {
             AssistantContextMenu(mergeRequestURL: item.url, title: item.title,
-                                 workspace: monitor.settings.automation.assistantWorkspace)
+                                 settings: monitor.settings)
             ReReviewControls(item: item, monitor: monitor.attention)
             InboxAttentionActions(item: item, feedbackAction: monitor.attentionFeedbackAction(for: item),
                                   onFeedback: { Task { await monitor.runAttentionFeedback(for: item) } },

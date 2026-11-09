@@ -5,6 +5,19 @@ import Testing
 @MainActor
 @Suite("SettingsManager")
 struct SettingsManagerTests {
+    @Test func manualConversationDestinationPersistsOnlyOnSaveAndIgnoresAutomationChoice() {
+        let defaults = makeDefaults()
+        let settings = SettingsManager(defaults: defaults)
+        #expect(settings.conversationDestination == .codexApp)
+        settings.conversationDestination = .claudeDesktop
+        #expect(SettingsManager(defaults: defaults).conversationDestination == .codexApp)
+        settings.automation.assistant = .codex
+        settings.save()
+        #expect(SettingsManager(defaults: defaults).conversationDestination == .claudeDesktop)
+        defaults.set("unknown-future-app", forKey: "conversationDestination")
+        #expect(SettingsManager(defaults: defaults).conversationDestination == .codexApp)
+    }
+
     private func makeDefaults() -> UserDefaults {
         let suiteName = "GitLabTodosTests-\(UUID().uuidString)"
         let defaults = UserDefaults(suiteName: suiteName)!

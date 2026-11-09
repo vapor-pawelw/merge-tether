@@ -73,7 +73,6 @@ struct BoardMRProposalCard: View {
                         titleColor: isMuted ? .secondary : .primary)
                 }
                 .buttonStyle(.plain)
-                moreMenu
             }
             if let finishedItem {
                 FinishedMergeRequestStatus(item: finishedItem, monitor: monitor)
@@ -109,6 +108,7 @@ struct BoardMRProposalCard: View {
                 }
                 runResult
             }
+            HStack { Spacer(minLength: 0); moreMenu }
         }
         .confirmationDialog(Text(.Board.boardProposalIgnore), isPresented: $confirmIgnore, titleVisibility: .visible) {
             Button(role: .destructive) {
@@ -124,6 +124,7 @@ struct BoardMRProposalCard: View {
         .padding(12).frame(maxWidth: .infinity, alignment: .leading)
         .overlay(RoundedRectangle(cornerRadius: 8).stroke(.secondary.opacity(0.12), lineWidth: 0.5))
         .boardCardInteraction { showingDetails = true }
+        .contextMenu { menuItems }
         .task(id: authorTaskID) { await authorLoader.load(proposal, displayMetadata: true) }
         .sheet(isPresented: $showingDetails) {
             BoardItemDetailSheet {
@@ -173,28 +174,27 @@ struct BoardMRProposalCard: View {
     }
 
     private var moreMenu: some View {
-        Menu {
-            Button { showingDetails = true } label: {
-                Label { Text(.Board.boardDetails) } icon: { Image(systemName: "rectangle.expand.vertical") }
-            }
-            Link(destination: proposal.url) {
-                Label { Text(.CommandCenter.commandCenterOpenGitLab) } icon: { Image(systemName: "arrow.up.right.square") }
-            }
-            GitLabRefreshButton(monitor: monitor,
-                itemID: proposal.target.iid.map { .init(projectID: proposal.target.projectID, iid: $0) }) {
-                await authorLoader.load(proposal, force: true)
-            }
-            AssistantContextMenu(mergeRequestURL: proposal.url, title: proposal.title,
-                workspace: monitor.settings.automation.assistantWorkspace)
-            if finishedState == nil {
-                Divider()
-                MRAutomationScopeMenu(monitor: monitor, target: proposal.target,
-                    projectPath: proposal.url.gitLabProjectPath, isDraft: isDraft)
-            }
-        } label: { BoardCardActionIcon(systemName: "ellipsis") }
-        .menuStyle(.borderlessButton).menuIndicator(.hidden).fixedSize()
-        .frame(width: 24, height: 24)
-        .accessibilityLabel(Text(.CommandCenter.commandCenterActions))
+        BoardActionsMenu { menuItems }
+    }
+
+    @ViewBuilder private var menuItems: some View {
+        Button { showingDetails = true } label: {
+            Label { Text(.Board.boardDetails) } icon: { Image(systemName: "rectangle.expand.vertical") }
+        }
+        Link(destination: proposal.url) {
+            Label { Text(.CommandCenter.commandCenterOpenGitLab) } icon: { Image(systemName: "arrow.up.right.square") }
+        }
+        GitLabRefreshButton(monitor: monitor,
+            itemID: proposal.target.iid.map { .init(projectID: proposal.target.projectID, iid: $0) }) {
+            await authorLoader.load(proposal, force: true)
+        }
+        AssistantContextMenu(mergeRequestURL: proposal.url, title: proposal.title,
+            settings: monitor.settings)
+        if finishedState == nil {
+            Divider()
+            MRAutomationScopeMenu(monitor: monitor, target: proposal.target,
+                projectPath: proposal.url.gitLabProjectPath, isDraft: isDraft)
+        }
     }
 
     @ViewBuilder
