@@ -3,6 +3,11 @@ import Testing
 @testable import MergeTetherRemote
 
 @Suite struct CardPresentationTests {
+    @Test func optionalApprovalsSurviveTheWireWithTheirActualCount() throws {
+        let progress = try #require(RemoteApprovalProgress(completed: 0, required: 0, received: 3))
+        let decoded = try JSONDecoder().decode(RemoteApprovalProgress.self, from: JSONEncoder().encode(progress))
+        #expect(decoded.completed == 0 && decoded.required == 0 && decoded.received == 3)
+    }
     @Test func requiredApprovalProgressSurvivesTheWireWithoutAddingACommand() throws {
         let progress = try #require(RemoteApprovalProgress(completed: 1, required: 2))
         let card = RemoteCard(id: "mr:1:2", title: "Example", project: "group/repo", url: nil, approvals: progress)

@@ -4,6 +4,16 @@ import MergeTetherRemote
 @testable import GitLabTodos
 
 @MainActor @Suite struct RemoteBoardAdapterTests {
+    @Test func optionalApprovalsKeepTheLegacyWireCountsValid() throws {
+        var item = MergeRequestAttentionMonitor.Item(id: .init(projectID: 1, iid: 2), title: "Example",
+            url: URL(string: "https://gitlab.example.org/g/p/-/merge_requests/2")!)
+        item.approvalProgress = MergeRequestApprovalProgress(completed: 3, required: 0)
+        let card = RemoteBoardAdapter.card(item, account: "me@gitlab.example.org")
+        #expect(card.approvals?.completed == 0 && card.approvals?.required == 0)
+        #expect(card.approvals?.received == 3)
+        let decoded = try JSONDecoder().decode(RemoteCard.self, from: JSONEncoder().encode(card))
+        #expect(decoded.approvals == card.approvals)
+    }
     @Test func approvalCountChangesCannotInvalidateAnOtherwiseCurrentPhoneAction() throws {
         var item = MergeRequestAttentionMonitor.Item(id: .init(projectID: 1, iid: 2), title: "Example",
             url: URL(string: "https://gitlab.example.org/g/p/-/merge_requests/2")!)

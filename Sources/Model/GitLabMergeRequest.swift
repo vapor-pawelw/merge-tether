@@ -3,9 +3,25 @@ import Foundation
 struct MergeRequestApprovalProgress: Equatable, Sendable {
     let completed: Int
     let required: Int
-    init?(completed: Int, required: Int) {
-        guard required >= 0, completed >= 0, completed <= required else { return nil }
+    let approvedBy: [Todo.Author]
+    var isSatisfied: Bool { completed > 0 && (required == 0 || completed == required) }
+    init?(completed: Int, required: Int, approvedBy: [Todo.Author] = []) {
+        guard required >= 0, completed >= 0, required == 0 || completed <= required else { return nil }
         self.completed = completed; self.required = required
+        self.approvedBy = approvedBy
+    }
+
+    struct Participant: Identifiable {
+        let author: Todo.Author
+        let approved: Bool
+        var id: Int { author.id }
+    }
+
+    func participants(reviewers: [Todo.Author]) -> [Participant] {
+        var seen: Set<Int> = []
+        let people = approvedBy.map { Participant(author: $0, approved: true) }
+            + reviewers.map { Participant(author: $0, approved: false) }
+        return people.filter { $0.id > 0 && seen.insert($0.id).inserted }
     }
 }
 
@@ -14,14 +30,33 @@ struct GitLabMergeRequestApprovalCounts: Decodable, Sendable {
     private let remaining: Int?
     private let projectID: Int?
     private let iid: Int?
+    private let approvedBy: [Approver]?
+
+    private struct Approver: Decodable, Sendable {
+        let user: User
+        struct User: Decodable, Sendable {
+            let id: Int
+            let username: String?
+            let name: String?
+            let avatarURL: URL?
+            enum CodingKeys: String, CodingKey { case id, username, name; case avatarURL = "avatar_url" }
+            var author: Todo.Author? {
+                guard id > 0, let username else { return nil }
+                return .init(id: id, username: username, name: name ?? username, avatarURL: avatarURL)
+            }
+        }
+    }
     enum CodingKeys: String, CodingKey {
         case required = "approvals_required", remaining = "approvals_left", projectID = "project_id", iid
+        case approvedBy = "approved_by"
     }
     func progress(projectID: Int, iid: Int) -> MergeRequestApprovalProgress? {
         guard projectID > 0, iid > 0, self.projectID == nil || self.projectID == projectID,
               self.iid == nil || self.iid == iid, let required, let remaining,
               required >= 0, remaining >= 0, remaining <= required else { return nil }
-        return .init(completed: required - remaining, required: required)
+        let received = Set((approvedBy ?? []).map(\.user.id).filter { $0 > 0 }).count
+        return .init(completed: required == 0 ? received : required - remaining, required: required,
+                     approvedBy: (approvedBy ?? []).compactMap(\.user.author))
     }
 }
 
@@ -49,6 +84,7 @@ struct GitLabMergeRequest: Codable, Sendable {
     let labels: [String]
     let blockingDiscussionsResolved: Bool?
     let headPipeline: Pipeline?
+    let reviewers: [Todo.Author]?
     private let user: UserPermissions?
 
     var canMerge: Bool? { user?.canMerge }
@@ -94,7 +130,7 @@ struct GitLabMergeRequest: Codable, Sendable {
         case labels
         case blockingDiscussionsResolved = "blocking_discussions_resolved"
         case headPipeline = "head_pipeline"
-        case user
+        case user, reviewers
     }
 }
 

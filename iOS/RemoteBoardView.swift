@@ -236,22 +236,28 @@ private struct RemoteMRDependencyRow: View {
 private struct RemoteApprovalProgressBadge: View {
     let progress: RemoteApprovalProgress?
 
+    private var received: Int { progress?.received ?? progress?.completed ?? 0 }
+
     private var explanation: Text {
-        if let progress { Text(.Board.boardApprovalsHelp(progress.completed, progress.required)) }
+        if let progress, progress.required == 0 { Text(.Board.boardApprovalsReceived(received)) }
+        else if let progress { Text(.Board.boardApprovalsHelp(progress.completed, progress.required)) }
         else { Text(.Board.boardApprovalsUnavailable) }
     }
-    private var complete: Bool { progress.map { $0.required > 0 && $0.completed == $0.required } ?? false }
+    private var complete: Bool { progress.map { ($0.required == 0 ? received > 0 : $0.completed == $0.required) } ?? false }
 
     var body: some View {
-        HStack(spacing: 3) {
-            Image(systemName: "checkmark.seal").accessibilityHidden(true)
-            if let progress { Text(.Board.boardApprovalRatio(progress.completed, progress.required)) }
-            else { Text(.Board.boardApprovalsUnknownRatio) }
+        if progress.map({ $0.required > 0 || received > 0 }) ?? true {
+            HStack(spacing: 3) {
+                Image(systemName: complete ? "checkmark.seal.fill" : "checkmark.seal").accessibilityHidden(true)
+                if let progress, progress.required == 0 { Text(verbatim: "\(received)") }
+                else if let progress { Text(.Board.boardApprovalRatio(progress.completed, progress.required)) }
+                else { Text(.Board.boardApprovalsUnknownRatio) }
+            }
+            .font(.caption2).monospacedDigit().foregroundStyle(complete ? Color.green : .secondary)
+            .padding(.horizontal, 5).padding(.vertical, 2)
+            .background(.secondary.opacity(0.08), in: Capsule()).fixedSize()
+            .accessibilityElement(children: .ignore).accessibilityLabel(explanation)
         }
-        .font(.caption2).monospacedDigit().foregroundStyle(complete ? Color.green : .secondary)
-        .padding(.horizontal, 5).padding(.vertical, 2)
-        .background(.secondary.opacity(0.08), in: Capsule()).fixedSize()
-        .accessibilityElement(children: .ignore).accessibilityLabel(explanation)
     }
 }
 

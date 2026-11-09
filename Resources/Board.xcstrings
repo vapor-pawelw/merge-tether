@@ -2,6 +2,27 @@
   "sourceLanguage": "en",
   "version": "1.0",
   "strings": {
+    "board.approvals.received.%lld": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": { "stringUnit": { "state": "translated", "value": "Approvals received: %lld" } },
+        "pl": { "stringUnit": { "state": "translated", "value": "Otrzymane zatwierdzenia: %lld" } }
+      }
+    },
+    "board.approvals.noPeople": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": { "stringUnit": { "state": "translated", "value": "No approvals or assigned reviewers" } },
+        "pl": { "stringUnit": { "state": "translated", "value": "Brak zatwierdzeń i przypisanych reviewerów" } }
+      }
+    },
+    "board.approvals.approved": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": { "stringUnit": { "state": "translated", "value": "Approved" } },
+        "pl": { "stringUnit": { "state": "translated", "value": "Zatwierdzono" } }
+      }
+    },
     "board.title": {
       "extractionState": "manual",
       "localizations": {
