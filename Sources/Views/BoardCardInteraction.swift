@@ -1,13 +1,28 @@
 import SwiftUI
 
+private struct BoardHeaderControlHover: ViewModifier {
+    @State private var hovered = false
+    @Environment(\.isEnabled) private var enabled
+
+    func body(content: Content) -> some View {
+        content
+            .background(Color.accentColor.opacity(hovered && enabled ? 0.14 : 0), in: RoundedRectangle(cornerRadius: 5))
+            .onHover { hovered = $0 }
+            .animation(.easeOut(duration: 0.12), value: hovered)
+    }
+}
+
 struct BoardActionsMenu<Content: View>: View {
     @ViewBuilder var content: () -> Content
 
     var body: some View {
         Menu(content: content) {
-            Label { Text(.CommandCenter.commandCenterActions) } icon: { Image(systemName: "ellipsis") }
+            BoardCardActionIcon(systemName: "ellipsis")
         }
-        .menuStyle(.button).menuIndicator(.hidden).fixedSize()
+        .menuStyle(.borderlessButton).menuIndicator(.hidden).fixedSize()
+        .boardHeaderControlHover()
+        .accessibilityLabel(Text(.CommandCenter.commandCenterActions))
+        .help(Text(.CommandCenter.commandCenterActions))
         .controlSize(.small)
     }
 }
@@ -38,6 +53,10 @@ private struct BoardCardInteraction: ViewModifier {
 }
 
 extension View {
+    func boardHeaderControlHover() -> some View {
+        modifier(BoardHeaderControlHover())
+    }
+
     func boardCardInteraction(onDetails: @escaping () -> Void) -> some View {
         modifier(BoardCardInteraction(onDetails: onDetails))
     }

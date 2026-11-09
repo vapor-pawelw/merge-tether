@@ -391,6 +391,7 @@ private struct CommandCenterMRDetailContent: View {
                 }
                 if item.needsConfirmation { confirmationControls }
                 decisionActions
+                FollowUpAutomationHoldView(row: presentationRow, monitor: monitor)
                 if item.authorFeedbackStatus != nil { feedbackCheck(citationContext: citationContext).id(Anchor.feedbackStatus) }
             }
             .font(.subheadline).padding(8).frame(maxWidth: .infinity, alignment: .leading)
@@ -495,6 +496,7 @@ private struct CommandCenterMRDetailContent: View {
         if !showsDecisions {
             if item.needsConfirmation { confirmationControls }
             decisionActions
+            FollowUpAutomationHoldView(row: presentationRow, monitor: monitor)
             if item.authorFeedbackStatus != nil { feedbackCheck(citationContext: citationContext).id(Anchor.feedbackStatus) }
         }
         if !item.isAuthored && !monitor.mrTodoIntents(for: item).contains(where: { $0.kind == .review }) {
@@ -602,7 +604,8 @@ private struct CommandCenterMRDetailContent: View {
             case .rawNotes(let ids):
                 ForEach(ids, id: \.self) { id in
                     commentEvidence(id, fingerprint: item.observedDiscussionFingerprint,
-                        relation: .FeedbackSuggestions.feedbackSuggestionsSourceOpen, citationContext: citationContext)
+                        relation: action.kind == .intent ? .FeedbackSuggestions.feedbackSuggestionsSourceRequest
+                            : .FeedbackSuggestions.feedbackSuggestionsSourceOpen, citationContext: citationContext)
                 }
             case .gitLabStatus:
                 Text(.FeedbackSuggestions.feedbackSuggestionsSourceStatus).font(.caption).foregroundStyle(.secondary)

@@ -21,11 +21,14 @@ struct BoardMRCompletionCard: View {
     var body: some View {
         VStack(alignment: .leading, spacing: 9) {
             metadata
-            HStack(alignment: .top) {
+            VStack(alignment: .leading, spacing: 3) {
                 Button(action: openDetails) {
                     BoardCardTitle(title: completion.title, repositoryPath: completion.url.gitLabProjectPath)
                 }
                 .buttonStyle(.plain)
+                if let iid = completion.target.iid {
+                    BoardMRReferenceLine(iid: iid, projectID: completion.target.projectID)
+                }
             }
             HStack(spacing: 8) {
                 Text(completion.kind == .merged ? .MRLifecycle.completionMerged : .MRLifecycle.completionClosed)
@@ -34,7 +37,6 @@ struct BoardMRCompletionCard: View {
                 seenButton
             }
             .font(.caption)
-            HStack { Spacer(minLength: 0); moreMenu }
         }
         .controlSize(.small)
         .padding(12).frame(maxWidth: .infinity, alignment: .leading)
@@ -49,6 +51,9 @@ struct BoardMRCompletionCard: View {
                 BoardItemDetailSheet {
                     metadata
                     Text(verbatim: completion.title).font(.title3).textSelection(.enabled)
+                    if let iid = completion.target.iid {
+                        BoardMRReferenceLine(iid: iid, projectID: completion.target.projectID)
+                    }
                     Text(verbatim: completion.url.gitLabProjectPath).foregroundStyle(.secondary).textSelection(.enabled)
                     Text(completion.kind == .merged ? .MRLifecycle.completionMerged : .MRLifecycle.completionClosed)
                     HStack {
@@ -71,7 +76,7 @@ struct BoardMRCompletionCard: View {
             if let author = completion.author { BoardCardAuthor(author: author) }
             Spacer(minLength: 4)
             FinishedMergeRequestBadge(state: state)
-            if let iid = completion.target.iid { BoardMRIdentifier(iid: iid) }
+            moreMenu
         }
     }
 

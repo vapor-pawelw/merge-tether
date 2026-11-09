@@ -42,9 +42,10 @@ struct BoardCompactJobCard: View {
     var body: some View {
         VStack(alignment: .leading, spacing: 9) {
             metadataHeader
-            HStack(alignment: .top, spacing: 6) {
+            VStack(alignment: .leading, spacing: 3) {
                 BoardCardTitle(title: handoff.title, repositoryPath: repositoryPath,
                     titleColor: isMuted ? .secondary : .primary)
+                BoardMRReferenceLine(iid: handoff.key.work.iid, projectID: handoff.key.work.projectID)
             }
             if let finishedItem {
                 FinishedMergeRequestStatus(item: finishedItem, monitor: monitor)
@@ -56,7 +57,6 @@ struct BoardCompactJobCard: View {
                 Text(.MRHumanAction.mrHumanActionActionReviewRun)
             }
             .buttonStyle(.plain).font(.caption).foregroundStyle(.secondary)
-            HStack { Spacer(minLength: 0); BoardActionsMenu { menuItems } }
         }
         .padding(12).controlSize(.small)
         .frame(maxWidth: .infinity, alignment: .leading)
@@ -66,6 +66,7 @@ struct BoardCompactJobCard: View {
             BoardItemDetailSheet {
                 metadataHeader
                 Text(verbatim: handoff.title).font(.title3).textSelection(.enabled)
+                BoardMRReferenceLine(iid: handoff.key.work.iid, projectID: handoff.key.work.projectID)
                 Text(verbatim: repositoryPath).foregroundStyle(.secondary)
                 if let finishedItem { FinishedMergeRequestStatus(item: finishedItem, monitor: monitor) }
                 AssistantJobRow(handoff: handoff, monitor: monitor, readOnly: finishedState != nil)
@@ -104,13 +105,13 @@ struct BoardCompactJobCard: View {
             Spacer(minLength: 4)
             if let finishedState { FinishedMergeRequestBadge(state: finishedState) }
             else if isDraft { BoardDraftBadge() }
-            BoardMRIdentifier(iid: handoff.key.work.iid)
             if finishedState == nil {
                 BoardAutomationToggle(settings: monitor.settings, target: scopeTarget, projectPath: repositoryPath, isDraft: isDraft)
             }
             BoardPinButton(pin: .mergeRequest(host: handoff.key.work.host,
                 username: handoff.key.username, projectID: handoff.key.work.projectID, iid: handoff.key.work.iid),
                 settings: monitor.settings)
+            BoardActionsMenu { menuItems }
         }
         .font(.caption).foregroundStyle(.secondary)
     }

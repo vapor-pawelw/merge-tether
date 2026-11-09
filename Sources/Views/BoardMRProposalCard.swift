@@ -44,12 +44,6 @@ struct BoardMRProposalCard: View {
         ProposalMRContext(proposal: proposal, fetchedRequest: currentRequest)
     }
 
-    @ViewBuilder private var dependencyRow: some View {
-        if let dependencies = proposal.item?.dependencies, dependencies.hasPresentation {
-            MRDependencyRow(summary: dependencies, projectID: proposal.target.projectID).transition(.opacity)
-        }
-    }
-
     private var authorTaskID: String {
         "\(proposal.target.host)/\(proposal.target.username)/\(proposal.target.projectID)/\(proposal.target.iid ?? 0)/\(proposal.url)|\(monitor.glab.resolvedHost ?? "")/\(monitor.glab.currentUsername ?? "")/\(monitor.glab.accountRevision)"
     }
@@ -67,17 +61,19 @@ struct BoardMRProposalCard: View {
     var body: some View {
         VStack(alignment: .leading, spacing: 9) {
             metadataHeader
-            HStack(alignment: .top) {
+            VStack(alignment: .leading, spacing: 3) {
                 Button { showingDetails = true } label: {
                     BoardCardTitle(title: proposal.title, repositoryPath: proposal.url.gitLabProjectPath,
                         titleColor: isMuted ? .secondary : .primary)
                 }
                 .buttonStyle(.plain)
+                if let iid = proposal.target.iid {
+                    BoardMRReferenceLine(iid: iid, projectID: proposal.target.projectID, dependencies: proposal.item?.dependencies)
+                }
             }
             if let finishedItem {
                 FinishedMergeRequestStatus(item: finishedItem, monitor: monitor)
             } else {
-                dependencyRow
                 reasons
                 HStack {
                     Button {
@@ -108,7 +104,6 @@ struct BoardMRProposalCard: View {
                 }
                 runResult
             }
-            HStack { Spacer(minLength: 0); moreMenu }
         }
         .confirmationDialog(Text(.Board.boardProposalIgnore), isPresented: $confirmIgnore, titleVisibility: .visible) {
             Button(role: .destructive) {
@@ -130,7 +125,9 @@ struct BoardMRProposalCard: View {
             BoardItemDetailSheet {
                 metadataHeader
                 Text(verbatim: proposal.title).font(.title3).textSelection(.enabled)
-                dependencyRow
+                if let iid = proposal.target.iid {
+                    BoardMRReferenceLine(iid: iid, projectID: proposal.target.projectID, dependencies: proposal.item?.dependencies)
+                }
                 Text(verbatim: proposal.url.gitLabProjectPath).foregroundStyle(.secondary)
                 ForEach(context.reasons) { value in
                     VStack(alignment: .leading, spacing: 6) {
@@ -163,13 +160,13 @@ struct BoardMRProposalCard: View {
                 BoardStatusChip(title: .Board.boardCompactProposal, symbol: "plus.circle")
                 if isDraft { BoardDraftBadge() }
             }
-            if let iid = proposal.target.iid { BoardMRIdentifier(iid: iid) }
             if finishedState == nil {
                 BoardAutomationToggle(settings: monitor.settings, target: proposal.target,
                     projectPath: proposal.url.gitLabProjectPath, isDraft: isDraft)
             }
             BoardPinButton(pin: .mergeRequest(host: proposal.target.host, username: proposal.target.username,
                 projectID: proposal.target.projectID, iid: proposal.target.iid ?? 0), settings: monitor.settings)
+            moreMenu
         }
     }
 

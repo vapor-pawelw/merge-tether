@@ -423,10 +423,8 @@ final class MergeRequestTodoRouter {
             let rule = settings.automation.reviewRequested
             return rule.isEnabled && rule.runner == .assistant && rule.isConfigured && rule.includes(project: project)
         case .followUp:
-            let rule = settings.automation.authorFeedback
-            let workflow = settings.automation.workflowRules[.newDiscussion]
-            return rule.runner == .assistant && rule.isConfigured && rule.includes(project: project)
-                && (rule.isEnabled || (workflow.mode == .assistant && workflow.includes(request)))
+            return settings.automation.followUpAutomationHold(for: request, target: target,
+                ignored: settings.ignoredMergeRequests.contains(target), includeDraftPolicy: false) == nil
         case .pipeline:
             let rule = settings.automation.workflowRules[.pipelineFailure]
             return request.author.username == target.username && settings.automation.autoClaimPipelineFailures

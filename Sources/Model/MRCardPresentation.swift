@@ -24,6 +24,7 @@ struct MRCardPresentation {
     let reviewingContext: ReviewingContext
     let allowsRemoval: Bool
     let assistantReady: Bool
+    let cliHoldKind: AssistantCLIHealthIssue.Kind?
     let confirmationState: MergeRequestAttentionMonitor.ConfirmationState?
     let automaticallyPublishedDraftIDs: Set<Int>
     let automaticConflictProgress: Bool
@@ -39,12 +40,14 @@ struct MRCardPresentation {
          automaticallyPublishedDraftIDs: Set<Int> = [], automaticConflictProgress: Bool = false,
          automaticPipelineProgress: Bool = false, conflictReceipts: Set<MergeConflictReceipt> = [],
          preservedHumanAction: MRHumanAction? = nil, isRefreshingAttention: Bool = false, refreshFailed: Bool = false,
-         showsReadProgress: Bool = true, automaticMergeProgress: Bool = false) {
+         showsReadProgress: Bool = true, automaticMergeProgress: Bool = false,
+         cliHoldKind: AssistantCLIHealthIssue.Kind? = nil) {
         self.row = row; self.reviewingContext = reviewingContext; self.allowsRemoval = allowsRemoval
         self.preservedHumanAction = preservedHumanAction; self.isRefreshingAttention = isRefreshingAttention
         self.refreshFailed = refreshFailed
         self.showsReadProgress = showsReadProgress
         self.automaticMergeProgress = automaticMergeProgress
+        self.cliHoldKind = cliHoldKind
         self.assistantReady = assistantReady; self.confirmationState = confirmationState
         self.automaticallyPublishedDraftIDs = automaticallyPublishedDraftIDs
         self.automaticConflictProgress = automaticConflictProgress
@@ -53,7 +56,7 @@ struct MRCardPresentation {
     }
 
     init(row: MergeRequestBoardSnapshot.Row, monitor: TodoMonitorService, allowsRemoval: Bool) {
-        let ready = monitor.availableAssistants.contains(monitor.settings.automation.assistant)
+        let ready = monitor.assistantDependencies.available.contains(monitor.settings.automation.assistant)
         let target = monitor.scopeTarget(projectID: row.id.projectID, iid: row.id.iid, url: row.item.url)
         let automatic = target.map {
             row.item.draftIDsHandledAutomatically(automation: monitor.settings.automation, target: $0,
@@ -69,7 +72,8 @@ struct MRCardPresentation {
             preservedHumanAction: monitor.confirmedHumanAction(for: row),
             isRefreshingAttention: monitor.isRecheckingAttention(for: row), refreshFailed: monitor.attentionRefreshFailed(for: row),
             showsReadProgress: monitor.showsRefreshProgress(for: row.id),
-            automaticMergeProgress: row.item.mergeRequest.map { monitor.authoredMergeRequests.isMerging($0) } ?? false)
+            automaticMergeProgress: row.item.mergeRequest.map { monitor.authoredMergeRequests.isMerging($0) } ?? false,
+            cliHoldKind: monitor.cliHealth.hold(for: row.latestJob?.key.assistant ?? monitor.settings.automation.assistant)?.issue.kind)
     }
 
     private var recoveryWaitsForHuman: Bool {
@@ -94,7 +98,15 @@ struct MRCardPresentation {
     private var quietReadCheck: Bool {
         !showsReadProgress && !executingWork && (busy || isRefreshingAttention)
     }
-    var working: Bool { finishedState == nil && (executingWork || (showsReadProgress && (busy || isRefreshingAttention))) }
+    private var waitingOnCLI: Bool {
+        guard cliHoldKind != nil, row.latestJob?.execution?.state != .running,
+              confirmationState != .publishing, confirmationState != .approving,
+              !automaticMergeProgress, !automaticPipelineProgress, !automaticConflictProgress else { return false }
+        return row.latestJob?.execution?.state == .queued
+            || (allowsRemoval && [.runReview, .automaticReview, .verifying].contains(reviewingContext.nextStep))
+            || row.attentionIntents.contains { ($0.kind == .review || $0.kind == .followUp) && $0.state == .pending }
+    }
+    var working: Bool { finishedState == nil && !waitingOnCLI && (executingWork || (showsReadProgress && (busy || isRefreshingAttention))) }
     var actionsBlocked: Bool { finishedState != nil || busy || isRefreshingAttention || row.latestJob?.execution?.state.isActive == true }
     private var preservesConfirmedAttention: Bool {
         (isRefreshingAttention || refreshFailed) && row.needsAttention && preservedHumanAction != nil
@@ -112,11 +124,14 @@ struct MRCardPresentation {
     }
     var neutralStatus: LocalizedStringResource? {
         if let finishedState { return finishedState.status }
-        if quietReadCheck {
-            if busy || reviewingContext.status == .activityUnknown || reviewingContext.status == .verifying { return nil }
+        if waitingOnCLI {
+            return cliHoldKind == .loginRequired ? .AutomationProgress.progressPausedLogin : .AutomationProgress.progressPausedLimit
         }
+        if busy || (isRefreshingAttention && showsReadProgress) { return progressTitle }
         if item.authorFeedbackStatus?.waitingForReviewer == true { return .AuthorFeedback.authorFeedbackWaitingChip }
-        guard allowsRemoval else { return nil }
+        guard allowsRemoval else {
+            return item.section == .draftMergeRequests ? .AutomationProgress.progressOwnDraft : .AutomationProgress.progressMonitoring
+        }
         return reviewingContext.status == .activityUnknown ? reviewingContext.presenceMessage : reviewingContext.statusMessage
     }
     var message: String {
@@ -125,6 +140,7 @@ struct MRCardPresentation {
     }
     var status: String? {
         if let finishedState { return String(localized: finishedState.status) }
+        if waitingOnCLI { return neutralStatus.map { String(localized: $0) } }
         if let job = row.latestJob, job.execution?.state.isActive == true {
             return String(localized: job.progressTitle(intents: row.intents, conflictReceipts: conflictReceipts)) + " · " + String(localized: job.key.assistant.displayName)
         }
@@ -152,6 +168,7 @@ struct MRCardPresentation {
     }
     var actionLabel: LocalizedStringResource? {
         guard finishedState == nil else { return nil }
+        if waitingOnCLI && humanAction == nil { return nil }
         guard !actionsBlocked || preservesConfirmedAttention else { return nil }
         if humanAction == nil, allowsRemoval, reviewingContext.nextStep == .runReview, !assistantReady {
             return .Board.boardCompactSetupCli

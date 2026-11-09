@@ -4,6 +4,27 @@ import Testing
 
 @MainActor
 struct MRProgressPresentationTests {
+    @Test func aHeldQueueHasAFactualPausedStatusWithoutASpinner() {
+        let queued = presentation("followUp", state: .queued)
+        let model = MRCardPresentation(row: queued.row, reviewingContext: queued.reviewingContext,
+            allowsRemoval: false, assistantReady: true, cliHoldKind: .rateLimited)
+        #expect(!model.working && model.actionsBlocked)
+        #expect(model.status == "Paused: CLI usage limit")
+    }
+
+    @Test func quietGlobalPollingKeepsTheIdleStatusStable() {
+        let idle = presentation("idle")
+        let model = MRCardPresentation(row: idle.row, reviewingContext: idle.reviewingContext,
+            allowsRemoval: false, assistantReady: true, isRefreshingAttention: true, showsReadProgress: false)
+        #expect(!model.working && model.status == "Monitoring MR")
+    }
+
+    @Test func anIdleAuthoredMRAlwaysHasAStatusWithoutInventingWork() {
+        let model = presentation("idle")
+        #expect(model.status == "Monitoring MR")
+        #expect(!model.working && !model.busy && model.humanAction == nil)
+    }
+
     @Test(arguments: [false, true])
     func independentStoppedWorkDoesNotAcquireFakeReviewPreparationWhileProofIsChecked(_ aiChecking: Bool) {
         var item = MergeRequestAttentionMonitor.Item(id: .init(projectID: 1, iid: 2), title: "Example",
@@ -22,7 +43,8 @@ struct MRProgressPresentationTests {
         let model = MRCardPresentation(row: row, reviewingContext: context, allowsRemoval: true,
             assistantReady: true, showsReadProgress: false)
         #expect(model.busy == aiChecking)
-        #expect(!model.working && model.status == nil)
+        #expect(!model.working)
+        #expect(aiChecking ? model.status == "Assessing AI assistance" : model.status == nil)
         if !aiChecking { #expect(model.humanAction?.kind == .blockedRun) }
     }
 
@@ -100,20 +122,20 @@ struct MRProgressPresentationTests {
     }
 
     @Test(arguments: ["replies", "feedback", "ai", "readiness"])
-    func backgroundReadOnlyChecksDoNotBecomeVisibleWork(_ stage: String) {
+    func backgroundReadOnlyChecksKeepTheirStatusWithoutSpinnerChurn(_ stage: String) {
         let model = presentation(stage, showsReadProgress: false)
-        #expect(!model.working && model.status == nil)
+        #expect(!model.working && model.status != nil)
         #expect(model.busy && model.actionsBlocked)
     }
 
-    @Test func quietReviewingChecksDoNotLeakVerificationOrFallbackText() {
+    @Test func quietReviewingChecksExplainTheReadWithoutInventingAHumanAction() {
         var item = MergeRequestAttentionMonitor.Item(id: .init(projectID: 1, iid: 2), title: "Example",
             url: URL(string: "https://gitlab.example.test/group/repo/-/merge_requests/2")!)
         item.reviewingProgress = .checking
         let row = MergeRequestBoardSnapshot.Row(item: item, latestJob: nil, intents: [])
         let model = MRCardPresentation(row: row, reviewingContext: ReviewingContext(row: row),
             allowsRemoval: true, assistantReady: true, isRefreshingAttention: true, showsReadProgress: false)
-        #expect(!model.working && model.status == nil && model.neutralStatus == nil && model.nextStep == nil)
+        #expect(!model.working && model.status == "Checking review" && model.nextStep == nil)
         #expect(model.actionsBlocked && model.actionLabel == nil)
     }
 

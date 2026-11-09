@@ -220,6 +220,50 @@
           }
         }
       }
+    },
+    "progressMonitoring": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Monitoring MR"
+          }
+        }
+      }
+    },
+    "progressPausedLogin": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Paused: CLI sign-in required"
+          }
+        }
+      }
+    },
+    "progressPausedLimit": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Paused: CLI usage limit"
+          }
+        }
+      }
+    },
+    "progressOwnDraft": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Draft MR; waiting to be marked ready"
+          }
+        }
+      }
     }
   },
   "version": "1.0"

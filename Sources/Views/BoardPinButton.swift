@@ -16,10 +16,11 @@ struct BoardPinButton: View {
             Image(systemName: isPinned ? "pin.fill" : "pin")
                 .font(.system(size: 10, weight: .medium))
                 .foregroundStyle(isPinned ? Color.accentColor : Color.secondary)
-                .frame(width: 16, height: 16)
+                .frame(width: 24, height: 24)
                 .contentShape(Rectangle())
         }
         .buttonStyle(.plain)
+        .boardHeaderControlHover()
         .help(Text(title))
         .accessibilityLabel(Text(title))
         .disabled(pin == nil)

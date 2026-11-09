@@ -46,6 +46,20 @@ struct BoardMRIdentifier: View {
     }
 }
 
+struct BoardMRReferenceLine: View {
+    let iid: Int
+    let projectID: Int
+    var dependencies: MergeRequestDependencySummary?
+
+    var body: some View {
+        if let dependencies {
+            MRDependencyRow(summary: dependencies, projectID: projectID, iid: iid)
+        } else {
+            BoardMRIdentifier(iid: iid)
+        }
+    }
+}
+
 struct BoardDraftBadge: View {
     var body: some View {
         Text(.Menu.menuMrDraftBadge)
@@ -106,11 +120,14 @@ struct BoardCardAuthor: View {
 struct MRDependencyRow: View {
     let summary: MergeRequestDependencySummary
     let projectID: Int
+    var iid: Int? = nil
 
     var body: some View {
         VStack(alignment: .leading, spacing: 3) {
-            if !description.characters.isEmpty {
-                Text(description).font(.caption).foregroundStyle(.secondary)
+            if let iid, summary.predecessors.isEmpty {
+                BoardMRIdentifier(iid: iid).help(tooltip)
+            } else if !description.characters.isEmpty {
+                Text(description).font(.caption).monospacedDigit().foregroundStyle(.secondary)
                     .fixedSize(horizontal: false, vertical: true)
                     .help(tooltip)
             }
@@ -123,20 +140,24 @@ struct MRDependencyRow: View {
 
     private var tooltip: Text {
         let references = summary.predecessors.map { "\($0.title)\n\($0.url.gitLabProjectPath)" }.joined(separator: "\n")
-        if summary.stackPosition != nil {
-            return Text(.MRDependencies.mrDependenciesPositionHelp) + Text(verbatim: references.isEmpty ? "" : "\n" + references)
+        if let position = summary.stackPosition {
+            return Text(.MRDependencies.mrDependenciesStackPosition(position)) + Text(verbatim: "\n")
+                + Text(.MRDependencies.mrDependenciesPositionHelp) + Text(verbatim: references.isEmpty ? "" : "\n" + references)
         }
         return Text(verbatim: references)
     }
 
     private var description: AttributedString {
         var text = AttributedString()
-        if let position = summary.stackPosition {
+        if let iid {
+            text = AttributedString("!\(iid)")
+        } else if let position = summary.stackPosition {
             text = AttributedString(String(localized: .MRDependencies.mrDependenciesStackPosition(position)))
         }
         if !summary.predecessors.isEmpty {
-            if summary.stackPosition != nil { text += AttributedString(" · ") }
-            text += AttributedString(String(localized: .MRDependencies.mrDependenciesAfter) + " ")
+            if iid != nil { text += AttributedString(", ") }
+            else if summary.stackPosition != nil { text += AttributedString(" · ") }
+            text += AttributedString(String(localized: iid == nil ? .MRDependencies.mrDependenciesAfter : .MRDependencies.mrDependenciesAfterInline) + " ")
             for (index, predecessor) in summary.predecessors.enumerated() {
                 if index > 0 { text += AttributedString(", ") }
                 var reference = predecessor.reference(relativeTo: projectID)

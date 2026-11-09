@@ -59,11 +59,20 @@ struct MRHumanAction {
         case finding(AuthorFeedbackPolicy.Finding, EvidenceContext)
         case replyThread(Int, EvidenceContext)
         case reReview(ReReviewReadiness.Blocker, EvidenceContext)
+        case followUp(MRTodoIntent, String?)
     }
     private var source: Source = .none
 
     func feedbackEvidence(for item: MergeRequestAttentionMonitor.Item) -> FeedbackEvidence {
         switch source {
+        case .followUp(let intent, let fingerprint):
+            let ids = intent.noteIDs.filter { $0 > 0 }.sorted()
+            guard !ids.isEmpty, intent.headSHA == item.mergeRequest?.sha,
+                  intent.request.webURL == item.url, intent.target.projectID == item.id.projectID,
+                  intent.target.iid == item.id.iid, intent.target.username == intent.request.author.username,
+                  item.url.isGitLabMergeRequest(host: intent.target.host, iid: item.id.iid),
+                  fingerprint == item.observedDiscussionFingerprint else { return .unavailable(ids.first) }
+            return .rawNotes(ids)
         case .finding(let finding, let context):
             guard let status = item.authorFeedbackStatus, context.matches(status, item: item),
                   status.phase == .complete || status.phase == .waitingPublication,
@@ -98,7 +107,7 @@ struct MRHumanAction {
     /// Exact source of the displayed concern, which can differ from its thread root.
     var sourceNoteID: Int? {
         switch source {
-        case .none: nil
+        case .none, .followUp: nil
         case .finding(let finding, _): finding.sourceNoteID
         case .replyThread(let root, _): root
         case .reReview(let blocker, _): blocker.noteID
@@ -173,6 +182,7 @@ struct MRHumanAction {
             guard let intent = row.attentionIntents.first(where: { $0.state == .failed && !row.isReconciling($0) }) else { return nil }
             self.init(kind: .intent, action: .retryIntent, message: Self.intentMessage(intent),
                       detail: intent.error.map(GlabService.redactWorkflowEvidence))
+            if intent.kind == .followUp { source = .followUp(intent, item.observedDiscussionFingerprint) }
             return
         }
         if let failure = item.draftProofRecoveryFailure {
@@ -226,6 +236,7 @@ struct MRHumanAction {
         } else if let intent {
             self.init(kind: .intent, action: .retryIntent, message: Self.intentMessage(intent),
                       detail: intent.error.map(GlabService.redactWorkflowEvidence))
+            if intent.kind == .followUp { source = .followUp(intent, item.observedDiscussionFingerprint) }
         } else if item.hasConflict {
             self.init(kind: .intent, action: .reviewIssue, message: .MRHumanAction.mrHumanActionConflictIntent)
         } else if item.failedPipeline {

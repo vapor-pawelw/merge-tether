@@ -41,13 +41,13 @@ private struct CommandCenterMRCardContent: View {
     private var nextIntent: MRTodoIntent? {
         row.attentionIntents.first { $0.state == .failed } ?? row.attentionIntents.first { $0.state == .pending }
     }
-    private var needsCLI: Bool { !monitor.availableAssistants.contains(monitor.settings.automation.assistant) }
+    private var needsCLI: Bool { !monitor.assistantDependencies.available.contains(monitor.settings.automation.assistant) }
     private var humanAction: MRHumanAction? { presentation.humanAction }
 
     var body: some View {
         VStack(alignment: .leading, spacing: 9) {
             metadataHeader
-            HStack(alignment: .top, spacing: 6) {
+            VStack(alignment: .leading, spacing: 3) {
                 Button(action: onDetails) {
                     BoardCardTitle(title: item.title, repositoryPath: item.url.gitLabProjectPath,
                         titleColor: isMuted ? .secondary : .primary)
@@ -55,6 +55,7 @@ private struct CommandCenterMRCardContent: View {
                 }
                 .buttonStyle(.plain)
                 .help(Text(verbatim: "\(item.title)\n\(item.url.gitLabProjectPath)\n") + Text(.Board.boardDetails))
+                BoardMRReferenceLine(iid: item.id.iid, projectID: item.id.projectID, dependencies: item.dependencies)
             }
             if finishedState != nil {
                 FinishedMergeRequestStatus(item: item, monitor: monitor)
@@ -80,7 +81,7 @@ private struct CommandCenterMRCardContent: View {
                             Button { openAttention(.assistantRuns) } label: { Text(.MRHumanAction.mrHumanActionActionReviewRun) }
                                 .buttonStyle(.plain)
                         } else if humanAction == nil, let status = neutralStatus {
-                            Text(status).font(.callout).foregroundStyle(isMuted ? Color.secondary : Color.primary).lineLimit(1)
+                            Text(status).font(.callout).foregroundStyle(isMuted ? Color.secondary : Color.primary).lineLimit(2)
                                 .help(Text(reviewingContext.presenceMessage)
                                       + Text(verbatim: "\n") + Text(reviewingContext.statusMessage))
                         }
@@ -88,9 +89,6 @@ private struct CommandCenterMRCardContent: View {
                         primaryAction
                     }
                     .font(.caption).foregroundStyle(.secondary)
-                }
-                if let dependencies = item.dependencies, dependencies.hasPresentation {
-                    MRDependencyRow(summary: dependencies, projectID: item.id.projectID).transition(.opacity)
                 }
                 if let nextStep = presentation.nextStep {
                     Text(verbatim: nextStep)
@@ -105,7 +103,6 @@ private struct CommandCenterMRCardContent: View {
                     }
                 }
             }
-            HStack { Spacer(minLength: 0); moreMenu }
         }
         .onChange(of: row.latestJob?.id) { _, _ in retryError = nil }
         .controlSize(.small)
@@ -138,7 +135,6 @@ private struct CommandCenterMRCardContent: View {
             if let finishedState { FinishedMergeRequestBadge(state: finishedState) }
             else if isDraft { BoardDraftBadge() }
             if finishedState == nil { BoardApprovalProgressBadge(progress: item.approvalProgress) }
-            BoardMRIdentifier(iid: item.id.iid)
             if finishedState == nil, let scopeTarget {
                 BoardAutomationToggle(settings: monitor.settings, target: scopeTarget,
                     projectPath: item.url.gitLabProjectPath, isDraft: isDraft)
@@ -146,6 +142,7 @@ private struct CommandCenterMRCardContent: View {
             BoardPinButton(pin: .mergeRequest(host: monitor.glab.resolvedHost,
                 username: monitor.glab.currentUsername, projectID: item.id.projectID, iid: item.id.iid),
                 settings: monitor.settings)
+            moreMenu
         }
     }
 
@@ -323,9 +320,9 @@ struct BoardTodoRow: View {
     }
 
     var body: some View {
-        VStack(alignment: .leading, spacing: 8) {
+        VStack(alignment: .leading, spacing: 9) {
             metadataHeader
-            HStack(alignment: .top, spacing: 6) {
+            VStack(alignment: .leading, spacing: 3) {
                 Button { showingDetails = true } label: {
                     ActionDescriptionText(todo: todo, currentUsername: monitor.glab.currentUsername,
                         repositoryPath: todo.project.pathWithNamespace)
@@ -336,6 +333,9 @@ struct BoardTodoRow: View {
                 }
                 .buttonStyle(.plain)
                 .help(Text(verbatim: "\(todo.displayTitle)\n\(todo.project.pathWithNamespace)"))
+                if todo.targetType == .mergeRequest, let iid = todo.target.iid {
+                    BoardMRReferenceLine(iid: iid, projectID: todo.project.id)
+                }
             }
             if let title = todo.target.title ?? (todo.body.isEmpty ? nil : todo.body), !title.isEmpty {
                 Text(verbatim: title).font(.caption).foregroundStyle(.secondary)
@@ -355,7 +355,6 @@ struct BoardTodoRow: View {
                     .disabled(monitor.isAssessingNotice(todo))
             }
             .font(.caption)
-            HStack { Spacer(minLength: 0); moreMenu }
         }
         .controlSize(.small)
         .padding(10)
@@ -368,6 +367,9 @@ struct BoardTodoRow: View {
                 ActionDescriptionText(todo: todo, currentUsername: monitor.glab.currentUsername)
                     .font(.title3).foregroundStyle(.primary)
                 Text(verbatim: todo.displayTitle).font(.headline).textSelection(.enabled)
+                if todo.targetType == .mergeRequest, let iid = todo.target.iid {
+                    BoardMRReferenceLine(iid: iid, projectID: todo.project.id)
+                }
                 Text(verbatim: todo.project.pathWithNamespace).foregroundStyle(.secondary)
                 Text(todo.createdAt, format: .dateTime)
                 if !todo.body.isEmpty, todo.body != todo.displayTitle {
@@ -391,9 +393,7 @@ struct BoardTodoRow: View {
                     ? .ReviewingContext.reviewingAuthorLabel : nil)
             Spacer(minLength: 4)
             if isDraft { BoardDraftBadge() }
-            if todo.targetType == .mergeRequest, let iid = todo.target.iid {
-                BoardMRIdentifier(iid: iid)
-            } else if !todo.relativeIdentifier.isEmpty {
+            if todo.targetType != .mergeRequest, !todo.relativeIdentifier.isEmpty {
                 Text(verbatim: todo.relativeIdentifier).font(.caption).foregroundStyle(.secondary)
             }
             if let scopeTarget {
@@ -402,6 +402,7 @@ struct BoardTodoRow: View {
             }
             BoardPinButton(pin: .todo(host: monitor.glab.resolvedHost,
                 username: monitor.glab.currentUsername, id: todo.id), settings: monitor.settings)
+            moreMenu
         }
     }
 

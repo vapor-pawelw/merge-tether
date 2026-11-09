@@ -385,6 +385,17 @@
           }
         }
       }
+    },
+    "feedback.suggestions.sourceRequest": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Comment behind this follow-up request"
+          }
+        }
+      }
     }
   },
   "version": "1.0"

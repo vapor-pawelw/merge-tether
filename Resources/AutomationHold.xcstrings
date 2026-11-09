@@ -1,0 +1,182 @@
+{
+  "sourceLanguage": "en",
+  "strings": {
+    "automation.hold.title": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Why automation is waiting"
+          }
+        }
+      }
+    },
+    "automation.hold.packageDisabled": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Assistant automation is turned off in Settings."
+          }
+        }
+      }
+    },
+    "automation.hold.ignored": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "This merge request is excluded from automation."
+          }
+        }
+      }
+    },
+    "automation.hold.closed": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Automatic follow-up only runs on open merge requests."
+          }
+        }
+      }
+    },
+    "automation.hold.scopePaused": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Automation is paused or outside the enabled scope for this merge request."
+          }
+        }
+      }
+    },
+    "automation.hold.draftPaused": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Automation is paused while this merge request is Draft. Enable automation for this draft or mark it ready."
+          }
+        }
+      }
+    },
+    "automation.hold.runnerUnsupported": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Follow-up uses a shell runner. Choose the assistant runner in Settings."
+          }
+        }
+      }
+    },
+    "automation.hold.notConfigured": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "The follow-up title or prompt is empty. Complete the rule in Settings."
+          }
+        }
+      }
+    },
+    "automation.hold.projectExcluded": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "The Author feedback rule excludes this repository."
+          }
+        }
+      }
+    },
+    "automation.hold.workflowExcluded": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "The new-discussion workflow excludes this repository, target branch or labels."
+          }
+        }
+      }
+    },
+    "automation.hold.ruleDisabled": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Automatic handling of author feedback is off. Enable Author feedback or an assistant workflow for new discussions in Settings."
+          }
+        }
+      }
+    },
+    "automation.hold.assistantUnavailable": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "The selected assistant CLI is not ready. Check installation and sign-in in Settings."
+          }
+        }
+      }
+    },
+    "automation.hold.retryRequired": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "A previous attempt stopped. Review its result and retry explicitly; stopped work is not automatically repeated."
+          }
+        }
+      }
+    },
+    "automation.hold.readinessUnknown": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Current Draft status could not be read. Refresh the merge request before automation can continue."
+          }
+        }
+      }
+    },
+    "automation.hold.loginRequired": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "The selected CLI needs sign-in. Use the sign-in banner above to restore access."
+          }
+        }
+      }
+    },
+    "automation.hold.rateLimited": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "The selected CLI has reached its usage limit. Use the banner above to inspect the reset time or retry queued work."
+          }
+        }
+      }
+    }
+  },
+  "version": "1.0"
+}

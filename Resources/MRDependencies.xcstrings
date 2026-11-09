@@ -99,6 +99,17 @@
           }
         }
       }
+    },
+    "mr.dependencies.afterInline": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "merge after"
+          }
+        }
+      }
     }
   },
   "version": "1.0"

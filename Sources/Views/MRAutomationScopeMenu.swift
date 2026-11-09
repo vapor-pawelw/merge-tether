@@ -17,7 +17,7 @@ struct BoardAutomationToggle: View {
                 Image(systemName: status.active ? "bolt.fill" : "bolt.slash")
                     .font(.system(size: 11, weight: .medium))
                     .foregroundStyle(status.active ? Color.accentColor : Color.secondary)
-                    .frame(width: 16, height: 16)
+                    .frame(width: 24, height: 24)
                     .overlay(alignment: .bottomTrailing) {
                         if choice == .forceOn || choice == .paused {
                             Circle().fill(.secondary).frame(width: 3, height: 3)
@@ -26,6 +26,7 @@ struct BoardAutomationToggle: View {
                     .contentShape(Rectangle())
             }
             .buttonStyle(.plain)
+            .boardHeaderControlHover()
             .help(scopeHelp(status, choice: choice, hasActionExceptions: hasActionExceptions(settings, target: target)))
             .accessibilityLabel(Text(.Menu.menuScopeTitle))
             .accessibilityValue(Text(scopeChoiceLabel(choice)) + Text(", ")

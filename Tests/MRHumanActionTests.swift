@@ -4,6 +4,40 @@ import Testing
 
 @MainActor
 struct MRHumanActionTests {
+    @Test(arguments: [MRTodoIntent.Kind.followUp, .pipeline])
+    func aPendingFollowUpQuotesItsSelectedCommentsInsteadOfUnrelatedFeedback(_ kind: MRTodoIntent.Kind) throws {
+        // given
+        let request = try MRDependencyPresentationTests().request(2, project: 1, title: "Example MR")
+        var item = MergeRequestAttentionMonitor.Item(id: .init(projectID: 1, iid: 2), title: request.title, url: request.webURL)
+        item.mergeRequest = request
+        item.observedDiscussionFingerprint = "comments"
+        let intent = MRTodoIntent(id: UUID(), target: .init(host: "gitlab.example.test", username: "author7", projectID: 1, iid: 2),
+            kind: kind, state: .pending, todoIDs: [], noteIDs: [43, 42], sourceEvents: [], request: request,
+            headSHA: request.sha!, updatedAt: Date())
+        let snapshot = MergeRequestBoardSnapshot.Row(item: item, latestJob: nil, intents: [intent])
+        // when
+        let action = try #require(MRHumanAction(row: snapshot, assistantReady: true))
+        // then
+        #expect(action.kind == .intent)
+        #expect(action.feedbackEvidence(for: item) == (kind == .followUp ? .rawNotes([42, 43]) : .none))
+        item.observedDiscussionFingerprint = "edited comments"
+        #expect(action.feedbackEvidence(for: item) == (kind == .followUp ? .unavailable(42) : .none))
+    }
+
+    @Test func aFollowUpWithoutLinkedCommentsExplicitlyReportsMissingEvidence() throws {
+        // given
+        let request = try MRDependencyPresentationTests().request(2, project: 1)
+        var item = MergeRequestAttentionMonitor.Item(id: .init(projectID: 1, iid: 2), title: request.title, url: request.webURL)
+        item.mergeRequest = request
+        let intent = MRTodoIntent(id: UUID(), target: .init(host: "gitlab.example.test", username: "author7", projectID: 1, iid: 2),
+            kind: .followUp, state: .pending, todoIDs: [], noteIDs: [], sourceEvents: [], request: request,
+            headSHA: request.sha!, updatedAt: Date())
+        // when
+        let action = try #require(MRHumanAction(row: .init(item: item, latestJob: nil, intents: [intent]), assistantReady: true))
+        // then
+        #expect(action.feedbackEvidence(for: item) == .unavailable(nil))
+    }
+
     @Test(arguments: [false, true])
     func aFailedCheckDoesNotClaimItsSourceIsTheMRWideStatus(_ authorCheck: Bool) throws {
         var item = item()

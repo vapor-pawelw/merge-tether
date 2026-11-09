@@ -290,7 +290,7 @@ import MergeTetherRemote
             handoffs: [], host: "gitlab.example.org", username: "me", humanAttention: .empty)
         let phone = RemoteBoardAdapter.project(board: board, other: [], session: UUID(), account: "me@host")
         let card = try #require(phone.lanes.first?.cards.first)
-        #expect(card.presentation?.status == nil)
+        #expect(card.presentation?.status == "Monitoring MR")
         #expect(card.presentation?.nextStep == nil)
         #expect(card.primaryCTA == nil)
     }
