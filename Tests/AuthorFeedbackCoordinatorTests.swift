@@ -929,7 +929,7 @@ struct AuthorFeedbackCoordinatorTests {
             #expect(status.replyNoteIDs.isEmpty)
             #expect(status.followUpNoteIDs == [20] && requested == [20])
             #expect(status.needsAttention)
-            #expect(status.findings.first?.state == .needsChanges)
+            #expect(status.findings.first?.state == (state == .blocking ? .needsChanges : .needsVerification))
             #expect(status.findings.allSatisfy { !$0.canResolve })
             #expect(!fixture.resolved)
             #expect(fixture.reactionPosts == 0)

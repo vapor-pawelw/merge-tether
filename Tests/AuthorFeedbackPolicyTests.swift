@@ -5,6 +5,38 @@ import Testing
 @Suite("Author feedback policy")
 struct AuthorFeedbackPolicyTests {
     private let fixedA = ReReviewAssessment.Note(noteID: 10, state: .addressed, reason: "Current diff fixes A")
+
+    @Test func anInheritedConfirmedConcernLeadsBeforeAnotherParticipantsUncertainty() throws {
+        let findings = try evaluate([
+            thread("shared", note(10, by: 7, "Fix A", resolvable: true), note(11, by: 8, "Also fix B")),
+            thread("uncertain", note(20, by: 7, "Verify the timeout")),
+            thread("blocking", note(30, by: 8, "Fix the retry"))
+        ], [fixedA, .init(noteID: 11, state: .addressed, reason: "B is fixed"),
+            .init(noteID: 20, state: .uncertain, reason: "The timeout evidence is incomplete"),
+            .init(noteID: 30, state: .blocking, reason: "The retry is still incorrect")])
+        #expect(findings.first?.state == .needsChanges && findings.first?.sourceNoteID == 30)
+    }
+
+    @Test func anUncertainThreadKeepsItsOwnSourceWhenAnotherThreadHasAConfirmedBlocker() throws {
+        let findings = try evaluate([
+            thread("uncertain", note(10, by: 7, "Please verify the timeout", resolvable: true)),
+            thread("blocking", note(20, by: 7, "Fix the retry", resolvable: true))
+        ], [.init(noteID: 10, state: .uncertain, reason: "The timeout evidence is incomplete"),
+            .init(noteID: 20, state: .blocking, reason: "The retry is still incorrect")])
+        #expect(findings.map(\.state) == [.needsVerification, .needsChanges])
+        #expect(findings.map(\.sourceNoteID) == [10, 20])
+        #expect(findings.map(\.reason) == ["The timeout evidence is incomplete", "The retry is still incorrect"])
+        #expect(findings.allSatisfy { !$0.canResolve })
+    }
+
+    @Test(arguments: [false, true])
+    func uncertaintyIsNotPresentedAsAConfirmedCorrection(_ resolvable: Bool) throws {
+        let findings = try evaluate([thread("uncertain", note(10, by: 7, "Please cover retries", resolvable: resolvable))], [
+            .init(noteID: 10, state: .uncertain, reason: "The current test evidence is incomplete")
+        ])
+        #expect(findings.first?.state == .needsVerification)
+        #expect(findings.first?.sourceNoteID == 10 && findings.first?.canResolve == false)
+    }
     private var alicesThread: String {
         thread("d1", note(10, by: 7, "Fix A", resolvable: true), note(11, by: 3, "Fixed A", at: "2026-01-01T11:00:00Z"))
     }
@@ -118,7 +150,8 @@ struct AuthorFeedbackPolicyTests {
                 let blocked = try evaluate([alicesThread, elsewhere],
                                            [fixedA, .init(noteID: 20, state: state, reason: "X is not renamed")], approved: [7])
                 #expect(blocked.map(\.id) == [10, 20])
-                #expect(blocked.map(\.state) == [.needsChanges, .needsChanges])
+                let expected: AuthorFeedbackPolicy.State = state == .uncertain ? .needsVerification : .needsChanges
+                #expect(blocked.map(\.state) == [expected, expected])
                 #expect(blocked.map(\.reason) == ["X is not renamed", "X is not renamed"])
                 #expect(blocked[0].waitingForReviewers == ["alice"])
                 #expect(blocked[1].discussionID == (elsewhere == general ? nil : "d2"))

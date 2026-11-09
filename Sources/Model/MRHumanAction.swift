@@ -26,6 +26,67 @@ struct PreparedReplyContext {
 /// A concrete reason for a human action, shared by the MR card and its detail view.
 @MainActor
 struct MRHumanAction {
+    enum FeedbackEvidence: Equatable {
+        case finding(AuthorFeedbackPolicy.Finding)
+        case replyThreads([Int])
+        case reReview([ReReviewReadiness.Blocker])
+        case rawNotes([Int])
+        case gitLabStatus
+        case unavailable(Int?)
+        case none
+    }
+
+    private struct EvidenceContext: Equatable {
+        let head: String?
+        let fingerprint: String?
+        let semanticContext: String?
+
+        init(_ status: AuthorFeedbackStatus) {
+            head = status.head; fingerprint = status.fingerprint; semanticContext = status.semanticContextFingerprint
+        }
+        init(reReview item: MergeRequestAttentionMonitor.Item) {
+            head = item.mergeRequest?.sha; fingerprint = item.reReviewFingerprint
+            semanticContext = item.mergeRequest?.semanticContextFingerprint
+        }
+        func matches(_ status: AuthorFeedbackStatus, item: MergeRequestAttentionMonitor.Item) -> Bool {
+            guard self == Self(status) else { return false }
+            guard let request = item.mergeRequest else { return true }
+            return head == request.sha && semanticContext == request.semanticContextFingerprint
+        }
+    }
+    private enum Source {
+        case none
+        case finding(AuthorFeedbackPolicy.Finding, EvidenceContext)
+        case replyThread(Int, EvidenceContext)
+        case reReview(ReReviewReadiness.Blocker, EvidenceContext)
+    }
+    private var source: Source = .none
+
+    func feedbackEvidence(for item: MergeRequestAttentionMonitor.Item) -> FeedbackEvidence {
+        switch source {
+        case .finding(let finding, let context):
+            guard let status = item.authorFeedbackStatus, context.matches(status, item: item),
+                  status.phase == .complete || status.phase == .waitingPublication,
+                  finding.sourceNoteID != nil, status.findings.contains(finding) else { return .unavailable(sourceNoteID) }
+            return .finding(finding)
+        case .replyThread(let root, let context):
+            guard let status = item.authorFeedbackStatus, context.matches(status, item: item),
+                  status.phase == .complete || status.phase == .waitingPublication,
+                  status.replyNoteIDs.contains(root) else { return .unavailable(root) }
+            return .replyThreads(status.replyNoteIDs.sorted())
+        case .reReview(let blocker, let context):
+            let current = Self.reReviewBlockers(item)
+            guard EvidenceContext(reReview: item) == context, current.contains(blocker) else { return .unavailable(blocker.noteID) }
+            return .reReview(current)
+        case .none:
+            guard kind == .feedback || kind == .reviewDecision || action == .verifyFeedback else { return .none }
+            let ids = Array(Set(item.feedback.compactMap(\.id))).filter { $0 > 0 }.sorted()
+            if !ids.isEmpty { return .rawNotes(ids) }
+            if !item.feedback.isEmpty { return .unavailable(nil) }
+            return kind == .feedback && (item.needsChanges || item.needsDiscussion) ? .gitLabStatus : .none
+        }
+    }
+
     enum Kind: Equatable { case blockedRun, interruptedRun, publication, uncheckedDrafts, verificationFailure, setupAssistant, reviewDecision, approval, pipelineHandoff, merge, feedback, intent }
     enum Action: Equatable { case reviewRun, retryRun, reviewDrafts, verifyFeedback, retryDraftVerification, setupAssistant, reviewDecision, reviewApproval, reviewHandoff, reviewMerge, handleFeedback, retryIntent, reviewFeedback, reviewIssue }
     let kind: Kind
@@ -34,10 +95,20 @@ struct MRHumanAction {
     let detail: String?
     let summary: String?
     let preparedReply: PreparedReplyContext?
-    /// A fresh remaining feedback concern can lead while the stopped run stays in history.
-    var sourceNoteID: Int? = nil
+    /// Exact source of the displayed concern, which can differ from its thread root.
+    var sourceNoteID: Int? {
+        switch source {
+        case .none: nil
+        case .finding(let finding, _): finding.sourceNoteID
+        case .replyThread(let root, _): root
+        case .reReview(let blocker, _): blocker.noteID
+        }
+    }
+    private var requiresPublishedReply = false
     var explanation: String {
-        let explanation = AgentExplanation.summary(summary) ?? String(localized: message)
+        if requiresPublishedReply { return String(localized: .MRHumanAction.mrHumanActionFeedbackReply) }
+        let feedbackReason = kind == .feedback ? AgentExplanation.summary(detail) : nil
+        let explanation = AgentExplanation.summary(summary) ?? feedbackReason ?? String(localized: message)
         guard preparedReply != nil else { return explanation }
         let subject = String(localized: .PreparedReplies.preparedRepliesNeedsReview)
         return explanation == subject ? subject : subject + " " + explanation
@@ -92,7 +163,7 @@ struct MRHumanAction {
             self.init(kind: interrupted ? .interruptedRun : .blockedRun, action: executable ? .retryRun : .reviewRun,
                       message: interrupted ? .MRHumanAction.mrHumanActionInterruptedRun : .MRHumanAction.mrHumanActionBlockedRun,
                       detail: execution.attentionExplanation, summary: currentSummary)
-            sourceNoteID = remaining?.sourceNoteID
+            if let remaining, let status = item.authorFeedbackStatus { source = .finding(remaining, EvidenceContext(status)) }
             return
         }
 
@@ -150,7 +221,7 @@ struct MRHumanAction {
         } else if !assistantReady && needsAssistant {
             self.init(kind: .setupAssistant, action: .setupAssistant, message: .MRHumanAction.mrHumanActionSetupAssistant)
         } else if item.authorFeedbackStatus?.needsAttention == true {
-            self.init(kind: .feedback, action: .handleFeedback, message: .MRHumanAction.mrHumanActionFeedback,
+            self.init(kind: .feedback, action: Self.feedbackAction(item), message: Self.feedbackMessage(item),
                       detail: Self.feedbackDetail(item), summary: Self.feedbackSummary(item))
         } else if let intent {
             self.init(kind: .intent, action: .retryIntent, message: Self.intentMessage(intent),
@@ -163,7 +234,8 @@ struct MRHumanAction {
             self.init(kind: .reviewDecision, action: .reviewFeedback, message: Self.reviewDecisionMessage(item),
                       detail: Self.feedbackDetail(item), summary: Self.feedbackSummary(item))
         } else if item.needsChanges || !item.feedback.isEmpty {
-            self.init(kind: .feedback, action: .handleFeedback, message: .MRHumanAction.mrHumanActionFeedback,
+            self.init(kind: .feedback, action: .reviewFeedback,
+                      message: item.needsChanges ? .MRHumanAction.mrHumanActionChangesRequested : .MRHumanAction.mrHumanActionFeedbackUnverified,
                       detail: Self.feedbackDetail(item), summary: Self.feedbackSummary(item))
         } else if item.needsDiscussion {
             self.init(kind: .feedback, action: .reviewFeedback, message: .MRHumanAction.mrHumanActionDiscussion)
@@ -174,6 +246,18 @@ struct MRHumanAction {
         } else if stoppedRun != nil {
             self.init(kind: .interruptedRun, action: .reviewRun, message: .MRHumanAction.mrHumanActionPreviousHeadRun)
         } else { return nil }
+        if kind == .feedback || kind == .reviewDecision {
+            if let status = item.authorFeedbackStatus, let finding = Self.feedbackFinding(item) {
+                source = .finding(finding, EvidenceContext(status))
+                requiresPublishedReply = item.authorFeedbackStatus?.replyNoteIDs.contains(finding.id) == true
+                    && ![.needsChanges, .needsVerification].contains(finding.state)
+            } else if let status = item.authorFeedbackStatus, let root = status.replyNoteIDs.min() {
+                source = .replyThread(root, EvidenceContext(status))
+                requiresPublishedReply = true
+            } else if let blocker = Self.reReviewBlockers(item).first {
+                source = .reReview(blocker, EvidenceContext(reReview: item))
+            }
+        }
     }
 
     private init(kind: Kind, action: Action, message: LocalizedStringResource, detail: String? = nil, summary: String? = nil,
@@ -182,18 +266,35 @@ struct MRHumanAction {
         self.preparedReply = preparedReply
     }
 
+    private static func feedbackFinding(_ item: MergeRequestAttentionMonitor.Item) -> AuthorFeedbackPolicy.Finding? {
+        item.authorFeedbackStatus?.primaryFinding
+    }
+
     private static func feedbackSummary(_ item: MergeRequestAttentionMonitor.Item) -> String? {
-        let finding = item.authorFeedbackStatus?.findings.first {
-            [.needsChanges, .needsVerification].contains($0.state)
-                || item.authorFeedbackStatus?.replyNoteIDs.contains($0.id) == true
-        }
-        if let finding, let reason = finding.reason, !reason.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
-            return finding.summary
-        }
+        if let finding = feedbackFinding(item) { return finding.summary }
+        if item.authorFeedbackStatus?.replyNoteIDs.isEmpty == false { return nil }
+        return reReviewBlockers(item).first?.summary
+    }
+
+    private static func reReviewBlockers(_ item: MergeRequestAttentionMonitor.Item) -> [ReReviewReadiness.Blocker] {
         switch item.reReviewReadiness {
-        case .blocked(let blockers), .uncertain(let blockers): return blockers.first?.summary
-        default: return nil
+        case .blocked(let blockers), .uncertain(let blockers): blockers
+        default: []
         }
+    }
+
+    private static func feedbackAction(_ item: MergeRequestAttentionMonitor.Item) -> Action {
+        feedbackFinding(item)?.state == .needsVerification ? .reviewFeedback : .handleFeedback
+    }
+
+    private static func feedbackMessage(_ item: MergeRequestAttentionMonitor.Item) -> LocalizedStringResource {
+        if let finding = feedbackFinding(item) {
+            if finding.state == .needsChanges { return .MRHumanAction.mrHumanActionFeedback }
+            if finding.state == .needsVerification { return .MRHumanAction.mrHumanActionFeedbackUnverified }
+            if item.authorFeedbackStatus?.replyNoteIDs.contains(finding.id) == true { return .MRHumanAction.mrHumanActionFeedbackReply }
+        }
+        if item.authorFeedbackStatus?.replyNoteIDs.isEmpty == false { return .MRHumanAction.mrHumanActionFeedbackReply }
+        return .MRHumanAction.mrHumanActionFeedbackUnverified
     }
 
     private static func remainingConcern(in row: MergeRequestBoardSnapshot.Row) -> AuthorFeedbackPolicy.Finding? {
@@ -207,31 +308,30 @@ struct MRHumanAction {
               status.semanticContextFingerprint == request.semanticContextFingerprint else { return nil }
         let selected = Set(job.feedbackNoteIDs ?? [])
         guard !selected.isDisjoint(with: status.ignoredNoteIDs) else { return nil }
-        return status.findings.first { finding in
+        var selectedStatus = status
+        selectedStatus.findings = status.findings.filter { finding in
             guard let source = finding.sourceNoteID, selected.contains(source),
                   status.followUpNoteIDs.contains(source), !status.ignoredNoteIDs.contains(source),
-                  [.needsChanges, .needsVerification].contains(finding.state),
-                  AgentExplanation.summary(finding.summary) != nil else { return false }
+                  [.needsChanges, .needsVerification].contains(finding.state) else { return false }
             return true
         }
+        return selectedStatus.primaryFinding
     }
 
     private static func feedbackDetail(_ item: MergeRequestAttentionMonitor.Item) -> String? {
-        let reason = item.authorFeedbackStatus?.findings.first { finding in
-            [.needsChanges, .needsVerification].contains(finding.state)
-                || item.authorFeedbackStatus?.replyNoteIDs.contains(finding.id) == true
-        }?.reason
-        if let reason, !reason.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty { return reason }
-        switch item.reReviewReadiness {
-        case .blocked(let blockers), .uncertain(let blockers): return blockers.first?.reason
-        default: return nil
+        if let finding = feedbackFinding(item) {
+            guard let reason = finding.reason, !reason.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else { return nil }
+            return reason
         }
+        if item.authorFeedbackStatus?.replyNoteIDs.isEmpty == false { return nil }
+        return reReviewBlockers(item).first?.reason
     }
 
     private static func reviewDecisionMessage(_ item: MergeRequestAttentionMonitor.Item) -> LocalizedStringResource {
         switch item.reReviewReadiness {
         case .failed, .unavailable: .MRHumanAction.mrHumanActionVerificationFailure
-        case .blocked, .uncertain: .MRHumanAction.mrHumanActionFeedback
+        case .blocked: .MRHumanAction.mrHumanActionFeedback
+        case .uncertain: .MRHumanAction.mrHumanActionFeedbackUnverified
         default: .MRHumanAction.mrHumanActionReviewDecision
         }
     }

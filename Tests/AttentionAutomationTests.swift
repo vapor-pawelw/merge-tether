@@ -3,6 +3,32 @@ import Testing
 @testable import GitLabTodos
 
 struct AttentionAutomationTests {
+    @MainActor @Test(arguments: [AuthorFeedbackPolicy.State.ready, .disabled])
+    func verifiedCommentsDoNotDismissAnIndependentGitLabChangeRequest(_ state: AuthorFeedbackPolicy.State) throws {
+        var original = try item()
+        let request = try #require(original.mergeRequest)
+        original.needsChanges = true
+        original.needsDiscussion = true
+        original.observedDiscussionFingerprint = "current"
+        original.feedback = [.init(id: 9, author: .init(id: 8, username: "alice", name: nil),
+            system: false, resolvable: true, resolved: false, resolvedBy: nil, body: "Please cover retries")]
+        original.authorFeedbackStatus = .init(head: "abc", fingerprint: "current",
+            semanticContextFingerprint: request.semanticContextFingerprint, phase: .complete,
+            findings: [.init(id: 9, discussionID: "thread", reviewerID: 8, reviewerUsername: "alice",
+                state: state, reason: "The change and reply are verified", waitingForReviewers: [], sourceNoteID: 9)],
+            addressedNoteIDs: [9])
+        let visible = original.presentingVerifiedAuthorFeedback()
+        #expect(visible.needsChanges && visible.feedback.isEmpty && !visible.needsDiscussion)
+        let row = MergeRequestBoardSnapshot.Row(item: visible, latestJob: nil, intents: [])
+        let action = try #require(MRHumanAction(row: row, assistantReady: true))
+        #expect(action.action == .reviewFeedback)
+        #expect(action.explanation == "GitLab reports requested changes. Review the current feedback.")
+        #expect(original.needsChanges && original.feedback.count == 1)
+        original.feedback.append(.init(id: 10, author: .init(id: 8, username: "alice", name: nil),
+            system: false, resolvable: true, resolved: false, resolvedBy: nil, body: "Another request"))
+        #expect(original.presentingVerifiedAuthorFeedback().needsChanges)
+    }
+
     private let target = MRAutomationScope.Target(host: "gitlab.example.org", username: "me", projectID: 1, iid: 2)
 
     private func item() throws -> MergeRequestAttentionMonitor.Item {
@@ -64,7 +90,7 @@ struct AttentionAutomationTests {
         #expect(original.requiringUserAttention(automation: config, target: target, failedTriggers: [.newDiscussion]).needsDiscussion)
     }
 
-    @Test(arguments: ["verified", "head", "context", "legacy-context", "discussion", "reply", "follow-up", "draft", "pending-draft", "checking", "needs-work"])
+    @Test(arguments: ["verified", "head", "context", "legacy-context", "discussion", "reply", "follow-up", "draft", "pending-draft", "checking", "needs-work", "other-reviewer", "reviewers-unavailable", "reviewers-empty", "ignored", "uncovered"])
     func verifiedWaitingForReviewerDoesNotRequireHumanCodeWork(_ scenario: String) throws {
         var original = try item()
         let storedRequest = try #require(original.mergeRequest)
@@ -76,6 +102,8 @@ struct AttentionAutomationTests {
         let head = try #require(request.sha)
         original.mergeRequest = request
         original.needsChanges = true
+        original.changeRequestReviewers = scenario == "reviewers-unavailable" ? nil
+            : scenario == "reviewers-empty" ? [] : scenario == "other-reviewer" ? ["alice", "bob"] : ["alice"]
         original.reReviewRequested = true
         original.observedDiscussionFingerprint = "current-discussion"
         original.authorFeedbackStatus = .init(head: scenario == "head" ? "old-head" : head,
@@ -90,6 +118,11 @@ struct AttentionAutomationTests {
             followUpNoteIDs: scenario == "follow-up" ? [9] : [],
             replyNoteIDs: scenario == "reply" ? [9] : [], addressedNoteIDs: [9])
         if scenario == "draft" { original.draftCount = 1 }
+        if scenario == "ignored" { original.authorFeedbackStatus?.ignoredNoteIDs = [99] }
+        if scenario == "uncovered" {
+            original.feedback = [.init(id: 40, author: .init(id: 9, username: "bob", name: nil),
+                system: false, resolvable: true, resolved: false, resolvedBy: nil, body: "A different request")]
+        }
         if scenario == "needs-work" {
             original.authorFeedbackStatus?.findings.append(.init(id: 10, discussionID: "other-thread", reviewerID: 8,
                 reviewerUsername: "alice", state: .needsChanges, reason: "Another correction remains",

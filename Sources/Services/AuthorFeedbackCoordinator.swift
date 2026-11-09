@@ -62,6 +62,11 @@ struct AuthorFeedbackStatus: Equatable, Sendable {
             [.needsChanges, .needsVerification].contains($0.state)
         }
     }
+    var primaryFinding: AuthorFeedbackPolicy.Finding? {
+        findings.first { $0.state == .needsChanges }
+            ?? findings.first { $0.state == .needsVerification }
+            ?? findings.first { replyNoteIDs.contains($0.id) }
+    }
     var waitingForReviewer: Bool { findings.contains { $0.state == .waitingAcceptance } }
 }
 

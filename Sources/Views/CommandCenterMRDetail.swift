@@ -171,7 +171,7 @@ private struct CommandCenterMRDetailContent: View {
                     } else if item.authorFeedbackStatus != nil {
                         feedbackExpanded = true
                         pendingInitialAnchor = .feedbackStatus
-                    } else { pendingInitialAnchor = .comments }
+                    } else { pendingInitialAnchor = showsDecisions ? .drafts : .comments }
                 }
             }
             .task(id: initialDestinationIsReady) {
@@ -330,7 +330,8 @@ private struct CommandCenterMRDetailContent: View {
                     if !item.needsConfirmation || (action.kind != .publication && action.kind != .approval) {
                         Text(verbatim: action.explanation).textSelection(.enabled)
                     }
-                    if let detail = action.detail, detail != action.explanation, action.preparedReply == nil {
+                    if let detail = action.detail, detail != action.explanation,
+                       AgentExplanation.summary(detail) != action.explanation, action.preparedReply == nil {
                         AgentDiagnosticDetails(reason: detail)
                     }
                     attentionSourceEvidence(for: action, citationContext: citationContext)
@@ -449,7 +450,7 @@ private struct CommandCenterMRDetailContent: View {
     private func feedbackCheck(citationContext: MRCommentCitation.Context?) -> some View {
         DisclosureGroup(isExpanded: $feedbackExpanded) {
             if feedbackExpanded {
-                AuthorFeedbackView(item: presentationItem, monitor: monitor, citationContext: citationContext,
+                AuthorFeedbackView(item: presentationItem, monitor: monitor, citationContext: citationContext, sourceLoading: feedbackSourceLoading,
                     decisionUpdating: isUpdatingFeedbackDecision, onIgnoreSuggestion: presentIgnoreSuggestion).padding(.top, 8)
             }
         } label: { Text(.CommandCenter.commandCenterFeedbackCheck).font(.subheadline.weight(.medium)) }
@@ -555,43 +556,92 @@ private struct CommandCenterMRDetailContent: View {
            let draft = item.drafts.first(where: { $0.id == reply.draftID }) {
             let root = item.rejectedDrafts.first { $0.draftID == reply.draftID }?.discussionRootNoteID
             if let source = citationContext?.reply(to: draft, rootNoteID: root) {
-                // A source quotation never waives a rejected reply's factual checks.
                 MRCommentCitationView(citation: source, relation: .FeedbackSuggestions.feedbackSuggestionsSourceReply)
-            } else { sourceUnavailable }
-        } else if let noteID = action.sourceNoteID, let status = item.authorFeedbackStatus,
-                  let finding = status.findings.first(where: { $0.sourceNoteID == noteID }) {
-            if let source = citationContext?.finding(finding, status: status) {
-                if !feedbackExpanded {
-                    MRCommentCitationView(citation: source, relation: .FeedbackSuggestions.feedbackSuggestionsSourceAssessment)
-                    if let reason = finding.reason, !reason.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
-                        ignoreSuggestionButton(source, summary: AgentExplanation.summary(finding.summary) ?? reason, reason: reason)
-                    }
-                }
-            } else { sourceUnavailable }
-        } else if [.blockedRun, .interruptedRun].contains(action.kind), let job = jobs.first,
-                  job.workflow == .followUp, !(job.feedbackNoteIDs ?? []).isEmpty {
+            } else { unavailableSource(root) }
+        } else if [.blockedRun, .interruptedRun].contains(action.kind), action.sourceNoteID == nil,
+                  let job = jobs.first, job.workflow == .followUp, !(job.feedbackNoteIDs ?? []).isEmpty {
             let sources = citationContext?.followUp(job) ?? []
-            if sources.isEmpty { sourceUnavailable }
+            if sources.isEmpty {
+                ForEach(Array(Set(job.feedbackNoteIDs ?? [])).filter { $0 > 0 }.sorted(), id: \.self) { id in
+                    unavailableSource(id)
+                }
+            }
             ForEach(sources) { source in
                 MRCommentCitationView(citation: source, relation: .FeedbackSuggestions.feedbackSuggestionsSourceRun)
             }
-        } else if [.feedback, .reviewDecision].contains(action.kind), let status = item.authorFeedbackStatus,
-                  let finding = status.findings.first(where: {
-                      [.needsChanges, .needsVerification].contains($0.state) || status.replyNoteIDs.contains($0.id)
-                  }) {
-            if let source = citationContext?.finding(finding, status: status) {
-                if !feedbackExpanded {
-                    MRCommentCitationView(citation: source, relation: .FeedbackSuggestions.feedbackSuggestionsSourceAssessment)
-                    if let reason = finding.reason, !reason.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
-                        ignoreSuggestionButton(source, summary: AgentExplanation.summary(finding.summary) ?? reason, reason: reason)
+        } else {
+            switch action.feedbackEvidence(for: item) {
+            case .finding(let finding):
+                if let status = item.authorFeedbackStatus, let source = citationContext?.finding(finding, status: status) {
+                    if !feedbackExpanded {
+                        MRCommentCitationView(citation: source, relation: .FeedbackSuggestions.feedbackSuggestionsSourceAssessment)
+                        if let reason = finding.reason, !reason.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
+                            ignoreSuggestionButton(source, summary: AgentExplanation.summary(finding.summary) ?? reason, reason: reason)
+                        }
+                    }
+                } else { unavailableSource(finding.sourceNoteID) }
+            case .replyThreads(let roots):
+                ForEach(roots, id: \.self) { root in
+                    commentEvidence(root, fingerprint: item.authorFeedbackStatus?.fingerprint,
+                        relation: .FeedbackSuggestions.feedbackSuggestionsSourceReplyThread, citationContext: citationContext)
+                }
+            case .reReview(let blockers):
+                ForEach(blockers, id: \.noteID) { blocker in
+                    VStack(alignment: .leading, spacing: 6) {
+                        Text(blocker.isUncertain || item.reReviewReadiness?.isUncertain == true ? .FeedbackSuggestions.feedbackSuggestionsUnverifiedConcern
+                            : .FeedbackSuggestions.feedbackSuggestionsConfirmedConcern).font(.caption).foregroundStyle(.secondary)
+                        if blocker.noteID != action.sourceNoteID {
+                            let summary = AgentExplanation.summary(blocker.summary) ?? AgentExplanation.summary(blocker.reason)
+                            if let summary { Text(verbatim: summary).textSelection(.enabled) }
+                            if AgentExplanation.summary(blocker.reason) != summary { AgentDiagnosticDetails(reason: blocker.reason) }
+                        }
+                        commentEvidence(blocker.noteID, fingerprint: item.reReviewFingerprint,
+                            relation: .FeedbackSuggestions.feedbackSuggestionsSourceAssessment, citationContext: citationContext)
                     }
                 }
-            } else { sourceUnavailable }
+            case .rawNotes(let ids):
+                ForEach(ids, id: \.self) { id in
+                    commentEvidence(id, fingerprint: item.observedDiscussionFingerprint,
+                        relation: .FeedbackSuggestions.feedbackSuggestionsSourceOpen, citationContext: citationContext)
+                }
+            case .gitLabStatus:
+                Text(.FeedbackSuggestions.feedbackSuggestionsSourceStatus).font(.caption).foregroundStyle(.secondary)
+            case .unavailable(let id): unavailableSource(id)
+            case .none: EmptyView()
+            }
         }
     }
 
+    @ViewBuilder
+    private func commentEvidence(_ id: Int, fingerprint: String?, relation: LocalizedStringResource,
+                                 citationContext: MRCommentCitation.Context?) -> some View {
+        if let source = citationContext?.comment(id, fingerprint: fingerprint) {
+            MRCommentCitationView(citation: source, relation: relation)
+        } else { unavailableSource(id) }
+    }
+
+    private func unavailableSource(_ noteID: Int?) -> some View {
+        VStack(alignment: .leading, spacing: 6) {
+            sourceUnavailable
+            if let noteID, let url = noteURL(noteID) {
+                Link(destination: url) { Text(.Menu.menuReReviewNote(noteID)) }.font(.caption)
+            }
+        }
+    }
+
+    private func noteURL(_ id: Int) -> URL? {
+        guard id > 0, var components = URLComponents(url: item.url, resolvingAgainstBaseURL: false) else { return nil }
+        components.fragment = "note_\(id)"
+        return components.url
+    }
+
+    private var feedbackSourceLoading: Bool {
+        discussionTarget != nil && (!initialDiscussionAttemptFinished || discussionStore.isLoading)
+    }
+
     private var sourceUnavailable: some View {
-        Text(.FeedbackSuggestions.feedbackSuggestionsSourceUnavailable).font(.caption).foregroundStyle(.secondary)
+        Text(feedbackSourceLoading ? .FeedbackSuggestions.feedbackSuggestionsSourceLoading : .FeedbackSuggestions.feedbackSuggestionsSourceUnavailable)
+            .font(.caption).foregroundStyle(.secondary)
     }
 
     private func ignoreSuggestionButton(_ source: MRCommentCitation, summary: String, reason: String) -> some View {

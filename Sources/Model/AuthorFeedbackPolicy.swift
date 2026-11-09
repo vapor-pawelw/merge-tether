@@ -100,9 +100,10 @@ struct AuthorFeedbackPolicy {
         let notesByID = Dictionary(published.compactMap { note in note.id.map { ($0, note) } }, uniquingKeysWith: { first, _ in first })
         var blockers: [Int: Verdict] = [:]
         for note in published {
-            guard let id = note.id, let reviewer = note.author?.id, let verdict = verdicts[id], isBlocking(verdict),
-                  blockers[reviewer] == nil else { continue }
-            blockers[reviewer] = verdict
+            guard let id = note.id, let reviewer = note.author?.id, let verdict = verdicts[id], isBlocking(verdict) else { continue }
+            if blockers[reviewer] == nil || verdict.state == .blocking && blockers[reviewer]?.state == .uncertain {
+                blockers[reviewer] = verdict
+            }
         }
 
         func accepted(_ concern: Note) -> Bool {
@@ -137,13 +138,16 @@ struct AuthorFeedbackPolicy {
                     $0.author?.id == participant.id && ($0.id == rootID || verdicts[$0.id ?? 0]?.state == .addressed)
                 }.allSatisfy(accepted)
             }
-            let semanticState: State = verified == nil ? .needsVerification : !blocked.isEmpty ? .needsChanges
+            let remaining = thread.compactMap { verdicts[$0.id ?? 0] }.filter(isBlocking)
+            let localConcern = remaining.first { $0.state == .blocking } ?? remaining.first
+            let inherited = blocked.compactMap { blockers[$0.id] }
+            let explanation = blocked.isEmpty ? verdicts[rootID]
+                : (localConcern ?? inherited.first { $0.state == .blocking } ?? inherited.first)
+            let semanticState: State = verified == nil ? .needsVerification
+                : !blocked.isEmpty ? (explanation?.state == .blocking ? .needsChanges : .needsVerification)
                 : !waiting.isEmpty ? .waitingAcceptance : .ready
             let state = pendingDraftCount > 0 ? .waitingPublication
                 : semanticState == .ready ? (gate ?? .ready) : semanticState
-            let threadBlocker = thread.lazy.compactMap { verdicts[$0.id ?? 0] }.first(where: isBlocking)
-            let explanation = blocked.isEmpty ? verdicts[rootID]
-                : (threadBlocker ?? blockers[blocked[0].id])
             findings.append(Finding(id: rootID, discussionID: discussionID, reviewerID: owner.id,
                                     reviewerUsername: handle(owner), state: state, reason: explanation?.reason,
                                     waitingForReviewers: verified == nil ? [] : waiting.map(handle), summary: explanation?.summary,
@@ -155,7 +159,8 @@ struct AuthorFeedbackPolicy {
                 guard let id = note.id, let author = note.author, let verdict = verdicts[id], isBlocking(verdict) else { continue }
                 findings.append(Finding(id: id, discussionID: note.resolvable == true ? discussion.id : nil,
                                         reviewerID: author.id, reviewerUsername: handle(author),
-                                        state: pendingDraftCount > 0 ? .waitingPublication : .needsChanges,
+                                        state: pendingDraftCount > 0 ? .waitingPublication
+                                            : verdict.state == .blocking ? .needsChanges : .needsVerification,
                                         reason: verdict.reason, waitingForReviewers: [handle(author)], summary: verdict.summary, sourceNoteID: verdict.noteID))
             }
         }

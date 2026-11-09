@@ -1526,9 +1526,10 @@ import Testing
         #expect(harness.log("re-review.log").isEmpty)
     }
 
-    @Test func informationalReviewerDoesNotHideMixedReadyAndBlockingReviewers() async throws {
+    @Test(arguments: [ReReviewAssessment.Note.State.informational, .uncertain])
+    func informationalReviewerDoesNotHideMixedReadyAndBlockingReviewers(_ firstState: ReReviewAssessment.Note.State) async throws {
         let harness = try makeHarness(assistantWorked: true, authored: true, assessment: .init(notes: [
-            .init(noteID: 40, state: .informational, reason: "Informational review summary"),
+            .init(noteID: 40, state: firstState, reason: "Review summary needing no action or more verification"),
             .init(noteID: 50, state: .addressed, reason: "Verified correction is ready for review"),
             .init(noteID: 60, state: .blocking, reason: "Missing required regression test")
         ]))
@@ -1552,7 +1553,8 @@ import Testing
             Issue.record("The unaddressed reviewer's blocker must remain visible")
             return
         }
-        #expect(blockers.map(\.noteID) == [60])
+        #expect(blockers.map(\.noteID) == (firstState == .uncertain ? [60, 40] : [60]))
+        #expect(blockers.filter(\.isUncertain).map(\.noteID) == (firstState == .uncertain ? [40] : []))
         #expect(harness.settings.reReviewDraftBaselines[target] != nil)
     }
 

@@ -4,6 +4,26 @@ import Testing
 
 @MainActor
 struct MRCommentCitationTests {
+    @Test func anOpenCommentCanBeQuotedWithoutInventingASemanticAssessment() throws {
+        let threads = discussions()
+        let source = try #require(context(threads).comment(42, fingerprint: ReviewVerdict.fingerprint(threads)))
+        #expect(source.id == 42 && source.note.author?.username == "reviewer")
+        #expect(source.note.body == "  Exact selected requirement.\nSecond line.  ")
+        #expect(source.url.fragment == "note_42")
+    }
+
+    @Test(arguments: ["missingFingerprint", "changed", "missing", "duplicate", "system", "empty"])
+    func openFeedbackAndReReviewSourcesMustMatchTheLoadedConversation(_ change: String) throws {
+        var threads = discussions()
+        let fingerprint = change == "missingFingerprint" ? nil : ReviewVerdict.fingerprint(threads)
+        if change == "changed" { threads = [.init(id: "selected", notes: [note(42, "Edited requirement")])] }
+        if change == "duplicate" { threads.append(.init(id: "duplicate", notes: [note(42)])) }
+        if change == "system" { threads = [.init(id: "selected", notes: [note(42, system: true)])] }
+        if change == "empty" { threads = [.init(id: "selected", notes: [note(42, " ")])] }
+        let currentFingerprint = ["duplicate", "system", "empty"].contains(change) ? ReviewVerdict.fingerprint(threads) : fingerprint
+        #expect(try context(threads).comment(change == "missing" ? 999 : 42, fingerprint: currentFingerprint) == nil)
+    }
+
     private let host = "gitlab.example.test"
     private var target: MRDiscussionTarget {
         .init(host: host, username: "me", projectID: 7, iid: 11,

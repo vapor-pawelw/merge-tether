@@ -140,7 +140,7 @@
         "en": {
           "stringUnit": {
             "state": "translated",
-            "value": "An unresolved discussion needs your response."
+            "value": "GitLab reports unresolved discussions. Review the current comments."
           }
         }
       }
@@ -460,6 +460,39 @@
           "stringUnit": {
             "state": "translated",
             "value": "Some replies could not be verified. Review them or run the check again."
+          }
+        }
+      }
+    },
+    "mrHumanAction.feedbackUnverified": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Open reviewer comments need review; remaining work has not been verified."
+          }
+        }
+      }
+    },
+    "mrHumanAction.changesRequested": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "GitLab reports requested changes. Review the current feedback."
+          }
+        }
+      }
+    },
+    "mrHumanAction.feedbackReply": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "A reviewer comment still needs a published reply."
           }
         }
       }

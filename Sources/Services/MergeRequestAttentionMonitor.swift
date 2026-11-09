@@ -51,6 +51,8 @@ final class MergeRequestAttentionMonitor {
         var hasOtherUnresolvedDiscussions = false
         var hasConflict = false
         var needsChanges = false
+        /// nil means the current reviewer states could not be read.
+        var changeRequestReviewers: Set<String>?
         var needsMerge = false
         var failedPipeline = false
         var needsPipelineHandoff = false
@@ -101,7 +103,10 @@ final class MergeRequestAttentionMonitor {
             }
             if status.semanticContextFingerprint == mergeRequest?.semanticContextFingerprint,
                status.semanticContextFingerprint != nil,
-               (status.waitingForReviewer || !status.ignoredNoteIDs.isEmpty), !status.needsAttention,
+               status.waitingForReviewer, status.ignoredNoteIDs.isEmpty,
+               let changeRequestReviewers, !changeRequestReviewers.isEmpty,
+               changeRequestReviewers.isSubset(of: Set(status.findings.filter { $0.state == .waitingAcceptance }.flatMap(\.waitingForReviewers))),
+               visible.feedback.isEmpty, !status.needsAttention,
                status.followUpNoteIDs.isEmpty, status.replyNoteIDs.isEmpty,
                status.pendingDraftCount == 0, draftCount == 0, drafts.isEmpty {
                 // GitLab may still block merging until acceptance; that is reviewer work.
@@ -839,6 +844,14 @@ final class MergeRequestAttentionMonitor {
                             )
                         } else { nil as [GitLabMergeRequestDiscussion]? }
                         updated.observedDiscussionFingerprint = discussions.flatMap { ReviewVerdict.fingerprint($0) }
+                        updated.changeRequestReviewers = nil
+                        if item.isAuthored, item.needsChanges,
+                           let reviewers = try? await glab.fetchMergeRequestReviewers(projectID: item.id.projectID, iid: item.id.iid, host: host) {
+                            let requests = reviewers.filter { $0.state == "requested_changes" }
+                            if !requests.isEmpty, requests.allSatisfy({ $0.user.id > 0 && $0.user.username?.isEmpty == false }) {
+                                updated.changeRequestReviewers = Set(requests.compactMap(\.user.username))
+                            }
+                        }
                         if !item.isAuthored, let request = item.mergeRequest {
                             updated.reviewingActivity = discussions.map {
                                 ReviewingActivity(discussions: $0, reviewerID: user.id, authorID: request.author.id)
@@ -2172,8 +2185,10 @@ final class MergeRequestAttentionMonitor {
             guard let assessment = reReviewChecks[id]?.assessment,
                   let assessed = try? assessment.reviewers(in: discussions, authorID: user.id, ignoredSuggestions: activeIgnored) else { return }
             recipients = pendingReviewers.filter { assessed[$0.key] != nil }
-            let blockers = assessment.notes.filter { $0.state == .blocking || $0.state == .uncertain }
-                .map { ReReviewReadiness.Blocker(noteID: $0.noteID, reason: $0.reason, summary: $0.summary) }
+            let concerns = assessment.notes.filter { $0.state == .blocking }
+                + assessment.notes.filter { $0.state == .uncertain }
+            let blockers = concerns
+                .map { ReReviewReadiness.Blocker(noteID: $0.noteID, reason: $0.reason, summary: $0.summary, isUncertain: $0.state == .uncertain) }
             reReviewChecks[id]?.state = assessment.notes.contains { $0.state == .blocking } ? .blocked(blockers) : .uncertain(blockers)
             let informationalReviewers = pendingReviewers.keys.filter { reviewerID in
                 let theirNotes = discussions.flatMap(\.notes).filter { $0.author?.id == reviewerID && $0.system != true }

@@ -4,6 +4,163 @@ import Testing
 
 @MainActor
 struct MRHumanActionTests {
+    @Test(arguments: [false, true])
+    func aFailedCheckDoesNotClaimItsSourceIsTheMRWideStatus(_ authorCheck: Bool) throws {
+        var item = item()
+        item.needsChanges = true
+        if authorCheck { item.authorFeedbackStatus = .init(head: "head", fingerprint: "comments", phase: .failed) }
+        else { item.reReviewReadiness = .failed }
+        let action = try #require(MRHumanAction(row: row(item), assistantReady: true))
+        #expect(action.feedbackEvidence(for: item) == .none)
+    }
+    @Test(arguments: ["checking", "edited", "head", "description", "missingSource"])
+    func aPreservedAssessmentNeverQuotesNewRawFeedback(_ change: String) throws {
+        var original = item()
+        let finding = AuthorFeedbackPolicy.Finding(id: 10, discussionID: "original", reviewerID: 8,
+            reviewerUsername: "reviewer", state: .needsChanges, reason: "The timeout is missing", waitingForReviewers: [],
+            sourceNoteID: change == "missingSource" ? nil : 42)
+        original.authorFeedbackStatus = .init(head: "head", fingerprint: "original comments",
+            semanticContextFingerprint: "original description", phase: .complete, findings: [finding])
+        let action = try #require(MRHumanAction(row: row(original), assistantReady: true))
+        if change != "missingSource" { #expect(action.feedbackEvidence(for: original) == .finding(finding)) }
+        var current = original
+        current.feedback = [.init(id: 99, author: .init(id: 9, username: "other", name: nil),
+            system: false, resolvable: true, resolved: false, resolvedBy: nil, body: "An unrelated new request")]
+        if change == "checking" || change == "missingSource" { current.authorFeedbackStatus?.phase = .checking; current.authorFeedbackStatus?.findings = [] }
+        if change == "edited" { current.authorFeedbackStatus = .init(head: "head", fingerprint: "edited comments", semanticContextFingerprint: "original description", phase: .complete, findings: [finding]) }
+        if change == "head" { current.authorFeedbackStatus = .init(head: "new head", fingerprint: "original comments", semanticContextFingerprint: "original description", phase: .complete, findings: [finding]) }
+        if change == "description" { current.authorFeedbackStatus?.semanticContextFingerprint = "changed description" }
+        #expect(action.feedbackEvidence(for: current) == .unavailable(change == "missingSource" ? nil : 42))
+    }
+
+    @Test func anOwedReplyWithoutAFindingKeepsItsOwnDiscussionInsteadOfAnotherChecksConcern() throws {
+        var item = item()
+        item.authorFeedbackStatus = .init(head: "head", fingerprint: "comments", phase: .complete, replyNoteIDs: [10])
+        item.reReviewReadiness = .blocked([.init(noteID: 99, reason: "Another check's concern")])
+        let action = try #require(MRHumanAction(row: row(item), assistantReady: true))
+        #expect(action.explanation == "A reviewer comment still needs a published reply.")
+        #expect(action.detail == nil && action.sourceNoteID == 10)
+        #expect(action.feedbackEvidence(for: item) == .replyThreads([10]))
+        item.authorFeedbackStatus?.replyNoteIDs = [20]
+        #expect(action.feedbackEvidence(for: item) == .unavailable(10))
+    }
+
+    @Test func aPreservedReReviewConcernDoesNotAdoptAChangedDiscussionSnapshot() throws {
+        var item = item()
+        let blocker = ReReviewReadiness.Blocker(noteID: 42, reason: "Verify the timeout")
+        item.reReviewFingerprint = "original comments"
+        item.reReviewReadiness = .uncertain([blocker])
+        let action = try #require(MRHumanAction(row: row(item), assistantReady: true))
+        #expect(action.feedbackEvidence(for: item) == .reReview([blocker]))
+        item.reReviewFingerprint = "edited comments"
+        #expect(action.feedbackEvidence(for: item) == .unavailable(42))
+    }
+
+    @Test func aVerifiedFixNeverHidesTheReplyStillOwedToTheReviewer() throws {
+        var item = item()
+        item.authorFeedbackStatus = .init(head: "head", fingerprint: "text", phase: .complete,
+            findings: [.init(id: 10, discussionID: "thread", reviewerID: 8, reviewerUsername: "reviewer",
+                state: .waitingAcceptance, reason: "Current diff fixes the retry timeout.", waitingForReviewers: ["reviewer"],
+                summary: "The timeout is fixed.", sourceNoteID: 42)], replyNoteIDs: [10])
+        let action = try #require(MRHumanAction(row: row(item), assistantReady: true))
+        #expect(action.explanation == "A reviewer comment still needs a published reply.")
+        #expect(action.detail == "Current diff fixes the retry timeout.")
+        #expect(action.sourceNoteID == 42 && action.action == .handleFeedback)
+    }
+
+    @Test(arguments: [AuthorFeedbackPolicy.State.needsVerification, .waitingAcceptance])
+    func aConfirmedCorrectionLeadsBeforeUncertaintyOrAnOwedReply(_ earlierState: AuthorFeedbackPolicy.State) throws {
+        var item = item()
+        item.authorFeedbackStatus = .init(head: "head", fingerprint: "text", phase: .complete,
+            findings: [.init(id: 10, discussionID: "earlier", reviewerID: 8, reviewerUsername: "reviewer",
+                state: earlierState, reason: "Earlier feedback", waitingForReviewers: [], sourceNoteID: 10),
+                .init(id: 20, discussionID: "remaining", reviewerID: 8, reviewerUsername: "reviewer",
+                state: .needsChanges, reason: "The retry still has no timeout.", waitingForReviewers: [], sourceNoteID: 20)],
+            replyNoteIDs: earlierState == .waitingAcceptance ? [10] : [])
+        let action = try #require(MRHumanAction(row: row(item), assistantReady: true))
+        #expect(action.explanation == "The retry still has no timeout.")
+        #expect(action.sourceNoteID == 20 && action.action == .handleFeedback)
+    }
+
+    @Test func aFindingWithNoReasonNeverBorrowsAnotherChecksExplanation() throws {
+        var item = item()
+        item.authorFeedbackStatus = .init(head: "head", fingerprint: "text", phase: .complete,
+            findings: [.init(id: 10, discussionID: "unverified", reviewerID: 8, reviewerUsername: "reviewer",
+                state: .needsVerification, reason: nil, waitingForReviewers: [], sourceNoteID: 10)])
+        item.reReviewReadiness = .blocked([.init(noteID: 99, reason: "A different check's concern")])
+        let action = try #require(MRHumanAction(row: row(item), assistantReady: true))
+        #expect(action.detail == nil && action.sourceNoteID == 10)
+        #expect(action.explanation == "Open reviewer comments need review; remaining work has not been verified.")
+    }
+
+    @Test func aMissingAssessmentSourceNeverBorrowsAnUnrelatedOpenComment() throws {
+        var item = item()
+        item.feedback = [.init(id: 99, author: .init(id: 8, username: "reviewer", name: nil),
+            system: false, resolvable: true, resolved: false, resolvedBy: nil, body: "An unrelated open comment")]
+        item.authorFeedbackStatus = .init(head: "head", fingerprint: "text", phase: .complete,
+            findings: [.init(id: 10, discussionID: "thread", reviewerID: 8, reviewerUsername: "reviewer",
+                state: .needsChanges, reason: "A legacy concern with no exact source", waitingForReviewers: [])])
+        let action = try #require(MRHumanAction(row: row(item), assistantReady: true))
+        #expect(action.sourceNoteID == nil)
+        #expect(action.detail == "A legacy concern with no exact source")
+    }
+
+    @Test func reReviewUncertaintyRetainsItsExactCommentWithoutClaimingACorrection() throws {
+        var item = item()
+        item.reReviewReadiness = .uncertain([.init(noteID: 42, reason: "The timeout evidence is incomplete")])
+        let action = try #require(MRHumanAction(row: row(item), assistantReady: true))
+        #expect(action.sourceNoteID == 42 && action.action == .reviewFeedback)
+        #expect(String(localized: action.message) == "Open reviewer comments need review; remaining work has not been verified.")
+    }
+
+    @Test func rawOpenFeedbackAsksForReviewWithoutClaimingAnotherFixIsRequired() throws {
+        var item = item()
+        item.feedback = [.init(id: 42, author: .init(id: 8, username: "reviewer", name: nil),
+            system: false, resolvable: true, resolved: false, resolvedBy: nil, body: "Please cover the timeout")]
+        let action = try #require(MRHumanAction(row: row(item), assistantReady: true))
+        #expect(action.action == .reviewFeedback)
+        #expect(action.explanation == "Open reviewer comments need review; remaining work has not been verified.")
+        #expect(action.sourceNoteID == nil)
+        #expect(action.feedbackEvidence(for: item) == .rawNotes([42]))
+    }
+
+    @Test func aServerChangeRequestDoesNotInventACommentOrVerifiedCorrection() throws {
+        var item = item()
+        item.needsChanges = true
+        let action = try #require(MRHumanAction(row: row(item), assistantReady: true))
+        #expect(action.action == .reviewFeedback)
+        #expect(action.explanation == "GitLab reports requested changes. Review the current feedback.")
+        #expect(action.sourceNoteID == nil && action.detail == nil)
+        #expect(action.feedbackEvidence(for: item) == .gitLabStatus)
+    }
+
+    @Test func aLegacyAssessmentShowsItsSpecificReasonAndExactSource() throws {
+        var item = item()
+        let reason = "The retry still has no timeout."
+        item.authorFeedbackStatus = .init(head: "head", fingerprint: "text", phase: .complete,
+            findings: [.init(id: 10, discussionID: "thread", reviewerID: 8, reviewerUsername: "reviewer",
+                state: .needsChanges, reason: reason, waitingForReviewers: [], sourceNoteID: 42)])
+        let action = try #require(MRHumanAction(row: row(item), assistantReady: true))
+        #expect(action.action == .handleFeedback && action.explanation == reason)
+        #expect(action.sourceNoteID == 42)
+    }
+
+    @Test func uncertainEvidenceAndMissingRepliesHaveDifferentExplanations() throws {
+        var item = item()
+        item.authorFeedbackStatus = .init(head: "head", fingerprint: "text", phase: .complete,
+            findings: [.init(id: 10, discussionID: "thread", reviewerID: 8, reviewerUsername: "reviewer",
+                state: .needsVerification, reason: nil, waitingForReviewers: [], sourceNoteID: 42)])
+        let uncertain = try #require(MRHumanAction(row: row(item), assistantReady: true))
+        #expect(uncertain.action == .reviewFeedback)
+        #expect(uncertain.explanation == "Open reviewer comments need review; remaining work has not been verified.")
+        item.authorFeedbackStatus?.findings[0] = .init(id: 10, discussionID: "thread", reviewerID: 8,
+            reviewerUsername: "reviewer", state: .waitingAcceptance, reason: nil, waitingForReviewers: [], sourceNoteID: 42)
+        item.authorFeedbackStatus?.replyNoteIDs = [10]
+        let reply = try #require(MRHumanAction(row: row(item), assistantReady: true))
+        #expect(reply.action == .handleFeedback)
+        #expect(reply.explanation == "A reviewer comment still needs a published reply.")
+    }
+
     private func item() -> MergeRequestAttentionMonitor.Item {
         .init(id: .init(projectID: 1, iid: 2), title: "Example MR",
               url: URL(string: "https://gitlab.example.test/group/repo/-/merge_requests/2")!)
@@ -60,6 +217,20 @@ struct MRHumanActionTests {
         job.workflow = .followUp
         job.feedbackNoteIDs = [10, 20]
         return .init(item: item, latestJob: job, intents: [])
+    }
+
+    @Test func stoppedFollowUpPrioritizesConfirmedConcernsWithinItsSelectedThreads() throws {
+        let base = try partiallyIgnoredStoppedRow()
+        var item = base.item
+        item.authorFeedbackStatus?.findings.insert(.init(id: 30, discussionID: "uncertain", reviewerID: 9,
+            reviewerUsername: "reviewer", state: .needsVerification, reason: "Check this separately", waitingForReviewers: [],
+            summary: "Verify an uncertain concern", sourceNoteID: 30), at: 0)
+        item.authorFeedbackStatus?.followUpNoteIDs = [20, 30]
+        var job = try #require(base.latestJob)
+        job.feedbackNoteIDs = [10, 20, 30]
+        let action = try #require(MRHumanAction(row: .init(item: item, latestJob: job, intents: []), assistantReady: true))
+        #expect(action.sourceNoteID == 20)
+        #expect(action.explanation.contains("Handle the independent timeout"))
     }
 
     @Test(arguments: ["The old contract suggestion is unresolved", "The test runner could not start", "The source push failed"])

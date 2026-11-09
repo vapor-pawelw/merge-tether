@@ -4,6 +4,7 @@ struct AuthorFeedbackView: View {
     let item: MergeRequestAttentionMonitor.Item
     let monitor: TodoMonitorService
     var citationContext: MRCommentCitation.Context?
+    var sourceLoading = false
     var decisionUpdating = false
     var onIgnoreSuggestion: ((MRCommentCitation, String, String) -> Void)?
     @State private var starting = false
@@ -20,7 +21,10 @@ struct AuthorFeedbackView: View {
                     case .complete: EmptyView()
                     }
                     if status.phase == .complete || status.phase == .waitingPublication {
-                        ForEach(status.findings) { finding in
+                        let findings = status.primaryFinding.map { primary in
+                            [primary] + status.findings.filter { $0.id != primary.id }
+                        } ?? status.findings
+                        ForEach(findings) { finding in
                             let source = citationContext?.finding(finding, status: status)
                             VStack(alignment: .leading, spacing: 4) {
                                 if source?.id != finding.id, let url = noteURL(finding.id) {
@@ -78,7 +82,8 @@ struct AuthorFeedbackView: View {
                     .buttonStyle(.plain).foregroundStyle(.orange).disabled(decisionUpdating)
             }
         } else {
-            Text(.FeedbackSuggestions.feedbackSuggestionsSourceUnavailable).font(.caption).foregroundStyle(.secondary)
+            Text(sourceLoading ? .FeedbackSuggestions.feedbackSuggestionsSourceLoading : .FeedbackSuggestions.feedbackSuggestionsSourceUnavailable)
+                .font(.caption).foregroundStyle(.secondary)
         }
     }
 

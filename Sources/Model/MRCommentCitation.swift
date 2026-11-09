@@ -62,6 +62,11 @@ struct MRCommentCitation: Identifiable, Sendable {
             return citations[id]
         }
 
+        func comment(_ id: Int, fingerprint: String?) -> MRCommentCitation? {
+            guard let fingerprint, fingerprint == discussionFingerprint else { return nil }
+            return citations[id]
+        }
+
         func reply(to draft: GitLabDraftNote, rootNoteID: Int? = nil) -> MRCommentCitation? {
             guard let id = draft.discussionID, !id.isEmpty else { return nil }
             guard let root = rootNoteIDs[id],

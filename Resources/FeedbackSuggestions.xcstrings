@@ -319,6 +319,72 @@
           }
         }
       }
+    },
+    "feedbackSuggestions.sourceOpen": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Open reviewer comment (remaining work not verified)"
+          }
+        }
+      }
+    },
+    "feedbackSuggestions.sourceStatus": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "This comes from GitLab’s MR status; no specific source comment was provided."
+          }
+        }
+      }
+    },
+    "feedbackSuggestions.sourceLoading": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Loading the source comment…"
+          }
+        }
+      }
+    },
+    "feedbackSuggestions.sourceReplyThread": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Discussion awaiting your reply"
+          }
+        }
+      }
+    },
+    "feedbackSuggestions.unverifiedConcern": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Needs verification"
+          }
+        }
+      }
+    },
+    "feedbackSuggestions.confirmedConcern": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Confirmed concern"
+          }
+        }
+      }
     }
   },
   "version": "1.0"
