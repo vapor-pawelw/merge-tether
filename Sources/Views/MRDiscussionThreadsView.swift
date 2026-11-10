@@ -27,8 +27,11 @@ struct MRDiscussionThreadsView: View {
                     .accessibilityLabel(Text(.MRDiscussions.mrDiscussionsAiLegend))
                 Spacer()
                 if isLoading { ProgressView().controlSize(.small) }
-                Button(action: onRefresh) { Text(.MRDiscussions.mrDiscussionsRefresh) }
-                    .buttonStyle(.borderless).disabled(isLoading)
+                Button(action: onRefresh) {
+                    Label { Text(.MRDiscussions.mrDiscussionsRefresh) } icon: { Image(systemName: "arrow.clockwise") }
+                }
+                .buttonStyle(.borderless).disabled(isLoading)
+                .foregroundStyle(isLoading ? Color.secondary : Color.accentColor)
             }
             if hasError {
                 Label { Text(.MRDiscussions.mrDiscussionsFailed) } icon: { Image(systemName: "exclamationmark.triangle") }
@@ -136,15 +139,13 @@ private struct MRDiscussionThreadView: View {
                     if thread.state == .resolved { Image(systemName: "checkmark") }
                     Text(stateLabel)
                 }
-                .font(.caption.weight(.medium)).foregroundStyle(stateColor)
+                .font(.caption.weight(thread.state == .open ? .semibold : .regular)).foregroundStyle(stateColor)
                 .fixedSize(horizontal: true, vertical: false)
                 .padding(.horizontal, 7).padding(.vertical, 3)
                 .background(stateColor.opacity(thread.state == .open ? 0.055 : 0.08), in: Capsule())
                 if let location = thread.location {
                     MRDiscussionLocationLabel(location: .init(full: location))
                         .layoutPriority(1)
-                } else {
-                    MRDiscussionAuthorView(author: comments.first?.author)
                 }
                 Spacer(minLength: 4)
                 if let posted = comments.first?.createdAt {
@@ -155,11 +156,13 @@ private struct MRDiscussionThreadView: View {
             }
             ViewThatFits(in: .horizontal) {
                 HStack(alignment: .firstTextBaseline, spacing: 10) {
-                    if thread.location != nil { MRDiscussionAuthorView(author: comments.first?.author) }
+                    MRDiscussionAuthorView(author: comments.first?.author)
+                        .foregroundStyle(thread.state == .resolved ? Color.secondary : Color.primary)
                     replyStatus(summary)
                 }
                 VStack(alignment: .leading, spacing: 5) {
-                    if thread.location != nil { MRDiscussionAuthorView(author: comments.first?.author) }
+                    MRDiscussionAuthorView(author: comments.first?.author)
+                        .foregroundStyle(thread.state == .resolved ? Color.secondary : Color.primary)
                     replyStatus(summary)
                 }
             }
