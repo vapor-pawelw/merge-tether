@@ -153,4 +153,45 @@ struct MRBoardProjectorTests {
         #expect(pending.humanActions.values.first?.action == .reviewDrafts)
     }
 
+    @Test func pointQueriesPreserveReviewAndRefreshReasonsWithoutBuildingACatalog() throws {
+        var evidence = item(try request(["author": ["id": 8, "username": "other", "name": "Other"]]))
+        evidence.reviewingProgress = .needsReview
+        let row = MergeRequestBoardSnapshot.Row(item: evidence, latestJob: nil, intents: [])
+        var configuration = AutomationSettings()
+        configuration.applyPreset(.manual, for: .codex)
+        var point = MRBoardProjector.RowInput(account: account, automation: configuration, workflowEntries: [],
+            assistantReady: true, catalogLoading: true)
+        let review = MRBoardProjector.reviewingContext(for: row, input: point)
+        #expect(review.status == .reviewNeeded && review.nextStep == .runReview)
+        #expect(MRBoardProjector.isRecheckingAttention(for: row, input: point))
+        #expect(!MRBoardProjector.attentionRefreshFailed(for: row, input: point))
+        point.catalogLoading = false
+        point.catalogReadFailed = true
+        #expect(!MRBoardProjector.isRecheckingAttention(for: row, input: point))
+        #expect(MRBoardProjector.attentionRefreshFailed(for: row, input: point))
+        point.confirmationBusy = true
+        #expect(!MRBoardProjector.attentionRefreshFailed(for: row, input: point))
+        #expect(!MRBoardProjector.isRecheckingAttention(for: row, input: point))
+        #expect(MRBoardProjector.reviewingContext(for: row, input: point).nextStep == review.nextStep)
+    }
+
+    @Test func feedbackFailurePresentationUsesTheCurrentCanonicalDecisionRevision() throws {
+        var evidence = item(try request())
+        evidence.needsDiscussion = true
+        evidence.observedDiscussionFingerprint = "checked-discussions"
+        evidence.feedback = [.init(id: 20, author: .init(id: 7, username: "reviewer", name: "Reviewer"),
+            system: false, resolvable: true, resolved: false, resolvedBy: nil, body: "Please rename X")]
+        var input = input(evidence: evidence, catalog: evidence)
+        input.automation.applyPreset(.full, for: .codex)
+        input.automation.scope.setEnabled(true, for: .init(host: account.host, username: account.username, projectID: 1, iid: 42))
+        let context = MRFeedbackLaunchCoordinator.Context(request: try request(), noteIDs: [20],
+            fingerprint: evidence.observedDiscussionFingerprint, notes: evidence.feedback,
+            configuration: input.automation, decisionRevision: "decision-a")
+        input.feedbackLaunchFailures = [.init(account: .init(host: account.host, username: account.username, revision: account.revision), context: context)]
+        input.feedbackDecisionRevisions[evidence.id] = "decision-a"
+        #expect(MRBoardProjector(input: input).attentionItems.first?.feedback.count == 1)
+        input.feedbackDecisionRevisions[evidence.id] = "decision-b"
+        #expect(MRBoardProjector(input: input).attentionItems.isEmpty)
+    }
+
 }

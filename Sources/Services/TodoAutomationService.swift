@@ -8,6 +8,12 @@ final class TodoAutomationService {
         case ready(AutomationRunner), running, queuedForAssistant, finished, failed
     }
 
+    enum FeedbackPreparationOutcome: Equatable {
+        enum Reason: Equatable { case policyChanged, inactiveRequest, contextChanged, noActionableFeedback }
+        case admitted(UUID)
+        case notAdmitted(Reason)
+    }
+
     private var running: Set<TodoAutomationReceipt> = []
     private var ineligible: Set<TodoAutomationReceipt> = []
     private struct RunningScript {
@@ -197,28 +203,29 @@ final class TodoAutomationService {
         return assistant == nil && (manual || (currentRule.isEnabled && currentRule.markDoneOnSuccess))
     }
 
+    @discardableResult
     func prepareFeedback(
         work: AssistantAutomationRunner.MergeRequestWork, noteIDs: [Int], username: String,
         settings: SettingsManager, glab: GlabService, manual: Bool = true,
         verifiedFingerprint: String? = nil, expectedHeadSHA: String? = nil,
         verifiedResidual: AuthorFeedbackResidual? = nil,
         shouldProceed: @MainActor () -> Bool
-    ) async throws {
+    ) async throws -> FeedbackPreparationOutcome {
         let configuration = settings.automation
         let decisionContext = AssistantAutomationRunner.feedbackDecisionRevision(work: work, username: username, settings: settings)
         let rule = configuration.authorFeedback
-        guard rule.runner == .assistant, rule.isConfigured, shouldProceed() else { return }
+        guard rule.runner == .assistant, rule.isConfigured, shouldProceed() else { return .notAdmitted(.policyChanged) }
         let request = try await glab.fetchMergeRequest(projectID: work.projectID, iid: work.iid, host: work.host)
         let project = request.webURL.gitLabProjectPath
         guard request.state == "opened", request.author.username == username,
-              request.webURL.isGitLabMergeRequest(host: work.host, iid: work.iid), rule.includes(project: project) else { return }
+              request.webURL.isGitLabMergeRequest(host: work.host, iid: work.iid), rule.includes(project: project) else { return .notAdmitted(.inactiveRequest) }
         let discussions = try await glab.fetchMergeRequestDiscussions(projectID: work.projectID, iid: work.iid, host: work.host)
         if let verifiedFingerprint {
-            guard request.sha == expectedHeadSHA, ReviewVerdict.fingerprint(discussions) == verifiedFingerprint else { return }
+            guard request.sha == expectedHeadSHA, ReviewVerdict.fingerprint(discussions) == verifiedFingerprint else { return .notAdmitted(.contextChanged) }
         }
         if let verifiedResidual {
             guard verifiedFingerprint != nil,
-                  verifiedResidual.semanticContextFingerprint == request.semanticContextFingerprint else { return }
+                  verifiedResidual.semanticContextFingerprint == request.semanticContextFingerprint else { return .notAdmitted(.contextChanged) }
             let requests = verifiedResidual.codeReviewRequests
             let target = MRAutomationScope.Target(host: work.host, username: username, projectID: work.projectID, iid: work.iid)
             let ignored = settings.feedbackSuggestionDecisions.applicable(in: discussions, for: target)
@@ -232,7 +239,7 @@ final class TodoAutomationService {
                                   && (question.kind == .potentialDefect
                                       ? [.addressed, .blocking, .uncertain].contains($0.state) : $0.state == .uncertain)
                           })
-                  }) else { return }
+                  }) else { return .notAdmitted(.contextChanged) }
         }
         let markerPrefix = verifiedFingerprint.map { "Verified feedback snapshot: \(expectedHeadSHA ?? "")/\($0)/" }
         var remaining = verifiedFingerprint == nil
@@ -268,7 +275,7 @@ final class TodoAutomationService {
         let feedback = Array(candidates
             .filter { $0.id.map(remaining.contains) == true }.prefix(12))
         let ids = feedback.compactMap(\.id)
-        guard !ids.isEmpty else { return }
+        guard !ids.isEmpty else { return .notAdmitted(.noActionableFeedback) }
         let marker = markerPrefix.map { $0 + "\(ids.sorted())" }
         let verifiedNotes: [Int: String]? = verifiedFingerprint.map { _ in
             Dictionary(feedback.compactMap { note in note.id.map { ($0, revision(note)) } }, uniquingKeysWith: { first, _ in first })
@@ -284,20 +291,20 @@ final class TodoAutomationService {
             let latest = try await glab.fetchMergeRequest(projectID: work.projectID, iid: work.iid, host: work.host)
             let latestDiscussions = try await glab.fetchMergeRequestDiscussions(projectID: work.projectID, iid: work.iid, host: work.host)
             guard latest.sha == expectedHeadSHA, latest.state == "opened", latest.author == request.author,
-                  ReviewVerdict.fingerprint(latestDiscussions) == verifiedFingerprint else { return }
-            if let verifiedResidual, verifiedResidual.semanticContextFingerprint != latest.semanticContextFingerprint { return }
+                  ReviewVerdict.fingerprint(latestDiscussions) == verifiedFingerprint else { return .notAdmitted(.contextChanged) }
+            if let verifiedResidual, verifiedResidual.semanticContextFingerprint != latest.semanticContextFingerprint { return .notAdmitted(.contextChanged) }
         }
         guard shouldProceed(), settings.automation == configuration,
               AssistantAutomationRunner.feedbackDecisionRevision(work: work, username: username, settings: settings) == decisionContext,
               (verifiedFingerprint != nil || AssistantAutomationRunner.unhandledFeedback(ids, work: work, username: username, settings: settings) == ids.sorted())
-        else { return }
+        else { return .notAdmitted(.contextChanged) }
         if let recovery {
             let fresh = feedbackRecovery(verifiedResidual, request: request, candidates: candidates,
                 selectedIDs: Set(ids), work: work, username: username, settings: settings)
             guard fresh?.origin.id == recovery.origin.id, fresh?.rootID == recovery.rootID,
-                  Set(fresh?.notes.map(\.noteID) ?? []) == Set(ids) else { return }
+                  Set(fresh?.notes.map(\.noteID) ?? []) == Set(ids) else { return .notAdmitted(.contextChanged) }
         }
-        try await run(
+        let handoff = try await run(
             .init(request: request, feedback: feedback),
             invocation: invocation,
             work: work, stackPosition: stackPosition, evidence: evidence, username: username, settings: settings, manual: manual,
@@ -306,6 +313,7 @@ final class TodoAutomationService {
             codeReviewRequests: verifiedResidual?.codeReviewRequests.filter { ids.contains($0.sourceNoteID) } ?? [],
             codeReviewNotes: verifiedResidual?.notes.filter { ids.contains($0.noteID) } ?? []
         )
+        return handoff.map { .admitted($0.id) } ?? .notAdmitted(.policyChanged)
     }
 
     private struct FeedbackRecovery {
@@ -444,6 +452,7 @@ final class TodoAutomationService {
             && file.sha256.count == 64 && file.sha256.utf8.allSatisfy { (48...57).contains($0) || (97...102).contains($0) }
     }
 
+    @discardableResult
     private func run(
         _ context: TodoAutomationContext,
         invocation: Invocation,
@@ -460,7 +469,7 @@ final class TodoAutomationService {
         feedbackRecovery: FeedbackRecovery? = nil,
         codeReviewRequests: [ReReviewAssessment.CodeReviewRequest] = [],
         codeReviewNotes: [ReReviewAssessment.Note] = []
-    ) async throws {
+    ) async throws -> AssistantAutomationRunner.Handoff? {
         let rule = invocation.rule
         let titleTemplate = rule.titleTemplate.trimmingCharacters(in: .whitespacesAndNewlines)
         let title = context.render(titleTemplate.isEmpty ? "{repo} !{iid} ({author})" : titleTemplate,
@@ -487,7 +496,7 @@ final class TodoAutomationService {
             } ?? ""
             let questions = try codeReviewInstructions(codeReviewRequests, notes: codeReviewNotes)
             let prompt = "\(task)\(scope)\(custom)\(isolation)\n\nFallback if needed: \(fallback)\(suppliedEvidence)\(verifiedContext)\(feedbackRecovery?.instructions ?? "")\(questions)"
-            try await AssistantAutomationRunner.launch(
+            return try await AssistantAutomationRunner.launch(
                 assistant, title: title, stackPosition: stackPosition, mergeRequestURL: context.url,
                 prompt: prompt,
                 workspace: invocation.workspace,
@@ -521,6 +530,7 @@ final class TodoAutomationService {
             try Task.checkCancellation()
             guard output.exitCode == 0 else { throw ScriptError.nonZeroExit(output.exitCode) }
         }
+        return nil
     }
 
     private enum ScriptError: Error {

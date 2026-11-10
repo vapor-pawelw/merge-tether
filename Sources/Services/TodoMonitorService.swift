@@ -39,11 +39,32 @@ final class TodoMonitorService {
     }
 
     func attentionRefreshFailed(for row: MergeRequestBoardSnapshot.Row) -> Bool {
-        boardProjector?.attentionRefreshFailed(for: row) ?? false
+        MRBoardProjector.attentionRefreshFailed(for: row, input: boardRowInput(for: row))
     }
 
     func isRecheckingAttention(for row: MergeRequestBoardSnapshot.Row) -> Bool {
-        boardProjector?.isRecheckingAttention(for: row) ?? false
+        MRBoardProjector.isRecheckingAttention(for: row, input: boardRowInput(for: row))
+    }
+
+    /// Point queries capture only this row's existing read facts, never the account-wide board input.
+    private func boardRowInput(for row: MergeRequestBoardSnapshot.Row) -> MRBoardProjector.RowInput {
+        let account: MRBoardProjector.Account? = glab.resolvedHost.flatMap { host in
+            glab.currentUsername.map { .init(host: host, username: $0, revision: glab.accountRevision) }
+        }
+        let request = row.item.mergeRequest
+        let aiFailure = account.map {
+            attention.aiOriginCoordinator.failure(work: .init(host: $0.host, projectID: row.id.projectID, iid: row.id.iid)) != nil
+        } == true
+        return .init(account: account, automation: settings.automation, workflowEntries: authoredMergeRequests.workflow.entries,
+            assistantReady: assistantDependencies.available.contains(settings.automation.assistant),
+            assistantChecking: assistantDependencies.isChecking,
+            confirmationBusy: attention.confirmationStates[row.id]?.isBusy == true,
+            conflictProcessing: request.map { automaticConflictIsProcessing(for: $0) } == true,
+            pipelineProcessing: request.map { authoredMergeRequests.workflow.isAutomaticallyProcessingPipeline($0) } == true,
+            catalogLoading: isLoading || attention.isLoading || authoredMergeRequests.isLoading,
+            catalogReadFailed: lastError != nil || attention.hasError || authoredMergeRequests.hasError,
+            workflowReadFailed: request.map { authoredMergeRequests.workflow.hasReadOnlyFailure(for: $0) } == true,
+            aiOriginReadFailed: aiFailure)
     }
 
     private let todoStore: InboxTodoStore
@@ -180,8 +201,12 @@ final class TodoMonitorService {
         return router
     }()
     private let cancelPolicyJob: @MainActor (UUID, SettingsManager) -> Void
-    private var runningAttentionFeedback: Set<AssistantAutomationRunner.MergeRequestWork> = []
-    private var failedAttentionFeedback: Set<AssistantAutomationRunner.MergeRequestWork> = []
+    @ObservationIgnored private lazy var feedbackLaunches = MRFeedbackLaunchCoordinator(
+        settings: settings, glab: glab, automation: automation, inbox: todoStore,
+        providers: assistantDependencies, health: cliHealth,
+        residualLookup: { [weak attention = attention] request, fingerprint in
+            attention?.authorFeedbackCoordinator?.reviewContext(for: request, fingerprint: fingerprint)
+        })
     private var timer: Timer?
     private var hasCompletedFirstFetch: Bool { todoStore.hasCompletedFirstFetch }
     @ObservationIgnored private var legacyGUIQueueRetired = false
@@ -438,6 +463,8 @@ final class TodoMonitorService {
             if settings.actionIsAutomatic(.commentPublication, for: target) { input.publicationAutomaticTargets.insert(target) }
             guard !input.requestFacts.contains(where: { $0.matches(request) }) else { continue }
             let work = AssistantAutomationRunner.MergeRequestWork(host: host, projectID: request.projectID, iid: request.iid)
+            input.feedbackDecisionRevisions[.init(projectID: request.projectID, iid: request.iid)] =
+                AssistantAutomationRunner.feedbackDecisionRevision(work: work, username: username, settings: settings)
             input.requestFacts.append(.init(request: request,
                 mergeAutomatic: settings.permitsAutomaticAction(.merge, for: request, target: target),
                 conflictFailed: authoredMergeRequests.conflictTaskFailed(for: request)
@@ -452,7 +479,7 @@ final class TodoMonitorService {
             input.remainingFeedbackIDs[item.id] = Set(AssistantAutomationRunner.unhandledFeedback(
                 item.feedback.compactMap(\.id), work: work, username: username, settings: settings))
         }
-        input.failedFeedbackIDs = Set(failedAttentionFeedback.filter { $0.host == host }.map { .init(projectID: $0.projectID, iid: $0.iid) })
+        input.feedbackLaunchFailures = feedbackLaunches.failures
         input.workflowEntries = authoredMergeRequests.workflow.entries
         input.pipelineHandoffs = pipelineHandoffs
         input.handoffs = assistantHandoffs
@@ -563,7 +590,7 @@ final class TodoMonitorService {
     }
 
     func reviewingContext(for row: MergeRequestBoardSnapshot.Row) -> ReviewingContext {
-        boardProjector?.reviewingContext(for: row) ?? ReviewingContext(row: row)
+        MRBoardProjector.reviewingContext(for: row, input: boardRowInput(for: row))
     }
 
     var ownMergeRequestItems: [MergeRequestAttentionMonitor.Item] { boardProjector?.ownItems ?? [] }
@@ -837,15 +864,7 @@ final class TodoMonitorService {
     }
 
     private func automaticallyHandlesFeedback(_ item: MergeRequestAttentionMonitor.Item) -> Bool {
-        guard settings.automaticActionsAllowed,
-              let target = scopeTarget(projectID: item.id.projectID, iid: item.id.iid, url: item.url),
-              let request = item.authoredRequest, request.state == "opened",
-              settings.automation.scope.permits(request, host: target.host, username: target.username),
-              request.author.username == target.username else { return false }
-        let rule = settings.automation.workflowRules[.newDiscussion]
-        let feedback = settings.automation.authorFeedback
-        guard feedback.runner == .assistant, feedback.isConfigured, feedback.includes(project: item.url.gitLabProjectPath) else { return false }
-        return feedback.isEnabled || (rule.mode == .assistant && rule.includes(request))
+        feedbackLaunches.automaticallyHandlesFeedback(item)
     }
 
     var assistantHandoffs: [AssistantAutomationRunner.Handoff] {
@@ -1074,79 +1093,17 @@ final class TodoMonitorService {
     }
 
     func attentionFeedbackAction(for item: MergeRequestAttentionMonitor.Item) -> TodoAutomationService.ActionState? {
-        guard let host = glab.resolvedHost, let username = glab.currentUsername, inboxHost == host,
-              let request = item.authoredRequest, request.author.username == username,
-              availableAssistants.contains(settings.automation.assistant) else { return nil }
-        let rule = settings.automation.authorFeedback
-        guard rule.runner == .assistant, rule.isConfigured, rule.includes(project: item.url.gitLabProjectPath) else { return nil }
-        let work = AssistantAutomationRunner.MergeRequestWork(host: host, projectID: item.id.projectID, iid: item.id.iid)
-        if runningAttentionFeedback.contains(work) { return .running }
-        guard !attentionFeedbackNoteIDs(for: item, work: work, username: username).isEmpty else { return nil }
-        return failedAttentionFeedback.contains(work) ? .failed : .ready(.assistant)
-    }
-
-    private func attentionFeedbackNoteIDs(
-        for item: MergeRequestAttentionMonitor.Item, work: AssistantAutomationRunner.MergeRequestWork, username: String
-    ) -> [Int] {
-        let notes = TodoAutomationEvent.feedbackWithoutTodo(
-            item.feedback, todos: allTodos, host: work.host, projectID: work.projectID, iid: work.iid, username: username
-        ).compactMap(\.id)
-        return AssistantAutomationRunner.unhandledFeedback(notes, work: work, username: username, settings: settings)
+        feedbackLaunches.action(for: item)
     }
 
     func runAttentionFeedback(for item: MergeRequestAttentionMonitor.Item, manual: Bool = true) async {
-        guard manual || settings.automaticActionsAllowed,
-              let action = attentionFeedbackAction(for: item), action == .ready(.assistant) || action == .failed,
-              let host = glab.resolvedHost, let username = glab.currentUsername else { return }
-        let revision = glab.accountRevision
-        let work = AssistantAutomationRunner.MergeRequestWork(host: host, projectID: item.id.projectID, iid: item.id.iid)
-        guard runningAttentionFeedback.insert(work).inserted else { return }
-        defer { runningAttentionFeedback.remove(work) }
-        failedAttentionFeedback.remove(work)
-        let notes = attentionFeedbackNoteIDs(for: item, work: work, username: username)
-        do {
-            try await automation.prepareFeedback(work: work, noteIDs: notes, username: username, settings: settings, glab: glab, manual: manual) {
-                self.glab.resolvedHost == host && self.glab.currentUsername == username && self.inboxHost == host
-                    && self.glab.accountRevision == revision
-                    && self.attentionFeedbackNoteIDs(for: item, work: work, username: username) == notes
-                    && (manual || self.automaticallyHandlesFeedback(item))
-            }
-        } catch {
-            failedAttentionFeedback.insert(work)
-            Log.monitor.error("Could not prepare MR feedback: \(String(describing: error), privacy: .private)")
-        }
+        await feedbackLaunches.runAttentionFeedback(for: item, manual: manual)
     }
 
     func runVerifiedAuthorFeedback(request: GitLabMergeRequest, noteIDs: Set<Int>, fingerprint: String,
                                   residual: AuthorFeedbackResidual? = nil, manual: Bool = true) async {
-        guard manual || settings.automaticActionsAllowed,
-              let host = glab.resolvedHost, let username = glab.currentUsername,
-              request.author.username == username, !noteIDs.isEmpty else { return }
-        let revision = glab.accountRevision
-        let configuration = settings.automation
-        let rule = configuration.authorFeedback
-        let workflow = configuration.workflowRules[.newDiscussion]
-        guard rule.runner == .assistant, rule.isConfigured, rule.includes(project: request.webURL.gitLabProjectPath),
-              manual || (configuration.packageDecision != .disabled && configuration.scope.permits(request, host: host, username: username)
-                  && (rule.isEnabled || (workflow.mode == .assistant && workflow.includes(request)))) else { return }
-        let work = AssistantAutomationRunner.MergeRequestWork(host: host, projectID: request.projectID, iid: request.iid)
-        guard manual || !failedAttentionFeedback.contains(work),
-              !AssistantAutomationRunner.isWorking(on: work), runningAttentionFeedback.insert(work).inserted else { return }
-        defer { runningAttentionFeedback.remove(work) }
-        failedAttentionFeedback.remove(work)
-        do {
-            try await automation.prepareFeedback(work: work, noteIDs: noteIDs.sorted(), username: username,
-                settings: settings, glab: glab, manual: manual, verifiedFingerprint: fingerprint, expectedHeadSHA: request.sha,
-                verifiedResidual: residual ?? attention.authorFeedbackCoordinator?.reviewContext(for: request, fingerprint: fingerprint)) {
-                    self.glab.resolvedHost == host && self.glab.currentUsername == username
-                        && self.glab.accountRevision == revision
-                        && self.settings.automation == configuration
-                        && (manual || self.settings.automaticActionsAllowed)
-                }
-        } catch {
-            failedAttentionFeedback.insert(work)
-            Log.monitor.error("Could not handle verified author feedback: \(String(describing: error), privacy: .private)")
-        }
+        await feedbackLaunches.runVerifiedAuthorFeedback(request: request, noteIDs: noteIDs,
+            fingerprint: fingerprint, residual: residual, manual: manual)
     }
 
     private func acknowledgeHandledTodos(host: String, username: String) async {

@@ -63,7 +63,8 @@ struct MRBoardProjector {
         var ownCatalogIsAuthoritative = false
         var trackedReviewedTargets: Set<MRAutomationScope.Target> = []
         var remainingFeedbackIDs: [Item.ID: Set<Int>] = [:]
-        var failedFeedbackIDs: Set<Item.ID> = []
+        var feedbackLaunchFailures: [MRFeedbackLaunchCoordinator.Failure] = []
+        var feedbackDecisionRevisions: [Item.ID: String] = [:]
         var requestFacts: [RequestFacts] = []
         var workflowEntries: [MergeWorkflowActivityEntry] = []
         var pipelineHandoffs: [MergeWorkflowActivityEntry] = []
@@ -189,7 +190,11 @@ struct MRBoardProjector {
                 guard let entry = currentEvents.first(where: { $0.event.kind == trigger }) else { return false }
                 return entry.state == .failed && !entry.isReadOnlyFailure
             })
-            if input.failedFeedbackIDs.contains(item.id) { failures.insert(.newDiscussion) }
+            if input.feedbackLaunchFailures.contains(where: { $0.matches(item, host: input.account.host,
+                username: input.account.username, revision: input.account.revision, configuration: input.automation,
+                decisionRevision: input.feedbackDecisionRevisions[item.id]) }) {
+                failures.insert(.newDiscussion)
+            }
             let conflictFailed = facts(for: item.mergeRequest)?.conflictFailed == true
             let pipelineState = currentEvents.first { $0.event.kind == .pipelineFailure
                 && $0.event.pipelineID == item.mergeRequest?.headPipeline?.id }?.state
@@ -228,30 +233,59 @@ struct MRBoardProjector {
         }
     }
 
-    func reviewingContext(for row: MergeRequestBoardSnapshot.Row) -> ReviewingContext {
-        ReviewingContext(row: row, workflowState: ReviewingContext.workflowState(for: row, entries: input.workflowEntries),
+    struct RowInput {
+        let account: Account?
+        let automation: AutomationSettings
+        let workflowEntries: [MergeWorkflowActivityEntry]
+        var assistantReady = false
+        var assistantChecking = false
+        var confirmationBusy = false
+        var conflictProcessing = false
+        var pipelineProcessing = false
+        var catalogLoading = false
+        var catalogReadFailed = false
+        var workflowReadFailed = false
+        var aiOriginReadFailed = false
+    }
+    func rowInput(for row: MergeRequestBoardSnapshot.Row) -> RowInput {
+        let facts = facts(for: row.item.mergeRequest)
+        return .init(account: input.account, automation: input.automation, workflowEntries: input.workflowEntries,
             assistantReady: input.reviewAssistantReady, assistantChecking: input.assistantChecking,
+            confirmationBusy: input.confirmationStates[row.id]?.isBusy == true,
+            conflictProcessing: facts?.conflictProcessing == true, pipelineProcessing: facts?.pipelineProcessing == true,
+            catalogLoading: input.catalogLoading, catalogReadFailed: input.catalogReadFailed,
+            workflowReadFailed: facts?.workflowReadFailed == true, aiOriginReadFailed: facts?.aiOriginReadFailed == true)
+    }
+    static func reviewingContext(for row: MergeRequestBoardSnapshot.Row, input: RowInput) -> ReviewingContext {
+        ReviewingContext(row: row, workflowState: ReviewingContext.workflowState(for: row, entries: input.workflowEntries),
+            assistantReady: input.assistantReady, assistantChecking: input.assistantChecking,
             draftAutomationAllowed: input.automation.hasEnabledAutomation && row.displayRequest.map {
-                input.automation.scope.permits($0, host: input.account.host, username: input.account.username)
+                input.automation.scope.permits($0, host: input.account?.host ?? "", username: input.account?.username ?? "")
             } == true)
     }
-    private func rowState(_ row: MergeRequestBoardSnapshot.Row) -> BoardAttentionPresenter.RowState {
-        .init(row: row, confirmationBusy: input.confirmationStates[row.id]?.isBusy == true,
-            conflictProcessing: facts(for: row.item.mergeRequest)?.conflictProcessing == true,
-            pipelineProcessing: facts(for: row.item.mergeRequest)?.pipelineProcessing == true)
+    private static func rowState(_ row: MergeRequestBoardSnapshot.Row, input: RowInput) -> BoardAttentionPresenter.RowState {
+        .init(row: row, confirmationBusy: input.confirmationBusy,
+            conflictProcessing: input.conflictProcessing, pipelineProcessing: input.pipelineProcessing)
     }
-    func attentionRefreshFailed(for row: MergeRequestBoardSnapshot.Row) -> Bool {
-        BoardAttentionPresenter.attentionRefreshFailed(row: rowState(row), refresh: .init(
-            catalogReadFailed: input.catalogReadFailed,
-            workflowReadFailed: facts(for: row.item.mergeRequest)?.workflowReadFailed == true,
-            needsAIAssessment: input.automation.needsAIAssessment,
-            aiOriginReadFailed: facts(for: row.item.mergeRequest)?.aiOriginReadFailed == true))
+    static func attentionRefreshFailed(for row: MergeRequestBoardSnapshot.Row, input: RowInput) -> Bool {
+        BoardAttentionPresenter.attentionRefreshFailed(row: rowState(row, input: input), refresh: .init(
+            catalogReadFailed: input.catalogReadFailed, workflowReadFailed: input.workflowReadFailed,
+            needsAIAssessment: input.automation.needsAIAssessment, aiOriginReadFailed: input.aiOriginReadFailed))
     }
-    func isRecheckingAttention(for row: MergeRequestBoardSnapshot.Row) -> Bool {
-        BoardAttentionPresenter.isRecheckingAttention(row: rowState(row), refresh: .init(
+    static func isRecheckingAttention(for row: MergeRequestBoardSnapshot.Row, input: RowInput) -> Bool {
+        BoardAttentionPresenter.isRecheckingAttention(row: rowState(row, input: input), refresh: .init(
             catalogLoading: input.catalogLoading,
             providerChecking: input.assistantChecking && input.automation.packageDecision != .disabled,
-            reviewingVerifying: !row.item.isAuthored && reviewingContext(for: row).nextStep == .verifying))
+            reviewingVerifying: !row.item.isAuthored && reviewingContext(for: row, input: input).nextStep == .verifying))
+    }
+    func reviewingContext(for row: MergeRequestBoardSnapshot.Row) -> ReviewingContext {
+        Self.reviewingContext(for: row, input: rowInput(for: row))
+    }
+    func attentionRefreshFailed(for row: MergeRequestBoardSnapshot.Row) -> Bool {
+        Self.attentionRefreshFailed(for: row, input: rowInput(for: row))
+    }
+    func isRecheckingAttention(for row: MergeRequestBoardSnapshot.Row) -> Bool {
+        Self.isRecheckingAttention(for: row, input: rowInput(for: row))
     }
 
     func board(humanAttention: UserAttentionSnapshot? = nil, preservedOrder: [Item.ID: Int] = [:]) -> MergeRequestBoardSnapshot {
