@@ -34,7 +34,7 @@ struct MRCatalogStalenessTests {
         try await h.poll()
 
         #expect(h.monitor.hasError && !h.monitor.hasSyncedCurrentCatalog)
-        try FileManager.default.removeItem(at: h.folder.appending(path: failedSource))
+        h.gitlab.remove(failedSource)
         try await h.poll()
         #expect(h.monitor.hasSyncedCurrentCatalog)
         #expect(Set(h.monitor.currentOpenItems.map(\.id.iid)) == [1, 2, 3])
@@ -173,7 +173,7 @@ struct MRCatalogStalenessTests {
         try h.write(failedSource, "yes")
         try await h.pollAuthored(monitor)
         #expect(monitor.hasError && !monitor.hasSyncedCurrentCatalog)
-        try FileManager.default.removeItem(at: h.folder.appending(path: failedSource))
+        h.gitlab.remove(failedSource)
         try await h.pollAuthored(monitor)
         #expect(monitor.hasSyncedCurrentCatalog && monitor.requests.count == 1)
         try h.write(failedSource, "yes")
@@ -313,10 +313,11 @@ struct MRCatalogStalenessTests {
         let suite: String
         let settings: SettingsManager
         let glab: GlabService
+        let gitlab: InMemoryGitLab
         let monitor: MergeRequestAttentionMonitor
 
         func write(_ name: String, _ text: String) throws {
-            try Data(text.utf8).write(to: folder.appending(path: name))
+            gitlab.write(name, text)
         }
 
         func poll(username: String = "me") async throws {
@@ -329,12 +330,7 @@ struct MRCatalogStalenessTests {
         }
 
         func waitForFile(_ name: String) async throws {
-            let file = folder.appending(path: name)
-            let deadline = ContinuousClock.now + .seconds(5)
-            while !FileManager.default.fileExists(atPath: file.path), ContinuousClock.now < deadline {
-                try await Task.sleep(for: .milliseconds(20))
-            }
-            try #require(FileManager.default.fileExists(atPath: file.path))
+            try await gitlab.waitFor(name)
         }
 
         func authoredMonitor() -> AuthoredMergeRequestMonitor {
@@ -352,6 +348,7 @@ struct MRCatalogStalenessTests {
         }
 
         func cleanUp() {
+            gitlab.close()
             try? FileManager.default.removeItem(at: folder)
             defaults.removePersistentDomain(forName: suite)
         }
@@ -364,7 +361,7 @@ struct MRCatalogStalenessTests {
         }
 
         func exactFetchCount() throws -> Int {
-            let calls = try String(contentsOf: folder.appending(path: "calls"), encoding: .utf8)
+            let calls = gitlab.text("calls")
             return calls.split(separator: "\n").filter { $0 == "/projects/1/merge_requests/3" }.count
         }
     }
@@ -385,46 +382,46 @@ struct MRCatalogStalenessTests {
         let suite = "MRCatalogStalenessTests.\(UUID())"
         let defaults = try #require(UserDefaults(suiteName: suite))
         let settings = SettingsManager(defaults: defaults)
-        let glab = GlabService()
-        glab.resolvedHost = host
-        glab.currentUsername = "me"
-        let executable = folder.appending(path: "glab")
-        try Data("""
-        #!/bin/sh
-        set -eu
-        cd "$(dirname "$0")"
-        echo "$2" >> calls
-        case "$2" in
-            /user) [ ! -f fail-auth ] || exit 2; cat user.json; touch user-read ;;
-            /merge_requests?scope=created_by_me*)
-                if [ -f pause-owned ]; then
-                    touch owned-started
-                    while [ ! -f release-owned ]; do sleep 0.02; done
-                fi
-                [ ! -f fail-owned ] || exit 2; cat owned.json ;;
-            /merge_requests?scope=all*) [ ! -f fail-reviewing ] || exit 2; cat reviewing.json ;;
-            /projects/1/merge_requests/3) [ ! -f fail-explicit ] || exit 2; cat explicit.json ;;
-            /projects/1/merge_requests/1)
-                [ -f detail.json ] || exit 100
-                if [ -f pause-detail ]; then
-                    touch detail-started
-                    while [ ! -f release-detail ]; do sleep 0.02; done
-                fi
-                cat detail.json ;;
-            /projects/1/merge_requests/1/discussions*) [ ! -f fail-discussions ] || exit 2; cat discussions.json ;;
-            /projects/1/merge_requests/1/draft_notes*)
-                if [ -f drafts.json ]; then cat drafts.json; else echo '[]'; fi ;;
-            */draft_notes*) echo '[]' ;;
-            */discussions*) echo '[]' ;;
-            *) exit 100 ;;
-        esac
-        """.utf8).write(to: executable)
-        try FileManager.default.setAttributes([.posixPermissions: 0o700], ofItemAtPath: executable.path)
-        glab.glabPath = executable
+        let gitlab = InMemoryGitLab()
+        let glab = gitlab.service(host: host, username: "me")
+        gitlab.handler = { request in
+            let path = request.endpoint
+            gitlab.append("calls", path + "\n")
+            switch path {
+            case "/user":
+                if gitlab.has("fail-auth") { return InMemoryGitLab.output(code: 2) }
+                let result = try gitlab.response("user.json")
+                gitlab.write("user-read")
+                return result
+            case let path where path.hasPrefix("/merge_requests?scope=created_by_me"):
+                try await gitlab.pause(ifPresent: "pause-owned", entered: "owned-started", until: "release-owned")
+                return gitlab.has("fail-owned") ? InMemoryGitLab.output(code: 2) : try gitlab.response("owned.json")
+            case let path where path.hasPrefix("/merge_requests?scope=all"):
+                return gitlab.has("fail-reviewing") ? InMemoryGitLab.output(code: 2) : try gitlab.response("reviewing.json")
+            case "/projects/1/merge_requests/3":
+                return gitlab.has("fail-explicit") ? InMemoryGitLab.output(code: 2) : try gitlab.response("explicit.json")
+            case "/projects/1/merge_requests/1":
+                try await gitlab.pause(ifPresent: "pause-detail", entered: "detail-started", until: "release-detail")
+                return try gitlab.response("detail.json")
+            case let path where path.hasPrefix("/projects/1/merge_requests/1/discussions"):
+                return gitlab.has("fail-discussions") ? InMemoryGitLab.output(code: 2) : try gitlab.response("discussions.json")
+            case let path where path.hasPrefix("/projects/1/merge_requests/1/draft_notes"):
+                return InMemoryGitLab.output(gitlab.has("drafts.json") ? gitlab.text("drafts.json") : "[]")
+            case let path where path.contains("/draft_notes") || path.contains("/discussions"):
+                return InMemoryGitLab.output("[]")
+            case let path where path.hasSuffix("/approvals") || path.hasSuffix("/approval_state"):
+                // The catalog fixture deliberately has no optional approval evidence.
+                return InMemoryGitLab.output(code: 100)
+            case "/projects/1": return InMemoryGitLab.output(code: 100)
+            case let path where path.contains("/blocks?") || path.hasPrefix("/projects/1/merge_requests?"):
+                return InMemoryGitLab.output(code: 100)
+            default: return try gitlab.unexpected(request)
+            }
+        }
         let monitor = MergeRequestAttentionMonitor(glab: glab, settings: settings, reportDirectory: folder,
             verdictDirectory: folder.appending(path: "verdicts"),
             aiAssessmentDirectory: folder.appending(path: "ai-assessments"), followUpDirectory: folder)
-        let result = Harness(folder: folder, defaults: defaults, suite: suite, settings: settings, glab: glab, monitor: monitor)
+        let result = Harness(folder: folder, defaults: defaults, suite: suite, settings: settings, glab: glab, gitlab: gitlab, monitor: monitor)
         try result.write("user.json", #"{"id":3,"username":"me"}"#)
         try result.write("owned.json", "[\(request(1, owned: true))]")
         try result.write("reviewing.json", "[\(request(2, owned: false))]")
@@ -452,7 +449,7 @@ struct MRCatalogStalenessTests {
         #expect(Set(h.monitor.currentOpenItems.map(\.id.iid)) == [1, 2])
         #expect(h.monitor.currentOpenItems.first { $0.id.iid == freshID }?.title == "Fresh title")
 
-        try FileManager.default.removeItem(at: h.folder.appending(path: failure))
+        h.gitlab.remove(failure)
         try h.write(ownedFails ? "owned.json" : "reviewing.json", "[]")
         try await h.poll()
         // An own MR missing from a recovered open listing needs an exact state
@@ -466,7 +463,7 @@ struct MRCatalogStalenessTests {
             let retained = try #require(h.monitor.currentOpenItems.first { $0.id.iid == 1 })
             #expect(retained.mergeRequest?.state == "opened")
             #expect(retained.url.absoluteString == "https://gitlab.example.org/g/p/-/merge_requests/1")
-            let calls = try String(contentsOf: h.folder.appending(path: "calls"), encoding: .utf8)
+            let calls = h.gitlab.text("calls")
             #expect(calls.split(separator: "\n").contains("/projects/1/merge_requests/1"))
             #expect(h.settings.mrLifecycleLedger.takeTransitions(host: host, username: "me").isEmpty)
         }
@@ -486,8 +483,8 @@ struct MRCatalogStalenessTests {
         try await h.poll()
         #expect(h.monitor.hasError)
         #expect(h.monitor.currentOpenItems.map(\.id.iid) == [3])
-        #expect(!FileManager.default.fileExists(atPath: h.folder.appending(path: "mr-status.json").path))
-        try FileManager.default.removeItem(at: h.folder.appending(path: "fail-explicit"))
+        #expect(!h.gitlab.has("mr-status.json"))
+        h.gitlab.remove("fail-explicit")
         try h.write("explicit.json", request(3, owned: false, state: state))
         try await h.poll()
         #expect(!h.monitor.hasError)

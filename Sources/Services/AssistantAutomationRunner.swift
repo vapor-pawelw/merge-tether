@@ -244,6 +244,7 @@ enum AssistantAutomationRunner {
         expectedHeadSHA: String? = nil,
         jobCoordinator: AssistantJobCoordinator? = nil,
         configurationSnapshot: AutomationSettings? = nil,
+        glab: GlabService? = nil,
         draftRepair: DraftReplyRepair.Context? = nil,
         retryOf: UUID? = nil,
         feedbackRecoveryRootID: UUID? = nil
@@ -264,7 +265,7 @@ enum AssistantAutomationRunner {
         let headSHA: String?
         if jobCoordinator == nil || configurationSnapshot != nil {
             headSHA = try await freshRequest(work: work, username: username, settings: settings,
-                isReview: isReview || mrWorkflow == .review).sha
+                isReview: isReview || mrWorkflow == .review, glab: glab).sha
             guard let headSHA, !headSHA.isEmpty else { throw AssistantJobExecutor.ExecutionError.inactiveMergeRequest }
             if let expectedHeadSHA, expectedHeadSHA != headSHA { throw AssistantJobExecutor.ExecutionError.headChanged }
         } else { headSHA = expectedHeadSHA }
@@ -398,7 +399,7 @@ enum AssistantAutomationRunner {
 
     @discardableResult
     static func retry(_ id: UUID, settings: SettingsManager, expectedHeadSHA: String? = nil,
-                      jobCoordinator: AssistantJobCoordinator? = nil) async throws -> Handoff {
+                      jobCoordinator: AssistantJobCoordinator? = nil, glab: GlabService? = nil) async throws -> Handoff {
         guard let handoff = settings.assistantHandoffs.first(where: { $0.id == id }) else { throw HandoffError.legacyJob }
         guard !handoff.isObsoleteReminder else { throw AssistantJobExecutor.ExecutionError.disabledPermission }
         guard let execution = handoff.execution, !execution.state.isActive,
@@ -406,7 +407,7 @@ enum AssistantAutomationRunner {
         var reservation: ExistingPipelineWorkDetector.Key?
         var retryHead = expectedHeadSHA
         if let prior = handoff.pipelineReservation {
-            let glab = GlabService()
+            let glab = glab ?? GlabService()
             if let executable = settings.glabPath { glab.glabPath = executable }
             else { glab.glabPath = await OnboardingDetector.findGlabExecutable() }
             guard await glab.recheck() == nil, glab.authStatus == .authenticated,
@@ -487,8 +488,8 @@ enum AssistantAutomationRunner {
     }
 
     private static func freshRequest(work: MergeRequestWork, username: String, settings: SettingsManager,
-                                     isReview: Bool) async throws -> GitLabMergeRequest {
-        let glab = GlabService()
+                                     isReview: Bool, glab: GlabService? = nil) async throws -> GitLabMergeRequest {
+        let glab = glab ?? GlabService()
         if let executable = settings.glabPath { glab.glabPath = executable }
         else { glab.glabPath = await OnboardingDetector.findGlabExecutable() }
         guard await glab.recheck() == nil, glab.authStatus == .authenticated,

@@ -65,7 +65,7 @@ extension GlabService {
         try checkSession()
         let output: ProcessRunner.Output
         do {
-            output = try await ProcessRunner.run(
+            output = try await runCommand(
                 executable,
                 arguments: ["mr", "update", String(iid), "--ready", "--yes", "--repo", repositoryURL.absoluteString],
                 environment: Self.shellEnvironment,
@@ -539,7 +539,7 @@ extension GlabService {
         guard let glabPath else { throw GlabError.glabNotInstalled }
         let output: ProcessRunner.Output
         do {
-            output = try await ProcessRunner.run(
+            output = try await runCommand(
                 glabPath,
                 arguments: ["api", endpoint, "--hostname", host] + arguments,
                 environment: Self.shellEnvironment,

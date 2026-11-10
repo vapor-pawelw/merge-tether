@@ -23,23 +23,20 @@ import Testing
         let encoder = JSONEncoder()
         let staleRequest = String(decoding: try encoder.encode(request), as: UTF8.self)
             .replacingOccurrences(of: head, with: String(repeating: "b", count: 40))
-        let executable = directory.appending(path: "glab")
-        try Data("""
-            #!/bin/sh
-            set -eu
-            case "$*" in
-              *'--method'*) printf x >> "$0-write"; exit 9 ;;
-              'api /user '*)
-                printf x >> "$0-reads"
-                if ! test -f "$0-available"; then printf '503 temporarily unavailable' >&2; exit 1; fi
-                printf '%s' '{"id":1,"username":"me"}' ;;
-              'api /projects/7/merge_requests/11 '*) printf '%s' '\(staleRequest)' ;;
-              *) exit 9 ;;
-            esac
-            """.utf8).write(to: executable)
-        try FileManager.default.setAttributes([.posixPermissions: 0o700], ofItemAtPath: executable.path)
-        let glab = GlabService()
-        glab.resolvedHost = original.host; glab.currentUsername = "me"; glab.glabPath = executable
+        let gitlab = InMemoryGitLab()
+        defer { gitlab.close() }
+        gitlab.handler = { request in
+            if request.method != "GET" { gitlab.write("write"); return InMemoryGitLab.output(code: 9) }
+            switch request.endpoint {
+            case "/user":
+                gitlab.append("reads", "x")
+                return gitlab.has("available") ? InMemoryGitLab.output(#"{"id":1,"username":"me"}"#)
+                    : InMemoryGitLab.output(error: "503 temporarily unavailable", code: 1)
+            case "/projects/7/merge_requests/11": return InMemoryGitLab.output(staleRequest)
+            default: return try gitlab.unexpected(request)
+            }
+        }
+        let glab = gitlab.service(host: original.host, username: "me")
         let clock = ReadRetryClock()
         func make(_ state: SettingsManager) -> MergeWorkflowAutomation {
             MergeWorkflowAutomation(settings: state, glab: glab, notifications: NotificationService(),
@@ -57,7 +54,7 @@ import Testing
                 try await Task.sleep(for: .milliseconds(10))
             }
         }
-        func reads() -> String { (try? String(contentsOf: URL(fileURLWithPath: executable.path + "-reads"), encoding: .utf8)) ?? "" }
+        func reads() -> String { gitlab.text("reads") }
         let automation = make(settings)
         automation.receive(event, host: original.host, user: original.user)
         automation.startNext()
@@ -67,7 +64,7 @@ import Testing
             #expect(automation.entries.first?.state == .skipped)
             #expect(automation.entries.first?.isReadOnlyFailure == false)
             #expect(settings.assistantHandoffs.isEmpty && settings.pipelineRefreshAttempts.isEmpty)
-            #expect(!FileManager.default.fileExists(atPath: executable.path + "-write"))
+            #expect(!gitlab.has("write"))
             return
         }
         #expect(reads() == "xxx")
@@ -83,7 +80,7 @@ import Testing
         glab.currentUsername = "me"
         restored.startNext()
         #expect(reads() == "xxx")
-        try Data().write(to: URL(fileURLWithPath: executable.path + "-available"))
+        gitlab.write("available")
         if recovery == "cooldown" {
             clock.date = clock.date.addingTimeInterval(ReadOnlyAssessmentRetry.cooldown + 1)
             restored.startNext()
@@ -94,7 +91,7 @@ import Testing
         #expect(restored.entries.first?.state == .skipped)
         #expect(!restored.hasReadOnlyFailure(for: request))
         #expect(restoredSettings.assistantHandoffs.isEmpty && restoredSettings.pipelineRefreshAttempts.isEmpty)
-        #expect(!FileManager.default.fileExists(atPath: executable.path + "-write"))
+        #expect(!gitlab.has("write"))
     }
 
     private func entry(jobID: UUID?) throws -> MergeWorkflowActivityEntry {
@@ -445,39 +442,38 @@ import Testing
         let previous = try detector.registerRun(for: key)
         let priorToken = try #require(previous)
         try detector.finishHandoff(for: priorToken)
-        let executable = root.appending(path: "glab")
-        try Data("""
-        #!/bin/sh
-        set -eu
-        root="${0%/*}"
-        printf '%s\\n' "$*" >> "$root/commands"
-        case "$*" in
-          'config get host') printf '%s' '\(host)' ;;
-          'auth status') printf '%s' 'Logged in to \(host) as me' >&2 ;;
-          'api /user '*) printf '%s' '{"id":1,"username":"me"}' ;;
-          'api /projects/7/merge_requests/11 '*) printf '%s' '\(request)' ;;
-          'api /projects/7/pipelines/101 '*) printf '%s' '{"id":101,"project_id":7,"status":"failed","sha":"\(merged)","ref":"refs/merge-requests/11/merge"}' ;;
-          'api /projects/7/repository/branches/feature '*) printf '%s' '{"commit":{"id":"\(source)"}}' ;;
-          'api /projects/7/repository/branches/main '*) printf '%s' '{"commit":{"id":"\(target)"}}' ;;
-          'api /projects/7/repository/commits/'*) printf '%s' '{"id":"\(merged)","parent_ids":["\(target)","\(source)"]}' ;;
-          'api /projects/7/merge_requests/11/diffs?'*)
-            touch "$root/entered"
-            if test '\(mutation)' != none && test '\(mutation)' != capacity; then
-              count=0
-              while test ! -f "$root/release" && test "$count" -lt 500; do sleep 0.01; count=$((count + 1)); done
-            fi
-            printf '%s' '[]' ;;
-          'api /projects/7 --hostname '*) printf '%s' '{"default_branch":"main"}' ;;
-          *) case "$*" in *'--method POST'*|*'--method PUT'*|*'--method DELETE'*) exit 90 ;; esac; printf '%s' '[]' ;;
-        esac
-        """.utf8).write(to: executable)
-        try FileManager.default.setAttributes([.posixPermissions: 0o700], ofItemAtPath: executable.path)
-        settings.glabPath = executable
+        let gitlab = InMemoryGitLab()
+        defer { gitlab.close() }
+        gitlab.handler = { call in
+            gitlab.append("commands", call.command + "\n")
+            if call.arguments == ["config", "get", "host"] { return InMemoryGitLab.output(host) }
+            if call.arguments == ["auth", "status"] { return InMemoryGitLab.output(error: "Logged in to \(host) as me") }
+            switch call.endpoint {
+            case "/user": return InMemoryGitLab.output(#"{"id":1,"username":"me"}"#)
+            case "/projects/7/merge_requests/11": return InMemoryGitLab.output(request)
+            case "/projects/7/pipelines/101": return try InMemoryGitLab.json(["id": 101, "project_id": 7, "status": "failed", "sha": merged, "ref": "refs/merge-requests/11/merge"])
+            case "/projects/7/repository/branches/feature": return try InMemoryGitLab.json(["commit": ["id": source]])
+            case "/projects/7/repository/branches/main": return try InMemoryGitLab.json(["commit": ["id": target]])
+            case let path where path.hasPrefix("/projects/7/repository/commits/"):
+                return try InMemoryGitLab.json(["id": merged, "parent_ids": [target, source]])
+            case let path where path.hasPrefix("/projects/7/merge_requests/11/diffs?"):
+                gitlab.write("entered")
+                if mutation != "none" && mutation != "capacity" { try await gitlab.waitFor("release") }
+                return InMemoryGitLab.output("[]")
+            case "/projects/7": return InMemoryGitLab.output(#"{"default_branch":"main"}"#)
+            case let path where path.hasPrefix("/projects/7/merge_trains?")
+                || path.hasPrefix("/projects/7/pipelines/101/jobs?")
+                || path.hasPrefix("/projects/7/merge_requests?")
+                || path.hasPrefix("/merge_requests?scope=all")
+                || path.contains("/discussions?") || path.contains("/blocks?") || path.contains("/reviewers?"):
+                #expect(call.method == "GET")
+                return InMemoryGitLab.output("[]")
+            default: return try gitlab.unexpected(call)
+            }
+        }
+        let glab = gitlab.service(host: host, username: "me")
+        settings.glabPath = glab.glabPath
         settings.save()
-        let glab = GlabService()
-        glab.glabPath = executable
-        glab.resolvedHost = host
-        glab.currentUsername = "me"
         var launched: [AssistantAutomationRunner.Handoff] = []
         var releaseAssessment = false
         defer { releaseAssessment = true }
@@ -508,18 +504,18 @@ import Testing
         }
         automation.observe([current], host: host, user: old.user)
         for _ in 0..<300 {
-            if FileManager.default.fileExists(atPath: root.appending(path: "entered").path) { break }
+            if gitlab.has("entered") { break }
             if automation.entries.contains(where: { $0.id != id && $0.state == .alreadyRegistered }) { break }
             try await Task.sleep(for: .milliseconds(10))
         }
         if ["unrelated-scope", "pause", "permission"].contains(mutation) {
-            #expect(FileManager.default.fileExists(atPath: root.appending(path: "entered").path))
+            #expect(gitlab.has("entered"))
             if mutation == "unrelated-scope" {
                 settings.automation.scope[.init(host: host, username: "me", projectID: 99, iid: 22)] = .active
             } else if mutation == "pause" {
                 settings.automation.scope[.init(host: host, username: "me", projectID: 7, iid: 11)] = .paused
             } else { settings.automation.allowFollowUpPush = false }
-            try Data().write(to: root.appending(path: "release"))
+            gitlab.write("release")
         }
         if mutation == "capacity" {
             for _ in 0..<300 where launched.isEmpty { try await Task.sleep(for: .milliseconds(10)) }
@@ -553,7 +549,7 @@ import Testing
             #expect(restarted.entries.contains { $0.id == id })
         }
         #expect(launched.count == (shouldLaunch ? 1 : 0))
-        let commands = try String(contentsOf: root.appending(path: "commands"), encoding: .utf8)
+        let commands = gitlab.text("commands")
         #expect(!commands.contains("--method POST") && !commands.contains("--method PUT"))
     }
 
@@ -682,30 +678,31 @@ import Testing
         if mutation == "changedTarget" {
             changedRequest = changedRequest.replacingOccurrences(of: "\"target_branch\":\"main\"", with: "\"target_branch\":\"release\"")
         }
-        let executable = directory.appending(path: "glab")
-        try Data("""
-        #!/bin/sh
-        set -eu
-        case "$*" in
-          'config get host') printf '%s' '\(host)' ;;
-          'auth status') printf '%s' 'Logged in to \(host) as me' >&2 ;;
-          'api /user '*)
-            if test -f "$0-user" && test '\(mutation ?? "")' = changedAccount; then
-              printf '%s' '{"id":2,"username":"me"}'
-            else printf '%s' '{"id":1,"username":"me"}'; fi
-            touch "$0-user" ;;
-          'api /projects/7/merge_requests/11 '*)
-            if test -f "$0-request"; then printf '%s' '\(changedRequest)'; else printf '%s' '\(request)'; fi
-            touch "$0-request" ;;
-          'api /projects/7/pipelines/100 '*) printf '%s' '{"id":100,"project_id":\(pipelineProject),"status":"failed","sha":"\(pipelineSHA)","ref":"\(pipelineRef)"}' ;;
-          'api /projects/7/repository/branches/feature '*) printf '%s' '{"commit":{"id":"\(branchSource)"}}' ;;
-          'api /projects/7/repository/branches/main '*) printf '%s' '{"commit":{"id":"\(target)"}}' ;;
-          'api /projects/7/repository/commits/'*) printf '%s' '{"id":"\(merged)","parent_ids":["\(targetParent)","\(sourceParent)"]}' ;;
-          *) printf '%s' 'Unexpected glab command' >&2; exit 20 ;;
-        esac
-        """.utf8).write(to: executable)
-        try FileManager.default.setAttributes([.posixPermissions: 0o700], ofItemAtPath: executable.path)
-        settings.glabPath = executable
+        let gitlab = InMemoryGitLab()
+        defer { gitlab.close() }
+        gitlab.handler = { call in
+            if call.arguments == ["config", "get", "host"] { return InMemoryGitLab.output(host) }
+            if call.arguments == ["auth", "status"] { return InMemoryGitLab.output(error: "Logged in to \(host) as me") }
+            switch call.endpoint {
+            case "/user":
+                let changed = gitlab.has("user") && mutation == "changedAccount"
+                gitlab.write("user")
+                return try InMemoryGitLab.json(["id": changed ? 2 : 1, "username": "me"])
+            case "/projects/7/merge_requests/11":
+                let changed = gitlab.has("request")
+                gitlab.write("request")
+                return InMemoryGitLab.output(changed ? changedRequest : request)
+            case "/projects/7/pipelines/100":
+                return try InMemoryGitLab.json(["id": 100, "project_id": pipelineProject, "status": "failed", "sha": pipelineSHA, "ref": pipelineRef])
+            case "/projects/7/repository/branches/feature": return try InMemoryGitLab.json(["commit": ["id": branchSource]])
+            case "/projects/7/repository/branches/main": return try InMemoryGitLab.json(["commit": ["id": target]])
+            case let path where path.hasPrefix("/projects/7/repository/commits/"):
+                return try InMemoryGitLab.json(["id": merged, "parent_ids": [targetParent, sourceParent]])
+            default: return try gitlab.unexpected(call)
+            }
+        }
+        let glab = gitlab.service(host: host, username: "me")
+        settings.glabPath = glab.glabPath
         let id = UUID()
         let url = try #require(URL(string: "https://\(host)/team/repo/-/merge_requests/11"))
         settings.assistantHandoffs = [.init(id: id,
@@ -721,7 +718,7 @@ import Testing
         })
         let retry: AssistantAutomationRunner.Handoff
         do {
-            retry = try await AssistantAutomationRunner.retry(id, settings: settings, expectedHeadSHA: source, jobCoordinator: coordinator)
+            retry = try await AssistantAutomationRunner.retry(id, settings: settings, expectedHeadSHA: source, jobCoordinator: coordinator, glab: glab)
         } catch {
             guard mutation != nil else { throw error }
             #expect(error is CancellationError || error is GitLabPipelineEvidenceError)
@@ -792,48 +789,46 @@ import Testing
         "sha":"\(source)","source_project_id":7,"source_branch":"feature","target_project_id":7,
         "target_branch":"main","has_conflicts":false,"labels":[],"head_pipeline":{"id":100,"project_id":7,"status":"failed","sha":"\(merged)","ref":"refs/merge-requests/11/merge"}}
         """
-        let executable = directory.appending(path: "glab")
-        try Data("""
-        #!/bin/sh
-        set -eu
-        case "$*" in
-          'api /user '*)
-            count=0
-            if test -f "$0-user-count"; then count=$(cat "$0-user-count"); fi
-            count=$((count + 1))
-            printf '%s' "$count" > "$0-user-count"
-            if test "$count" -le '\(prelaunchFailures)'; then printf '503 temporarily unavailable' >&2; exit 1; fi
-            printf '%s' '{"id":1,"username":"me"}' ;;
-          'api /projects/7/jobs/200/retry '*'--method POST'*)
-            printf x >> "$0-posted"
-            printf '%s' '{"id":200,"status":"pending","allow_failure":false,"failure_reason":"runner_system_failure","pipeline":{"id":100}}' ;;
-          'api /projects/7/jobs/200 '*)
-            if test '\(draftOnJobRead)' = true; then touch "$0-job-read"; fi
-            printf '%s' '{"id":200,"status":"failed","allow_failure":false,"failure_reason":"runner_system_failure","pipeline":{"id":100}}' ;;
-          'api /projects/7/merge_requests/11/pipelines '*'--method POST'*)
-            printf x >> "$0-posted"
-            if test '\(ambiguousResponse)' = true; then printf 'network response lost' >&2; exit 1; fi
-            printf '%s' '{"id":101,"project_id":7,"status":"pending","sha":"\(currentMerged)","ref":"refs/merge-requests/11/merge"}' ;;
-          'api /projects/7/merge_requests/11 '*)
-            count=0
-            if test -f "$0-mr-count"; then count=$(cat "$0-mr-count"); fi
-            count=$((count + 1))
-            printf '%s' "$count" > "$0-mr-count"
-            if test "$count" -ge '\(draftAfterRead ?? Int.max)' || test -f "$0-job-read"; then
-              printf '%s' '\(request)' | sed 's/"draft":false/"draft":true/'
-            else printf '%s' '\(request)'; fi ;;
-          'api /projects/7/pipelines/100 '*)
-            if test '\(ownershipRace)' = true; then mkdir -p '\(directory.path)/claims/host-\(host)/project-7/mr-11/active'; fi
-            printf '%s' '{"id":100,"project_id":7,"status":"failed","sha":"\(merged)","ref":"refs/merge-requests/11/merge"}' ;;
-          'api /projects/7/pipelines/101 '*) printf '%s' '{"id":101,"project_id":7,"status":"pending","sha":"\(currentMerged)","ref":"refs/merge-requests/11/merge"}' ;;
-          'api /projects/7/repository/branches/feature '*) printf '%s' '{"commit":{"id":"\(source)"}}' ;;
-          'api /projects/7/repository/branches/main '*) printf '%s' '{"commit":{"id":"\(target)"}}' ;;
-          'api /projects/7/repository/commits/\(currentMerged) '*) printf '%s' '{"id":"\(currentMerged)","parent_ids":["\(createdTarget)","\(source)"]}' ;;
-          'api /projects/7/repository/commits/'*) printf '%s' '{"id":"\(merged)","parent_ids":["\(oldTarget)","\(source)"]}' ;;
-          *) printf '%s' 'Unexpected glab command' >&2; exit 20 ;;
-        esac
-        """.utf8).write(to: executable)
-        try FileManager.default.setAttributes([.posixPermissions: 0o700], ofItemAtPath: executable.path)
+        let gitlab = InMemoryGitLab()
+        defer { gitlab.close() }
+        var userReads = 0, mrReads = 0
+        gitlab.handler = { call in
+            switch call.endpoint {
+            case "/user":
+                userReads += 1
+                return userReads <= prelaunchFailures ? InMemoryGitLab.output(error: "503 temporarily unavailable", code: 1)
+                    : InMemoryGitLab.output(#"{"id":1,"username":"me"}"#)
+            case "/projects/7/jobs/200/retry":
+                #expect(call.method == "POST")
+                gitlab.append("posted", "x")
+                return try InMemoryGitLab.json(["id": 200, "status": "pending", "allow_failure": false, "failure_reason": "runner_system_failure", "pipeline": ["id": 100]])
+            case "/projects/7/jobs/200":
+                if draftOnJobRead { gitlab.write("job-read") }
+                return try InMemoryGitLab.json(["id": 200, "status": "failed", "allow_failure": false, "failure_reason": "runner_system_failure", "pipeline": ["id": 100]])
+            case "/projects/7/merge_requests/11/pipelines":
+                #expect(call.method == "POST")
+                gitlab.append("posted", "x")
+                if ambiguousResponse { return InMemoryGitLab.output(error: "network response lost", code: 1) }
+                return try InMemoryGitLab.json(["id": 101, "project_id": 7, "status": "pending", "sha": currentMerged, "ref": "refs/merge-requests/11/merge"])
+            case "/projects/7/merge_requests/11":
+                mrReads += 1
+                return InMemoryGitLab.output(mrReads >= (draftAfterRead ?? Int.max) || gitlab.has("job-read")
+                    ? request.replacingOccurrences(of: #""draft":false"#, with: #""draft":true"#) : request)
+            case "/projects/7/pipelines/100":
+                if ownershipRace {
+                    try FileManager.default.createDirectory(at: directory.appending(path: "claims/host-\(host)/project-7/mr-11/active"), withIntermediateDirectories: true)
+                }
+                return try InMemoryGitLab.json(["id": 100, "project_id": 7, "status": "failed", "sha": merged, "ref": "refs/merge-requests/11/merge"])
+            case "/projects/7/pipelines/101":
+                return try InMemoryGitLab.json(["id": 101, "project_id": 7, "status": "pending", "sha": currentMerged, "ref": "refs/merge-requests/11/merge"])
+            case "/projects/7/repository/branches/feature": return try InMemoryGitLab.json(["commit": ["id": source]])
+            case "/projects/7/repository/branches/main": return try InMemoryGitLab.json(["commit": ["id": target]])
+            case "/projects/7/repository/commits/\(currentMerged)": return try InMemoryGitLab.json(["id": currentMerged, "parent_ids": [createdTarget, source]])
+            case let path where path.hasPrefix("/projects/7/repository/commits/"):
+                return try InMemoryGitLab.json(["id": merged, "parent_ids": [oldTarget, source]])
+            default: return try gitlab.unexpected(call)
+            }
+        }
         let decoded = try JSONDecoder().decode(GitLabMergeRequest.self, from: Data(request.utf8))
         let event = MergeWorkflowEvent(kind: .pipelineFailure, mergeRequest: decoded, identity: "refresh-stale",
                                        context: "Failed CI", pipelineProjectID: 7, pipelineID: 100,
@@ -854,10 +849,7 @@ import Testing
                 settings.automation.workflowRules[.pipelineFailure].retryInfrastructureFailure = true
             }
             settings.workflowActivity = []
-            let glab = GlabService()
-            glab.glabPath = executable
-            glab.resolvedHost = host
-            glab.currentUsername = "me"
+            let glab = gitlab.service(host: host, username: "me")
             var retryDelays: [Duration] = []
             let automation = MergeWorkflowAutomation(settings: settings, glab: glab, notifications: NotificationService(),
                                                     detector: .init(directory: claims), retryWait: { retryDelays.append($0) })
@@ -885,7 +877,7 @@ import Testing
             if confirmed { #expect(!automation.isAutomaticallyProcessingPipeline(current)) }
             try? FileManager.default.removeItem(at: claims)
         }
-        let posted = try? String(contentsOf: URL(fileURLWithPath: executable.path + "-posted"), encoding: .utf8)
+        let posted = gitlab.files["posted"]
         #expect(posted == (ownershipRace || draftPaused ? nil : "x"))
         let attempts = defaults.data(forKey: "pipelineRefreshAttempts")
         let attemptCount = try attempts.map { (try JSONSerialization.jsonObject(with: $0) as? [Any])?.count ?? 0 } ?? 0

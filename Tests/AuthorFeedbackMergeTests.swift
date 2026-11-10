@@ -26,25 +26,21 @@ struct AuthorFeedbackMergeTests {
     @Test(arguments: ["missingProof", "eligible", "draft", "approval", "pipeline", "scope", "changedDiscussion"])
     func exactBlockedWorkProofLiftsOnlyItsOwnAutomaticMergeStop(_ gate: String) async throws {
         var settings: SettingsManager?
-        try await withFixture(configure: { settings = $0 }) { monitor, folder, _ in
+        try await withFixture(configure: { settings = $0 }) { monitor, gitlab, _ in
             let settings = try #require(settings)
-            let file = folder.appending(path: "request.json")
+            let file = "request.json"
             if gate == "draft" || gate == "pipeline" {
-                let raw = try String(contentsOf: file, encoding: .utf8)
+                let raw = gitlab.text(file)
                 try raw.replacingOccurrences(of: gate == "draft" ? #""draft":false"# : #""has_conflicts":false"#,
                     with: gate == "draft" ? #""draft":true"# : #""has_conflicts":false,"head_pipeline":{"id":8,"sha":"0123456789012345678901234567890123456789","status":"failed"}"#)
-                    .write(to: file, atomically: true, encoding: .utf8)
+                    .store(in: gitlab, as: file)
             }
             if gate == "approval" {
-                let executable = folder.appending(path: "glab")
-                try String(contentsOf: executable, encoding: .utf8)
-                    .replacingOccurrences(of: #""approvals_required":1,"approved":true"#, with: #""approvals_required":1,"approved":false"#)
-                    .write(to: executable, atomically: true, encoding: .utf8)
-                try FileManager.default.setAttributes([.posixPermissions: 0o700], ofItemAtPath: executable.path)
+                gitlab.write("approval-state.json", #"{"rules":[{"approvals_required":1,"approved":false}]}"#)
             }
-            let request = try JSONDecoder().decode(GitLabMergeRequest.self, from: Data(contentsOf: file))
+            let request = try JSONDecoder().decode(GitLabMergeRequest.self, from: gitlab.data(file))
             let discussions = try JSONDecoder().decode([GitLabMergeRequestDiscussion].self,
-                from: Data(contentsOf: folder.appending(path: "discussions.json")))
+                from: gitlab.data("discussions.json"))
             let job = AssistantAutomationRunner.Handoff(id: UUID(), key: .init(assistant: .codex,
                 work: .init(host: "gitlab.example.org", projectID: 1, iid: 2), username: "me", workspace: "", access: .gitLabRead),
                 title: "Feedback", prompt: "Complete assigned feedback", createdAt: Date(), allowsPush: false,
@@ -64,10 +60,10 @@ struct AuthorFeedbackMergeTests {
                     for: .init(host: job.key.work.host, username: "me", projectID: 1, iid: 2))
             }
             if gate == "changedDiscussion" {
-                let discussionFile = folder.appending(path: "discussions.json")
-                try String(contentsOf: discussionFile, encoding: .utf8)
+                let discussionFile = "discussions.json"
+                try gitlab.text(discussionFile)
                     .replacingOccurrences(of: "regression test.", with: "regression test and another requirement.")
-                    .write(to: discussionFile, atomically: true, encoding: .utf8)
+                    .store(in: gitlab, as: discussionFile)
             }
             monitor.authorFeedbackStatus = { _ in proof }
             monitor.authorFeedbackAllowsMerge = { _, _, _ in true }
@@ -76,47 +72,47 @@ struct AuthorFeedbackMergeTests {
 
             try await refresh(monitor)
 
-            #expect(FileManager.default.fileExists(atPath: folder.appending(path: "merged").path) == (gate == "eligible"))
+            #expect(gitlab.has("merged") == (gate == "eligible"))
             #expect(settings.assistantHandoffs[0].execution?.state == .blocked)
         }
     }
 
     @Test func actualAutomaticMergeIsReportedOnlyWhileTheWriteIsInFlight() async throws {
-        try await withFixture { monitor, folder, _ in
+        try await withFixture { monitor, gitlab, _ in
             let request = try JSONDecoder().decode(GitLabMergeRequest.self,
-                from: Data(contentsOf: folder.appending(path: "request.json")))
-            try Data("yes".utf8).write(to: folder.appending(path: "hold-merge"))
-            defer { try? Data("yes".utf8).write(to: folder.appending(path: "release-merge")) }
+                from: gitlab.data("request.json"))
+            try Data("yes".utf8).store(in: gitlab, as: "hold-merge")
+            defer { try? Data("yes".utf8).store(in: gitlab, as: "release-merge") }
             monitor.authorFeedbackAllowsMerge = { _, _, _ in true }
             #expect(!monitor.isMerging(request))
             monitor.refreshIfNeeded()
             let deadline = ContinuousClock.now + .seconds(5)
-            while !FileManager.default.fileExists(atPath: folder.appending(path: "merge-started").path),
+            while !gitlab.has("merge-started"),
                   monitor.isLoading, ContinuousClock.now < deadline {
                 try await Task.sleep(for: .milliseconds(20))
             }
             let duringWrite = monitor.isMerging(request)
-            try Data("yes".utf8).write(to: folder.appending(path: "release-merge"))
+            try Data("yes".utf8).store(in: gitlab, as: "release-merge")
             while monitor.isLoading, ContinuousClock.now < deadline { try await Task.sleep(for: .milliseconds(20)) }
-            #expect(FileManager.default.fileExists(atPath: folder.appending(path: "merged").path))
+            #expect(gitlab.has("merged"))
             #expect(duringWrite && !monitor.isMerging(request))
         }
     }
 
     @Test func advanceApprovalWithGeneralConditionCannotMergeWithoutSemanticProof() async throws {
-        try await withFixture { monitor, folder, _ in
+        try await withFixture { monitor, gitlab, _ in
             monitor.refreshIfNeeded()
             let deadline = ContinuousClock.now + .seconds(5)
             while monitor.isLoading, ContinuousClock.now < deadline { try await Task.sleep(for: .milliseconds(20)) }
             try #require(!monitor.isLoading)
             #expect(!monitor.hasError)
-            #expect(!FileManager.default.fileExists(atPath: folder.appending(path: "merged").path))
+            #expect(!gitlab.has("merged"))
             #expect(monitor.requests.count == 1)
         }
     }
 
     @Test func semanticProofCanAuthorizeMergeOfTheVerifiedConversation() async throws {
-        try await withFixture { monitor, folder, _ in
+        try await withFixture { monitor, gitlab, _ in
             var verified = false
             monitor.authorFeedbackAllowsMerge = { request, discussions, author in
                 verified = request.iid == 2 && author == 3 && discussions.flatMap(\.notes).map(\.id) == [10]
@@ -125,16 +121,16 @@ struct AuthorFeedbackMergeTests {
             try await refresh(monitor)
             #expect(verified)
             #expect(!monitor.hasError)
-            #expect(FileManager.default.fileExists(atPath: folder.appending(path: "merged").path))
+            #expect(gitlab.has("merged"))
         }
     }
 
     @Test func rejectedSemanticProofKeepsTheMRPending() async throws {
-        try await withFixture { monitor, folder, _ in
+        try await withFixture { monitor, gitlab, _ in
             monitor.authorFeedbackAllowsMerge = { _, _, _ in false }
             try await refresh(monitor)
             #expect(!monitor.hasError)
-            #expect(!FileManager.default.fileExists(atPath: folder.appending(path: "merged").path))
+            #expect(!gitlab.has("merged"))
             #expect(monitor.requests.count == 1)
         }
     }
@@ -143,37 +139,37 @@ struct AuthorFeedbackMergeTests {
 
     @Test(arguments: Drift.allCases)
     func finalMergeRecheckRejectsChangesAfterTheSemanticVerdict(_ drift: Drift) async throws {
-        try await withFixture { monitor, folder, _ in
+        try await withFixture { monitor, gitlab, _ in
             var changed = false
             monitor.authorFeedbackAllowsMerge = { _, _, _ in
                 do {
                     switch drift {
                     case .newComment:
-                        let file = folder.appending(path: "discussions.json")
-                        let body = try String(contentsOf: file, encoding: .utf8)
+                        let file = "discussions.json"
+                        let body = gitlab.text(file)
                         let extra = #",{"id":"new-condition","notes":[{"id":11,"author":{"id":7,"username":"reviewer"},"body":"Please also document the fallback.","system":false,"resolvable":false}]}]"#
-                        try (String(body.dropLast()) + extra).write(to: file, atomically: true, encoding: .utf8)
+                        try (String(body.dropLast()) + extra).store(in: gitlab, as: file)
                     case .editedComment:
-                        let file = folder.appending(path: "discussions.json")
-                        let body = try String(contentsOf: file, encoding: .utf8)
+                        let file = "discussions.json"
+                        let body = gitlab.text(file)
                         try body.replacingOccurrences(of: "regression test.", with: "regression test and documentation.")
-                            .write(to: file, atomically: true, encoding: .utf8)
+                            .store(in: gitlab, as: file)
                     case .unpublishedReply:
                         try #"[{"id":20,"author_id":3,"note":"Pending response"}]"#
-                            .write(to: folder.appending(path: "drafts.json"), atomically: true, encoding: .utf8)
+                            .store(in: gitlab, as: "drafts.json")
                     case .changedHead:
-                        let file = folder.appending(path: "request.json")
-                        let body = try String(contentsOf: file, encoding: .utf8)
+                        let file = "request.json"
+                        let body = gitlab.text(file)
                         try body.replacingOccurrences(of: "0123456789012345678901234567890123456789",
                                                      with: "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa")
-                            .write(to: file, atomically: true, encoding: .utf8)
+                            .store(in: gitlab, as: file)
                     case .changedTitle, .changedDescription:
-                        let file = folder.appending(path: "request.json")
-                        let body = try String(contentsOf: file, encoding: .utf8)
+                        let file = "request.json"
+                        let body = gitlab.text(file)
                         try body.replacingOccurrences(of: "\"title\":\"Feature\"",
                             with: drift == .changedTitle ? "\"title\":\"Changed acceptance criteria\""
                                 : "\"title\":\"Feature\",\"description\":\"Changed acceptance criteria\"")
-                            .write(to: file, atomically: true, encoding: .utf8)
+                            .store(in: gitlab, as: file)
                     }
                     changed = true
                 } catch { Issue.record(error) }
@@ -182,23 +178,23 @@ struct AuthorFeedbackMergeTests {
             try await refresh(monitor)
             #expect(changed)
             #expect(!monitor.hasError)
-            #expect(!FileManager.default.fileExists(atPath: folder.appending(path: "merged").path))
+            #expect(!gitlab.has("merged"))
             #expect(monitor.requests.count == 1)
         }
     }
 
     @Test func finalMergeRejectsDescriptionEditedDuringFinalAuthentication() async throws {
-        try await withFixture { monitor, folder, _ in
+        try await withFixture { monitor, gitlab, _ in
             monitor.authorFeedbackAllowsMerge = { _, _, _ in
-                do { try Data("yes".utf8).write(to: folder.appending(path: "edit-description-during-auth")) }
+                do { try Data("yes".utf8).store(in: gitlab, as: "edit-description-during-auth") }
                 catch { Issue.record(error) }
                 return true
             }
 
             try await refresh(monitor)
 
-            #expect(FileManager.default.fileExists(atPath: folder.appending(path: "description-edited-during-auth").path))
-            #expect(!FileManager.default.fileExists(atPath: folder.appending(path: "merged").path))
+            #expect(gitlab.has("description-edited-during-auth"))
+            #expect(!gitlab.has("merged"))
             #expect(monitor.requests.count == 1)
         }
     }
@@ -210,38 +206,38 @@ struct AuthorFeedbackMergeTests {
         try await withFixture(configure: { settings in
             state = settings
             settings.autoMergeOptOuts.insert(target)
-        }) { monitor, folder, _ in
+        }) { monitor, gitlab, _ in
             let settings = try #require(state)
             monitor.authorFeedbackAllowsMerge = { _, _, _ in true }
             try await refresh(monitor)
-            #expect(!FileManager.default.fileExists(atPath: folder.appending(path: "merged").path))
+            #expect(!gitlab.has("merged"))
             #expect(monitor.requests.first?.mayAutoMerge == true)
             settings.autoMergeOptOuts.remove(target)
             if gate == "global" { settings.automation.autoMergeEnabled = false }
             if gate == "scope" { settings.automation.scope.setManualChoice(.paused, for: target) }
             if gate == "discussion" { monitor.authorFeedbackAllowsMerge = { _, _, _ in false } }
             if gate == "pipeline" {
-                let file = folder.appending(path: "request.json")
-                try String(contentsOf: file, encoding: .utf8)
+                let file = "request.json"
+                try gitlab.text(file)
                     .replacingOccurrences(of: #""has_conflicts":false"#,
                         with: #""has_conflicts":false,"head_pipeline":{"id":8,"status":"running"}"#)
-                    .write(to: file, atomically: true, encoding: .utf8)
+                    .store(in: gitlab, as: file)
             }
             settings.save()
             await monitor.resumeAutomaticMerge(for: target)
-            #expect(FileManager.default.fileExists(atPath: folder.appending(path: "merged").path) == (gate == "ready"))
+            #expect(gitlab.has("merged") == (gate == "ready"))
         }
     }
 
     @Test func mergeOptOutDuringFinalSemanticReadPreventsTheAutomaticWrite() async throws {
         var state: SettingsManager?
-        try await withFixture(configure: { state = $0 }) { monitor, folder, _ in
+        try await withFixture(configure: { state = $0 }) { monitor, gitlab, _ in
             monitor.authorFeedbackAllowsMerge = { _, _, _ in
                 state?.autoMergeOptOuts.insert(.init(host: "gitlab.example.org", username: "me", projectID: 1, iid: 2))
                 return true
             }
             try await refresh(monitor)
-            #expect(!FileManager.default.fileExists(atPath: folder.appending(path: "merged").path))
+            #expect(!gitlab.has("merged"))
         }
     }
 
@@ -253,52 +249,43 @@ struct AuthorFeedbackMergeTests {
     }
 
     private func withFixture(configure: (SettingsManager) -> Void = { _ in },
-                             _ body: (AuthoredMergeRequestMonitor, URL, GlabService) async throws -> Void) async throws {
-        let folder = FileManager.default.temporaryDirectory.appending(path: UUID().uuidString)
-        try FileManager.default.createDirectory(at: folder, withIntermediateDirectories: false)
+                             _ body: (AuthoredMergeRequestMonitor, InMemoryGitLab, GlabService) async throws -> Void) async throws {
+        let gitlab = InMemoryGitLab()
         let suite = "AuthorFeedbackMergeTests.\(UUID())"
         let defaults = try #require(UserDefaults(suiteName: suite))
-        defer { try? FileManager.default.removeItem(at: folder); defaults.removePersistentDomain(forName: suite) }
+        defer { gitlab.close(); defaults.removePersistentDomain(forName: suite) }
         let request = #"{"project_id":1,"iid":2,"author":{"id":3,"username":"me","name":"Me"},"labels":[],"title":"Feature","web_url":"https://gitlab.example.org/g/p/-/merge_requests/2","state":"opened","draft":false,"sha":"0123456789012345678901234567890123456789","source_branch":"feature","target_branch":"main","detailed_merge_status":"mergeable","has_conflicts":false,"blocking_discussions_resolved":true,"user":{"can_merge":true}}"#
-        try Data(request.utf8).write(to: folder.appending(path: "request.json"))
-        let discussions = #"[{"id":"general","notes":[{"id":10,"author":{"id":7,"username":"reviewer"},"body":"Approved in advance, but please add the missing regression test.","system":false,"resolvable":false}]}]"#
-        try Data(discussions.utf8).write(to: folder.appending(path: "discussions.json"))
-        try Data("[]".utf8).write(to: folder.appending(path: "drafts.json"))
-        let executable = folder.appending(path: "glab")
-        try Data("""
-        #!/bin/sh
-        set -eu
-        cd "$(dirname "$0")"
-        case "$2" in
-          /user)
-            if [ -f edit-description-during-auth ]; then
-                rm edit-description-during-auth
-                /usr/bin/python3 -c 'import json; p="request.json"; a=json.load(open(p)); a["description"]="Changed acceptance criteria during authentication"; json.dump(a,open(p,"w"))'
-                touch description-edited-during-auth
-            fi
-            echo '{"id":3,"username":"me"}' ;;
-          /merge_requests\\?*) printf '['; cat request.json; printf ']' ;;
-          /projects/1/merge_requests/2) cat request.json ;;
-          */approval_state) echo '{"rules":[{"approvals_required":1,"approved":true}]}' ;;
-          */discussions\\?*) cat discussions.json ;;
-          */draft_notes\\?*) cat drafts.json ;;
-          /projects/1) echo '{"only_allow_merge_if_all_discussions_are_resolved":true,"reset_approvals_on_push":true}' ;;
-          */merge)
-            touch merge-started
-            if [ -e hold-merge ]; then
-                attempts=0
-                while [ ! -e release-merge ] && [ "$attempts" -lt 200 ]; do
-                    /bin/sleep 0.02
-                    attempts=$((attempts + 1))
-                done
-            fi
-            touch merged; echo '{"project_id":1,"iid":2,"state":"merged"}' ;;
-          *) exit 100 ;;
-        esac
-        """.utf8).write(to: executable)
-        try FileManager.default.setAttributes([.posixPermissions: 0o700], ofItemAtPath: executable.path)
-        let glab = GlabService()
-        glab.glabPath = executable; glab.resolvedHost = "gitlab.example.org"; glab.currentUsername = "me"
+        gitlab.write("request.json", request)
+        gitlab.write("discussions.json", #"[{"id":"general","notes":[{"id":10,"author":{"id":7,"username":"reviewer"},"body":"Approved in advance, but please add the missing regression test.","system":false,"resolvable":false}]}]"#)
+        gitlab.write("drafts.json", "[]")
+        gitlab.write("approval-state.json", #"{"rules":[{"approvals_required":1,"approved":true}]}"#)
+        gitlab.handler = { call in
+            switch call.endpoint {
+            case "/user":
+                if gitlab.has("edit-description-during-auth") {
+                    gitlab.remove("edit-description-during-auth")
+                    var object = try #require(JSONSerialization.jsonObject(with: gitlab.data("request.json")) as? [String: Any])
+                    object["description"] = "Changed acceptance criteria during authentication"
+                    try JSONSerialization.data(withJSONObject: object).store(in: gitlab, as: "request.json")
+                    gitlab.write("description-edited-during-auth")
+                }
+                return InMemoryGitLab.output(#"{"id":3,"username":"me"}"#)
+            case let path where path.hasPrefix("/merge_requests?"):
+                return InMemoryGitLab.output("[" + gitlab.text("request.json") + "]")
+            case "/projects/1/merge_requests/2": return try gitlab.response("request.json")
+            case let path where path.hasSuffix("/approval_state"): return try gitlab.response("approval-state.json")
+            case let path where path.contains("/discussions?"): return try gitlab.response("discussions.json")
+            case let path where path.contains("/draft_notes?"): return try gitlab.response("drafts.json")
+            case "/projects/1": return InMemoryGitLab.output(#"{"only_allow_merge_if_all_discussions_are_resolved":true,"reset_approvals_on_push":true}"#)
+            case let path where path.hasSuffix("/merge"):
+                gitlab.write("merge-started")
+                try await gitlab.pause(ifPresent: "hold-merge", entered: "merge-started", until: "release-merge")
+                gitlab.write("merged")
+                return InMemoryGitLab.output(#"{"project_id":1,"iid":2,"state":"merged"}"#)
+            default: return try gitlab.unexpected(call)
+            }
+        }
+        let glab = gitlab.service(host: "gitlab.example.org", username: "me")
         let settings = SettingsManager(defaults: defaults)
         settings.onboardingCompleted = true; settings.notificationsEnabled = false
         settings.automation.autoMergeEnabled = true; settings.automation.autoMergeProjects = "g/p"
@@ -307,6 +294,6 @@ struct AuthorFeedbackMergeTests {
         let listed = try await glab.fetchAuthoredMergeRequests(host: "gitlab.example.org")
         try #require(listed.count == 1)
         _ = try await glab.fetchMergeRequest(projectID: 1, iid: 2, host: "gitlab.example.org")
-        try await body(monitor, folder, glab)
+        try await body(monitor, gitlab, glab)
     }
 }

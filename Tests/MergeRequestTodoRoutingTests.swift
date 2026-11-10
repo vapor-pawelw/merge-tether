@@ -11,7 +11,7 @@ import Testing
         f.settings.mrActionIntents[0].jobID = nil
         f.settings.mrActionIntents[0].state = .pending
         let discussions = try JSONDecoder().decode([GitLabMergeRequestDiscussion].self,
-            from: Data(contentsOf: f.root.appending(path: "discussions")))
+            from: f.gitlab.data("discussions"))
         let note = try #require(discussions.first?.notes.first)
         let decision = IgnoredFeedbackSuggestion(id: UUID(), target: target, sourceNoteID: note.id!, sourceAuthorID: note.author!.id,
             sourceBody: note.body!, sourceRevision: UserAttentionSnapshot.digest("\(note.author!.id)\n" + note.body!),
@@ -30,7 +30,7 @@ import Testing
 
         #expect((f.settings.mrActionIntents[0].state == .completed) == (scenario == "ignoredOnly"))
         #expect(f.settings.assistantHandoffs[0].execution?.state == .succeeded)
-        #expect(!FileManager.default.fileExists(atPath: f.root.appending(path: "acks").path))
+        #expect(!f.gitlab.has("acks"))
     }
 
     @Test(arguments: ["exact", "missingCallback", "missingProof", "wrongRun", "changedBlocker", "changedBlockerDuringRead", "changedContext", "changedHead", "changedDiscussion", "unverifiedTool"])
@@ -42,8 +42,8 @@ import Testing
             blocker: scenario == "unverifiedTool" ? "A required current verification tool is unavailable." : "Confirm a dependency before a later deployment.")
         f.settings.mrActionIntents[0].state = .failed
         let job = try #require(f.settings.assistantHandoffs.first)
-        let request = try JSONDecoder().decode(GitLabMergeRequest.self, from: Data(contentsOf: f.root.appending(path: "mr")))
-        let discussions = try JSONDecoder().decode([GitLabMergeRequestDiscussion].self, from: Data(contentsOf: f.root.appending(path: "discussions")))
+        let request = try JSONDecoder().decode(GitLabMergeRequest.self, from: f.gitlab.data("mr"))
+        let discussions = try JSONDecoder().decode([GitLabMergeRequestDiscussion].self, from: f.gitlab.data("discussions"))
         var proof = AuthorFeedbackStatus(head: request.sha!, fingerprint: ReviewVerdict.fingerprint(discussions)!,
             semanticContextFingerprint: request.semanticContextFingerprint, phase: .complete, addressedNoteIDs: [42])
         if !["missingProof", "unverifiedTool"].contains(scenario) {
@@ -54,15 +54,15 @@ import Testing
         if scenario == "changedBlocker" { f.settings.assistantHandoffs[0].execution?.blocker = "A newly failed required verification step." }
         if scenario == "changedContext" || scenario == "changedHead" {
             let file = f.root.appending(path: "mr")
-            let value = try String(contentsOf: file, encoding: .utf8)
+            let value = f.gitlab.text(file.lastPathComponent)
             try value.replacingOccurrences(of: scenario == "changedHead" ? request.sha! : "Example MR",
                 with: scenario == "changedHead" ? String(repeating: "b", count: 40) : "Changed requirement")
-                .write(to: file, atomically: true, encoding: .utf8)
+                .store(in: f.gitlab, as: file.lastPathComponent)
         }
         if scenario == "changedDiscussion" {
             let file = f.root.appending(path: "discussions")
-            try String(contentsOf: file, encoding: .utf8).replacingOccurrences(of: "Please fix this.", with: "Please also correct another case.")
-                .write(to: file, atomically: true, encoding: .utf8)
+            try f.gitlab.text(file.lastPathComponent).replacingOccurrences(of: "Please fix this.", with: "Please also correct another case.")
+                .store(in: f.gitlab, as: file.lastPathComponent)
         }
         let router = MergeRequestTodoRouter(settings: f.settings, glab: f.glab, canAutomate: { false })
         router.followUpAssessment = { _, _ in
@@ -81,7 +81,7 @@ import Testing
 
         #expect((f.settings.mrActionIntents[0].state == .completed) == (scenario == "exact"))
         #expect(f.settings.assistantHandoffs[0].execution?.state == .blocked)
-        #expect(!FileManager.default.fileExists(atPath: f.root.appending(path: "acks").path))
+        #expect(!f.gitlab.has("acks"))
     }
 
     @Test(arguments: [false, true], [false, true])
@@ -90,12 +90,12 @@ import Testing
         f.settings.automation.reviewRequested.isEnabled = true
         f.settings.automation.authorFeedback.isEnabled = true
         let file = f.root.appending(path: "mr")
-        let ready = try String(contentsOf: file, encoding: .utf8)
+        let ready = f.gitlab.text(file.lastPathComponent)
         try ready.replacingOccurrences(of: #""draft":false"#, with: #""draft":true"#)
-            .write(to: file, atomically: true, encoding: .utf8)
+            .store(in: f.gitlab, as: file.lastPathComponent)
         if owned {
             try #"[{"id":"feedback","notes":[{"id":42,"author":{"id":2,"username":"other"},"system":false,"resolvable":true,"resolved":false,"body":"Please fix this behavior."}]}]"#
-                .write(to: f.root.appending(path: "discussions"), atomically: true, encoding: .utf8)
+                .store(in: f.gitlab, as: "discussions")
         }
         var launches = 0
         let router = MergeRequestTodoRouter(settings: f.settings, glab: f.glab, canAutomate: { true }, launcher: { intent, manual in
@@ -114,7 +114,7 @@ import Testing
 
         #expect(launches == (forceOff ? 0 : 1))
         #expect(f.settings.mrActionIntents.first?.state == (forceOff ? .pending : .running))
-        let current = try JSONDecoder().decode(GitLabMergeRequest.self, from: Data(contentsOf: file))
+        let current = try JSONDecoder().decode(GitLabMergeRequest.self, from: f.gitlab.data(file.lastPathComponent))
         #expect(current.draft == true)
     }
 
@@ -132,13 +132,14 @@ import Testing
         func release() { released = true; continuation?.resume(returning: false); continuation = nil }
     }
 
-    private struct Fixture {
+    @MainActor private struct Fixture {
         let settings: SettingsManager
         let defaults: UserDefaults
         let suite: String
         let root: URL
         let glab: GlabService
-        func cleanup() { defaults.removePersistentDomain(forName: suite); try? FileManager.default.removeItem(at: root) }
+        let gitlab: InMemoryGitLab
+        func cleanup() { gitlab.close(); defaults.removePersistentDomain(forName: suite); try? FileManager.default.removeItem(at: root) }
     }
 
     private func fixture(owned: Bool = false, acknowledgementFails: Bool = false) throws -> Fixture {
@@ -147,36 +148,31 @@ import Testing
         let settings = SettingsManager(defaults: defaults)
         let root = FileManager.default.temporaryDirectory.appending(path: "MRTodoRoutingTests-\(UUID())")
         try FileManager.default.createDirectory(at: root, withIntermediateDirectories: true)
-        let executable = root.appending(path: "glab")
-        let script = """
-        #!/bin/sh
-        root="${0%/*}"
-        if [ "$2" = --method ]; then
-          printf '%s\\n' "$4" >> "$root/acks"
-          [ -f "$root/fail-ack" ] && exit 1
-          printf '{}'; exit 0
-        fi
-        case "$2" in
-          /user) printf '%s' '{"id":1,"username":"me"}' ;;
-          */discussions*) cat "$root/discussions" ;;
-          */draft_notes*) cat "$root/drafts" ;;
-          /projects/7/pipelines/*) /usr/bin/python3 -c 'import json,sys; p=json.load(open(sys.argv[1]))["head_pipeline"]; p.setdefault("project_id",7); p.setdefault("ref","feature"); print(json.dumps(p))' "$root/mr" ;;
-          /projects/7/repository/branches/feature) /usr/bin/python3 -c 'import json,sys; print(json.dumps({"commit":{"id":json.load(open(sys.argv[1]))["sha"]}}))' "$root/mr" ;;
-          */merge_requests/11)
-            if [ -f "$root/pause-mr" ]; then
-              touch "$root/mr-entered"
-              attempts=0
-              while [ ! -f "$root/release-mr" ] && [ "$attempts" -lt 500 ]; do
-                sleep 0.01
-                attempts=$((attempts + 1))
-              done
-            fi
-            cat "$root/mr" ;;
-          *) exit 2 ;;
-        esac
-        """
-        try script.write(to: executable, atomically: true, encoding: .utf8)
-        try FileManager.default.setAttributes([.posixPermissions: 0o700], ofItemAtPath: executable.path)
+        let gitlab = InMemoryGitLab()
+        gitlab.handler = { request in
+            if request.arguments[1] == "--method" {
+                gitlab.append("acks", request.arguments[3] + "\n")
+                return gitlab.has("fail-ack") ? InMemoryGitLab.output(code: 1) : InMemoryGitLab.output("{}")
+            }
+            switch request.endpoint {
+            case "/user": return InMemoryGitLab.output(#"{"id":1,"username":"me"}"#)
+            case let path where path.contains("/discussions"): return try gitlab.response("discussions")
+            case let path where path.contains("/draft_notes"): return try gitlab.response("drafts")
+            case let path where path.hasPrefix("/projects/7/pipelines/"):
+                let object = try #require(JSONSerialization.jsonObject(with: gitlab.data("mr")) as? [String: Any])
+                var pipeline = try #require(object["head_pipeline"] as? [String: Any])
+                if pipeline["project_id"] == nil { pipeline["project_id"] = 7 }
+                if pipeline["ref"] == nil { pipeline["ref"] = "feature" }
+                return .init(stdout: try JSONSerialization.data(withJSONObject: pipeline), stderr: "", exitCode: 0)
+            case "/projects/7/repository/branches/feature":
+                let object = try #require(JSONSerialization.jsonObject(with: gitlab.data("mr")) as? [String: Any])
+                return .init(stdout: try JSONSerialization.data(withJSONObject: ["commit": ["id": object["sha"]!]]), stderr: "", exitCode: 0)
+            case let path where path.hasSuffix("/merge_requests/11"):
+                try await gitlab.pause(ifPresent: "pause-mr", entered: "mr-entered", until: "release-mr")
+                return try gitlab.response("mr")
+            default: return try gitlab.unexpected(request)
+            }
+        }
         let author = owned ? "me" : "other"
         let id = owned ? 1 : 2
         let request = """
@@ -185,19 +181,18 @@ import Testing
          "state":"opened","sha":"\(String(repeating: "a", count: 40))","source_project_id":7,"target_project_id":7,
          "source_branch":"feature","target_branch":"main","draft":false,"labels":[],"has_conflicts":false}
         """
-        try request.write(to: root.appending(path: "mr"), atomically: true, encoding: .utf8)
-        try "[]".write(to: root.appending(path: "discussions"), atomically: true, encoding: .utf8)
-        try "[]".write(to: root.appending(path: "drafts"), atomically: true, encoding: .utf8)
-        if acknowledgementFails { try Data().write(to: root.appending(path: "fail-ack")) }
-        let glab = GlabService()
-        glab.glabPath = executable; glab.resolvedHost = "gitlab.example.test"; glab.currentUsername = "me"
-        return .init(settings: settings, defaults: defaults, suite: suite, root: root, glab: glab)
+        try request.store(in: gitlab, as: "mr")
+        try "[]".store(in: gitlab, as: "discussions")
+        try "[]".store(in: gitlab, as: "drafts")
+        if acknowledgementFails { try Data().store(in: gitlab, as: "fail-ack") }
+        let glab = gitlab.service(host: "gitlab.example.test", username: "me")
+        return .init(settings: settings, defaults: defaults, suite: suite, root: root, glab: glab, gitlab: gitlab)
     }
 
     private var target: MRAutomationScope.Target { .init(host: "gitlab.example.test", username: "me", projectID: 7, iid: 11) }
 
     private func completedFollowUp(_ fixture: Fixture, withReply: Bool = true) throws {
-        let request = try JSONDecoder().decode(GitLabMergeRequest.self, from: Data(contentsOf: fixture.root.appending(path: "mr")))
+        let request = try JSONDecoder().decode(GitLabMergeRequest.self, from: fixture.gitlab.data("mr"))
         let jobID = UUID()
         fixture.settings.assistantHandoffs.append(.init(id: jobID,
             key: .init(assistant: .codex, work: .init(host: target.host, projectID: 7, iid: 11),
@@ -209,7 +204,7 @@ import Testing
             todoIDs: [], noteIDs: [42], sourceEvents: [], request: request, headSHA: request.sha!, jobID: jobID, updatedAt: Date()))
         let reply = withReply ? #",{"id":43,"author":{"id":1,"username":"me"},"system":false,"body":"Fixed with source and test evidence."}"# : ""
         try (#"[{"id":"d","notes":[{"id":42,"author":{"id":2,"username":"other"},"system":false,"resolvable":true,"resolved":false,"body":"Please fix this."}"#
-            + reply + "]}]").write(to: fixture.root.appending(path: "discussions"), atomically: true, encoding: .utf8)
+            + reply + "]}]").store(in: fixture.gitlab, as: "discussions")
     }
 
     @Test func unboundDraftFollowUpReconcilesCurrentEvidenceWithoutRerunningWork() async throws {
@@ -218,10 +213,10 @@ import Testing
         f.settings.mrActionIntents[0].jobID = nil
         f.settings.mrActionIntents[0].state = .pending
         let file = f.root.appending(path: "mr")
-        let text = try String(contentsOf: file, encoding: .utf8)
+        let text = f.gitlab.text(file.lastPathComponent)
         try text.replacingOccurrences(of: #""draft":false"#, with: #""draft":true"#)
             .replacingOccurrences(of: String(repeating: "a", count: 40), with: String(repeating: "b", count: 40))
-            .write(to: file, atomically: true, encoding: .utf8)
+            .store(in: f.gitlab, as: file.lastPathComponent)
         var launches = 0
         let router = MergeRequestTodoRouter(settings: f.settings, glab: f.glab, canAutomate: { true }, launcher: { _, _ in
             launches += 1; return UUID()
@@ -232,7 +227,7 @@ import Testing
         #expect(f.settings.mrActionIntents[0].jobID == nil)
         #expect(f.settings.assistantHandoffs.count == 1)
         #expect(launches == 0)
-        #expect(!FileManager.default.fileExists(atPath: f.root.appending(path: "acks").path))
+        #expect(!f.gitlab.has("acks"))
     }
 
     @Test func unboundFollowUpKeepsPendingWhenAddressedConcernStillNeedsAReply() async throws {
@@ -287,7 +282,7 @@ import Testing
         #expect(f.settings.assistantHandoffs[0].execution?.error == "Original stopped attempt")
         #expect(f.settings.automationEvents.contains { $0.state == .failed && $0.message == "Original stopped attempt" })
         #expect(launches == 0 && f.settings.assistantHandoffs.count == 1)
-        #expect(!FileManager.default.fileExists(atPath: f.root.appending(path: "acks").path))
+        #expect(!f.gitlab.has("acks"))
     }
 
     @Test func stoppedFollowUpDoesNotCompleteWhileUnpublishedRemoteWorkRemains() async throws {
@@ -296,7 +291,7 @@ import Testing
         f.settings.assistantHandoffs[0].execution = .init(state: .interrupted, error: "Stopped before completion")
         f.settings.mrActionIntents[0].state = .failed
         try #"[{"id":99,"author_id":1,"note":"An unpublished reply needs verification."}]"#
-            .write(to: f.root.appending(path: "drafts"), atomically: true, encoding: .utf8)
+            .store(in: f.gitlab, as: "drafts")
         let router = MergeRequestTodoRouter(settings: f.settings, glab: f.glab, canAutomate: { false })
         router.followUpAssessment = { _, _ in .init(notes: [
             .init(noteID: 42, state: .addressed, reason: "The source and existing reply are addressed.")
@@ -304,8 +299,8 @@ import Testing
         await router.refreshCompletionEvidence(host: target.host, username: target.username)
         #expect(f.settings.mrActionIntents[0].state == .failed)
         #expect(f.settings.assistantHandoffs[0].execution?.state == .interrupted)
-        #expect(try String(contentsOf: f.root.appending(path: "drafts"), encoding: .utf8).contains("unpublished reply"))
-        #expect(!FileManager.default.fileExists(atPath: f.root.appending(path: "acks").path))
+        #expect(f.gitlab.text("drafts").contains("unpublished reply"))
+        #expect(!f.gitlab.has("acks"))
     }
 
     @Test func unrelatedBlockingFeedbackDoesNotKeepAnAddressedSelectedIntentFailed() async throws {
@@ -315,9 +310,9 @@ import Testing
         f.settings.mrActionIntents[0].state = .failed
         f.settings.mrActionIntents[0].error = "Earlier attempt"
         let file = f.root.appending(path: "discussions")
-        let text = try String(contentsOf: file, encoding: .utf8)
+        let text = f.gitlab.text(file.lastPathComponent)
         try text.replacingOccurrences(of: "]}]", with: #",{"id":44,"author":{"id":2,"username":"other"},"system":false,"resolvable":false,"body":"A separate concern remains."}]}]"#)
-            .write(to: file, atomically: true, encoding: .utf8)
+            .store(in: f.gitlab, as: file.lastPathComponent)
         let router = MergeRequestTodoRouter(settings: f.settings, glab: f.glab, canAutomate: { false })
         router.followUpAssessment = { _, _ in .init(notes: [
             .init(noteID: 42, state: .addressed, reason: "Selected concern and its published reply verified."),
@@ -325,17 +320,17 @@ import Testing
         ]) }
         await router.refreshCompletionEvidence(host: target.host, username: target.username)
         #expect(f.settings.mrActionIntents[0].state == .completed)
-        #expect(try String(contentsOf: file, encoding: .utf8).contains("A separate concern remains."))
-        #expect(!FileManager.default.fileExists(atPath: f.root.appending(path: "acks").path))
+        #expect(f.gitlab.text(file.lastPathComponent).contains("A separate concern remains."))
+        #expect(!f.gitlab.has("acks"))
     }
 
     @Test func draftReviewRequestIsAdoptedThenStartsOnlyAfterReady() async throws {
         let f = try fixture(); defer { f.cleanup() }
         f.settings.automation.reviewRequested.isEnabled = true
         let file = f.root.appending(path: "mr")
-        let ready = try String(contentsOf: file, encoding: .utf8)
+        let ready = f.gitlab.text(file.lastPathComponent)
         try ready.replacingOccurrences(of: #""draft":false"#, with: #""draft":true"#)
-            .write(to: file, atomically: true, encoding: .utf8)
+            .store(in: f.gitlab, as: file.lastPathComponent)
         var launches = 0
         let router = MergeRequestTodoRouter(settings: f.settings, glab: f.glab, canAutomate: { true }, launcher: { _, _ in
             launches += 1; return UUID()
@@ -344,7 +339,7 @@ import Testing
         #expect(f.settings.automation.scope[target] == .active)
         #expect(f.settings.mrActionIntents.first?.state == .pending)
         #expect(launches == 0)
-        try ready.write(to: file, atomically: true, encoding: .utf8)
+        try ready.store(in: f.gitlab, as: file.lastPathComponent)
         _ = await router.process([], host: target.host, username: target.username, managed: [target])
         #expect(launches == 1)
         #expect(f.settings.mrActionIntents.first?.state == .running)
@@ -353,11 +348,11 @@ import Testing
     @Test func pausedDraftMentionRemainsUnreadWithoutPaidSemanticAssessment() async throws {
         let f = try fixture(); defer { f.cleanup() }
         let file = f.root.appending(path: "mr")
-        let text = try String(contentsOf: file, encoding: .utf8)
+        let text = f.gitlab.text(file.lastPathComponent)
         try text.replacingOccurrences(of: #""draft":false"#, with: #""draft":true"#)
-            .write(to: file, atomically: true, encoding: .utf8)
+            .store(in: f.gitlab, as: file.lastPathComponent)
         try #"[{"id":"d","notes":[{"id":42,"author":{"id":2,"username":"other"},"system":false,"body":"@me informational context."}]}]"#
-            .write(to: f.root.appending(path: "discussions"), atomically: true, encoding: .utf8)
+            .store(in: f.gitlab, as: "discussions")
         var assessments = 0
         let router = MergeRequestTodoRouter(settings: f.settings, glab: f.glab, canAutomate: { true })
         router.mentionDisposition = { _, _, _, _ in assessments += 1; return .informational }
@@ -365,7 +360,7 @@ import Testing
                                      username: target.username, managed: []).isEmpty)
         #expect(assessments == 0)
         #expect(f.settings.mrActionIntents.isEmpty)
-        #expect(!FileManager.default.fileExists(atPath: f.root.appending(path: "acks").path))
+        #expect(!f.gitlab.has("acks"))
     }
 
     @Test func informationalMentionIsAcknowledgedWithoutAdoptingOrReviewingForeignDraft() async throws {
@@ -373,11 +368,11 @@ import Testing
         let f = try fixture(); defer { f.cleanup() }
         f.settings.automation.scope.pauseDraftsByDefault = false
         let file = f.root.appending(path: "mr")
-        let text = try String(contentsOf: file, encoding: .utf8)
+        let text = f.gitlab.text(file.lastPathComponent)
         try text.replacingOccurrences(of: #""draft":false"#, with: #""draft":true"#)
-            .write(to: file, atomically: true, encoding: .utf8)
+            .store(in: f.gitlab, as: file.lastPathComponent)
         try #"[{"id":"d","notes":[{"id":42,"author":{"id":2,"username":"other"},"system":false,"body":"@me review is deferred until the author finishes this draft."}]}]"#
-            .write(to: f.root.appending(path: "discussions"), atomically: true, encoding: .utf8)
+            .store(in: f.gitlab, as: "discussions")
         var launches = 0
         let router = MergeRequestTodoRouter(settings: f.settings, glab: f.glab, canAutomate: { true }, launcher: { _, _ in
             launches += 1; return UUID()
@@ -398,7 +393,7 @@ import Testing
     @Test func informationalReceiptDoesNotManageALaterForeignReviewRequest() async throws {
         let f = try fixture(); defer { f.cleanup() }
         try #"[{"id":"d","notes":[{"id":42,"author":{"id":2,"username":"other"},"system":false,"body":"@me status update only."}]}]"#
-            .write(to: f.root.appending(path: "discussions"), atomically: true, encoding: .utf8)
+            .store(in: f.gitlab, as: "discussions")
         let router = MergeRequestTodoRouter(settings: f.settings, glab: f.glab, canAutomate: { false })
         router.mentionDisposition = { _, _, _, _ in .informational }
         let notice = todo(action: .mentioned, linked: true)
@@ -414,7 +409,7 @@ import Testing
     func foreignMentionWithoutInformationalEvidenceRemainsUnread(disposition: MRTodoMentionDisposition) async throws {
         let f = try fixture(); defer { f.cleanup() }
         try #"[{"id":"d","notes":[{"id":42,"author":{"id":2,"username":"other"},"system":false,"body":"@me please inspect this."}]}]"#
-            .write(to: f.root.appending(path: "discussions"), atomically: true, encoding: .utf8)
+            .store(in: f.gitlab, as: "discussions")
         f.settings.automation.reviewRequested.isEnabled = true
         let router = MergeRequestTodoRouter(settings: f.settings, glab: f.glab, canAutomate: { true })
         router.mentionDisposition = { _, _, _, _ in disposition }
@@ -426,11 +421,11 @@ import Testing
     @Test func changedDiscussionDuringMentionAssessmentPreservesUnreadEvent() async throws {
         let f = try fixture(); defer { f.cleanup() }
         try #"[{"id":"d","notes":[{"id":42,"author":{"id":2,"username":"other"},"system":false,"body":"@me informational context."}]}]"#
-            .write(to: f.root.appending(path: "discussions"), atomically: true, encoding: .utf8)
+            .store(in: f.gitlab, as: "discussions")
         let router = MergeRequestTodoRouter(settings: f.settings, glab: f.glab, canAutomate: { true })
         router.mentionDisposition = { _, _, _, _ in
             try? #"[{"id":"d","notes":[{"id":42,"author":{"id":2,"username":"other"},"system":false,"body":"@me please fix this immediately."}]}]"#
-                .write(to: f.root.appending(path: "discussions"), atomically: true, encoding: .utf8)
+                .store(in: f.gitlab, as: "discussions")
             return .informational
         }
         #expect(await router.process([todo(action: .mentioned, linked: true)], host: target.host, username: target.username, managed: []).isEmpty)
@@ -442,17 +437,17 @@ import Testing
         let f = try fixture(); defer { f.cleanup() }
         f.settings.automation.scope.pauseDraftsByDefault = false
         let requestFile = f.root.appending(path: "mr")
-        let ready = try String(contentsOf: requestFile, encoding: .utf8)
+        let ready = f.gitlab.text(requestFile.lastPathComponent)
         let draft = ready.replacingOccurrences(of: #""draft":false"#, with: #""draft":true"#)
-        try draft.write(to: requestFile, atomically: true, encoding: .utf8)
+        try draft.store(in: f.gitlab, as: requestFile.lastPathComponent)
         let threads = #"[{"id":"d","notes":[{"id":42,"author":{"id":2,"username":"other"},"system":false,"body":"@me review once this is ready.","resolvable":true,"resolved":false}]}]"#
-        try threads.write(to: f.root.appending(path: "discussions"), atomically: true, encoding: .utf8)
+        try threads.store(in: f.gitlab, as: "discussions")
         let router = MergeRequestTodoRouter(settings: f.settings, glab: f.glab, canAutomate: { false })
         router.mentionDisposition = { _, _, _, _ in
-            if change == "ready" { try? ready.write(to: requestFile, atomically: true, encoding: .utf8) }
+            if change == "ready" { try? ready.store(in: f.gitlab, as: requestFile.lastPathComponent) }
             else {
                 try? threads.replacingOccurrences(of: #""resolved":false"#, with: #""resolved":true"#)
-                    .write(to: f.root.appending(path: "discussions"), atomically: true, encoding: .utf8)
+                    .store(in: f.gitlab, as: "discussions")
             }
             return .informational
         }
@@ -460,7 +455,7 @@ import Testing
                                                 username: target.username, managed: [])
         #expect(acknowledged.isEmpty)
         #expect(f.settings.mrActionIntents.isEmpty)
-        #expect(!FileManager.default.fileExists(atPath: f.root.appending(path: "acks").path))
+        #expect(!f.gitlab.has("acks"))
     }
 
     @Test("An independently verified no-op follow-up completes without a draft publication receipt",
@@ -474,7 +469,7 @@ import Testing
         #expect(f.settings.mrActionIntents[0].state == .completed)
         #expect(f.settings.mrActionIntents[0].error == nil)
         #expect(SettingsManager(defaults: f.defaults).mrActionIntents[0].state == .completed)
-        #expect(!FileManager.default.fileExists(atPath: f.root.appending(path: "proofs").path))
+        #expect(!f.gitlab.has("proofs"))
     }
 
     @Test func recoveredNoOpKeepsThePreviousApplicationFailureInHistory() async throws {
@@ -644,19 +639,19 @@ import Testing
         else { f.settings.assistantHandoffs[0].execution = .init(state: scenario == "blocked" ? .blocked : .failed, error: "Old worker stopped.") }
         if scenario == "closedMR" {
             let file = f.root.appending(path: "mr")
-            let text = try String(contentsOf: file, encoding: .utf8)
+            let text = f.gitlab.text(file.lastPathComponent)
             try text.replacingOccurrences(of: #""state":"opened""#, with: #""state":"closed""#)
-                .write(to: file, atomically: true, encoding: .utf8)
+                .store(in: f.gitlab, as: file.lastPathComponent)
         }
-        try Data().write(to: f.root.appending(path: "pause-mr"))
+        try Data().store(in: f.gitlab, as: "pause-mr")
         let router = MergeRequestTodoRouter(settings: f.settings, glab: f.glab, canAutomate: { false })
         let task = Task { await router.refreshCompletionEvidence(host: target.host, username: target.username) }
-        defer { task.cancel(); try? Data().write(to: f.root.appending(path: "release-mr")) }
+        defer { task.cancel(); try? Data().store(in: f.gitlab, as: "release-mr") }
         let deadline = ContinuousClock.now + .seconds(3)
-        while !FileManager.default.fileExists(atPath: f.root.appending(path: "mr-entered").path), ContinuousClock.now < deadline {
+        while !f.gitlab.has("mr-entered"), ContinuousClock.now < deadline {
             try await Task.sleep(for: .milliseconds(10))
         }
-        try #require(FileManager.default.fileExists(atPath: f.root.appending(path: "mr-entered").path))
+        try #require(f.gitlab.has("mr-entered"))
         let replacementID: UUID
         if scenario == "sameIDAppeared" { replacementID = try #require(f.settings.mrActionIntents[0].jobID) }
         else { replacementID = UUID() }
@@ -670,7 +665,7 @@ import Testing
         f.settings.mrActionIntents[0].headSHA = replacementHead
         f.settings.mrActionIntents[0].state = .running
         f.settings.mrActionIntents[0].error = nil
-        try Data().write(to: f.root.appending(path: "release-mr"))
+        try Data().store(in: f.gitlab, as: "release-mr")
         await task.value
         #expect(f.settings.mrActionIntents[0].jobID == replacementID)
         #expect(f.settings.mrActionIntents[0].headSHA == replacementHead)
@@ -693,22 +688,22 @@ import Testing
             if scenario == "missingNote" { notes = [] }
             if scenario == "newExpectation" {
                 let file = f.root.appending(path: "discussions")
-                let text = try! String(contentsOf: file, encoding: .utf8)
+                let text = f.gitlab.text(file.lastPathComponent)
                 try! text.replacingOccurrences(of: "]}]", with: #",{"id":44,"author":{"id":2,"username":"other"},"system":false,"body":"Also fix the new case."}]}]"#)
-                    .write(to: file, atomically: true, encoding: .utf8)
+                    .store(in: f.gitlab, as: file.lastPathComponent)
             }
             if scenario == "newHead" || scenario == "newContext" {
                 let file = f.root.appending(path: "mr")
-                let text = try! String(contentsOf: file, encoding: .utf8)
+                let text = f.gitlab.text(file.lastPathComponent)
                 try! text.replacingOccurrences(of: scenario == "newHead" ? String(repeating: "a", count: 40) : "Example MR",
                     with: scenario == "newHead" ? String(repeating: "b", count: 40) : "Changed expectations")
-                    .write(to: file, atomically: true, encoding: .utf8)
+                    .store(in: f.gitlab, as: file.lastPathComponent)
             }
             if scenario == "editedDiscussion" {
                 let file = f.root.appending(path: "discussions")
-                let text = try! String(contentsOf: file, encoding: .utf8)
+                let text = f.gitlab.text(file.lastPathComponent)
                 try! text.replacingOccurrences(of: "Please fix this.", with: "Please fix a different case.")
-                    .write(to: file, atomically: true, encoding: .utf8)
+                    .store(in: f.gitlab, as: file.lastPathComponent)
             }
             if scenario == "wrongAccount" { f.glab.currentUsername = "another" }
             if scenario == "replacementRun" {
@@ -759,9 +754,9 @@ import Testing
         let router = MergeRequestTodoRouter(settings: f.settings, glab: f.glab, canAutomate: { false })
         _ = await router.process([todo(10)], host: target.host, username: target.username, managed: [target])
         let file = f.root.appending(path: "mr")
-        let updated = try String(contentsOf: file, encoding: .utf8)
+        let updated = f.gitlab.text(file.lastPathComponent)
             .replacingOccurrences(of: String(repeating: "a", count: 40), with: String(repeating: "b", count: 40))
-        try updated.write(to: file, atomically: true, encoding: .utf8)
+        try updated.store(in: f.gitlab, as: file.lastPathComponent)
         _ = await router.process([todo(20)], host: target.host, username: target.username, managed: [target])
         #expect(f.settings.mrActionIntents.count == 1)
         #expect(f.settings.mrActionIntents[0].todoIDs == [10, 20])
@@ -775,7 +770,7 @@ import Testing
         let acknowledged = await router.process([known, unknown], host: target.host, username: target.username, managed: [target])
         #expect(acknowledged == [known.id])
         #expect(f.settings.mrActionIntents.flatMap(\.todoIDs) == [known.id])
-        let calls = try String(contentsOf: f.root.appending(path: "acks"), encoding: .utf8)
+        let calls = f.gitlab.text("acks")
         #expect(!calls.contains("/20/"))
     }
 
@@ -815,7 +810,7 @@ import Testing
         #expect(f.settings.routedMRTodoReceipts.count == 1)
         #expect(f.settings.mrActionIntents.count == 1)
         f.settings.mrActionIntents[0].state = .completed; f.settings.save()
-        try FileManager.default.removeItem(at: f.root.appending(path: "fail-ack"))
+        f.gitlab.remove("fail-ack")
         let restored = SettingsManager(defaults: f.defaults)
         let restarted = MergeRequestTodoRouter(settings: restored, glab: f.glab, canAutomate: { true }, launcher: { _, _ in
             launches += 1; return UUID()
@@ -833,7 +828,7 @@ import Testing
         #expect(await router.process([event], host: target.host, username: target.username, managed: []).isEmpty)
         #expect(f.settings.mrActionIntents.isEmpty)
         try #"[{"id":"d","notes":[{"id":42,"author":{"id":2,"username":"other"},"system":false,"resolvable":true,"resolved":false,"body":"Please fix this."}]}]"#
-            .write(to: f.root.appending(path: "discussions"), atomically: true, encoding: .utf8)
+            .store(in: f.gitlab, as: "discussions")
         let acknowledged = await router.process([event], host: target.host, username: target.username, managed: [])
         #expect(acknowledged == [event.id])
         #expect(f.settings.mrActionIntents[0].kind == .followUp)
@@ -863,7 +858,7 @@ import Testing
         #expect(acceptedIDs.count == 1)
         _ = await router.process([todo()], host: target.host, username: target.username, managed: [target])
         #expect(acceptedIDs.count == 1)
-        try FileManager.default.removeItem(at: f.root.appending(path: "fail-ack"))
+        f.gitlab.remove("fail-ack")
         _ = await router.process([todo()], host: target.host, username: target.username, managed: [target])
         #expect(acceptedIDs.count == 1)
     }
@@ -883,7 +878,7 @@ import Testing
     @Test func submittedGeneralReviewRefreshesBeforeSharedSemanticAssessment() async throws {
         let f = try fixture(owned: true); defer { f.cleanup() }
         try #"[{"id":"general","notes":[{"id":42,"author":{"id":2,"username":"other"},"system":false,"resolvable":false,"body":"Please also check the documented edge case."}]}]"#
-            .write(to: f.root.appending(path: "discussions"), atomically: true, encoding: .utf8)
+            .store(in: f.gitlab, as: "discussions")
         f.settings.automation.authorFeedback.isEnabled = true
         var launchedNotes: Set<Int> = []
         let router = MergeRequestTodoRouter(settings: f.settings, glab: f.glab, canAutomate: { true }, launcher: { intent, _ in
@@ -907,11 +902,11 @@ import Testing
 
     @Test func failedReviewEvidenceReadKeepsEventUnreadWithoutDurableAcceptance() async throws {
         let f = try fixture(owned: true); defer { f.cleanup() }
-        try "unavailable".write(to: f.root.appending(path: "discussions"), atomically: true, encoding: .utf8)
+        try "unavailable".store(in: f.gitlab, as: "discussions")
         let router = MergeRequestTodoRouter(settings: f.settings, glab: f.glab, canAutomate: { false })
         #expect(await router.process([todo(action: .reviewSubmitted)], host: target.host, username: target.username, managed: []).isEmpty)
         #expect(f.settings.mrActionIntents.isEmpty)
-        #expect(!FileManager.default.fileExists(atPath: f.root.appending(path: "acks").path))
+        #expect(!f.gitlab.has("acks"))
     }
 
     @Test func newEventDuringRunningReviewRemainsASeparatePendingAction() async throws {
@@ -958,15 +953,15 @@ import Testing
     @Test func mismatchedLiveMergeRequestIdentityRemainsUnread() async throws {
         let f = try fixture(); defer { f.cleanup() }
         let file = f.root.appending(path: "mr")
-        let decoded = try JSONSerialization.jsonObject(with: Data(contentsOf: file))
+        let decoded = try JSONSerialization.jsonObject(with: f.gitlab.data(file.lastPathComponent))
         var object = try #require(decoded as? [String: Any])
         object["web_url"] = "https://another.example.test/team/repo/-/merge_requests/11"
-        try JSONSerialization.data(withJSONObject: object).write(to: file)
+        try JSONSerialization.data(withJSONObject: object).store(in: f.gitlab, as: file.lastPathComponent)
         let router = MergeRequestTodoRouter(settings: f.settings, glab: f.glab, canAutomate: { false })
         let ack = await router.process([todo()], host: target.host, username: target.username, managed: [target])
         #expect(ack.isEmpty)
         #expect(f.settings.mrActionIntents.isEmpty)
-        #expect(!FileManager.default.fileExists(atPath: f.root.appending(path: "acks").path))
+        #expect(!f.gitlab.has("acks"))
     }
 
     @Test func interruptedRunWithUnboundIntentIsNeverAutomaticallyReplayed() async throws {
@@ -1008,9 +1003,9 @@ import Testing
             createdAt: Date(), allowsPush: false, feedbackTodos: intent.sourceEvents, execution: .init(state: .succeeded), workflow: .review, expectedHeadSHA: intent.headSHA))
         f.settings.mrActionIntents[0].state = .running
         let file = f.root.appending(path: "mr")
-        let decoded = try JSONSerialization.jsonObject(with: Data(contentsOf: file))
+        let decoded = try JSONSerialization.jsonObject(with: f.gitlab.data(file.lastPathComponent))
         var object = try #require(decoded as? [String: Any]); object["sha"] = String(repeating: "b", count: 40)
-        try JSONSerialization.data(withJSONObject: object).write(to: file)
+        try JSONSerialization.data(withJSONObject: object).store(in: f.gitlab, as: file.lastPathComponent)
         _ = await router.process([], host: target.host, username: target.username, managed: [target])
         #expect(f.settings.mrActionIntents[0].state == .failed)
         await router.run(intent.id, manual: true)
@@ -1042,13 +1037,13 @@ import Testing
         let acknowledged = await router.process([todo()], host: target.host, username: target.username, managed: [])
         #expect(acknowledged.isEmpty)
         #expect(f.settings.mrActionIntents.isEmpty)
-        #expect(!FileManager.default.fileExists(atPath: f.root.appending(path: "acks").path))
+        #expect(!f.gitlab.has("acks"))
     }
 
     @Test("configured assistant restrictions and title placeholders survive semantic routing", arguments: [MRTodoIntent.Kind.review, .followUp])
     func configuredInstructionsArePreserved(kind: MRTodoIntent.Kind) throws {
         let f = try fixture(owned: kind == .followUp); defer { f.cleanup() }
-        let request = try JSONDecoder().decode(GitLabMergeRequest.self, from: Data(contentsOf: f.root.appending(path: "mr")))
+        let request = try JSONDecoder().decode(GitLabMergeRequest.self, from: f.gitlab.data("mr"))
         let event = todo(action: kind == .review ? .reviewRequested : .mentioned)
         let intent = MRTodoIntent(id: UUID(), target: target, kind: kind, state: .pending, todoIDs: [event.id], noteIDs: [],
             sourceEvents: [event.feedbackIdentity], request: request, headSHA: request.sha!, updatedAt: Date(), sourceTodo: event)
@@ -1111,7 +1106,7 @@ import Testing
     @Test func failedPipelineLaunchWithoutJobIDCanExplicitlyReacquireItsReceipt() throws {
         let f = try fixture(owned: true); defer { f.cleanup() }
         let file = f.root.appending(path: "mr")
-        let decoded = try JSONSerialization.jsonObject(with: Data(contentsOf: file))
+        let decoded = try JSONSerialization.jsonObject(with: f.gitlab.data(file.lastPathComponent))
         var object = try #require(decoded as? [String: Any])
         object["head_pipeline"] = ["id": 100, "project_id": 7, "sha": String(repeating: "a", count: 40), "status": "failed"]
         let request = try JSONDecoder().decode(GitLabMergeRequest.self, from: JSONSerialization.data(withJSONObject: object))
@@ -1133,11 +1128,11 @@ import Testing
     func resolvedLiveStateClearsFailedIntent(kind: MRTodoIntent.Kind) async throws {
         let f = try fixture(owned: kind != .review); defer { f.cleanup() }
         let file = f.root.appending(path: "mr")
-        let decoded = try JSONSerialization.jsonObject(with: Data(contentsOf: file))
+        let decoded = try JSONSerialization.jsonObject(with: f.gitlab.data(file.lastPathComponent))
         var object = try #require(decoded as? [String: Any])
         if kind == .pipeline { object["head_pipeline"] = ["id": 100, "project_id": 7, "sha": String(repeating: "a", count: 40), "status": "failed"] }
         if kind == .conflict { object["has_conflicts"] = true }
-        try JSONSerialization.data(withJSONObject: object).write(to: file)
+        try JSONSerialization.data(withJSONObject: object).store(in: f.gitlab, as: file.lastPathComponent)
         let action: ActionName = kind == .pipeline ? .buildFailed : (kind == .conflict ? .unmergeable : .reviewRequested)
         let router = MergeRequestTodoRouter(settings: f.settings, glab: f.glab, canAutomate: { false })
         _ = await router.process([todo(action: action)], host: target.host, username: target.username, managed: [target])
@@ -1152,7 +1147,7 @@ import Testing
         if kind == .pipeline { object["head_pipeline"] = ["id": 100, "project_id": 7, "sha": String(repeating: "a", count: 40), "status": "success"] }
         else if kind == .conflict { object["has_conflicts"] = false }
         else { object["state"] = "closed" }
-        try JSONSerialization.data(withJSONObject: object).write(to: file)
+        try JSONSerialization.data(withJSONObject: object).store(in: f.gitlab, as: file.lastPathComponent)
         _ = await router.process([], host: target.host, username: target.username, managed: [target])
         #expect(f.settings.mrActionIntents[0].state == .completed)
         #expect(f.settings.assistantHandoffs[0].execution?.state == .failed)
@@ -1161,9 +1156,9 @@ import Testing
     @Test func ownedFailedPipelineTabEventRoutesToCanonicalMRAction() async throws {
         let f = try fixture(owned: true); defer { f.cleanup() }
         let file = f.root.appending(path: "mr")
-        var request = try #require(JSONSerialization.jsonObject(with: Data(contentsOf: file)) as? [String: Any])
+        var request = try #require(JSONSerialization.jsonObject(with: f.gitlab.data(file.lastPathComponent)) as? [String: Any])
         request["head_pipeline"] = ["id": 99, "project_id": 7, "status": "failed", "sha": String(repeating: "a", count: 40)]
-        try JSONSerialization.data(withJSONObject: request).write(to: file)
+        try JSONSerialization.data(withJSONObject: request).store(in: f.gitlab, as: file.lastPathComponent)
         let router = MergeRequestTodoRouter(settings: f.settings, glab: f.glab, canAutomate: { false })
         let event = todo(action: .buildFailed, suffix: "/pipelines")
 
@@ -1183,7 +1178,7 @@ import Testing
         let acknowledged = await router.process([todo(suffix: suffix)], host: target.host,
             username: target.username, managed: [target])
         #expect(acknowledged.isEmpty && f.settings.mrActionIntents.isEmpty)
-        #expect(!FileManager.default.fileExists(atPath: f.root.appending(path: "acks").path))
+        #expect(!f.gitlab.has("acks"))
     }
 
     @Test(arguments: ["https://other.example.test/team/repo/-/merge_requests/11/pipelines",
@@ -1299,10 +1294,10 @@ import Testing
     @Test func mismatchedPipelineSHAIsReceivedAsRefreshWithoutStartingWork() async throws {
         let f = try fixture(owned: true); defer { f.cleanup() }
         let file = f.root.appending(path: "mr")
-        let decoded = try JSONSerialization.jsonObject(with: Data(contentsOf: file))
+        let decoded = try JSONSerialization.jsonObject(with: f.gitlab.data(file.lastPathComponent))
         var request = try #require(decoded as? [String: Any])
         request["head_pipeline"] = ["id": 99, "project_id": 7, "status": "failed", "sha": String(repeating: "b", count: 40)]
-        try JSONSerialization.data(withJSONObject: request).write(to: file)
+        try JSONSerialization.data(withJSONObject: request).store(in: f.gitlab, as: file.lastPathComponent)
         var launches = 0
         let router = MergeRequestTodoRouter(settings: f.settings, glab: f.glab, canAutomate: { true }, launcher: { _, _ in
             launches += 1; return UUID()
@@ -1321,12 +1316,12 @@ import Testing
     func missingPipelineSHARemainsUnknown(includeEmptySHA: Bool) async throws {
         let f = try fixture(owned: true); defer { f.cleanup() }
         let file = f.root.appending(path: "mr")
-        let decoded = try JSONSerialization.jsonObject(with: Data(contentsOf: file))
+        let decoded = try JSONSerialization.jsonObject(with: f.gitlab.data(file.lastPathComponent))
         var request = try #require(decoded as? [String: Any])
         var pipeline: [String: Any] = ["id": 99, "status": "failed"]
         if includeEmptySHA { pipeline["sha"] = "" }
         request["head_pipeline"] = pipeline
-        try JSONSerialization.data(withJSONObject: request).write(to: file)
+        try JSONSerialization.data(withJSONObject: request).store(in: f.gitlab, as: file.lastPathComponent)
         let router = MergeRequestTodoRouter(settings: f.settings, glab: f.glab, canAutomate: { false })
         let acknowledged = await router.process([todo(action: .buildFailed, suffix: "/pipelines")],
                                                 host: target.host, username: target.username, managed: [target])

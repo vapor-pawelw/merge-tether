@@ -389,7 +389,7 @@ struct VerifiedAuthorFeedbackTests {
                 try fixture.write("changed-discussions.json", Fixture.discussions.replacingOccurrences(of: "rename X", with: "rename Y"))
             }
             try await fixture.prepare()
-            #expect(FileManager.default.fileExists(atPath: fixture.directory.appending(path: "stack-read").path))
+            #expect(fixture.gitlab.has("stack-read"))
             #expect(fixture.settings.assistantHandoffs.isEmpty)
             #expect(!fixture.executed)
         }
@@ -405,7 +405,7 @@ struct VerifiedAuthorFeedbackTests {
             }
             try await fixture.prepare()
             #expect(fixture.settings.assistantHandoffs.isEmpty)
-            #expect(!FileManager.default.fileExists(atPath: fixture.directory.appending(path: "stack-read").path))
+            #expect(!fixture.gitlab.has("stack-read"))
             #expect(!fixture.executed)
         }
     }
@@ -436,6 +436,7 @@ struct VerifiedAuthorFeedbackTests {
         let suite = "VerifiedAuthorFeedbackTests.\(UUID())"
         let settings: SettingsManager
         let glab: GlabService
+        let gitlab = InMemoryGitLab()
         let work = AssistantAutomationRunner.MergeRequestWork(host: "gitlab.example.test", projectID: 1, iid: 2)
         var executed = false
         var resultStatus: AssistantJobResult.Status = .blocked
@@ -455,32 +456,22 @@ struct VerifiedAuthorFeedbackTests {
             settings.automation.authorFeedback.runner = .assistant
             settings.automation.authorFeedback.isEnabled = true
             settings.automation.allowFollowUpPush = false
-            glab = GlabService()
-            glab.glabPath = directory.appending(path: "glab")
-            glab.resolvedHost = Self.host
-            glab.currentUsername = "me"
+            glab = gitlab.service(host: Self.host, username: "me")
             try write("request.json", Self.request)
             try write("discussions.json", Self.discussions)
-            try write("glab", """
-                #!/bin/sh
-                set -eu
-                cd "$(dirname "$0")"
-                test "$1" = api
-                test "$3" = --hostname
-                test "$4" = \(Self.host)
-                case "$2" in
-                  /projects/1/merge_requests/2) cat request.json ;;
-                  */discussions\\?*) cat discussions.json ;;
-                  /projects/1/merge_requests\\?*)
-                    touch stack-read
-                    if [ -e changed-request.json ]; then cp changed-request.json request.json; fi
-                    if [ -e changed-discussions.json ]; then cp changed-discussions.json discussions.json; fi
-                    printf '%s' '[]' ;;
-                  /projects/1) printf '%s' '{"default_branch":"main"}' ;;
-                  *) printf '%s' "Unexpected glab command: $*" >&2; exit 100 ;;
-                esac
-                """)
-            try FileManager.default.setAttributes([.posixPermissions: 0o700], ofItemAtPath: directory.appending(path: "glab").path)
+            gitlab.handler = { [gitlab] request in
+                switch request.endpoint {
+                case "/projects/1/merge_requests/2": return try gitlab.response("request.json")
+                case let path where path.contains("/discussions?"): return try gitlab.response("discussions.json")
+                case let path where path.hasPrefix("/projects/1/merge_requests?"):
+                    gitlab.write("stack-read")
+                    if gitlab.has("changed-request.json") { try gitlab.copy("changed-request.json", "request.json") }
+                    if gitlab.has("changed-discussions.json") { try gitlab.copy("changed-discussions.json", "discussions.json") }
+                    return InMemoryGitLab.output("[]")
+                case "/projects/1": return InMemoryGitLab.output(#"{"default_branch":"main"}"#)
+                default: return try gitlab.unexpected(request)
+                }
+            }
         }
 
         func prepare(noteIDs: [Int] = [20], snapshot: String? = nil, manual: Bool = false, expectedHeadSHA: String? = nil,
@@ -502,8 +493,9 @@ struct VerifiedAuthorFeedbackTests {
             #expect(!coordinator.isWorking(on: work))
         }
 
-        func write(_ name: String, _ content: String) throws { try Data(content.utf8).write(to: directory.appending(path: name)) }
+        func write(_ name: String, _ content: String) throws { gitlab.write(name, content) }
         func cleanUp() {
+            gitlab.close()
             defaults.removePersistentDomain(forName: suite)
             try? FileManager.default.removeItem(at: directory)
         }

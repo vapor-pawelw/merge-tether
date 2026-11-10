@@ -12,7 +12,7 @@ import Testing
         let initial = try #require(harness.monitor.currentOpenItems.first)
         #expect(initial.approvalProgress?.completed == 2)
         try harness.write("reviewing.json", "[]")
-        try FileManager.default.removeItem(at: harness.folder.appending(path: "request.json"))
+        harness.gitlab.remove("request.json")
         harness.monitor.refresh(host: host, username: "me", todos: [])
         for _ in 0..<250 where harness.monitor.isLoading { try await Task.sleep(for: .milliseconds(20)) }
         #expect(!harness.monitor.isLoading && harness.monitor.hasError)
@@ -27,10 +27,10 @@ import Testing
         try harness.write("reviewing.json", "[]")
         try harness.write("pause-approval-read", "")
         harness.monitor.refresh(host: host, username: "me", todos: [])
-        for _ in 0..<250 where !FileManager.default.fileExists(atPath: harness.folder.appending(path: "approval-read-entered").path) {
+        for _ in 0..<250 where !harness.gitlab.has("approval-read-entered") {
             try await Task.sleep(for: .milliseconds(20))
         }
-        try #require(FileManager.default.fileExists(atPath: harness.folder.appending(path: "approval-read-entered").path))
+        try #require(harness.gitlab.has("approval-read-entered"))
         let nextHead = String(repeating: "b", count: 40)
         let newer = try JSONDecoder().decode(GitLabMergeRequest.self,
             from: Data(harness.log("request.json").replacingOccurrences(of: head, with: nextHead).utf8))
@@ -119,16 +119,17 @@ import Testing
         let suite: String
         let settings: SettingsManager
         let glab: GlabService
+        let gitlab: InMemoryGitLab
         let monitor: MergeRequestAttentionMonitor
 
         func write(_ name: String, _ text: String) throws {
-            try Data(text.utf8).write(to: folder.appending(path: name))
+            gitlab.write(name, text)
         }
 
         func recordVerdict(_ verdict: String, head: String) throws {
             let folder = self.folder.appending(path: "verdicts/gitlab.example.org")
             try FileManager.default.createDirectory(at: folder, withIntermediateDirectories: true)
-            let discussions = try JSONDecoder().decode([GitLabMergeRequestDiscussion].self, from: Data(contentsOf: self.folder.appending(path: "discussions.json")))
+            let discussions = try JSONDecoder().decode([GitLabMergeRequestDiscussion].self, from: gitlab.data("discussions.json"))
             let value = ReviewVerdict(version: 1, host: "gitlab.example.org", projectID: 1, iid: 2, headSHA: head,
                                       verdict: try #require(ReviewVerdict.Kind(rawValue: verdict)),
                                       discussionFingerprint: ReviewVerdict.fingerprint(discussions))
@@ -149,7 +150,7 @@ import Testing
             let run = AssistantAutomationRunner.Handoff(id: UUID(), key: key, title: "Follow up", prompt: "", createdAt: Date(), allowsPush: false,
                                                        followUpPushAllowed: true, execution: .init(state: .succeeded))
             settings.assistantHandoffs.append(run)
-            let raw = try #require(JSONSerialization.jsonObject(with: Data(contentsOf: folder.appending(path: "drafts.json"))) as? [[String: Any]])
+            let raw = try #require(JSONSerialization.jsonObject(with: gitlab.data("drafts.json")) as? [[String: Any]])
             let drafts = raw.filter { $0["author_id"] as? Int == 3 }.map {
                 FollowUpVerification.DraftEvidence(id: $0["id"] as! Int, bodySHA256: AICommentAssessmentStore.digest($0["note"] as! String))
             }
@@ -168,8 +169,8 @@ import Testing
             let work = AssistantAutomationRunner.MergeRequestWork(host: "gitlab.example.org", projectID: 1, iid: 2)
             let path = FollowUpVerificationStore.recordURL(kind: "follow-up-verifications", work: work, username: "me", in: folder)
             let origin = try JSONDecoder().decode(FollowUpVerification.self, from: Data(contentsOf: path))
-            let request = try JSONDecoder().decode(GitLabMergeRequest.self, from: Data(contentsOf: folder.appending(path: "request.json")))
-            let threads = try JSONDecoder().decode([GitLabMergeRequestDiscussion].self, from: Data(contentsOf: folder.appending(path: "discussions.json")))
+            let request = try JSONDecoder().decode(GitLabMergeRequest.self, from: gitlab.data("request.json"))
+            let threads = try JSONDecoder().decode([GitLabMergeRequestDiscussion].self, from: gitlab.data("discussions.json"))
             let ids = draftIDs ?? origin.drafts.map(\.id)
             try #require(FollowUpVerificationStore.validRecoveryScope(ids, origin: origin))
             let identity = UUID()
@@ -187,14 +188,14 @@ import Testing
         }
 
         func log(_ name: String) -> String {
-            (try? String(contentsOf: folder.appending(path: name), encoding: .utf8)) ?? ""
+            gitlab.text(name)
         }
 
         func bindFollowUpDiscussions() throws {
             let url = folder.appending(path: "follow-up-verifications/gitlab.example.org/1-2-me.json")
             var receipt = try #require(JSONSerialization.jsonObject(with: Data(contentsOf: url)) as? [String: Any])
             let discussions = try JSONDecoder().decode([GitLabMergeRequestDiscussion].self,
-                from: Data(contentsOf: folder.appending(path: "discussions.json")))
+                from: gitlab.data("discussions.json"))
             receipt["discussionFingerprint"] = ReviewVerdict.fingerprint(discussions)
             try JSONSerialization.data(withJSONObject: receipt).write(to: url)
         }
@@ -202,7 +203,9 @@ import Testing
         func poll(waitForAIOrigin: Bool = true, timeout: Duration = .seconds(5)) async throws {
             monitor.refresh(host: "gitlab.example.org", username: "me", todos: [])
             let deadline = ContinuousClock.now + timeout
-            while monitor.isLoading || monitor.isVerifyingReReview || (waitForAIOrigin && monitor.isAssessingAIOrigins), ContinuousClock.now < deadline {
+            while monitor.isLoading || monitor.isVerifyingReReview
+                    || monitor.currentOpenItems.contains(where: { $0.reReviewReadiness == .checking })
+                    || (waitForAIOrigin && monitor.isAssessingAIOrigins), ContinuousClock.now < deadline {
                 try await Task.sleep(for: .milliseconds(20))
             }
             try #require(!monitor.isLoading && !monitor.hasError)
@@ -217,6 +220,7 @@ import Testing
         }
 
         func cleanUp() {
+            gitlab.close()
             monitor.aiOriginCoordinator.cancel()
             try? FileManager.default.removeItem(at: folder)
             defaults.removePersistentDomain(forName: suite)
@@ -225,7 +229,7 @@ import Testing
 
     /// A GitLab stub where "me" (id 3) reviews MR !2, authored by someone else (id 9).
     private func makeHarness(assistantWorked: Bool, authored: Bool = false,
-                             duringAutomationCheck: (@MainActor (URL) -> Void)? = nil,
+                             duringAutomationCheck: (@MainActor (InMemoryGitLab) -> Void)? = nil,
                              approvalReadClock: @escaping ReadOnlyAssessmentRetry.Clock = { Date() },
                              assessment: ReReviewAssessment? = nil,
                              assessAIOrigin: AICommentOriginCoordinator.Assess? = nil,
@@ -244,148 +248,159 @@ import Testing
              "labels":[],"user":{"can_merge":true},"blocking_discussions_resolved":true}
             """
         if authored { request = request.replacingOccurrences(of: "\"id\":9,\"username\":\"alice\",\"name\":\"Alice\"", with: "\"id\":3,\"username\":\"me\",\"name\":\"Me\"") }
-        try Data((authored ? "[\(request)]" : "[]").utf8).write(to: folder.appending(path: "authored.json"))
-        try Data((authored ? "[]" : "[\(request)]").utf8).write(to: folder.appending(path: "reviewing.json"))
-        try Data(request.utf8).write(to: folder.appending(path: "request.json"))
-        try Data("[]".utf8).write(to: folder.appending(path: "drafts.json"))
-        try Data(#"[{"user":{"id":3},"state":"reviewed"}]"#.utf8).write(to: folder.appending(path: "reviewers.json"))
-        try Data("[]".utf8).write(to: folder.appending(path: "discussions.json"))
-        try Data(#"{"id":8,"username":"GitLabDuo","bot":true}"#.utf8).write(to: folder.appending(path: "duo.json"))
-        try Data("fixed code\n".utf8).write(to: folder.appending(path: "remote-file-content.txt"))
-        try Data(head.utf8).write(to: folder.appending(path: "remote-head.txt"))
-        try Data(#"{"id":3,"username":"me"}"#.utf8).write(to: folder.appending(path: "live-user.json"))
-        let executable = folder.appending(path: "glab")
-        try Data("""
-            #!/bin/sh
-            set -eu
-            cd "$(dirname "$0")"
-            if [ -f ai-assessment-after-preview-pending ]; then
-                rm ai-assessment-after-preview-pending
-                mkdir -p ai-assessments/gitlab.example.org
-                cp late-ai-assessment.json ai-assessments/gitlab.example.org/1-2-41.json
-                touch ai-assessment-added-after-preview
-            fi
-            case "$2" in
-                /user)
-                    if [ -f fail-next-approval-user ]; then rm fail-next-approval-user; exit 1; fi
-                    cat live-user.json ;;
-                /merge_requests?scope=created_by_me*)
-                    if [ -f fail-owned-list ]; then exit 1; fi
-                    cat authored.json ;;
-                /merge_requests?scope=all*) cat reviewing.json ;;
-                */draft_notes/bulk_publish)
-                    echo published >> publish.log; echo '[]' > drafts.json
-                    if [ -f published-discussions.json ]; then cp published-discussions.json discussions.json; fi ;;
-                graphql)
-                    echo "$*" >> re-review-targets.log
-                    echo requested >> re-review.log
-                    if [ -f fail-review-request ]; then exit 1; fi
-                    echo '{"data":{"mergeRequestReviewerRereview":{"mergeRequest":{"iid":"2"},"errors":[]}}}' ;;
-                */draft_notes/*/publish)
-                    if [ -f fail-publish ]; then exit 1; fi
-                    draft="${2%/publish}"
-                    draft="${draft##*/}"
-                    if [ -f fail-publish-id ] && [ "$(cat fail-publish-id)" = "$draft" ]; then exit 1; fi
-                    echo "$*" >> selected.log
-                    /usr/bin/python3 -c 'import json,sys; p="drafts.json"; a=json.load(open(p)); json.dump([d for d in a if d["id"]!=int(sys.argv[1])],open(p,"w"))' "$draft"
-                    if [ -f after-selected-publish.json ]; then cp after-selected-publish.json drafts.json; rm after-selected-publish.json; fi
-                    if [ -f user-after-selected-publish.json ]; then cp user-after-selected-publish.json live-user.json; rm user-after-selected-publish.json; fi
-                    if [ -f inject-unseen-draft ]; then
-                        /usr/bin/python3 -c 'import json; p="drafts.json"; a=json.load(open(p)); a=[d for d in a if d["id"]!=99]; a.append(dict(id=99,author_id=3,note="/merge")); json.dump(a,open(p,"w"))'
-                    fi
-                    if [ -f published-discussions.json ]; then cp published-discussions.json discussions.json; fi
-                    if [ -f fail-read-after-publish ]; then touch fail-next-draft-read; fi
-                    echo '{}' ;;
-                /users/8)
-                    if [ -f add-ai-assessment-after-preview ]; then
-                        rm add-ai-assessment-after-preview
-                        touch ai-assessment-after-preview-pending
-                    fi
-                    if [ -f edit-after-proof-draft-read ] && [ -f proof-draft-read ]; then
-                        rm edit-after-proof-draft-read
-                        /usr/bin/python3 -c 'import json; p="drafts.json"; a=json.load(open(p)); [d.update(note="/merge") for d in a if d["id"]==12]; json.dump(a,open(p,"w"))'
-                        touch edited-after-proof-draft-read
-                    fi
-                    if [ -f pause-user-check ]; then
-                        rm pause-user-check
-                        echo entered >> user-check.log
-                        while [ -d "$PWD" ] && [ ! -f release-user-check ]; do sleep 0.01; done
-                    fi
-                    cat duo.json ;;
-                /users/9|/users/10)
-                    user="${2##*/}"
-                    printf '{"id":%s,"username":"reviewer%s","bot":false,"state":"active"}' "$user" "$user" ;;
-                */draft_notes*)
-                    if [ -f approval-preflight-armed ] && [ -f approval-preflight-failures ]; then
-                        count="$(cat approval-preflight-failures)"
-                        if [ "$count" -gt 0 ]; then
-                            echo "$((count - 1))" > approval-preflight-failures
-                            echo failed >> approval-preflight.log
-                            exit 1
-                        fi
-                    fi
-                    if [ -f pause-selected-read ]; then
-                        touch selected-read-entered
-                        attempts=0
-                        while [ ! -f release-selected-read ] && [ "$attempts" -lt 500 ]; do sleep 0.01; attempts=$((attempts + 1)); done
-                    fi
-                    if [ -f proof-file-read ]; then touch proof-draft-read; fi
-                    if [ -f fail-next-draft-read ]; then rm fail-next-draft-read; exit 1; fi
-                    cat drafts.json ;;
-                */raw_diffs) echo "verified diff fixture" ;;
-                */reviewers*)
-                    if [ -f approval-preflight-failures ]; then touch approval-preflight-armed; fi
-                    cat reviewers.json ;;
-                */approvals)
-                    if [ -f fail-approvals ]; then exit 1; fi
-                    if [ -f pause-approval-read ]; then
-                        touch approval-read-entered
-                        while [ ! -f release-approval-read ]; do sleep 0.02; done
-                    fi
-                    if [ -f approvals.json ]; then cat approvals.json; else echo '{"approved_by":[]}'; fi ;;
-                */discussions*)
-                    if [ -f fail-discussion-read ]; then exit 1; fi
-                    if [ -f edit-on-this-discussion ]; then
-                        rm edit-on-this-discussion
-                        /usr/bin/python3 -c 'import json; p="drafts.json"; a=json.load(open(p)); [d.update(note="/merge") for d in a if d["id"]==11]; json.dump(a,open(p,"w"))'
-                    fi
-                    if [ -f edit-after-next-discussion ]; then mv edit-after-next-discussion edit-on-this-discussion; fi
-                    if [ -f capture-one-discussion ]; then
-                        rm capture-one-discussion
-                        cp discussions.json captured-discussions.json
-                        touch discussion-captured
-                        while [ ! -f release-discussion ]; do sleep 0.02; done
-                        cat captured-discussions.json
-                        exit 0
-                    fi
-                    if [ -f change-during-discussions ]; then
-                        /usr/bin/python3 -c 'import json,os,tempfile; p="drafts.json"; a=json.load(open(p)); [d.update(note="Edited while checking") for d in a if d["id"]==12]; f=tempfile.NamedTemporaryFile(mode="w",dir=".",delete=False); json.dump(a,f); f.close(); os.replace(f.name,p)'
-                    fi
-                    cat discussions.json ;;
-                */approve)
-                    echo "$*" >> approve.log
-                    if [ -f approval-response-lost ]; then
-                        echo '{"approved_by":[{"user":{"id":3,"username":"me"}}]}' > approvals.json
-                        exit 1
-                    fi
-                    if [ -f fail-approval-write ]; then exit 1; fi
-                    echo '{"approved_by":[{"user":{"id":3}}]}' ;;
-                /projects/1/repository/branches/fix) printf '{"commit":{"id":"'; cat remote-head.txt; printf '"}}' ;;
-                /projects/1/repository/files/Sources%2FA.swift?ref=*)
-                    if [ -f edit-after-proof-draft-read ]; then touch proof-file-read; fi
-                    if [ -f edit-during-proof ]; then
-                        /usr/bin/python3 -c 'import json; p="drafts.json"; a=json.load(open(p)); [d.update(note="New unsupported local fix") for d in a if d["id"]==12]; json.dump(a,open(p,"w"))'
-                    fi
-                    /usr/bin/python3 -c 'import json,base64; print(json.dumps(dict(file_path="Sources/A.swift",encoding="base64",content=base64.b64encode(open("remote-file-content.txt","rb").read()).decode())))' ;;
-                /projects/99/merge_requests/2|/projects/1/merge_requests/99)
-                    /usr/bin/python3 -c 'import json,sys; parts=sys.argv[1].split("/"); p=int(parts[2]); i=int(parts[4]); r=json.load(open("request.json")); r.update(project_id=p,iid=i,state="closed",source_project_id=p,target_project_id=p,web_url="https://gitlab.example.org/g/p/-/merge_requests/"+str(i)); print(json.dumps(r))' "$2" ;;
-                /projects/1/merge_requests/2)
-                    cat request.json
-                    if [ -f pause-selected-read ]; then touch captured-ready-rereview-mr; fi ;;
-                *) exit 100 ;;
-            esac
-            """.utf8).write(to: executable)
-        try FileManager.default.setAttributes([.posixPermissions: 0o700], ofItemAtPath: executable.path)
+        let gitlab = InMemoryGitLab()
+        try Data((authored ? "[\(request)]" : "[]").utf8).store(in: gitlab, as: "authored.json")
+        try Data((authored ? "[]" : "[\(request)]").utf8).store(in: gitlab, as: "reviewing.json")
+        try Data(request.utf8).store(in: gitlab, as: "request.json")
+        try Data("[]".utf8).store(in: gitlab, as: "drafts.json")
+        try Data(#"[{"user":{"id":3},"state":"reviewed"}]"#.utf8).store(in: gitlab, as: "reviewers.json")
+        try Data("[]".utf8).store(in: gitlab, as: "discussions.json")
+        try Data(#"{"id":8,"username":"GitLabDuo","bot":true}"#.utf8).store(in: gitlab, as: "duo.json")
+        try Data("fixed code\n".utf8).store(in: gitlab, as: "remote-file-content.txt")
+        try Data(head.utf8).store(in: gitlab, as: "remote-head.txt")
+        try Data(#"{"id":3,"username":"me"}"#.utf8).store(in: gitlab, as: "live-user.json")
+        gitlab.handler = { request in
+            let path = request.endpoint
+            if gitlab.has("ai-assessment-after-preview-pending") {
+                gitlab.remove("ai-assessment-after-preview-pending")
+                let destination = folder.appending(path: "ai-assessments/gitlab.example.org")
+                try FileManager.default.createDirectory(at: destination, withIntermediateDirectories: true)
+                try Data(contentsOf: folder.appending(path: "late-ai-assessment.json"))
+                    .write(to: destination.appending(path: "1-2-41.json"))
+                gitlab.write("ai-assessment-added-after-preview")
+            }
+            switch path {
+            case "/user":
+                if gitlab.has("fail-next-approval-user") { gitlab.remove("fail-next-approval-user"); return InMemoryGitLab.output(code: 1) }
+                return try gitlab.response("live-user.json")
+            case let path where path.hasPrefix("/merge_requests?scope=created_by_me"):
+                return gitlab.has("fail-owned-list") ? InMemoryGitLab.output(code: 1) : try gitlab.response("authored.json")
+            case let path where path.hasPrefix("/merge_requests?scope=all"): return try gitlab.response("reviewing.json")
+            case let path where path.hasSuffix("/draft_notes/bulk_publish"):
+                gitlab.append("publish.log", "published\n")
+                gitlab.write("drafts.json", "[]")
+                if gitlab.has("published-discussions.json") { try gitlab.copy("published-discussions.json", "discussions.json") }
+                return InMemoryGitLab.output()
+            case "graphql":
+                gitlab.append("re-review-targets.log", request.command + "\n")
+                gitlab.append("re-review.log", "requested\n")
+                if gitlab.has("fail-review-request") { return InMemoryGitLab.output(code: 1) }
+                return InMemoryGitLab.output(#"{"data":{"mergeRequestReviewerRereview":{"mergeRequest":{"iid":"2"},"errors":[]}}}"#)
+            case let path where path.contains("/draft_notes/") && path.hasSuffix("/publish"):
+                if gitlab.has("fail-publish") { return InMemoryGitLab.output(code: 1) }
+                let id = Int(path.split(separator: "/").dropLast().last!)!
+                if gitlab.text("fail-publish-id") == String(id) { return InMemoryGitLab.output(code: 1) }
+                gitlab.append("selected.log", request.command + "\n")
+                try gitlab.editArray("drafts.json") { $0.removeAll { $0["id"] as? Int == id } }
+                for (source, destination) in [("after-selected-publish.json", "drafts.json"), ("user-after-selected-publish.json", "live-user.json")] {
+                    if gitlab.has(source) { try gitlab.copy(source, destination); gitlab.remove(source) }
+                }
+                if gitlab.has("inject-unseen-draft") {
+                    try gitlab.editArray("drafts.json") { drafts in
+                        drafts.removeAll { $0["id"] as? Int == 99 }
+                        drafts.append(["id": 99, "author_id": 3, "note": "/merge"])
+                    }
+                }
+                if gitlab.has("published-discussions.json") { try gitlab.copy("published-discussions.json", "discussions.json") }
+                if gitlab.has("fail-read-after-publish") { gitlab.write("fail-next-draft-read") }
+                return InMemoryGitLab.output("{}")
+            case "/users/8":
+                if gitlab.has("add-ai-assessment-after-preview") {
+                    gitlab.remove("add-ai-assessment-after-preview"); gitlab.write("ai-assessment-after-preview-pending")
+                }
+                if gitlab.has("edit-after-proof-draft-read") && gitlab.has("proof-draft-read") {
+                    gitlab.remove("edit-after-proof-draft-read")
+                    try gitlab.editArray("drafts.json") { drafts in
+                        for index in drafts.indices where drafts[index]["id"] as? Int == 12 { drafts[index]["note"] = "/merge" }
+                    }
+                    gitlab.write("edited-after-proof-draft-read")
+                }
+                if gitlab.has("pause-user-check") {
+                    gitlab.remove("pause-user-check")
+                    gitlab.append("user-check.log", "entered\n")
+                    try await gitlab.waitFor("release-user-check")
+                }
+                return try gitlab.response("duo.json")
+            case "/users/9", "/users/10":
+                let id = Int(path.split(separator: "/").last!)!
+                return InMemoryGitLab.output("{\"id\":\(id),\"username\":\"reviewer\(id)\",\"bot\":false,\"state\":\"active\"}")
+            case let path where path.contains("/draft_notes"):
+                if gitlab.has("approval-preflight-armed"), let count = Int(gitlab.text("approval-preflight-failures")), count > 0 {
+                    gitlab.write("approval-preflight-failures", String(count - 1))
+                    gitlab.append("approval-preflight.log", "failed\n")
+                    return InMemoryGitLab.output(code: 1)
+                }
+                try await gitlab.pause(ifPresent: "pause-selected-read", entered: "selected-read-entered", until: "release-selected-read")
+                if gitlab.has("proof-file-read") { gitlab.write("proof-draft-read") }
+                if gitlab.has("fail-next-draft-read") { gitlab.remove("fail-next-draft-read"); return InMemoryGitLab.output(code: 1) }
+                return try gitlab.response("drafts.json")
+            case let path where path.hasSuffix("/raw_diffs"): return InMemoryGitLab.output("verified diff fixture\n")
+            case let path where path.contains("/reviewers"):
+                if gitlab.has("approval-preflight-failures") { gitlab.write("approval-preflight-armed") }
+                return try gitlab.response("reviewers.json")
+            case let path where path.hasSuffix("/approvals"):
+                if gitlab.has("fail-approvals") { return InMemoryGitLab.output(code: 1) }
+                try await gitlab.pause(ifPresent: "pause-approval-read", entered: "approval-read-entered", until: "release-approval-read")
+                return gitlab.has("approvals.json") ? try gitlab.response("approvals.json") : InMemoryGitLab.output(#"{"approved_by":[]}"#)
+            case let path where path.contains("/discussions"):
+                if gitlab.has("fail-discussion-read") { return InMemoryGitLab.output(code: 1) }
+                if gitlab.has("edit-on-this-discussion") {
+                    gitlab.remove("edit-on-this-discussion")
+                    try gitlab.editArray("drafts.json") { drafts in
+                        for index in drafts.indices where drafts[index]["id"] as? Int == 11 { drafts[index]["note"] = "/merge" }
+                    }
+                }
+                if gitlab.has("edit-after-next-discussion") { gitlab.remove("edit-after-next-discussion"); gitlab.write("edit-on-this-discussion") }
+                if gitlab.has("capture-one-discussion") {
+                    gitlab.remove("capture-one-discussion")
+                    let captured = try gitlab.response("discussions.json")
+                    gitlab.write("discussion-captured")
+                    try await gitlab.waitFor("release-discussion")
+                    return captured
+                }
+                if gitlab.has("change-during-discussions") {
+                    try gitlab.editArray("drafts.json") { drafts in
+                        for index in drafts.indices where drafts[index]["id"] as? Int == 12 { drafts[index]["note"] = "Edited while checking" }
+                    }
+                }
+                return try gitlab.response("discussions.json")
+            case let path where path.hasSuffix("/approve"):
+                gitlab.append("approve.log", request.command + "\n")
+                if gitlab.has("approval-response-lost") {
+                    gitlab.write("approvals.json", #"{"approved_by":[{"user":{"id":3,"username":"me"}}]}"#)
+                    return InMemoryGitLab.output(code: 1)
+                }
+                return gitlab.has("fail-approval-write") ? InMemoryGitLab.output(code: 1) : InMemoryGitLab.output(#"{"approved_by":[{"user":{"id":3}}]}"#)
+            case "/projects/1/repository/branches/fix":
+                return InMemoryGitLab.output("{\"commit\":{\"id\":\"\(gitlab.text("remote-head.txt"))\"}}")
+            case let path where path.hasPrefix("/projects/1/repository/files/Sources%2FA.swift?ref="):
+                if gitlab.has("edit-after-proof-draft-read") { gitlab.write("proof-file-read") }
+                if gitlab.has("edit-during-proof") {
+                    try gitlab.editArray("drafts.json") { drafts in
+                        for index in drafts.indices where drafts[index]["id"] as? Int == 12 { drafts[index]["note"] = "New unsupported local fix" }
+                    }
+                }
+                let object = ["file_path": "Sources/A.swift", "encoding": "base64", "content": gitlab.data("remote-file-content.txt").base64EncodedString()]
+                return .init(stdout: try JSONSerialization.data(withJSONObject: object), stderr: "", exitCode: 0)
+            case "/projects/99/merge_requests/2", "/projects/1/merge_requests/99":
+                let parts = path.split(separator: "/")
+                let project = Int(parts[1])!, iid = Int(parts[3])!
+                var object = try #require(JSONSerialization.jsonObject(with: gitlab.data("request.json")) as? [String: Any])
+                object.merge(["project_id": project, "iid": iid, "state": "closed", "source_project_id": project, "target_project_id": project,
+                              "web_url": "https://gitlab.example.org/g/p/-/merge_requests/\(iid)"]) { _, new in new }
+                return .init(stdout: try JSONSerialization.data(withJSONObject: object), stderr: "", exitCode: 0)
+            case "/projects/1/merge_requests/2":
+                let result = try gitlab.response("request.json")
+                if gitlab.has("pause-selected-read") { gitlab.write("captured-ready-rereview-mr") }
+                return result
+            case "/projects/1":
+                return InMemoryGitLab.output(code: 100)
+            case let path where path.contains("/blocks?") || path.hasPrefix("/projects/1/merge_requests?"):
+                // This fixture intentionally has no optional stack/dependency data.
+                return InMemoryGitLab.output(code: 100)
+            default: return try gitlab.unexpected(request)
+            }
+        }
 
         let settings = SettingsManager(defaults: defaults)
         // These tests isolate publication/re-review from the independent acceptance workflow.
@@ -397,30 +412,21 @@ import Testing
             )
             settings.assistantChats[key] = "thread"
         }
-        let glab = GlabService()
-        glab.glabPath = executable
-        glab.resolvedHost = host
-        glab.currentUsername = "me"
+        let glab = gitlab.service(host: host, username: "me")
         let monitor = MergeRequestAttentionMonitor(
             glab: glab, settings: settings, verdictDirectory: folder.appending(path: "verdicts"),
             aiAssessmentDirectory: folder.appending(path: "ai-assessments"), followUpDirectory: folder,
             canAutomate: { _ in
-                duringAutomationCheck?(folder)
-                return !FileManager.default.fileExists(atPath: folder.appending(path: "assistant-unavailable").path)
+                duringAutomationCheck?(gitlab)
+                return !gitlab.has("assistant-unavailable")
             },
             approvalReadClock: approvalReadClock, approvalReadWait: { _ in },
             verifyReReview: { input, _, _ in
                 try await reReviewGate?()
-                try JSONEncoder().encode(input).write(to: folder.appending(path: "verifier-input.json"))
-                let log = folder.appending(path: "verification.log")
-                let previous = (try? Data(contentsOf: log)) ?? Data()
-                try (previous + Data("verified\n".utf8)).write(to: log)
-                if FileManager.default.fileExists(atPath: folder.appending(path: "fail-verification").path) {
-                    throw ReReviewVerifier.VerificationError.failed
-                }
-                if FileManager.default.fileExists(atPath: folder.appending(path: "unavailable-verification").path) {
-                    throw ReReviewVerifier.VerificationError.unavailable
-                }
+                try JSONEncoder().encode(input).store(in: gitlab, as: "verifier-input.json")
+                gitlab.append("verification.log", "verified\n")
+                if gitlab.has("fail-verification") { throw ReReviewVerifier.VerificationError.failed }
+                if gitlab.has("unavailable-verification") { throw ReReviewVerifier.VerificationError.unavailable }
                 if let assessment { return assessment }
                 return ReReviewAssessment(notes: input.discussions.flatMap(\.notes).filter {
                     $0.system != true && $0.author?.id != input.authorID
@@ -435,7 +441,7 @@ import Testing
                 } })
             }
         )
-        return Harness(folder: folder, defaults: defaults, suite: suite, settings: settings, glab: glab, monitor: monitor)
+        return Harness(folder: folder, defaults: defaults, suite: suite, settings: settings, glab: glab, gitlab: gitlab, monitor: monitor)
     }
 
     private let draftJSON = #"""
@@ -528,7 +534,7 @@ import Testing
             if change == "resolve" { drafts[index]["resolve_discussion"] = true }
             if change == "position" { drafts[index]["position"] = ["new_path": "Changed.swift", "new_line": 9] }
         }
-        try JSONSerialization.data(withJSONObject: drafts).write(to: harness.folder.appending(path: "drafts.json"))
+        try JSONSerialization.data(withJSONObject: drafts).store(in: harness.gitlab, as: "drafts.json")
         await harness.monitor.publishDrafts(selected, for: manualTarget)
         #expect(harness.log("selected.log").isEmpty && harness.log("publish.log").isEmpty)
         #expect(harness.monitor.confirmationStates[.init(projectID: 1, iid: 2)] == .changed)
@@ -619,10 +625,10 @@ import Testing
         let task = Task { await harness.monitor.publishDrafts(selected, for: target) }
         defer { task.cancel(); try? harness.write("release-selected-read", "yes") }
         let deadline = ContinuousClock.now + .seconds(3)
-        while !FileManager.default.fileExists(atPath: harness.folder.appending(path: "selected-read-entered").path), ContinuousClock.now < deadline {
+        while !harness.gitlab.has("selected-read-entered"), ContinuousClock.now < deadline {
             try await Task.sleep(for: .milliseconds(10))
         }
-        try #require(FileManager.default.fileExists(atPath: harness.folder.appending(path: "selected-read-entered").path))
+        try #require(harness.gitlab.has("selected-read-entered"))
         harness.glab.currentUsername = "another"
         try harness.write("live-user.json", #"{"id":4,"username":"another"}"#)
         harness.monitor.refresh(host: host, username: "another", todos: [])
@@ -915,11 +921,11 @@ import Testing
         let quickCheck = Task { await harness.monitor.refreshPendingDrafts() }
         defer { try? harness.write("release-discussion", "yes") }
         let deadline = ContinuousClock.now + .seconds(5)
-        while !FileManager.default.fileExists(atPath: harness.folder.appending(path: "discussion-captured").path),
+        while !harness.gitlab.has("discussion-captured"),
               ContinuousClock.now < deadline {
             try await Task.sleep(for: .milliseconds(20))
         }
-        try #require(FileManager.default.fileExists(atPath: harness.folder.appending(path: "discussion-captured").path))
+        try #require(harness.gitlab.has("discussion-captured"))
         try harness.write("discussions.json", othersThread)
         try await harness.poll()
         #expect(harness.monitor.currentItems.first?.section == .open)
@@ -1020,7 +1026,7 @@ import Testing
         let harness = try makeHarness(assistantWorked: true, duringAutomationCheck: { folder in
             guard probe.armed else { return }
             probe.armed = false
-            try? Data("yes".utf8).write(to: folder.appending(path: "fail-next-approval-user"))
+            folder.write("fail-next-approval-user", "yes")
         }, approvalReadClock: { probe.now })
         defer { harness.cleanUp() }
         try harness.recordVerdict("no_objections", head: head)
@@ -1065,7 +1071,7 @@ import Testing
 
         // GitLab confirms the original effect only after the unsuccessful readback.
         try harness.write("approvals.json", #"{"approved_by":[{"user":{"id":3,"username":"me"}}]}"#)
-        try FileManager.default.removeItem(at: harness.folder.appending(path: "fail-approval-write"))
+        harness.gitlab.remove("fail-approval-write")
         await harness.monitor.approve(item.id)
 
         #expect(harness.log("approve.log").split(separator: "\n").count == 1)
@@ -1365,7 +1371,7 @@ import Testing
 
         try await harness.poll()
 
-        #expect(FileManager.default.fileExists(atPath: harness.folder.appending(path: "ai-assessment-added-after-preview").path))
+        #expect(harness.gitlab.has("ai-assessment-added-after-preview"))
         #expect(harness.log("selected.log").contains("/draft_notes/12/publish"))
         #expect(!harness.log("selected.log").contains("/draft_notes/14/publish"))
         #expect(harness.monitor.currentItems.first?.drafts.map(\.id) == [14])
@@ -1428,7 +1434,7 @@ import Testing
 
         try await harness.poll()
 
-        #expect(FileManager.default.fileExists(atPath: harness.folder.appending(path: "edited-after-proof-draft-read").path))
+        #expect(harness.gitlab.has("edited-after-proof-draft-read"))
         #expect(harness.log("selected.log").isEmpty)
         #expect(harness.monitor.currentOpenItems.first?.draftCount == 1)
     }
@@ -1494,7 +1500,7 @@ import Testing
         let harness = try makeHarness(assistantWorked: true, authored: true, duringAutomationCheck: { folder in
             if armFinalRead {
                 armFinalRead = false
-                try? Data().write(to: folder.appending(path: "pause-selected-read"))
+                folder.write("pause-selected-read")
             }
         })
         defer {
@@ -1511,17 +1517,17 @@ import Testing
         try await harness.poll()
         try #require(!harness.monitor.isVerifyingReReview && harness.log("verification.log") == "verified\n")
         try #require(harness.log("re-review.log").isEmpty)
-        try FileManager.default.removeItem(at: harness.folder.appending(path: "assistant-unavailable"))
+        harness.gitlab.remove("assistant-unavailable")
         armFinalRead = true
         harness.monitor.refresh(host: host, username: "me", todos: [])
         let deadline = ContinuousClock.now + .seconds(5)
-        while (!FileManager.default.fileExists(atPath: harness.folder.appending(path: "selected-read-entered").path)
-               || !FileManager.default.fileExists(atPath: harness.folder.appending(path: "captured-ready-rereview-mr").path)),
+        while (!harness.gitlab.has("selected-read-entered")
+               || !harness.gitlab.has("captured-ready-rereview-mr")),
               ContinuousClock.now < deadline {
             try await Task.sleep(for: .milliseconds(10))
         }
-        try #require(FileManager.default.fileExists(atPath: harness.folder.appending(path: "selected-read-entered").path))
-        try #require(FileManager.default.fileExists(atPath: harness.folder.appending(path: "captured-ready-rereview-mr").path))
+        try #require(harness.gitlab.has("selected-read-entered"))
+        try #require(harness.gitlab.has("captured-ready-rereview-mr"))
         try #require(!harness.monitor.isVerifyingReReview)
         let original = harness.log("request.json")
         let current = state == "draft" ? original.replacingOccurrences(of: "\"draft\":false", with: "\"draft\":true")
@@ -1687,15 +1693,12 @@ import Testing
         let harness = try makeHarness(assistantWorked: true, authored: true, duringAutomationCheck: { folder in
             guard armed else { return }
             armed = false
-            do {
-                let requestURL = folder.appending(path: "request.json")
-                let current = try String(contentsOf: requestURL, encoding: .utf8)
-                let edited = current.replacingOccurrences(of: "\"title\":\"Fix\"",
-                    with: field == "title" ? "\"title\":\"New acceptance criteria\""
-                        : "\"title\":\"Fix\",\"description\":\"New acceptance criteria\"")
-                try edited.write(to: requestURL, atomically: true, encoding: .utf8)
-                changed = true
-            } catch { Issue.record(error) }
+            let current = folder.text("request.json")
+            let edited = current.replacingOccurrences(of: "\"title\":\"Fix\"",
+                with: field == "title" ? "\"title\":\"New acceptance criteria\""
+                    : "\"title\":\"Fix\",\"description\":\"New acceptance criteria\"")
+            folder.write("request.json", edited)
+            changed = true
         })
         defer { harness.cleanUp() }
         try prepareAuthoredFeedback(harness)
@@ -1811,7 +1814,7 @@ import Testing
         #expect(harness.log("re-review.log").isEmpty)
         try await harness.poll()
         #expect(harness.log("verification.log") == "verified\n")
-        try FileManager.default.removeItem(at: harness.folder.appending(path: "fail-verification"))
+        harness.gitlab.remove("fail-verification")
         await harness.monitor.retryReReview(item.id)
         try await harness.settleVerification()
         #expect(harness.log("re-review.log") == "requested\n")
@@ -1834,7 +1837,7 @@ import Testing
         #expect(before.reReviewReadiness == (failure == "failed" ? .failed : .unavailable))
         #expect(harness.log("re-review.log").isEmpty)
 
-        try FileManager.default.removeItem(at: harness.folder.appending(path: marker))
+        harness.gitlab.remove(marker)
         try await completeSharedAuthorFeedback(harness)
         try await harness.poll()
 
@@ -1855,6 +1858,70 @@ import Testing
         }
         #expect(harness.log("publish.log").isEmpty && harness.log("selected.log").isEmpty)
         #expect(harness.log("verification.log") == "verified\nverified\n")
+    }
+
+    @Test func aCatalogCommitCannotOverwriteAVerifierThatFinishedDuringItsFinalRead() async throws {
+        var boundary: InMemoryGitLab?
+        let harness = try makeHarness(assistantWorked: true, authored: true, reReviewGate: {
+            boundary?.write("verifier-entered")
+            try await boundary?.waitFor("finish-verification")
+        })
+        boundary = harness.gitlab
+        defer { harness.cleanUp() }
+        defer {
+            harness.gitlab.write("finish-verification")
+            harness.gitlab.write("release-catalog")
+        }
+        try prepareAuthoredFeedback(harness)
+        try await harness.poll()
+        try harness.write("drafts.json", "[]")
+        try harness.write("discussions.json", harness.log("published-discussions.json"))
+        try harness.write("fail-verification", "yes")
+        // Start a verifier for the current row, then refresh the catalog again
+        // while that existing verifier is suspended.
+        harness.monitor.refresh(host: host, username: "me", todos: [])
+        let firstDeadline = ContinuousClock.now + .seconds(5)
+        while harness.monitor.isLoading || !harness.gitlab.has("verifier-entered"), ContinuousClock.now < firstDeadline {
+            await Task.yield()
+        }
+        try #require(!harness.monitor.isLoading && harness.gitlab.has("verifier-entered"))
+        var other = try #require(JSONSerialization.jsonObject(with: harness.gitlab.data("request.json")) as? [String: Any])
+        other["iid"] = 3
+        other["author"] = ["id": 9, "username": "alice", "name": "Alice"]
+        other["web_url"] = "https://gitlab.example.org/g/p/-/merge_requests/3"
+        let otherJSON = String(decoding: try JSONSerialization.data(withJSONObject: other), as: UTF8.self)
+        try harness.write("reviewing.json", "[" + otherJSON + "]")
+        let original = try #require(harness.gitlab.handler)
+        harness.gitlab.handler = { request in
+            if request.endpoint.hasPrefix("/projects/1/merge_requests/3/draft_notes") {
+                harness.gitlab.write("catalog-paused")
+                try await harness.gitlab.waitFor("release-catalog")
+                return InMemoryGitLab.output("[]")
+            }
+            if request.endpoint.hasPrefix("/projects/1/merge_requests/3/discussions") {
+                return InMemoryGitLab.output("[]")
+            }
+            if request.endpoint == "/projects/1/merge_requests/3" { return InMemoryGitLab.output(otherJSON) }
+            return try await original(request)
+        }
+
+        harness.monitor.refresh(host: host, username: "me", todos: [])
+        let deadline = ContinuousClock.now + .seconds(5)
+        while !harness.gitlab.has("catalog-paused") || !harness.gitlab.has("verifier-entered"), ContinuousClock.now < deadline {
+            await Task.yield()
+        }
+        try #require(harness.gitlab.has("catalog-paused") && harness.gitlab.has("verifier-entered"))
+        harness.gitlab.write("finish-verification")
+        while harness.monitor.isVerifyingReReview, ContinuousClock.now < deadline { await Task.yield() }
+        try #require(!harness.monitor.isVerifyingReReview)
+        harness.gitlab.write("release-catalog")
+        while harness.monitor.isLoading, ContinuousClock.now < deadline { await Task.yield() }
+        try #require(!harness.monitor.isLoading && !harness.monitor.hasError)
+
+        let item = try #require(harness.monitor.currentOpenItems.first { $0.id.iid == 2 })
+        #expect(item.reReviewReadiness == .failed)
+        #expect(item.canConfirmReReview)
+        #expect(harness.log("re-review.log").isEmpty)
     }
 
     @Test func sharedSemanticSuccessDoesNotHideAnUnconfirmedReviewerRequestOrRepeatItsWrite() async throws {
@@ -2151,7 +2218,7 @@ import Testing
         let harness = try makeHarness(assistantWorked: true, authored: authored, duringAutomationCheck: { folder in
             guard probe.armed else { return }
             probe.armed = false
-            try? Data("yes".utf8).write(to: folder.appending(path: "pause-selected-read"))
+            folder.write("pause-selected-read", "yes")
         }, verifyDraftRecovery: { input, _, _ in
             .init(drafts: input.requestedDraftIDs.map { .init(draftID: $0, state: .uncertain, reason: "Reply B remains unverified") })
         })
@@ -2164,9 +2231,9 @@ import Testing
         let polling = Task { try await harness.poll() }
         defer { try? harness.write("release-selected-read", "yes") }
         let deadline = ContinuousClock.now + .seconds(4)
-        while !FileManager.default.fileExists(atPath: harness.folder.appending(path: "selected-read-entered").path),
+        while !harness.gitlab.has("selected-read-entered"),
               ContinuousClock.now < deadline { try await Task.sleep(for: .milliseconds(20)) }
-        try #require(FileManager.default.fileExists(atPath: harness.folder.appending(path: "selected-read-entered").path))
+        try #require(harness.gitlab.has("selected-read-entered"))
         harness.settings.assistantHandoffs.append(job)
         try harness.write("release-selected-read", "yes")
         try await polling.value
@@ -2323,7 +2390,7 @@ import Testing
                           "body": index == 2 ? "Latest AI reply" : "Latest human reply"])
             published[index]["notes"] = notes
         }
-        try JSONSerialization.data(withJSONObject: published).write(to: harness.folder.appending(path: "discussions.json"))
+        try JSONSerialization.data(withJSONObject: published).store(in: harness.gitlab, as: "discussions.json")
         try harness.write("drafts.json", pending)
         return originalRun
     }
@@ -2598,15 +2665,15 @@ import Testing
         let reviewerJSON = String(decoding: try JSONSerialization.data(withJSONObject: reviewerMR), as: UTF8.self)
         try harness.write("reviewing.json", "[" + reviewerJSON + "]")
         try harness.write("request-3.json", reviewerJSON)
-        let executable = harness.folder.appending(path: "glab")
-        let script = try String(contentsOf: executable, encoding: .utf8)
-        try script.replacingOccurrences(of: "case \"$2\" in", with: """
-        case "$2" in
-            /projects/1/merge_requests/3) cat request-3.json; exit 0 ;;
-            /projects/1/merge_requests/3/draft_notes*|/projects/1/merge_requests/3/discussions*) echo '[]'; exit 0 ;;
-        """)
-            .write(to: executable, atomically: true, encoding: .utf8)
-        try FileManager.default.setAttributes([.posixPermissions: 0o700], ofItemAtPath: executable.path)
+        let originalHandler = try #require(harness.gitlab.handler)
+        harness.gitlab.handler = { request in
+            switch request.endpoint {
+            case "/projects/1/merge_requests/3": return try harness.gitlab.response("request-3.json")
+            case let path where path.hasPrefix("/projects/1/merge_requests/3/draft_notes") || path.hasPrefix("/projects/1/merge_requests/3/discussions"):
+                return InMemoryGitLab.output("[]")
+            default: return try await originalHandler(request)
+            }
+        }
         let verdict = ReviewVerdict(version: 1, host: host, projectID: 1, iid: 3, headSHA: head,
             verdict: try #require(ReviewVerdict.Kind(rawValue: "no_objections")),
             discussionFingerprint: ReviewVerdict.fingerprint([]))
@@ -2630,8 +2697,12 @@ import Testing
         harness.monitor.draftProofRecoveryCoordinator?.onChange = nil
         harness.monitor.draftProofRecoveryCoordinator?.onNeedsRepair = { snapshot, _, _ in
             repairedMRs.append(snapshot.request.iid)
+            // Hold the first repair attempt so a capacity-style nil result cannot
+            // be retried by another refresh before this assertion observes it.
+            try await harness.gitlab.waitFor("release-repair")
             return nil
         }
+        defer { harness.gitlab.write("release-repair") }
         harness.settings.autoApproveOptOuts.remove(approvalTarget)
         harness.settings.save()
 
@@ -2650,7 +2721,8 @@ import Testing
         let normalDeadline = ContinuousClock.now + .seconds(5)
         while repairedMRs.isEmpty,
               ContinuousClock.now < normalDeadline { try await Task.sleep(for: .milliseconds(20)) }
-        #expect(assessedMRs == [2] && repairedMRs == [2])
+        #expect(assessedMRs == [2])
+        #expect(repairedMRs == [2])
         #expect(harness.monitor.draftProofRecoveryCoordinator?.isChecking(work: unrelatedWork) == true)
     }
 

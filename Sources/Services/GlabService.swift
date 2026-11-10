@@ -4,6 +4,26 @@ import Observation
 @MainActor
 @Observable
 final class GlabService {
+    typealias CommandRunner = @MainActor (URL, [String], [String: String], TimeInterval) async throws -> ProcessRunner.Output
+    @ObservationIgnored private let commandRunner: CommandRunner
+
+    // Keep command construction/decoding real in workflow tests while replacing
+    // the external process boundary. Adapter tests retain the default runner.
+    init(commandRunner: @escaping CommandRunner = { executable, arguments, environment, timeout in
+        try await ProcessRunner.run(executable, arguments: arguments, environment: environment, timeout: timeout)
+    }) {
+        self.commandRunner = commandRunner
+    }
+
+    func runCommand(_ executable: URL, arguments: [String], environment: [String: String],
+                    timeout: TimeInterval) async throws -> ProcessRunner.Output {
+        try await commandRunner(executable, arguments, environment, timeout)
+    }
+
+    func freshSession() -> GlabService {
+        GlabService(commandRunner: commandRunner)
+    }
+
     /// Path to the resolved `glab` executable. Set by `OnboardingDetector` / `recheck()`.
     var glabPath: URL?
 
@@ -51,7 +71,7 @@ final class GlabService {
         guard let glabPath else { return .failure(.glabNotInstalled) }
         let output: ProcessRunner.Output
         do {
-            output = try await ProcessRunner.run(
+            output = try await runCommand(
                 glabPath,
                 arguments: ["api", "--paginate", "/todos?per_page=100&state=pending"] + Self.hostArguments(host),
                 environment: Self.shellEnvironment,
@@ -80,7 +100,7 @@ final class GlabService {
         guard let glabPath else { return .failure(.glabNotInstalled) }
         let output: ProcessRunner.Output
         do {
-            output = try await ProcessRunner.run(
+            output = try await runCommand(
                 glabPath,
                 arguments: ["api", "--method", "POST", "/todos/\(id)/mark_as_done"] + Self.hostArguments(host),
                 environment: Self.shellEnvironment,
@@ -99,7 +119,7 @@ final class GlabService {
 
     func mergeRequestAuthor(projectID: Int, iid: Int, host: String) async throws -> Todo.Author {
         guard let glabPath else { throw GlabError.glabNotInstalled }
-        let output = try await ProcessRunner.run(
+        let output = try await runCommand(
             glabPath,
             arguments: ["api", "/projects/\(projectID)/merge_requests/\(iid)", "--hostname", host],
             environment: Self.shellEnvironment,
@@ -165,7 +185,7 @@ final class GlabService {
     private func resolveHost(executable: URL) async -> String? {
         let output: ProcessRunner.Output
         do {
-            output = try await ProcessRunner.run(
+            output = try await runCommand(
                 executable,
                 arguments: ["config", "get", "host"],
                 environment: Self.shellEnvironment,
@@ -184,7 +204,7 @@ final class GlabService {
     private func probeAuthedHosts(executable: URL, defaultHost: String?) async -> Result<[AuthedHost], GlabError> {
         let output: ProcessRunner.Output
         do {
-            output = try await ProcessRunner.run(
+            output = try await runCommand(
                 executable,
                 arguments: ["auth", "status"],
                 environment: Self.shellEnvironment,

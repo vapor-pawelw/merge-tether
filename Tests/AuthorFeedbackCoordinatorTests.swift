@@ -517,7 +517,7 @@ struct AuthorFeedbackCoordinatorTests {
             #expect(status.followUpNoteIDs == [20])
             #expect(status.phase == .waitingPublication && status.pendingDraftCount == 1)
             #expect(!fixture.resolved)
-            #expect(try Data(contentsOf: fixture.directory.appending(path: "drafts.json"))
+            #expect(fixture.gitlab.data("drafts.json")
                 == Data(#"[{"id":30,"author_id":3,"discussion_id":"thread-a","note":"An uncertain earlier reply"}]"#.utf8))
         }
     }
@@ -796,7 +796,7 @@ struct AuthorFeedbackCoordinatorTests {
             #expect(refreshed.needsAttention == (scenario == "denied"))
             #expect(refreshed.findings.first?.state == (scenario == "denied" ? .needsVerification : nil))
             if scenario == "denied" {
-                try FileManager.default.removeItem(at: fixture.directory.appending(path: "deny-resolve"))
+                fixture.gitlab.remove("deny-resolve")
                 coordinator.invalidate(projectID: 1, iid: 2)
                 try await fixture.run(coordinator)
                 #expect(fixture.resolutionPosts == 2 && fixture.resolved)
@@ -830,7 +830,7 @@ struct AuthorFeedbackCoordinatorTests {
             let editedPraise = praise.replacingOccurrences(of: "mapping looks good.", with: "mapping and scope look good.")
             try fixture.write("discussions.json", "[\(editedPraise),\(Fixture.condition)]")
             try fixture.write("resolved.json", editedPraise.replacingOccurrences(of: "\"resolved\":false", with: "\"resolved\":true"))
-            try FileManager.default.removeItem(at: fixture.directory.appending(path: "deny-resolve"))
+            fixture.gitlab.remove("deny-resolve")
             try await fixture.run(coordinator, requestJSON: updated)
             #expect(fixture.resolutionPosts == 2 && fixture.resolved)
         }
@@ -1346,6 +1346,7 @@ struct AuthorFeedbackCoordinatorTests {
         let suite = "AuthorFeedbackCoordinatorTests.\(UUID())"
         let settings: SettingsManager
         let glab: GlabService
+        let gitlab = InMemoryGitLab()
         var verified = false
         var inputs: [ReReviewVerifier.Input] = []
         var retryDelays: [Duration] = []
@@ -1354,9 +1355,9 @@ struct AuthorFeedbackCoordinatorTests {
         var userReads: Int { count("user-reads") }
         var resolutionPosts: Int { count("resolution-posts") }
         private func count(_ name: String) -> Int {
-            (try? String(contentsOf: directory.appending(path: name), encoding: .utf8).split(separator: "\n").count) ?? 0
+            gitlab.text(name).split(separator: "\n").count
         }
-        var resolved: Bool { FileManager.default.fileExists(atPath: directory.appending(path: "resolved").path) }
+        var resolved: Bool { gitlab.has("resolved") }
 
         init() throws {
             directory = FileManager.default.temporaryDirectory.appending(path: UUID().uuidString)
@@ -1365,10 +1366,7 @@ struct AuthorFeedbackCoordinatorTests {
             settings = SettingsManager(defaults: defaults)
             settings.automation.packageDecision = .enabled
             settings.automation.autoResolveAcceptedFeedback = true
-            glab = GlabService()
-            glab.resolvedHost = Self.host
-            glab.currentUsername = "me"
-            glab.glabPath = directory.appending(path: "glab")
+            glab = gitlab.service(host: Self.host, username: "me")
             try write("request.json", Self.request)
             try write("user.json", #"{"id":3,"username":"me"}"#)
             try write("approvals.json", #"{"approved_by":[{"user":{"id":7,"username":"alice"}}]}"#)
@@ -1377,61 +1375,66 @@ struct AuthorFeedbackCoordinatorTests {
             try write("drafts.json", "[]")
             try write("awards.json", "[]")
             try write("reviewer.json", #"{"id":7,"username":"alice","bot":false}"#)
-            try write("glab", """
-                #!/bin/sh
-                set -eu
-                cd "$(dirname "$0")"
-                test "$1" = api
-                test "$3" = --hostname
-                test "$4" = \(Self.host)
-                case "$2" in
-                  /users/7)
-                    if [ -e fail-reviewer ]; then printf '%s' '503 unavailable' >&2; exit 1; fi
-                    cat reviewer.json ;;
-                  /user) printf 'user\\n' >> user-reads; cat user.json ;;
-                  /projects/1/merge_requests/2)
-                    if [ -e fail-request-once ]; then rm fail-request-once; printf '503 temporarily unavailable' >&2; exit 1; fi
-                    cat request.json ;;
-                  */award_emoji*)
-                    note_path="${2%/award_emoji*}"
-                    note_id="${note_path##*/}"
-                    award_file="awards-$note_id.json"
-                    if [ "${5-}" = --method ]; then
-                      test "$5" = --method
-                      test "$6" = POST
-                      printf 'post\\n' >> reaction-posts
-                      if [ -e fail-award ]; then printf '%s' '403 Forbidden' >&2; exit 1; fi
-                      printf '%s' '{"id":40,"name":"thumbsup","user":{"id":3,"username":"me"}}'
-                      printf '%s' '[{"id":40,"name":"thumbsup","user":{"id":3,"username":"me"}}]' > "$award_file"
-                      if [ -e change-after-award ]; then cp changed-discussions.json discussions.json; fi
-                    else
-                      printf 'get\\n' >> award-reads
-                      if [ -e fail-award-read ]; then printf '%s' '403 Forbidden' >&2; exit 1; fi
-                      if [ -e "$award_file" ]; then cat "$award_file"; else cat awards.json; fi
-                      if [ -e change-after-award-read ]; then cp changed-discussions.json discussions.json; fi
-                    fi ;;
-                  */raw_diffs) printf '%s' 'diff --git a/A b/A' ;;
-                  */approvals)
-                    if [ -e approvals-read ] && [ -e withdraw-approval ]; then
-                      printf '%s' '{"approved_by":[]}'
-                    else cat approvals.json; fi
-                    touch approvals-read ;;
-                  */draft_notes*) cat drafts.json ;;
-                  */discussions\\?*)
-                    if [ -e resolved ] && [ -e fail-discussions-after-resolution ]; then printf '%s' '503 unavailable' >&2; exit 1; fi
-                    if [ -e resolved ]; then sed 's/"resolved":false/"resolved":true/g' discussions.json;
-                    else cat discussions.json; fi ;;
-                  */discussions/thread-a)
-                    test "$*" = 'api /projects/1/merge_requests/2/discussions/thread-a --hostname \(Self.host) --method PUT --field resolved=true'
-                    printf 'put\\n' >> resolution-posts
-                    if [ -e deny-resolve ]; then printf '%s' '403 Forbidden' >&2; exit 1; fi
-                    touch resolved
-                    if [ -e lose-resolve-response ]; then printf '%s' 'response lost' >&2; exit 1; fi
-                    cat resolved.json ;;
-                  *) printf '%s' "Unexpected glab command: $*" >&2; exit 100 ;;
-                esac
-                """)
-            try FileManager.default.setAttributes([.posixPermissions: 0o700], ofItemAtPath: directory.appending(path: "glab").path)
+            gitlab.handler = { [gitlab] request in
+                let endpoint = request.endpoint
+                #expect(Array(request.arguments.prefix(4)) == ["api", endpoint, "--hostname", Self.host])
+                switch endpoint {
+                case let path where path.hasPrefix("/merge_requests?scope=created_by_me"):
+                    // The completion callback test does not supply a catalog listing.
+                    return InMemoryGitLab.output(code: 100)
+                case let path where path.hasPrefix("/merge_requests?scope=all"):
+                    return InMemoryGitLab.output(code: 100)
+                case "/users/7":
+                    if gitlab.has("fail-reviewer") { return InMemoryGitLab.output(error: "503 unavailable", code: 1) }
+                    return try gitlab.response("reviewer.json")
+                case "/user":
+                    gitlab.append("user-reads", "user\n")
+                    return try gitlab.response("user.json")
+                case "/projects/1/merge_requests/2":
+                    if gitlab.has("fail-request-once") {
+                        gitlab.remove("fail-request-once")
+                        return InMemoryGitLab.output(error: "503 temporarily unavailable", code: 1)
+                    }
+                    return try gitlab.response("request.json")
+                case let path where path.contains("/award_emoji"):
+                    let noteID = path.components(separatedBy: "/award_emoji")[0].split(separator: "/").last!
+                    let name = "awards-\(noteID).json"
+                    if request.method == "POST" {
+                        gitlab.append("reaction-posts", "post\n")
+                        if gitlab.has("fail-award") { return InMemoryGitLab.output(error: "403 Forbidden", code: 1) }
+                        gitlab.write(name, #"[{"id":40,"name":"thumbsup","user":{"id":3,"username":"me"}}]"#)
+                        if gitlab.has("change-after-award") { try gitlab.copy("changed-discussions.json", "discussions.json") }
+                        return InMemoryGitLab.output(#"{"id":40,"name":"thumbsup","user":{"id":3,"username":"me"}}"#)
+                    }
+                    gitlab.append("award-reads", "get\n")
+                    if gitlab.has("fail-award-read") { return InMemoryGitLab.output(error: "403 Forbidden", code: 1) }
+                    let result = try gitlab.response(gitlab.has(name) ? name : "awards.json")
+                    if gitlab.has("change-after-award-read") { try gitlab.copy("changed-discussions.json", "discussions.json") }
+                    return result
+                case let path where path.hasSuffix("/raw_diffs"):
+                    return InMemoryGitLab.output("diff --git a/A b/A")
+                case let path where path.hasSuffix("/approvals"):
+                    let withdrawn = gitlab.has("approvals-read") && gitlab.has("withdraw-approval")
+                    gitlab.write("approvals-read")
+                    return withdrawn ? InMemoryGitLab.output(#"{"approved_by":[]}"#) : try gitlab.response("approvals.json")
+                case let path where path.contains("/draft_notes"):
+                    return try gitlab.response("drafts.json")
+                case let path where path.contains("/discussions?"):
+                    if gitlab.has("resolved") && gitlab.has("fail-discussions-after-resolution") {
+                        return InMemoryGitLab.output(error: "503 unavailable", code: 1)
+                    }
+                    let json = gitlab.text("discussions.json")
+                    return InMemoryGitLab.output(gitlab.has("resolved") ? json.replacingOccurrences(of: #""resolved":false"#, with: #""resolved":true"#) : json)
+                case let path where path.hasSuffix("/discussions/thread-a"):
+                    #expect(request.arguments == ["api", endpoint, "--hostname", Self.host, "--method", "PUT", "--field", "resolved=true"])
+                    gitlab.append("resolution-posts", "put\n")
+                    if gitlab.has("deny-resolve") { return InMemoryGitLab.output(error: "403 Forbidden", code: 1) }
+                    gitlab.write("resolved")
+                    if gitlab.has("lose-resolve-response") { return InMemoryGitLab.output(error: "response lost", code: 1) }
+                    return try gitlab.response("resolved.json")
+                default: return try gitlab.unexpected(request)
+                }
+            }
         }
 
         func coordinator(assessment: ReReviewAssessment? = nil, duringVerification: (() -> Void)? = nil) -> AuthorFeedbackCoordinator {
@@ -1471,13 +1474,14 @@ struct AuthorFeedbackCoordinatorTests {
         }
 
         func discussions() throws -> [GitLabMergeRequestDiscussion] {
-            var json = try String(contentsOf: directory.appending(path: "discussions.json"), encoding: .utf8)
+            var json = gitlab.text("discussions.json")
             if resolved { json = json.replacingOccurrences(of: "\"resolved\":false", with: "\"resolved\":true") }
             return try JSONDecoder().decode([GitLabMergeRequestDiscussion].self, from: Data(json.utf8))
         }
 
-        func write(_ name: String, _ content: String) throws { try Data(content.utf8).write(to: directory.appending(path: name)) }
+        func write(_ name: String, _ content: String) throws { gitlab.write(name, content) }
         func cleanUp() {
+            gitlab.close()
             defaults.removePersistentDomain(forName: suite)
             try? FileManager.default.removeItem(at: directory)
         }

@@ -799,6 +799,8 @@ final class MergeRequestAttentionMonitor {
             }
         }
         var results: [Item] = []
+        var authoredUnansweredFeedback: [Item.ID: Bool] = [:]
+        var reReviewCandidates: [(GitLabMergeRequest, ReReviewFeedback, Int)] = []
         var failed = owned == nil || assigned == nil
         let ordered = candidates.values.sorted { ($0.id.projectID, $0.id.iid) < ($1.id.projectID, $1.id.iid) }
         // Limit simultaneous glab processes while still checking the entire list.
@@ -1012,10 +1014,10 @@ final class MergeRequestAttentionMonitor {
                             drafts: item.draftCount, host: host, user: user)
                     }
                     if automaticResume == nil, success, let feedback, let request = item.authoredRequest {
-                        await requestReReviewsIfReady(for: request, feedback: feedback, draftCount: item.draftCount,
-                                                      account: account, user: user)
+                        reReviewCandidates.append((request, feedback, item.draftCount))
                     }
                     if item.isAuthored {
+                        authoredUnansweredFeedback[item.id] = feedback?.hasUnansweredFeedback != false
                         let receipts = settings?.reReviewReceipts.filter {
                             $0.key.host == host && $0.key.authorID == user.id && $0.key.projectID == item.id.projectID
                                 && $0.key.iid == item.id.iid
@@ -1049,7 +1051,6 @@ final class MergeRequestAttentionMonitor {
                 results[index].dependencies = previous.dependencies
             }
         }
-        items = Item.ordered(results.filter(\.needsAttention))
         hasError = failed || explicitFetchFailed
         hasOwnListing = owned != nil
         let openIDs = Set(currentListed.filter { $0.state == "opened" }.map {
@@ -1090,6 +1091,26 @@ final class MergeRequestAttentionMonitor {
         // Retention belongs only to the read-only catalog. Stale rows do not become
         // new publication, approval or re-review action candidates.
         openItems = Item.ordered(Array(retainedCatalog.values))
+        // Verifiers can finish while another row or retained review is being read.
+        // Commit their current state, rather than the earlier per-row snapshot.
+        for index in results.indices where results[index].isAuthored {
+            let id = results[index].id
+            let unanswered = authoredUnansweredFeedback[id] ?? true
+            applyReReviewPresentation(&results[index], unanswered: unanswered)
+            if let catalogIndex = openItems.firstIndex(where: { $0.id == id }) {
+                applyReReviewPresentation(&openItems[catalogIndex], unanswered: unanswered)
+                retainedCatalog[id] = openItems[catalogIndex]
+            }
+        }
+        items = Item.ordered(results.filter(\.needsAttention))
+        openItems = Item.ordered(openItems)
+        // A fast verifier needs its row to exist before it can apply its result
+        // and continue the re-review workflow.
+        for (request, feedback, draftCount) in reReviewCandidates {
+            guard isCurrent(account), revision == glab.accountRevision else { return }
+            await requestReReviewsIfReady(for: request, feedback: feedback, draftCount: draftCount,
+                                          account: account, user: user)
+        }
         if owned != nil, assigned != nil, !explicitFetchFailed { syncedCatalogRevision = revision }
         if automaticResume == nil || automaticResume?.action == .commentPublication {
             await publishSettledDrafts(agentWorks: agentWorks, account: account, only: automaticResume?.id)
@@ -1976,19 +1997,22 @@ final class MergeRequestAttentionMonitor {
             .joined(separator: "|")
     }
 
-    private func updateReReviewPresentation(_ id: Item.ID, unanswered: Bool = false) {
+    private func applyReReviewPresentation(_ item: inout Item, unanswered: Bool) {
+        let id = item.id
         let check = reReviewChecks[id]
         let receipts = settings?.reReviewReceipts.filter {
             $0.key.host == account?.host && $0.key.authorID == user?.id
                 && $0.key.projectID == id.projectID && $0.key.iid == id.iid
         }.values
-        updateItem(id) { item in
-            item.reReviewReadiness = check?.state
-            item.reReviewFingerprint = check?.fingerprint
-            item.canConfirmReReview = check?.state.canConfirm == true && !unanswered && item.draftCount == 0
-            item.reReviewRequested = receipts?.contains { $0.requested == true } ?? false
-            item.reReviewUnconfirmed = receipts?.contains { $0.unconfirmed } ?? false
-        }
+        item.reReviewReadiness = check?.state
+        item.reReviewFingerprint = check?.fingerprint
+        item.canConfirmReReview = check?.state.canConfirm == true && !unanswered && item.draftCount == 0
+        item.reReviewRequested = receipts?.contains { $0.requested == true } ?? false
+        item.reReviewUnconfirmed = receipts?.contains { $0.unconfirmed } ?? false
+    }
+
+    private func updateReReviewPresentation(_ id: Item.ID, unanswered: Bool = false) {
+        updateItem(id) { applyReReviewPresentation(&$0, unanswered: unanswered) }
     }
 
     func retryReReview(_ id: Item.ID) async {

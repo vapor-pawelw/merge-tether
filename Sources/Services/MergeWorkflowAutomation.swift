@@ -627,7 +627,8 @@ final class MergeWorkflowAutomation {
             work: workKey(entry), username: entry.user.username, settings: settings, pipelineReservation: handoff,
             feedbackNoteIDs: feedbackIDs, isReview: event.kind == .reviewUpdate, mrWorkflow: mrWorkflow,
             expectedHeadSHA: entry.pipelineClaimAssessment == nil ? nil : current.sha, jobCoordinator: jobCoordinator,
-            configurationSnapshot: entry.pipelineClaimAssessment == nil ? nil : assessmentConfiguration
+            configurationSnapshot: entry.pipelineClaimAssessment == nil ? nil : assessmentConfiguration,
+            glab: glab.freshSession()
         )
         // Transfer this owned reservation to the CLI run; terminal completion
         // releases it through the monitor callback rather than user dismissal.
