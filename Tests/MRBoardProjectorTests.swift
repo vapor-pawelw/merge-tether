@@ -175,6 +175,135 @@ struct MRBoardProjectorTests {
         #expect(MRBoardProjector.reviewingContext(for: row, input: point).nextStep == review.nextStep)
     }
 
+    @Test(arguments: ["project_id", "iid", "web_url", "sha", "source_project_id", "source_branch",
+        "target_project_id", "target_branch", "state", "title", "description", "authorID", "authorUsername",
+        "draft", "pipelineID", "pipelineProjectID", "pipelineStatus", "pipelineSHA", "pipelineRef",
+        "has_conflicts", "detailed_merge_status", "blocking_discussions_resolved", "merge_when_pipeline_succeeds",
+        "user", "labels"])
+    func preparedFactsRequireEveryOriginalBindingField(_ change: String) throws {
+        // given
+        var fields: [String: Any] = ["source_project_id": 1, "target_project_id": 1,
+            "head_pipeline": ["id": 10, "project_id": 1, "status": "failed", "sha": "a", "ref": "feature"],
+            "has_conflicts": false, "detailed_merge_status": "mergeable", "blocking_discussions_resolved": true,
+            "merge_when_pipeline_succeeds": false, "user": ["can_merge": true], "labels": ["first", "second"]]
+        let original = try request(fields)
+        switch change {
+        case "project_id", "iid", "source_project_id", "target_project_id": fields[change] = 99
+        case "web_url": fields[change] = "https://other.test/g/p/-/merge_requests/42"
+        case "sha", "source_branch", "target_branch", "state", "title", "description", "detailed_merge_status":
+            fields[change] = "changed"
+        case "authorID": fields["author"] = ["id": 8, "username": "me", "name": "Me"]
+        case "authorUsername": fields["author"] = ["id": 3, "username": "other", "name": "Me"]
+        case "draft", "has_conflicts", "merge_when_pipeline_succeeds": fields[change] = true
+        case "blocking_discussions_resolved": fields[change] = false
+        case "user": fields[change] = ["can_merge": false]
+        case "labels": fields[change] = ["second", "first"]
+        default:
+            var pipeline = try #require(fields["head_pipeline"] as? [String: Any])
+            switch change {
+            case "pipelineID": pipeline["id"] = 11
+            case "pipelineProjectID": pipeline["project_id"] = 2
+            case "pipelineStatus": pipeline["status"] = "success"
+            case "pipelineSHA": pipeline["sha"] = "b"
+            default: pipeline["ref"] = "other"
+            }
+            fields["head_pipeline"] = pipeline
+        }
+        let changed = try request(fields)
+        let index = MRBoardProjector.RequestFacts.Index([.init(request: original, pipelineProcessing: true)])
+
+        // when + then
+        #expect(index.facts(for: original)?.pipelineProcessing == true)
+        #expect(index.facts(for: changed) == nil)
+    }
+
+    @Test func preparedFactsKeepFirstMatchAndEquivalentAbsentBody() throws {
+        let original = try request(["description": NSNull()])
+        let equivalent = try request(["description": ""])
+        let index = MRBoardProjector.RequestFacts.Index([
+            .init(request: original, conflictProcessing: true), .init(request: equivalent, pipelineProcessing: true)])
+        #expect(index.values.count == 1)
+        #expect(index.facts(for: equivalent)?.conflictProcessing == true)
+        #expect(index.facts(for: equivalent)?.pipelineProcessing == false)
+    }
+
+    @Test(arguments: ["title", "description"])
+    func preparedFactsPreserveByteSensitiveSemanticFingerprints(_ field: String) throws {
+        // given
+        let composed = try request([field: "\u{00e9}"])
+        let decomposed = try request([field: "e\u{0301}"])
+        #expect(composed.semanticContextFingerprint != decomposed.semanticContextFingerprint)
+        var index = MRBoardProjector.RequestFacts.Index()
+
+        // when
+        index.insert(composed) { .init(request: composed, conflictProcessing: true) }
+        index.insert(decomposed) { .init(request: decomposed, pipelineProcessing: true) }
+
+        // then
+        #expect(index.values.count == 2)
+        #expect(index.facts(for: composed)?.conflictProcessing == true)
+        #expect(index.facts(for: composed)?.pipelineProcessing == false)
+        #expect(index.facts(for: decomposed)?.conflictProcessing == false)
+        #expect(index.facts(for: decomposed)?.pipelineProcessing == true)
+    }
+
+    @Test func preparedFactsDistinguishWhitespaceFromAnEmptyBody() throws {
+        let empty = try request(["description": ""])
+        let whitespace = try request(["description": " "])
+        let index = MRBoardProjector.RequestFacts.Index([.init(request: empty, pipelineProcessing: true)])
+        #expect(index.facts(for: whitespace) == nil)
+    }
+
+    @Test(arguments: [10, 100], [false, true])
+    func projectionPreparesEachDistinctRequestFingerprintOnce(_ count: Int, _ includeFacts: Bool) throws {
+        // given
+        let requests = try (1...count).map { iid in
+            try request(["iid": iid, "web_url": "https://gitlab.test/g/p/-/merge_requests/\(iid)"])
+        }
+        var fingerprintCount = 0
+        let fingerprint: (GitLabMergeRequest) -> String = {
+            fingerprintCount += 1
+            return $0.semanticContextFingerprint
+        }
+        var index = MRBoardProjector.RequestFacts.Index(semanticFingerprint: fingerprint)
+        if includeFacts {
+            for request in requests + requests {
+                index.insert(request) { .init(request: request, pipelineProcessing: true, semanticFingerprint: fingerprint) }
+            }
+        }
+        let items = requests.map(item)
+        var input = MRBoardProjector.Input(account: account)
+        input.requestFacts = index.values
+        input.attention = .init(host: account.host, username: account.username, revision: account.revision,
+            evidence: items, attention: items, catalog: items)
+
+        // when
+        let projector = MRBoardProjector(input: input, semanticFingerprint: fingerprint)
+        let rows = items.map { MergeRequestBoardSnapshot.Row(item: $0, latestJob: nil, intents: []) }
+        for _ in 0..<3 {
+            for row in rows { #expect(projector.rowInput(for: row).pipelineProcessing == includeFacts) }
+        }
+
+        // then
+        #expect(index.values.count == (includeFacts ? count : 0))
+        #expect(fingerprintCount == count)
+    }
+
+    @Test func evidenceAndCatalogFactsRemainSeparateAtTheSameHead() throws {
+        let evidence = item(try request())
+        let catalog = item(try request(["description": "New text", "head_pipeline": ["id": 11, "status": "success"]]))
+        var input = input(evidence: evidence, catalog: catalog)
+        input.requestFacts = [.init(request: try #require(evidence.mergeRequest), pipelineProcessing: true),
+            .init(request: try #require(catalog.mergeRequest), workflowReadFailed: true)]
+        let projector = MRBoardProjector(input: input)
+        let evidenceRow = MergeRequestBoardSnapshot.Row(item: evidence, latestJob: nil, intents: [])
+        let catalogRow = MergeRequestBoardSnapshot.Row(item: catalog, latestJob: nil, intents: [])
+        #expect(projector.rowInput(for: evidenceRow).pipelineProcessing)
+        #expect(!projector.rowInput(for: evidenceRow).workflowReadFailed)
+        #expect(!projector.rowInput(for: catalogRow).pipelineProcessing)
+        #expect(projector.rowInput(for: catalogRow).workflowReadFailed)
+    }
+
     @Test func feedbackFailurePresentationUsesTheCurrentCanonicalDecisionRevision() throws {
         var evidence = item(try request())
         evidence.needsDiscussion = true

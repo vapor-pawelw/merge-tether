@@ -12,8 +12,8 @@ struct MRBoardProjector {
     }
     struct RequestFacts {
         /// Includes the mutable fields consumed by CI/conflict/policy readers; envelope compatibility is weaker.
-        private struct Binding: Equatable {
-            struct Pipeline: Equatable {
+        private struct Fields: Hashable {
+            struct Pipeline: Hashable {
                 let id: Int?
                 let projectID: Int?
                 let status: String
@@ -24,7 +24,6 @@ struct MRBoardProjector {
                 }
             }
             let context: MergeRequestDependencySummary.Context
-            let semanticContext: String
             let authorID: Int
             let authorUsername: String
             let draft: Bool?
@@ -36,7 +35,7 @@ struct MRBoardProjector {
             let canMerge: Bool?
             let labels: [String]
             init(_ request: GitLabMergeRequest) {
-                context = .init(request); semanticContext = request.semanticContextFingerprint
+                context = .init(request)
                 authorID = request.author.id; authorUsername = request.author.username; draft = request.draft
                 pipeline = request.headPipeline.map(Pipeline.init)
                 hasConflicts = request.hasConflicts; detailedMergeStatus = request.detailedMergeStatus
@@ -45,14 +44,72 @@ struct MRBoardProjector {
                 labels = request.labels
             }
         }
+        private struct Source: Hashable {
+            let fields: Fields
+            let title: Data
+            let body: Data
+            init(_ request: GitLabMergeRequest) {
+                fields = .init(request)
+                // String equality normalizes Unicode; the existing semantic digest hashes exact UTF-8 bytes.
+                title = Data(request.title.utf8); body = Data((request.description ?? "").utf8)
+            }
+        }
+        private struct Binding: Hashable {
+            let fields: Fields
+            let semanticContext: String
+        }
         let request: GitLabMergeRequest
+        private let source: Source
+        private let binding: Binding
         var mergeAutomatic = false
         var conflictFailed = false
         var conflictProcessing = false
         var pipelineProcessing = false
         var workflowReadFailed = false
         var aiOriginReadFailed = false
-        func matches(_ request: GitLabMergeRequest) -> Bool { Binding(self.request) == Binding(request) }
+        init(request: GitLabMergeRequest, mergeAutomatic: Bool = false, conflictFailed: Bool = false,
+             conflictProcessing: Bool = false, pipelineProcessing: Bool = false, workflowReadFailed: Bool = false,
+             aiOriginReadFailed: Bool = false,
+             semanticFingerprint: (GitLabMergeRequest) -> String = { $0.semanticContextFingerprint }) {
+            self.request = request; source = .init(request)
+            binding = .init(fields: source.fields, semanticContext: semanticFingerprint(request))
+            self.mergeAutomatic = mergeAutomatic; self.conflictFailed = conflictFailed
+            self.conflictProcessing = conflictProcessing; self.pipelineProcessing = pipelineProcessing
+            self.workflowReadFailed = workflowReadFailed; self.aiOriginReadFailed = aiOriginReadFailed
+        }
+
+        struct Index {
+            private let semanticFingerprint: (GitLabMergeRequest) -> String
+            private var bindings: [Source: Binding] = [:]
+            private var factsByBinding: [Binding: RequestFacts] = [:]
+            private(set) var values: [RequestFacts] = []
+
+            init(_ facts: [RequestFacts] = [],
+                 semanticFingerprint: @escaping (GitLabMergeRequest) -> String = { $0.semanticContextFingerprint }) {
+                self.semanticFingerprint = semanticFingerprint
+                for fact in facts { retain(fact) }
+            }
+            private mutating func retain(_ fact: RequestFacts) {
+                bindings[fact.source] = fact.binding
+                guard factsByBinding[fact.binding] == nil else { return }
+                factsByBinding[fact.binding] = fact
+                values.append(fact)
+            }
+            mutating func insert(_ request: GitLabMergeRequest, makeFacts: () -> RequestFacts) {
+                guard bindings[Source(request)] == nil else { return }
+                retain(makeFacts())
+            }
+            mutating func prepare(_ request: GitLabMergeRequest) {
+                let source = Source(request)
+                guard bindings[source] == nil else { return }
+                bindings[source] = .init(fields: source.fields, semanticContext: semanticFingerprint(request))
+            }
+            func facts(for request: GitLabMergeRequest) -> RequestFacts? {
+                let source = Source(request)
+                let binding = bindings[source] ?? .init(fields: source.fields, semanticContext: semanticFingerprint(request))
+                return factsByBinding[binding]
+            }
+        }
     }
     struct Input {
         let account: Account
@@ -94,6 +151,16 @@ struct MRBoardProjector {
         var completions: [MergeRequestLifecycleLedger.CompletionReceipt] = []
     }
     let input: Input
+    private let requestFacts: RequestFacts.Index
+    init(input: Input, semanticFingerprint: @escaping (GitLabMergeRequest) -> String = { $0.semanticContextFingerprint }) {
+        self.input = input
+        var facts = RequestFacts.Index(input.requestFacts, semanticFingerprint: semanticFingerprint)
+        let items = (input.attention?.evidence ?? []) + (input.attention?.attention ?? []) + (input.attention?.catalog ?? [])
+        let requests = items.compactMap(\.mergeRequest) + input.authored.map(\.request) + input.retainedRequests
+            + input.pipelineHandoffs.map(\.event.mergeRequest) + input.displayRequests + input.pipelineEvidence
+        for request in requests { facts.prepare(request) }
+        requestFacts = facts
+    }
     private var preparing: Bool { input.assistantReady || input.assistantChecking }
     private var attentionSnapshot: MergeRequestAttentionMonitor.PresentationSnapshot? {
         guard let snapshot = input.attention, snapshot.host == input.account.host,
@@ -106,7 +173,7 @@ struct MRBoardProjector {
     }
     private func facts(for request: GitLabMergeRequest?) -> RequestFacts? {
         guard let request else { return nil }
-        return input.requestFacts.first { $0.matches(request) }
+        return requestFacts.facts(for: request)
     }
     var catalogItems: [Item] {
         var rows = Dictionary((attentionSnapshot?.catalog ?? []).map { ($0.id, $0) }, uniquingKeysWith: { first, _ in first })

@@ -47,20 +47,21 @@ final class TodoMonitorService {
     }
 
     /// Point queries capture only this row's existing read facts, never the account-wide board input.
-    private func boardRowInput(for row: MergeRequestBoardSnapshot.Row) -> MRBoardProjector.RowInput {
+    func boardRowInput(for row: MergeRequestBoardSnapshot.Row) -> MRBoardProjector.RowInput {
         let account: MRBoardProjector.Account? = glab.resolvedHost.flatMap { host in
             glab.currentUsername.map { .init(host: host, username: $0, revision: glab.accountRevision) }
         }
         let request = row.item.mergeRequest
+        let workflowEntries = authoredMergeRequests.workflow.entries
         let aiFailure = account.map {
             attention.aiOriginCoordinator.failure(work: .init(host: $0.host, projectID: row.id.projectID, iid: row.id.iid)) != nil
         } == true
-        return .init(account: account, automation: settings.automation, workflowEntries: authoredMergeRequests.workflow.entries,
+        return .init(account: account, automation: settings.automation, workflowEntries: workflowEntries,
             assistantReady: assistantDependencies.available.contains(settings.automation.assistant),
             assistantChecking: assistantDependencies.isChecking,
             confirmationBusy: attention.confirmationStates[row.id]?.isBusy == true,
             conflictProcessing: request.map { automaticConflictIsProcessing(for: $0) } == true,
-            pipelineProcessing: request.map { authoredMergeRequests.workflow.isAutomaticallyProcessingPipeline($0) } == true,
+            pipelineProcessing: request.map { authoredMergeRequests.workflow.isAutomaticallyProcessingPipeline($0, entries: workflowEntries) } == true,
             catalogLoading: isLoading || attention.isLoading || authoredMergeRequests.isLoading,
             catalogReadFailed: lastError != nil || attention.hasError || authoredMergeRequests.hasError,
             workflowReadFailed: request.map { authoredMergeRequests.workflow.hasReadOnlyFailure(for: $0) } == true,
@@ -450,30 +451,34 @@ final class TodoMonitorService {
         }
         let items = (snapshot?.evidence ?? []) + (snapshot?.catalog ?? [])
         let requests = items.compactMap(\.mergeRequest) + input.authored.map(\.request) + input.retainedRequests
+        let workflowEntries = authoredMergeRequests.workflow.entries
+        var requestFacts = MRBoardProjector.RequestFacts.Index()
         for request in requests {
             let target = MRAutomationScope.Target(host: host, username: username, projectID: request.projectID, iid: request.iid)
             if trackedReviewTarget(target) { input.trackedReviewedTargets.insert(target) }
             if settings.actionIsAutomatic(.commentPublication, for: target) { input.publicationAutomaticTargets.insert(target) }
-            guard !input.requestFacts.contains(where: { $0.matches(request) }) else { continue }
-            let work = AssistantAutomationRunner.MergeRequestWork(host: host, projectID: request.projectID, iid: request.iid)
-            input.feedbackDecisionRevisions[.init(projectID: request.projectID, iid: request.iid)] =
-                AssistantAutomationRunner.feedbackDecisionRevision(work: work, username: username, settings: settings)
-            input.requestFacts.append(.init(request: request,
-                mergeAutomatic: settings.permitsAutomaticAction(.merge, for: request, target: target),
-                conflictFailed: authoredMergeRequests.conflictTaskFailed(for: request)
-                    || (request.hasMergeConflict && authoredMergeRequests.conflictAutomationState(for: request) == nil),
-                conflictProcessing: automaticConflictIsProcessing(for: request),
-                pipelineProcessing: authoredMergeRequests.workflow.isAutomaticallyProcessingPipeline(request),
-                workflowReadFailed: authoredMergeRequests.workflow.hasReadOnlyFailure(for: request),
-                aiOriginReadFailed: attention.aiOriginCoordinator.failure(work: work) != nil))
+            requestFacts.insert(request) {
+                let work = AssistantAutomationRunner.MergeRequestWork(host: host, projectID: request.projectID, iid: request.iid)
+                input.feedbackDecisionRevisions[.init(projectID: request.projectID, iid: request.iid)] =
+                    AssistantAutomationRunner.feedbackDecisionRevision(work: work, username: username, settings: settings)
+                return .init(request: request,
+                    mergeAutomatic: settings.permitsAutomaticAction(.merge, for: request, target: target),
+                    conflictFailed: authoredMergeRequests.conflictTaskFailed(for: request)
+                        || (request.hasMergeConflict && authoredMergeRequests.conflictAutomationState(for: request) == nil),
+                    conflictProcessing: automaticConflictIsProcessing(for: request),
+                    pipelineProcessing: authoredMergeRequests.workflow.isAutomaticallyProcessingPipeline(request, entries: workflowEntries),
+                    workflowReadFailed: authoredMergeRequests.workflow.hasReadOnlyFailure(for: request),
+                    aiOriginReadFailed: attention.aiOriginCoordinator.failure(work: work) != nil)
+            }
         }
+        input.requestFacts = requestFacts.values
         for item in snapshot?.attention ?? [] {
             let work = AssistantAutomationRunner.MergeRequestWork(host: host, projectID: item.id.projectID, iid: item.id.iid)
             input.remainingFeedbackIDs[item.id] = Set(AssistantAutomationRunner.unhandledFeedback(
                 item.feedback.compactMap(\.id), work: work, username: username, settings: settings))
         }
         input.feedbackLaunchFailures = feedbackLaunches.failures
-        input.workflowEntries = authoredMergeRequests.workflow.entries
+        input.workflowEntries = workflowEntries
         input.pipelineHandoffs = pipelineHandoffs
         input.handoffs = assistantHandoffs
         input.confirmationStates = attention.confirmationStates
