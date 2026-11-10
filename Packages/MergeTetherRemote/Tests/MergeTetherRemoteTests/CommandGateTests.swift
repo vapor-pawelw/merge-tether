@@ -34,6 +34,50 @@ import Testing
         }
     }
 
+    @Test func aReceiptFromAnEarlierSessionCannotConfirmAReplayedCommand() async {
+        var board = board()
+        let gate = RemoteCommandGate()
+        let command = RemoteCommand(hostSession: board.hostSession, cardID: "mr:1:2", actionID: "approve", token: "current-content")
+        let first = await gate.execute(command, board: board) { _, _ in .completed }
+        #expect(first.status == .completed)
+        board.hostSession = UUID()
+        let replay = await gate.execute(command, board: board) { _, _ in Issue.record("Old session executed"); return .completed }
+        #expect(replay.status == .changed)
+        let fresh = RemoteCommand(hostSession: board.hostSession, cardID: "mr:1:2", actionID: "approve", token: "current-content")
+        let current = await gate.execute(fresh, board: board) { _, _ in .completed }
+        #expect(current.status == .completed)
+    }
+
+    @Test func aNewSessionGetsItsOwnReceiptBudget() async {
+        var board = board()
+        let gate = RemoteCommandGate()
+        for _ in 0..<512 {
+            let command = RemoteCommand(hostSession: board.hostSession, cardID: "mr:1:2", actionID: "approve", token: "current-content")
+            let result = await gate.execute(command, board: board) { _, _ in .completed }
+            #expect(result.status == .completed)
+        }
+        let exhausted = RemoteCommand(hostSession: board.hostSession, cardID: "mr:1:2", actionID: "approve", token: "current-content")
+        let limited = await gate.execute(exhausted, board: board) { _, _ in Issue.record("Receipt limit bypassed"); return .completed }
+        #expect(limited.status == .limit)
+        board.hostSession = UUID()
+        let command = RemoteCommand(hostSession: board.hostSession, cardID: "mr:1:2", actionID: "approve", token: "current-content")
+        let fresh = await gate.execute(command, board: board) { _, _ in .completed }
+        #expect(fresh.status == .completed)
+    }
+
+    @Test func anAcceptedOperationKeepsTheWriteLockAcrossSessionChanges() async {
+        let board = board(), gate = RemoteCommandGate()
+        let command = RemoteCommand(hostSession: board.hostSession, cardID: "mr:1:2", actionID: "approve", token: "current-content")
+        _ = await gate.execute(command, board: board) { _, _ in
+            var reconnected = board
+            reconnected.hostSession = UUID()
+            let fresh = RemoteCommand(hostSession: reconnected.hostSession, cardID: "mr:1:2", actionID: "approve", token: "current-content")
+            let blocked = await gate.execute(fresh, board: reconnected) { _, _ in Issue.record("Concurrent write after reconnect"); return .completed }
+            #expect(blocked.status == .changed)
+            return .completed
+        }
+    }
+
     @Test func uncertainResultsAreNeverRetried() async {
         let board = board(), gate = RemoteCommandGate()
         let command = RemoteCommand(hostSession: board.hostSession, cardID: "mr:1:2", actionID: "approve", token: "current-content")

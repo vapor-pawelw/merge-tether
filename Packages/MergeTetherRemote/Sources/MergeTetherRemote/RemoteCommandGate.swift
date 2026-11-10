@@ -3,10 +3,18 @@ import Foundation
 @MainActor public final class RemoteCommandGate {
     private var receipts: [UUID: (RemoteCommand, RemoteCommandResult)] = [:]
     private var busy = false
+    private var hostSession: UUID?
     public init() {}
     public func execute(_ command: RemoteCommand, board: RemoteBoard,
                         accepted: @MainActor () async -> Void = {},
                         operation: @MainActor (RemoteCard, RemoteAction) async -> RemoteCommandResult.Status) async -> RemoteCommandResult {
+        if hostSession != board.hostSession {
+            hostSession = board.hostSession
+            receipts.removeAll()
+            // A reconnect does not cancel a write already accepted by GitLab.
+            // Keep the same lock until that operation finishes.
+        }
+        guard command.hostSession == board.hostSession else { return .init(id: command.id, status: .changed) }
         if let (original, result) = receipts[command.id] {
             return original == command ? result : .init(id: command.id, status: .changed)
         }
@@ -20,7 +28,7 @@ import Foundation
         receipts[command.id] = (command, .init(id: command.id, status: .running))
         await accepted()
         let result = RemoteCommandResult(id: command.id, status: await operation(card, action))
-        receipts[command.id] = (command, result)
+        if hostSession == command.hostSession { receipts[command.id] = (command, result) }
         busy = false
         return result
     }
