@@ -17,8 +17,9 @@ struct AutomationSettingsTab: View {
         var id: String { rawValue }
     }
 
-    init(monitor: TodoMonitorService) {
+    init(monitor: TodoMonitorService, initialPage: Page = .checkpoints) {
         self.monitor = monitor
+        _page = State(initialValue: initialPage)
         _draft = State(initialValue: monitor.settings.automation)
         _packageChoice = State(initialValue: monitor.settings.automation.baselinePreset)
     }
@@ -68,11 +69,9 @@ struct AutomationSettingsTab: View {
                         assistantFields
                     case .workflow:
                         MergeWorkflowSettingsSection(rules: $draft.workflowRules)
-                    case .authored:
-                        authoredMergeRequestFields
                     case .todos:
                         todoFields
-                        runnerFields
+                        if rule.wrappedValue.runner == .assistant { runnerFields }
                     case .advanced:
                         advancedFields
                     case .scope:
@@ -131,6 +130,33 @@ struct AutomationSettingsTab: View {
 
     private var checkpointFields: some View {
         Group {
+            preparationFields
+            publicationFields
+            deliveryFields
+            completionFields
+        }
+    }
+
+    private var preparationFields: some View {
+        Section {
+            checkpointToggle($draft.autoClaimPipelineFailures, .Settings.settingsAutomationPipelineOwnership,
+                             help: .Settings.settingsAutomationPipelineOwnershipHelp, reset: .pipelineOwnership)
+            VStack(alignment: .leading, spacing: 4) {
+                Toggle(isOn: $draft.conflictTasksEnabled) {
+                    Text(.Settings.settingsAutomationConflictsToggle)
+                }
+                .toggleStyle(.checkbox)
+
+                Text(.EffectivePolicy.settingsConflictsHelp)
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+            }
+        } header: { Text(.EffectivePolicy.settingsPreparation) }
+        footer: { Text(.Settings.settingsAutomationAuthoredMergeRequestsPolling).font(.caption).foregroundStyle(.secondary) }
+    }
+
+    private var publicationFields: some View {
+        Group {
             Section {
                 VStack(alignment: .leading, spacing: 4) {
                     HStack(alignment: .top) {
@@ -149,25 +175,89 @@ struct AutomationSettingsTab: View {
                 automaticAIReplies: Binding(get: { draft.automaticAIReplies }, set: { draft.setAutomaticAIReplies($0) }),
                 publishesAllComments: draft.publishesAllComments, glab: monitor.glab, preset: draft.baselinePreset,
                 onFiltersChanged: { draft.publicationFiltersChanged() })
-            Section {
-                checkpointToggle($draft.autoApproveEnabled, .Settings.settingsAutomationCheckpointAutoApprove,
-                                 help: .Settings.settingsAutomationCheckpointAutoApproveHelp, reset: .approval)
-                checkpointToggle($draft.allowFollowUpPush, .Settings.settingsAutomationFollowUpPush,
-                                 help: .Settings.settingsAutomationFollowUpPushHelp, reset: .followUpPush)
-                checkpointToggle($draft.autoClaimPipelineFailures, .Settings.settingsAutomationPipelineOwnership,
-                                 help: .Settings.settingsAutomationPipelineOwnershipHelp, reset: .pipelineOwnership)
-            } header: {
-                Text(.Settings.settingsAutomationCheckpointSection)
-            } footer: {
+        }
+    }
+
+    private var deliveryFields: some View {
+        Section {
+            checkpointToggle($draft.allowFollowUpPush, .Settings.settingsAutomationFollowUpPush,
+                             help: .Settings.settingsAutomationFollowUpPushHelp, reset: .followUpPush)
+            Toggle(isOn: $draft.allowAssistantTools) {
+                Text(.Settings.settingsAutomationAssistantTools)
+            }
+            .toggleStyle(.checkbox)
+
+            if draft.allowAssistantTools {
+                TextField(text: $draft.assistantToolProjects) {
+                    Text(.Settings.settingsAutomationToolProjects)
+                }
+                .autocorrectionDisabled()
+            }
+            Text(.Settings.settingsAutomationAssistantToolsHelp).font(.caption).foregroundStyle(.secondary)
+            if draft.conflictTasksEnabled, draft.allowAssistantTools {
+                Toggle(isOn: $draft.allowConflictPush) {
+                    Text(.Settings.settingsAutomationConflictsAllowPush)
+                }
+                .toggleStyle(.checkbox)
+
+                if draft.allowConflictPush {
+                    TextField(text: $draft.conflictPushProjects) {
+                        Text(.Settings.settingsAutomationConflictsPushProjects)
+                    }
+                    .autocorrectionDisabled()
+                }
+            }
+        } header: { Text(.EffectivePolicy.settingsDelivery) }
+        footer: {
+            if draft.conflictTasksEnabled && draft.allowAssistantTools && draft.allowConflictPush {
+                Text(.Settings.settingsAutomationAuthoredMergeRequestsProjectsHelp).font(.caption).foregroundStyle(.secondary)
+            }
+        }
+    }
+
+    private var completionFields: some View {
+        Section {
+            checkpointToggle($draft.autoApproveEnabled, .Settings.settingsAutomationCheckpointAutoApprove,
+                             help: .Settings.settingsAutomationCheckpointAutoApproveHelp, reset: .approval)
+            checkpointToggle($draft.autoResolveOwnReviewThreads, .Settings.settingsAutomationResolveOwnReviewThreads,
+                             help: .Settings.settingsAutomationResolveOwnReviewThreadsHelp, reset: .ownThreadResolution)
+            checkpointToggle($draft.autoResolveAcceptedFeedback, .AuthorFeedback.authorFeedbackSetting,
+                             help: .AuthorFeedback.authorFeedbackSettingHelp, reset: .acceptedFeedbackResolution)
+            VStack(alignment: .leading, spacing: 4) {
+                Toggle(isOn: $draft.autoReReviewEnabled) {
+                    Text(.Settings.settingsAutomationAutoReReviewToggle)
+                }
+                .toggleStyle(.checkbox)
+
+                Text(.Settings.settingsAutomationAutoReReviewHelp)
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+            }
+
+            VStack(alignment: .leading, spacing: 4) {
+                Toggle(isOn: $draft.autoMergeEnabled) {
+                    Text(.Settings.settingsAutomationAutoMergeToggle)
+                }
+                .toggleStyle(.checkbox)
+
+                Text(.Settings.settingsAutomationAutoMergeHelp)
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+
+                if draft.autoMergeEnabled {
+                    TextField(text: $draft.autoMergeProjects) {
+                        Text(.Settings.settingsAutomationAutoMergeProjects)
+                    }
+                    .autocorrectionDisabled()
+                }
+            }
+
+        } header: { Text(.EffectivePolicy.settingsCompletion) }
+        footer: {
+            VStack(alignment: .leading, spacing: 4) {
                 Text(.Settings.settingsAutomationProfilePermissionsHelp)
-                    .font(.caption).foregroundStyle(.secondary)
-            }
-            Section {
-                checkpointToggle($draft.autoResolveOwnReviewThreads, .Settings.settingsAutomationResolveOwnReviewThreads,
-                                 help: .Settings.settingsAutomationResolveOwnReviewThreadsHelp, reset: .ownThreadResolution)
-                checkpointToggle($draft.autoResolveAcceptedFeedback, .AuthorFeedback.authorFeedbackSetting,
-                                 help: .AuthorFeedback.authorFeedbackSettingHelp, reset: .acceptedFeedbackResolution)
-            }
+                if draft.autoMergeEnabled { Text(.Settings.settingsAutomationAuthoredMergeRequestsProjectsHelp) }
+            }.font(.caption).foregroundStyle(.secondary)
         }
     }
 
@@ -304,24 +394,8 @@ struct AutomationSettingsTab: View {
                 .font(.caption)
                 .foregroundStyle(.secondary)
         }
-        Section {
-            Toggle(isOn: $draft.allowAssistantTools) {
-                Text(.Settings.settingsAutomationAssistantTools)
-            }
-            .toggleStyle(.checkbox)
-
-            if draft.allowAssistantTools {
-                TextField(text: $draft.assistantToolProjects) {
-                    Text(.Settings.settingsAutomationToolProjects)
-                }
-                .autocorrectionDisabled()
-            }
-        } footer: {
-            Text(.Settings.settingsAutomationAssistantToolsHelp)
-                .font(.caption)
-                .foregroundStyle(.secondary)
-        }
-
+        LegacyAutomationRuleSettings(rule: $draft.reviewRequested, title: .Settings.settingsAutomationReviewRequested)
+        LegacyAutomationRuleSettings(rule: $draft.authorFeedback, title: .Settings.settingsAutomationAuthorFeedback)
     }
 
     private var todoFields: some View {
@@ -359,6 +433,7 @@ struct AutomationSettingsTab: View {
             if rule.wrappedValue.runner == .shell {
                 Text(.Settings.settingsAutomationRunnerLegacyHelp)
                     .font(.caption).foregroundStyle(.orange)
+                Text(.EffectivePolicy.settingsLegacyLocation).font(.caption).foregroundStyle(.secondary)
             }
         } header: {
             Text(.Settings.settingsAutomationTodoSection)
@@ -367,75 +442,6 @@ struct AutomationSettingsTab: View {
                 Text(trigger.description)
                 Text(.Settings.settingsAutomationOutcome)
                 Text(.Settings.settingsAutomationTodoProjectsHelp)
-            }
-            .font(.caption)
-            .foregroundStyle(.secondary)
-        }
-    }
-
-    private var authoredMergeRequestFields: some View {
-        Section {
-            VStack(alignment: .leading, spacing: 4) {
-                Toggle(isOn: $draft.autoReReviewEnabled) {
-                    Text(.Settings.settingsAutomationAutoReReviewToggle)
-                }
-                .toggleStyle(.checkbox)
-
-                Text(.Settings.settingsAutomationAutoReReviewHelp)
-                    .font(.caption)
-                    .foregroundStyle(.secondary)
-            }
-
-            VStack(alignment: .leading, spacing: 4) {
-                Toggle(isOn: $draft.autoMergeEnabled) {
-                    Text(.Settings.settingsAutomationAutoMergeToggle)
-                }
-                .toggleStyle(.checkbox)
-
-                Text(.Settings.settingsAutomationAutoMergeHelp)
-                    .font(.caption)
-                    .foregroundStyle(.secondary)
-
-                if draft.autoMergeEnabled {
-                    TextField(text: $draft.autoMergeProjects) {
-                        Text(.Settings.settingsAutomationAutoMergeProjects)
-                    }
-                    .autocorrectionDisabled()
-                }
-            }
-
-            VStack(alignment: .leading, spacing: 4) {
-                Toggle(isOn: $draft.conflictTasksEnabled) {
-                    Text(.Settings.settingsAutomationConflictsToggle)
-                }
-                .toggleStyle(.checkbox)
-
-                Text(.Settings.settingsAutomationConflictsHelp)
-                    .font(.caption)
-                    .foregroundStyle(.secondary)
-
-                if draft.conflictTasksEnabled, draft.allowAssistantTools {
-                    Toggle(isOn: $draft.allowConflictPush) {
-                        Text(.Settings.settingsAutomationConflictsAllowPush)
-                    }
-                    .toggleStyle(.checkbox)
-
-                    if draft.allowConflictPush {
-                        TextField(text: $draft.conflictPushProjects) {
-                            Text(.Settings.settingsAutomationConflictsPushProjects)
-                        }
-                        .autocorrectionDisabled()
-                    }
-                }
-            }
-        } header: {
-            Text(.Settings.settingsAutomationAuthoredMergeRequestsSection)
-        } footer: {
-            VStack(alignment: .leading, spacing: 4) {
-                Text(.Settings.settingsAutomationAuthoredMergeRequestsPolling)
-                if draft.autoMergeEnabled || (draft.conflictTasksEnabled && draft.allowAssistantTools && draft.allowConflictPush) {
-                    Text(.Settings.settingsAutomationAuthoredMergeRequestsProjectsHelp)
-                }
             }
             .font(.caption)
             .foregroundStyle(.secondary)
@@ -464,13 +470,6 @@ struct AutomationSettingsTab: View {
                     Text(.Settings.settingsAutomationPrompt)
                 }
                 .lineLimit(5...8)
-            } else {
-                Text(.Settings.settingsAutomationCommand).font(.caption.weight(.semibold))
-                Text(verbatim: rule.wrappedValue.command)
-                    .font(.body.monospaced()).textSelection(.enabled)
-                    .frame(maxWidth: .infinity, alignment: .leading)
-                Text(.Settings.settingsAutomationRunnerLegacyHelp)
-                    .font(.caption).foregroundStyle(.secondary)
             }
             VStack(alignment: .leading, spacing: 6) {
                 Text(.Settings.settingsAutomationTemplateHelp)
@@ -481,8 +480,8 @@ struct AutomationSettingsTab: View {
         }
     }
 
-    private enum Page: CaseIterable {
-        case checkpoints, assistant, scope, todos, workflow, authored, advanced
+    enum Page: CaseIterable {
+        case checkpoints, assistant, scope, todos, workflow, advanced
 
         var symbol: String {
             switch self {
@@ -491,7 +490,6 @@ struct AutomationSettingsTab: View {
             case .scope: "scope"
             case .todos: "tray"
             case .workflow: "bolt"
-            case .authored: "person.crop.circle"
             case .advanced: "slider.horizontal.3"
             }
         }
@@ -502,8 +500,7 @@ struct AutomationSettingsTab: View {
             case .assistant: .Settings.settingsAutomationPageAssistant
             case .scope: .Settings.settingsAutomationPageScope
             case .workflow: .Settings.settingsAutomationPageWorkflow
-            case .authored: .Settings.settingsAutomationPageAuthored
-            case .todos: .Settings.settingsAutomationPageTodos
+            case .todos: .EffectivePolicy.settingsPreparationRules
             case .advanced: .Settings.settingsAutomationPageAdvanced
             }
         }
@@ -517,6 +514,31 @@ struct AutomationSettingsTab: View {
             switch self {
             case .reviewRequested: .Settings.settingsAutomationReviewRequestedDescription
             case .authorFeedback: .Settings.settingsAutomationAuthorFeedbackDescription
+            }
+        }
+    }
+}
+
+/// Stored shell handlers stay inspectable; choosing an agent remains an explicit action in preparation rules.
+struct LegacyAutomationRuleSettings: View {
+    @Binding var rule: AutomationRule
+    let title: LocalizedStringResource
+
+    var body: some View {
+        if rule.runner == .shell {
+            Section {
+                Text(rule.isEnabled ? .EffectivePolicy.settingsLegacyEnabled : .EffectivePolicy.settingsLegacyDisabled)
+                    .font(.caption).foregroundStyle(.orange)
+                TextField(text: $rule.titleTemplate) { Text(.Settings.settingsAutomationTitle) }
+                    .autocorrectionDisabled()
+                Text(.Settings.settingsAutomationCommand).font(.caption.weight(.semibold))
+                Text(verbatim: rule.command)
+                    .font(.body.monospaced()).textSelection(.enabled)
+                    .frame(maxWidth: .infinity, alignment: .leading)
+                Text(.Settings.settingsAutomationRunnerLegacyHelp).font(.caption).foregroundStyle(.secondary)
+                Text(.Settings.settingsAutomationTemplateHelp).font(.caption).foregroundStyle(.secondary).textSelection(.enabled)
+            } header: {
+                Text(.EffectivePolicy.settingsLegacyTitle) + Text(" · ") + Text(title)
             }
         }
     }

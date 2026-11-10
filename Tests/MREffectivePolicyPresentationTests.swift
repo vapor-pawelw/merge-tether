@@ -146,7 +146,50 @@ struct MREffectivePolicyPresentationTests {
             if let path = ProcessInfo.processInfo.environment["WS8_LAYOUT_PATH"] {
                 try renderLayoutProof(frozen, path: path)
             }
+            if let path = ProcessInfo.processInfo.environment["WS8_SETTINGS_PROOF_PATH"] {
+                try renderSettingsProof(settings, path: path)
+            }
         }
+    }
+
+    private func renderSettingsProof(_ settings: SettingsManager, path: String) throws {
+        let original = settings.automation
+        defer { settings.automation = original }
+        let gitlab = InMemoryGitLab()
+        let glab = gitlab.service(host: target.host, username: target.username)
+        let monitor = TodoMonitorService(settings: settings, glab: glab)
+        defer { monitor.stopTimer() }
+        let content = AutomationSettingsTab(monitor: monitor).frame(width: 1040, height: 1900)
+        let view = NSHostingView(rootView: content)
+        view.appearance = NSAppearance(named: .aqua)
+        view.frame = .init(x: 0, y: 0, width: 1040, height: 1900)
+        let window = NSWindow(contentRect: view.frame, styleMask: [.titled], backing: .buffered, defer: false)
+        window.isReleasedWhenClosed = false
+        window.contentView = view
+        defer { window.close() }
+        view.layoutSubtreeIfNeeded()
+        let bitmap = try #require(view.bitmapImageRepForCachingDisplay(in: view.bounds))
+        view.cacheDisplay(in: view.bounds, to: bitmap)
+        let png = try #require(bitmap.representation(using: .png, properties: [:]))
+        try png.write(to: URL(fileURLWithPath: path))
+        settings.automation.reviewRequested.runner = .shell
+        settings.automation.reviewRequested.isEnabled = true
+        settings.automation.reviewRequested.command = "saved-review-handler {url}"
+        settings.automation.authorFeedback.runner = .shell
+        settings.automation.authorFeedback.isEnabled = false
+        settings.automation.authorFeedback.command = "saved-feedback-handler {url}"
+        let advanced = NSHostingView(rootView: AutomationSettingsTab(monitor: monitor, initialPage: .advanced)
+            .frame(width: 1040, height: 980))
+        advanced.appearance = NSAppearance(named: .aqua)
+        advanced.frame = .init(x: 0, y: 0, width: 1040, height: 980)
+        window.setContentSize(.init(width: 1040, height: 980))
+        window.contentView = advanced
+        advanced.layoutSubtreeIfNeeded()
+        let advancedBitmap = try #require(advanced.bitmapImageRepForCachingDisplay(in: advanced.bounds))
+        advanced.cacheDisplay(in: advanced.bounds, to: advancedBitmap)
+        let advancedPNG = try #require(advancedBitmap.representation(using: .png, properties: [:]))
+        try advancedPNG.write(to: URL(fileURLWithPath: path.replacingOccurrences(of: ".png", with: "-advanced.png")))
+        #expect(gitlab.requests.isEmpty)
     }
 
     private func renderLayoutProof(_ policy: MREffectivePolicyPresentation, path: String) throws {

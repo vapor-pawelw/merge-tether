@@ -136,6 +136,8 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 
 ### Changed
 
+- Group automation permissions into preparation, publication, delivery and completion, keeping existing choices and saved legacy handlers available in Advanced.
+
 - Default feedback, draft-claim and AI-assistance verification to High reasoning for Codex and Claude, with a shared Low, Medium or High setting independent of coding reasoning.
 
 - Identify rejected prepared replies by their exact text and source discussion, with a direct review action and expandable technical evidence.

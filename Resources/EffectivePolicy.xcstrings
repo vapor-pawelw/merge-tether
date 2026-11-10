@@ -198,6 +198,105 @@
           }
         }
       }
+    },
+    "settings.preparation": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Preparation"
+          }
+        }
+      }
+    },
+    "settings.delivery": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Delivery"
+          }
+        }
+      }
+    },
+    "settings.completion": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Completion"
+          }
+        }
+      }
+    },
+    "settings.preparationRules": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Review & feedback"
+          }
+        }
+      }
+    },
+    "settings.legacyTitle": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Saved shell handler"
+          }
+        }
+      }
+    },
+    "settings.legacyEnabled": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Saved as enabled. This legacy handler does not run automatically."
+          }
+        }
+      }
+    },
+    "settings.legacyDisabled": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Saved as disabled. This legacy handler does not run automatically."
+          }
+        }
+      }
+    },
+    "settings.legacyLocation": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "The saved title and command are in Advanced. Choose the coding agent here to migrate explicitly."
+          }
+        }
+      }
+    },
+    "settings.conflictsHelp": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "The coding agent prepares and checks conflict fixes. Enable conflict pushes to deliver them automatically; otherwise inspect the run result and deliver them manually. Project permission under Delivery also applies."
+          }
+        }
+      }
     }
   },
   "version": "1.0"
