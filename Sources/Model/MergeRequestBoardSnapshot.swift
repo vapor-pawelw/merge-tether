@@ -8,18 +8,20 @@ struct MergeRequestBoardSnapshot {
         let intents: [MRTodoIntent]
         var pipelineEvidence: GitLabMergeRequest? = nil
         var pipelineEvidenceCheckedAt: Date? = nil
-        var catalog: MRAttentionRecord.CatalogObservation? = nil
+        var catalog: MRCurrentRowProjection.Catalog? = nil
         /// Compatibility only; fresh command guards still decide every action.
         var evidenceMatchesCatalogContext = true
-        var displayRequest: GitLabMergeRequest? { catalog?.request ?? item.mergeRequest }
-        var displayTitle: String { catalog?.title ?? item.title }
-        var displayURL: URL { catalog?.url ?? item.url }
+        var displayRequest: GitLabMergeRequest? { catalog?.facts.request ?? item.mergeRequest }
+        var displayTitle: String { catalog?.facts.title ?? item.title }
+        var displayURL: URL { catalog?.facts.url ?? item.url }
         var isDraft: Bool { displayRequest?.draft == true || displayRequest == nil && item.section == .draftMergeRequests }
         var displayItem: MergeRequestAttentionMonitor.Item {
             guard let catalog else { return item }
-            return .init(id: item.id, title: catalog.title, url: catalog.url,
-                lifecycleCompletionID: catalog.lifecycleCompletionID, approvalProgress: catalog.approvalProgress,
-                mergeRequest: catalog.request, isAuthored: catalog.isAuthored, reviewingActivity: catalog.reviewingActivity)
+            let facts = catalog.facts
+            return .init(id: item.id, title: facts.title, url: facts.url,
+                lifecycleCompletionID: facts.lifecycleCompletionID, approvalProgress: facts.approvalProgress,
+                mergeRequest: facts.request, isAuthored: facts.isAuthored, reviewingActivity: facts.reviewingActivity,
+                dependencies: catalog.dependencies)
         }
         /// Dedicated CI metadata never replaces the MR snapshot bound to drafts or feedback.
         var currentPipelineRequest: GitLabMergeRequest? {
@@ -59,6 +61,7 @@ struct MergeRequestBoardSnapshot {
             stoppedJobNeedsAttention || attentionIntents.contains { $0.state == .failed && !isReconciling($0) }
         }
         var needsAttention: Bool {
+            if displayRequest.map({ ["merged", "closed"].contains($0.state) }) == true { return false }
             if let humanActionRequired = item.humanActionRequired { return humanActionRequired }
             if latestJob?.operationalExecution?.state.isActive == true { return false }
             if item.draftProofRecoveryChecking || isCheckingReadOnlyReconciliation {
@@ -107,7 +110,8 @@ struct MergeRequestBoardSnapshot {
          pipelineEvidenceCheckedAt: Date? = nil, preservedOrder: [MergeRequestAttentionMonitor.Item.ID: Int] = [:],
          automation: AutomationSettings? = nil, displayRequests: [GitLabMergeRequest] = [],
          grouping: MRBoardGrouping = .withoutAutomation,
-         completions: [MergeRequestLifecycleLedger.CompletionReceipt] = []) {
+         completions: [MergeRequestLifecycleLedger.CompletionReceipt] = [],
+         currentRows: [MergeRequestAttentionMonitor.Item.ID: MRCurrentRowProjection] = [:]) {
         self.ignoredTargets = ignoredTargets
         self.automation = automation
         self.grouping = grouping
@@ -146,7 +150,7 @@ struct MergeRequestBoardSnapshot {
         }
         func row(_ original: MergeRequestAttentionMonitor.Item) -> Row {
             let valid = host.map { original.url.isGitLabMergeRequest(host: $0, iid: original.id.iid) } == true
-            let projection = MRCurrentRowProjection(evidence: attention.first { sameMergeRequest($0, original) } ?? original,
+            let projection = currentRows[original.id] ?? MRCurrentRowProjection(evidence: attention.first { sameMergeRequest($0, original) } ?? original,
                 catalog: original, username: username)
             var item = projection.item
             let latest = handoffs.filter {
@@ -223,6 +227,15 @@ struct MergeRequestBoardSnapshot {
                 projectID: proposal.target.projectID, iid: proposal.target.iid ?? 0)
         }
         otherTodos = unknown
+    }
+
+    /// An open Details selection may outlive a host change; numeric MR IDs alone are insufficient.
+    func row(matching item: MergeRequestAttentionMonitor.Item, host: String?, username: String?) -> Row? {
+        guard let host, let username, !username.isEmpty,
+              let url = item.url.gitLabTodoMergeRequestURL(host: host, iid: item.id.iid) else { return nil }
+        return (own + reviewed + otherMergeRequests).first {
+            $0.id == item.id && $0.item.url.gitLabTodoMergeRequestURL(host: host, iid: item.id.iid) == url
+        }
     }
 
     struct OtherCard: Identifiable {

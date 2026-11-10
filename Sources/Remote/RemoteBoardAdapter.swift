@@ -39,11 +39,7 @@ import MergeTetherRemote
         var card = RemoteCard(id: "mr:\(item.id.projectID):\(item.id.iid)", title: item.title,
             project: item.url.gitLabProjectPath, url: item.url,
             head: item.mergeRequest?.sha, detail: detail(item), drafts: drafts)
-        if let dependencies = item.dependencies, dependencies.hasPresentation {
-            card.dependencies = .init(stackPosition: dependencies.stackPosition,
-                predecessors: dependencies.predecessors.map { .init(reference: $0.reference(relativeTo: item.id.projectID),
-                    title: $0.title, url: $0.url, isCurrent: $0.isCurrent) }, notice: dependencies.notice)
-        }
+        card.dependencies = dependencyPresentation(item.dependencies, projectID: item.id.projectID)
         var kinds = extraActions
         if item.mergeRequest?.sha != nil {
             if item.draftCount == drafts.count, !drafts.isEmpty, !item.requiresDiscussionRecheck,
@@ -75,6 +71,13 @@ import MergeTetherRemote
                   received: $0.completed, requirementsSatisfied: $0.requirementsSatisfied)
         }
         return card
+    }
+
+    private static func dependencyPresentation(_ summary: MergeRequestDependencySummary?, projectID: Int) -> RemoteMRDependencies? {
+        guard let dependencies = summary, dependencies.hasPresentation else { return nil }
+        return .init(stackPosition: dependencies.stackPosition,
+            predecessors: dependencies.predecessors.map { .init(reference: $0.reference(relativeTo: projectID),
+                title: $0.title, url: $0.url, isCurrent: $0.isCurrent) }, notice: dependencies.notice)
     }
 
     static func board(monitor: TodoMonitorService, session: UUID, account: String) -> RemoteBoard {
@@ -261,8 +264,13 @@ import MergeTetherRemote
         card.title = model.row.displayTitle
         card.project = model.row.displayURL.gitLabProjectPath
         card.url = model.row.displayURL
+        card.dependencies = dependencyPresentation(model.row.displayItem.dependencies, projectID: model.row.id.projectID)
+        card.approvals = model.row.displayItem.approvalProgress.flatMap {
+            .init(completed: min($0.completed, $0.required), required: $0.required,
+                received: $0.completed, requirementsSatisfied: $0.requirementsSatisfied)
+        }
         if !model.row.evidenceMatchesCatalogContext {
-            card.actions.removeAll { [.publish, .approve, .reReview, .finishCommentReview, .merge, .enqueueMerge, .resolveThreads].contains($0.kind) }
+            card.actions.removeAll { [.publish, .approve, .reReview, .merge, .enqueueMerge].contains($0.kind) }
         }
         let human = model.humanAction
         card.needsAttention = human != nil

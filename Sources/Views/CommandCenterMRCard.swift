@@ -55,7 +55,7 @@ private struct CommandCenterMRCardContent: View {
                 }
                 .buttonStyle(.plain)
                 .help(Text(verbatim: "\(row.displayTitle)\n\(row.displayURL.gitLabProjectPath)\n") + Text(.Board.boardDetails))
-                BoardMRReferenceLine(iid: item.id.iid, projectID: item.id.projectID, dependencies: item.dependencies)
+                BoardMRReferenceLine(iid: item.id.iid, projectID: item.id.projectID, dependencies: row.displayItem.dependencies)
             }
             if finishedState != nil {
                 FinishedMergeRequestStatus(item: row.displayItem, monitor: monitor)

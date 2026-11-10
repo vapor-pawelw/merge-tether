@@ -38,28 +38,12 @@ final class TodoMonitorService {
         boardAttentionPresenter.confirmedHumanAction(key: attentionKey(row.item), account: attentionPresentationAccount)
     }
 
-    private func attentionRowState(_ row: MergeRequestBoardSnapshot.Row) -> BoardAttentionPresenter.RowState {
-        .init(row: row, confirmationBusy: attention.confirmationStates[row.id]?.isBusy == true,
-            conflictProcessing: row.item.mergeRequest.map { automaticConflictIsProcessing(for: $0) } == true,
-            pipelineProcessing: row.item.mergeRequest.map { authoredMergeRequests.workflow.isAutomaticallyProcessingPipeline($0) } == true)
-    }
-
     func attentionRefreshFailed(for row: MergeRequestBoardSnapshot.Row) -> Bool {
-        let workflowFailure = row.item.mergeRequest.map { authoredMergeRequests.workflow.hasReadOnlyFailure(for: $0) } == true
-        let aiFailure = glab.resolvedHost.map {
-            attention.aiOriginCoordinator.failure(work: .init(host: $0, projectID: row.id.projectID, iid: row.id.iid)) != nil
-        } == true
-        return BoardAttentionPresenter.attentionRefreshFailed(row: attentionRowState(row), refresh: .init(
-            catalogReadFailed: lastError != nil || attention.hasError || authoredMergeRequests.hasError,
-            workflowReadFailed: workflowFailure, needsAIAssessment: settings.automation.needsAIAssessment,
-            aiOriginReadFailed: aiFailure))
+        boardProjector?.attentionRefreshFailed(for: row) ?? false
     }
 
     func isRecheckingAttention(for row: MergeRequestBoardSnapshot.Row) -> Bool {
-        BoardAttentionPresenter.isRecheckingAttention(row: attentionRowState(row), refresh: .init(
-            catalogLoading: isLoading || attention.isLoading || authoredMergeRequests.isLoading,
-            providerChecking: assistantDependencies.isChecking && settings.automation.packageDecision != .disabled,
-            reviewingVerifying: !row.item.isAuthored && reviewingContext(for: row).nextStep == .verifying))
+        boardProjector?.isRecheckingAttention(for: row) ?? false
     }
 
     private let todoStore: InboxTodoStore
@@ -431,12 +415,70 @@ final class TodoMonitorService {
         return AssistantTaskGroup.groups(from: settings.assistantHandoffs, host: host, username: username)
     }
 
-    private var mergeRequestBrowser: MergeRequestBrowserSnapshot? {
+    /// Capture existing owners and policy decisions as values; the projector cannot call back into them.
+    var boardProjector: MRBoardProjector? {
         guard let host = glab.resolvedHost, let username = glab.currentUsername else { return nil }
-        return MergeRequestBrowserSnapshot(openItems: lifecycleCatalogItems(host: host, username: username),
-            authored: authoredMergeRequests.requests, host: host, username: username, scope: settings.automation.scope,
-            ownCatalogIsAuthoritative: attention.hasCurrentOwnListing,
-            draftsLast: settings.effectiveBoardGrouping == .drafts)
+        let snapshot = attention.presentationSnapshot
+        var input = MRBoardProjector.Input(account: .init(host: host, username: username, revision: glab.accountRevision))
+        input.attention = snapshot
+        input.authored = authoredMergeRequests.requests
+        input.retainedRequests = settings.mrLifecycleLedger.retainedRequests(host: host, username: username)
+        input.ownCatalogIsAuthoritative = attention.hasCurrentOwnListing
+        let targets = settings.mrLifecycleLedger.targets(host: host, username: username)
+        for target in targets {
+            if let iid = target.iid, let id = settings.mrLifecycleLedger.completionID(for: target) {
+                input.completionIDs[.init(projectID: target.projectID, iid: iid)] = id
+            }
+        }
+        let items = (snapshot?.evidence ?? []) + (snapshot?.catalog ?? [])
+        let requests = items.compactMap(\.mergeRequest) + input.authored.map(\.request) + input.retainedRequests
+        for request in requests {
+            let target = MRAutomationScope.Target(host: host, username: username, projectID: request.projectID, iid: request.iid)
+            if trackedReviewTarget(target) { input.trackedReviewedTargets.insert(target) }
+            if settings.actionIsAutomatic(.commentPublication, for: target) { input.publicationAutomaticTargets.insert(target) }
+            guard !input.requestFacts.contains(where: { $0.matches(request) }) else { continue }
+            let work = AssistantAutomationRunner.MergeRequestWork(host: host, projectID: request.projectID, iid: request.iid)
+            input.requestFacts.append(.init(request: request,
+                mergeAutomatic: settings.permitsAutomaticAction(.merge, for: request, target: target),
+                conflictFailed: authoredMergeRequests.conflictTaskFailed(for: request)
+                    || (request.hasMergeConflict && authoredMergeRequests.conflictAutomationState(for: request) == nil),
+                conflictProcessing: automaticConflictIsProcessing(for: request),
+                pipelineProcessing: authoredMergeRequests.workflow.isAutomaticallyProcessingPipeline(request),
+                workflowReadFailed: authoredMergeRequests.workflow.hasReadOnlyFailure(for: request),
+                aiOriginReadFailed: attention.aiOriginCoordinator.failure(work: work) != nil))
+        }
+        for item in snapshot?.attention ?? [] {
+            let work = AssistantAutomationRunner.MergeRequestWork(host: host, projectID: item.id.projectID, iid: item.id.iid)
+            input.remainingFeedbackIDs[item.id] = Set(AssistantAutomationRunner.unhandledFeedback(
+                item.feedback.compactMap(\.id), work: work, username: username, settings: settings))
+        }
+        input.failedFeedbackIDs = Set(failedAttentionFeedback.filter { $0.host == host }.map { .init(projectID: $0.projectID, iid: $0.iid) })
+        input.workflowEntries = authoredMergeRequests.workflow.entries
+        input.pipelineHandoffs = pipelineHandoffs
+        input.handoffs = assistantHandoffs
+        input.confirmationStates = attention.confirmationStates
+        input.automation = settings.automation
+        input.assistantReady = availableAssistants.contains(settings.automation.assistant)
+        input.reviewAssistantReady = assistantDependencies.available.contains(settings.automation.assistant)
+        input.assistantChecking = assistantDependencies.isChecking
+        input.ignoredTargets = settings.ignoredMergeRequests
+        input.hiddenTargets = hiddenBoardTargets
+        input.mrCatalogReadFailed = attention.hasError || authoredMergeRequests.hasError
+        input.catalogReadFailed = lastError != nil || input.mrCatalogReadFailed
+        input.catalogLoading = isLoading || attention.isLoading || authoredMergeRequests.isLoading
+        input.inboxLoading = isLoading
+        input.assessingMentionNoteIDs = assessingMentionNoteIDs
+        input.todos = currentAccountTodos
+        input.intents = currentMRTodoIntents
+        input.routedTodoIDs = routedMRTodoIDs
+        input.pipelineEvidence = currentPipelineEvidence
+        input.pipelineEvidenceCheckedAt = currentPipelineEvidenceDate
+        input.displayRequests = boardDisplayRequests
+        input.pins = settings.boardPins
+        input.grouping = settings.boardGrouping
+        input.draftsLast = settings.effectiveBoardGrouping == .drafts
+        input.completions = lifecycleCompletions
+        return .init(input: input)
     }
 
     var currentMRTodoIntents: [MRTodoIntent] {
@@ -521,22 +563,11 @@ final class TodoMonitorService {
     }
 
     func reviewingContext(for row: MergeRequestBoardSnapshot.Row) -> ReviewingContext {
-        ReviewingContext(row: row,
-            workflowState: ReviewingContext.workflowState(for: row, entries: authoredMergeRequests.workflow.entries),
-            assistantReady: assistantDependencies.available.contains(settings.automation.assistant),
-            assistantChecking: assistantDependencies.isChecking,
-            draftAutomationAllowed: settings.automation.hasEnabledAutomation && row.item.mergeRequest.map {
-                settings.automation.scope.permits($0, host: glab.resolvedHost ?? "", username: glab.currentUsername ?? "")
-            } == true)
+        boardProjector?.reviewingContext(for: row) ?? ReviewingContext(row: row)
     }
 
-    var ownMergeRequestItems: [MergeRequestAttentionMonitor.Item] { mergeRequestBrowser?.own ?? [] }
-    var reviewedMergeRequestItems: [MergeRequestAttentionMonitor.Item] {
-        (mergeRequestBrowser?.reviewed ?? []).filter { item in
-            guard let target = scopeTarget(projectID: item.id.projectID, iid: item.id.iid, url: item.url) else { return false }
-            return !settings.ignoredMergeRequests.contains(target) && trackedReviewTarget(target)
-        }
-    }
+    var ownMergeRequestItems: [MergeRequestAttentionMonitor.Item] { boardProjector?.ownItems ?? [] }
+    var reviewedMergeRequestItems: [MergeRequestAttentionMonitor.Item] { boardProjector?.reviewedItems ?? [] }
 
     func assistantChatLinks(for item: MergeRequestAttentionMonitor.Item) -> [AssistantChatLink] {
         guard let target = scopeTarget(projectID: item.id.projectID, iid: item.id.iid, url: item.url) else { return [] }
@@ -788,80 +819,7 @@ final class TodoMonitorService {
         return (target, projectPath, verified)
     }
 
-    var attentionItems: [MergeRequestAttentionMonitor.Item] {
-        var items = attention.currentItems.compactMap { item -> MergeRequestAttentionMonitor.Item? in
-            guard let host = glab.resolvedHost, let username = glab.currentUsername, !item.feedback.isEmpty else { return item }
-            let work = AssistantAutomationRunner.MergeRequestWork(host: host, projectID: item.id.projectID, iid: item.id.iid)
-            let remaining = Set(AssistantAutomationRunner.unhandledFeedback(
-                item.feedback.compactMap(\.id), work: work, username: username, settings: settings
-            ))
-            var item = item
-            item.feedback.removeAll { $0.id.map { !remaining.contains($0) } ?? false }
-            if item.feedback.isEmpty { item.needsDiscussion = item.hasOtherUnresolvedDiscussions }
-            return item.needsAttention ? item : nil
-        }
-        let handoffs = pipelineHandoffs
-        for handoff in handoffs {
-            let mr = handoff.event.mergeRequest
-            let id = MergeRequestAttentionMonitor.Item.ID(projectID: mr.projectID, iid: mr.iid)
-            if let index = items.firstIndex(where: { $0.id == id }) {
-                items[index].needsPipelineHandoff = true
-                if items[index].mergeRequest == nil { items[index].mergeRequest = mr }
-            } else {
-                items.append(.init(id: id, title: mr.title, url: mr.webURL, needsPipelineHandoff: true, mergeRequest: mr))
-            }
-        }
-        if !attention.hasError, !authoredMergeRequests.hasError, let host = glab.resolvedHost, let username = glab.currentUsername {
-            for status in authoredMergeRequests.requests where status.mayMergeManually {
-                let request = status.request
-                guard request.author.username == username,
-                      request.webURL.isGitLabMergeRequest(host: host, iid: request.iid),
-                      let current = attention.currentOpenItems.first(where: {
-                          $0.id.projectID == request.projectID && $0.id.iid == request.iid
-                      }), current.mergeRequest?.author.username == username, current.canOfferManualMerge(using: status)
-                else { continue }
-                let id = MergeRequestAttentionMonitor.Item.ID(projectID: request.projectID, iid: request.iid)
-                guard (items.first(where: { $0.id == id })?.draftCount ?? 0) == 0 else { continue }
-                let automatic = (availableAssistants.contains(settings.automation.assistant) || assistantDependencies.isChecking)
-                    && status.mayAutoMerge && settings.permitsAutomaticAction(.merge, for: request,
-                        target: .init(host: host, username: username, projectID: request.projectID, iid: request.iid))
-                    && !AssistantJobExecution.hasUnfinishedWork(in: settings.assistantHandoffs,
-                        for: .init(host: host, projectID: id.projectID, iid: id.iid), username: username,
-                        currentRequest: request, feedbackStatus: current.authorFeedbackStatus,
-                        discussionFingerprint: current.observedDiscussionFingerprint)
-                guard !automatic else { continue }
-                if let index = items.firstIndex(where: { $0.id == id }) { items[index].needsMerge = true }
-                else { items.append(.init(id: id, title: request.title, url: request.webURL, needsMerge: true, mergeRequest: request, isAuthored: true)) }
-            }
-        }
-        let visible = items.compactMap { item -> MergeRequestAttentionMonitor.Item? in
-            guard let target = scopeTarget(projectID: item.id.projectID, iid: item.id.iid, url: item.url) else { return item }
-            let work = AssistantAutomationRunner.MergeRequestWork(host: target.host, projectID: item.id.projectID, iid: item.id.iid)
-            let currentEvents = authoredMergeRequests.workflow.entries.filter {
-                $0.event.mergeRequest.projectID == item.id.projectID && $0.event.mergeRequest.iid == item.id.iid
-                    && $0.event.mergeRequest.sha == item.mergeRequest?.sha
-            }
-            var failures = Set(MergeWorkflowTrigger.allCases.filter { trigger in
-                guard let entry = currentEvents.first(where: { $0.event.kind == trigger }) else { return false }
-                return entry.state == .failed && !entry.isReadOnlyFailure
-            })
-            if failedAttentionFeedback.contains(work) { failures.insert(.newDiscussion) }
-            let conflictFailed = item.mergeRequest.map {
-                authoredMergeRequests.conflictTaskFailed(for: $0)
-                    || ($0.hasMergeConflict && authoredMergeRequests.conflictAutomationState(for: $0) == nil)
-            } ?? false
-            let pipelineState = currentEvents.first { $0.event.kind == .pipelineFailure
-                && $0.event.pipelineID == item.mergeRequest?.headPipeline?.id }?.state
-            let pipelineOwned = pipelineState.map { [.queued, .running, .waitingForAssistant, .completed, .alreadyRegistered].contains($0) } ?? false
-            let feedbackState = currentEvents.first { $0.event.kind == .newDiscussion }?.state
-            let feedbackOwned = feedbackState.map { [.queued, .running, .waitingForAssistant, .completed].contains($0) } ?? false
-            let visible = item.requiringUserAttention(automation: settings.automation, target: target,
-                                                     failedTriggers: failures, conflictTaskFailed: conflictFailed,
-                                                     pipelineOwnedAutomatically: pipelineOwned, feedbackOwnedAutomatically: feedbackOwned)
-            return visible.needsAttention ? visible : nil
-        }
-        return MergeRequestAttentionMonitor.Item.ordered(visible)
-    }
+    var attentionItems: [MergeRequestAttentionMonitor.Item] { boardProjector?.attentionItems ?? [] }
 
     func unmanagedTarget(for item: MergeRequestAttentionMonitor.Item) -> MRAutomationScope.Target? {
         guard let target = scopeTarget(projectID: item.id.projectID, iid: item.id.iid, url: item.url),
@@ -925,67 +883,7 @@ final class TodoMonitorService {
 
     /// Shared semantic projection for the menu indicator and native notifications.
     private var pendingUserAttention: ConfirmedAttentionSnapshot.Input {
-        guard let host = glab.resolvedHost, let username = glab.currentUsername else { return .init(account: nil) }
-        let ready = availableAssistants.contains(settings.automation.assistant)
-        let preparing = ready || assistantDependencies.isChecking
-        let board = MergeRequestBoardSnapshot(own: ownMergeRequestItems, reviewed: reviewedMergeRequestItems,
-            todos: currentAccountTodos, attention: attentionItems, handoffs: settings.assistantHandoffs,
-            host: host, username: username, intents: currentMRTodoIntents, routedTodoIDs: routedMRTodoIDs,
-            ignoredTargets: hiddenBoardTargets, pipelineEvidence: currentPipelineEvidence,
-            pipelineEvidenceCheckedAt: currentPipelineEvidenceDate, automation: settings.automation)
-        var rows: [BoardAttentionPresenter.PresentedRow] = []
-        for row in board.own + board.reviewed {
-            guard row.item.mergeRequest?.state == "opened" else { continue }
-            let target = MRAutomationScope.Target(host: host, username: username, projectID: row.id.projectID, iid: row.id.iid)
-            guard !settings.ignoredMergeRequests.contains(target) else { continue }
-            let item = row.item.presentingHumanAttention(
-                filtered: attentionItems.first { $0.id == row.id },
-                unfiltered: attention.currentItems.first { $0.id == row.id },
-                assistantReady: preparing)
-            let state = attention.confirmationStates[row.id]
-            let conflictProcessing = row.item.mergeRequest.map { automaticConflictIsProcessing(for: $0) } ?? false
-            let pipelineProcessing = row.item.mergeRequest.map { authoredMergeRequests.workflow.isAutomaticallyProcessingPipeline($0) } ?? false
-            let recoveryWaitsForHuman = (row.item.draftProofRecoveryChecking || row.isCheckingReadOnlyReconciliation) && row.hasIndependentStoppedWork
-            let busy = row.latestJob?.operationalExecution?.state.isActive == true || state?.isBusy == true
-                || row.item.aiOriginChecking
-                || (!recoveryWaitsForHuman && (row.item.authorFeedbackStatus?.phase == .checking || row.item.draftProofRecoveryChecking))
-                || conflictProcessing || pipelineProcessing
-                || (!recoveryWaitsForHuman && !row.item.isAuthored && reviewingContext(for: row).isAutomaticProcessing)
-            let automaticDrafts = item.draftIDsHandledAutomatically(automation: settings.automation,
-                target: target, assistantPreparing: preparing,
-                publicationAutomatic: settings.actionIsAutomatic(.commentPublication, for: target))
-            rows.append(.init(row: row, item: item, confirmationState: state, busy: busy,
-                automaticDraftIDs: automaticDrafts,
-                checking: isRecheckingAttention(for: row) || attentionRefreshFailed(for: row),
-                automaticIntentIDs: Set(row.attentionIntents.filter { attentionIntentIsAutomatic($0, ready: preparing) }.map(\.id))))
-        }
-        return BoardAttentionPresenter.project(.init(account: attentionPresentationAccount, host: host, username: username,
-            rows: rows, proposals: board.proposals, otherTodos: board.otherTodos, inboxLoading: isLoading,
-            assessingMentionNoteIDs: assessingMentionNoteIDs, assistantReady: ready, assistantPreparing: preparing))
-    }
-
-    private func attentionIntentIsAutomatic(_ intent: MRTodoIntent, ready: Bool) -> Bool {
-        let configuration = settings.automation
-        guard configuration.packageDecision != .disabled, configuration.scope.resolve(intent.target).active,
-              !settings.ignoredMergeRequests.contains(intent.target), intent.request.state == "opened",
-              intent.isDeferredReview || (ready && configuration.scope.permits(intent.request,
-                  host: intent.target.host, username: intent.target.username)) else { return false }
-        let project = intent.request.webURL.gitLabProjectPath
-        switch intent.kind {
-        case .review:
-            let rule = configuration.reviewRequested
-            return rule.isEnabled && rule.runner == .assistant && rule.isConfigured && rule.includes(project: project)
-        case .followUp:
-            let rule = configuration.authorFeedback
-            let workflow = configuration.workflowRules[.newDiscussion]
-            return rule.runner == .assistant && rule.isConfigured && rule.includes(project: project)
-                && (rule.isEnabled || (workflow.mode == .assistant && workflow.includes(intent.request)))
-        case .pipeline:
-            let rule = configuration.workflowRules[.pipelineFailure]
-            return intent.request.author.username == intent.target.username && configuration.autoClaimPipelineFailures
-                && rule.mode == .assistant && rule.includes(intent.request)
-        default: return false
-        }
+        boardProjector?.pendingUserAttention ?? .init(account: nil)
     }
 
     var attentionCount: Int { inbox.attention.count + standaloneManualAssistantGroups.count + (hasAssistantAction ? 1 : 0) }
@@ -1369,26 +1267,6 @@ final class TodoMonitorService {
                 let state = settings.mrLifecycleLedger.request(for: target)?.state
                 return state == "merged" || state == "closed"
             })
-    }
-
-    private func lifecycleCatalogItems(host: String, username: String) -> [MergeRequestAttentionMonitor.Item] {
-        var rows = Dictionary(attention.currentOpenItems.map { ($0.id, $0) }, uniquingKeysWith: { first, _ in first })
-        for request in settings.mrLifecycleLedger.retainedRequests(host: host, username: username) {
-            let id = MergeRequestAttentionMonitor.Item.ID(projectID: request.projectID, iid: request.iid)
-            let target = MRAutomationScope.Target(host: host, username: username, projectID: request.projectID, iid: request.iid)
-            if let original = rows[id]?.mergeRequest, original.sha == request.sha,
-               original.state == request.state, original.draft == request.draft {
-                rows[id]?.lifecycleCompletionID = settings.mrLifecycleLedger.completionID(for: target)
-                continue
-            }
-            // Never attach old publication/feedback proof to newly observed source or lifecycle state.
-            rows[id] = .init(id: id, title: request.title, url: request.webURL,
-                mergeRequest: request, isAuthored: request.author.username == username)
-            rows[id]?.lifecycleCompletionID = settings.mrLifecycleLedger.completionID(for: target)
-        }
-        return rows.values.filter {
-            !hiddenBoardTargets.contains(.init(host: host, username: username, projectID: $0.id.projectID, iid: $0.id.iid))
-        }
     }
 
     private func recordOwnedLifecycleObservations(_ requests: [GitLabMergeRequest], observedAt: Date) {

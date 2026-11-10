@@ -463,6 +463,23 @@ final class MergeRequestAttentionMonitor {
         return openItems.map(presentAuthorFeedback)
     }
 
+    /// One account/revision-bound value read for the display projector; no additional owner or epoch.
+    struct PresentationSnapshot {
+        let host: String
+        let username: String
+        let revision: UInt64
+        let evidence: [Item]
+        let attention: [Item]
+        let catalog: [Item]
+    }
+
+    var presentationSnapshot: PresentationSnapshot? {
+        guard let account, isCurrent(account), attentionRecordsRevision == glab.accountRevision else { return nil }
+        return .init(host: account.host, username: account.username, revision: glab.accountRevision,
+            evidence: attentionRecords.values.map { presentAuthorFeedback($0.evidence) },
+            attention: items.map(presentAuthorFeedback), catalog: openItems.map(presentAuthorFeedback))
+    }
+
     private func presentAuthorFeedback(_ original: Item) -> Item {
         var item = original
         item.dependencies = item.mergeRequest.flatMap { request in

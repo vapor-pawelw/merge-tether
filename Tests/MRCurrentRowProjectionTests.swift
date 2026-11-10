@@ -32,13 +32,15 @@ struct MRCurrentRowProjectionTests {
         }
         let current = try request()
         let catalog = MergeRequestAttentionMonitor.Item(id: evidence.id, title: current.title, url: current.webURL,
-            approvalProgress: .init(completed: 1, required: 2), mergeRequest: current, isAuthored: true)
+            approvalProgress: .init(completed: 1, required: 2), mergeRequest: current, isAuthored: current.author.username == "me")
         let projection = MRCurrentRowProjection(evidence: evidence, catalog: catalog, username: "me")
         #expect(projection.evidenceMatchesCatalogContext == (change == "same"))
+        #expect(projection.item.isAuthored)
+        #expect(projection.catalog.facts.isAuthored == (current.author.username == "me"))
         #expect(projection.item.drafts == evidence.drafts)
         #expect(projection.item.observedDiscussionFingerprint == "conversation-a")
-        #expect(projection.catalog.request?.draft == current.draft)
-        #expect(projection.catalog.request?.state == current.state)
+        #expect(projection.catalog.facts.request?.draft == current.draft)
+        #expect(projection.catalog.facts.request?.state == current.state)
         #expect(projection.item.mergeRequest?.semanticContextFingerprint == checked.semanticContextFingerprint)
         #expect(projection.item.mergeRequest?.sha == "a")
         #expect(projection.item.mergeRequest?.draft == false)

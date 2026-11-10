@@ -22,7 +22,7 @@ struct CommandCenterMRDetail: View {
     var body: some View {
         // Resolve the shared board projection once, outside layout-driven child updates.
         let board = monitor.boardSnapshot
-        let row = (board.own + board.reviewed + board.otherMergeRequests).first { $0.id == item.id }
+        let row = board.row(matching: item, host: monitor.glab.resolvedHost, username: monitor.glab.currentUsername)
         let required = row?.item.humanActionRequired ?? item.humanActionRequired ?? needsHumanAttention
         CommandCenterMRDetailContent(item: row?.item ?? item, catalogRow: row,
             monitor: monitor, initialSection: initialSection, needsHumanAttention: required)
@@ -259,7 +259,7 @@ private struct CommandCenterMRDetailContent: View {
                 Text(verbatim: "!\(item.id.iid)").monospacedDigit()
                 if let finishedState { FinishedMergeRequestBadge(state: finishedState) }
                 else if presentationRow.isDraft { BoardDraftBadge() }
-                RepositoryPathText(item.url.gitLabProjectPath).lineLimit(1)
+                RepositoryPathText(presentationRow.displayURL.gitLabProjectPath).lineLimit(1)
                 if let author = presentationRow.displayRequest?.author {
                     AvatarView(url: author.avatarURL, size: 18).accessibilityHidden(true)
                     Text(verbatim: author.name.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty ? author.username : author.name).lineLimit(1)

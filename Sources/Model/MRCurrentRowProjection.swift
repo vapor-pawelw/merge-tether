@@ -3,8 +3,17 @@ import Foundation
 /// Ephemeral join of a checked action envelope and separately observed catalog facts.
 /// Context compatibility describes this join; it is never action authorization.
 struct MRCurrentRowProjection {
+    /// Display-only dependency values stay outside the attention record's stored catalog slice.
+    struct Catalog {
+        let facts: MRAttentionRecord.CatalogObservation
+        let dependencies: MergeRequestDependencySummary?
+        init(_ item: MergeRequestAttentionMonitor.Item) {
+            facts = .init(item)
+            dependencies = item.dependencies
+        }
+    }
     let item: MergeRequestAttentionMonitor.Item
-    let catalog: MRAttentionRecord.CatalogObservation
+    let catalog: Catalog
     let evidenceMatchesCatalogContext: Bool
 
     init(evidence: MergeRequestAttentionMonitor.Item, catalog: MergeRequestAttentionMonitor.Item,
@@ -28,7 +37,9 @@ struct MRCurrentRowProjection {
             value.automaticPublicationPolicy = nil
             if value.draftCount > 0 || !value.drafts.isEmpty { value.requiresDiscussionRecheck = true }
         }
-        value.isAuthored = catalog.isAuthored || catalog.mergeRequest?.author.username == username
+        if evidenceMatchesCatalogContext {
+            value.isAuthored = catalog.isAuthored || catalog.mergeRequest?.author.username == username
+        }
         item = value.presentingVerifiedAuthorFeedback()
     }
 }

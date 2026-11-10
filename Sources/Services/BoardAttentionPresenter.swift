@@ -156,8 +156,8 @@ final class BoardAttentionPresenter {
                 }
             }
             let id = key(row.id.projectID, row.id.iid)
-            let candidate = UserAttentionSnapshot.Candidate(id: id, title: row.item.title,
-                subtitle: row.item.url.gitLabProjectPath, actions: actions, working: presented.busy)
+            let candidate = UserAttentionSnapshot.Candidate(id: id, title: row.displayTitle,
+                subtitle: row.displayURL.gitLabProjectPath, actions: actions, working: presented.busy)
             candidates.append(candidate)
             if presented.checking { checkingIDs.insert(id) }
             if UserAttentionSnapshot(candidates: [candidate]).hasAttention {
@@ -165,7 +165,8 @@ final class BoardAttentionPresenter {
                 confirmedItem.humanActionRequired = true
                 let confirmedRow = MergeRequestBoardSnapshot.Row(item: confirmedItem, latestJob: row.latestJob,
                     intents: row.intents, pipelineEvidence: row.pipelineEvidence,
-                    pipelineEvidenceCheckedAt: row.pipelineEvidenceCheckedAt)
+                    pipelineEvidenceCheckedAt: row.pipelineEvidenceCheckedAt, catalog: row.catalog,
+                    evidenceMatchesCatalogContext: row.evidenceMatchesCatalogContext)
                 humanActions[id] = MRHumanAction(row: confirmedRow, assistantReady: input.assistantReady,
                     confirmationState: state, automaticallyPublishedDraftIDs: automaticDrafts)
             }

@@ -13,14 +13,7 @@ import Foundation
     }
 
     private func makeBoardSnapshot(preservedOrder: [MergeRequestAttentionMonitor.Item.ID: Int] = [:]) -> MergeRequestBoardSnapshot {
-        .init(own: ownMergeRequestItems, reviewed: reviewedMergeRequestItems,
-            todos: currentAccountTodos, attention: attentionItems,
-            handoffs: assistantHandoffs, host: glab.resolvedHost, username: glab.currentUsername,
-            intents: currentMRTodoIntents, routedTodoIDs: routedMRTodoIDs,
-            ignoredTargets: hiddenBoardTargets, humanAttention: userAttention,
-            pinnedCards: settings.boardPins, pipelineEvidence: currentPipelineEvidence,
-            pipelineEvidenceCheckedAt: currentPipelineEvidenceDate, preservedOrder: preservedOrder,
-            automation: settings.automation, displayRequests: boardDisplayRequests, grouping: settings.boardGrouping,
-            completions: lifecycleCompletions)
+        boardProjector?.board(humanAttention: userAttention, preservedOrder: preservedOrder)
+            ?? .init(own: [], reviewed: [], todos: [], attention: [], handoffs: [], host: nil, username: nil)
     }
 }

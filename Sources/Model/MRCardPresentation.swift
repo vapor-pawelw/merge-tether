@@ -202,7 +202,7 @@ struct MRCardPresentation {
     var chips: [Chip] {
         guard finishedState == nil else { return [] }
         var result: [Chip] = []
-        if item.hasConflict || item.mergeRequest?.hasMergeConflict == true {
+        if row.displayRequest?.hasMergeConflict == true || (row.evidenceMatchesCatalogContext && item.hasConflict) {
             result.append(.init(title: .Board.boardCompactConflict, symbol: "arrow.triangle.branch"))
         }
         if let pipeline = row.currentPipelineRequest?.headPipeline,
