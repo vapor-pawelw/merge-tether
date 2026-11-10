@@ -94,7 +94,7 @@ import Testing
             let policy = GitLabMergeActionPolicy(action: .enqueue, requiresResolvedDiscussions: true,
                 resetsApprovalsOnPush: true, usesMergeTrain: false)
             let outcome = try await glab.mergeMergeRequest(projectID: 1, iid: 2, headSHA: request.sha!, host: host,
-                expectedUser: user, expectedContext: .init(request), action: .enqueue, expectedPolicy: policy)
+                expectedUser: user, expectedContext: .init(request), action: .enqueue, expectedPolicy: policy, shouldProceed: { true })
             #expect(outcome == .queued)
             let write = try #require(gitlab.requests.first { $0.method != "GET" })
             #expect(write.endpoint == "/projects/1/merge_requests/2/merge" && write.method == "PUT")
@@ -206,7 +206,7 @@ import Testing
     private func submit(_ glab: GlabService, request: GitLabMergeRequest) async throws -> MergeSubmissionState {
         try await glab.mergeMergeRequest(projectID: 1, iid: 2, headSHA: request.sha!, host: host,
             expectedUser: user, expectedContext: .init(request), expectedDiscussionFingerprint: ReviewVerdict.fingerprint([]),
-            expectedSemanticContextFingerprint: request.semanticContextFingerprint, action: .enqueue, expectedPolicy: policy)
+            expectedSemanticContextFingerprint: request.semanticContextFingerprint, action: .enqueue, expectedPolicy: policy, shouldProceed: { true })
     }
 
     private func fixture(_ body: (GlabService, InMemoryGitLab, GitLabMergeRequest) async throws -> Void) async throws {

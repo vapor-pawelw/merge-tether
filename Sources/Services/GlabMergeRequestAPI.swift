@@ -26,7 +26,7 @@ extension GlabService {
 
     func markMergeRequestReady(
         projectID: Int, iid: Int, headSHA: String, host: String,
-        expectedUser: GitLabAuthenticatedUser, shouldProceed: @MainActor () -> Bool = { true }
+        expectedUser: GitLabAuthenticatedUser, shouldProceed: @MainActor () -> Bool
     ) async throws -> GitLabMergeRequest {
         guard projectID > 0, iid > 0, Self.isFullGitSHA(headSHA) else {
             throw GlabError.decoding("Invalid merge request identity or source SHA")
@@ -243,7 +243,7 @@ extension GlabService {
     /// Approves the merge request only if its head is still `headSHA`.
     func approveMergeRequest(projectID: Int, iid: Int, headSHA: String, host: String, userID: Int,
                              willSubmit: (() -> Void)? = nil,
-                             shouldProceed: @MainActor () -> Bool = { true }) async throws {
+                             shouldProceed: @MainActor () -> Bool) async throws {
         struct Approval: Decodable {
             struct Approver: Decodable {
                 struct User: Decodable { let id: Int }
@@ -498,7 +498,7 @@ extension GlabService {
         action: MergeSubmissionAction = .mergeNow,
         expectedPolicy: GitLabMergeActionPolicy? = nil,
         beforeWrite: @MainActor () throws -> Void = {},
-        shouldProceed: @MainActor () -> Bool = { true }
+        shouldProceed: @MainActor () -> Bool
     ) async throws -> MergeSubmissionState {
         struct MergeResult: Decodable {
             let projectID: Int

@@ -227,7 +227,7 @@ struct MergeDependencyGateTests {
 
         func merge() async throws {
             try await glab.mergeMergeRequest(projectID: 1, iid: 2, headSHA: childHead, host: host,
-                expectedUser: .init(id: 3, username: "me"))
+                expectedUser: .init(id: 3, username: "me"), shouldProceed: { true })
         }
 
         func poll() async throws {

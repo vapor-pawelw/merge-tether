@@ -118,7 +118,7 @@ struct GlabMergeRequestAPITests {
     @Test func mergesOnlyAfterRecheckingAccountAndPinsSourceHead() async throws {
         try await withFakeGlab(expectMerge: true) { glab in
             let user = try await glab.fetchAuthenticatedUser(host: host, expectedUsername: "author")
-            try await glab.mergeMergeRequest(projectID: 34, iid: 12, headSHA: sha, host: host, expectedUser: user)
+            try await glab.mergeMergeRequest(projectID: 34, iid: 12, headSHA: sha, host: host, expectedUser: user, shouldProceed: { true })
         }
     }
 
@@ -141,7 +141,7 @@ struct GlabMergeRequestAPITests {
         try await withFakeGlab { glab in
             let otherUser = GitLabAuthenticatedUser(id: 999, username: "author")
             await #expect(throws: GlabError.notAuthenticated) {
-                try await glab.mergeMergeRequest(projectID: 34, iid: 12, headSHA: sha, host: host, expectedUser: otherUser)
+                try await glab.mergeMergeRequest(projectID: 34, iid: 12, headSHA: sha, host: host, expectedUser: otherUser, shouldProceed: { true })
             }
         }
     }
@@ -171,7 +171,7 @@ struct GlabMergeRequestAPITests {
     @Test func marksOnlyTheCurrentOwnDraftReadyUsingTheDocumentedCLIAction() async throws {
         try await withReadyGlab(expectWrites: 1) { glab, _ in
             let updated = try await glab.markMergeRequestReady(projectID: 34, iid: 12, headSHA: sha,
-                host: host, expectedUser: .init(id: 7, username: "author"))
+                host: host, expectedUser: .init(id: 7, username: "author"), shouldProceed: { true })
             #expect(updated.draft == false && updated.sha == sha && updated.author.id == 7)
         }
     }
@@ -179,7 +179,7 @@ struct GlabMergeRequestAPITests {
     @Test func markingAnAlreadyReadyOwnMRIsIdempotent() async throws {
         try await withReadyGlab(overrides: ["draft": false]) { glab, _ in
             let updated = try await glab.markMergeRequestReady(projectID: 34, iid: 12, headSHA: sha,
-                host: host, expectedUser: .init(id: 7, username: "author"))
+                host: host, expectedUser: .init(id: 7, username: "author"), shouldProceed: { true })
             #expect(updated.draft == false)
         }
     }
@@ -194,7 +194,7 @@ struct GlabMergeRequestAPITests {
         try await withReadyGlab(overrides: overrides) { glab, _ in
             await #expect(throws: CancellationError.self) {
                 _ = try await glab.markMergeRequestReady(projectID: 34, iid: 12, headSHA: sha,
-                    host: host, expectedUser: .init(id: 7, username: "author"))
+                    host: host, expectedUser: .init(id: 7, username: "author"), shouldProceed: { true })
             }
         }
     }
@@ -203,7 +203,7 @@ struct GlabMergeRequestAPITests {
         try await withReadyGlab { glab, _ in
             await #expect(throws: GlabError.notAuthenticated) {
                 _ = try await glab.markMergeRequestReady(projectID: 34, iid: 12, headSHA: sha,
-                    host: host, expectedUser: .init(id: 999, username: "author"))
+                    host: host, expectedUser: .init(id: 999, username: "author"), shouldProceed: { true })
             }
         }
     }
@@ -221,7 +221,7 @@ struct GlabMergeRequestAPITests {
         try await withReadyGlab(gateRead: true) { glab, directory in
             let release = directory.appending(path: "release")
             let task = Task { try await glab.markMergeRequestReady(projectID: 34, iid: 12, headSHA: sha,
-                host: host, expectedUser: .init(id: 7, username: "author")) }
+                host: host, expectedUser: .init(id: 7, username: "author"), shouldProceed: { true }) }
             defer { task.cancel(); try? Data().write(to: release) }
             let entered = directory.appending(path: "entered")
             for _ in 0..<200 where !FileManager.default.fileExists(atPath: entered.path) {
@@ -239,7 +239,7 @@ struct GlabMergeRequestAPITests {
         try await withReadyGlab(resultStillDraft: true, expectWrites: 1) { glab, _ in
             await #expect(throws: (any Error).self) {
                 _ = try await glab.markMergeRequestReady(projectID: 34, iid: 12, headSHA: sha,
-                    host: host, expectedUser: .init(id: 7, username: "author"))
+                    host: host, expectedUser: .init(id: 7, username: "author"), shouldProceed: { true })
             }
         }
     }

@@ -51,7 +51,7 @@ extension GlabService {
     func refreshStaleFailedPipeline(
         for request: GitLabMergeRequest, host: String, expectedUser: GitLabAuthenticatedUser,
         settings: SettingsManager, detector: ExistingPipelineWorkDetector = .init(),
-        shouldProceed: @MainActor () -> Bool = { true }
+        shouldProceed: @MainActor () -> Bool
     ) async throws -> Bool {
         let proof: StalePipelineTarget
         do {
