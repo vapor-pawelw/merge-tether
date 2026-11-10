@@ -150,7 +150,7 @@ final class MergeRequestTodoRouter {
         guard !Task.isCancelled, let original = settings.mrActionIntents.first(where: { $0.id == id }), original.state != .completed,
               let iid = original.target.iid, isCurrent(original.target.host, original.target.username) else { return }
         let revision = glab.accountRevision
-        func isCurrentRun() -> Bool {
+        @MainActor @Sendable func isCurrentRun() -> Bool {
             isCurrent(original.target.host, original.target.username) && glab.accountRevision == revision
         }
         let origin: MRAutomationEvent.Origin = manual ? .manual : .automatic
@@ -415,7 +415,11 @@ final class MergeRequestTodoRouter {
         // Durable acceptance is required for both automatic routing and manual Add/handle.
         guard settings.automaticActionsAllowed, (!automatically || settings.automaticWritesAllowed), isCurrent(target.host, target.username),
               glab.accountRevision == revision else { return false }
-        switch await glab.markAsDone(id: todo.id, host: target.host) {
+        switch await glab.markAsDone(id: todo.id, host: target.host, shouldProceed: {
+            !Task.isCancelled && self.settings.automaticActionsAllowed
+                && (!automatically || self.settings.automaticWritesAllowed)
+                && self.isCurrent(target.host, target.username) && self.glab.accountRevision == revision
+        }) {
         case .success:
             settings.routedMRTodoReceipts.insert(.init(target: target, event: todo.feedbackIdentity, intentID: intentID))
             settings.save()

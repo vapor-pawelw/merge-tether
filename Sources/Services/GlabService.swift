@@ -4,20 +4,31 @@ import Observation
 @MainActor
 @Observable
 final class GlabService {
-    typealias CommandRunner = @MainActor (URL, [String], [String: String], TimeInterval) async throws -> ProcessRunner.Output
+    typealias CommandRunner = @MainActor (URL, [String], [String: String], TimeInterval, (@MainActor @Sendable () -> Bool)?) async throws -> ProcessRunner.Output
     @ObservationIgnored private let commandRunner: CommandRunner
 
     // Keep command construction/decoding real in workflow tests while replacing
     // the external process boundary. Adapter tests retain the default runner.
-    init(commandRunner: @escaping CommandRunner = { executable, arguments, environment, timeout in
-        try await ProcessRunner.run(executable, arguments: arguments, environment: environment, timeout: timeout)
+    init(commandRunner: @escaping CommandRunner = { executable, arguments, environment, timeout, authorization in
+        try await ProcessRunner.run(executable, arguments: arguments, environment: environment, timeout: timeout, authorizeLaunch: authorization)
     }) {
         self.commandRunner = commandRunner
     }
 
     func runCommand(_ executable: URL, arguments: [String], environment: [String: String],
                     timeout: TimeInterval) async throws -> ProcessRunner.Output {
-        try await commandRunner(executable, arguments, environment, timeout)
+        try await commandRunner(executable, arguments, environment, timeout, nil)
+    }
+
+    func runWriteCommand(_ executable: URL, arguments: [String], environment: [String: String],
+                         timeout: TimeInterval, shouldProceed: @escaping @MainActor @Sendable () -> Bool) async throws -> ProcessRunner.Output {
+        let revision = accountRevision, host = resolvedHost, username = currentUsername
+        let authorization: @MainActor @Sendable () -> Bool = {
+            !Task.isCancelled && self.glabPath == executable && self.accountRevision == revision
+                && self.resolvedHost == host && self.currentUsername == username && shouldProceed()
+        }
+        guard authorization() else { throw CancellationError() }
+        return try await commandRunner(executable, arguments, environment, timeout, authorization)
     }
 
     func freshSession() -> GlabService {
@@ -96,15 +107,15 @@ final class GlabService {
         }
     }
 
-    func markAsDone(id: Int, host: String? = nil) async -> Result<Void, GlabError> {
+    func markAsDone(id: Int, host: String? = nil, shouldProceed: @escaping @MainActor @Sendable () -> Bool) async -> Result<Void, GlabError> {
         guard let glabPath else { return .failure(.glabNotInstalled) }
         let output: ProcessRunner.Output
         do {
-            output = try await runCommand(
+            output = try await runWriteCommand(
                 glabPath,
                 arguments: ["api", "--method", "POST", "/todos/\(id)/mark_as_done"] + Self.hostArguments(host),
                 environment: Self.shellEnvironment,
-                timeout: 15
+                timeout: 15, shouldProceed: shouldProceed
             )
         } catch ProcessRunner.RunError.timedOut {
             return .failure(.timedOut)

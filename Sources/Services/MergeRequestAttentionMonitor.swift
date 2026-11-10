@@ -1421,7 +1421,7 @@ final class MergeRequestAttentionMonitor {
         }
         let eligible = candidates.filter { qualifies($0, in: discussions) }
         guard !eligible.isEmpty, isCurrent(account), !isConfirming(id) else { return }
-        let generation = accountGeneration
+        let generation = accountGeneration, revision = glab.accountRevision
         confirmationStates[id] = .publishing
         defer {
             if generation == accountGeneration, confirmationStates[id] == .publishing { confirmationStates[id] = nil }
@@ -1449,8 +1449,22 @@ final class MergeRequestAttentionMonitor {
                       settings.automation.publishAIRepliesWithoutConfirmation,
                       permitsAutomaticPublication(of: request, account: account),
                       !hasActiveWorker(for: id, account: account) else { continue }
+                let proofVerdict = ReviewVerdictStore.verdict(host: account.host, projectID: id.projectID, iid: id.iid, in: verdictDirectory)
+                let proofReceipts = publicationReceipts(projectID: id.projectID, iid: id.iid, host: account.host, username: account.username)
+                let reviewRevision = settings.commentReviewRevision(for: commentReviewTarget(id, account: account))
                 attemptedPublish = true
-                try await glab.publishDraftNote(projectID: id.projectID, iid: id.iid, draftID: draftID, host: account.host)
+                try await glab.publishDraftNote(projectID: id.projectID, iid: id.iid, draftID: draftID, host: account.host) {
+                    !Task.isCancelled && generation == self.accountGeneration && revision == self.glab.accountRevision
+                        && self.isCurrent(account) && settings.automaticWritesAllowed
+                        && settings.automation == configuration && settings.automation.publishAIRepliesWithoutConfirmation
+                        && self.openItems.first(where: { $0.id == id })?.mergeRequest?.sha == request.sha
+                        && self.openItems.first(where: { $0.id == id })?.mergeRequest?.semanticContextFingerprint == request.semanticContextFingerprint
+                        && ReviewVerdictStore.verdict(host: account.host, projectID: id.projectID, iid: id.iid, in: self.verdictDirectory) == proofVerdict
+                        && self.publicationReceipts(projectID: id.projectID, iid: id.iid, host: account.host, username: account.username) == proofReceipts
+                        && settings.commentReviewRevision(for: self.commentReviewTarget(id, account: account)) == reviewRevision
+                        && self.permitsAutomaticPublication(of: request, account: account)
+                        && !self.hasActiveWorker(for: id, account: account)
+                }
                 attemptedPublish = false
                 guard isCurrent(account) else { return }
                 published = true
@@ -1490,7 +1504,7 @@ final class MergeRequestAttentionMonitor {
               let displayed = (items + openItems).first(where: { $0.id == id }),
               displayed.drafts.contains(expected) else { return }
         let generation = accountGeneration, revision = glab.accountRevision
-        func current() -> Bool { generation == accountGeneration && revision == glab.accountRevision && isCurrent(account) }
+        @MainActor @Sendable func current() -> Bool { generation == accountGeneration && revision == glab.accountRevision && isCurrent(account) }
         confirmationStates[id] = .deleting
         defer {
             if current(), confirmationStates[id] == .deleting { confirmationStates[id] = nil }
@@ -1511,7 +1525,7 @@ final class MergeRequestAttentionMonitor {
             guard !matching.isEmpty else { return } // Already handled in GitLab; retain the human checkpoint.
             guard matching == [expected] else { confirmationStates[id] = .changed; return }
             try Task.checkCancellation()
-            try await glab.deleteDraftNote(projectID: id.projectID, iid: id.iid, draftID: draftID, host: account.host)
+            try await glab.deleteDraftNote(projectID: id.projectID, iid: id.iid, draftID: draftID, host: account.host) { !Task.isCancelled && current() }
             guard current() else { return }
             // A poll started before DELETE may still carry this exact snapshot.
             publishedDrafts[id, default: []].append(expected)
@@ -1622,7 +1636,7 @@ final class MergeRequestAttentionMonitor {
             return
         }
         let generation = accountGeneration, revision = glab.accountRevision
-        func currentContext() -> Bool {
+        @MainActor @Sendable func currentContext() -> Bool {
             generation == accountGeneration && revision == glab.accountRevision && isCurrent(account)
         }
         func display(_ drafts: [GitLabDraftNote]) {
@@ -1662,7 +1676,7 @@ final class MergeRequestAttentionMonitor {
                 }
                 try Task.checkCancellation()
                 attemptedWrite = true
-                try await glab.publishDraftNote(projectID: id.projectID, iid: id.iid, draftID: draftID, host: account.host)
+                try await glab.publishDraftNote(projectID: id.projectID, iid: id.iid, draftID: draftID, host: account.host) { !Task.isCancelled && currentContext() }
                 attemptedWrite = false
                 guard currentContext() else { return }
                 publishedAny = true
@@ -1706,7 +1720,7 @@ final class MergeRequestAttentionMonitor {
               !isConfirming(id) else { return }
         guard !automatic || !hasActiveWorker(for: id, account: account) else { return }
         let expected = displayed.drafts
-        let generation = accountGeneration
+        let generation = accountGeneration, revision = glab.accountRevision
         confirmationStates[id] = .publishing
         defer {
             if generation == accountGeneration, confirmationStates[id] == .publishing { confirmationStates[id] = nil }
@@ -1753,8 +1767,22 @@ final class MergeRequestAttentionMonitor {
                           settings.automation.publishDraftsWithoutConfirmation,
                           permitsAutomaticPublication(of: request, account: account),
                           !hasActiveWorker(for: id, account: account) else { continue }
+                    let proofVerdict = ReviewVerdictStore.verdict(host: account.host, projectID: id.projectID, iid: id.iid, in: verdictDirectory)
+                    let proofReceipts = publicationReceipts(projectID: id.projectID, iid: id.iid, host: account.host, username: account.username)
+                    let reviewRevision = settings.commentReviewRevision(for: commentReviewTarget(id, account: account))
                     attemptedPublish = true
-                    try await glab.publishDraftNote(projectID: id.projectID, iid: id.iid, draftID: draftID, host: account.host)
+                    try await glab.publishDraftNote(projectID: id.projectID, iid: id.iid, draftID: draftID, host: account.host) {
+                        !Task.isCancelled && generation == self.accountGeneration && revision == self.glab.accountRevision
+                            && self.isCurrent(account) && settings.automaticWritesAllowed
+                            && settings.automation == configuration && settings.automation.publishDraftsWithoutConfirmation
+                            && self.openItems.first(where: { $0.id == id })?.mergeRequest?.sha == request.sha
+                            && self.openItems.first(where: { $0.id == id })?.mergeRequest?.semanticContextFingerprint == request.semanticContextFingerprint
+                            && ReviewVerdictStore.verdict(host: account.host, projectID: id.projectID, iid: id.iid, in: self.verdictDirectory) == proofVerdict
+                            && self.publicationReceipts(projectID: id.projectID, iid: id.iid, host: account.host, username: account.username) == proofReceipts
+                            && settings.commentReviewRevision(for: self.commentReviewTarget(id, account: account)) == reviewRevision
+                            && self.permitsAutomaticPublication(of: request, account: account)
+                            && !self.hasActiveWorker(for: id, account: account)
+                    }
                     attemptedPublish = false
                     guard isCurrent(account) else { return }
                     publishedAny = true
@@ -1768,7 +1796,10 @@ final class MergeRequestAttentionMonitor {
                 updateItem(id) { $0.drafts = remaining; $0.draftCount = remaining.count }
             } else {
                 attemptedPublish = true
-                try await glab.publishDraftNotes(projectID: id.projectID, iid: id.iid, host: account.host)
+                try await glab.publishDraftNotes(projectID: id.projectID, iid: id.iid, host: account.host) {
+                    !Task.isCancelled && generation == self.accountGeneration && revision == self.glab.accountRevision
+                        && self.isCurrent(account)
+                }
                 attemptedPublish = false
                 guard isCurrent(account) else { return }
                 publishedAny = true
@@ -1955,7 +1986,7 @@ final class MergeRequestAttentionMonitor {
               Set(expectedDrafts.compactMap(\.id)).count == expectedDrafts.count,
               let displayed = items.first(where: { $0.id == id }), displayed.drafts == expectedDrafts else { return .changed }
         let generation = accountGeneration, revision = glab.accountRevision
-        func currentContext() -> Bool {
+        @MainActor @Sendable func currentContext() -> Bool {
             generation == accountGeneration && revision == glab.accountRevision
                 && executable == glab.glabPath && isCurrent(account)
         }
@@ -1985,7 +2016,7 @@ final class MergeRequestAttentionMonitor {
                 }
                 try Task.checkCancellation()
                 attemptedWrite = true
-                try await glab.publishDraftNote(projectID: id.projectID, iid: id.iid, draftID: draftID, host: account.host)
+                try await glab.publishDraftNote(projectID: id.projectID, iid: id.iid, draftID: draftID, host: account.host) { !Task.isCancelled && currentContext() }
                 attemptedWrite = false
                 guard currentContext() else { return .uncertain }
                 publishedAny = true
@@ -2028,7 +2059,7 @@ final class MergeRequestAttentionMonitor {
         var checkedSemanticContext: String?
         typealias Evidence = (request: GitLabMergeRequest, drafts: [GitLabDraftNote],
                               discussions: [GitLabMergeRequestDiscussion], user: GitLabAuthenticatedUser, approvers: Set<Int>)
-        @MainActor func currentAccount() -> Bool {
+        @MainActor @Sendable func currentAccount() -> Bool {
             generation == accountGeneration && revision == glab.accountRevision && isCurrent(account)
         }
         @MainActor func readEvidence() async throws -> Evidence {
@@ -2039,7 +2070,7 @@ final class MergeRequestAttentionMonitor {
             let approved = try await glab.fetchMergeRequestApproverIDs(projectID: id.projectID, iid: id.iid, host: account.host)
             return (current, drafts, discussions, currentUser, approved)
         }
-        @MainActor func permits(_ evidence: Evidence) -> Bool {
+        @MainActor @Sendable func permits(_ evidence: Evidence) -> Bool {
             let current = evidence.request
             let verdict = ReviewVerdictStore.verdict(host: account.host, projectID: id.projectID, iid: id.iid, in: verdictDirectory)
             return currentAccount() && !commentReviewPending(id, account: account)
@@ -2627,7 +2658,15 @@ final class MergeRequestAttentionMonitor {
                 settings.save()
                 guard settings.automaticWritesAllowed else { throw CancellationError() }
                 try await glab.requestReview(of: checkedMR, userID: reviewerID, username: username,
-                                             alreadyAssigned: checkedReviewer != nil, host: host)
+                                             alreadyAssigned: checkedReviewer != nil, host: host) {
+                    !Task.isCancelled && self.isCurrent(account) && settings.automaticWritesAllowed
+                        && settings.automation == finalConfiguration && settings.automation.autoReReviewEnabled
+                        && self.runtimePermitsReReview(id, account: account)
+                        && self.reReviewChecks[id]?.key == key
+                        && self.reReviewKey(checkedMR, fingerprint: fingerprint, account: account) == key
+                        && !settings.pendingCommentReviews.contains(target)
+                        && settings.automation.scope.permits(checkedMR, host: host, username: account.username)
+                }
                 settings.reReviewReceipts[receiptKey]?.unconfirmed = false
                 settings.reReviewReceipts[receiptKey]?.requested = true
                 settings.save()

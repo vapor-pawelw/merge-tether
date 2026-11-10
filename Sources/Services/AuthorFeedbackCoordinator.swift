@@ -504,7 +504,11 @@ final class AuthorFeedbackCoordinator {
             let permitted = AuthorFeedbackPolicy.evaluate(discussions: discussions, assessment: assessment, authorID: user.id,
                 approvedReviewerIDs: liveApproved, ignoredSuggestions: input.ignoredSuggestions).contains { $0.discussionID == discussionID && $0.canResolve }
             guard permitted, !settings.pendingCommentReviews.contains(input.target) else { continue }
-            try await glab.resolveAcceptedDiscussion(projectID: request.projectID, iid: request.iid, discussionID: discussionID, host: host)
+            try await glab.resolveAcceptedDiscussion(projectID: request.projectID, iid: request.iid, discussionID: discussionID, host: host) {
+                self.settings.automaticWritesAllowed && self.isCurrent(input) && !input.readOnly
+                    && input.configuration.autoResolveAcceptedFeedback
+                    && !self.settings.pendingCommentReviews.contains(input.target)
+            }
             changed = true
             accepted.insert(finding.reviewerID)
             threads = try await glab.fetchMergeRequestDiscussions(projectID: request.projectID, iid: request.iid, host: host)
@@ -677,7 +681,11 @@ final class AuthorFeedbackCoordinator {
                             threads = try await liveInformationalDiscussions(input)
                             guard currentCandidate(threads) != nil else { throw CancellationError() }
                             try await glab.addOwnThumbsUp(projectID: input.request.projectID, iid: input.request.iid,
-                                noteID: noteID, host: input.target.host, userID: input.user.id)
+                                noteID: noteID, host: input.target.host, userID: input.user.id) {
+                                self.settings.automaticWritesAllowed && self.isCurrent(input) && !input.readOnly
+                                    && input.configuration.autoResolveAcceptedFeedback
+                                    && self.acknowledgementAttempts[input.target]?.threadRevisions[rootID] == threadRevision
+                            }
                             changed = true
                         }
                         if let key = reactionKeys[noteID] { acknowledgedReactions[input.target, default: []].insert(key) }
@@ -703,7 +711,12 @@ final class AuthorFeedbackCoordinator {
                     GlabError.decoding("GitLab did not confirm discussion resolution"))
                 do {
                     let resolved = try await glab.resolveAcceptedDiscussion(projectID: input.request.projectID, iid: input.request.iid,
-                        discussionID: discussionID, host: input.target.host)
+                        discussionID: discussionID, host: input.target.host) {
+                        self.settings.automaticWritesAllowed && self.isCurrent(input) && !input.readOnly
+                            && input.configuration.autoResolveAcceptedFeedback
+                            && self.acknowledgementAttempts[input.target]?.threadRevisions[rootID] == threadRevision
+                            && !self.settings.pendingCommentReviews.contains(input.target)
+                    }
                     acknowledgementAttempts[input.target]?.failures.removeValue(forKey: rootID)
                     if let index = threads.firstIndex(where: { $0.id == discussionID }) { threads[index] = resolved }
                     guard ReviewVerdict.fingerprint(threads) == input.fingerprint else { throw CancellationError() }
@@ -740,14 +753,14 @@ extension GlabService {
     }
 
     @discardableResult
-    func resolveAcceptedDiscussion(projectID: Int, iid: Int, discussionID: String, host: String) async throws -> GitLabMergeRequestDiscussion {
+    func resolveAcceptedDiscussion(projectID: Int, iid: Int, discussionID: String, host: String, shouldProceed: @escaping @MainActor @Sendable () -> Bool) async throws -> GitLabMergeRequestDiscussion {
         let unreserved = CharacterSet(charactersIn: "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789-._~")
         guard !discussionID.isEmpty, let encoded = discussionID.addingPercentEncoding(withAllowedCharacters: unreserved) else {
             throw GlabError.decoding("Missing discussion identity")
         }
-        let result: GitLabMergeRequestDiscussion = try await mergeRequestAPI(
+        let result: GitLabMergeRequestDiscussion = try await mergeRequestWriteAPI(
             "/projects/\(projectID)/merge_requests/\(iid)/discussions/\(encoded)", host: host,
-            arguments: ["--method", "PUT", "--field", "resolved=true"])
+            arguments: ["--method", "PUT", "--field", "resolved=true"], shouldProceed: shouldProceed)
         guard result.id == discussionID, !result.notes.isEmpty,
               result.notes.allSatisfy({ $0.resolvable != true || $0.resolved == true }) else {
             throw GlabError.decoding("GitLab did not confirm discussion resolution")

@@ -124,7 +124,12 @@ final class InboxTodoStore {
         }
         let host = self.host
         let username = glab.currentUsername
-        let result = await glab.markAsDone(id: todo.id, host: host)
+        let revision = glab.accountRevision
+        let result = await glab.markAsDone(id: todo.id, host: host) {
+            !Task.isCancelled && self.host == host && self.username == username
+                && self.glab.currentUsername == username && self.accountRevision == revision
+                && self.glab.accountRevision == revision && (!automatically || self.settings.automaticWritesAllowed)
+        }
         optimisticallyDone.remove(todo.id)
         guard self.host == host, glab.currentUsername == username else { return }
         switch result {

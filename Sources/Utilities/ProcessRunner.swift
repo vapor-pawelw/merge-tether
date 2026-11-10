@@ -38,7 +38,8 @@ enum ProcessRunner {
         timeout: TimeInterval = 30,
         input: Data? = nil,
         outputDirectory: URL? = nil,
-        onOutput: (@Sendable (Output) -> Void)? = nil
+        onOutput: (@Sendable (Output) -> Void)? = nil,
+        authorizeLaunch: (@MainActor @Sendable () -> Bool)? = nil
     ) async throws -> Output {
         #if DEBUG
         guard permitsTestExecutable(executable, environment: ProcessInfo.processInfo.environment,
@@ -103,10 +104,7 @@ enum ProcessRunner {
                     }
                 }
 
-                do {
-                    try process.run()
-                    tree.start(process.processIdentifier)
-
+                @Sendable func startTimeout() {
                     let timeoutTask = Task.detached {
                         try? await Task.sleep(
                             nanoseconds: UInt64(max(0, timeout) * 1_000_000_000)
@@ -117,17 +115,35 @@ enum ProcessRunner {
                         }
                     }
                     state.setTimeoutTask(timeoutTask)
-
-                    if Task.isCancelled {
-                        _ = state.request(.cancelled)
-                        stop(process, tree: tree)
-                    }
-                } catch {
-                    process.terminationHandler = nil
-                    if state.failLaunch() {
-                        cont.resume(throwing: RunError.launchFailed(error.localizedDescription))
+                }
+                @Sendable func launch(authorized: Bool) {
+                    do {
+                        if authorizeLaunch != nil {
+                            guard authorized else { throw CancellationError() }
+                            try state.launch { try process.run() }
+                        } else { try process.run() }
+                        tree.start(process.processIdentifier)
+                        if authorizeLaunch == nil { startTimeout() }
+                        if Task.isCancelled || (authorizeLaunch != nil && !state.permitsLaunch) {
+                            _ = state.request(.cancelled)
+                            stop(process, tree: tree)
+                        }
+                    } catch {
+                        process.terminationHandler = nil
+                        if authorizeLaunch == nil {
+                            if state.failLaunch() { cont.resume(throwing: RunError.launchFailed(error.localizedDescription)) }
+                        } else if let reason = state.finish() {
+                            if reason == .timedOut { cont.resume(throwing: RunError.timedOut) }
+                            else if reason == .cancelled || error is CancellationError { cont.resume(throwing: CancellationError()) }
+                            else { cont.resume(throwing: RunError.launchFailed(error.localizedDescription)) }
+                        }
                     }
                 }
+                if let authorizeLaunch {
+                    startTimeout()
+                    // Consent and process.run share one actor turn; no scheduling gap follows the check.
+                    Task { @MainActor in launch(authorized: state.permitsLaunch && authorizeLaunch()) }
+                } else { launch(authorized: true) }
             }
         } onCancel: {
             if state.request(.cancelled) {
@@ -156,6 +172,22 @@ private final class ProcessRunState: @unchecked Sendable {
     private var reason = Reason.completed
     private var isFinished = false
     private var timeoutTask: Task<Void, Never>?
+
+    var permitsLaunch: Bool {
+        lock.lock()
+        defer { lock.unlock() }
+        return !isFinished && reason == .completed
+    }
+
+    func launch(_ operation: () throws -> Void) throws {
+        lock.lock()
+        defer { lock.unlock() }
+        guard !isFinished, reason == .completed else {
+            if reason == .timedOut { throw ProcessRunner.RunError.timedOut }
+            throw CancellationError()
+        }
+        try operation()
+    }
 
     func request(_ requestedReason: Reason) -> Bool {
         lock.lock()

@@ -19,11 +19,13 @@ final class InMemoryGitLab {
     var files: [String: String] = [:]
     var requests: [Request] = []
     var handler: ((Request) async throws -> ProcessRunner.Output)?
+    /// Delay the launch boundary independently of response handling for authorization races.
+    var beforeCommand: ((Request) async throws -> Void)?
     private var waiters: [String: [CheckedContinuation<Void, any Error>]] = [:]
     private var closed = false
 
     func service(host: String, username: String) -> GlabService {
-        let service = GlabService(commandRunner: { [self] _, arguments, _, _ in
+        let service = GlabService(commandRunner: { [self] _, arguments, _, _, authorization in
             try Task.checkCancellation()
             // External commands suspend; preserve that scheduling boundary without
             // process startup or a wall-clock delay.
@@ -31,6 +33,9 @@ final class InMemoryGitLab {
             try Task.checkCancellation()
             guard !closed, arguments.count >= 2 else { throw CancellationError() }
             let request = Request(arguments: arguments)
+            try await beforeCommand?(request)
+            try Task.checkCancellation()
+            guard !closed, authorization?() != false else { throw CancellationError() }
             requests.append(request)
             guard let handler else {
                 Issue.record("Unexpected GitLab command: \(request.command)")
@@ -94,6 +99,7 @@ final class InMemoryGitLab {
         waiters.removeAll()
         for waiter in pending { waiter.resume(throwing: CancellationError()) }
         handler = nil
+        beforeCommand = nil
     }
 }
 

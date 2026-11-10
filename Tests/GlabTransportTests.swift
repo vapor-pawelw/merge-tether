@@ -6,11 +6,12 @@ import Testing
 struct GlabTransportTests {
     @Test func injectedTransportDecodesResponsesAndReceivesTheExactCommand() async throws {
         var calls: [[String]] = []
-        let glab = GlabService(commandRunner: { executable, arguments, environment, timeout in
+        let glab = GlabService(commandRunner: { executable, arguments, environment, timeout, authorization in
             #expect(executable.path == "/nonexistent/fixture-glab")
             #expect(environment["HOME"] != nil && environment["PATH"] != nil)
             #expect(environment["GITLAB_TOKEN"] == nil)
             #expect(timeout == 15)
+            #expect(authorization == nil)
             calls.append(arguments)
             return .init(stdout: Data(#"{"id":3,"username":"me"}"#.utf8), stderr: "", exitCode: 0)
         })
@@ -23,12 +24,12 @@ struct GlabTransportTests {
     }
 
     @Test func injectedTransportPreservesTimeoutAndExitErrorClassification() async throws {
-        let timeout = GlabService(commandRunner: { _, _, _, _ in throw ProcessRunner.RunError.timedOut })
+        let timeout = GlabService(commandRunner: { _, _, _, _, _ in throw ProcessRunner.RunError.timedOut })
         timeout.glabPath = URL(fileURLWithPath: "/nonexistent/fixture-glab")
         await #expect(throws: GlabError.timedOut) {
             _ = try await timeout.fetchAuthenticatedUser(host: "gitlab.example.test", expectedUsername: "me")
         }
-        let denied = GlabService(commandRunner: { _, _, _, _ in
+        let denied = GlabService(commandRunner: { _, _, _, _, _ in
             .init(stdout: Data(), stderr: "403 Forbidden", exitCode: 1)
         })
         denied.glabPath = timeout.glabPath
@@ -39,7 +40,7 @@ struct GlabTransportTests {
 
     @Test func aFreshSessionKeepsItsTransportAndRequiresFreshAccountEvidence() async throws {
         var reads = 0
-        let original = GlabService(commandRunner: { _, _, _, _ in
+        let original = GlabService(commandRunner: { _, _, _, _, _ in
             reads += 1
             return .init(stdout: Data(#"{"id":3,"username":"me"}"#.utf8), stderr: "", exitCode: 0)
         })

@@ -6,6 +6,8 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 
 ## Unreleased
 
+- Recheck explicit write authorization at every native GitLab process launch, including draft publication, reactions, discussion resolution, review requests and todo acknowledgements, while preserving deliberate manual actions.
+
 - Show the Mac's safety pause on iPhone while keeping refresh and manual checks available.
 
 - Bind phone publication to the checked account, CLI and signed-in user, and stop selected Mac publication after an account round trip.

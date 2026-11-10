@@ -434,7 +434,7 @@ final class AuthoredMergeRequestMonitor {
                                    automatic: Bool) async throws -> MergeSubmissionState {
         let work = AssistantAutomationRunner.MergeRequestWork(host: account.host, projectID: request.projectID, iid: request.iid)
         let configurationID = configurationFingerprint()
-        func permits() -> Bool {
+        @MainActor @Sendable func permits() -> Bool {
             isCurrent(account) && glab.accountRevision == revision && settings.automation == configuration
                 && configurationFingerprint() == configurationID
                 && (!automatic || permitsAutomaticMerge(request, account: account))

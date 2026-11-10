@@ -51,7 +51,7 @@ extension GlabService {
     func refreshStaleFailedPipeline(
         for request: GitLabMergeRequest, host: String, expectedUser: GitLabAuthenticatedUser,
         settings: SettingsManager, detector: ExistingPipelineWorkDetector = .init(),
-        shouldProceed: @MainActor () -> Bool
+        shouldProceed: @escaping @MainActor @Sendable () -> Bool
     ) async throws -> Bool {
         let proof: StalePipelineTarget
         do {
@@ -62,7 +62,7 @@ extension GlabService {
         let configuration = settings.automation
         let target = MRAutomationScope.Target(host: host, username: expectedUser.username,
                                              projectID: request.projectID, iid: request.iid)
-        func permitted() -> Bool {
+        @MainActor @Sendable func permitted() -> Bool {
             configuration == settings.automation && configuration.autoClaimPipelineFailures
                 && configuration.workflowRules[.pipelineFailure].mode == .assistant
                 && configuration.workflowRules[.pipelineFailure].includes(request)
@@ -102,9 +102,9 @@ extension GlabService {
         guard permitted(), !settings.pipelineRefreshAttempts.contains(attempt) else { throw CancellationError() }
         guard settings.savePipelineRefreshAttempt(attempt) else { throw PipelineRefreshError.persistenceUnavailable }
         guard permitted() else { throw CancellationError() }
-        let created: GitLabMergeRequest.Pipeline = try await mergeRequestAPI(
+        let created: GitLabMergeRequest.Pipeline = try await mergeRequestWriteAPI(
             "/projects/\(request.projectID)/merge_requests/\(request.iid)/pipelines", host: host,
-            arguments: ["--method", "POST"]
+            arguments: ["--method", "POST"], shouldProceed: permitted
         )
         guard let id = created.id, id > 0, id != oldID,
               let sha = created.sha, Self.isFullGitSHA(sha) else { throw PipelineRefreshError.unconfirmedResponse }

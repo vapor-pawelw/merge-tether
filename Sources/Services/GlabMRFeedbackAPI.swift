@@ -20,10 +20,10 @@ extension GlabService {
 
     /// The caller has just rechecked the live account, head, complete thread and policy.
     /// Never replay a failed POST; a later deliberate attempt starts by reading awards again.
-    func addOwnThumbsUp(projectID: Int, iid: Int, noteID: Int, host: String, userID: Int) async throws {
-        let result: FeedbackAward = try await mergeRequestAPI(
+    func addOwnThumbsUp(projectID: Int, iid: Int, noteID: Int, host: String, userID: Int, shouldProceed: @escaping @MainActor @Sendable () -> Bool) async throws {
+        let result: FeedbackAward = try await mergeRequestWriteAPI(
             "/projects/\(projectID)/merge_requests/\(iid)/notes/\(noteID)/award_emoji", host: host,
-            arguments: ["--method", "POST", "--field", "name=thumbsup"])
+            arguments: ["--method", "POST", "--field", "name=thumbsup"], shouldProceed: shouldProceed)
         guard result.id > 0, result.name == "thumbsup", result.user?.id == userID,
               try await hasOwnThumbsUp(projectID: projectID, iid: iid, noteID: noteID, host: host, userID: userID) else {
             throw GlabError.decoding("GitLab did not confirm the account's thumbs-up reaction")

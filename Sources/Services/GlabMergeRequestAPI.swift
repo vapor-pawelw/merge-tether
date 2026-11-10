@@ -26,7 +26,7 @@ extension GlabService {
 
     func markMergeRequestReady(
         projectID: Int, iid: Int, headSHA: String, host: String,
-        expectedUser: GitLabAuthenticatedUser, shouldProceed: @MainActor () -> Bool
+        expectedUser: GitLabAuthenticatedUser, shouldProceed: @escaping @MainActor @Sendable () -> Bool
     ) async throws -> GitLabMergeRequest {
         guard projectID > 0, iid > 0, Self.isFullGitSHA(headSHA) else {
             throw GlabError.decoding("Invalid merge request identity or source SHA")
@@ -65,11 +65,11 @@ extension GlabService {
         try checkSession()
         let output: ProcessRunner.Output
         do {
-            output = try await runCommand(
+            output = try await runWriteCommand(
                 executable,
                 arguments: ["mr", "update", String(iid), "--ready", "--yes", "--repo", repositoryURL.absoluteString],
                 environment: Self.shellEnvironment,
-                timeout: 30
+                timeout: 30, shouldProceed: shouldProceed
             )
         } catch ProcessRunner.RunError.timedOut {
             throw GlabError.timedOut
@@ -188,31 +188,31 @@ extension GlabService {
     }
 
     /// Publishes all of the current user's draft notes on the merge request.
-    func publishDraftNotes(projectID: Int, iid: Int, host: String) async throws {
+    func publishDraftNotes(projectID: Int, iid: Int, host: String, shouldProceed: @escaping @MainActor @Sendable () -> Bool) async throws {
         struct NoContent: Decodable {}
-        let _: NoContent = try await mergeRequestAPI(
+        let _: NoContent = try await mergeRequestWriteAPI(
             "/projects/\(projectID)/merge_requests/\(iid)/draft_notes/bulk_publish",
             host: host,
             arguments: ["--method", "POST"],
-            timeout: 30,
+            timeout: 30, shouldProceed: shouldProceed,
             decode: { _ in NoContent() }
         )
     }
 
     /// Selective publication avoids sending unrelated human replies in the same review.
-    func publishDraftNote(projectID: Int, iid: Int, draftID: Int, host: String) async throws {
+    func publishDraftNote(projectID: Int, iid: Int, draftID: Int, host: String, shouldProceed: @escaping @MainActor @Sendable () -> Bool) async throws {
         struct NoContent: Decodable {}
-        let _: NoContent = try await mergeRequestAPI(
+        let _: NoContent = try await mergeRequestWriteAPI(
             "/projects/\(projectID)/merge_requests/\(iid)/draft_notes/\(draftID)/publish",
-            host: host, arguments: ["--method", "PUT"], timeout: 30, decode: { _ in NoContent() }
+            host: host, arguments: ["--method", "PUT"], timeout: 30, shouldProceed: shouldProceed, decode: { _ in NoContent() }
         )
     }
 
-    func deleteDraftNote(projectID: Int, iid: Int, draftID: Int, host: String) async throws {
+    func deleteDraftNote(projectID: Int, iid: Int, draftID: Int, host: String, shouldProceed: @escaping @MainActor @Sendable () -> Bool) async throws {
         struct NoContent: Decodable {}
-        let _: NoContent = try await mergeRequestAPI(
+        let _: NoContent = try await mergeRequestWriteAPI(
             "/projects/\(projectID)/merge_requests/\(iid)/draft_notes/\(draftID)",
-            host: host, arguments: ["--method", "DELETE"], timeout: 30, decode: { _ in NoContent() }
+            host: host, arguments: ["--method", "DELETE"], timeout: 30, shouldProceed: shouldProceed, decode: { _ in NoContent() }
         )
     }
 
@@ -243,7 +243,7 @@ extension GlabService {
     /// Approves the merge request only if its head is still `headSHA`.
     func approveMergeRequest(projectID: Int, iid: Int, headSHA: String, host: String, userID: Int,
                              willSubmit: (() -> Void)? = nil,
-                             shouldProceed: @MainActor () -> Bool) async throws {
+                             shouldProceed: @escaping @MainActor @Sendable () -> Bool) async throws {
         struct Approval: Decodable {
             struct Approver: Decodable {
                 struct User: Decodable { let id: Int }
@@ -257,11 +257,11 @@ extension GlabService {
         guard currentUser.id == userID else { throw GlabError.notAuthenticated }
         guard shouldProceed() else { throw CancellationError() }
         willSubmit?()
-        let result: Approval = try await mergeRequestAPI(
+        let result: Approval = try await mergeRequestWriteAPI(
             "/projects/\(projectID)/merge_requests/\(iid)/approve",
             host: host,
             arguments: ["--method", "POST", "--raw-field", "sha=\(headSHA)"],
-            timeout: 30
+            timeout: 30, shouldProceed: shouldProceed
         )
         guard result.approvedBy?.contains(where: { $0.user.id == userID }) == true else {
             throw GlabError.decoding("GitLab did not confirm the approval")
@@ -322,7 +322,7 @@ extension GlabService {
     }
 
     func requestReview(of request: GitLabMergeRequest, userID: Int, username: String,
-                       alreadyAssigned: Bool, host: String) async throws {
+                       alreadyAssigned: Bool, host: String, shouldProceed: @escaping @MainActor @Sendable () -> Bool) async throws {
         struct Response: Decodable {
             struct Payload: Decodable {
                 struct Request: Decodable { let iid: String }
@@ -351,11 +351,11 @@ extension GlabService {
             }
             """
         let reviewer = alreadyAssigned ? "userId=gid://gitlab/User/\(userID)" : "username=\(username)"
-        let result: Response = try await mergeRequestAPI(
+        let result: Response = try await mergeRequestWriteAPI(
             "graphql", host: host, arguments: [
                 "--raw-field", "query=\(query)", "--raw-field", "projectPath=\(request.webURL.gitLabProjectPath)",
                 "--raw-field", "iid=\(request.iid)", "--raw-field", reviewer
-            ]
+            ], shouldProceed: shouldProceed
         )
         let payload = result.data?.mergeRequestReviewerRereview ?? result.data?.mergeRequestSetReviewers
         guard result.errors?.isEmpty != false, let payload, payload.errors.isEmpty,
@@ -498,7 +498,7 @@ extension GlabService {
         action: MergeSubmissionAction = .mergeNow,
         expectedPolicy: GitLabMergeActionPolicy? = nil,
         beforeWrite: @MainActor () throws -> Void = {},
-        shouldProceed: @MainActor () -> Bool
+        shouldProceed: @escaping @MainActor @Sendable () -> Bool
     ) async throws -> MergeSubmissionState {
         struct MergeResult: Decodable {
             let projectID: Int
@@ -575,9 +575,9 @@ extension GlabService {
             let usesTrain = expectedPolicy?.usesMergeTrain == true
             let endpoint = usesTrain ? "/projects/\(projectID)/merge_trains/merge_requests/\(iid)"
                 : "/projects/\(projectID)/merge_requests/\(iid)/merge"
-            let _: Data = try await mergeRequestAPI(endpoint, host: host,
+            let _: Data = try await mergeRequestWriteAPI(endpoint, host: host,
                 arguments: ["--method", usesTrain ? "POST" : "PUT", "--raw-field", "sha=\(headSHA)", "--field", "auto_merge=true"],
-                timeout: 30, decode: { $0 })
+                timeout: 30, shouldProceed: shouldProceed, decode: { $0 })
             let updated = try await fetchMergeRequest(projectID: projectID, iid: iid, host: host)
             guard updated.projectID == projectID, updated.iid == iid, updated.sha == headSHA,
                   updated.webURL == current.webURL, updated.sourceBranch == current.sourceBranch,
@@ -591,11 +591,11 @@ extension GlabService {
             }
             return outcome
         }
-        let result: MergeResult = try await mergeRequestAPI(
+        let result: MergeResult = try await mergeRequestWriteAPI(
             "/projects/\(projectID)/merge_requests/\(iid)/merge",
             host: host,
             arguments: ["--method", "PUT", "--raw-field", "sha=\(headSHA)"],
-            timeout: 30
+            timeout: 30, shouldProceed: shouldProceed
         )
         guard result.projectID == projectID, result.iid == iid, result.state == "merged" else {
             throw GlabError.decoding("GitLab did not confirm the merge")
@@ -626,15 +626,37 @@ extension GlabService {
         timeout: TimeInterval = 15,
         decode: (Data) throws -> Value = { try JSONDecoder().decode(Value.self, from: $0) }
     ) async throws -> Value {
+        // Current reads use only pagination. Fields can implicitly turn glab api into POST.
+        guard endpoint != "graphql", arguments.isEmpty || arguments == ["--paginate"] else { throw CancellationError() }
+        return try await performMergeRequestAPI(endpoint, host: host, arguments: arguments, timeout: timeout,
+                                               authorizeLaunch: nil, decode: decode)
+    }
+
+    func mergeRequestWriteAPI<Value: Decodable>(
+        _ endpoint: String, host: String, arguments: [String], timeout: TimeInterval = 15,
+        shouldProceed: @escaping @MainActor @Sendable () -> Bool,
+        decode: (Data) throws -> Value = { try JSONDecoder().decode(Value.self, from: $0) }
+    ) async throws -> Value {
+        try await performMergeRequestAPI(endpoint, host: host, arguments: arguments, timeout: timeout,
+                                        authorizeLaunch: shouldProceed, decode: decode)
+    }
+
+    private func performMergeRequestAPI<Value: Decodable>(
+        _ endpoint: String, host: String, arguments: [String], timeout: TimeInterval,
+        authorizeLaunch: (@MainActor @Sendable () -> Bool)?, decode: (Data) throws -> Value
+    ) async throws -> Value {
         guard let glabPath else { throw GlabError.glabNotInstalled }
         let output: ProcessRunner.Output
         do {
-            output = try await runCommand(
-                glabPath,
-                arguments: ["api", endpoint, "--hostname", host] + arguments,
-                environment: Self.shellEnvironment,
-                timeout: timeout
-            )
+            if let authorizeLaunch {
+                output = try await runWriteCommand(glabPath,
+                    arguments: ["api", endpoint, "--hostname", host] + arguments,
+                    environment: Self.shellEnvironment, timeout: timeout, shouldProceed: authorizeLaunch)
+            } else {
+                output = try await runCommand(glabPath,
+                    arguments: ["api", endpoint, "--hostname", host] + arguments,
+                    environment: Self.shellEnvironment, timeout: timeout)
+            }
         } catch ProcessRunner.RunError.timedOut {
             throw GlabError.timedOut
         }

@@ -57,6 +57,47 @@ struct InboxTodoStoreTests {
         }
     }
 
+    @Test(arguments: [true, false])
+    func queuedAcknowledgementRechecksAutomaticConsentWithoutBlockingManualActions(_ automatically: Bool) async throws {
+        try await fixture { store, gitlab, settings in
+            settings.automation.packageDecision = .enabled
+            try await fetch(store)
+            let todo = try #require(store.visibleTodos.first)
+            gitlab.beforeCommand = { request in
+                if request.method == "POST" {
+                    gitlab.write("acknowledgement-queued")
+                    try await gitlab.waitFor("release-acknowledgement")
+                }
+            }
+            let pending = Task { await store.markDone(todo, automatically: automatically) }
+            try await gitlab.waitFor("acknowledgement-queued")
+            settings.automation.packageDecision = .disabled
+            gitlab.write("release-acknowledgement")
+            await pending.value
+            #expect(gitlab.requests.filter { $0.method == "POST" }.count == (automatically ? 0 : 1))
+            #expect(store.visibleTodos.map(\.id) == (automatically ? [todo.id] : []))
+        }
+    }
+
+    @Test func anAcknowledgedAutomaticWriteIsRecordedAfterConsentCloses() async throws {
+        try await fixture { store, gitlab, settings in
+            settings.automation.packageDecision = .enabled
+            try await fetch(store)
+            let todo = try #require(store.visibleTodos.first)
+            let pending = TodoActionAcknowledgement(host: host, username: "alice", todo: todo.feedbackIdentity)
+            settings.pendingTodoAcknowledgements.insert(pending)
+            gitlab.handler = { request in
+                #expect(request.method == "POST")
+                settings.automation.packageDecision = .disabled
+                return InMemoryGitLab.output("{}")
+            }
+            await store.markDone(todo, automatically: true)
+            #expect(store.visibleTodos.isEmpty)
+            #expect(!settings.pendingTodoAcknowledgements.contains(pending))
+            #expect(settings.automation.packageDecision == .disabled)
+        }
+    }
+
     @Test func failedReadRetainsInboxAndAccountEpochPreventsReuse() async throws {
         try await fixture { store, gitlab, _ in
             try await fetch(store)

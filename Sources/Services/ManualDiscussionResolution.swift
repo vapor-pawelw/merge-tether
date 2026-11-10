@@ -141,7 +141,7 @@ enum ManualDiscussionResolution {
         let request = prepared.request
         for id in prepared.plan.eligibleIDs {
             do {
-                func checkSession() throws {
+                @MainActor @Sendable func checkSession() throws {
                     guard glab.accountRevision == prepared.revision, glab.resolvedHost == prepared.host,
                           glab.currentUsername == prepared.user.username,
                           try MergeSubmissionFingerprint.configuration(settings) == prepared.configuration else { throw CancellationError() }
@@ -167,7 +167,9 @@ enum ManualDiscussionResolution {
                 guard final.author.id == user.id, MergeRequestDependencySummary.Context(final) == .init(request),
                       final.semanticContextFingerprint == request.semanticContextFingerprint else { break }
                 try checkSession()
-                let response = try await glab.resolveAcceptedDiscussion(projectID: request.projectID, iid: request.iid, discussionID: id, host: prepared.host)
+                let response = try await glab.resolveAcceptedDiscussion(projectID: request.projectID, iid: request.iid, discussionID: id, host: prepared.host) {
+                    do { try checkSession(); return true } catch { return false }
+                }
                 guard let next = checked.acceptingResolution(response) else { break }
                 checked = next
                 let updated = try await glab.fetchMergeRequestDiscussions(projectID: request.projectID, iid: request.iid, host: prepared.host)
