@@ -114,6 +114,9 @@ Full verification includes the app suite, `Tests/TestTools`,
 Python tests. Standalone phases retain their own compressed logs and exit codes.
 The Swift package uses an owned scratch build directory, cleaned with Derived
 Data unless `--reuse-build` was requested.
+Pairing-store tests inject an in-memory Security client and exercise the real
+encoding, replacement/removal rules, Keychain query policy and failure handling.
+They do not access the login Keychain or require interactive authorization.
 
 Each timestamped app-test run under the ignored `.test-results/` directory contains:
 

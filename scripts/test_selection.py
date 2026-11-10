@@ -16,13 +16,15 @@ GROUPS = {
     "presentation": ["MRBoardGroupingTests", "MRHumanActionTests", "MRProgressPresentationTests",
                      "MergeRequestBoardSnapshotTests", "InboxSnapshotTests", "RemoteBoardAdapterTests",
                      "ConfirmedAttentionSnapshotTests", "UserAttentionTests", "ReviewingContextTests",
-                     "MRChatStatusTests", "BoardRefreshStateTests", "BoardCardPinTests"],
+                     "MRChatStatusTests", "BoardRefreshStateTests", "BoardCardPinTests",
+                     "MRActivityTimelineTests", "BoardApprovalProgressTests", "CommentReviewSnapshotTests"],
     "feedback": ["AuthorFeedbackPolicyTests", "AuthorFeedbackCoordinatorTests", "AuthorFeedbackMergeTests",
                  "ReReviewAssessmentTests", "ReReviewVerifierTests", "VerifiedAuthorFeedbackTests",
                  "ConfirmationQueueTests", "MergeRequestTodoRoutingTests", "DraftProofRecoveryTests",
                  "FollowUpPushPermissionTests", "MRHumanActionTests", "RemoteBoardAdapterTests",
                  "MergeWorkflowExecutionTests", "TodoAutomationTests", "MRNoticeClassifierTests",
-                 "FeedbackSuggestionDecisionsTests", "FeedbackSuggestionDecisionActionTests"],
+                 "FeedbackSuggestionDecisionsTests", "FeedbackSuggestionDecisionActionTests",
+                 "CommentReviewSnapshotTests", "AuthoredMergeRequestStatusTests", "GlabMergeRequestAPITests"],
 }
 
 RULES = [

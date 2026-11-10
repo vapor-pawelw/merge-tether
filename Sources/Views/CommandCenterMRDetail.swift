@@ -196,7 +196,7 @@ private struct CommandCenterMRDetailContent: View {
                 }
             }
             .onChange(of: monitor.attention.confirmationStates[item.id]) { old, current in
-                if old == .publishing && current != .publishing { refreshDiscussions() }
+                if old?.isBusy == true && current?.isBusy != true { refreshDiscussions() }
             }
             .onChange(of: jobs.first?.id) { _, _ in retryError = nil }
             .onAppear { publicationSession.open(with: item.drafts, accountAvailable: discussionTarget != nil) }
@@ -261,15 +261,17 @@ private struct CommandCenterMRDetailContent: View {
                     Text(verbatim: author.name.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty ? author.username : author.name).lineLimit(1)
                         .help(Text(verbatim: "@\(author.username)"))
                 }
-                if finishedState == nil, let target = monitor.scopeTarget(projectID: item.id.projectID, iid: item.id.iid, url: item.url) {
-                    BoardAutomationToggle(settings: monitor.settings, target: target, projectPath: item.url.gitLabProjectPath,
-                        isDraft: item.section == .draftMergeRequests)
-                }
                 Spacer()
-                BoardPinButton(pin: .mergeRequest(host: monitor.glab.resolvedHost,
-                    username: monitor.glab.currentUsername, projectID: item.id.projectID, iid: item.id.iid),
-                    settings: monitor.settings)
-                headerMenu
+                HStack(spacing: 0) {
+                    if finishedState == nil, let target = monitor.scopeTarget(projectID: item.id.projectID, iid: item.id.iid, url: item.url) {
+                        BoardAutomationToggle(settings: monitor.settings, target: target, projectPath: item.url.gitLabProjectPath,
+                            isDraft: item.section == .draftMergeRequests)
+                    }
+                    BoardPinButton(pin: .mergeRequest(host: monitor.glab.resolvedHost,
+                        username: monitor.glab.currentUsername, projectID: item.id.projectID, iid: item.id.iid),
+                        settings: monitor.settings)
+                    headerMenu
+                }
             }
             .font(.subheadline).foregroundStyle(.secondary)
             Text(verbatim: item.title).font(.title2.weight(.semibold)).textSelection(.enabled)
@@ -287,10 +289,8 @@ private struct CommandCenterMRDetailContent: View {
                             .font(.subheadline).foregroundStyle(needsHumanAttention ? .orange : .secondary)
                         }
                         if progress.working, let status = progress.status {
-                            HStack(spacing: 6) {
-                                ProgressView().controlSize(.mini)
-                                Text(verbatim: status)
-                            }
+                            MRActivityStatus(status: status,
+                                startedAt: monitor.activityStartedAt(for: item, activity: progress.activity))
                             .font(.subheadline).foregroundStyle(.secondary)
                         } else if progress.refreshFailed {
                             Label { Text(.AutomationProgress.progressRefreshFailed) } icon: { Image(systemName: "arrow.clockwise") }
@@ -321,13 +321,11 @@ private struct CommandCenterMRDetailContent: View {
     }
 
     private var headerMenu: some View {
-        Menu {
+        BoardActionsMenu {
             MRCommonMenuItems(item: item, monitor: monitor,
                 onRemove: monitor.reviewedMergeRequestItems.contains(where: { $0.id == item.id && $0.url == item.url })
                     ? { confirmRemoval = true } : nil)
-        } label: { Image(systemName: "ellipsis") }
-        .menuStyle(.borderlessButton).menuIndicator(.hidden).fixedSize()
-        .accessibilityLabel(Text(.CommandCenter.commandCenterActions))
+        }
     }
 
     private func nextStep(proxy: ScrollViewProxy, citationContext: MRCommentCitation.Context?) -> some View {
@@ -420,7 +418,10 @@ private struct CommandCenterMRDetailContent: View {
             onApprove: { Task { await monitor.attention.approve(item.id) } },
             onOpen: { NSWorkspace.shared.open(item.url) }, initiallyExpanded: initialSection == .drafts,
             showDraftPreview: false, showHeader: false, selection: $publicationSession.selection,
-            onPublishSelected: publishSelected, requiresSelection: true, additionalActions: EmptyView())
+            onPublishSelected: publishSelected, requiresSelection: true,
+            onDelete: { draft in Task { await monitor.attention.deleteDraft(draft, from: item.id) } },
+            onFinishCommentReview: { Task { await monitor.attention.finishCommentReview(item) } },
+            additionalActions: EmptyView())
     }
 
     @ViewBuilder
@@ -428,7 +429,7 @@ private struct CommandCenterMRDetailContent: View {
         let selected = publicationSession.selection.selectedDrafts(from: item.drafts)
         if !selected.isEmpty, let target = discussionTarget {
             let state = monitor.attention.confirmationStates[item.id]
-            let busy = state == .publishing || state == .approving
+            let busy = state?.isBusy == true
             HStack(spacing: 12) {
                 Button { publicationSession.clearSelection() } label: {
                     Text(.DraftPublication.draftPublicationClearSelection)
@@ -437,9 +438,10 @@ private struct CommandCenterMRDetailContent: View {
                 Spacer()
                 if busy { ProgressView().controlSize(.small) }
                 Button { Task { await monitor.attention.publishDrafts(selected, for: target) } } label: {
-                    Text(.DraftPublication.draftPublicationPublishSelected(selected.count))
+                    Text(selected.count == item.drafts.count ? .CommentReview.commentReviewPublishSelected(selected.count)
+                         : .DraftPublication.draftPublicationPublishSelected(selected.count))
                 }
-                .help(Text(.DraftPublication.draftPublicationPublishSelectedHelp))
+                .help(Text(.CommentReview.commentReviewPublishSelectedHelp))
                 .buttonStyle(.borderedProminent)
             }
             .controlSize(.small)
@@ -452,6 +454,7 @@ private struct CommandCenterMRDetailContent: View {
 
     private var decisionActions: some View {
         VStack(alignment: .leading, spacing: 12) {
+            CommentReviewImpactView(item: item, reReviewEnabled: monitor.settings.automation.autoReReviewEnabled)
             BoardMRIntentActions(row: presentationRow, monitor: monitor)
             ReReviewControls(item: presentationItem, monitor: monitor.attention)
             InboxAttentionActions(item: presentationItem, feedbackAction: monitor.attentionFeedbackAction(for: item),
@@ -573,17 +576,6 @@ private struct CommandCenterMRDetailContent: View {
             if let source = citationContext?.reply(to: draft, rootNoteID: root) {
                 MRCommentCitationView(citation: source, relation: .FeedbackSuggestions.feedbackSuggestionsSourceReply)
             } else { unavailableSource(root) }
-        } else if [.blockedRun, .interruptedRun].contains(action.kind), action.sourceNoteID == nil,
-                  let job = jobs.first, job.workflow == .followUp, !(job.feedbackNoteIDs ?? []).isEmpty {
-            let sources = citationContext?.followUp(job) ?? []
-            if sources.isEmpty {
-                ForEach(Array(Set(job.feedbackNoteIDs ?? [])).filter { $0 > 0 }.sorted(), id: \.self) { id in
-                    unavailableSource(id)
-                }
-            }
-            ForEach(sources) { source in
-                MRCommentCitationView(citation: source, relation: .FeedbackSuggestions.feedbackSuggestionsSourceRun)
-            }
         } else {
             switch action.feedbackEvidence(for: item) {
             case .finding(let finding):
@@ -722,8 +714,8 @@ private struct CommandCenterMRDetailContent: View {
             currentUsername: monitor.glab.currentUsername, isLoading: current && discussionStore.isLoading,
             hasError: current && discussionStore.hasError, hasLoaded: current && discussionStore.hasLoaded,
             expandPendingDrafts: true, selection: $publicationSession.selection,
-            selectionDisabled: discussionTarget == nil || monitor.attention.confirmationStates[item.id] == .publishing
-                || monitor.attention.confirmationStates[item.id] == .approving,
+            selectionDisabled: discussionTarget == nil || monitor.attention.confirmationStates[item.id]?.isBusy == true,
+            onDelete: { draft in Task { await monitor.attention.deleteDraft(draft, from: item.id) } },
             title: .DraftPublication.draftPublicationThreads, draftsFirst: true, onRefresh: refreshDiscussions)
     }
 

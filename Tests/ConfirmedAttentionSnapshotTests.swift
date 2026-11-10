@@ -79,7 +79,7 @@ struct ConfirmedAttentionSnapshotTests {
     }
 
     @Test(arguments: [false, true])
-    func cachedReadChecksStayQuietWhilePreservingAttentionAndRemoteActionFences(_ visible: Bool) throws {
+    func readChecksShowProgressWhilePreservingAttentionAndRemoteActionFences(_ visible: Bool) throws {
         var item = MergeRequestAttentionMonitor.Item(id: .init(projectID: 1, iid: 2), title: "Example",
             url: URL(string: "https://host/group/repo/-/merge_requests/2")!)
         item.draftCount = 1
@@ -91,15 +91,15 @@ struct ConfirmedAttentionSnapshotTests {
         let model = MRCardPresentation(row: checking, reviewingContext: ReviewingContext(row: checking),
             allowsRemoval: false, assistantReady: true, preservedHumanAction: action, isRefreshingAttention: true,
             showsReadProgress: visible)
-        #expect(model.working == visible)
-        #expect(model.status == (visible ? "Checking feedback" : nil))
+        #expect(model.working)
+        #expect(model.status == "Checking feedback")
         #expect(model.busy && model.actionsBlocked)
         #expect(model.message == action.explanation && model.humanAction != nil)
         var original = RemoteBoardAdapter.card(item, account: "me")
         original.actions = [.init(id: "publish", kind: .publish, token: "current-token")]
         let phone = RemoteBoardAdapter.presentation(original, model: model)
         #expect(phone.needsAttention == true && phone.detail == action.explanation)
-        #expect(phone.presentation?.working == visible && phone.actions.isEmpty)
+        #expect(phone.presentation?.working == true && phone.actions.isEmpty)
     }
 
     @Test func aRecheckCannotMoveACardOutOfTheAttentionGroupBeforeItsResult() {

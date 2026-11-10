@@ -17,6 +17,22 @@ struct MRProgressPresentationTests {
         let model = MRCardPresentation(row: idle.row, reviewingContext: idle.reviewingContext,
             allowsRemoval: false, assistantReady: true, isRefreshingAttention: true, showsReadProgress: false)
         #expect(!model.working && model.status == "Monitoring MR")
+        #expect(model.activity == nil)
+    }
+
+    @Test func repeatedBackgroundRefreshesKeepReviewingCardsIdle() {
+        var item = MergeRequestAttentionMonitor.Item(id: .init(projectID: 1, iid: 2), title: "Example",
+            url: URL(string: "https://gitlab.example.test/group/repo/-/merge_requests/2")!)
+        item.reviewingProgress = .current
+        let row = MergeRequestBoardSnapshot.Row(item: item, latestJob: nil, intents: [])
+        let idle = MRCardPresentation(row: row, reviewingContext: ReviewingContext(row: row),
+            allowsRemoval: true, assistantReady: true, showsReadProgress: false)
+        for refreshing in [true, false, true, false] {
+            let polled = MRCardPresentation(row: row, reviewingContext: ReviewingContext(row: row),
+                allowsRemoval: true, assistantReady: true, isRefreshingAttention: refreshing, showsReadProgress: false)
+            #expect(!polled.working && polled.activity == nil)
+            #expect(polled.status == idle.status)
+        }
     }
 
     @Test func anIdleAuthoredMRAlwaysHasAStatusWithoutInventingWork() {
@@ -43,8 +59,8 @@ struct MRProgressPresentationTests {
         let model = MRCardPresentation(row: row, reviewingContext: context, allowsRemoval: true,
             assistantReady: true, showsReadProgress: false)
         #expect(model.busy == aiChecking)
-        #expect(!model.working)
-        #expect(aiChecking ? model.status == "Assessing AI assistance" : model.status == nil)
+        #expect(model.working)
+        #expect(model.status == (aiChecking ? "Assessing AI assistance" : "Checking replies"))
         if !aiChecking { #expect(model.humanAction?.kind == .blockedRun) }
     }
 
@@ -89,6 +105,28 @@ struct MRProgressPresentationTests {
         #expect(model.status == (state == "merged" ? "Merged. Automation is off." : "Closed. Automation is off."))
     }
 
+    @Test func waitingForReviewerDoesNotShowWork() {
+        var item = MergeRequestAttentionMonitor.Item(id: .init(projectID: 1, iid: 2), title: "Example",
+            url: URL(string: "https://gitlab.example.test/group/repo/-/merge_requests/2")!)
+        item.authorFeedbackStatus = .init(head: "head", fingerprint: "text", phase: .complete,
+            findings: [.init(id: 3, discussionID: "thread", reviewerID: 4, reviewerUsername: "reviewer",
+                state: .waitingAcceptance, reason: nil, waitingForReviewers: ["reviewer"])])
+        let row = MergeRequestBoardSnapshot.Row(item: item, latestJob: nil, intents: [])
+        let model = MRCardPresentation(row: row, reviewingContext: ReviewingContext(row: row),
+            allowsRemoval: false, assistantReady: true, showsReadProgress: false)
+        #expect(!model.working && !model.busy && model.activity == nil)
+        #expect(model.status == String(localized: .AuthorFeedback.authorFeedbackWaitingChip))
+    }
+
+    @Test(arguments: [AssistantJobExecution.State.queued, .running])
+    func agentActivityUsesTheCurrentRunAndItsRecordedStageStart(_ state: AssistantJobExecution.State) throws {
+        let model = presentation("followUp", state: state, showsReadProgress: false)
+        let job = try #require(model.row.latestJob)
+        let activity = try #require(model.activity)
+        #expect(model.working && activity.jobID == job.id)
+        #expect(activity.startedAt == (state == .running ? job.execution?.startedAt : job.createdAt))
+    }
+
     private func presentation(_ stage: String, state: AssistantJobExecution.State? = nil,
                               showsReadProgress: Bool = true) -> MRCardPresentation {
         var item = MergeRequestAttentionMonitor.Item(id: .init(projectID: 1, iid: 2), title: "Example",
@@ -109,7 +147,7 @@ struct MRProgressPresentationTests {
                 workspace: "", access: .gitLabRead), title: "Example", prompt: "", createdAt: Date(),
                 allowsPush: stage == "conflict",
                 pipelineReservation: stage == "pipeline" ? .init(host: "gitlab.example.test", projectID: 1, mergeRequestIID: 2, pipelineID: 3) : nil,
-                execution: .init(state: state), workflow: stage == "review" ? .review : (stage == "followUp" ? .followUp : nil))
+                execution: .init(state: state, startedAt: state == .running ? Date(timeIntervalSince1970: 1_000) : nil), workflow: stage == "review" ? .review : (stage == "followUp" ? .followUp : nil))
         }
         let row = MergeRequestBoardSnapshot.Row(item: item, latestJob: job, intents: [])
         return .init(row: row, reviewingContext: ReviewingContext(row: row), allowsRemoval: false,
@@ -122,9 +160,9 @@ struct MRProgressPresentationTests {
     }
 
     @Test(arguments: ["replies", "feedback", "ai", "readiness"])
-    func backgroundReadOnlyChecksKeepTheirStatusWithoutSpinnerChurn(_ stage: String) {
+    func backgroundReadOnlyChecksShowWorkEvenDuringQuietPolling(_ stage: String) {
         let model = presentation(stage, showsReadProgress: false)
-        #expect(!model.working && model.status != nil)
+        #expect(model.working && model.status != nil)
         #expect(model.busy && model.actionsBlocked)
     }
 
@@ -135,7 +173,7 @@ struct MRProgressPresentationTests {
         let row = MergeRequestBoardSnapshot.Row(item: item, latestJob: nil, intents: [])
         let model = MRCardPresentation(row: row, reviewingContext: ReviewingContext(row: row),
             allowsRemoval: true, assistantReady: true, isRefreshingAttention: true, showsReadProgress: false)
-        #expect(!model.working && model.status == "Checking review" && model.nextStep == nil)
+        #expect(model.working && model.status == "Checking review" && model.nextStep == nil)
         #expect(model.actionsBlocked && model.actionLabel == nil)
     }
 

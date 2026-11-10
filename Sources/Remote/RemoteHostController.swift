@@ -20,6 +20,7 @@ import MergeTetherRemote
     private var account = ""
     private var accountRevision: UInt64?
     private var gate = RemoteCommandGate()
+    private var phoneSupportsCommentReview = false
 
     init(monitor: TodoMonitorService,
          loadPairing: (@Sendable () async throws -> RemotePairing?)? = nil,
@@ -81,7 +82,7 @@ import MergeTetherRemote
     }
     private func start(_ pair: RemotePairing) {
         do {
-            hostSession = UUID(); gate = RemoteCommandGate()
+            hostSession = UUID(); gate = RemoteCommandGate(); phoneSupportsCommentReview = false
             let connection = try RemoteConnection(pairing: pair, role: .host)
             connection.onStatus = { [weak self, weak connection] connected, fatal in
                 self?.connected = connected; self?.failed = fatal
@@ -104,6 +105,7 @@ import MergeTetherRemote
         switch message.type {
         case .hello:
             guard let challenge = message.challenge else { return }
+            phoneSupportsCommentReview = message.capabilities?.contains(RemoteMessage.commentReviewCapability) == true
             let fresh = await refreshSource(force: false, deadline: .now + .seconds(35))
             guard connection === active else { return }
             var board = snapshot()
@@ -151,6 +153,7 @@ import MergeTetherRemote
             account = currentAccount; accountRevision = monitor.glab.accountRevision; hostSession = UUID(); gate = RemoteCommandGate()
         }
         return RemoteBoardAdapter.board(monitor: monitor, session: hostSession, account: account)
+            .forClient(supportsCommentReview: phoneSupportsCommentReview)
     }
     private func execute(_ card: RemoteCard, action: RemoteAction) async -> RemoteCommandResult.Status {
         if card.id.hasPrefix("completion:") {
@@ -182,6 +185,16 @@ import MergeTetherRemote
               RemoteBoardAdapter.card(item, account: account).drafts == card.drafts,
               item.mergeRequest?.sha == card.head else { return .changed }
         switch action.kind {
+        case .finishCommentReview:
+            return await monitor.attention.finishCommentReview(item) ? .completed
+                : (monitor.attention.confirmationStates[item.id] == .failed ? .failed : .changed)
+        case .deleteDraft:
+            guard action.id.hasPrefix("deleteDraft:"), let id = Int(action.id.dropFirst("deleteDraft:".count)),
+                  let draft = item.drafts.first(where: { $0.id == id }) else { return .changed }
+            await monitor.attention.deleteDraft(draft, from: item.id)
+            if monitor.attention.confirmationStates[item.id] == .failed { return .uncertain }
+            return monitor.attention.currentOpenItems.first(where: { $0.id == item.id })?.drafts.contains(draft) == false
+                ? .completed : .changed
         case .publish:
             guard let head = card.head else { return .changed }
             switch await monitor.attention.publishRemoteDrafts(of: item.id, head: head, expectedDrafts: item.drafts) {

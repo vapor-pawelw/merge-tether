@@ -2,7 +2,7 @@ import Foundation
 import CryptoKit
 
 public enum RemoteLaneID: String, Codable, CaseIterable, Sendable { case ready, attention, todos, drafts, own, reviewed, other }
-public enum RemoteActionKind: String, Codable, Sendable { case publish, approve, markDone, prepare, handoff, reReview, verify, retryJob }
+public enum RemoteActionKind: String, Codable, Sendable { case publish, approve, markDone, prepare, handoff, reReview, verify, retryJob, deleteDraft, finishCommentReview }
 
 public struct RemoteAction: Codable, Equatable, Identifiable, Sendable {
     public var id: String
@@ -79,16 +79,20 @@ public struct RemoteMRDependencies: Codable, Equatable, Sendable {
 public struct RemoteApprovalProgress: Codable, Equatable, Sendable {
     public let completed: Int
     public let required: Int
-    public init?(completed: Int, required: Int) {
-        guard required >= 0, completed >= 0, completed <= required else { return nil }
+    public let received: Int?
+    public init?(completed: Int, required: Int, received: Int? = nil) {
+        guard required >= 0, completed >= 0, completed <= required,
+              received.map({ $0 >= 0 }) ?? true else { return nil }
         self.completed = completed; self.required = required
+        self.received = received
     }
-    private enum CodingKeys: String, CodingKey { case completed, required }
+    private enum CodingKeys: String, CodingKey { case completed, required, received }
     public init(from decoder: Decoder) throws {
         let values = try decoder.container(keyedBy: CodingKeys.self)
         let completed = try values.decode(Int.self, forKey: .completed)
         let required = try values.decode(Int.self, forKey: .required)
-        guard let progress = Self(completed: completed, required: required) else {
+        let received = try values.decodeIfPresent(Int.self, forKey: .received)
+        guard let progress = Self(completed: completed, required: required, received: received) else {
             throw DecodingError.dataCorruptedError(forKey: .completed, in: values, debugDescription: "Invalid required approval progress")
         }
         self = progress
@@ -159,15 +163,35 @@ public struct RemoteCommandResult: Codable, Equatable, Sendable {
 }
 
 public struct RemoteMessage: Codable, Sendable {
+    public static let commentReviewCapability = "comment-review-v1"
     public enum Kind: String, Codable, Sendable { case hello, snapshot, command, accepted, result, unavailable, hostReady = "host-ready" }
     public var type: Kind
     public var challenge: UUID?
     public var board: RemoteBoard?
     public var command: RemoteCommand?
     public var result: RemoteCommandResult?
+    public var capabilities: [String]?
     public init(type: Kind, challenge: UUID? = nil, board: RemoteBoard? = nil,
-                command: RemoteCommand? = nil, result: RemoteCommandResult? = nil) {
+                command: RemoteCommand? = nil, result: RemoteCommandResult? = nil, capabilities: [String]? = nil) {
         self.type = type; self.challenge = challenge; self.board = board; self.command = command; self.result = result
+        self.capabilities = capabilities
+    }
+}
+
+extension RemoteBoard {
+    public func forClient(supportsCommentReview: Bool) -> Self {
+        guard !supportsCommentReview else { return self }
+        var compatible = self
+        for lane in compatible.lanes.indices {
+            for card in compatible.lanes[lane].cards.indices {
+                if compatible.lanes[lane].cards[card].drafts.isEmpty,
+                   compatible.lanes[lane].cards[card].primaryCTA?.destination == .drafts {
+                    compatible.lanes[lane].cards[card].primaryCTA = nil
+                }
+                compatible.lanes[lane].cards[card].actions.removeAll { $0.kind == .deleteDraft || $0.kind == .finishCommentReview }
+            }
+        }
+        return compatible
     }
 }
 

@@ -274,6 +274,7 @@ struct AuthorFeedbackMergeTests {
                 return InMemoryGitLab.output("[" + gitlab.text("request.json") + "]")
             case "/projects/1/merge_requests/2": return try gitlab.response("request.json")
             case let path where path.hasSuffix("/approval_state"): return try gitlab.response("approval-state.json")
+            case let path where path.contains("/reviewers?"): return InMemoryGitLab.output(code: 100)
             case let path where path.contains("/discussions?"): return try gitlab.response("discussions.json")
             case let path where path.contains("/draft_notes?"): return try gitlab.response("drafts.json")
             case "/projects/1": return InMemoryGitLab.output(#"{"only_allow_merge_if_all_discussions_are_resolved":true,"reset_approvals_on_push":true}"#)

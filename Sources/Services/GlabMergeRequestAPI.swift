@@ -208,6 +208,14 @@ extension GlabService {
         )
     }
 
+    func deleteDraftNote(projectID: Int, iid: Int, draftID: Int, host: String) async throws {
+        struct NoContent: Decodable {}
+        let _: NoContent = try await mergeRequestAPI(
+            "/projects/\(projectID)/merge_requests/\(iid)/draft_notes/\(draftID)",
+            host: host, arguments: ["--method", "DELETE"], timeout: 30, decode: { _ in NoContent() }
+        )
+    }
+
     /// Read stable account metadata rather than inferring identity from names or AI-like prose.
     func feedbackAccountKind(userID: Int, host: String) async throws -> AuthorFeedbackPolicy.AccountKind {
         struct Account: Decodable {

@@ -145,7 +145,9 @@ struct FollowUpPushPermissionTests {
             FollowUpVerificationStore.publicationReceipts(work: work, username: "me", settings: settings, in: folder)
         }
         #expect(Set(candidates().map(\.verificationID)) == [oldClaims.verificationID, newClaims.verificationID])
-        for state in [AssistantJobExecution.State.queued, .running, .failed, .blocked, .cancelled, .interrupted] {
+        settings.assistantHandoffs[1].execution?.state = .blocked
+        #expect(Set(candidates().map(\.verificationID)) == [oldClaims.verificationID, newClaims.verificationID])
+        for state in [AssistantJobExecution.State.queued, .running, .failed, .cancelled, .interrupted] {
             settings.assistantHandoffs[1].execution?.state = state
             #expect(candidates().isEmpty)
         }

@@ -477,7 +477,7 @@ final class AuthorFeedbackCoordinator {
             threads = discussions
             let permitted = AuthorFeedbackPolicy.evaluate(discussions: discussions, assessment: assessment, authorID: user.id,
                 approvedReviewerIDs: liveApproved, ignoredSuggestions: input.ignoredSuggestions).contains { $0.discussionID == discussionID && $0.canResolve }
-            guard permitted else { continue }
+            guard permitted, !settings.pendingCommentReviews.contains(input.target) else { continue }
             try await glab.resolveAcceptedDiscussion(projectID: request.projectID, iid: request.iid, discussionID: discussionID, host: host)
             changed = true
             accepted.insert(finding.reviewerID)
@@ -666,7 +666,8 @@ final class AuthorFeedbackCoordinator {
                     }
                     throw CancellationError()
                 }
-                guard liveCandidate.canResolve, let discussionID = liveCandidate.discussionID else { continue }
+                guard liveCandidate.canResolve, let discussionID = liveCandidate.discussionID,
+                      !settings.pendingCommentReviews.contains(input.target) else { continue }
                 acknowledgementAttempts[input.target]?.resolutions.insert(rootID)
                 // A fresh read reconciles lost responses before a fenced failure reaches the UI.
                 acknowledgementAttempts[input.target]?.failures[rootID] = String(describing:

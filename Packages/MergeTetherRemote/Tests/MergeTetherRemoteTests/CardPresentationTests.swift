@@ -3,6 +3,23 @@ import Testing
 @testable import MergeTetherRemote
 
 @Suite struct CardPresentationTests {
+    @Test func olderPhonesReceiveOnlyActionsTheirDecoderUnderstands() {
+        let actions: [RemoteAction] = [.init(id: "approve", kind: .approve, token: "a"),
+            .init(id: "deleteDraft:11", kind: .deleteDraft, token: "b"),
+            .init(id: "finishCommentReview", kind: .finishCommentReview, token: "c")]
+        let board = RemoteBoard(hostSession: UUID(), account: "me@host", lanes: [
+            .init(id: .own, cards: [.init(id: "mr:1:2", title: "Example", project: "g/p", url: nil, actions: actions,
+                primaryCTA: .init(title: "Finish comment review", destination: .drafts))])])
+        #expect(board.forClient(supportsCommentReview: false).cards.first?.actions.map(\.kind) == [.approve])
+        #expect(board.forClient(supportsCommentReview: false).cards.first?.primaryCTA == nil)
+        #expect(board.forClient(supportsCommentReview: true).cards.first?.actions == actions)
+    }
+
+    @Test func optionalApprovalsSurviveTheWireWithTheirActualCount() throws {
+        let progress = try #require(RemoteApprovalProgress(completed: 0, required: 0, received: 3))
+        let decoded = try JSONDecoder().decode(RemoteApprovalProgress.self, from: JSONEncoder().encode(progress))
+        #expect(decoded.completed == 0 && decoded.required == 0 && decoded.received == 3)
+    }
     @Test func requiredApprovalProgressSurvivesTheWireWithoutAddingACommand() throws {
         let progress = try #require(RemoteApprovalProgress(completed: 1, required: 2))
         let card = RemoteCard(id: "mr:1:2", title: "Example", project: "group/repo", url: nil, approvals: progress)

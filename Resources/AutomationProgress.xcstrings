@@ -264,6 +264,54 @@
           }
         }
       }
+    },
+    "progressElapsedSeconds": {
+      "comment": "Elapsed busy time below one minute.",
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "%llds"
+          }
+        }
+      }
+    },
+    "progressElapsedMinutes": {
+      "comment": "Elapsed busy time below one hour, in minutes and seconds.",
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "%1$lldm %2$llds"
+          }
+        }
+      }
+    },
+    "progressElapsedHours": {
+      "comment": "Elapsed busy time in hours and minutes.",
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "%1$lldh %2$lldm"
+          }
+        }
+      }
+    },
+    "progressTimedStatus": {
+      "comment": "Current activity followed by elapsed time in parentheses.",
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "%1$@ (%2$@)"
+          }
+        }
+      }
     }
   },
   "version": "1.0"

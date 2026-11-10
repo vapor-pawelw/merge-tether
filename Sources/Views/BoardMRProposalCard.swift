@@ -160,13 +160,15 @@ struct BoardMRProposalCard: View {
                 BoardStatusChip(title: .Board.boardCompactProposal, symbol: "plus.circle")
                 if isDraft { BoardDraftBadge() }
             }
-            if finishedState == nil {
-                BoardAutomationToggle(settings: monitor.settings, target: proposal.target,
-                    projectPath: proposal.url.gitLabProjectPath, isDraft: isDraft)
+            HStack(spacing: 0) {
+                if finishedState == nil {
+                    BoardAutomationToggle(settings: monitor.settings, target: proposal.target,
+                        projectPath: proposal.url.gitLabProjectPath, isDraft: isDraft)
+                }
+                BoardPinButton(pin: .mergeRequest(host: proposal.target.host, username: proposal.target.username,
+                    projectID: proposal.target.projectID, iid: proposal.target.iid ?? 0), settings: monitor.settings)
+                moreMenu
             }
-            BoardPinButton(pin: .mergeRequest(host: proposal.target.host, username: proposal.target.username,
-                projectID: proposal.target.projectID, iid: proposal.target.iid ?? 0), settings: monitor.settings)
-            moreMenu
         }
     }
 

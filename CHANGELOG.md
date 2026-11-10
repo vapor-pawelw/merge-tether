@@ -11,6 +11,18 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 
 - Retain complete per-case test timing reports and failure diagnostics, separate build/runner time from execution, and replace avoidable test retry delays with controlled waits.
 
+- Request re-review from earlier participating reviewers and reset approvers once all feedback is ready; show prioritized current, earlier and comment-only review status in the approvals hover list, sorted by recent activity.
+
+- Show progress indicators and elapsed stage time on busy MR cards and in Details, while routine background polling and reviewer waits stay quiet.
+
+- Recover sealed draft replies from blocked author follow-ups through independent current-source verification, without waiting for publication to mark the worker complete.
+
+- Quote comments in Next step only when they support the displayed concern; keep general worker and publication blockers free of unrelated task comments.
+
+- Confirm enabling Draft MR automation with an explanation of enabled work, existing permissions and persistent scope; group automation, pin and action controls more tightly on cards and in Details.
+
+- Hide empty optional approvals, show received-only counts without a denominator, fill satisfied approval icons in green, and show approvers and assigned reviewers with avatars on hover.
+
 - Expose draft replies and their threads below the Details publication button, default all current drafts to checked per window, publish the checked count, and keep direct MR publication as Publish all comments.
 
 - Run up to four MR workers concurrently, retain persistent CLI login/quota banners, group toolbar actions and highlight clickable pin/automation controls.
@@ -38,6 +50,9 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 - Add an iOS companion MVP with the Mac board, encrypted Cloudflare relay pairing and guarded remote actions.
 
 ### Added
+
+- Delete individual private drafts with confirmation on macOS and iOS. Finish comment review directly on an MR card, with a persistent account-scoped checkpoint and live commit, discussion and draft checks.
+- Explain which approval, re-review and merge steps are waiting for comment review in MR details.
 
 - Rank the five highest-cost MRs within the Agent Usage date range and show each MR’s all-time tracked cost, preserving account identity and explicitly unattributed historical records.
 - Quote and link the exact feedback comment behind a decision; save precise ignored suggestions with confirmation, a conditional Details list, Restore and Reset, and current-context prompts for verifiers and coding agents.
@@ -134,6 +149,9 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 - Refresh public documentation and use the retro painted-style MergeTether icon.
 
 ### Fixed
+
+- Keep the workflow paused after drafts are handled in GitLab or deleted in the app, until comment review is explicitly finished. Successful publication can complete the checkpoint after checking the reviewed context and remaining drafts.
+- Include pending and unavailable draft checks in automatic merge readiness, and keep existing paired phones compatible with the new comment actions.
 
 - Keep app-hosted tests invisible and separate from production monitoring, notifications and remote access; refuse development relaunches while another app or test host is running instead of stopping it or forcing an extra copy.
 

@@ -35,7 +35,7 @@ The same menu has separate automatic publication, merge and approval checkboxes 
 
 Use **Add merge request…** to add a reviewed MR by URL or repository and number. **Remove from my list** on a reviewed MR keeps it out of automatic adoption until you explicitly add it again.
 
-Attention means a human action is required. Automatic work and verification show short stage labels, such as Checking replies or Handling feedback, without an attention marker; waiting for a reviewer stays neutral and never creates reminder comments. Cards, the menu-bar indicator and notifications use the same decision.
+Attention means a human action is required. Automatic work and verification show short stage labels, such as Checking replies or Handling feedback, with a progress indicator and elapsed stage time on cards and in Details, without an attention marker; waiting for a reviewer stays neutral and never creates reminder comments. Cards, the menu-bar indicator and notifications use the same decision.
 Each attention card explains what needs you and offers a matching action. Pending comments open expanded for review; stopped automation offers a direct retry, with its previous result and actual cause still available.
 
 The menu-bar icon stays neutral while work is handled automatically and turns amber when something needs your attention. Optional macOS notifications bring those decisions to you without announcing every automatically handled update. Enable notification permission inside the app; if macOS has denied it, the app links to System Settings.
@@ -73,6 +73,8 @@ Choose a profile, coding agent and scope in **Settings → Automation**. Install
 | Merge | Full automation enables it; checks ownership, approvals, threads, pipeline and the source commit. |
 
 **Choose how much to automate.** **Full automation** runs reviews and follow-ups, publishes eligible comments, approves, resolves verified findings, pushes fixes and merges within the active scope. **With checkpoints** reviews and prepares local proposals automatically, publishes eligible replies to AI feedback, and waits for your other publication and delivery decisions. **Manual only** disables automatic work; you can still start a review yourself. Existing settings are preserved until you choose a profile, and individual permissions remain adjustable. Publication can be set to all eligible comments, eligible replies to AI feedback, or **Private drafts only** for manual confirmation. Saved legacy shell rules remain available for reference; choose the coding agent CLI to migrate them.
+
+When the full feedback check is ready and replies are published, re-review requests also bring back earlier participating reviewers and people whose approvals were reset. Current approvals and outstanding review requests are respected. Hover over the approval counter to see current approvals, earlier approvals and comment-only participation, in that order, with the most recent activity first within each group.
 
 Optional publication filters can require matching repositories, MR authors, source-comment authors and verified or high-confidence AI-assisted feedback. **All eligible comments** ignores these filters; in conditional modes, all selected conditions must match (AND). Comments that do not qualify remain private. Explicit manual **Publish all** bypasses automation filters. Individual reset controls restore that setting to the chosen profile’s defaults without discarding other customization.
 

@@ -78,8 +78,10 @@ private struct CommandCenterMRCardContent: View {
                 if presentation.working || presentation.refreshFailed || humanAction != nil || neutralStatus != nil || (isDraft && item.isAuthored) {
                     HStack(spacing: 6) {
                         if presentation.working {
-                            ProgressView().controlSize(.mini)
-                            if let status = presentation.status { Text(verbatim: status) }
+                            if let status = presentation.status {
+                                MRActivityStatus(status: status,
+                                    startedAt: monitor.activityStartedAt(for: item, activity: presentation.activity))
+                            }
                         } else if presentation.refreshFailed {
                             Label { Text(.AutomationProgress.progressRefreshFailed) } icon: { Image(systemName: "arrow.clockwise") }
                         } else if humanAction?.action == .retryRun {
@@ -94,6 +96,13 @@ private struct CommandCenterMRCardContent: View {
                         primaryAction
                     }
                     .font(.caption).foregroundStyle(.secondary)
+                }
+                if presentation.showsAdditionalCommentReview {
+                    Button { start { await monitor.attention.finishCommentReview(item) } } label: {
+                        Text(.CommentReview.commentReviewFinish)
+                    }
+                    .buttonStyle(.bordered)
+                    .disabled(presentation.actionsBlocked || !item.canFinishCommentReview)
                 }
                 if let nextStep = presentation.nextStep {
                     Text(verbatim: nextStep)
@@ -139,15 +148,19 @@ private struct CommandCenterMRCardContent: View {
             Spacer(minLength: 4)
             if let finishedState { FinishedMergeRequestBadge(state: finishedState) }
             else if isDraft { BoardDraftBadge() }
-            if finishedState == nil { BoardApprovalProgressBadge(progress: item.approvalProgress) }
-            if finishedState == nil, let scopeTarget {
-                BoardAutomationToggle(settings: monitor.settings, target: scopeTarget,
-                    projectPath: item.url.gitLabProjectPath, isDraft: isDraft)
+            if finishedState == nil {
+                BoardApprovalProgressBadge(progress: item.approvalProgress, reviewers: item.mergeRequest?.reviewers ?? [])
             }
-            BoardPinButton(pin: .mergeRequest(host: monitor.glab.resolvedHost,
-                username: monitor.glab.currentUsername, projectID: item.id.projectID, iid: item.id.iid),
-                settings: monitor.settings)
-            moreMenu
+            HStack(spacing: 0) {
+                if finishedState == nil, let scopeTarget {
+                    BoardAutomationToggle(settings: monitor.settings, target: scopeTarget,
+                        projectPath: item.url.gitLabProjectPath, isDraft: isDraft)
+                }
+                BoardPinButton(pin: .mergeRequest(host: monitor.glab.resolvedHost,
+                    username: monitor.glab.currentUsername, projectID: item.id.projectID, iid: item.id.iid),
+                    settings: monitor.settings)
+                moreMenu
+            }
         }
     }
 
@@ -218,8 +231,12 @@ private struct CommandCenterMRCardContent: View {
                 }
             }
         case .reviewDrafts:
-            if action.showsDirectPublication && !item.drafts.isEmpty {
-                primary(.Menu.menuConfirmPublish, enabled: scopeTarget != nil) {
+            if action.kind == .commentReview {
+                primary(.CommentReview.commentReviewFinish, enabled: item.canFinishCommentReview) {
+                    start { await monitor.attention.finishCommentReview(item) }
+                }
+            } else if action.showsDirectPublication && !item.drafts.isEmpty {
+                primary(.CommentReview.commentReviewPublishAll, enabled: scopeTarget != nil) {
                     start { await monitor.attention.publishDrafts(of: item.id) }
                 }
             } else {
@@ -410,13 +427,15 @@ struct BoardTodoRow: View {
             if todo.targetType != .mergeRequest, !todo.relativeIdentifier.isEmpty {
                 Text(verbatim: todo.relativeIdentifier).font(.caption).foregroundStyle(.secondary)
             }
-            if let scopeTarget {
-                BoardAutomationToggle(settings: monitor.settings, target: scopeTarget,
-                    projectPath: todo.project.pathWithNamespace, isDraft: isDraft)
+            HStack(spacing: 0) {
+                if let scopeTarget {
+                    BoardAutomationToggle(settings: monitor.settings, target: scopeTarget,
+                        projectPath: todo.project.pathWithNamespace, isDraft: isDraft)
+                }
+                BoardPinButton(pin: .todo(host: monitor.glab.resolvedHost,
+                    username: monitor.glab.currentUsername, id: todo.id), settings: monitor.settings)
+                moreMenu
             }
-            BoardPinButton(pin: .todo(host: monitor.glab.resolvedHost,
-                username: monitor.glab.currentUsername, id: todo.id), settings: monitor.settings)
-            moreMenu
         }
     }
 

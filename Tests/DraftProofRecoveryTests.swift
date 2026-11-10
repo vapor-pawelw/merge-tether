@@ -484,7 +484,7 @@ struct DraftProofRecoveryTests {
         #expect(f.live.drafts == f.snapshot.drafts)
     }
 
-    @Test(arguments: ["valid", "extraID", "missingIntent", "wrongIntent", "unknownAncestor"])
+    @Test(arguments: ["valid", "extraID", "missingIntent", "wrongIntent", "unknownAncestor", "unfinishedAncestor"])
     func repairedSealIsQuarantinedAndCannotManufactureDraftOwnership(_ scenario: String) async throws {
         let f = try Fixture()
         defer { f.clean() }
@@ -505,6 +505,12 @@ struct DraftProofRecoveryTests {
         if scenario == "unknownAncestor" {
             let archive = FollowUpVerificationStore.recordURL(kind: "follow-up-verifications-archive", work: f.work, username: "me", in: f.folder).deletingPathExtension()
             try FileManager.default.removeItem(at: archive)
+        }
+        if scenario == "unfinishedAncestor" {
+            let origin = f.settings.assistantHandoffs[0]
+            f.settings.assistantHandoffs.append(.init(id: UUID(), key: origin.key, title: "Unfinished intervening work", prompt: "",
+                createdAt: origin.createdAt.addingTimeInterval(0.000001), allowsPush: false, followUpPushAllowed: true,
+                execution: .init(state: .failed)))
         }
         try f.persist(repaired)
         #expect(f.publication().isEmpty)
@@ -562,6 +568,81 @@ struct DraftProofRecoveryTests {
         try JSONEncoder().encode(unrelated).write(to: archive.appending(path: "unrelated.json"))
         let origins = FollowUpVerificationStore.recoveryOrigins(work: fixture.work, username: "me", settings: fixture.settings, in: fixture.folder)
         #expect(origins == [original])
+    }
+
+    @Test(arguments: [DraftProofRecoveryVerifier.Assessment.State.valid, .uncertain, .invalid])
+    func aBlockedWorkerWithSealedRepliesCanReachIndependentVerification(_ verdict: DraftProofRecoveryVerifier.Assessment.State) async throws {
+        let f = try Fixture()
+        defer { f.clean() }
+        f.settings.assistantHandoffs[0].execution = .init(state: .blocked, blocker: "The response remains private.")
+        f.proof = f.currentProof(runID: f.proof.runID, body: "Fixed")
+        try f.persist(f.proof)
+        f.claimState = verdict
+        let origins = FollowUpVerificationStore.recoveryOrigins(work: f.work, username: "me", settings: f.settings, in: f.folder)
+        let origin = try #require(origins.first)
+        #expect(f.publication().isEmpty)
+        let coordinator = f.coordinator()
+        coordinator.schedule(snapshot: f.snapshot, origin: origin, configuration: f.settings.automation)
+        try await f.settle(coordinator)
+        #expect(f.assessments == 1)
+        #expect(f.publication().isEmpty == (verdict != .valid))
+        #expect(f.settings.assistantHandoffs[0].execution?.state == .blocked)
+    }
+
+    @Test(arguments: ["same", "head", "branch", "account", "provider"])
+    func aLaterSealedBlockedReplyDoesNotStrandOtherRepliesAtTheSameSourceHead(_ change: String) async throws {
+        let f = try Fixture()
+        defer { f.clean() }
+        try f.addSibling()
+        let earlier = f.settings.assistantHandoffs[0]
+        f.settings.assistantHandoffs[0].execution = .init(state: .blocked)
+        let earlierProof = f.currentProof(runID: earlier.id, body: "Fixed")
+        try f.archive(earlierProof)
+        let laterKey = AssistantAutomationRunner.ChatKey(assistant: change == "provider" ? .claude : earlier.key.assistant,
+            work: earlier.key.work, username: earlier.key.username, workspace: earlier.key.workspace, access: earlier.key.access)
+        let later = AssistantAutomationRunner.Handoff(id: UUID(), key: laterKey, title: "Another sealed response", prompt: "",
+            createdAt: earlier.createdAt.addingTimeInterval(1), allowsPush: false, followUpPushAllowed: true,
+            execution: .init(state: .blocked), workflow: .followUp)
+        f.settings.assistantHandoffs.append(later)
+        let laterProof = FollowUpVerification(version: 1, sealed: true, verificationID: UUID(), runID: later.id,
+            host: earlierProof.host, projectID: earlierProof.projectID, iid: earlierProof.iid,
+            username: earlierProof.username, userID: change == "account" ? 99 : earlierProof.userID,
+            headSHA: change == "head" ? String(repeating: "b", count: 40) : earlierProof.headSHA,
+            sourceProjectID: earlierProof.sourceProjectID, sourceBranch: change == "branch" ? "other" : earlierProof.sourceBranch,
+            files: earlierProof.files, drafts: [.init(id: 13, bodySHA256: AICommentAssessmentStore.digest("Another claim"))],
+            discussionFingerprint: earlierProof.discussionFingerprint)
+        try f.persist(laterProof)
+        let origins = FollowUpVerificationStore.recoveryOrigins(work: f.work, username: "me", settings: f.settings, in: f.folder)
+        if change != "same" {
+            #expect(!origins.contains(earlierProof))
+            return
+        }
+        #expect(Set(origins.map(\.runID)) == [earlier.id, later.id])
+        let coordinator = f.coordinator()
+        for origin in origins {
+            coordinator.schedule(snapshot: f.snapshot, origin: origin, configuration: f.settings.automation)
+            try await f.settle(coordinator)
+        }
+        #expect(Set(f.publication().flatMap { $0.drafts.map(\.id) }) == [12, 13])
+        #expect(f.settings.assistantHandoffs.allSatisfy { $0.execution?.state == .blocked })
+    }
+
+    @Test(arguments: ["missing", "unsealed", "fingerprint", "failed", "active"])
+    func aStoppedResultWithoutACompletedSealCannotEstablishReplyOwnership(_ change: String) throws {
+        let f = try Fixture()
+        defer { f.clean() }
+        f.settings.assistantHandoffs[0].execution = .init(state: change == "failed" ? .failed : change == "active" ? .running : .blocked)
+        var proof = f.currentProof(runID: f.proof.runID, body: "Fixed")
+        if change == "fingerprint" { proof.discussionFingerprint = nil }
+        try f.persist(proof)
+        let path = FollowUpVerificationStore.recordURL(kind: "follow-up-verifications", work: f.work, username: "me", in: f.folder)
+        if change == "missing" { try FileManager.default.removeItem(at: path) }
+        if change == "unsealed" {
+            var json = try #require(JSONSerialization.jsonObject(with: Data(contentsOf: path)) as? [String: Any])
+            json["sealed"] = false
+            try JSONSerialization.data(withJSONObject: json).write(to: path)
+        }
+        #expect(FollowUpVerificationStore.recoveryOrigins(work: f.work, username: "me", settings: f.settings, in: f.folder).isEmpty)
     }
 
     @Test func sealedHistoricalDraftOwnershipCanBeReverifiedWithoutRewritingItsLegacyJob() throws {

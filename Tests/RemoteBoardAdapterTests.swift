@@ -4,6 +4,44 @@ import MergeTetherRemote
 @testable import GitLabTodos
 
 @MainActor @Suite struct RemoteBoardAdapterTests {
+    @Test func phoneCompletionBindsTheCurrentCommentReviewAndDiscussionText() throws {
+        var item = try item()
+        item.drafts = []; item.draftCount = 0
+        item.mergeRequest = try MRDependencyPresentationTests().request(2, project: 1)
+        item.requiresCommentReview = true
+        item.observedDiscussionFingerprint = "comments"
+        item.commentReviewSnapshot = CommentReviewSnapshot(request: item.mergeRequest, discussions: [])
+        let pending = RemoteBoardAdapter.card(item, account: "me@gitlab.example.org")
+        #expect(pending.actions.contains { $0.kind == .finishCommentReview })
+        let displayed = RemoteBoardAdapter.presentation(pending, row: .init(item: item, latestJob: nil, intents: []))
+        #expect(displayed.primaryCTA?.title == String(localized: .CommentReview.commentReviewFinish))
+        item.observedDiscussionFingerprint = "changed comments"
+        let changed = RemoteBoardAdapter.card(item, account: "me@gitlab.example.org")
+        #expect(changed.actions != pending.actions)
+        item.requiresCommentReview = false
+        #expect(!RemoteBoardAdapter.card(item, account: "me@gitlab.example.org").actions.contains { $0.kind == .finishCommentReview })
+    }
+
+    @Test func phoneDeletionActionsAreBoundToEachExactDraft() throws {
+        var item = try item()
+        item.drafts = [.init(id: 11, authorID: 3, note: "Draft", discussionID: nil, position: nil)]
+        item.draftCount = 1
+        let before = RemoteBoardAdapter.card(item, account: "me@gitlab.example.org")
+        let deletion = try #require(before.actions.first { $0.kind == .deleteDraft })
+        #expect(deletion.id == "deleteDraft:11")
+        item.drafts = [.init(id: 11, authorID: 3, note: "Edited", discussionID: nil, position: nil)]
+        #expect(RemoteBoardAdapter.card(item, account: "me@gitlab.example.org").actions.first { $0.kind == .deleteDraft }?.token != deletion.token)
+    }
+    @Test func optionalApprovalsKeepTheLegacyWireCountsValid() throws {
+        var item = MergeRequestAttentionMonitor.Item(id: .init(projectID: 1, iid: 2), title: "Example",
+            url: URL(string: "https://gitlab.example.org/g/p/-/merge_requests/2")!)
+        item.approvalProgress = MergeRequestApprovalProgress(completed: 3, required: 0)
+        let card = RemoteBoardAdapter.card(item, account: "me@gitlab.example.org")
+        #expect(card.approvals?.completed == 0 && card.approvals?.required == 0)
+        #expect(card.approvals?.received == 3)
+        let decoded = try JSONDecoder().decode(RemoteCard.self, from: JSONEncoder().encode(card))
+        #expect(decoded.approvals == card.approvals)
+    }
     @Test func approvalCountChangesCannotInvalidateAnOtherwiseCurrentPhoneAction() throws {
         var item = MergeRequestAttentionMonitor.Item(id: .init(projectID: 1, iid: 2), title: "Example",
             url: URL(string: "https://gitlab.example.org/g/p/-/merge_requests/2")!)
@@ -194,7 +232,8 @@ import MergeTetherRemote
         let cta = try #require(card["primaryCTA"] as? [String: Any])
         #expect(cta["title"] as? String == String(localized: .MRHumanAction.mrHumanActionActionReviewDrafts))
         #expect(cta["destination"] as? String == "drafts")
-        #expect((card["actions"] as? [Any])?.isEmpty == true)
+        let actions = try #require(card["actions"] as? [[String: Any]])
+        #expect(actions.allSatisfy { $0["kind"] as? String == "deleteDraft" })
     }
 
     @Test func pipelineOwnershipOffersReviewHandoffWithoutInventingAWrite() throws {

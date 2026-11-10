@@ -1384,6 +1384,7 @@ struct AuthorFeedbackCoordinatorTests {
                     return InMemoryGitLab.output(code: 100)
                 case let path where path.hasPrefix("/merge_requests?scope=all"):
                     return InMemoryGitLab.output(code: 100)
+                case let path where path.contains("/reviewers?"): return InMemoryGitLab.output(code: 100)
                 case "/users/7":
                     if gitlab.has("fail-reviewer") { return InMemoryGitLab.output(error: "503 unavailable", code: 1) }
                     return try gitlab.response("reviewer.json")

@@ -412,6 +412,7 @@ struct MRCatalogStalenessTests {
             case let path where path.hasSuffix("/approvals") || path.hasSuffix("/approval_state"):
                 // The catalog fixture deliberately has no optional approval evidence.
                 return InMemoryGitLab.output(code: 100)
+            case let path where path.contains("/reviewers?"): return InMemoryGitLab.output(code: 100)
             case "/projects/1": return InMemoryGitLab.output(code: 100)
             case let path where path.contains("/blocks?") || path.hasPrefix("/projects/1/merge_requests?"):
                 return InMemoryGitLab.output(code: 100)
