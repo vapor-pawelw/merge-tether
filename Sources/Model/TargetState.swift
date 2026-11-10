@@ -1,5 +1,4 @@
 import Foundation
-import SwiftUI
 
 enum TargetState: Hashable, Sendable {
     case draft
@@ -21,28 +20,6 @@ enum TargetState: Hashable, Sendable {
         case "reopened": self = .reopened
         case nil, "": self = .none
         default: self = .none
-        }
-    }
-
-    var label: LocalizedStringResource? {
-        switch self {
-        case .draft: .Menu.menuBadgeStateDraft
-        case .open: .Menu.menuBadgeStateOpen
-        case .merged: .Menu.menuBadgeStateMerged
-        case .closed: .Menu.menuBadgeStateClosed
-        case .reopened: .Menu.menuBadgeStateReopened
-        case .none: nil
-        }
-    }
-
-    var tint: Color {
-        switch self {
-        case .draft: .gray
-        case .open: .green
-        case .merged: .purple
-        case .closed: .red
-        case .reopened: .green
-        case .none: .secondary
         }
     }
 }

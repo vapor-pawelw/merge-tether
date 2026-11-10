@@ -62,20 +62,4 @@ enum TargetType: Hashable, Codable, Sendable {
         default: ""
         }
     }
-
-    /// SF Symbol displayed on the row badge when no IID is available.
-    var symbolName: String {
-        switch self {
-        case .mergeRequest: "arrow.triangle.branch"
-        case .issue: "exclamationmark.circle"
-        case .epic: "square.stack.3d.up"
-        case .designManagementDesign: "paintbrush"
-        case .alert: "bell.badge"
-        case .wikiPage: "book"
-        case .commit: "checkmark.seal"
-        case .snippet: "doc.text"
-        case .workItem: "checklist"
-        case .unknown: "questionmark.circle"
-        }
-    }
 }

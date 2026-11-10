@@ -301,7 +301,7 @@ struct AuthorFeedbackMergeTests {
             #expect(await monitor.mergeManually(request) == .uncertain)
             let saved = try #require(settings)
             saved.automation.autoMergeEnabled = true
-            let restarted = AuthoredMergeRequestMonitor(settings: saved, glab: glab, notifications: NotificationService(), canAutomate: { _ in true })
+            let restarted = AuthoredMergeRequestMonitor(settings: saved, glab: glab, canAutomate: { _ in true })
             restarted.authorFeedbackAllowsMerge = { _, _, _ in true }
             try await refresh(restarted)
             #expect(gitlab.requests.filter { $0.method == "PUT" && $0.endpoint.hasSuffix("/merge") }.count == 1)
@@ -370,7 +370,7 @@ struct AuthorFeedbackMergeTests {
         settings.onboardingCompleted = true; settings.notificationsEnabled = false
         settings.automation.autoMergeEnabled = true; settings.automation.autoMergeProjects = "g/p"
         configure(settings)
-        let monitor = AuthoredMergeRequestMonitor(settings: settings, glab: glab, notifications: NotificationService(), canAutomate: { _ in true })
+        let monitor = AuthoredMergeRequestMonitor(settings: settings, glab: glab, canAutomate: { _ in true })
         let listed = try await glab.fetchAuthoredMergeRequests(host: "gitlab.example.org")
         try #require(listed.count == 1)
         _ = try await glab.fetchMergeRequest(projectID: 1, iid: 2, host: "gitlab.example.org")

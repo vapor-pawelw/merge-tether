@@ -1,5 +1,4 @@
 import Foundation
-import UserNotifications
 
 enum OnboardingDetector {
     static let defaultCandidates: [String] = [
@@ -37,10 +36,6 @@ enum OnboardingDetector {
         guard let trimmed, !trimmed.isEmpty else { return nil }
         guard FileManager.default.isExecutableFile(atPath: trimmed) else { return nil }
         return URL(fileURLWithPath: trimmed)
-    }
-
-    static func checkNotificationPermission() async -> UNAuthorizationStatus {
-        await UNUserNotificationCenter.current().notificationSettings().authorizationStatus
     }
 
     private static var minimalShellEnvironment: [String: String] {

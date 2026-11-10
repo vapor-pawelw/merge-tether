@@ -115,7 +115,6 @@ struct GeneralSettingsTab: View {
             set: { newValue in
                 monitor.settings.notificationsEnabled = newValue
                 monitor.settings.save()
-                monitor.restartUnreadReminderTimer()
             }
         )
     }

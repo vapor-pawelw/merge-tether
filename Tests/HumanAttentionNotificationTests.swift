@@ -38,13 +38,10 @@ import UserNotifications
         #expect(request.content.body == "Example 0")
     }
 
-    @Test func multipleNewHumanItemsAreConsolidatedWithoutLegacyNotifications() async {
+    @Test func multipleNewHumanItemsAreConsolidated() async {
         let delivery = Delivery(); delivery.status = .authorized
         let service = NotificationService(authorization: { delivery.status }, post: { delivery.requests.append($0) })
         await service.deliverHumanAttention(items(4))
-        #expect(delivery.requests.count == 1)
-        service.deliver(newTodos: [], dashboardURL: nil)
-        service.deliverUnreadReminder(todoCount: 10, dashboardURL: nil, sound: .submarine)
         #expect(delivery.requests.count == 1)
     }
     @Test func failedSubmissionDoesNotAcknowledgePendingActions() async {

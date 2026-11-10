@@ -9,18 +9,6 @@ enum GlabError: Error, Equatable, Sendable {
     case timedOut
     case unknown(String)
 
-    var userMessageKey: String.LocalizationValue {
-        switch self {
-        case .glabNotInstalled: "error.glabNotInstalled"
-        case .notAuthenticated: "error.notAuthenticated"
-        case .network: "error.network"
-        case .decoding: "error.decoding"
-        case .nonZeroExit: "error.nonZeroExit"
-        case .timedOut: "error.timedOut"
-        case .unknown: "error.unknown"
-        }
-    }
-
     static func classify(exitCode: Int32, stderr: String) -> GlabError {
         let lower = stderr.lowercased()
         if lower.contains("not authenticated")

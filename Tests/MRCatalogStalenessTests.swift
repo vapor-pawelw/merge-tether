@@ -337,7 +337,7 @@ struct MRCatalogStalenessTests {
             settings.onboardingCompleted = true
             settings.notificationsEnabled = false
             return AuthoredMergeRequestMonitor(settings: settings, glab: glab,
-                notifications: NotificationService(), canAutomate: { _ in false })
+                canAutomate: { _ in false })
         }
 
         func pollAuthored(_ monitor: AuthoredMergeRequestMonitor) async throws {

@@ -29,7 +29,6 @@ struct NotificationsStep: View {
             set: { enabled in
                 monitor.settings.notificationsEnabled = enabled
                 monitor.settings.save()
-                monitor.restartUnreadReminderTimer()
             }
         )
     }

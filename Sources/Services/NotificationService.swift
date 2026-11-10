@@ -58,13 +58,6 @@ final class NotificationService: NSObject, UNUserNotificationCenterDelegate, @un
         return delivered
     }
 
-    // Legacy senders deliberately cannot bypass semantic attention accounting.
-    func deliver(newTodos: [Todo], dashboardURL: URL?) {}
-    func deliverWorkflowEvent(_ event: MergeWorkflowEvent, requiresHandoff: Bool) {}
-    func deliverUnresolvedMergeRequest(_ request: GitLabMergeRequest) {}
-    func deliverAutoApproved(_ request: GitLabMergeRequest) {}
-    func deliverUnreadReminder(todoCount: Int, dashboardURL: URL?, sound: ReminderSound) {}
-
     func userNotificationCenter(_ center: UNUserNotificationCenter, willPresent notification: UNNotification,
                                 withCompletionHandler completionHandler: @escaping (UNNotificationPresentationOptions) -> Void) {
         completionHandler([.banner, .sound])

@@ -46,7 +46,4 @@ final class AttentionNotificationScheduler {
         return next
     }
 
-    /// Legacy periodic raw-to-do reminders are retired; kept for settings callers.
-    func restartUnreadReminderTimer() {}
-    func stopUnreadReminderTimer() {}
 }

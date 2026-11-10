@@ -35,7 +35,6 @@ final class SettingsManager {
     var resolvedHost: String?
     var launchAtLoginPreference: Bool
     var lastMenuOpenedAt: Date?
-    var lastMenuSection: String?
     /// Managed MRs where the user turned off automatic approval.
     var autoApproveOptOuts: Set<MRAutomationScope.Target>
     var autoPublishOptOuts: Set<MRAutomationScope.Target> = []
@@ -111,7 +110,6 @@ final class SettingsManager {
             ? Date(timeIntervalSince1970: storedMenuOpenedAt)
             : nil
 
-        self.lastMenuSection = defaults.string(forKey: Key.lastMenuSection)
         self.ignoredMergeRequests = store.load(Key.ignoredMergeRequests, fallback: [])
         self.autoApproveOptOuts = store.load(Key.autoApproveOptOuts, fallback: [])
         self.autoPublishOptOuts = store.load(Key.autoPublishOptOuts, fallback: [])
@@ -192,11 +190,6 @@ final class SettingsManager {
         persistenceStore.save(autoPublishOptOuts, forKey: Key.autoPublishOptOuts)
         persistenceStore.save(mergeSubmissions, forKey: Key.mergeSubmissions)
         persistenceStore.save(autoMergeOptOuts, forKey: Key.autoMergeOptOuts)
-        if let lastMenuSection {
-            defaults.set(lastMenuSection, forKey: Key.lastMenuSection)
-        } else {
-            defaults.removeObject(forKey: Key.lastMenuSection)
-        }
         let synchronized = persistenceStore.synchronize()
         if automationSaved && synchronized {
             lastSavedAutomation = automation
@@ -301,7 +294,6 @@ final class SettingsManager {
         static let launchAtLoginPreference = "launchAtLoginPreference"
         static let hasLaunchedBefore = "hasLaunchedBefore"
         static let lastMenuOpenedAt = "lastMenuOpenedAt"
-        static let lastMenuSection = "lastMenuSection"
         static let autoApproveOptOuts = "autoApproveOptOuts"
         static let autoPublishOptOuts = "autoPublishOptOuts"
         static let mergeSubmissions = "mergeSubmissions"

@@ -19,7 +19,4 @@ enum ReminderSound: String, CaseIterable, Codable, Identifiable, Sendable {
 
     var id: String { rawValue }
 
-    var soundName: String? {
-        self == .off ? nil : rawValue
-    }
 }

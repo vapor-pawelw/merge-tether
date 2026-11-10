@@ -292,12 +292,6 @@ final class MergeRequestTodoRouter {
         if changed { settings.save() }
     }
 
-    func dismiss(_ id: UUID) {
-        guard let intent = settings.mrActionIntents.first(where: { $0.id == id }),
-              isCurrent(intent.target.host, intent.target.username) else { return }
-        update(id, origin: .manual) { $0.state = .completed; $0.error = nil }
-    }
-
     private func classify(_ todo: Todo, request: GitLabMergeRequest, user: GitLabAuthenticatedUser,
                           host: String) async throws -> (MRTodoIntent.Kind, Set<Int>)? {
         let owned = request.author.id == user.id

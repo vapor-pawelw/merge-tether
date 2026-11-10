@@ -76,7 +76,6 @@ final class MergeWorkflowAutomation {
 
     private let settings: SettingsManager
     private let glab: GlabService
-    private let notifications: NotificationService
     private let detector: ExistingPipelineWorkDetector
     private let jobCoordinator: AssistantJobCoordinator?
     private let monitor: MergeWorkflowMonitor
@@ -139,7 +138,7 @@ final class MergeWorkflowAutomation {
     }
 
     init(
-        settings: SettingsManager, glab: GlabService, notifications: NotificationService,
+        settings: SettingsManager, glab: GlabService,
         detector: ExistingPipelineWorkDetector = ExistingPipelineWorkDetector(), jobCoordinator: AssistantJobCoordinator? = nil,
         retryWait: @escaping ReadOnlyAssessmentRetry.Wait = ReadOnlyAssessmentRetry.wait,
         now: @escaping ReadOnlyAssessmentRetry.Clock = { Date() }
@@ -147,7 +146,6 @@ final class MergeWorkflowAutomation {
         self.settings = settings
         self.monitor = MergeWorkflowMonitor(persistenceStore: settings.persistenceStore)
         self.glab = glab
-        self.notifications = notifications
         self.detector = detector
         self.jobCoordinator = jobCoordinator
         self.retryWait = retryWait

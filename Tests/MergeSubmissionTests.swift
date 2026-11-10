@@ -16,7 +16,7 @@ import Testing
             settings.notificationsEnabled = false
             if !train { gitlab.write("ordinary-project") }
             let monitor = AuthoredMergeRequestMonitor(settings: settings, glab: glab,
-                notifications: NotificationService(), canAutomate: { _ in true })
+                canAutomate: { _ in true })
             monitor.setVisible(true)
             while monitor.isLoading { await Task.yield() }
             let ready = try #require(monitor.requests.first)
@@ -111,7 +111,7 @@ import Testing
             settings.onboardingCompleted = true; settings.notificationsEnabled = false
             settings.automation.autoMergeEnabled = true
             gitlab.write("observed", "queued")
-            let monitor = AuthoredMergeRequestMonitor(settings: settings, glab: glab, notifications: NotificationService(), canAutomate: { _ in true })
+            let monitor = AuthoredMergeRequestMonitor(settings: settings, glab: glab, canAutomate: { _ in true })
             monitor.refreshIfNeeded()
             while monitor.isLoading { await Task.yield() }
             #expect(monitor.requests.first?.submissionState == .queued)
@@ -132,7 +132,7 @@ import Testing
             settings.onboardingCompleted = true; settings.notificationsEnabled = false
             settings.automation.autoMergeEnabled = true
             var injected = false
-            let monitor = AuthoredMergeRequestMonitor(settings: settings, glab: glab, notifications: NotificationService(), canAutomate: { _ in
+            let monitor = AuthoredMergeRequestMonitor(settings: settings, glab: glab, canAutomate: { _ in
                 if !injected { injected = true; gitlab.write("observed", "queued") }
                 return true
             })
@@ -161,7 +161,7 @@ import Testing
                 }
                 return try await transport(call)
             }
-            let monitor = AuthoredMergeRequestMonitor(settings: settings, glab: glab, notifications: NotificationService(), canAutomate: { _ in
+            let monitor = AuthoredMergeRequestMonitor(settings: settings, glab: glab, canAutomate: { _ in
                 gitlab.write("observed", "queued")
                 return true
             })

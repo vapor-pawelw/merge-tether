@@ -58,12 +58,6 @@ final class GlabService {
     var authStatus: AuthStatus = .unknown
     @ObservationIgnored private var authenticationCheck: Task<GlabError?, Never>?
 
-    /// Dashboard URL for "Open in browser" links in the menu header.
-    var dashboardTodosURL: URL? {
-        guard let resolvedHost else { return nil }
-        return URL(string: "https://\(resolvedHost)/dashboard/todos")
-    }
-
     struct AuthedHost: Sendable, Equatable, Hashable {
         let host: String
         let username: String

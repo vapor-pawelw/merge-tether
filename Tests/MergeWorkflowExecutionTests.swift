@@ -39,7 +39,7 @@ import Testing
         let glab = gitlab.service(host: original.host, username: "me")
         let clock = ReadRetryClock()
         func make(_ state: SettingsManager) -> MergeWorkflowAutomation {
-            MergeWorkflowAutomation(settings: state, glab: glab, notifications: NotificationService(),
+            MergeWorkflowAutomation(settings: state, glab: glab,
                 detector: .init(directory: directory.appending(path: "claims")),
                 retryWait: { _ in
                     if recovery == "account-change" {
@@ -127,7 +127,7 @@ import Testing
         let glab = GlabService()
         glab.resolvedHost = "gitlab.example.test"
         glab.currentUsername = "me"
-        let automation = MergeWorkflowAutomation(settings: settings, glab: glab, notifications: NotificationService())
+        let automation = MergeWorkflowAutomation(settings: settings, glab: glab)
         #expect(automation.entries[0].state == .running)
         #expect(automation.entries[1].state == .waitingForAssistant)
         settings.assistantHandoffs[0].execution = .init(state: .succeeded, summary: "Fix verified")
@@ -155,7 +155,7 @@ import Testing
         let gitlab = InMemoryGitLab()
         defer { gitlab.close() }
         let glab = gitlab.service(host: stored.host, username: "me")
-        let automation = MergeWorkflowAutomation(settings: settings, glab: glab, notifications: NotificationService())
+        let automation = MergeWorkflowAutomation(settings: settings, glab: glab)
         #expect(automation.entries.first?.state == .running)
         #expect(settings.workflowActivity.first?.state == .waitingForAssistant)
 
@@ -168,7 +168,7 @@ import Testing
         #expect(settings.workflowActivity.first?.summary == nil)
         let restored = SettingsManager(defaults: defaults)
         #expect(restored.workflowActivity.first?.state == .waitingForAssistant)
-        let restarted = MergeWorkflowAutomation(settings: restored, glab: glab, notifications: NotificationService())
+        let restarted = MergeWorkflowAutomation(settings: restored, glab: glab)
         #expect(restarted.entries.first?.state == .completed)
     }
 
@@ -196,7 +196,7 @@ import Testing
             return InMemoryGitLab.output(error: "503 temporarily unavailable", code: 1)
         }
         let glab = gitlab.service(host: stored.host, username: "me")
-        let automation = MergeWorkflowAutomation(settings: settings, glab: glab, notifications: NotificationService(), retryWait: { _ in })
+        let automation = MergeWorkflowAutomation(settings: settings, glab: glab, retryWait: { _ in })
         let coordinator = AssistantJobCoordinator(execute: { _, _ in
             try await Task.sleep(for: .seconds(60))
             return .init(result: .init(status: .succeeded, summary: "Done"), output: "")
@@ -237,7 +237,7 @@ import Testing
         let gitlab = InMemoryGitLab()
         defer { gitlab.close() }
         let glab = gitlab.service(host: stored.host, username: "me")
-        let automation = MergeWorkflowAutomation(settings: settings, glab: glab, notifications: NotificationService())
+        let automation = MergeWorkflowAutomation(settings: settings, glab: glab)
         automation.startNext()
         #expect(automation.entries.first?.state == .skipped)
         #expect(SettingsManager(defaults: defaults).workflowActivity.first?.state == .skipped)
@@ -268,7 +268,7 @@ import Testing
         let gitlab = InMemoryGitLab()
         defer { gitlab.close() }
         let glab = gitlab.service(host: parent.host, username: "me")
-        let automation = MergeWorkflowAutomation(settings: settings, glab: glab, notifications: NotificationService())
+        let automation = MergeWorkflowAutomation(settings: settings, glab: glab)
         for index in 0..<125 {
             automation.receive(.init(kind: .reviewWaiting, mergeRequest: parent.event.mergeRequest,
                 identity: "passive-\(index)", context: "History"), host: parent.host, user: parent.user)
@@ -279,7 +279,7 @@ import Testing
         #expect(settings.workflowActivity.contains { $0.id == parent.id } == protected)
         if protected { #expect(automation.entries.first { $0.id == assessment.id }?.state == .skipped) }
         let restored = SettingsManager(defaults: defaults)
-        let restarted = MergeWorkflowAutomation(settings: restored, glab: glab, notifications: NotificationService())
+        let restarted = MergeWorkflowAutomation(settings: restored, glab: glab)
         restarted.startNext()
         #expect(restored.workflowActivity.contains { $0.id == assessment.id && $0.pipelineClaimAssessment?.skippedActivityID == parent.id } == protected)
         #expect(restored.workflowActivity.contains { $0.id == parent.id } == protected)
@@ -301,7 +301,7 @@ import Testing
         let glab = GlabService()
         glab.resolvedHost = "gitlab.example.test"
         glab.currentUsername = "me"
-        let automation = MergeWorkflowAutomation(settings: settings, glab: glab, notifications: NotificationService())
+        let automation = MergeWorkflowAutomation(settings: settings, glab: glab)
         #expect(automation.entries[0].state == .failed)
         #expect(settings.assistantHandoffs.count == 1)
     }
@@ -327,7 +327,7 @@ import Testing
         let glab = GlabService()
         glab.resolvedHost = "gitlab.example.test"
         glab.currentUsername = "me"
-        let automation = MergeWorkflowAutomation(settings: settings, glab: glab, notifications: NotificationService())
+        let automation = MergeWorkflowAutomation(settings: settings, glab: glab)
         let coordinator = AssistantJobCoordinator(execute: { _, _ in
             try await Task.sleep(for: .seconds(60))
             return .init(result: .init(status: .succeeded, summary: "Done"), output: "")
@@ -359,7 +359,7 @@ import Testing
         glab.currentUsername = "me"
         let root = FileManager.default.temporaryDirectory.appending(path: UUID().uuidString)
         defer { try? FileManager.default.removeItem(at: root) }
-        let automation = MergeWorkflowAutomation(settings: settings, glab: glab, notifications: NotificationService(),
+        let automation = MergeWorkflowAutomation(settings: settings, glab: glab,
                                                 detector: .init(directory: root))
         let pending = try entry(jobID: nil)
         automation.receive(pending.event, host: pending.host, user: pending.user)
@@ -381,7 +381,7 @@ import Testing
         glab.currentUsername = pending.user.username
         let directory = FileManager.default.temporaryDirectory.appending(path: UUID().uuidString)
         defer { try? FileManager.default.removeItem(at: directory) }
-        let automation = MergeWorkflowAutomation(settings: settings, glab: glab, notifications: NotificationService(),
+        let automation = MergeWorkflowAutomation(settings: settings, glab: glab,
                                                 detector: .init(directory: directory))
         automation.observe([pending.event.mergeRequest], host: pending.host, user: pending.user)
         #expect(automation.entries.first?.state == .queued)
@@ -404,7 +404,7 @@ import Testing
         let claim = try detector.externalRegistrationURL(for: .init(host: pending.host, projectID: 7,
                                                                   mergeRequestIID: 11, pipelineID: 101))
         try FileManager.default.createDirectory(at: claim, withIntermediateDirectories: true)
-        let automation = MergeWorkflowAutomation(settings: settings, glab: glab, notifications: NotificationService(), detector: detector)
+        let automation = MergeWorkflowAutomation(settings: settings, glab: glab, detector: detector)
         automation.receive(pending.event, host: pending.host, user: pending.user)
         #expect(automation.entries.first?.state == .alreadyRegistered)
         #expect(settings.assistantHandoffs.isEmpty)
@@ -520,7 +520,7 @@ import Testing
         let glab = GlabService()
         glab.resolvedHost = stored.host
         glab.currentUsername = stored.user.username
-        let automation = MergeWorkflowAutomation(settings: settings, glab: glab, notifications: NotificationService(), detector: detector)
+        let automation = MergeWorkflowAutomation(settings: settings, glab: glab, detector: detector)
         let user = GitLabAuthenticatedUser(id: blocker == "wrong-account" ? 2 : 1, username: "me")
         automation.observe([current], host: stored.host, user: user)
         let resumable = blocker == "none" || blocker == "draft-became-ready"
@@ -552,7 +552,7 @@ import Testing
         for _ in 0..<4 { await Task.yield() }
         if freshAssessment {
             let restored = SettingsManager(defaults: defaults)
-            let restarted = MergeWorkflowAutomation(settings: restored, glab: glab, notifications: NotificationService(), detector: detector)
+            let restarted = MergeWorkflowAutomation(settings: restored, glab: glab, detector: detector)
             restarted.observe([current], host: stored.host, user: user)
             #expect(restarted.entries.count == 2)
             #expect(restarted.entries.first(where: { $0.id == stored.id })?.state == .skipped)
@@ -646,7 +646,7 @@ import Testing
             return .init(result: .init(status: .blocked, summary: "Fresh assessment fixture finished.",
                                       blocker: "Fixture does not execute remote corrections."), output: "")
         })
-        let automation = MergeWorkflowAutomation(settings: settings, glab: glab, notifications: NotificationService(),
+        let automation = MergeWorkflowAutomation(settings: settings, glab: glab,
                                                 detector: detector, jobCoordinator: coordinator)
         coordinator.onFinished = { [weak automation] handoff in
             if let reservation = handoff.pipelineReservation { try? detector.finishHandoff(for: reservation) }
@@ -690,7 +690,7 @@ import Testing
         #expect(detector.hasEmptyPipelineReceipt(for: key))
         #expect(!detector.hasActiveReservation(for: key))
         let restored = SettingsManager(defaults: defaults)
-        let restarted = MergeWorkflowAutomation(settings: restored, glab: glab, notifications: NotificationService(),
+        let restarted = MergeWorkflowAutomation(settings: restored, glab: glab,
                                                detector: detector, jobCoordinator: coordinator)
         restarted.observe([current], host: host, user: old.user)
         for _ in 0..<4 { await Task.yield() }
@@ -726,7 +726,7 @@ import Testing
         glab.glabPath = URL(fileURLWithPath: "/usr/bin/false")
         glab.resolvedHost = "gitlab.example.test"
         glab.currentUsername = "me"
-        let automation = MergeWorkflowAutomation(settings: settings, glab: glab, notifications: NotificationService())
+        let automation = MergeWorkflowAutomation(settings: settings, glab: glab)
         let pending = try waitingEntry(jobID: nil, state: .queued)
         automation.receive(pending.event, host: pending.host, user: pending.user)
         #expect(automation.entries.first?.state == .preview)
@@ -751,7 +751,7 @@ import Testing
         let glab = GlabService()
         glab.resolvedHost = "gitlab.example.test"
         glab.currentUsername = "me"
-        let automation = MergeWorkflowAutomation(settings: settings, glab: glab, notifications: NotificationService())
+        let automation = MergeWorkflowAutomation(settings: settings, glab: glab)
         automation.startNext()
         let mustStop = state == .queued || state == .running
         #expect(automation.entries.first?.state == (mustStop ? .preview : .failed))
@@ -776,7 +776,7 @@ import Testing
             createdAt: Date(), allowsPush: false, execution: .init(state: .interrupted))]
         let glab = GlabService()
         glab.glabPath = URL(fileURLWithPath: "/usr/bin/false")
-        let automation = MergeWorkflowAutomation(settings: settings, glab: glab, notifications: NotificationService())
+        let automation = MergeWorkflowAutomation(settings: settings, glab: glab)
         #expect(settings.assistantHandoffs.first?.workflow == nil)
         glab.resolvedHost = "gitlab.example.test"
         glab.currentUsername = "me"
@@ -1009,7 +1009,7 @@ import Testing
             settings.workflowActivity = []
             let glab = gitlab.service(host: host, username: "me")
             var retryDelays: [Duration] = []
-            let automation = MergeWorkflowAutomation(settings: settings, glab: glab, notifications: NotificationService(),
+            let automation = MergeWorkflowAutomation(settings: settings, glab: glab,
                                                     detector: .init(directory: claims), retryWait: { retryDelays.append($0) })
             var remoteChanges = 0
             automation.onRemoteChange = { remoteChanges += 1 }

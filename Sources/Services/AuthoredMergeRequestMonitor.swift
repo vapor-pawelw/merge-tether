@@ -43,7 +43,6 @@ final class AuthoredMergeRequestMonitor {
 
     private let settings: SettingsManager
     private let glab: GlabService
-    private let notifications: NotificationService
     private let canAutomate: @MainActor (AutomationAssistant) async -> Bool
     private let conflictLauncher: ConflictLauncher
     private var isVisible = false
@@ -53,7 +52,6 @@ final class AuthoredMergeRequestMonitor {
     private var conflictTaskWork: AssistantAutomationRunner.MergeRequestWork?
     private var runtimeScope: (account: Account, revision: UInt64, scope: MRAutomationScope)?
     private var failedConflicts: Set<MergeConflictReceipt> = []
-    private var notifiedDiscussions: Set<String> = []
     private struct Preparation {
         let sourceSHA: String
         let configuration: AutomationSettings
@@ -156,16 +154,15 @@ final class AuthoredMergeRequestMonitor {
     }
     private var mergingRequests: [MergeRequestAttentionMonitor.Item.ID: MergeProgress] = [:]
 
-    init(settings: SettingsManager, glab: GlabService, notifications: NotificationService,
+    init(settings: SettingsManager, glab: GlabService,
          canAutomate: @escaping @MainActor (AutomationAssistant) async -> Bool = {
              await AssistantCLI.detect($0, requireCLI: true).isReady
          }, conflictLauncher: @escaping ConflictLauncher = AuthoredMergeRequestMonitor.launchConflict) {
         self.settings = settings
         self.glab = glab
-        self.notifications = notifications
         self.canAutomate = canAutomate
         self.conflictLauncher = conflictLauncher
-        workflow = MergeWorkflowAutomation(settings: settings, glab: glab, notifications: notifications)
+        workflow = MergeWorkflowAutomation(settings: settings, glab: glab)
     }
 
     func setVisible(_ isVisible: Bool) {
@@ -192,7 +189,6 @@ final class AuthoredMergeRequestMonitor {
             syncedCatalogRevision = nil
             hasError = false
             requests = []
-            notifiedDiscussions = []
             lastAccount = account
         }
 
@@ -239,7 +235,6 @@ final class AuthoredMergeRequestMonitor {
         if lastAccount != account {
             syncedCatalogRevision = nil
             requests = []
-            notifiedDiscussions = []
             lastAccount = account
         }
         isLoading = true
@@ -355,7 +350,6 @@ final class AuthoredMergeRequestMonitor {
         hasError = actionFailed
         lastRefresh = Date()
         if automaticMergeTarget == nil {
-            notifyUnresolvedDiscussions(results)
             let isWatchingWorkflow = !settings.automation.workflowRules.enabled.isEmpty
             if isWatchingWorkflow || wasWatchingWorkflow {
                 workflow.observe(results.map(\.request), host: host, user: user)
@@ -709,22 +703,5 @@ final class AuthoredMergeRequestMonitor {
         If a choice about behavior or permissions
         blocks a safe push, stop and summarize what needs attention.
         """
-    }
-
-    private func notifyUnresolvedDiscussions(_ statuses: [AuthoredMergeRequestStatus]) {
-        guard settings.automation.autoMergeEnabled, settings.notificationsEnabled, let account = lastAccount else {
-            notifiedDiscussions = []
-            return
-        }
-
-        let blocked = statuses.filter {
-            settings.automation.permitsAutoMerge(project: $0.request.webURL.gitLabProjectPath)
-                && settings.automation.scope.permits($0.request, host: account.host, username: account.username)
-                && $0.blockers.contains(.discussions)
-        }
-        for status in blocked where !notifiedDiscussions.contains(status.id) {
-            notifications.deliverUnresolvedMergeRequest(status.request)
-        }
-        notifiedDiscussions = Set(blocked.map(\.id))
     }
 }

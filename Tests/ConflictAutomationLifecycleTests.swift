@@ -165,7 +165,7 @@ struct ConflictAutomationLifecycleTests {
         var launcherEntries = 0
         var launchFails = false
         private enum LaunchError: Error { case uncertain }
-        lazy var monitor = AuthoredMergeRequestMonitor(settings: settings, glab: glab, notifications: NotificationService(),
+        lazy var monitor = AuthoredMergeRequestMonitor(settings: settings, glab: glab,
             canAutomate: { [self] _ in canAutomate }, conflictLauncher: { [self] input, settings in
                 launcherEntries += 1
                 if launchFails { throw LaunchError.uncertain }

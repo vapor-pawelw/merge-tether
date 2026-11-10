@@ -122,14 +122,6 @@ struct GlabMergeRequestAPITests {
         }
     }
 
-    @Test func workItemProposalUsesTheSingleExplicitMRReference() async throws {
-        try await withFakeGlab { glab in
-            let request = try await glab.fetchMergeRequest(projectID: 34, iid: 12, host: host)
-            let item = try await glab.singleLinkedWorkItem(for: request, host: host)
-            #expect(item?.absoluteString == "https://\(host)/group/repo/-/work_items/19")
-        }
-    }
-
     @Test func managedRepositoryURLResolvesToTheCanonicalProjectID() async throws {
         try await withFakeGlab { glab in
             let project = try await glab.resolveAutomationProject(path: "group/repo", host: host)
@@ -329,12 +321,6 @@ struct GlabMergeRequestAPITests {
             ;;
           'api /projects/34/merge_requests/12/approvals --hostname \(host)')
             printf '%s' '{"project_id":34,"iid":12,"approvals_required":2,"approvals_left":1,"approved_by":[{"user":{"id":7,"username":"reviewer"}}]}'
-            ;;
-          'api /projects/34/merge_requests/12/closes_issues?per_page=100 --hostname \(host) --paginate')
-            printf '%s' '[]'
-            ;;
-          'api /projects/34/merge_requests/12/related_issues?per_page=100 --hostname \(host) --paginate')
-            printf '%s' '[{"iid":19,"project_id":34,"web_url":"https://\(host)/group/repo/-/work_items/19"},{"iid":23,"project_id":34,"web_url":"https://\(host)/group/repo/-/work_items/23"}]'
             ;;
           'api /projects/34/merge_requests?state=opened&scope=all&per_page=100 --hostname \(host) --paginate')
             printf '%s' '[\(request)]'

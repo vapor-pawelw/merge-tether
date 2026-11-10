@@ -315,7 +315,6 @@ final class MergeRequestAttentionMonitor {
     private let verifyReReview: @MainActor (ReReviewVerifier.Input, AutomationAssistant, String) async throws -> ReReviewAssessment
     private var reReviewsInProgress: Set<MRAutomationScope.Target> = []
     /// Called after MergeTether approved a merge request on its own.
-    var onAutoApproved: ((GitLabMergeRequest) -> Void)?
     var onRefreshed: (() -> Void)?
     var onCommentReviewFinished: ((Item.ID) -> Void)?
     var onDisplayMetadataObserved: ((GitLabMergeRequest, MRAutomationScope.Target, UInt64, Date) -> Void)?
@@ -1203,7 +1202,6 @@ final class MergeRequestAttentionMonitor {
             && (automaticResume == nil || (automaticResume?.action == .approval && automaticResume?.id == item.id)) {
             guard let request = item.mergeRequest, let head = request.sha else { continue }
             if await performApproval(of: item.id, head: head, requireAllResolved: true) {
-                onAutoApproved?(request)
             }
         }
         scheduleDependencyRefresh(account: account, revision: revision)

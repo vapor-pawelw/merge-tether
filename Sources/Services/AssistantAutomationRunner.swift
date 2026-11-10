@@ -119,10 +119,6 @@ enum AssistantAutomationRunner {
         var feedbackRecoveryRootID: UUID? = nil
         var feedbackDecisionRevision: String? = nil
 
-        var supportsCodexRelay: Bool {
-            false
-        }
-
         var deliveredFeedbackTodos: [Todo.FeedbackIdentity] {
             if let execution { return execution.state == .succeeded ? feedbackTodos ?? [] : [] }
             return []
@@ -160,7 +156,6 @@ enum AssistantAutomationRunner {
         }
     }
 
-    private static var openingHandoffs: Set<UUID> = []
     private static let coordinator = AssistantJobCoordinator()
     static var onJobFinished: ((Handoff) -> Void)? {
         get { coordinator.onFinished }
@@ -200,14 +195,6 @@ enum AssistantAutomationRunner {
             settings.save()
         }
         return true
-    }
-
-    static func isAvailable(_ assistant: AutomationAssistant) -> Bool {
-        AssistantCLI.candidates(for: assistant, desktopURL: nil).contains { FileManager.default.isExecutableFile(atPath: $0.path) }
-    }
-
-    static func isDesktopRunning(_ assistant: AutomationAssistant) -> Bool {
-        !NSRunningApplication.runningApplications(withBundleIdentifier: bundleID(for: assistant)).isEmpty
     }
 
     static func desktopApplication(_ assistant: AutomationAssistant) -> URL? {
@@ -384,9 +371,6 @@ enum AssistantAutomationRunner {
         return handoff
     }
 
-    static func usesRelay(_ handoff: Handoff, settings: SettingsManager) -> Bool { false }
-    static func isOpening(_ id: UUID) -> Bool { coordinator.isRunning(id) }
-
     static func synchronizeInterruptedRuns(settings: SettingsManager) {
         coordinator.synchronizeInterruptedRuns(settings: settings)
     }
@@ -398,11 +382,6 @@ enum AssistantAutomationRunner {
     static func waitForTermination() async { await coordinator.waitForTermination() }
 
     static func cancel(_ id: UUID, settings: SettingsManager) { coordinator.cancel(id) }
-    static func cancelAll(settings: SettingsManager) {
-        for handoff in settings.assistantHandoffs where handoff.execution?.state.isActive == true {
-            coordinator.cancel(handoff.id)
-        }
-    }
 
     @discardableResult
     static func retry(_ id: UUID, settings: SettingsManager, expectedHeadSHA: String? = nil,
@@ -510,51 +489,11 @@ enum AssistantAutomationRunner {
         return request
     }
 
-    // Kept as compatibility entry points; these never launch assistant desktop applications.
-    static func open(_ id: UUID, settings: SettingsManager) async throws { _ = try await retry(id, settings: settings) }
-    static func openDesktop(_ assistant: AutomationAssistant) async throws { throw HandoffError.legacyJob }
-    static func openCodexListener() async throws { throw HandoffError.legacyJob }
-
-    static func draftWorkspace(for handoff: Handoff) throws -> String? {
-        // Keep the stored key for chat reuse, but don't turn that folder into a Codex project.
-        guard handoff.key.assistant != .codex || handoff.key.access == .configuredTools else { return nil }
-        let path = handoff.key.workspace
-        let files = FileManager.default
-        if handoff.key.access == .preparation {
-            try files.createDirectory(atPath: path, withIntermediateDirectories: true,
-                                      attributes: [.posixPermissions: 0o700])
-        }
-        var isDirectory: ObjCBool = false
-        return files.fileExists(atPath: path, isDirectory: &isDirectory) && isDirectory.boolValue ? path : nil
-    }
-
-    nonisolated static func draftURL(for assistant: AutomationAssistant, prompt: String?, path: String?) -> URL? {
-        var components = URLComponents()
-        components.scheme = assistant == .codex ? "codex" : "claude"
-        components.host = assistant == .codex ? "threads" : "code"
-        components.path = "/new"
-        let promptName = assistant == .codex ? "prompt" : "q"
-        let pathName = assistant == .codex ? "path" : "folder"
-        let query = [prompt.map { URLQueryItem(name: promptName, value: $0) },
-                     path.map { URLQueryItem(name: pathName, value: $0) }].compactMap { $0 }
-        if !query.isEmpty { components.queryItems = query }
-        // Both apps interpret + as a space in query strings.
-        components.percentEncodedQuery = components.percentEncodedQuery?.replacingOccurrences(of: "+", with: "%2B")
-        return components.url
-    }
-
     /// Reopens a Claude Desktop Code session. Claude links cannot carry a prompt into an
     /// existing session, so the caller copies it for pasting.
     nonisolated static func claudeSessionURL(_ id: String) -> URL? {
         guard CodexDesktopRelay.isClaudeSessionID(id) else { return nil }
         return URL(string: "claude://claude.ai/epitaxy/\(id)")
-    }
-
-    nonisolated static func claudeSessionLinkInstructions(jobID: UUID) -> String {
-        let job = jobID.uuidString.lowercased()
-        return """
-            MergeTether job ID: \(job). Before anything else, link this session to the merge request so later events continue here: get this session's ID from the session info tool (`get_session` with "self"; the ID starts with `local_`) and call the MergeTether `record_claude_session` tool with that sessionID and jobID `\(job)`. If either tool is unavailable, skip this step.
-            """
     }
 
     nonisolated static func codexChatURL(_ id: String) -> URL? {

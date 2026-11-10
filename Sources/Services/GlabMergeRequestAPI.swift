@@ -291,24 +291,6 @@ extension GlabService {
         )
     }
 
-    func singleLinkedWorkItem(for request: GitLabMergeRequest, host: String) async throws -> URL? {
-        struct Details: Decodable { let description: String? }
-        let endpoint = "/projects/\(request.projectID)/merge_requests/\(request.iid)"
-        let closing: [GitLabLinkedWorkItem] = try await fetchMergeRequestPages(endpoint + "/closes_issues?per_page=100", host: host)
-        let candidates: Set<URL>
-        if closing.isEmpty {
-            async let related: [GitLabLinkedWorkItem] = fetchMergeRequestPages(endpoint + "/related_issues?per_page=100", host: host)
-            async let details: Details = mergeRequestAPI(endpoint, host: host)
-            let (items, mr) = try await (related, details)
-            candidates = Set(items.filter { $0.isExplicitlyMentioned(in: request, description: mr.description) }
-                .compactMap { $0.verifiedURL(for: request) })
-        } else {
-            candidates = Set(closing.compactMap { $0.verifiedURL(for: request) })
-            guard candidates.count == closing.count else { return nil }
-        }
-        return candidates.count == 1 ? candidates.first : nil
-    }
-
     func activeHumanReviewerUsername(userID: Int, host: String) async throws -> String? {
         struct Reviewer: Decodable {
             let id: Int

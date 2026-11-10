@@ -212,7 +212,7 @@ struct MergeDependencyGateTests {
                 default: return try gitlab.unexpected(call)
                 }
             }
-            monitor = AuthoredMergeRequestMonitor(settings: settings, glab: glab, notifications: NotificationService(),
+            monitor = AuthoredMergeRequestMonitor(settings: settings, glab: glab,
                 canAutomate: { [unowned self] _ in beforeMerge?(); return true })
         }
 

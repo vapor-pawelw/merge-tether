@@ -303,7 +303,7 @@ struct AuthoredMergeRequestStatusTests {
         glab.currentUsername = "me"
         @MainActor final class Availability { var ready = false }
         let availability = Availability()
-        let monitor = AuthoredMergeRequestMonitor(settings: settings, glab: glab, notifications: NotificationService(),
+        let monitor = AuthoredMergeRequestMonitor(settings: settings, glab: glab,
                                                   canAutomate: { _ in availability.ready })
         let merged = folder.appending(path: "merged")
 

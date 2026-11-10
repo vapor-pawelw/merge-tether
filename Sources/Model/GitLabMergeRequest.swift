@@ -170,39 +170,6 @@ struct GitLabMergeRequest: Codable, Sendable {
     }
 }
 
-struct GitLabLinkedWorkItem: Decodable, Sendable {
-    let iid: Int
-    let projectID: Int?
-    let url: URL?
-
-    enum CodingKeys: String, CodingKey {
-        case iid
-        case projectID = "project_id"
-        case url = "web_url"
-    }
-
-    func verifiedURL(for request: GitLabMergeRequest) -> URL? {
-        guard iid > 0, let url, url.host == request.webURL.host, url.port == request.webURL.port,
-              url.scheme == request.webURL.scheme, url.user == nil, url.password == nil,
-              url.path.hasSuffix("/-/work_items/\(iid)") || url.path.hasSuffix("/-/issues/\(iid)") else { return nil }
-        return url
-    }
-
-    func isExplicitlyMentioned(in request: GitLabMergeRequest, description: String?) -> Bool {
-        guard let url = verifiedURL(for: request) else { return false }
-        let text = request.title + "\n" + (description ?? "")
-        let canonical = url.absoluteString
-        let workItemURL = canonical.replacingOccurrences(of: "/-/issues/", with: "/-/work_items/")
-        let issueURL = canonical.replacingOccurrences(of: "/-/work_items/", with: "/-/issues/")
-        if text.contains(workItemURL) || text.contains(issueURL) { return true }
-        let project = url.path.components(separatedBy: "/-/").first?.dropFirst() ?? ""
-        let fullReference = NSRegularExpression.escapedPattern(for: "\(project)#\(iid)")
-        if text.range(of: "(?<![\\w/])\(fullReference)(?!\\d)", options: .regularExpression) != nil { return true }
-        return projectID == request.projectID
-            && text.range(of: "(?<![\\w/#])#\(iid)(?!\\d)", options: .regularExpression) != nil
-    }
-}
-
 struct GitLabMergeRequestApprovalState: Decodable, Sendable {
     private let rules: [Rule]
 
