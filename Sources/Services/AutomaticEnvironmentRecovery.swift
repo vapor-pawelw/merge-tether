@@ -72,7 +72,7 @@ final class AutomaticEnvironmentRecovery {
         let project = original.mergeRequestURL?.gitLabProjectPath ?? ""
         let target = MRAutomationScope.Target(host: original.key.work.host, username: original.key.username,
             projectID: original.key.work.projectID, iid: original.key.work.iid)
-        guard configuration.packageDecision != .disabled, configuration.allowFollowUpPush,
+        guard configuration.hasAutomaticActionConsent, configuration.allowFollowUpPush,
               configuration.assistant == original.key.assistant, configuration.scope.resolve(target).active,
               original.key.access != .configuredTools || configuration.permitsAssistantTools(project: project),
               !settings.ignoredMergeRequests.contains(target), original.workflow == .followUp,

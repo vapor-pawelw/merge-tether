@@ -16,6 +16,7 @@ struct InboxTodoStoreTests {
         let gitlab = InMemoryGitLab()
         defer { gitlab.close() }
         gitlab.handler = { request in
+            if request.endpoint == "/user" { return InMemoryGitLab.output(#"{"id":7,"username":"alice"}"#) }
             if request.arguments.contains(where: { $0.hasPrefix("/todos?") }) { return InMemoryGitLab.output(todoJSON) }
             return InMemoryGitLab.output("{}")
         }
@@ -31,6 +32,29 @@ struct InboxTodoStoreTests {
         let todos = try fetched.result.get()
         store.bindAccount(host: fetched.host, username: fetched.username, revision: fetched.revision)
         store.accept(todos)
+    }
+
+    @Test(arguments: [AutomationPackageDecision.undecided, .disabled, .enabled])
+    func automaticAcknowledgementRequiresConsentWhileManualAcknowledgementRemainsAvailable(_ decision: AutomationPackageDecision) async throws {
+        try await fixture { store, gitlab, settings in
+            // given
+            settings.automation.packageDecision = decision
+            try await fetch(store)
+            let todo = try #require(store.visibleTodos.first)
+
+            // when
+            await store.markDone(todo, automatically: true)
+
+            // then
+            let writes = gitlab.requests.filter { $0.method == "POST" }
+            #expect(writes.count == (decision == .enabled ? 1 : 0))
+            if decision != .enabled {
+                #expect(store.visibleTodos.map(\.id) == [todo.id])
+                await store.markDone(todo, automatically: false)
+                #expect(gitlab.requests.filter { $0.method == "POST" }.count == 1)
+            }
+            #expect(store.visibleTodos.isEmpty)
+        }
     }
 
     @Test func failedReadRetainsInboxAndAccountEpochPreventsReuse() async throws {
@@ -78,7 +102,7 @@ struct InboxTodoStoreTests {
             store.beginRefresh()
             let read = Task { await store.fetch() }
             try await gitlab.waitFor("reading")
-            await store.markDone(todo)
+            await store.markDone(todo, automatically: false)
             gitlab.write("release")
             let fetched = try #require(await read.value)
             let todos = try fetched.result.get()
@@ -97,7 +121,7 @@ struct InboxTodoStoreTests {
             gitlab.handler = { _ in InMemoryGitLab.output(error: "network unavailable", code: 1) }
             let changed = OSAllocatedUnfairLock(initialState: false)
             withObservationTracking { _ = store.visibleTodos } onChange: { changed.withLock { $0 = true } }
-            await store.markDone(todo)
+            await store.markDone(todo, automatically: false)
             #expect(changed.withLock { $0 })
             #expect(store.visibleTodos.map(\.id) == [401])
             #expect(store.lastError != nil)

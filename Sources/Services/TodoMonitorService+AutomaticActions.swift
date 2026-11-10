@@ -9,7 +9,7 @@ extension TodoMonitorService {
         let changed = settings.actionIsAutomatic(action, for: target) != enabled
         settings.setActionAutomatic(action, enabled: enabled, for: target)
         settings.save()
-        guard settings.automaticActionsAllowed, changed, enabled,
+        guard settings.automaticWritesAllowed, changed, enabled,
               glab.resolvedHost == target.host, glab.currentUsername == target.username else { return }
         switch action {
         case .commentPublication, .approval: await attention.resumeAutomaticAction(action, for: target)

@@ -4,6 +4,21 @@ import Testing
 
 @MainActor
 struct MRAutomaticActionPolicyTests {
+    @Test(arguments: [AutomationPackageDecision.undecided, .disabled, .enabled], MRAutomaticAction.allCases)
+    func automaticActionsRequireExplicitConsentEvenWithPermissiveFlags(_ decision: AutomationPackageDecision, _ action: MRAutomaticAction) async throws {
+        try await fixture { settings, _ in
+            settings.automation.applyPreset(.full, for: .codex)
+            settings.automation.packageDecision = decision
+            let ready = try request()
+            #expect(settings.automaticActionsAllowed)
+            #expect(settings.permitsAutomaticAction(action, for: ready, target: target) == (decision == .enabled))
+            #expect(settings.automation.hasEnabledAutomation == (decision == .enabled))
+            let presentation = MREffectivePolicyPresentation(input: .init(request: ready, target: target,
+                settings: settings, assistantReady: true))
+            if decision != .enabled { #expect(presentation.clauses == [.automationOff]) }
+        }
+    }
+
     @Test(arguments: MRAutomaticAction.allCases)
     func corruptedSafetyHistoryBlocksEveryAutomaticActionWithoutChangingPolicy(_ action: MRAutomaticAction) async throws {
         try await fixture { settings, defaults in

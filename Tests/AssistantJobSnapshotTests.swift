@@ -177,8 +177,31 @@ import Testing
         #expect(!result.contains("Expected head: old"))
         #expect(result.contains("Review the feedback."))
     }
+    @MainActor @Test(arguments: ["followUp", "resolve", "conflict"])
+    func manualWorkerCannotRetainAutomaticWriteGrantsAfterConsentIsRevoked(_ grant: String) throws {
+        // given
+        var configuration = AutomationSettings()
+        configuration.applyPreset(.full, for: .codex)
+        let handoff = AssistantAutomationRunner.Handoff(id: UUID(),
+            key: .init(assistant: .codex, work: .init(host: "gitlab.example.test", projectID: 1, iid: 2),
+                username: "me", workspace: "", access: .gitLabRead), title: "Manual work", prompt: "Task", createdAt: Date(),
+            allowsPush: grant == "conflict", followUpPushAllowed: grant == "followUp",
+            mergeRequestURL: URL(string: "https://gitlab.example.test/group/repo/-/merge_requests/2"),
+            resolvesOwnThreads: grant == "resolve", manual: true)
+        try AssistantJobExecutor.validateConfiguration(handoff, automation: configuration)
+
+        // when
+        configuration.packageDecision = .undecided
+
+        // then
+        #expect(throws: AssistantJobExecutor.ExecutionError.disabledPermission) {
+            try AssistantJobExecutor.validateConfiguration(handoff, automation: configuration)
+        }
+    }
+
     @MainActor @Test func rejectsQueuedJobsAfterTheirOriginatingRuleChanges() throws {
-        let original = AutomationSettings()
+        var original = AutomationSettings()
+        original.packageDecision = .enabled
         var handoff = AssistantAutomationRunner.Handoff(id: UUID(),
             key: .init(assistant: .codex, work: .init(host: "gitlab.example.test", projectID: 7, iid: 11),
                        username: "me", workspace: "", access: .gitLabRead), title: "Review", prompt: "Review",
@@ -198,7 +221,8 @@ import Testing
     }
 
     @MainActor @Test func unrelatedRepositoryScopeChangesDoNotInvalidateQueuedConfiguration() throws {
-        let original = AutomationSettings()
+        var original = AutomationSettings()
+        original.packageDecision = .enabled
         let handoff = AssistantAutomationRunner.Handoff(id: UUID(),
             key: .init(assistant: .codex, work: .init(host: "gitlab.example.test", projectID: 7, iid: 11),
                        username: "me", workspace: "", access: .gitLabRead), title: "Review", prompt: "Review",

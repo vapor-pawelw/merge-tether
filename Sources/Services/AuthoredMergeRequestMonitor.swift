@@ -79,7 +79,7 @@ final class AuthoredMergeRequestMonitor {
 
     func conflictAutomationState(for request: GitLabMergeRequest) -> ConflictAutomationPolicy.State? {
         guard let host = glab.resolvedHost, let username = glab.currentUsername,
-              settings.automation.packageDecision != .disabled, settings.automation.conflictTasksEnabled,
+              settings.automation.hasAutomaticActionConsent, settings.automation.conflictTasksEnabled,
               request.author.username == username, request.state == "opened",
               request.hasMergeConflict, let sha = request.sha, !sha.isEmpty,
               request.sourceProjectID != nil, request.targetProjectID != nil,
@@ -564,7 +564,7 @@ final class AuthoredMergeRequestMonitor {
     }
 
     private func scheduleConflictIfNeeded(_ request: GitLabMergeRequest, account: Account, user: GitLabAuthenticatedUser) async {
-        guard conflictTask == nil, settings.automation.packageDecision != .disabled,
+        guard conflictTask == nil, settings.automation.hasAutomaticActionConsent,
               settings.automation.conflictTasksEnabled, request.hasMergeConflict,
               settings.automation.scope.permits(request, host: account.host, username: account.username),
               let sourceSHA = request.sha,

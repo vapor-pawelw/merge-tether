@@ -270,7 +270,7 @@ final class MergeWorkflowAutomation {
     /// Reconsider that event only while every recorded effect is still absent;
     /// execution keeps the live account, source/target and atomic-claim checks.
     private func reconsiderSkippedPipelines(_ authored: [GitLabMergeRequest], user: GitLabAuthenticatedUser) {
-        guard settings.automation.autoClaimPipelineFailures, settings.automation.packageDecision != .disabled else { return }
+        guard settings.automation.autoClaimPipelineFailures, settings.automation.hasAutomaticActionConsent else { return }
         for entry in currentAdmissions where entry.state == .skipped && entry.event.kind == .pipelineFailure && entry.pipelineClaimAssessment == nil {
             guard entry.user == user, entry.assistantJobID == nil, entry.chatURL == nil,
                   (entry.summary ?? "").trimmingCharacters(in: .whitespacesAndNewlines).isEmpty,
@@ -632,7 +632,7 @@ final class MergeWorkflowAutomation {
     }
 
     private func configuredRule(for event: MergeWorkflowEvent) -> MergeWorkflowRule? {
-        guard let host = glab.resolvedHost, let username = glab.currentUsername,
+        guard settings.automation.hasAutomaticActionConsent, let host = glab.resolvedHost, let username = glab.currentUsername,
               settings.automation.scope.permits(event.mergeRequest, host: host, username: username) else { return nil }
         var rule = settings.automation.workflowRules[event.kind]
         rule.mode = rule.effectiveMode(for: event.kind)
@@ -654,7 +654,7 @@ final class MergeWorkflowAutomation {
               settings.automation.scope.permits(current, host: entry.host, username: entry.user.username),
               current.headPipeline?.id == key.pipelineID, current.headPipeline?.status == "failed",
               configuration.preservingScope(from: settings.automation) == settings.automation,
-              settings.automation.autoClaimPipelineFailures, settings.automation.packageDecision != .disabled,
+              settings.automation.autoClaimPipelineFailures, settings.automation.hasAutomaticActionConsent,
               shouldProceed(entry), configuredRule(for: entry.event)?.includes(current) == true,
               !settings.ignoredMergeRequests.contains(.init(host: entry.host, username: entry.user.username,
                                                           projectID: current.projectID, iid: current.iid)),
@@ -710,7 +710,7 @@ final class MergeWorkflowAutomation {
     }
 
     private func shouldProceed(_ entry: MergeWorkflowActivityEntry) -> Bool {
-        settings.automaticActionsAllowed && ownsAdmission(entry)
+        settings.automaticWritesAllowed && ownsAdmission(entry)
             && entry.event.kind != .reviewWaiting && isCurrent(host: entry.host, user: entry.user)
             && configuredRule(for: entry.event)?.mode == .assistant
             && (entry.event.kind != .pipelineFailure || settings.automation.autoClaimPipelineFailures

@@ -113,7 +113,7 @@ final class MRFeedbackLaunchCoordinator {
         return AssistantAutomationRunner.unhandledFeedback(notes, work: work(account, item.id), username: account.username, settings: settings)
     }
     func automaticallyHandlesFeedback(_ item: Item) -> Bool {
-        guard settings.automaticActionsAllowed, let account, let request = item.authoredRequest,
+        guard settings.automaticWritesAllowed, let account, let request = item.authoredRequest,
               request.state == "opened", request.author.username == account.username,
               item.url.isGitLabMergeRequest(host: account.host, iid: item.id.iid),
               settings.automation.scope.permits(request, host: account.host, username: account.username) else { return false }
@@ -168,7 +168,7 @@ final class MRFeedbackLaunchCoordinator {
     }
 
     func runAttentionFeedback(for item: Item, manual: Bool = true) async {
-        guard manual || settings.automaticActionsAllowed,
+        guard manual || settings.automaticWritesAllowed,
               let action = action(for: item), action == .ready(.assistant) || action == .failed,
               let account, let request = item.authoredRequest else { return }
         let notes = noteIDs(for: item, account: account)
@@ -193,13 +193,13 @@ final class MRFeedbackLaunchCoordinator {
 
     func runVerifiedAuthorFeedback(request: GitLabMergeRequest, noteIDs: Set<Int>, fingerprint: String,
                                   residual: AuthorFeedbackResidual? = nil, manual: Bool = true) async {
-        guard manual || settings.automaticActionsAllowed, let account,
+        guard manual || settings.automaticWritesAllowed, let account,
               request.author.username == account.username, !noteIDs.isEmpty,
               request.webURL.isGitLabMergeRequest(host: account.host, iid: request.iid) else { return }
         let configuration = settings.automation, rule = configuration.authorFeedback
         let workflow = configuration.workflowRules[.newDiscussion]
         guard rule.runner == .assistant, rule.isConfigured, rule.includes(project: request.webURL.gitLabProjectPath),
-              manual || (configuration.packageDecision != .disabled
+              manual || (configuration.hasAutomaticActionConsent
                   && configuration.scope.permits(request, host: account.host, username: account.username)
                   && (rule.isEnabled || (workflow.mode == .assistant && workflow.includes(request)))) else { return }
         let id = Item.ID(projectID: request.projectID, iid: request.iid)
@@ -213,7 +213,7 @@ final class MRFeedbackLaunchCoordinator {
                 username: account.username, settings: settings, glab: glab, manual: manual, verifiedFingerprint: fingerprint,
                 expectedHeadSHA: request.sha, verifiedResidual: residual ?? residualLookup(request, fingerprint)) {
                     self.owns(attempt) && self.settings.automation == configuration
-                        && (manual || self.settings.automaticActionsAllowed)
+                        && (manual || self.settings.automaticWritesAllowed)
                 }
             finish(attempt, outcome: outcome)
         } catch {

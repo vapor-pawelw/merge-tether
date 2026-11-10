@@ -4,6 +4,80 @@ import Testing
 
 @MainActor
 @Suite struct ConfirmationQueueTests {
+    @Test(arguments: ["fresh", "legacy110", "legacyFlags", "enabled", "disabled"])
+    func completedManualReviewDoesNotGrantAutomaticWriteConsent(_ installation: String) async throws {
+        // given
+        let stored = installation == "legacyFlags"
+            ? #"{"autoApproveEnabled":true,"publishDraftsWithoutConfirmation":true,"codexRelayEnabled":true}"# : nil
+        let consent: AutomationPackageDecision? = installation == "enabled" ? .enabled : (installation == "disabled" ? .disabled : nil)
+        let harness = try makeHarness(assistantWorked: false, consent: consent, storedAutomation: stored, legacyInboxOnly: installation == "legacy110")
+        defer { harness.cleanUp() }
+        if installation == "legacy110" {
+            #expect(harness.defaults.data(forKey: "automation") == nil)
+        }
+        let work = AssistantAutomationRunner.MergeRequestWork(host: host, projectID: 1, iid: 2)
+        harness.settings.glabPath = URL(fileURLWithPath: "/in-memory/glab")
+        let handler = try #require(harness.gitlab.handler)
+        harness.gitlab.handler = { call in
+            if call.arguments == ["config", "get", "host"] { return InMemoryGitLab.output(host) }
+            if call.arguments == ["auth", "status"] { return InMemoryGitLab.output(error: "Logged in to \(host) as me") }
+            return try await handler(call)
+        }
+        let coordinator = AssistantJobCoordinator(execute: { _, _ in
+            try harness.recordVerdict("no_objections", head: head)
+            return .init(result: .init(status: .succeeded, summary: "Review complete"), output: "")
+        })
+        let review = try await AssistantAutomationRunner.launch(.codex, title: "Manual review",
+            mergeRequestURL: URL(string: "https://\(host)/g/p/-/merge_requests/2")!, prompt: "Review the MR",
+            workspace: "", access: .gitLabRead, work: work, username: "me", settings: harness.settings,
+            isReview: true, mrWorkflow: .review, manual: true, expectedHeadSHA: head, jobCoordinator: coordinator,
+            configurationSnapshot: harness.settings.automation, glab: harness.glab)
+        await coordinator.waitForTermination()
+        #expect(harness.settings.assistantHandoffs.first { $0.id == review.id }?.execution?.state == .succeeded)
+        #expect(review.resolvesOwnThreads == (consent == .enabled))
+
+        // when
+        try await harness.poll()
+
+        // then
+        #expect(harness.settings.automation.packageDecision == (consent ?? .undecided))
+        if installation == "enabled" {
+            #expect(harness.log("approve.log").split(separator: "\n").count == 1)
+        } else {
+            #expect(harness.gitlab.requests.allSatisfy { $0.method == "GET" })
+            let item = try #require(harness.monitor.currentItems.first)
+            #expect(item.canApprove && !item.autoApproveReady)
+            await harness.monitor.approve(item.id)
+            #expect(harness.log("approve.log").split(separator: "\n").count == 1)
+        }
+    }
+
+    @Test(arguments: [AutomationPackageDecision.undecided, .disabled])
+    func revokingConsentDuringFinalApprovalReadPreventsTheWrite(_ decision: AutomationPackageDecision) async throws {
+        // given
+        let harness = try makeHarness(assistantWorked: true)
+        defer { harness.cleanUp() }
+        try harness.recordVerdict("no_objections", head: head)
+        let original = try #require(harness.gitlab.handler)
+        let id = MergeRequestAttentionMonitor.Item.ID(projectID: 1, iid: 2)
+        var reads = 0
+        harness.gitlab.handler = { call in
+            if call.endpoint == "/user", harness.monitor.confirmationStates[id] == .approving {
+                reads += 1
+                if reads == 2 { harness.settings.automation.packageDecision = decision }
+            }
+            return try await original(call)
+        }
+
+        // when
+        try await harness.poll()
+
+        // then
+        #expect(reads == 2)
+        #expect(harness.log("approve.log").isEmpty)
+        #expect(harness.settings.automaticActionsAllowed)
+    }
+
     @Test func failedExactLookupClearsCountsOnRetainedTrackedReviews() async throws {
         let harness = try makeHarness(assistantWorked: true)
         defer { harness.cleanUp() }
@@ -339,6 +413,7 @@ import Testing
 
     /// A GitLab stub where "me" (id 3) reviews MR !2, authored by someone else (id 9).
     private func makeHarness(assistantWorked: Bool, authored: Bool = false,
+                             consent: AutomationPackageDecision? = .enabled, storedAutomation: String? = nil, legacyInboxOnly: Bool = false,
                              duringAutomationCheck: (@MainActor (InMemoryGitLab) -> Void)? = nil,
                              approvalReadClock: @escaping ReadOnlyAssessmentRetry.Clock = { Date() },
                              assessment: ReReviewAssessment? = nil,
@@ -525,7 +600,13 @@ import Testing
             }
         }
 
+        if legacyInboxOnly {
+            defaults.set(true, forKey: "hasLaunchedBefore")
+            defaults.set(RefreshInterval.fiveMinutes.rawValue, forKey: "refreshInterval")
+        }
+        if let storedAutomation { defaults.set(Data(storedAutomation.utf8), forKey: "automation") }
         let settings = SettingsManager(defaults: defaults)
+        if let consent { settings.automation.packageDecision = consent }
         // These tests isolate publication/re-review from the independent acceptance workflow.
         settings.automation.autoResolveAcceptedFeedback = false
         if assistantWorked {
@@ -1668,6 +1749,26 @@ import Testing
         try await harness.poll()
         #expect(harness.log("approve.log").isEmpty)
         #expect(harness.monitor.currentItems.first?.canApprove == true)
+    }
+
+    @Test(arguments: [AutomationPackageDecision.undecided, .disabled])
+    func missingConsentStopsAutomaticPublicationButKeepsExplicitFreshPublication(_ decision: AutomationPackageDecision) async throws {
+        // given
+        let harness = try makeHarness(assistantWorked: true, consent: decision)
+        defer { harness.cleanUp() }
+        harness.settings.automation.publicationMode = .all
+        try harness.write("drafts.json", draftJSON)
+        try harness.recordVerdict("objections", head: head)
+
+        // when
+        try await harness.poll()
+        try await harness.poll()
+
+        // then
+        #expect(harness.log("selected.log").isEmpty && harness.log("publish.log").isEmpty)
+        #expect(harness.monitor.currentItems.first?.drafts.count == 2)
+        await harness.monitor.publishDrafts(of: .init(projectID: 1, iid: 2))
+        #expect(harness.log("publish.log") == "published\n")
     }
 
     @Test func persistenceHoldStopsAutomaticPublicationButKeepsExplicitFreshPublication() async throws {

@@ -37,10 +37,21 @@ struct AttentionAutomationTests {
                      mergeRequest: request, isAuthored: true)
     }
 
+    @Test(arguments: [AutomationPackageDecision.undecided, .disabled])
+    func permissionsWithoutConsentCannotHideManualAttentionReasons(_ decision: AutomationPackageDecision) throws {
+        var original = try item()
+        original.hasConflict = true
+        var configuration = AutomationSettings()
+        configuration.conflictTasksEnabled = true
+        configuration.packageDecision = decision
+        #expect(original.requiringUserAttention(automation: configuration, target: target).hasConflict)
+    }
+
     @Test func conflictVisibilityFollowsScopeAndSettingWithoutLosingTheReason() throws {
         var original = try item()
         original.hasConflict = true
         var config = AutomationSettings()
+        config.packageDecision = .enabled
         config.scope.mode = .selected
         config.conflictTasksEnabled = true
         #expect(original.requiringUserAttention(automation: config, target: target).hasConflict)
@@ -60,6 +71,7 @@ struct AttentionAutomationTests {
         original.draftCount = 2
         original.reReviewUnconfirmed = true
         var config = AutomationSettings()
+        config.packageDecision = .enabled
         config.conflictTasksEnabled = true
         let visible = original.requiringUserAttention(automation: config, target: target)
         #expect(visible.needsAttention && visible.draftCount == 2 && visible.reReviewUnconfirmed)
@@ -76,6 +88,7 @@ struct AttentionAutomationTests {
         original.feedback = [.init(id: 9, author: .init(id: 8, username: "alice", name: "Alice"),
                                    system: false, resolvable: true, resolved: false, resolvedBy: nil)]
         var config = AutomationSettings()
+        config.packageDecision = .enabled
         config.workflowRules[.newDiscussion].mode = .assistant
         let visible = original.requiringUserAttention(automation: config, target: target)
         #expect(!visible.needsDiscussion && visible.feedback.isEmpty)
@@ -129,6 +142,7 @@ struct AttentionAutomationTests {
                 waitingForReviewers: ["alice"]))
         }
         var config = AutomationSettings()
+        config.packageDecision = .enabled
         config.applyPreset(.full, for: .codex)
         let visible = original.presentingVerifiedAuthorFeedback().requiringUserAttention(automation: config,
             target: target, feedbackOwnedAutomatically: false)
@@ -146,6 +160,7 @@ struct AttentionAutomationTests {
         var original = try item()
         original.failedPipeline = true
         var config = AutomationSettings()
+        config.packageDecision = .enabled
         config.workflowRules[.pipelineFailure].mode = .assistant
         #expect(original.requiringUserAttention(automation: config, target: target).failedPipeline)
         #expect(!original.requiringUserAttention(automation: config, target: target, pipelineOwnedAutomatically: true).needsAttention)

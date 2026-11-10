@@ -30,7 +30,7 @@ extension AutomationSettings {
     func followUpAutomationHold(for request: GitLabMergeRequest, target: MRAutomationScope.Target,
                                 ignored: Bool = false, includeDraftPolicy: Bool = true,
                                 requiresTodoRouting: Bool = true) -> MRFollowUpAutomationHold? {
-        if packageDecision == .disabled { return .packageDisabled }
+        if !hasAutomaticActionConsent { return .packageDisabled }
         if ignored { return .ignored }
         if request.state != "opened" { return .closed }
         if !scope.resolve(target).active { return .scopePaused }

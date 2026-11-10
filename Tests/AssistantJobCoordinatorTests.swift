@@ -4,6 +4,31 @@ import Testing
 
 @MainActor
 @Suite struct AssistantJobCoordinatorTests {
+    @Test(arguments: [AutomationPackageDecision.undecided, .disabled, .enabled], [false, true])
+    func executableAdmissionRequiresConsentUnlessManuallyRequested(_ decision: AutomationPackageDecision, _ manual: Bool) async throws {
+        // given
+        let (settings, name, defaults) = try fixture()
+        defer { defaults.removePersistentDomain(forName: name) }
+        settings.automation.packageDecision = decision
+        var value = job()
+        value.manual = manual
+        settings.assistantHandoffs = [value]
+        var executions = 0
+        let coordinator = AssistantJobCoordinator(execute: { _, _ in
+            executions += 1
+            return .init(result: .init(status: .succeeded, summary: "Review complete"), output: "")
+        })
+
+        // when
+        let admitted = coordinator.schedule(value, settings: settings)
+        await coordinator.waitForTermination()
+
+        // then
+        #expect(admitted == (manual || decision == .enabled))
+        #expect(executions == (admitted ? 1 : 0))
+        #expect(settings.automaticActionsAllowed)
+    }
+
     @Test(arguments: [false, true])
     func corruptedRequiredJournalDeniesExecutableWorkIncludingManualJobs(_ manual: Bool) async throws {
         // given
@@ -261,7 +286,9 @@ import Testing
     private func fixture() throws -> (SettingsManager, String, UserDefaults) {
         let name = "AssistantJobCoordinatorTests.\(UUID())"
         let defaults = try #require(UserDefaults(suiteName: name))
-        return (SettingsManager(defaults: defaults), name, defaults)
+        let settings = SettingsManager(defaults: defaults)
+        settings.automation.packageDecision = .enabled
+        return (settings, name, defaults)
     }
 
     private func job(state: AssistantJobExecution.State? = .queued, iid: Int = 2,

@@ -148,7 +148,7 @@ final class MergeRequestAttentionMonitor {
             failedTriggers: Set<MergeWorkflowTrigger> = [], conflictTaskFailed: Bool = false,
             pipelineOwnedAutomatically: Bool = false, feedbackOwnedAutomatically: Bool = false
         ) -> Self {
-            guard let request = authoredRequest, request.state == "opened",
+            guard automation.hasAutomaticActionConsent, let request = authoredRequest, request.state == "opened",
                   request.author.username == target.username,
                   request.projectID == target.projectID, request.iid == target.iid,
                   request.webURL.isGitLabMergeRequest(host: target.host, iid: request.iid),
@@ -380,7 +380,7 @@ final class MergeRequestAttentionMonitor {
                 return try await glab.fetchMergeRequestDiscussions(projectID: target.projectID, iid: iid, host: target.host).flatMap(\.notes)
             }, isCurrent: { target, assistant, model, thinking in
                 guard let settings, glab.resolvedHost == target.host, glab.currentUsername == target.username,
-                      settings.automation.packageDecision != .disabled,
+                      settings.automation.hasAutomaticActionConsent,
                       settings.automation.assistant == assistant, settings.automation.publicationMode != .manual,
                       settings.automation.automaticPublicationPolicy.requiresAI,
                       settings.automation.scope.resolve(target).active else { return false }
@@ -1821,7 +1821,7 @@ final class MergeRequestAttentionMonitor {
         guard let settings, isCurrent(account), !Task.isCancelled else { return }
         let configuration = settings.automation
         let policy = configuration.automaticPublicationPolicy
-        guard configuration.packageDecision != .disabled, policy.mode != .manual, policy.requiresAI,
+        guard configuration.hasAutomaticActionConsent, policy.mode != .manual, policy.requiresAI,
               configuration.scope.permits(request, host: account.host, username: account.username) else { return }
         var sources: [Int: GitLabMergeRequestDiscussion.Note] = [:]
         for draft in drafts where policy.couldAllow(draft, request: request, userID: user.id, host: account.host) {
@@ -2360,7 +2360,7 @@ final class MergeRequestAttentionMonitor {
     ) async {
         let id = Item.ID(projectID: request.projectID, iid: request.iid)
         guard runtimePermitsReReview(id, account: account) else { return }
-        guard let settings, settings.automation.autoReReviewEnabled,
+        guard let settings, settings.automation.hasAutomaticActionConsent, settings.automation.autoReReviewEnabled,
               isCurrent(account), request.state == "opened", request.author.id == user.id,
               settings.automation.scope.permits(request, host: account.host, username: account.username) else {
             reReviewTasks.removeValue(forKey: id)?.cancel()
@@ -2552,7 +2552,7 @@ final class MergeRequestAttentionMonitor {
         }
         var finished = true
         for (reviewerID, noteID) in recipients.sorted(by: { $0.key < $1.key }) {
-            guard settings.automaticActionsAllowed else {
+            guard settings.automaticWritesAllowed else {
                 reReviewChecks[id]?.state = .unavailable
                 updateReReviewPresentation(id, unanswered: feedback.hasUnansweredFeedback)
                 return
@@ -2604,7 +2604,7 @@ final class MergeRequestAttentionMonitor {
                 async let finalDrafts = glab.fetchOwnDraftNoteCount(projectID: request.projectID, iid: request.iid, host: host, userID: user.id)
                 let (checkedMR, checkedThreads, checkedDraftCount, checkedReviewers, checkedApprovers) = try await
                     (finalMR, finalThreads, finalDrafts, finalReviewers, finalApprovers)
-                guard settings.automaticActionsAllowed, !Task.isCancelled, finalUser == user, isCurrent(account),
+                guard settings.automaticWritesAllowed, !Task.isCancelled, finalUser == user, isCurrent(account),
                       runtimePermitsReReview(id, account: account),
                       settings.automation == finalConfiguration, settings.automation.autoReReviewEnabled,
                       checkedDraftCount == 0, !settings.pendingCommentReviews.contains(target), checkedMR.state == "opened",
@@ -2625,7 +2625,7 @@ final class MergeRequestAttentionMonitor {
                 }
                 settings.reReviewReceipts[receiptKey] = ReReviewReceipt(noteID: noteID, unconfirmed: true, headSHA: head)
                 settings.save()
-                guard settings.automaticActionsAllowed else { throw CancellationError() }
+                guard settings.automaticWritesAllowed else { throw CancellationError() }
                 try await glab.requestReview(of: checkedMR, userID: reviewerID, username: username,
                                              alreadyAssigned: checkedReviewer != nil, host: host)
                 settings.reReviewReceipts[receiptKey]?.unconfirmed = false
