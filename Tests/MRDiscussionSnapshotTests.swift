@@ -3,6 +3,95 @@ import Testing
 @testable import GitLabTodos
 
 struct MRDiscussionSnapshotTests {
+    @Test(arguments: [
+        (#"{"new_path":"Sources/Views/File.swift","new_line":12}"#, "Sources/Views/File.swift:12", "File.swift:12"),
+        (#"{"old_path":"Deleted/Old.swift","old_line":8}"#, "Deleted/Old.swift:8", "Old.swift:8"),
+        (#"{"new_path":"Renamed/New.swift","old_path":"Old.swift","new_line":5,"old_line":2}"#, "Renamed/New.swift:5", "New.swift:5"),
+        (#"{"new_path":"Sources/File.swift","old_line":3}"#, "Sources/File.swift:3", "File.swift:3"),
+        (#"{"new_path":"Sources/File.swift"}"#, "Sources/File.swift", "File.swift"),
+        (#"{"new_path":"dir/a%2Fb #c:part.swift","new_line":4}"#, "dir/a%2Fb #c:part.swift:4", "a%2Fb #c:part.swift:4"),
+        (#"{"new_path":"dir/../literal\\name.swift","new_line":4}"#, #"dir/../literal\name.swift:4"#, #"literal\name.swift:4"#),
+        (#"{"new_path":"Root.swift","new_line":0}"#, "Root.swift:0", "Root.swift:0")
+    ])
+    func compactLocationsPreserveExactFullMetadata(position: String, full: String, compact: String) throws {
+        let decoded = try JSONDecoder().decode(GitLabDraftNote.Position.self, from: Data(position.utf8))
+        let location = try #require(MRDiscussionLocation(position: decoded))
+        #expect(location.full == full)
+        #expect(location.compact == compact)
+        let thread = try presentationThread(notes: "[{\"id\":1,\"position\":\(position)}]")
+        #expect(thread.location == full)
+    }
+
+    @Test func missingPathsHaveNoLocationAndLiteralTrailingSlashesRemainIntact() throws {
+        let position = try JSONDecoder().decode(GitLabDraftNote.Position.self, from: Data(#"{"new_line":8}"#.utf8))
+        #expect(MRDiscussionLocation(position: nil) == nil)
+        #expect(MRDiscussionLocation(position: position) == nil)
+        #expect(MRDiscussionLocation(full: "literal/path/").compact == "literal/path/")
+    }
+
+    @Test func rootCommentAndSystemEventsNeverCountAsOurPublishedReply() throws {
+        let thread = try presentationThread(notes: #"[{"id":1,"author":{"id":9,"username":"me"}},{"id":2,"system":true,"author":{"id":9,"username":"me"}},{"id":3,"author":{"id":7,"username":"reviewer"}}]"#)
+        #expect(thread.replySummary(currentUsername: "me").publishedReply == .none)
+        #expect(thread.replySummary(currentUsername: "reviewer").publishedReply == .published)
+    }
+
+    @Test func draftDoesNotCountAsPublishedAndCoexistsWithOwnPublishedReply() throws {
+        let notes = #"[{"id":1,"author":{"id":7,"username":"reviewer"}},{"id":2,"author":{"id":9,"username":"me"}}]"#
+        let drafts = #"[{"id":10,"author_id":9,"note":"Pending","discussion_id":"thread"}]"#
+        let thread = try presentationThread(notes: notes, drafts: drafts)
+        let own = thread.replySummary(currentUsername: "me")
+        #expect(own.publishedReply == .published)
+        #expect(own.draftCount == 1)
+        let draftOnly = try presentationThread(notes: #"[{"id":1,"author":{"id":7,"username":"reviewer"}}]"#, drafts: drafts)
+        #expect(draftOnly.replySummary(currentUsername: "me").publishedReply == .none)
+        #expect(draftOnly.replySummary(currentUsername: "me").draftCount == 1)
+        let withoutDraft = try presentationThread(notes: notes)
+        #expect(withoutDraft.replySummary(currentUsername: "me").draftCount == 0)
+    }
+
+    @Test func anotherAuthorsReplyAndAIOriginNeverStandInForCurrentAccount() throws {
+        let thread = try presentationThread(notes: #"[{"id":1,"author":{"id":7,"username":"reviewer"}},{"id":2,"author":{"id":8,"username":"agent"}}]"#, origins: [2: .verifiedAssistant])
+        #expect(thread.replySummary(currentUsername: "me").publishedReply == .none)
+        #expect(thread.replySummary(currentUsername: "agent").publishedReply == .published)
+        #expect(thread.replySummary(currentUsername: "AGENT").publishedReply == .none)
+    }
+
+    @Test func newerCommentsDistinguishEarlierReplyFromReplyToLatestActivity() throws {
+        let notes = #"[{"id":1,"author":{"id":7,"username":"reviewer"}},{"id":70,"created_at":"2026-11-10T12:00:00Z","author":{"id":9,"username":"me"}},{"id":2,"created_at":"invalid","author":{"id":7,"username":"reviewer"}}]"#
+        let earlier = try presentationThread(notes: notes)
+        #expect(earlier.replySummary(currentUsername: "me").publishedReply == .earlier)
+        let repliedAgain = try presentationThread(notes: String(notes.dropLast()) + #",{"id":4,"author":{"id":9,"username":"me"}},{"id":5,"system":true}]"#)
+        #expect(repliedAgain.replySummary(currentUsername: "me").publishedReply == .published)
+    }
+
+    @Test func unknownIdentityNeverClaimsNoReplyOrReplyToUnknownLatestAuthor() throws {
+        let unknown = try presentationThread(notes: #"[{"id":1},{"id":2,"author":{"id":9,"name":"me"}}]"#)
+        #expect(unknown.replySummary(currentUsername: "me").publishedReply == .unknown)
+        let missingUsernames: [String?] = [nil, "", "  "]
+        for username in missingUsernames {
+            #expect(unknown.replySummary(currentUsername: username).publishedReply == .unavailable)
+        }
+        let earlier = try presentationThread(notes: #"[{"id":1},{"id":2,"author":{"id":9,"username":"me"}},{"id":3}]"#)
+        #expect(earlier.replySummary(currentUsername: "me").publishedReply == .earlier)
+        let ownLatest = try presentationThread(notes: #"[{"id":1},{"id":2},{"id":3,"author":{"id":9,"username":"me"}}]"#)
+        #expect(ownLatest.replySummary(currentUsername: "me").publishedReply == .published)
+        let rootOnly = try presentationThread(notes: #"[{"id":1}]"#)
+        #expect(rootOnly.replySummary(currentUsername: "me").publishedReply == .none)
+    }
+
+    @Test func replySummaryDoesNotInterpretGeneralOrResolvedCommentsAsActionRequired() throws {
+        for flags in [#""resolvable":false"#, #""resolvable":true,"resolved":true"#] {
+            let thread = try presentationThread(notes: "[{\"id\":1,\(flags),\"author\":{\"id\":7,\"username\":\"reviewer\"}}]")
+            #expect(thread.replySummary(currentUsername: "me").publishedReply == .none)
+        }
+    }
+
+    private func presentationThread(notes: String, drafts: String = "[]", origins: [Int: MRDiscussionSnapshot.Origin] = [:]) throws -> MRDiscussionSnapshot.Thread {
+        let discussions = try JSONDecoder().decode([GitLabMergeRequestDiscussion].self, from: Data("[{\"id\":\"thread\",\"notes\":\(notes)}]".utf8))
+        let pending = try JSONDecoder().decode([GitLabDraftNote].self, from: Data(drafts.utf8))
+        return try #require(MRDiscussionSnapshot(discussions: discussions, drafts: pending, origins: origins).threads.first)
+    }
+
     @Test func groupsOpenResolvedAndGeneralWhilePreservingServerOrderWithinEachState() throws {
         let discussions = try JSONDecoder().decode([GitLabMergeRequestDiscussion].self, from: Data(#"""
         [

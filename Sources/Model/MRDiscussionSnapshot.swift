@@ -23,6 +23,28 @@ struct MRDiscussionSnapshot {
         let state: State
         let location: String?
         let origins: [Int: Origin]
+
+        struct ReplySummary {
+            enum PublishedReply: Equatable { case none, published, earlier, unknown, unavailable }
+            let publishedReply: PublishedReply
+            let draftCount: Int
+        }
+
+        func replySummary(currentUsername: String?) -> ReplySummary {
+            guard let currentUsername, !currentUsername.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else {
+                return .init(publishedReply: .unavailable, draftCount: drafts.count)
+            }
+            let replies = notes.filter { $0.system != true }.dropFirst()
+            let latestOwnReply = replies.lastIndex { $0.author?.username == currentUsername }
+            let state: ReplySummary.PublishedReply
+            if let latestOwnReply {
+                state = latestOwnReply == replies.indices.last ? .published : .earlier
+            } else {
+                state = replies.contains { $0.author?.username?.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty != false }
+                    ? .unknown : .none
+            }
+            return .init(publishedReply: state, draftCount: drafts.count)
+        }
     }
     var threads: [Thread] = []
     var standaloneDrafts: [GitLabDraftNote] = []
@@ -54,9 +76,7 @@ struct MRDiscussionSnapshot {
             let state: State = resolvable.isEmpty ? .general
                 : resolvable.allSatisfy { $0.resolved == true } ? .resolved : .open
             let position = notes.compactMap(\.position).first
-            let path = position?.newPath ?? position?.oldPath
-            let line = position?.newLine ?? position?.oldLine
-            let location = path.map { path in line.map { "\(path):\($0)" } ?? path }
+            let location = MRDiscussionLocation(position: position)?.full
             let noteIDs = Set(notes.compactMap(\.id))
             threads.append(.init(id: discussion.id.map { "discussion/\($0)" } ?? "unidentified/\(index)",
                 discussionID: discussion.id, notes: notes, drafts: pending.map(\.element), state: state,
@@ -67,5 +87,22 @@ struct MRDiscussionSnapshot {
             threads.filter { $0.state == state }
         }
         standaloneDrafts = drafts.enumerated().filter { !matchedDrafts.contains($0.offset) }.map(\.element)
+    }
+}
+
+struct MRDiscussionLocation: Equatable {
+    let full: String
+
+    var compact: String {
+        let filename = full.split(separator: "/", omittingEmptySubsequences: false).last.map(String.init)
+        return filename.flatMap { $0.isEmpty ? nil : $0 } ?? full
+    }
+
+    init(full: String) { self.full = full }
+
+    init?(position: GitLabDraftNote.Position?) {
+        guard let path = position?.newPath ?? position?.oldPath else { return nil }
+        let line = position?.newLine ?? position?.oldLine
+        full = line.map { "\(path):\($0)" } ?? path
     }
 }

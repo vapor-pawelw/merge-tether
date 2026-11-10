@@ -276,6 +276,116 @@
           }
         }
       }
+    },
+    "mrDiscussions.noOwnReply": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "No reply from you"
+          }
+        }
+      }
+    },
+    "mrDiscussions.noOwnReplyHelp": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "No published reply is attributed to the current account. The opening comment and system events do not count as replies. This is conversation history, not a request to take action."
+          }
+        }
+      }
+    },
+    "mrDiscussions.publishedReply": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Published reply"
+          }
+        }
+      }
+    },
+    "mrDiscussions.publishedReplyHelp": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "The current account has a published reply in this thread, with no newer comment following it. This does not mean the thread is addressed or resolved."
+          }
+        }
+      }
+    },
+    "mrDiscussions.earlierReply": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Published reply · newer comments"
+          }
+        }
+      }
+    },
+    "mrDiscussions.earlierReplyHelp": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "The current account replied earlier. Newer comments follow that reply, so it does not indicate a response to the latest comment. Private drafts are shown separately."
+          }
+        }
+      }
+    },
+    "mrDiscussions.replyUnknown": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Reply attribution unclear"
+          }
+        }
+      }
+    },
+    "mrDiscussions.replyUnknownHelp": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "At least one reply has no known username, so a reply from the current account cannot be confirmed or ruled out."
+          }
+        }
+      }
+    },
+    "mrDiscussions.replyUnavailable": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Reply status unavailable"
+          }
+        }
+      }
+    },
+    "mrDiscussions.replyUnavailableHelp": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "The current account username is unavailable, so published replies cannot be attributed. Private drafts are shown separately."
+          }
+        }
+      }
     }
   },
   "version": "1.0"

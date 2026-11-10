@@ -98,7 +98,8 @@ private struct MRDiscussionThreadView: View {
             DisclosureGroup(isExpanded: $isExpanded) {
                 if isExpanded {
                     VStack(alignment: .leading, spacing: 12) {
-                        ForEach(Array(comments.enumerated()), id: \.offset) { _, note in
+                        ForEach(Array(comments.enumerated()), id: \.offset) { index, note in
+                            if index > 0 { Divider().padding(.vertical, 2) }
                             MRDiscussionNoteView(note: note, origin: note.id.flatMap { thread.origins[$0] },
                                                  mergeRequestURL: mergeRequestURL, threadLocation: thread.location)
                         }
@@ -107,30 +108,60 @@ private struct MRDiscussionThreadView: View {
                     .padding(.top, 10)
                 }
             } label: {
-                VStack(alignment: .leading, spacing: 5) {
-                    HStack(alignment: .firstTextBaseline, spacing: 8) {
-                        Text(verbatim: discussionAuthor(comments.first?.author)).fontWeight(.medium)
-                        Text(stateLabel).foregroundStyle(stateColor)
-                        Spacer(minLength: 4)
-                        if !thread.drafts.isEmpty {
-                            Text(.MRDiscussions.mrDiscussionsDraftCount(thread.drafts.count)).foregroundStyle(Color.accentColor)
-                        }
-                    }
-                    .font(.caption)
-                    if let location = thread.location {
-                        Text(verbatim: location).font(.caption.monospaced()).foregroundStyle(.secondary)
-                    }
-                    if !isExpanded, let body = comments.first?.body {
-                        Text(verbatim: body).font(.subheadline).foregroundStyle(.secondary).lineLimit(2)
-                    }
-                }
+                threadHeader
             }
             .disclosureGroupStyle(MRDiscussionDisclosureStyle())
         }
         .padding(12)
         .frame(maxWidth: .infinity, alignment: .leading)
         .background(Color.secondary.opacity(0.045), in: RoundedRectangle(cornerRadius: 8))
+        .overlay { RoundedRectangle(cornerRadius: 8).strokeBorder(Color.secondary.opacity(0.1)) }
         .onAppear { if initiallyExpanded { isExpanded = true } }
+    }
+
+    private var threadHeader: some View {
+        let summary = thread.replySummary(currentUsername: currentUsername)
+        return VStack(alignment: .leading, spacing: 7) {
+            HStack(alignment: .firstTextBaseline, spacing: 8) {
+                if let location = thread.location {
+                    MRDiscussionLocationLabel(location: .init(full: location))
+                        .layoutPriority(1)
+                    Spacer(minLength: 4)
+                }
+                Text(stateLabel)
+                    .font(.caption2.weight(.medium)).foregroundStyle(stateColor)
+                    .padding(.horizontal, 7).padding(.vertical, 3)
+                    .background(stateColor.opacity(0.08), in: Capsule())
+                if thread.location == nil { Spacer(minLength: 4) }
+            }
+            HStack(alignment: .firstTextBaseline, spacing: 8) {
+                MRDiscussionAuthorView(author: comments.first?.author)
+                Spacer(minLength: 4)
+                if let posted = comments.first?.createdAt {
+                    Text(verbatim: discussionTimestamp(posted))
+                        .font(.caption2).foregroundStyle(.secondary).help(posted)
+                }
+            }
+            ViewThatFits(in: .horizontal) {
+                HStack(spacing: 8) { replyStatus(summary) }
+                VStack(alignment: .leading, spacing: 5) { replyStatus(summary) }
+            }
+            if !isExpanded, let body = comments.first?.body {
+                Text(verbatim: body).font(.subheadline).foregroundStyle(.secondary).lineLimit(2)
+                    .padding(.top, 1)
+            }
+        }
+    }
+
+    @ViewBuilder
+    private func replyStatus(_ summary: MRDiscussionSnapshot.Thread.ReplySummary) -> some View {
+        MRDiscussionReplyBadge(state: summary.publishedReply)
+        if summary.draftCount > 0 {
+            Label { Text(.MRDiscussions.mrDiscussionsDraftCount(summary.draftCount)) } icon: {
+                Image(systemName: "square.and.pencil")
+            }
+            .font(.caption2.weight(.medium)).foregroundStyle(Color.accentColor)
+        }
     }
 
     private var draftRows: some View {
@@ -176,7 +207,7 @@ private struct MRDiscussionNoteView: View {
     var body: some View {
         VStack(alignment: .leading, spacing: 7) {
             HStack(alignment: .firstTextBaseline, spacing: 8) {
-                Text(verbatim: discussionAuthor(note.author)).fontWeight(.medium)
+                MRDiscussionAuthorView(author: note.author)
                 if let origin { MRDiscussionAIBadge(origin: origin) }
                 Spacer(minLength: 4)
                 if let posted = note.createdAt {
@@ -189,8 +220,8 @@ private struct MRDiscussionNoteView: View {
                 }
             }
             .font(.caption)
-            if let location = discussionLocation(note.position), location != threadLocation {
-                Text(verbatim: location).font(.caption.monospaced()).foregroundStyle(.secondary).textSelection(.enabled)
+            if let location = MRDiscussionLocation(position: note.position), location.full != threadLocation {
+                MRDiscussionLocationLabel(location: location).textSelection(.enabled)
             }
             MRDiscussionBody(source: note.body)
         }
@@ -219,8 +250,8 @@ private struct MRDiscussionDraftView: View {
                 if let onDelete { DraftDeleteButton(draft: draft, disabled: selectionDisabled, onDelete: onDelete) }
             }
             .font(.caption)
-            if let location = discussionLocation(draft.position), location != threadLocation {
-                Text(verbatim: location).font(.caption.monospaced()).foregroundStyle(.secondary).textSelection(.enabled)
+            if let location = MRDiscussionLocation(position: draft.position), location.full != threadLocation {
+                MRDiscussionLocationLabel(location: location).textSelection(.enabled)
             }
             MRDiscussionBody(source: draft.note)
         }
@@ -273,12 +304,73 @@ private struct MRDiscussionBody: View {
     }
 }
 
-private func discussionAuthor(_ author: GitLabWorkflowUser?) -> String {
-    if let username = author?.username, !username.isEmpty {
-        if let name = author?.name, !name.isEmpty, name != username { return "\(name) (@\(username))" }
-        return "@\(username)"
+private struct MRDiscussionLocationLabel: View {
+    let location: MRDiscussionLocation
+
+    var body: some View {
+        Label { Text(verbatim: location.compact) } icon: { Image(systemName: "doc.text") }
+            .font(.caption.monospaced()).foregroundStyle(.secondary)
+            .lineLimit(1).truncationMode(.middle)
+            .help(Text(verbatim: location.full))
+            .accessibilityElement(children: .ignore)
+            .accessibilityLabel(Text(verbatim: location.full))
     }
-    return author?.name ?? String(localized: .MRDiscussions.mrDiscussionsUnknownAuthor)
+}
+
+private struct MRDiscussionAuthorView: View {
+    let author: GitLabWorkflowUser?
+
+    var body: some View {
+        HStack(alignment: .firstTextBaseline, spacing: 5) {
+            if let name = author?.name, !name.isEmpty, name != author?.username {
+                Text(verbatim: name).fontWeight(.semibold)
+                if let username = author?.username, !username.isEmpty {
+                    Text(verbatim: "@\(username)").foregroundStyle(.secondary)
+                }
+            } else if let username = author?.username, !username.isEmpty {
+                Text(verbatim: "@\(username)").fontWeight(.semibold)
+            } else {
+                Text(.MRDiscussions.mrDiscussionsUnknownAuthor).foregroundStyle(.secondary)
+            }
+        }
+        .font(.caption).lineLimit(1).truncationMode(.middle)
+    }
+}
+
+private struct MRDiscussionReplyBadge: View {
+    let state: MRDiscussionSnapshot.Thread.ReplySummary.PublishedReply
+
+    private var label: LocalizedStringResource {
+        switch state {
+        case .none: .MRDiscussions.mrDiscussionsNoOwnReply
+        case .published: .MRDiscussions.mrDiscussionsPublishedReply
+        case .earlier: .MRDiscussions.mrDiscussionsEarlierReply
+        case .unknown: .MRDiscussions.mrDiscussionsReplyUnknown
+        case .unavailable: .MRDiscussions.mrDiscussionsReplyUnavailable
+        }
+    }
+    private var explanation: LocalizedStringResource {
+        switch state {
+        case .none: .MRDiscussions.mrDiscussionsNoOwnReplyHelp
+        case .published: .MRDiscussions.mrDiscussionsPublishedReplyHelp
+        case .earlier: .MRDiscussions.mrDiscussionsEarlierReplyHelp
+        case .unknown: .MRDiscussions.mrDiscussionsReplyUnknownHelp
+        case .unavailable: .MRDiscussions.mrDiscussionsReplyUnavailableHelp
+        }
+    }
+    private var symbol: String {
+        switch state {
+        case .published, .earlier: "arrowshape.turn.up.left"
+        case .none: "bubble.left"
+        case .unknown, .unavailable: "questionmark.bubble"
+        }
+    }
+
+    var body: some View {
+        Label { Text(label) } icon: { Image(systemName: symbol) }
+            .font(.caption2).foregroundStyle(.secondary)
+            .help(Text(explanation)).accessibilityHint(Text(explanation))
+    }
 }
 
 private func discussionTimestamp(_ raw: String) -> String {
@@ -286,12 +378,6 @@ private func discussionTimestamp(_ raw: String) -> String {
     formatter.formatOptions = [.withInternetDateTime, .withFractionalSeconds]
     let date = formatter.date(from: raw) ?? ISO8601DateFormatter().date(from: raw)
     return date?.formatted(date: .abbreviated, time: .shortened) ?? raw
-}
-
-private func discussionLocation(_ position: GitLabDraftNote.Position?) -> String? {
-    guard let path = position?.newPath ?? position?.oldPath else { return nil }
-    let line = position?.newLine ?? position?.oldLine
-    return line.map { "\(path):\($0)" } ?? path
 }
 
 private func discussionNoteURL(_ url: URL, id: Int) -> URL? {

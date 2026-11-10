@@ -6,6 +6,8 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 
 ## Unreleased
 
+- Make Details discussion threads easier to scan with compact filenames, full-path hover descriptions, clearer comment hierarchy and separate published-reply and private-draft status for the current account.
+
 - Index linked assistant history once per workflow projection to reduce board and history processing while preserving current execution results and account checks.
 
 - Reduce repeated MR-board fingerprint work by preparing exact request bindings once per projection, preserving separate catalog and action evidence.
