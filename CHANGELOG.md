@@ -6,6 +6,8 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 
 ## Unreleased
 
+- Distinguish general discussion threads with a purple status label in MR Details, and group open, resolved and general threads while preserving GitLab order within each group.
+
 - Separate saved iOS pairing from connection progress and failure, bound the initial wait, and add an explicit Reconnect action alongside board refresh without forgetting trust or replaying commands.
 
 - Escalate source-bound technical questions from comment verification to the configured feedback reviewer/fixer, keeping private hypotheses separate from original reviewer requirements and reusing the existing scoped recovery budget and permissions.

@@ -17,9 +17,6 @@ struct MRDiscussionThreadsView: View {
     var draftsFirst = false
     let onRefresh: () -> Void
 
-    private var pendingThreads: [MRDiscussionSnapshot.Thread] { snapshot.threads.filter { !$0.drafts.isEmpty } }
-    private var otherThreads: [MRDiscussionSnapshot.Thread] { snapshot.threads.filter { $0.drafts.isEmpty } }
-
     var body: some View {
         VStack(alignment: .leading, spacing: 12) {
             HStack {
@@ -40,7 +37,7 @@ struct MRDiscussionThreadsView: View {
                 Text(isLoading ? .MRDiscussions.mrDiscussionsLoading : .MRDiscussions.mrDiscussionsUnavailable)
                     .font(.caption).foregroundStyle(.secondary)
             }
-            ForEach(pendingThreads) { thread in threadView(thread) }
+            ForEach(snapshot.threads) { thread in threadView(thread) }
             ForEach(Array(snapshot.standaloneDrafts.enumerated()), id: \.offset) { _, draft in
                 VStack(alignment: .leading, spacing: 9) {
                     Text(draft.discussionID == nil ? .MRDiscussions.mrDiscussionsNewComment
@@ -54,7 +51,6 @@ struct MRDiscussionThreadsView: View {
                 .frame(maxWidth: .infinity, alignment: .leading)
                 .background(Color.accentColor.opacity(0.04), in: RoundedRectangle(cornerRadius: 8))
             }
-            ForEach(otherThreads) { thread in threadView(thread) }
             if hasLoaded && !isLoading && snapshot.threads.isEmpty && snapshot.standaloneDrafts.isEmpty {
                 Text(.MRDiscussions.mrDiscussionsEmpty).font(.subheadline).foregroundStyle(.secondary)
             }
@@ -88,6 +84,13 @@ private struct MRDiscussionThreadView: View {
         case .general: .MRDiscussions.mrDiscussionsGeneral
         }
     }
+    private var stateColor: Color {
+        switch thread.state {
+        case .open: .secondary
+        case .resolved: .green
+        case .general: .purple
+        }
+    }
 
     var body: some View {
         VStack(alignment: .leading, spacing: 12) {
@@ -107,7 +110,7 @@ private struct MRDiscussionThreadView: View {
                 VStack(alignment: .leading, spacing: 5) {
                     HStack(alignment: .firstTextBaseline, spacing: 8) {
                         Text(verbatim: discussionAuthor(comments.first?.author)).fontWeight(.medium)
-                        Text(stateLabel).foregroundStyle(thread.state == .resolved ? .green : .secondary)
+                        Text(stateLabel).foregroundStyle(stateColor)
                         Spacer(minLength: 4)
                         if !thread.drafts.isEmpty {
                             Text(.MRDiscussions.mrDiscussionsDraftCount(thread.drafts.count)).foregroundStyle(Color.accentColor)

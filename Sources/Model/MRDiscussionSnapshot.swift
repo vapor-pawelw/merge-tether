@@ -62,10 +62,10 @@ struct MRDiscussionSnapshot {
                 discussionID: discussion.id, notes: notes, drafts: pending.map(\.element), state: state,
                 location: location, origins: origins.filter { noteIDs.contains($0.key) }))
         }
-        threads = threads.enumerated().sorted { lhs, rhs in
-            if lhs.element.drafts.isEmpty != rhs.element.drafts.isEmpty { return !lhs.element.drafts.isEmpty }
-            return lhs.offset < rhs.offset
-        }.map(\.element)
+        // Group by GitLab state without changing server order within a group.
+        threads = [State.open, .resolved, .general].flatMap { state in
+            threads.filter { $0.state == state }
+        }
         standaloneDrafts = drafts.enumerated().filter { !matchedDrafts.contains($0.offset) }.map(\.element)
     }
 }
