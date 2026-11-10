@@ -119,6 +119,11 @@ Phone readiness requires an encrypted response to a fresh challenge, with a
 45-second lease measured from the challenge. Previous data remains visible on a
 connection failure. Initial catalog sync and GitLab errors disable writes.
 
+The companion shows a notice when the Mac's safety data needs attention and automatic
+actions are paused. Refreshing and manual checks remain available. Manual writes
+still use the Mac's existing guards and required saved receipts. Older phones can
+ignore the additive notice field; it never grants action permission.
+
 Commands bind a host session, authenticated account, card, action and content token.
 The Mac refreshes before checking the token. Approval pins the displayed commit;
 publication checks the live commit and exact remaining draft content before each

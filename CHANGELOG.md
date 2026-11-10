@@ -6,6 +6,10 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 
 ## Unreleased
 
+- Show the Mac's safety pause on iPhone while keeping refresh and manual checks available.
+
+- Bind phone publication to the checked account, CLI and signed-in user, and stop selected Mac publication after an account round trip.
+
 - Show the phone running-action indicator above the card action buttons.
 
 - Reject stale phone commands and receipts after reconnects or account changes, retain write serialization across sessions, and discard disconnected thread-resolution previews.

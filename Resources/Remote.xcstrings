@@ -1,6 +1,23 @@
 {
   "sourceLanguage": "en",
   "strings": {
+    "remote.automation.paused": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Automatic actions are paused. Check MergeTether on your Mac; refreshing and manual checks are still available."
+          }
+        },
+        "pl": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Automatyczne działania są wstrzymane. Sprawdź MergeTether na Macu; nadal możesz odświeżać dane i wykonywać ręczne sprawdzenia."
+          }
+        }
+      }
+    },
     "remote.mac.pairPhone": {
       "extractionState": "manual",
       "localizations": {

@@ -142,10 +142,11 @@ public struct RemoteBoard: Codable, Equatable, Sendable {
     public var account: String
     public var updatedAt: Date?
     public var partial: Bool
+    public var automationPaused: Bool?
     public var lanes: [RemoteLane]
-    public init(hostSession: UUID, account: String, updatedAt: Date? = nil, partial: Bool = false, lanes: [RemoteLane]) {
+    public init(hostSession: UUID, account: String, updatedAt: Date? = nil, partial: Bool = false, lanes: [RemoteLane], automationPaused: Bool? = nil) {
         self.hostSession = hostSession; self.account = account; self.updatedAt = updatedAt
-        self.partial = partial; self.lanes = lanes
+        self.partial = partial; self.lanes = lanes; self.automationPaused = automationPaused
     }
     public var cards: [RemoteCard] { lanes.flatMap(\.cards) }
 }

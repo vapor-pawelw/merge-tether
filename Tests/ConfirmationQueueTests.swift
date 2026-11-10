@@ -1060,6 +1060,97 @@ import Testing
         #expect(harness.settings.pendingCommentReviews.isEmpty)
     }
 
+    @Test(arguments: ["account", "executable"])
+    func remotePublicationRejectsAChangedSessionDuringTheDraftRead(_ change: String) async throws {
+        let harness = try makeHarness(assistantWorked: false)
+        defer { harness.cleanUp() }
+        try harness.write("drafts.json", draftJSON)
+        try await harness.poll()
+        let item = try #require(harness.monitor.currentItems.first)
+        try #require(harness.monitor.hasSyncedCurrentCatalog)
+        try #require(item.mergeRequest?.sha == head && item.drafts.compactMap(\.id) == [11, 12])
+        let handler = try #require(harness.gitlab.handler)
+        var changed = false
+        harness.gitlab.handler = { request in
+            let response = try await handler(request)
+            if !changed, request.method == "GET", request.endpoint.contains("/draft_notes?") {
+                changed = true
+                if change == "account" {
+                    harness.glab.currentUsername = "other"; harness.glab.currentUsername = "me"
+                } else { harness.glab.glabPath = URL(fileURLWithPath: "/in-memory/replaced-glab") }
+            }
+            return response
+        }
+        let result = await harness.monitor.publishRemoteDrafts(of: item.id, head: head, expectedDrafts: item.drafts)
+        #expect(changed)
+        #expect(result == .changed)
+        #expect(harness.log("selected.log").isEmpty && harness.log("publish.log").isEmpty)
+        #expect(harness.monitor.confirmationStates[item.id] != .publishing)
+    }
+
+    @Test func remotePublicationRechecksTheAuthenticatedPrincipalBeforePosting() async throws {
+        let harness = try makeHarness(assistantWorked: false)
+        defer { harness.cleanUp() }
+        try harness.write("drafts.json", draftJSON)
+        try await harness.poll()
+        let item = try #require(harness.monitor.currentItems.first)
+        try harness.write("live-user.json", #"{"id":99,"username":"me"}"#)
+        let result = await harness.monitor.publishRemoteDrafts(of: item.id, head: head, expectedDrafts: item.drafts)
+        #expect(result == .changed)
+        #expect(harness.log("selected.log").isEmpty && harness.log("publish.log").isEmpty)
+    }
+
+    @Test(arguments: ["account", "executable"])
+    func remotePublicationStopsAfterASessionChangeDuringTheFirstWrite(_ change: String) async throws {
+        let harness = try makeHarness(assistantWorked: false)
+        defer { harness.cleanUp() }
+        try harness.write("drafts.json", draftJSON)
+        try await harness.poll()
+        let item = try #require(harness.monitor.currentItems.first)
+        let handler = try #require(harness.gitlab.handler)
+        var changed = false
+        harness.gitlab.handler = { request in
+            let response = try await handler(request)
+            if request.method == "PUT", request.endpoint.hasSuffix("/11/publish") {
+                changed = true
+                if change == "account" {
+                    harness.glab.currentUsername = "other"; harness.glab.currentUsername = "me"
+                } else { harness.glab.glabPath = URL(fileURLWithPath: "/in-memory/replaced-glab") }
+            }
+            return response
+        }
+        let result = await harness.monitor.publishRemoteDrafts(of: item.id, head: head, expectedDrafts: item.drafts)
+        try #require(changed)
+        #expect(result == .uncertain)
+        #expect(harness.log("selected.log").contains("/11/publish"))
+        #expect(!harness.log("selected.log").contains("/12/publish"))
+        #expect(harness.log("publish.log").isEmpty)
+        #expect(harness.monitor.confirmationStates[item.id] != .publishing)
+    }
+
+    @Test func selectedPublicationRejectsAnAccountRoundTripDuringTheDraftRead() async throws {
+        let harness = try makeHarness(assistantWorked: false)
+        defer { harness.cleanUp() }
+        try harness.write("drafts.json", draftJSON)
+        try await harness.poll()
+        let item = try #require(harness.monitor.currentItems.first)
+        let target = MRDiscussionTarget(host: host, username: "me", projectID: 1, iid: 2, url: item.url)
+        let handler = try #require(harness.gitlab.handler)
+        var changed = false
+        harness.gitlab.handler = { request in
+            let response = try await handler(request)
+            if !changed, request.method == "GET", request.endpoint.contains("/draft_notes?") {
+                changed = true
+                harness.glab.currentUsername = "other"; harness.glab.currentUsername = "me"
+            }
+            return response
+        }
+        await harness.monitor.publishDrafts(item.drafts, for: target)
+        #expect(changed)
+        #expect(harness.log("selected.log").isEmpty && harness.log("publish.log").isEmpty)
+        #expect(harness.monitor.confirmationStates[item.id] != .publishing)
+    }
+
     @Test func remotePublicationStopsWhenAnUnseenDraftAppearsBetweenWrites() async throws {
         let harness = try makeHarness(assistantWorked: false)
         defer { harness.cleanUp() }

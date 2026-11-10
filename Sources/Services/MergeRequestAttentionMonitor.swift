@@ -1595,15 +1595,18 @@ final class MergeRequestAttentionMonitor {
             confirmationStates[id] = .changed
             return
         }
-        let generation = accountGeneration
-        func currentContext() -> Bool { generation == accountGeneration && isCurrent(account) }
+        let generation = accountGeneration, revision = glab.accountRevision
+        func currentContext() -> Bool {
+            generation == accountGeneration && revision == glab.accountRevision && isCurrent(account)
+        }
         func display(_ drafts: [GitLabDraftNote]) {
             let visible = drafts.filter { publishedDrafts[id]?.contains($0) != true }
             updateItem(id) { $0.drafts = visible; $0.draftCount = visible.count }
         }
         confirmationStates[id] = .publishing
         defer {
-            if currentContext(), confirmationStates[id] == .publishing { confirmationStates[id] = nil }
+            // Release this run's local lock even if its account revision changed.
+            if generation == accountGeneration, confirmationStates[id] == .publishing { confirmationStates[id] = nil }
             signalAutomaticActionIdle()
         }
         var remaining = selected
@@ -1920,12 +1923,16 @@ final class MergeRequestAttentionMonitor {
     enum RemotePublicationResult { case completed, changed, uncertain, partial }
 
     func publishRemoteDrafts(of id: Item.ID, head: String, expectedDrafts: [GitLabDraftNote]) async -> RemotePublicationResult {
-        guard let account, isCurrent(account), let user, !isConfirming(id),
+        guard let account, isCurrent(account), let user, let executable = glab.glabPath, !isConfirming(id),
               !expectedDrafts.isEmpty, expectedDrafts.allSatisfy(AICommentAssessmentStore.safeForAutomaticPublication),
               expectedDrafts.allSatisfy({ $0.id != nil && $0.authorID == user.id }),
               Set(expectedDrafts.compactMap(\.id)).count == expectedDrafts.count,
               let displayed = items.first(where: { $0.id == id }), displayed.drafts == expectedDrafts else { return .changed }
-        let generation = accountGeneration
+        let generation = accountGeneration, revision = glab.accountRevision
+        func currentContext() -> Bool {
+            generation == accountGeneration && revision == glab.accountRevision
+                && executable == glab.glabPath && isCurrent(account)
+        }
         confirmationStates[id] = .publishing
         defer {
             if generation == accountGeneration, confirmationStates[id] == .publishing { confirmationStates[id] = nil }
@@ -1936,18 +1943,25 @@ final class MergeRequestAttentionMonitor {
         var publishedAny = false
         do {
             for draft in expectedDrafts {
+                try Task.checkCancellation()
                 async let live = glab.fetchMergeRequest(projectID: id.projectID, iid: id.iid, host: account.host)
-                async let pending = glab.fetchOwnDraftNotes(projectID: id.projectID, iid: id.iid, host: account.host, userID: user.id)
-                let (request, drafts) = try await (live, pending)
-                guard isCurrent(account), request.state == "opened", request.sha == head,
+                async let authenticated = glab.fetchAuthenticatedUser(host: account.host, expectedUsername: account.username)
+                let (request, liveUser) = try await (live, authenticated)
+                guard currentContext() else { return publishedAny ? .partial : .changed }
+                guard liveUser == user else { throw GlabError.notAuthenticated }
+                // Read the exact bodies last, after identity checks that can suspend.
+                let drafts = try await glab.fetchOwnDraftNotes(projectID: id.projectID, iid: id.iid, host: account.host, userID: user.id)
+                guard currentContext(), request.state == "opened", request.sha == head,
+                      request.projectID == id.projectID, request.iid == id.iid, request.webURL == displayed.url,
                       drafts == remaining, let draftID = draft.id else {
-                    if isCurrent(account) { confirmationStates[id] = .changed }
+                    if currentContext() { confirmationStates[id] = .changed }
                     return publishedAny ? .partial : .changed
                 }
+                try Task.checkCancellation()
                 attemptedWrite = true
                 try await glab.publishDraftNote(projectID: id.projectID, iid: id.iid, draftID: draftID, host: account.host)
                 attemptedWrite = false
-                guard isCurrent(account) else { return .uncertain }
+                guard currentContext() else { return .uncertain }
                 publishedAny = true
                 remaining.removeAll { $0 == draft }
                 publishedDrafts[id, default: []].append(draft)
@@ -1956,10 +1970,11 @@ final class MergeRequestAttentionMonitor {
             previousDrafts[id] = nil
             confirmationStates[id] = nil
             await completeCommentReviewAfterPublication(id, snapshot: displayed.commentReviewSnapshot, published: expectedDrafts, account: account, user: user)
+            guard currentContext() else { return .uncertain }
             await refreshReReviewAfterPublication(id, account: account, user: user)
-            return .completed
+            return currentContext() ? .completed : .uncertain
         } catch {
-            if isCurrent(account) { confirmationStates[id] = .failed }
+            if currentContext() { confirmationStates[id] = .failed }
             return attemptedWrite ? .uncertain : (publishedAny ? .partial : .changed)
         }
     }
