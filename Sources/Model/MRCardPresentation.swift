@@ -32,7 +32,7 @@ struct MRCardPresentation {
     let automaticPipelineProgress: Bool
     let automaticMergeProgress: Bool
     private var item: MergeRequestAttentionMonitor.Item { row.item }
-    private var finishedState: MergeRequestFinishedState? { .init(item.mergeRequest) }
+    private var finishedState: MergeRequestFinishedState? { .init(row.displayRequest) }
 
     init(row: MergeRequestBoardSnapshot.Row, reviewingContext: ReviewingContext,
          allowsRemoval: Bool, assistantReady: Bool,
@@ -58,11 +58,11 @@ struct MRCardPresentation {
     init(row: MergeRequestBoardSnapshot.Row, monitor: TodoMonitorService, allowsRemoval: Bool) {
         let ready = monitor.assistantDependencies.available.contains(monitor.settings.automation.assistant)
         let target = monitor.scopeTarget(projectID: row.id.projectID, iid: row.id.iid, url: row.item.url)
-        let automatic = target.map {
+        let automatic = row.evidenceMatchesCatalogContext ? target.map {
             row.item.draftIDsHandledAutomatically(automation: monitor.settings.automation, target: $0,
                 assistantPreparing: ready || monitor.assistantDependencies.isChecking,
                 publicationAutomatic: monitor.settings.actionIsAutomatic(.commentPublication, for: $0))
-        } ?? []
+        } ?? [] : []
         self.init(row: row, reviewingContext: monitor.reviewingContext(for: row), allowsRemoval: allowsRemoval,
             assistantReady: ready, confirmationState: monitor.attention.confirmationStates[row.id],
             automaticallyPublishedDraftIDs: automatic,
@@ -147,7 +147,7 @@ struct MRCardPresentation {
         if busy || (isRefreshingAttention && showsReadProgress) { return progressTitle }
         if item.authorFeedbackStatus?.waitingForReviewer == true { return .AuthorFeedback.authorFeedbackWaitingChip }
         guard allowsRemoval else {
-            return item.section == .draftMergeRequests ? .AutomationProgress.progressOwnDraft : .AutomationProgress.progressMonitoring
+            return row.isDraft ? .AutomationProgress.progressOwnDraft : .AutomationProgress.progressMonitoring
         }
         return reviewingContext.status == .activityUnknown ? reviewingContext.presenceMessage : reviewingContext.statusMessage
     }

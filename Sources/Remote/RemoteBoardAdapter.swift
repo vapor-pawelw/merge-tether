@@ -101,7 +101,7 @@ import MergeTetherRemote
                     card = self.card(item, account: account, extraActions: extras, context: handoffs.map(\.id).sorted() + [(try? RemoteDigest.token(monitor.settings.automation)) ?? ""])
                     let presentation = MRCardPresentation(row: row, monitor: monitor, allowsRemoval: result.lanes[lane].id == .reviewed)
                     card = self.presentation(card, model: presentation)
-                    if item.mergeRequest?.state == "merged" || item.mergeRequest?.state == "closed" {
+                    if row.displayRequest?.state == "merged" || row.displayRequest?.state == "closed" {
                         card.actions = []
                         result.lanes[lane].cards[index] = card
                         continue
@@ -116,7 +116,8 @@ import MergeTetherRemote
                     let busy = presentation.actionsBlocked
                     if busy { card.actions = [] }
                     else {
-                        card = mergeActions(card, item: item, status: mergeStatus, monitor: monitor, account: account)
+                        card = mergeActions(card, item: item, status: mergeStatus, monitor: monitor, account: account,
+                            evidenceMatchesCatalogContext: row.evidenceMatchesCatalogContext)
                         let intent = row.attentionIntents.first { $0.state == .failed } ?? row.attentionIntents.first { $0.state == .pending }
                         if let intent, intent.kind == .refresh || monitor.availableAssistants.contains(monitor.settings.automation.assistant),
                            let token = try? RemoteDigest.token([account, try RemoteDigest.token(intent), try RemoteDigest.token(monitor.settings.automation)]) {
@@ -151,13 +152,14 @@ import MergeTetherRemote
     }
 
     static func mergeActions(_ original: RemoteCard, item: MergeRequestAttentionMonitor.Item,
-                             status: AuthoredMergeRequestStatus?, monitor: TodoMonitorService, account: String) -> RemoteCard {
+                             status: AuthoredMergeRequestStatus?, monitor: TodoMonitorService, account: String,
+                             evidenceMatchesCatalogContext: Bool = true) -> RemoteCard {
         var card = original
         guard item.isAuthored, item.mergeRequest?.author.username == monitor.glab.currentUsername,
               let request = item.mergeRequest, request.state == "opened",
               let token = try? RemoteDigest.token([account, try RemoteDigest.token(request),
                   item.observedDiscussionFingerprint ?? "", try MergeSubmissionFingerprint.configuration(monitor.settings)]) else { return card }
-        if let status, item.canOfferManualMerge(using: status), let action = status.action {
+        if evidenceMatchesCatalogContext, let status, item.canOfferManualMerge(using: status), let action = status.action {
             let kind: RemoteActionKind = action == .mergeNow ? .merge : .enqueueMerge
             card.actions.append(.init(id: kind.rawValue, kind: kind, token: token,
                 confirmationText: String(localized: .MergeActions.mergeActionsConfirmHelp)))
@@ -256,6 +258,12 @@ import MergeTetherRemote
 
     static func presentation(_ original: RemoteCard, model: MRCardPresentation) -> RemoteCard {
         var card = original
+        card.title = model.row.displayTitle
+        card.project = model.row.displayURL.gitLabProjectPath
+        card.url = model.row.displayURL
+        if !model.row.evidenceMatchesCatalogContext {
+            card.actions.removeAll { [.publish, .approve, .reReview, .finishCommentReview, .merge, .enqueueMerge, .resolveThreads].contains($0.kind) }
+        }
         let human = model.humanAction
         card.needsAttention = human != nil
         card.mergeRequestIID = model.row.id.iid
@@ -279,8 +287,8 @@ import MergeTetherRemote
         }
         card.presentation = .init(author: author,
             repository: card.project.split(separator: "/").last.map(String.init) ?? card.project,
-            draftBadge: MergeRequestFinishedState(model.row.item.mergeRequest).map { String(localized: $0.badge) }
-                ?? (model.row.item.section == .draftMergeRequests ? String(localized: .Menu.menuMrDraftBadge) : nil),
+            draftBadge: MergeRequestFinishedState(model.row.displayRequest).map { String(localized: $0.badge) }
+                ?? (model.row.isDraft ? String(localized: .Menu.menuMrDraftBadge) : nil),
             status: model.status, nextStep: model.nextStep, working: model.working,
             chips: model.chips.map { .init(title: String(localized: $0.title), symbol: $0.symbol) },
             secondaryCTA: human?.action == .retryRun ? .init(title: String(localized: .MRHumanAction.mrHumanActionActionReviewRun), destination: .assistantRuns) : nil)

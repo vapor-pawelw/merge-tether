@@ -63,5 +63,6 @@ struct MRAttentionRecord {
         return MergeRequestDependencySummary.Context(left) == MergeRequestDependencySummary.Context(right)
             && left.semanticContextFingerprint == right.semanticContextFingerprint
             && left.draft == right.draft && left.author.id == right.author.id
+            && left.author.username == right.author.username
     }
 }

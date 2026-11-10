@@ -10,6 +10,7 @@ enum PipelineJobReconciliation {
               details.author.username == job.key.username,
               MergeRequestDependencySummary.Context(displayed) == MergeRequestDependencySummary.Context(details),
               displayed.semanticContextFingerprint == details.semanticContextFingerprint,
+              displayed.draft == details.draft,
               let pipeline = details.headPipeline, let id = pipeline.id, id > 0 else { return nil }
         return details
     }

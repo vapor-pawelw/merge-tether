@@ -4,6 +4,7 @@ import SwiftUI
 struct MergeActionsView<AdditionalActions: View>: View {
     let item: MergeRequestAttentionMonitor.Item
     let monitor: TodoMonitorService
+    var evidenceMatchesCatalogContext = true
     var actionsBlocked = false
     @ViewBuilder var additionalActions: () -> AdditionalActions
     @State private var showingConfirmation = false
@@ -38,7 +39,7 @@ struct MergeActionsView<AdditionalActions: View>: View {
             }
             HStack(spacing: 8) {
                 if owned {
-                    if state == .none, let status, item.canOfferManualMerge(using: status), let action = status.action {
+                    if evidenceMatchesCatalogContext, state == .none, let status, item.canOfferManualMerge(using: status), let action = status.action {
                         Button { prepared = nil; showingConfirmation = true } label: {
                             if working { ProgressView().controlSize(.small) }
                             else { Text(action.title) }
@@ -111,8 +112,10 @@ struct MergeActionsView<AdditionalActions: View>: View {
 }
 
 extension MergeActionsView where AdditionalActions == EmptyView {
-    init(item: MergeRequestAttentionMonitor.Item, monitor: TodoMonitorService, actionsBlocked: Bool = false) {
+    init(item: MergeRequestAttentionMonitor.Item, monitor: TodoMonitorService,
+         evidenceMatchesCatalogContext: Bool = true, actionsBlocked: Bool = false) {
         self.item = item; self.monitor = monitor; self.actionsBlocked = actionsBlocked
+        self.evidenceMatchesCatalogContext = evidenceMatchesCatalogContext
         self.additionalActions = { EmptyView() }
     }
 }

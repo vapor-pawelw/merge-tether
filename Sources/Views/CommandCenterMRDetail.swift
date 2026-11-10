@@ -21,9 +21,11 @@ struct CommandCenterMRDetail: View {
 
     var body: some View {
         // Resolve the shared board projection once, outside layout-driven child updates.
-        let required = item.humanActionRequired ?? needsHumanAttention
-        CommandCenterMRDetailContent(item: item, monitor: monitor, initialSection: initialSection,
-                                     needsHumanAttention: required)
+        let board = monitor.boardSnapshot
+        let row = (board.own + board.reviewed + board.otherMergeRequests).first { $0.id == item.id }
+        let required = row?.item.humanActionRequired ?? item.humanActionRequired ?? needsHumanAttention
+        CommandCenterMRDetailContent(item: row?.item ?? item, catalogRow: row,
+            monitor: monitor, initialSection: initialSection, needsHumanAttention: required)
     }
 
     private var needsHumanAttention: Bool {
@@ -35,6 +37,7 @@ struct CommandCenterMRDetail: View {
 
 private struct CommandCenterMRDetailContent: View {
     let item: MergeRequestAttentionMonitor.Item
+    let catalogRow: MergeRequestBoardSnapshot.Row?
     let monitor: TodoMonitorService
     let initialSection: CommandCenterMRDetailSection
     let needsHumanAttention: Bool
@@ -59,7 +62,7 @@ private struct CommandCenterMRDetailContent: View {
 
     private enum Anchor: Hashable { case overview, drafts, comments, details, actions, feedbackStatus, assistantRuns }
 
-    private var finishedState: MergeRequestFinishedState? { .init(item.mergeRequest) }
+    private var finishedState: MergeRequestFinishedState? { .init(presentationRow.displayRequest) }
     private var target: MRAutomationScope.Target? {
         monitor.scopeTarget(projectID: item.id.projectID, iid: item.id.iid, url: item.url)
     }
@@ -71,19 +74,15 @@ private struct CommandCenterMRDetailContent: View {
     private var work: AssistantAutomationRunner.MergeRequestWork? {
         target.map { .init(host: $0.host, projectID: item.id.projectID, iid: item.id.iid) }
     }
-    private var presentationItem: MergeRequestAttentionMonitor.Item {
-        var value = item
-        value.humanActionRequired = finishedState == nil && needsHumanAttention
-        return value
-    }
+    private var presentationItem: MergeRequestAttentionMonitor.Item { presentationRow.item }
     private var jobs: [AssistantAutomationRunner.Handoff] {
         guard let work, let target else { return [] }
         return monitor.assistantHandoffs.filter { $0.key.work == work && $0.key.username == target.username && !$0.isObsoleteReminder }.sorted { $0.createdAt > $1.createdAt }
     }
     private var presentationRow: MergeRequestBoardSnapshot.Row {
-        .init(item: presentationItem, latestJob: jobs.first, intents: monitor.mrTodoIntents(for: item),
-            pipelineEvidence: jobs.first.flatMap { monitor.currentRequest(for: $0) },
-            pipelineEvidenceCheckedAt: monitor.currentPipelineEvidenceDate)
+        catalogRow ?? .init(item: item, latestJob: jobs.first, intents: monitor.mrTodoIntents(for: item),
+                pipelineEvidence: jobs.first.flatMap { monitor.currentRequest(for: $0) },
+                pipelineEvidenceCheckedAt: monitor.currentPipelineEvidenceDate)
     }
     private var humanAction: MRHumanAction? {
         let reviewing = monitor.reviewedMergeRequestItems.contains { $0.id == item.id && $0.url == item.url }
@@ -142,7 +141,7 @@ private struct CommandCenterMRDetailContent: View {
                     if finishedState == nil {
                         MREffectivePolicySummary(row: presentationRow, monitor: monitor,
                             excluding: [humanAction?.explanation ?? ""])
-                        MergeActionsView(item: item, monitor: monitor, actionsBlocked: isStartingReview || isRetrying)
+                        MergeActionsView(item: item, monitor: monitor, evidenceMatchesCatalogContext: presentationRow.evidenceMatchesCatalogContext, actionsBlocked: isStartingReview || isRetrying)
                     }
                     if showsDecisions { nextStep(proxy: proxy, citationContext: citationContext).id(Anchor.drafts) }
                     if finishedState == nil { supplementaryActions(citationContext: citationContext).id(Anchor.actions) }
@@ -259,9 +258,9 @@ private struct CommandCenterMRDetailContent: View {
             HStack(spacing: 8) {
                 Text(verbatim: "!\(item.id.iid)").monospacedDigit()
                 if let finishedState { FinishedMergeRequestBadge(state: finishedState) }
-                else if item.section == .draftMergeRequests { BoardDraftBadge() }
+                else if presentationRow.isDraft { BoardDraftBadge() }
                 RepositoryPathText(item.url.gitLabProjectPath).lineLimit(1)
-                if let author = item.mergeRequest?.author {
+                if let author = presentationRow.displayRequest?.author {
                     AvatarView(url: author.avatarURL, size: 18).accessibilityHidden(true)
                     Text(verbatim: author.name.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty ? author.username : author.name).lineLimit(1)
                         .help(Text(verbatim: "@\(author.username)"))
@@ -270,7 +269,7 @@ private struct CommandCenterMRDetailContent: View {
                 HStack(spacing: 0) {
                     if finishedState == nil, let target = monitor.scopeTarget(projectID: item.id.projectID, iid: item.id.iid, url: item.url) {
                         BoardAutomationToggle(settings: monitor.settings, target: target, projectPath: item.url.gitLabProjectPath,
-                            isDraft: item.section == .draftMergeRequests)
+                            isDraft: presentationRow.isDraft)
                     }
                     BoardPinButton(pin: .mergeRequest(host: monitor.glab.resolvedHost,
                         username: monitor.glab.currentUsername, projectID: item.id.projectID, iid: item.id.iid),
@@ -279,7 +278,7 @@ private struct CommandCenterMRDetailContent: View {
                 }
             }
             .font(.subheadline).foregroundStyle(.secondary)
-            Text(verbatim: item.title).font(.title2.weight(.semibold)).textSelection(.enabled)
+            Text(verbatim: presentationRow.displayTitle).font(.title2.weight(.semibold)).textSelection(.enabled)
             HStack {
                 VStack(alignment: .leading, spacing: 4) {
                     if let finishedState {

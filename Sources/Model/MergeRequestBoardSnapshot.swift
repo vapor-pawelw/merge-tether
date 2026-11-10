@@ -8,10 +8,23 @@ struct MergeRequestBoardSnapshot {
         let intents: [MRTodoIntent]
         var pipelineEvidence: GitLabMergeRequest? = nil
         var pipelineEvidenceCheckedAt: Date? = nil
+        var catalog: MRAttentionRecord.CatalogObservation? = nil
+        /// Compatibility only; fresh command guards still decide every action.
+        var evidenceMatchesCatalogContext = true
+        var displayRequest: GitLabMergeRequest? { catalog?.request ?? item.mergeRequest }
+        var displayTitle: String { catalog?.title ?? item.title }
+        var displayURL: URL { catalog?.url ?? item.url }
+        var isDraft: Bool { displayRequest?.draft == true || displayRequest == nil && item.section == .draftMergeRequests }
+        var displayItem: MergeRequestAttentionMonitor.Item {
+            guard let catalog else { return item }
+            return .init(id: item.id, title: catalog.title, url: catalog.url,
+                lifecycleCompletionID: catalog.lifecycleCompletionID, approvalProgress: catalog.approvalProgress,
+                mergeRequest: catalog.request, isAuthored: catalog.isAuthored, reviewingActivity: catalog.reviewingActivity)
+        }
         /// Dedicated CI metadata never replaces the MR snapshot bound to drafts or feedback.
         var currentPipelineRequest: GitLabMergeRequest? {
-            PipelineJobReconciliation.matchingDetails(item.mergeRequest, details: pipelineEvidence,
-                checkedAt: pipelineEvidenceCheckedAt, job: latestJob) ?? item.mergeRequest
+            PipelineJobReconciliation.matchingDetails(displayRequest, details: pipelineEvidence,
+                checkedAt: pipelineEvidenceCheckedAt, job: latestJob) ?? displayRequest
         }
         var id: MergeRequestAttentionMonitor.Item.ID { item.id }
         var isCheckingReadOnlyReconciliation: Bool {
@@ -133,22 +146,9 @@ struct MergeRequestBoardSnapshot {
         }
         func row(_ original: MergeRequestAttentionMonitor.Item) -> Row {
             let valid = host.map { original.url.isGitLabMergeRequest(host: $0, iid: original.id.iid) } == true
-            var item = attention.first { sameMergeRequest($0, original) } ?? original
-            if let current = original.mergeRequest {
-                if ["merged", "closed"].contains(current.state) || current.state != item.mergeRequest?.state {
-                    item = original
-                } else if current.draft != item.mergeRequest?.draft {
-                    item.mergeRequest = current
-                }
-            }
-            if item.mergeRequest == nil { item.mergeRequest = original.mergeRequest }
-            item.approvalProgress = item.mergeRequest?.sha == original.mergeRequest?.sha ? original.approvalProgress : nil
-            if let request = original.mergeRequest, let displayed = item.mergeRequest,
-               MergeRequestDependencySummary.Context(request) == MergeRequestDependencySummary.Context(displayed) {
-                item.dependencies = original.dependencies ?? item.dependencies
-            }
-            item.isAuthored = original.isAuthored || username.map { original.mergeRequest?.author.username == $0 } == true
-            item = item.presentingVerifiedAuthorFeedback()
+            let projection = MRCurrentRowProjection(evidence: attention.first { sameMergeRequest($0, original) } ?? original,
+                catalog: original, username: username)
+            var item = projection.item
             let latest = handoffs.filter {
                 !$0.isObsoleteReminder && valid && $0.key.work.host == host && $0.key.username == username
                     && $0.key.work.projectID == item.id.projectID && $0.key.work.iid == item.id.iid
@@ -161,7 +161,8 @@ struct MergeRequestBoardSnapshot {
             item.humanActionRequired = humanAttention.map { $0.items.contains { $0.id == actionKey } }
             return Row(item: item, latestJob: latest, intents: currentIntents,
                 pipelineEvidence: pipelineEvidence.first { $0.projectID == item.id.projectID && $0.iid == item.id.iid },
-                pipelineEvidenceCheckedAt: pipelineEvidenceCheckedAt)
+                pipelineEvidenceCheckedAt: pipelineEvidenceCheckedAt, catalog: projection.catalog,
+                evidenceMatchesCatalogContext: projection.evidenceMatchesCatalogContext)
         }
         let originalListed = own + reviewed
         let orphanIntents = accountIntents.filter { intent in
@@ -327,7 +328,7 @@ struct MergeRequestBoardSnapshot {
             return pinnedCards.contains(pin)
         }
         func isFinished(_ row: Row) -> Bool {
-            row.item.mergeRequest.map { ["merged", "closed"].contains($0.state) } == true
+            row.displayRequest.map { ["merged", "closed"].contains($0.state) } == true
         }
         func activityRank(_ row: Row) -> Int {
             guard let automation, let host, let username else { return 0 }
@@ -335,14 +336,14 @@ struct MergeRequestBoardSnapshot {
                 && row.item.url.isGitLabMergeRequest(host: host, iid: row.id.iid)
                 ? .init(host: host, username: username, projectID: row.id.projectID, iid: row.id.iid) : nil
             return MRBoardActivity(automation: automation, target: target,
-                isDraft: row.item.section == .draftMergeRequests, isFinished: isFinished(row), grouping: grouping).group.rawValue
+                isDraft: row.isDraft, isFinished: isFinished(row), grouping: grouping).group.rawValue
         }
         let normal = rows.enumerated().sorted {
             (isFinished($0.element) ? 0 : 1, activityRank($0.element), isPinned($0.element) ? 0 : 1,
-             automation?.hasEnabledAutomation != true && draftsLast && $0.element.item.section == .draftMergeRequests ? 1 : 0,
+             automation?.hasEnabledAutomation != true && draftsLast && $0.element.isDraft ? 1 : 0,
              $0.element.needsAttention ? 0 : 1, $0.offset)
                 < (isFinished($1.element) ? 0 : 1, activityRank($1.element), isPinned($1.element) ? 0 : 1,
-                   automation?.hasEnabledAutomation != true && draftsLast && $1.element.item.section == .draftMergeRequests ? 1 : 0,
+                   automation?.hasEnabledAutomation != true && draftsLast && $1.element.isDraft ? 1 : 0,
                    $1.element.needsAttention ? 0 : 1, $1.offset)
         }.map(\.element)
         let finished = normal.filter(isFinished)

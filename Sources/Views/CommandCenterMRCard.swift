@@ -27,8 +27,8 @@ private struct CommandCenterMRCardContent: View {
     @Environment(\.openSettings) private var openSettings
 
     private var item: MergeRequestAttentionMonitor.Item { row.item }
-    private var isDraft: Bool { item.section == .draftMergeRequests }
-    private var finishedState: MergeRequestFinishedState? { .init(item.mergeRequest) }
+    private var isDraft: Bool { row.isDraft }
+    private var finishedState: MergeRequestFinishedState? { .init(row.displayRequest) }
     private var isMuted: Bool {
         monitor.boardActivity(projectID: item.id.projectID, iid: item.id.iid, url: item.url,
             isDraft: isDraft, isFinished: finishedState != nil).isMuted
@@ -49,16 +49,16 @@ private struct CommandCenterMRCardContent: View {
             metadataHeader
             VStack(alignment: .leading, spacing: 3) {
                 Button(action: onDetails) {
-                    BoardCardTitle(title: item.title, repositoryPath: item.url.gitLabProjectPath,
+                    BoardCardTitle(title: row.displayTitle, repositoryPath: row.displayURL.gitLabProjectPath,
                         titleColor: isMuted ? .secondary : .primary)
                         .contentShape(Rectangle())
                 }
                 .buttonStyle(.plain)
-                .help(Text(verbatim: "\(item.title)\n\(item.url.gitLabProjectPath)\n") + Text(.Board.boardDetails))
+                .help(Text(verbatim: "\(row.displayTitle)\n\(row.displayURL.gitLabProjectPath)\n") + Text(.Board.boardDetails))
                 BoardMRReferenceLine(iid: item.id.iid, projectID: item.id.projectID, dependencies: item.dependencies)
             }
             if finishedState != nil {
-                FinishedMergeRequestStatus(item: item, monitor: monitor)
+                FinishedMergeRequestStatus(item: row.displayItem, monitor: monitor)
             } else {
                 if humanAction != nil {
                     Text(verbatim: presentation.message).help(Text(verbatim: presentation.message))
@@ -107,7 +107,7 @@ private struct CommandCenterMRCardContent: View {
                 }
                 MREffectivePolicySummary(row: row, monitor: monitor,
                     excluding: [presentation.message, presentation.nextStep ?? ""])
-                MergeActionsView(item: item, monitor: monitor, actionsBlocked: presentation.actionsBlocked) {
+                MergeActionsView(item: item, monitor: monitor, evidenceMatchesCatalogContext: row.evidenceMatchesCatalogContext, actionsBlocked: presentation.actionsBlocked) {
                     if humanAction?.action == .retryRun {
                         Button { openAttention(.assistantRuns) } label: { Text(.MRHumanAction.mrHumanActionActionReviewRun) }
                             .buttonStyle(.plain)
@@ -155,7 +155,7 @@ private struct CommandCenterMRCardContent: View {
             if let finishedState { FinishedMergeRequestBadge(state: finishedState) }
             else if isDraft { BoardDraftBadge() }
             if finishedState == nil {
-                BoardApprovalProgressBadge(progress: item.approvalProgress, reviewers: item.mergeRequest?.reviewers ?? [])
+                BoardApprovalProgressBadge(progress: row.displayItem.approvalProgress, reviewers: row.displayRequest?.reviewers ?? [])
             }
             HStack(spacing: 0) {
                 if finishedState == nil, let scopeTarget {

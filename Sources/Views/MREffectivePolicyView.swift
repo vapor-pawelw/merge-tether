@@ -8,13 +8,8 @@ struct MREffectivePolicySummary: View {
 
     var body: some View {
         let target = monitor.scopeTarget(projectID: row.id.projectID, iid: row.id.iid, url: row.item.url)
-        let request = target.flatMap { monitor.boardDisplayRequest(for: $0, url: row.item.url) }
-        let sameContext = request.map { current in
-            row.item.mergeRequest.map {
-                MergeRequestDependencySummary.Context($0) == .init(current)
-                    && $0.semanticContextFingerprint == current.semanticContextFingerprint
-            } == true
-        } == true
+        let request = row.displayRequest
+        let sameContext = row.evidenceMatchesCatalogContext
         let status = monitor.authoredMergeRequests.hasSyncedCurrentCatalog && sameContext
             ? monitor.authoredMergeRequests.requests.first { status in
                 status.request.projectID == row.id.projectID && status.request.iid == row.id.iid

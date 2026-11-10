@@ -1,9 +1,41 @@
 import Foundation
 import Testing
+import MergeTetherRemote
 @testable import GitLabTodos
 
 @MainActor
 struct MergeRequestBoardSnapshotTests {
+    @Test func draftFlipDoesNotRebindThePrivateActionCheckpoint() throws {
+        let json = """
+        {"project_id":1,"iid":42,"author":{"id":3,"username":"me","name":"Me"},"title":"MR",
+         "web_url":"https://\(host)/g/p/-/merge_requests/42","state":"opened","draft":false,
+         "sha":"head-a","source_branch":"feature","target_branch":"main","labels":[]}
+        """
+        var checkpoint = item(42)
+        checkpoint.mergeRequest = try JSONDecoder().decode(GitLabMergeRequest.self, from: Data(json.utf8))
+        checkpoint.requiresCommentReview = true
+        checkpoint.draftCount = 1
+        checkpoint.observedDiscussionFingerprint = "checked-conversation"
+        var catalog = checkpoint
+        catalog.mergeRequest = try JSONDecoder().decode(GitLabMergeRequest.self,
+            from: Data(json.replacingOccurrences(of: "\"draft\":false", with: "\"draft\":true").utf8))
+        let board = MergeRequestBoardSnapshot(own: [catalog], reviewed: [], todos: [], attention: [checkpoint],
+            handoffs: [], host: host, username: "me")
+        let row = try #require(board.own.first)
+        #expect(row.item.draftCount == 1 && row.item.requiresCommentReview)
+        #expect(row.item.observedDiscussionFingerprint == "checked-conversation")
+        #expect(row.item.mergeRequest?.draft == false)
+        #expect(row.displayRequest?.draft == true && row.isDraft)
+        #expect(!row.evidenceMatchesCatalogContext)
+        let model = MRCardPresentation(row: row, reviewingContext: ReviewingContext(row: row),
+            allowsRemoval: false, assistantReady: true)
+        #expect(model.humanAction?.kind == .uncheckedDrafts)
+        let card = RemoteBoardAdapter.presentation(RemoteBoardAdapter.card(row.item, account: "me@\(host)"), model: model)
+        #expect(card.presentation?.draftBadge == String(localized: .Menu.menuMrDraftBadge))
+        #expect(card.primaryCTA?.title == model.actionLabel.map { String(localized: $0) })
+        #expect(card.actions.allSatisfy { ![RemoteActionKind.publish, .approve, .merge, .enqueueMerge, .resolveThreads].contains($0.kind) })
+    }
+
     @Test func aSyntheticMergeCheckpointKeepsTheCatalogsApprovalProgress() throws {
         var original = item(42)
         original.approvalProgress = MergeRequestApprovalProgress(completed: 1, required: 2)
@@ -153,7 +185,8 @@ struct MergeRequestBoardSnapshotTests {
             todos: [], attention: [oldAttention], handoffs: [], host: host, username: "me", pinnedCards: [pin],
             preservedOrder: [item(3).id: 0, item(1).id: 1])
         #expect(board.own.map(\.id.iid) == [2, 3, 1])
-        #expect(board.own.first?.item.mergeRequest?.state == state)
+        #expect(board.own.first?.displayRequest?.state == state)
+        #expect(board.own.first?.item.mergeRequest?.state == "opened")
     }
 
     @Test func cancelledRemindersRemainHistoryWithoutOperationalAttentionOrStandaloneRetryCards() throws {
