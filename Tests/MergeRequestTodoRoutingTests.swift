@@ -4,6 +4,32 @@ import Testing
 
 @MainActor
 @Suite struct MergeRequestTodoRoutingTests {
+    @Test(arguments: [AutomationPackageDecision.undecided, .disabled])
+    func missingConsentKeepsAutomaticRoutingUnreadWhileManualAcceptanceRemainsAvailable(_ decision: AutomationPackageDecision) async throws {
+        // given
+        let f = try fixture(consent: decision); defer { f.cleanup() }
+        f.settings.automation.reviewRequested.isEnabled = true
+        var launches = 0
+        let router = MergeRequestTodoRouter(settings: f.settings, glab: f.glab, canAutomate: { true }, launcher: { _, _ in
+            launches += 1
+            return UUID()
+        })
+        let event = todo()
+
+        // when
+        let automatic = await router.process([event], host: target.host, username: target.username, managed: [target])
+
+        // then
+        #expect(automatic.isEmpty && f.settings.mrActionIntents.isEmpty)
+        #expect(f.settings.routedMRTodoReceipts.isEmpty && !f.gitlab.has("acks") && launches == 0)
+        let manual = await router.process([event], host: target.host, username: target.username, managed: [target], automatically: false)
+        #expect(manual == [event.id])
+        let intent = try #require(f.settings.mrActionIntents.first)
+        #expect(intent.state == .pending && launches == 0)
+        await router.run(intent.id, manual: true)
+        #expect(launches == 1 && f.settings.automation.packageDecision == decision)
+    }
+
     @Test(arguments: ["ignoredOnly", "sameNoteRemaining", "restored"])
     func unboundFollowUpCanUseOnlyACurrentExactConcernDecision(_ scenario: String) async throws {
         let f = try fixture(owned: true); defer { f.cleanup() }
@@ -142,10 +168,12 @@ import Testing
         func cleanup() { gitlab.close(); defaults.removePersistentDomain(forName: suite); try? FileManager.default.removeItem(at: root) }
     }
 
-    private func fixture(owned: Bool = false, acknowledgementFails: Bool = false) throws -> Fixture {
+    private func fixture(owned: Bool = false, acknowledgementFails: Bool = false,
+                         consent: AutomationPackageDecision = .enabled) throws -> Fixture {
         let suite = "MRTodoRoutingTests.\(UUID())"
         let defaults = try #require(UserDefaults(suiteName: suite))
         let settings = SettingsManager(defaults: defaults)
+        settings.automation.packageDecision = consent
         let root = FileManager.default.temporaryDirectory.appending(path: "MRTodoRoutingTests-\(UUID())")
         try FileManager.default.createDirectory(at: root, withIntermediateDirectories: true)
         let gitlab = InMemoryGitLab()
@@ -401,7 +429,7 @@ import Testing
         #expect(f.settings.mrActionIntents.first?.kind == .refresh)
         let request = todo(20, action: .reviewRequested)
         #expect(await router.process([request], host: target.host, username: target.username, managed: []).isEmpty)
-        #expect(f.settings.mrActionIntents.count == 1)
+        try #require(f.settings.mrActionIntents.count == 1)
         #expect(f.settings.automation.scope[target] == .inherit)
     }
 
@@ -468,7 +496,8 @@ import Testing
         _ = await router.process([], host: target.host, username: target.username, managed: [target])
         #expect(f.settings.mrActionIntents[0].state == .completed)
         #expect(f.settings.mrActionIntents[0].error == nil)
-        #expect(SettingsManager(defaults: f.defaults).mrActionIntents[0].state == .completed)
+        let restoredIntent = try #require(SettingsManager(defaults: f.defaults).mrActionIntents.first)
+        #expect(restoredIntent.state == .completed)
         #expect(!f.gitlab.has("proofs"))
     }
 
@@ -611,7 +640,7 @@ import Testing
         let gate = ProbeGate()
         let router = MergeRequestTodoRouter(settings: f.settings, glab: f.glab, canAutomate: { await gate.wait() }, proofDirectory: f.root.appending(path: "proofs"))
         router.followUpAssessment = { _, _ in .init(notes: [.init(noteID: 42, state: .addressed, reason: "Current feedback verified.")]) }
-        let intentID = f.settings.mrActionIntents[0].id
+        let intentID = try #require(f.settings.mrActionIntents.first).id
         let retry = Task { await router.run(intentID, manual: true) }
         defer { gate.release(); retry.cancel() }
         let deadline = ContinuousClock.now + .seconds(3)
@@ -771,7 +800,7 @@ import Testing
         let event = todo()
         let acknowledged = await router.process([event], host: target.host, username: target.username, managed: [target])
         #expect(acknowledged == [event.id])
-        #expect(f.settings.mrActionIntents.count == 1)
+        try #require(f.settings.mrActionIntents.count == 1)
         #expect(f.settings.mrActionIntents[0].kind == .review)
         #expect(f.settings.mrActionIntents[0].state == .pending)
         let restored = SettingsManager(defaults: f.defaults)
@@ -791,7 +820,7 @@ import Testing
             .replacingOccurrences(of: String(repeating: "a", count: 40), with: String(repeating: "b", count: 40))
         try updated.store(in: f.gitlab, as: file.lastPathComponent)
         _ = await router.process([todo(20)], host: target.host, username: target.username, managed: [target])
-        #expect(f.settings.mrActionIntents.count == 1)
+        try #require(f.settings.mrActionIntents.count == 1)
         #expect(f.settings.mrActionIntents[0].todoIDs == [10, 20])
         #expect(f.settings.mrActionIntents[0].headSHA == String(repeating: "b", count: 40))
     }
@@ -826,7 +855,7 @@ import Testing
         f.settings.automation.scope[target] = .inherit
         _ = await router.process([todo()], host: target.host, username: target.username, managed: [])
         #expect(f.settings.automation.scope[target] == .active)
-        #expect(f.settings.mrActionIntents.count == 1)
+        try #require(f.settings.mrActionIntents.count == 1)
         #expect(launches == 1)
         #expect(f.settings.mrActionIntents[0].state == .running)
     }
@@ -841,7 +870,7 @@ import Testing
         let event = todo()
         #expect(await router.process([event], host: target.host, username: target.username, managed: [target]).isEmpty)
         #expect(f.settings.routedMRTodoReceipts.count == 1)
-        #expect(f.settings.mrActionIntents.count == 1)
+        try #require(f.settings.mrActionIntents.count == 1)
         f.settings.mrActionIntents[0].state = .completed; f.settings.save()
         f.gitlab.remove("fail-ack")
         let restored = SettingsManager(defaults: f.defaults)
@@ -864,8 +893,9 @@ import Testing
             .store(in: f.gitlab, as: "discussions")
         let acknowledged = await router.process([event], host: target.host, username: target.username, managed: [])
         #expect(acknowledged == [event.id])
-        #expect(f.settings.mrActionIntents[0].kind == .followUp)
-        #expect(f.settings.mrActionIntents[0].noteIDs == [42])
+        let intent = try #require(f.settings.mrActionIntents.first)
+        #expect(intent.kind == .followUp)
+        #expect(intent.noteIDs == [42])
     }
     @Test func manuallyAcceptedEventsRemainDurableWithoutAnAutomaticEventBanner() async throws {
         let f = try fixture(); defer { f.cleanup() }
@@ -875,7 +905,7 @@ import Testing
         let received = await router.process([todo()], host: target.host, username: target.username,
                                             managed: [target], automatically: false)
         #expect(received == [10])
-        #expect(f.settings.mrActionIntents.count == 1)
+        try #require(f.settings.mrActionIntents.count == 1)
         #expect(banners == 0)
     }
 
@@ -959,7 +989,7 @@ import Testing
         })
         _ = await router.process([todo()], host: target.host, username: target.username, managed: [target])
         _ = await router.process([todo(20)], host: target.host, username: target.username, managed: [target])
-        #expect(f.settings.mrActionIntents.count == 2)
+        try #require(f.settings.mrActionIntents.count == 2)
         #expect(f.settings.mrActionIntents[0].jobID == activeJob)
         #expect(f.settings.mrActionIntents[1].state == .pending)
         #expect(f.settings.mrActionIntents[1].jobID == nil)
@@ -976,7 +1006,7 @@ import Testing
             launches += 1; return UUID()
         })
         _ = await router.process([event], host: target.host, username: target.username, managed: [target])
-        #expect(f.settings.mrActionIntents.count == 1)
+        try #require(f.settings.mrActionIntents.count == 1)
         #expect(f.settings.mrActionIntents[0].state == .failed)
         #expect(launches == 0)
         await router.run(f.settings.mrActionIntents[0].id, manual: true)
@@ -1027,6 +1057,7 @@ import Testing
         })
         _ = await router.process([todo()], host: target.host, username: target.username, managed: [target])
         _ = await router.process([], host: target.host, username: target.username, managed: [target])
+        try #require(f.settings.mrActionIntents.count == 1)
         #expect(f.settings.mrActionIntents[0].state == .failed)
         let intent = f.settings.mrActionIntents[0]
         let id = try #require(intent.jobID)
@@ -1056,7 +1087,7 @@ import Testing
             launchedTodoIDs.formUnion(intent.todoIDs); return UUID()
         })
         _ = await router.process([todo(20), todo(10)], host: target.host, username: target.username, managed: [target])
-        #expect(f.settings.mrActionIntents.count == 2)
+        try #require(f.settings.mrActionIntents.count == 2)
         #expect(launchedTodoIDs == [20])
         #expect(f.settings.mrActionIntents.first { $0.todoIDs.contains(10) }?.state == .failed)
     }
@@ -1115,11 +1146,12 @@ import Testing
         let f = try fixture(); defer { f.cleanup() }
         let router = MergeRequestTodoRouter(settings: f.settings, glab: f.glab, canAutomate: { false })
         _ = await router.process([todo()], host: target.host, username: target.username, managed: [target])
+        try #require(f.settings.mrActionIntents.count == 1)
         let oldID = UUID(), newID = UUID()
         f.settings.mrActionIntents[0].jobID = oldID
         f.settings.mrActionIntents[0].state = .failed
         f.settings.mrActionIntents[0].error = "Old failure"
-        let original = f.settings.mrActionIntents[0]
+        let original = try #require(f.settings.mrActionIntents.first)
         f.settings.mrActionIntents.append(.init(id: UUID(), target: target, kind: .review, state: .completed,
             todoIDs: [], noteIDs: [], sourceEvents: [], request: original.request, headSHA: original.headSHA,
             jobID: oldID, updatedAt: Date()))
@@ -1232,7 +1264,7 @@ import Testing
             launchedIDs.formUnion(intent.todoIDs); return UUID()
         })
         _ = await router.process([todo(10)], host: target.host, username: target.username, managed: [target])
-        let original = f.settings.mrActionIntents[0]
+        let original = try #require(f.settings.mrActionIntents.first)
         f.settings.assistantHandoffs.append(.init(id: UUID(),
             key: .init(assistant: .codex, work: .init(host: target.host, projectID: 7, iid: 11),
                        username: "me", workspace: "", access: .gitLabRead), title: "Interrupted", prompt: "Interrupted",
@@ -1240,7 +1272,7 @@ import Testing
             execution: .init(state: .interrupted), expectedHeadSHA: original.headSHA))
         f.settings.automation.reviewRequested.isEnabled = true
         _ = await router.process([todo(20)], host: target.host, username: target.username, managed: [target])
-        #expect(f.settings.mrActionIntents.count == 2)
+        try #require(f.settings.mrActionIntents.count == 2)
         #expect(f.settings.mrActionIntents[0].state == .failed)
         #expect(launchedIDs == [20])
     }
@@ -1276,7 +1308,7 @@ import Testing
             return jobID
         }, cancelJob: { id, _ in cancelled = id })
         _ = await router.process([todo()], host: target.host, username: target.username, managed: [target])
-        let intentID = f.settings.mrActionIntents[0].id
+        let intentID = try #require(f.settings.mrActionIntents.first).id
         await router.run(intentID, manual: true)
         #expect(cancelled == jobID)
         #expect(f.settings.mrActionIntents[0].state == .failed)
@@ -1290,14 +1322,14 @@ import Testing
             _ = await gate.wait(); return UUID()
         })
         _ = await router.process([todo(10)], host: target.host, username: target.username, managed: [target])
-        let originalID = f.settings.mrActionIntents[0].id
+        let originalID = try #require(f.settings.mrActionIntents.first).id
         let manual = Task { await router.run(originalID, manual: true) }
         for _ in 0..<100 where !gate.entered { try await Task.sleep(for: .milliseconds(2)) }
         #expect(gate.entered)
         _ = await router.process([todo(20)], host: target.host, username: target.username, managed: [target])
         gate.release()
         await manual.value
-        #expect(f.settings.mrActionIntents.count == 2)
+        try #require(f.settings.mrActionIntents.count == 2)
         #expect(f.settings.mrActionIntents[0].todoIDs == [10])
         #expect(f.settings.mrActionIntents[1].todoIDs == [20])
         #expect(f.settings.mrActionIntents[1].jobID == nil)

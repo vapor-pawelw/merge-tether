@@ -81,7 +81,8 @@ struct AuthoredMergeRequestStatusTests {
         #expect(settings.reviewRequested.isEnabled)
         #expect(settings.reviewRequested.titleTemplate == "Custom")
         #expect(!settings.autoMergeEnabled)
-        #expect(settings.conflictTasksEnabled)
+        #expect(!settings.conflictTasksEnabled)
+        #expect(settings.packageDecision == .undecided && !settings.hasEnabledAutomation)
         #expect(!settings.allowConflictPush)
     }
 
@@ -197,6 +198,7 @@ struct AuthoredMergeRequestStatusTests {
             """)
         try FileManager.default.setAttributes([.posixPermissions: 0o700], ofItemAtPath: executable.path)
         let settings = SettingsManager(defaults: defaults)
+        settings.automation.packageDecision = .enabled
         settings.automation.autoReReviewEnabled = true
         settings.automation.autoVerifyReReview = false
         let glab = GlabService()
@@ -293,6 +295,7 @@ struct AuthoredMergeRequestStatusTests {
         let defaults = try #require(UserDefaults(suiteName: suite))
         defer { defaults.removePersistentDomain(forName: suite) }
         let settings = SettingsManager(defaults: defaults)
+        settings.automation.packageDecision = .enabled
         settings.onboardingCompleted = true
         settings.notificationsEnabled = false
         settings.automation.autoMergeEnabled = true

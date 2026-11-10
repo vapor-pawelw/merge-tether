@@ -112,7 +112,7 @@ struct MRNoticeClassifierTests {
         #expect(second == .actionable)
     }
 
-    @Test(arguments: ["undecided", "shell", "enabled-without-agent", "manual", "full", "legacy-agent"])
+    @Test(arguments: ["undecided", "shell", "enabled-without-agent", "manual", "full", "legacy-agent", "enabled-agent"])
     func incomingNoticeClassificationRequiresAnEnabledAgentWorkflow(configuration: String) {
         var settings = AutomationSettings()
         switch configuration {
@@ -124,9 +124,12 @@ struct MRNoticeClassifierTests {
         case "manual": settings.applyPreset(.manual, for: .claude)
         case "full": settings.applyPreset(.full, for: .claude)
         case "legacy-agent": settings.authorFeedback.isEnabled = true
+        case "enabled-agent":
+            settings.packageDecision = .enabled
+            settings.authorFeedback.isEnabled = true
         default: break
         }
-        #expect(settings.canClassifyIncomingNotices == ["full", "legacy-agent"].contains(configuration))
+        #expect(settings.canClassifyIncomingNotices == ["full", "enabled-agent"].contains(configuration))
     }
 
     @Test(arguments: AutomationAssistant.allCases)

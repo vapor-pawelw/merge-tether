@@ -367,6 +367,7 @@ struct AuthorFeedbackMergeTests {
         }
         let glab = gitlab.service(host: "gitlab.example.org", username: "me")
         let settings = SettingsManager(defaults: defaults)
+        settings.automation.packageDecision = .enabled
         settings.onboardingCompleted = true; settings.notificationsEnabled = false
         settings.automation.autoMergeEnabled = true; settings.automation.autoMergeProjects = "g/p"
         configure(settings)

@@ -162,6 +162,7 @@ struct MergeDependencyGateTests {
         init() throws {
             defaults = try #require(UserDefaults(suiteName: suite))
             settings = SettingsManager(defaults: defaults)
+            settings.automation.packageDecision = .enabled
             glab = gitlab.service(host: host, username: "me")
             settings.onboardingCompleted = true
             settings.notificationsEnabled = false

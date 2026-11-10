@@ -552,6 +552,7 @@ struct VerifiedAuthorFeedbackTests {
             try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: false)
             defaults = try #require(UserDefaults(suiteName: suite))
             settings = SettingsManager(defaults: defaults)
+            settings.automation.packageDecision = .enabled
             settings.automation.assistant = .codex
             settings.automation.authorFeedback.runner = .assistant
             settings.automation.authorFeedback.isEnabled = true
