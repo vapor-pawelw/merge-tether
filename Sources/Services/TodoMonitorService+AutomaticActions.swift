@@ -9,7 +9,8 @@ extension TodoMonitorService {
         let changed = settings.actionIsAutomatic(action, for: target) != enabled
         settings.setActionAutomatic(action, enabled: enabled, for: target)
         settings.save()
-        guard changed, enabled, glab.resolvedHost == target.host, glab.currentUsername == target.username else { return }
+        guard settings.automaticActionsAllowed, changed, enabled,
+              glab.resolvedHost == target.host, glab.currentUsername == target.username else { return }
         switch action {
         case .commentPublication, .approval: await attention.resumeAutomaticAction(action, for: target)
         case .merge: await authoredMergeRequests.resumeAutomaticMerge(for: target)

@@ -100,7 +100,8 @@ final class TodoAutomationService {
     ) async throws -> Bool {
         let rule = settings.automation[event]
         let project = todo.project.pathWithNamespace
-        guard (manual || rule.isEnabled), isPending(), rule.isConfigured, rule.includes(project: project),
+        guard settings.automaticActionsAllowed,
+              (manual || rule.isEnabled), isPending(), rule.isConfigured, rule.includes(project: project),
               let iid = todo.target.iid, iid > 0,
               todo.targetURL.isGitLabMergeRequest(host: host, iid: iid)
         else { return false }
@@ -178,6 +179,7 @@ final class TodoAutomationService {
         // Mark a side effect as attempted only after evidence and account checks.
         settings.automationAttemptReceipts.insert(key)
         settings.save()
+        guard settings.automaticActionsAllowed, isPending() else { return false }
         if assistant == nil || event != .authorFeedback || noteIDs.isEmpty || !AssistantAutomationRunner.attachFeedbackTodo(
             acknowledgement, noteIDs: noteIDs, work: work, username: username, settings: settings
         ) {
@@ -190,6 +192,7 @@ final class TodoAutomationService {
         settings.automationReceipts.insert(key)
         if manual && assistant == nil { settings.pendingTodoAcknowledgements.insert(manualAcknowledgement) }
         settings.save()
+        guard settings.automaticActionsAllowed, isPending() else { return false }
         let currentRule = settings.automation[event]
         return assistant == nil && (manual || (currentRule.isEnabled && currentRule.markDoneOnSuccess))
     }
@@ -502,7 +505,8 @@ final class TodoAutomationService {
             let scriptEnvironment = environment
             let id = UUID()
             let task = Task {
-                try await ProcessRunner.run(
+                try AssistantJobExecutor.validatePersistence(settings)
+                return try await ProcessRunner.run(
                     URL(fileURLWithPath: "/bin/zsh"), arguments: ["-c", rule.command],
                     environment: scriptEnvironment, timeout: 300
                 )
