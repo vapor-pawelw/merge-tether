@@ -121,6 +121,9 @@ struct GitLabMergeRequest: Codable, Sendable {
     let headPipeline: Pipeline?
     let reviewers: [Todo.Author]?
     private let user: UserPermissions?
+    // Derived live evidence is deliberately excluded from the persisted REST payload.
+    var mergeTrainConflict: MergeTrainPreparationConflict? = nil
+    var mergeTrainEvidenceUnavailable = false
 
     var canMerge: Bool? { user?.canMerge }
 

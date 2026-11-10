@@ -208,7 +208,9 @@ struct MRCardPresentation {
     var chips: [Chip] {
         guard finishedState == nil else { return [] }
         var result: [Chip] = []
-        if row.displayRequest?.hasMergeConflict == true || (row.evidenceMatchesCatalogContext && item.hasConflict) {
+        if row.displayRequest?.mergeTrainConflict != nil {
+            result.append(.init(title: .MergeActions.mergeActionsTrainRebaseConflict, symbol: "arrow.triangle.branch"))
+        } else if row.displayRequest?.hasMergeConflict == true || (row.evidenceMatchesCatalogContext && item.hasConflict) {
             result.append(.init(title: .Board.boardCompactConflict, symbol: "arrow.triangle.branch"))
         }
         if let pipeline = row.currentPipelineRequest?.headPipeline,

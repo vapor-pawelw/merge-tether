@@ -217,6 +217,19 @@ struct MRBoardProjectorTests {
         #expect(index.facts(for: changed) == nil)
     }
 
+    @Test(arguments: [false, true])
+    func preparedFactsDoNotReuseReadinessAcrossTrainEvidence(_ unavailable: Bool) throws {
+        let original = try request([:])
+        var changed = original
+        if unavailable { changed.mergeTrainEvidenceUnavailable = true }
+        else {
+            changed.mergeTrainConflict = .init(context: .init(original), noteID: 1,
+                sourceSHA: original.sha ?? "a", targetSHA: String(repeating: "b", count: 40))
+        }
+        let index = MRBoardProjector.RequestFacts.Index([.init(request: original, conflictProcessing: true)])
+        #expect(index.facts(for: changed) == nil)
+    }
+
     @Test func preparedFactsKeepFirstMatchAndEquivalentAbsentBody() throws {
         let original = try request(["description": NSNull()])
         let equivalent = try request(["description": ""])

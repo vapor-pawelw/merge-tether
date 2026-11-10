@@ -4,6 +4,46 @@ import MergeTetherRemote
 @testable import GitLabTodos
 
 @MainActor @Suite struct RemoteBoardAdapterTests {
+    @Test(arguments: ["conflict", "unavailable", "uncertain"], ["same", "target", "description", "draft", "host", "author", "stale-catalog"])
+    func mergeStatusForThePhoneRequiresTheDisplayedContext(_ reason: String, _ change: String) throws {
+        // given
+        let raw = #"{"project_id":1,"iid":2,"author":{"id":3,"username":"me","name":"Me"},"title":"Feature","description":"Checked","labels":[],"web_url":"https://gitlab.example.test/g/p/-/merge_requests/2","state":"opened","draft":false,"sha":"aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa","source_project_id":1,"target_project_id":1,"source_branch":"feature","target_branch":"main","detailed_merge_status":"mergeable","has_conflicts":false,"user":{"can_merge":true}}"#
+        var checked = try JSONDecoder().decode(GitLabMergeRequest.self, from: Data(raw.utf8))
+        if reason == "conflict" {
+            checked.mergeTrainConflict = .init(context: .init(checked), noteID: 10,
+                sourceSHA: checked.sha!, targetSHA: String(repeating: "b", count: 40))
+        }
+        checked.mergeTrainEvidenceUnavailable = reason == "unavailable"
+        let status = AuthoredMergeRequestStatus(request: checked, approvals: nil, discussionsResolved: true,
+            projectRequiresResolvedDiscussions: true, autoMergeEnabled: false,
+            submissionState: reason == "uncertain" ? .uncertain : .none)
+        var fields = try #require(JSONSerialization.jsonObject(with: Data(raw.utf8)) as? [String: Any])
+        switch change {
+        case "target": fields["target_branch"] = "parent"
+        case "description": fields["description"] = "Edited"
+        case "draft": fields["draft"] = true
+        case "host": fields["web_url"] = "https://other.example.test/g/p/-/merge_requests/2"
+        case "author": fields["author"] = ["id": 4, "username": "other", "name": "Other"]
+        default: break
+        }
+        let displayed = try JSONDecoder().decode(GitLabMergeRequest.self, from: JSONSerialization.data(withJSONObject: fields))
+        let item = MergeRequestAttentionMonitor.Item(id: .init(projectID: 1, iid: 2), title: displayed.title,
+            url: displayed.webURL, mergeRequest: displayed, isAuthored: true)
+        let row = MergeRequestBoardSnapshot.Row(item: item, latestJob: nil, intents: [],
+            evidenceMatchesCatalogContext: change != "stale-catalog")
+
+        // when
+        let bound = RemoteBoardAdapter.matchingMergeStatus(for: row, statuses: [status])
+
+        // then
+        #expect((bound != nil) == (change == "same"))
+        if change == "same" {
+            #expect(bound?.request.mergeTrainConflict == checked.mergeTrainConflict)
+            #expect(bound?.request.mergeTrainEvidenceUnavailable == checked.mergeTrainEvidenceUnavailable)
+            #expect(bound?.submissionState == status.submissionState)
+        }
+    }
+
     @Test func aSafetyStorageFailureIsVisibleWithoutInvalidatingManualReadiness() throws {
         let suite = "RemoteStorageStatusTests.\(UUID())"
         let defaults = try #require(UserDefaults(suiteName: suite))

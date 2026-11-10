@@ -1,6 +1,34 @@
 import Foundation
 
 extension GlabService {
+    struct MergeTrainPreparationObservation {
+        let latestNoteID: Int
+        let conflict: MergeTrainPreparationConflict?
+    }
+
+    func fetchMergeTrainPreparationConflict(_ request: GitLabMergeRequest, host: String) async throws -> MergeTrainPreparationConflict? {
+        try await fetchMergeTrainPreparation(request, host: host).conflict
+    }
+
+    func fetchMergeTrainPreparation(_ request: GitLabMergeRequest, host: String) async throws -> MergeTrainPreparationObservation {
+        guard request.state == "opened", !request.hasQueuedMerge,
+              request.webURL.isGitLabMergeRequest(host: host, iid: request.iid) else {
+            return .init(latestNoteID: 0, conflict: nil)
+        }
+        let discussions = try await fetchMergeRequestDiscussions(projectID: request.projectID, iid: request.iid, host: host)
+        let latestNoteID = discussions.flatMap(\.notes).compactMap(\.id).max() ?? 0
+        func observation(_ conflict: MergeTrainPreparationConflict? = nil) -> MergeTrainPreparationObservation {
+            .init(latestNoteID: latestNoteID, conflict: conflict)
+        }
+        guard let conflict = MergeTrainPreparationConflict.latest(in: discussions, for: request) else { return observation() }
+        guard try await fetchActiveMergeTrainIIDs(projectID: request.projectID, host: host).contains(request.iid) == false else { return observation() }
+        guard let project = request.targetProjectID else { throw GlabError.decoding("GitLab did not provide the merge train target project") }
+        // A train base can be a synthetic result including other MRs. Only the actual
+        // current target branch is evidence for this branch's conflict repair permission.
+        let target = try await fetchBranchHeadSHA(projectID: project, branch: request.targetBranch, host: host)
+        return observation(target == conflict.targetSHA ? conflict : nil)
+    }
+
     func fetchMergeActionPolicy(projectID: Int, host: String, request: GitLabMergeRequest? = nil) async throws -> GitLabMergeActionPolicy {
         struct Project: Decodable {
             let mergeTrainsEnabled: Bool?

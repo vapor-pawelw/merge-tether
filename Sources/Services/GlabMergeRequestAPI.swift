@@ -479,7 +479,7 @@ extension GlabService {
         expectedSemanticContextFingerprint: String? = nil,
         action: MergeSubmissionAction = .mergeNow,
         expectedPolicy: GitLabMergeActionPolicy? = nil,
-        beforeWrite: @MainActor () throws -> Void = {},
+        beforeWrite: @MainActor (Int?) throws -> Void = { _ in },
         shouldProceed: @escaping @MainActor @Sendable () -> Bool
     ) async throws -> MergeSubmissionState {
         struct MergeResult: Decodable {
@@ -529,6 +529,9 @@ extension GlabService {
         }
         guard current.isReadyForMergeSubmission(action) else { throw CancellationError() }
         guard try await fetchMergeDependencyReadiness(for: current, host: host) == .ready else { throw CancellationError() }
+        let trainPreparation = expectedPolicy?.usesMergeTrain == true
+            ? try await fetchMergeTrainPreparation(current, host: host) : nil
+        if let conflict = trainPreparation?.conflict { throw conflict }
         // Re-read after dependency I/O so same-head retargets cannot reuse the
         // checked graph. GitLab's merge SHA precondition protects only the source.
         async let finalRequest = fetchMergeRequest(projectID: projectID, iid: iid, host: host)
@@ -552,7 +555,7 @@ extension GlabService {
         try Task.checkCancellation()
         guard shouldProceed() else { throw CancellationError() }
 
-        try beforeWrite()
+        try beforeWrite(trainPreparation?.latestNoteID)
         if action == .enqueue {
             let usesTrain = expectedPolicy?.usesMergeTrain == true
             let endpoint = usesTrain ? "/projects/\(projectID)/merge_trains/merge_requests/\(iid)"
@@ -568,6 +571,8 @@ extension GlabService {
                 throw GlabError.decoding("GitLab merge queue context changed")
             }
             let outcome = try await observedMergeSubmission(updated, action: action, host: host, usesMergeTrain: usesTrain)
+            if outcome == .none, usesTrain,
+               let conflict = try await fetchMergeTrainPreparationConflict(updated, host: host) { throw conflict }
             guard outcome == .merged || outcome.isDelegated else {
                 throw GlabError.decoding("GitLab did not confirm the merge queue request")
             }

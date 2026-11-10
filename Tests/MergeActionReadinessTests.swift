@@ -3,6 +3,25 @@ import Testing
 @testable import GitLabTodos
 
 struct MergeActionReadinessTests {
+    @Test(arguments: ["same", "target", "description", "title", "draft", "authorID", "username", "host", "head"])
+    func displayedMergeStatusRequiresTheExactCurrentRequest(_ change: String) throws {
+        let checked = try status()
+        var fields = try #require(JSONSerialization.jsonObject(with: JSONEncoder().encode(checked.request)) as? [String: Any])
+        switch change {
+        case "target": fields["target_branch"] = "parent"
+        case "description": fields["description"] = "New condition"
+        case "title": fields["title"] = "Edited"
+        case "draft": fields["draft"] = true
+        case "authorID": fields["author"] = ["id": 4, "username": "me", "name": "Me"]
+        case "username": fields["author"] = ["id": 3, "username": "other", "name": "Me"]
+        case "host": fields["web_url"] = "https://other.example.test/g/p/-/merge_requests/2"
+        case "head": fields["sha"] = String(repeating: "b", count: 40)
+        default: break
+        }
+        let current = try JSONDecoder().decode(GitLabMergeRequest.self, from: JSONSerialization.data(withJSONObject: fields))
+        #expect(checked.matchesCurrentRequest(current) == (change == "same"))
+    }
+
     @Test(arguments: [false, true])
     func manualMergeDoesNotDependOnTheAutomaticSetting(_ automatic: Bool) throws {
         let status = try status(automatic: automatic)

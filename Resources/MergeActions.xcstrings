@@ -253,6 +253,28 @@
           }
         }
       }
+    },
+    "mergeActions.trainRebaseConflict": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Merge train blocked: GitLab could not rebase the commits onto the target branch."
+          }
+        }
+      }
+    },
+    "mergeActions.trainEvidenceUnavailable": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Merge train preparation could not be checked. Review the current train in GitLab."
+          }
+        }
+      }
     }
   },
   "version": "1.0"

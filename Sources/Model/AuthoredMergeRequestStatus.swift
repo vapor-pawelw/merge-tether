@@ -32,6 +32,13 @@ struct AuthoredMergeRequestStatus: Identifiable {
 
     var id: String { "\(request.projectID)!\(request.iid)" }
 
+    func matchesCurrentRequest(_ current: GitLabMergeRequest) -> Bool {
+        MergeRequestDependencySummary.Context(request) == .init(current)
+            && request.semanticContextFingerprint == current.semanticContextFingerprint
+            && request.draft == current.draft && request.author.id == current.author.id
+            && request.author.username == current.author.username
+    }
+
     static func orderedForMerge(_ statuses: [Self]) -> [Self] {
         statuses.sorted { $0.mergeOrder < $1.mergeOrder }
     }
@@ -104,6 +111,7 @@ struct AuthoredMergeRequestStatus: Identifiable {
         }
 
         if pendingDraftCount == nil || approvals == nil || discussionsResolved == nil || request.canMerge == nil
+            || request.mergeTrainEvidenceUnavailable
             || request.draft == nil || request.detailedMergeStatus == nil
             || (request.detailedMergeStatus == "mergeable" && (request.sha == nil || request.hasConflicts == nil)) {
             blockers.append(.unknown)
@@ -140,11 +148,13 @@ struct AuthoredMergeRequestStatus: Identifiable {
 }
 
 extension GitLabMergeRequest {
-    var hasMergeConflict: Bool { hasConflicts == true || detailedMergeStatus == "conflict" }
+    var hasMergeConflict: Bool {
+        hasConflicts == true || detailedMergeStatus == "conflict" || mergeTrainConflict?.matches(self) == true
+    }
 
     var isReadyForMergeChecks: Bool {
         state == "opened" && draft == false && detailedMergeStatus == "mergeable"
-            && hasConflicts == false && canMerge == true && sha != nil
+            && hasConflicts == false && !hasMergeConflict && !mergeTrainEvidenceUnavailable && canMerge == true && sha != nil
             && (headPipeline == nil || headPipeline?.status == "success")
     }
 }

@@ -6,14 +6,28 @@ struct MergeRequestBrowserSnapshotTests {
     private let host = "gitlab.example.org"
 
     private func request(_ iid: Int, username: String = "me", title: String = "Fix",
-                         host: String = "gitlab.example.org", draft: Bool = false, state: String = "opened") throws -> GitLabMergeRequest {
+                         host: String = "gitlab.example.org", draft: Bool = false, state: String = "opened",
+                         target: String = "main") throws -> GitLabMergeRequest {
         try JSONDecoder().decode(GitLabMergeRequest.self, from: Data("""
         {"project_id":1,"iid":\(iid),"author":{"id":3,"username":"\(username)","name":"Author"},
          "title":"\(title)","web_url":"https://\(host)/g/p/-/merge_requests/\(iid)",
          "state":"\(state)","draft":\(draft),"sha":"aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
-         "source_branch":"fix","target_branch":"main","detailed_merge_status":"mergeable",
+         "source_branch":"fix","target_branch":"\(target)","detailed_merge_status":"mergeable",
          "has_conflicts":false,"labels":[],"blocking_discussions_resolved":true,"user":{"can_merge":true}}
         """.utf8))
+    }
+
+    @Test(arguments: ["main", "parent"])
+    func trainFailureDisplayIsBoundToTheCurrentTarget(_ target: String) throws {
+        let current = try request(1, target: target)
+        var checked = try request(1)
+        checked.mergeTrainConflict = .init(context: .init(checked), noteID: 10,
+            sourceSHA: checked.sha!, targetSHA: String(repeating: "b", count: 40))
+        let result = MergeRequestBrowserSnapshot(openItems: [item(current)], authored: [try status(checked, approved: true)],
+            host: host, username: "me", scope: .init())
+        let displayed = try #require(result.own.first)
+        #expect((displayed.mergeRequest?.mergeTrainConflict != nil) == (target == "main"))
+        #expect(displayed.hasConflict == (target == "main"))
     }
 
     private func item(_ request: GitLabMergeRequest) -> MergeRequestAttentionMonitor.Item {

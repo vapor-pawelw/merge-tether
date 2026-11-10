@@ -109,10 +109,14 @@ import MergeTetherRemote
                         result.lanes[lane].cards[index] = card
                         continue
                     }
-                    let mergeStatus = monitor.authoredMergeRequests.requests.first {
-                        $0.request.projectID == item.id.projectID && $0.request.iid == item.id.iid && $0.request.sha == item.mergeRequest?.sha
-                    }
-                    if let title = mergeStatus?.submissionState.title {
+                    let mergeStatus = monitor.authoredMergeRequests.hasSyncedCurrentCatalog
+                        ? matchingMergeStatus(for: row, statuses: monitor.authoredMergeRequests.requests) : nil
+                    if let conflict = mergeStatus?.request.mergeTrainConflict {
+                        card.presentation?.status = String(localized: .MergeActions.mergeActionsTrainRebaseConflict)
+                        card.detail = conflict.noteURL.absoluteString
+                    } else if mergeStatus?.request.mergeTrainEvidenceUnavailable == true {
+                        card.presentation?.status = String(localized: .MergeActions.mergeActionsTrainEvidenceUnavailable)
+                    } else if let title = mergeStatus?.submissionState.title {
                         card.presentation?.status = String(localized: title)
                         card.detail = String(localized: .MergeActions.mergeActionsConfirmHelp)
                     }
@@ -152,6 +156,12 @@ import MergeTetherRemote
             for lane in result.lanes.indices { for card in result.lanes[lane].cards.indices { result.lanes[lane].cards[card].actions = [] } }
         }
         return result
+    }
+
+    static func matchingMergeStatus(for row: MergeRequestBoardSnapshot.Row,
+                                    statuses: [AuthoredMergeRequestStatus]) -> AuthoredMergeRequestStatus? {
+        guard row.evidenceMatchesCatalogContext, let request = row.displayRequest else { return nil }
+        return statuses.first { $0.matchesCurrentRequest(request) }
     }
 
     static func mergeActions(_ original: RemoteCard, item: MergeRequestAttentionMonitor.Item,

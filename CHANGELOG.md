@@ -6,6 +6,8 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 
 ## Unreleased
 
+- Recognize source- and target-bound merge train rebase failures even when GitLab reports a mergeable MR; show the server cause, hold repeat submissions and route separately authorized conflict preparation without losing uncertain-attempt protection.
+
 - Give MR Details a clearer hierarchy, more readable conversation text and a grouped discussion list, with quieter section surfaces and dependency information above header actions.
 
 - Make Details discussion threads easier to scan with compact filenames, full-path hover descriptions, clearer comment hierarchy and separate published-reply and private-draft status for the current account.

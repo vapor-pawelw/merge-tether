@@ -76,6 +76,242 @@ import Testing
         }
     }
 
+    @Test func aTrainRebaseConflictBlocksAMergeableSummaryBeforeAnyWrite() async throws {
+        try await fixture { glab, gitlab, request in
+            gitlab.write("train-conflict")
+            await #expect(throws: MergeTrainPreparationConflict.self) { _ = try await submit(glab, request: request) }
+            #expect(gitlab.requests.allSatisfy { $0.method == "GET" })
+        }
+    }
+
+    @Test(arguments: ["source", "target", "ref", "newer-removal"])
+    func staleOrUntrustedTrainFailuresDoNotBecomeCurrentConflicts(_ mismatch: String) async throws {
+        try await fixture { glab, gitlab, request in
+            gitlab.write("train-conflict", mismatch)
+            gitlab.write("outcome", "train")
+            let outcome = try await submit(glab, request: request)
+            #expect(outcome == .inTrain)
+            #expect(gitlab.requests.filter { $0.method != "GET" }.count == 1)
+        }
+    }
+
+    @Test func aUserCommentCannotForgeTheSystemTrainFailure() async throws {
+        try await fixture { glab, gitlab, request in
+            gitlab.write("train-conflict", "comment")
+            let conflict = try await glab.fetchMergeTrainPreparationConflict(request, host: host)
+            #expect(conflict == nil)
+            #expect(gitlab.requests.allSatisfy { $0.method == "GET" })
+        }
+    }
+
+    @Test(arguments: ["queued", "train"])
+    func anActiveQueueTakesPrecedenceOverHistoricalTrainFailure(_ state: String) async throws {
+        try await fixture { glab, gitlab, request in
+            gitlab.write("train-conflict")
+            gitlab.write("observed", state)
+            let outcome = try await submit(glab, request: request)
+            #expect(outcome == (state == "train" ? .inTrain : .queued))
+            #expect(gitlab.requests.allSatisfy { $0.method == "GET" })
+        }
+    }
+
+    @Test func aTrainFailureArrivingDuringDependencyChecksStopsTheFinalWrite() async throws {
+        try await fixture { glab, gitlab, request in
+            let handler = try #require(gitlab.handler)
+            gitlab.handler = { call in
+                if call.endpoint.contains("/blocks?") { gitlab.write("train-conflict") }
+                return try await handler(call)
+            }
+            await #expect(throws: MergeTrainPreparationConflict.self) { _ = try await submit(glab, request: request) }
+            #expect(gitlab.requests.allSatisfy { $0.method == "GET" })
+        }
+    }
+
+    @Test func aTrainRejectedBeforeThePostconditionReportsItsCauseWithoutReplaying() async throws {
+        try await fixture { glab, gitlab, request in
+            let handler = try #require(gitlab.handler)
+            gitlab.handler = { call in
+                if call.method != "GET" { gitlab.write("train-conflict") }
+                return try await handler(call)
+            }
+            do {
+                _ = try await submit(glab, request: request)
+                Issue.record("A removed train must not be reported as accepted")
+            } catch let conflict as MergeTrainPreparationConflict {
+                #expect(conflict.sourceSHA == request.sha)
+                #expect(conflict.targetSHA == String(repeating: "b", count: 40))
+                #expect(conflict.noteID == 10)
+            }
+            #expect(gitlab.requests.filter { $0.method != "GET" }.count == 1)
+        }
+    }
+
+    @Test func immediateRejectionPreservesTheAttemptAndItsNewerServerProof() async throws {
+        try await fixture { glab, gitlab, request in
+            // given
+            let suite = "ImmediateTrainRejection.\(UUID())"
+            let defaults = try #require(UserDefaults(suiteName: suite))
+            defer { defaults.removePersistentDomain(forName: suite) }
+            let settings = SettingsManager(defaults: defaults)
+            settings.onboardingCompleted = true; settings.notificationsEnabled = false
+            let monitor = AuthoredMergeRequestMonitor(settings: settings, glab: glab, canAutomate: { _ in true })
+            monitor.setVisible(true)
+            while monitor.isLoading { await Task.yield() }
+            let handler = try #require(gitlab.handler)
+            gitlab.handler = { call in
+                if call.method != "GET" { gitlab.write("train-conflict") }
+                return try await handler(call)
+            }
+
+            // when
+            #expect(await monitor.mergeManually(request) == .changed)
+            while monitor.isLoading { await Task.yield() }
+
+            // then
+            let receipt = try #require(settings.mergeSubmissions.first)
+            #expect(receipt.state == .uncertain)
+            #expect(receipt.trainNoteIDBeforeAttempt == 0)
+            #expect(receipt.confirmedTrainRejection?.noteID == 10)
+            #expect(monitor.requests.first?.request.mergeTrainConflict?.noteID == 10)
+            #expect(await monitor.mergeManually(request) == .uncertain)
+            #expect(gitlab.requests.filter { $0.method != "GET" }.count == 1)
+        }
+    }
+
+    @Test(arguments: [9, 10, 11])
+    func onlyARejectionNewerThanTheSavedBaselineCanReleaseANewSource(_ noteID: Int) async throws {
+        try await fixture { _, _, request in
+            let suite = "TrainProofBaseline.\(UUID())"
+            let defaults = try #require(UserDefaults(suiteName: suite))
+            defer { defaults.removePersistentDomain(forName: suite) }
+            var receipt = MergeSubmissionReceipt(target: .init(host: host, username: user.username, projectID: 1, iid: 2),
+                userID: user.id, context: .init(request), semanticFingerprint: request.semanticContextFingerprint,
+                discussionFingerprint: ReviewVerdict.fingerprint([])!, configuration: .init(SettingsManager(defaults: defaults)),
+                action: .enqueue, createdAt: Date())
+            receipt.trainNoteIDBeforeAttempt = 10
+            receipt.confirmedTrainRejection = .init(context: .init(request), noteID: noteID,
+                sourceSHA: request.sha!, targetSHA: String(repeating: "b", count: 40))
+            let encoded = try JSONEncoder().encode(request)
+            var fields = try #require(JSONSerialization.jsonObject(with: encoded) as? [String: Any])
+            fields["sha"] = String(repeating: "c", count: 40)
+            let repaired = try JSONDecoder().decode(GitLabMergeRequest.self, from: JSONSerialization.data(withJSONObject: fields))
+            #expect(receipt.mayReconsiderAfterTrainRepair(repaired) == (noteID > 10))
+            #expect(!receipt.mayReconsiderAfterTrainRepair(request))
+        }
+    }
+
+    @Test func aTrainRebaseConflictIsVisibleAndSchedulesOneSeparatelyAuthorizedRepair() async throws {
+        try await fixture { glab, gitlab, _ in
+            let suite = "TrainRebaseConflict.\(UUID())"
+            let defaults = try #require(UserDefaults(suiteName: suite))
+            defer { defaults.removePersistentDomain(forName: suite) }
+            let settings = SettingsManager(defaults: defaults)
+            settings.onboardingCompleted = true; settings.notificationsEnabled = false
+            settings.automation.packageDecision = .enabled
+            settings.automation.conflictTasksEnabled = true
+            gitlab.write("train-conflict")
+            var prompts: [String] = []
+            let monitor = AuthoredMergeRequestMonitor(settings: settings, glab: glab, canAutomate: { _ in true },
+                conflictLauncher: { input, _ in
+                    prompts.append(input.prompt)
+                    return .init(id: UUID(), key: .init(assistant: input.assistant, work: input.work,
+                        username: input.username, workspace: "", access: input.access), title: input.title,
+                        prompt: input.prompt, createdAt: Date(), allowsPush: input.allowsPush, expectedHeadSHA: input.head)
+                })
+            monitor.setVisible(true)
+            while monitor.isLoading { await Task.yield() }
+            let deadline = ContinuousClock.now + .seconds(3)
+            while prompts.isEmpty, ContinuousClock.now < deadline { await Task.yield() }
+            try #require(!prompts.isEmpty)
+            let status = try #require(monitor.requests.first)
+            #expect(status.request.hasMergeConflict)
+            #expect(status.blockers.contains(.conflicts))
+            #expect(!status.mayMergeManually && !status.mayAutoMerge)
+            #expect(prompts.first?.contains("merge train") == true)
+            #expect(prompts.first?.contains("has_conflicts=false") == true)
+            #expect(prompts.first?.contains("Before any push, repeat") == true)
+            #expect(prompts.first?.contains("After an authorized normal push") == true)
+            #expect(prompts.first?.contains("A clean final-tree merge alone is not proof") == true)
+            #expect(prompts.first?.contains("Leave force-pushes") == true)
+            monitor.refreshIfNeeded()
+            while monitor.isLoading { await Task.yield() }
+            #expect(prompts.count == 1)
+            #expect(gitlab.requests.allSatisfy { $0.method == "GET" })
+        }
+    }
+
+    @Test(arguments: [false, true])
+    func onlyAConfirmedRejectionAllowsANewHeadToLeaveAnUncertainAttempt(_ hasBaseline: Bool) async throws {
+        try await fixture { glab, gitlab, request in
+            // given
+            let suite = "TrainRejectionRecovery.\(UUID())"
+            let defaults = try #require(UserDefaults(suiteName: suite))
+            defer { defaults.removePersistentDomain(forName: suite) }
+            let settings = SettingsManager(defaults: defaults)
+            settings.onboardingCompleted = true; settings.notificationsEnabled = false
+            settings.automation.packageDecision = .enabled
+            settings.automation.conflictTasksEnabled = true
+            var receipt = MergeSubmissionReceipt(target: .init(host: host, username: user.username, projectID: 1, iid: 2),
+                userID: user.id, context: .init(request), semanticFingerprint: request.semanticContextFingerprint,
+                discussionFingerprint: ReviewVerdict.fingerprint([])!, configuration: .init(settings), action: .enqueue, createdAt: Date())
+            receipt.trainNoteIDBeforeAttempt = hasBaseline ? 0 : nil
+            #expect(settings.saveMergeSubmission(receipt))
+            gitlab.write("train-conflict")
+            var launches = 0
+            let monitor = AuthoredMergeRequestMonitor(settings: settings, glab: glab, canAutomate: { _ in true },
+                conflictLauncher: { input, _ in
+                    launches += 1
+                    return .init(id: UUID(), key: .init(assistant: input.assistant, work: input.work,
+                        username: input.username, workspace: "", access: input.access), title: input.title,
+                        prompt: input.prompt, createdAt: Date(), allowsPush: input.allowsPush, expectedHeadSHA: input.head)
+                })
+
+            // when
+            monitor.setVisible(true)
+            while monitor.isLoading { await Task.yield() }
+            let deadline = ContinuousClock.now + .seconds(3)
+            while launches == 0, ContinuousClock.now < deadline { await Task.yield() }
+            try #require(launches == 1)
+            let rejected = try #require(monitor.requests.first)
+
+            // then
+            #expect(rejected.submissionState == .uncertain)
+            #expect(rejected.request.mergeTrainConflict != nil)
+            #expect((settings.mergeSubmissions.first?.confirmedTrainRejection != nil) == hasBaseline)
+            let restored = SettingsManager(defaults: defaults)
+            #expect(restored.mergeSubmissions.first?.trainNoteIDBeforeAttempt == (hasBaseline ? 0 : nil))
+            #expect((restored.mergeSubmissions.first?.confirmedTrainRejection != nil) == hasBaseline)
+            #expect(await monitor.mergeManually(request) == .uncertain)
+            #expect(gitlab.requests.allSatisfy { $0.method == "GET" })
+            gitlab.write("current-head", String(repeating: "c", count: 40))
+            monitor.refreshIfNeeded()
+            while monitor.isLoading { await Task.yield() }
+            let repaired = try #require(monitor.requests.first)
+            #expect(repaired.submissionState == (hasBaseline ? .none : .uncertain))
+            #expect(repaired.blockers.isEmpty)
+            #expect(repaired.mayMergeManually == hasBaseline)
+            #expect(launches == 1)
+            #expect(gitlab.requests.allSatisfy { $0.method == "GET" })
+        }
+    }
+
+    @Test(arguments: ["account", "target-unavailable"])
+    func trainEvidenceCannotAuthorizeAcrossASessionChangeOrMissingTarget(_ failure: String) async throws {
+        try await fixture { glab, gitlab, request in
+            gitlab.write("train-conflict")
+            let handler = try #require(gitlab.handler)
+            gitlab.handler = { call in
+                if call.endpoint == "/projects/1/repository/branches/main" {
+                    if failure == "target-unavailable" { return InMemoryGitLab.output(error: "403 Forbidden", code: 1) }
+                    glab.currentUsername = "other"; glab.currentUsername = "me"
+                }
+                return try await handler(call)
+            }
+            await #expect(throws: (any Error).self) { _ = try await submit(glab, request: request) }
+            #expect(gitlab.requests.allSatisfy { $0.method == "GET" })
+        }
+    }
+
     @Test(arguments: ["17.10.9-ee", "garbage"])
     func unsupportedServerNeverGuessesTheQueueAPI(_ version: String) async throws {
         try await fixture { glab, gitlab, _ in
@@ -218,6 +454,8 @@ import Testing
         let request = try JSONDecoder().decode(GitLabMergeRequest.self, from: Data(raw.utf8))
         gitlab.handler = { call in
             let drift = gitlab.text("drift")
+            let listed = gitlab.has("current-head")
+                ? raw.replacingOccurrences(of: String(repeating: "a", count: 40), with: gitlab.text("current-head")) : raw
             switch call.endpoint {
             case "/user": return InMemoryGitLab.output(drift == "account" ? #"{"id":99,"username":"me"}"# : #"{"id":3,"username":"me"}"#)
             case "/version": return try InMemoryGitLab.json(["version": gitlab.has("version") ? gitlab.text("version") : "19.5.3-ee"])
@@ -229,11 +467,12 @@ import Testing
             case "/projects/1/approvals":
                 return gitlab.has("unavailable-approval-policy") ? InMemoryGitLab.output(error: "403 Forbidden", code: 1)
                     : InMemoryGitLab.output(#"{"reset_approvals_on_push":true}"#)
-            case let path where path.hasPrefix("/merge_requests?"): return InMemoryGitLab.output("[" + raw + "]")
+            case let path where path.hasPrefix("/merge_requests?"): return InMemoryGitLab.output("[" + listed + "]")
             case let path where path.contains("/merge_trains?"):
                 return InMemoryGitLab.output(gitlab.text("observed") == "train" ? #"[{"merge_request":{"project_id":1,"iid":2}}]"# : "[]")
             case "/projects/1/merge_requests/2":
                 var object = try #require(JSONSerialization.jsonObject(with: Data(raw.utf8)) as? [String: Any])
+                if gitlab.has("current-head") { object["sha"] = gitlab.text("current-head") }
                 if gitlab.has("pipeline-running") {
                     object["detailed_merge_status"] = "ci_still_running"
                     object["head_pipeline"] = ["id": 4, "status": "running"]
@@ -243,12 +482,30 @@ import Testing
                 if gitlab.text("observed") == "queued" || gitlab.text("observed") == "train" { object["merge_when_pipeline_succeeds"] = true }
                 if gitlab.text("observed") == "merged" { object["state"] = "merged" }
                 return try InMemoryGitLab.json(object)
-            case let path where path.contains("/merge_requests?state=opened"): return InMemoryGitLab.output("[" + raw + "]")
+            case let path where path.contains("/merge_requests?state=opened"): return InMemoryGitLab.output("[" + listed + "]")
             case let path where path.contains("/blocks?"):
                 return InMemoryGitLab.output(drift == "dependencies" ? #"[{"blocking_merge_request":null}]"# : "[]")
             case let path where path.hasSuffix("/approval_state"): return InMemoryGitLab.output(#"{"rules":[{"approvals_required":2,"approved":true}]}"#)
             case let path where path.contains("/discussions?"):
+                if gitlab.has("train-conflict") {
+                    let mismatch = gitlab.text("train-conflict")
+                    let source = String(repeating: mismatch == "source" ? "c" : "a", count: 40)
+                    let target = String(repeating: mismatch == "target" ? "c" : "b", count: 40)
+                    let ref = mismatch == "ref" ? "3" : "2"
+                    var notes: [[String: Any]] = [["id": 10, "system": mismatch != "comment", "resolvable": false,
+                        "body": "removed this merge request from the merge train because the merge train pipeline could not be prepared: failed to rebase \(source) on \(target) while preparing refs/merge-requests/\(ref)/train due to conflict. [Learn more](https://gitlab.example.test/help/ci/pipelines/merge_trains.md)"]]
+                    if mismatch == "newer-removal" {
+                        notes.append(["id": 11, "system": true, "resolvable": false,
+                            "body": "removed this merge request from the merge train because the pipeline failed"])
+                    }
+                    return try InMemoryGitLab.json([["id": "train", "notes": notes]])
+                }
                 return InMemoryGitLab.output(drift == "newFeedback" ? #"[{"id":"new","notes":[{"id":10,"author":{"id":7},"system":false,"body":"New condition"}]}]"# : "[]")
+            case "/projects/1/repository/branches/main":
+                return try InMemoryGitLab.json(["commit": ["id": String(repeating: "b", count: 40)]])
+            case "/projects/1/repository/branches/feature":
+                return try InMemoryGitLab.json(["commit": ["id": String(repeating: "a", count: 40)]])
+            case let path where path.contains("/diffs?"): return InMemoryGitLab.output("[]")
             case let path where path.contains("/draft_notes?"):
                 return InMemoryGitLab.output(drift == "drafts" ? #"[{"id":10,"author_id":3,"note":"Reply"}]"# : "[]")
             case "/projects/1/merge_trains/merge_requests/2", "/projects/1/merge_requests/2/merge":

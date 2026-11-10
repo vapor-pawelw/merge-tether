@@ -14,8 +14,9 @@ struct MergeActionsView<AdditionalActions: View>: View {
     @State private var resolutionMessage: String?
 
     private var status: AuthoredMergeRequestStatus? {
-        monitor.authoredMergeRequests.requests.first { $0.request.projectID == item.id.projectID && $0.request.iid == item.id.iid
-            && $0.request.sha == item.mergeRequest?.sha && $0.request.webURL == item.url }
+        guard evidenceMatchesCatalogContext, monitor.authoredMergeRequests.hasSyncedCurrentCatalog,
+              let request = item.mergeRequest, request.webURL == item.url else { return nil }
+        return monitor.authoredMergeRequests.requests.first { $0.matchesCurrentRequest(request) }
     }
     private var owned: Bool {
         item.isAuthored && item.mergeRequest?.state == "opened" && item.mergeRequest?.author.username == monitor.glab.currentUsername
@@ -27,7 +28,13 @@ struct MergeActionsView<AdditionalActions: View>: View {
     var body: some View {
         VStack(alignment: .leading, spacing: 6) {
             if owned {
-                if let title = state.title {
+                if let conflict = status?.request.mergeTrainConflict {
+                    Link(destination: conflict.noteURL) {
+                        Label { Text(.MergeActions.mergeActionsTrainRebaseConflict) } icon: { Image(systemName: "arrow.triangle.branch") }
+                    }.foregroundStyle(.orange)
+                } else if status?.request.mergeTrainEvidenceUnavailable == true {
+                    Text(.MergeActions.mergeActionsTrainEvidenceUnavailable).foregroundStyle(.orange)
+                } else if let title = state.title {
                     Label { Text(title) } icon: { Image(systemName: state.isDelegated ? "clock" : "exclamationmark.circle") }
                         .foregroundStyle(state.isDelegated ? Color.secondary : .orange)
                 } else if let status, status.action == nil {
@@ -35,7 +42,7 @@ struct MergeActionsView<AdditionalActions: View>: View {
                 }
                 if hasDiscussionBlock { Text(.Menu.menuAuthoredBlockerDiscussions).foregroundStyle(.orange) }
                 if let resolutionMessage { Text(verbatim: resolutionMessage).foregroundStyle(.secondary).textSelection(.enabled) }
-                if result == .changed { Text(.MergeActions.mergeActionsBlocked).foregroundStyle(.orange) }
+                if result == .changed, status?.request.mergeTrainConflict == nil { Text(.MergeActions.mergeActionsBlocked).foregroundStyle(.orange) }
             }
             HStack(spacing: 8) {
                 if owned {

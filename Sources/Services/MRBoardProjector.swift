@@ -29,6 +29,8 @@ struct MRBoardProjector {
             let draft: Bool?
             let pipeline: Pipeline?
             let hasConflicts: Bool?
+            let trainConflict: MergeTrainPreparationConflict?
+            let trainEvidenceUnavailable: Bool
             let detailedMergeStatus: String?
             let blockingDiscussionsResolved: Bool?
             let mergeWhenPipelineSucceeds: Bool?
@@ -39,6 +41,7 @@ struct MRBoardProjector {
                 authorID = request.author.id; authorUsername = request.author.username; draft = request.draft
                 pipeline = request.headPipeline.map(Pipeline.init)
                 hasConflicts = request.hasConflicts; detailedMergeStatus = request.detailedMergeStatus
+                trainConflict = request.mergeTrainConflict; trainEvidenceUnavailable = request.mergeTrainEvidenceUnavailable
                 blockingDiscussionsResolved = request.blockingDiscussionsResolved
                 mergeWhenPipelineSucceeds = request.mergeWhenPipelineSucceeds; canMerge = request.canMerge
                 labels = request.labels
@@ -428,6 +431,12 @@ struct MRBoardProjector {
             if let currentHead = rows[id]?.mergeRequest?.sha, currentHead != request.sha { continue }
             var item = rows[id] ?? .init(id: id, title: request.title, url: request.webURL)
             if item.mergeRequest == nil { item.mergeRequest = request }
+            if let current = item.mergeRequest, MergeRequestDependencySummary.Context(current) == .init(request),
+               current.semanticContextFingerprint == request.semanticContextFingerprint, current.draft == request.draft {
+                item.mergeRequest?.mergeTrainConflict = request.mergeTrainConflict
+                item.mergeRequest?.mergeTrainEvidenceUnavailable = request.mergeTrainEvidenceUnavailable
+                if request.mergeTrainConflict != nil { item.hasConflict = true }
+            }
             item.isAuthored = true
             rows[id] = item
         }
