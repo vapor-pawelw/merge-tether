@@ -233,4 +233,10 @@ identifier to keep that installation's preferences and permissions.
 
 A release build script lives at `scripts/build-release.sh`. Run it through the pinned toolchain with `mise exec -- bash scripts/build-release.sh [version]`. It generates the project, runs an unsigned Release `clean build`, and packages the `.app` into a DMG and ZIP with SHA-256 files under `release/`. Without a version argument it reads `CFBundleShortVersionString` from `Project.swift`. It replaces and then removes the repository’s scratch `build/` directory.
 
+The script writes and checks the chosen version in the staged app's `Info.plist` before either archive is created. It preserves `CFBundleVersion` and leaves `Project.swift` unchanged. CI also injects the tag version and workflow build number before project generation; local packaging does not require that CI-only step.
+
+These artifacts do not have a certificate-backed distribution signature or notarization. An automatic linker ad hoc signature does not provide either. Distribution signing and notarization remain release blockers; a local Apple Development identity used for pairing is not the distribution setup.
+
 Releases are tag-driven: pushing a `v*` tag triggers the Release workflow. `scripts/release-interactive.sh` promotes Unreleased notes and pushes their commit and an annotated tag; it is a publication command, not a local build helper. Only publish or tag a release when explicitly requested. Legacy `GitLabTodos` artifact names remain in use.
+
+If the workflow API is unavailable, there are no workflows, or the Release workflow is missing after a tag push, the script exits nonzero and reports an incomplete release. A pushed tag alone is not success. Inspect the existing workflow run and release assets using the printed commands before any further action; do not restart publication by pushing the tag again.

@@ -528,28 +528,27 @@ main() {
     exit 1
   fi
 
+  local workflow_status
   if release_workflow_status "$source_repo"; then
     :
   else
-    local workflow_status
     workflow_status="$?"
     case "$workflow_status" in
       2)
-        echo "Tag pushed, but could not query GitHub Actions workflows for ${source_repo}."
-        echo "Skipping workflow/release/Homebrew verification."
-        exit 0
+        echo "Could not query GitHub Actions workflows for ${source_repo}." >&2
         ;;
       3)
-        echo "Tag pushed. No GitHub Actions workflows are configured in ${source_repo}."
-        echo "Skipping workflow/release/Homebrew verification."
-        exit 0
+        echo "No GitHub Actions workflows are configured in ${source_repo}." >&2
         ;;
       4)
-        echo "Tag pushed. Workflow '${RELEASE_WORKFLOW_NAME}' is not configured in ${source_repo}."
-        echo "Skipping workflow/release/Homebrew verification."
-        exit 0
+        echo "Workflow '${RELEASE_WORKFLOW_NAME}' is not configured in ${source_repo}." >&2
         ;;
     esac
+    echo "Release incomplete: tag ${tag} was pushed, but workflow/release/Homebrew verification did not finish." >&2
+    echo "Inspect the existing tag and workflow; do not push the tag again." >&2
+    echo "Check with: gh run list --workflow \"${RELEASE_WORKFLOW_NAME}\" --repo ${source_repo}" >&2
+    echo "Check with: gh release view ${tag} --repo ${release_repo}" >&2
+    exit 1
   fi
 
   echo "Changelog commit ${changelog_commit} pushed. Waiting for GitHub Actions run..."

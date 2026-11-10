@@ -180,6 +180,8 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 
 ### Fixed
 
+- Put the requested version in local release archives and report incomplete publication as a failure when workflow verification cannot finish after a tag push.
+
 - Keep feedback launch failures tied to their account and checked discussion context, and distinguish an admitted task from a rejected preflight without replaying earlier work.
 
 - Keep private MR checkpoints bound to their checked source while showing newer catalog metadata consistently on Mac and phone.

@@ -72,6 +72,14 @@ fi
 STAGED_APP="${STAGING_DIR}/${APP_NAME}.app"
 cp -R "${BUILT_APP}" "${STAGED_APP}"
 
+echo "==> Setting staged bundle version to ${VERSION}"
+# Tuist's literal Info.plist version takes precedence over MARKETING_VERSION.
+/usr/libexec/PlistBuddy -c "Set :CFBundleShortVersionString ${VERSION}" "${STAGED_APP}/Contents/Info.plist"
+if [[ "$(/usr/libexec/PlistBuddy -c 'Print :CFBundleShortVersionString' "${STAGED_APP}/Contents/Info.plist")" != "${VERSION}" ]]; then
+    echo "error: staged app version does not match ${VERSION}; refusing to package" >&2
+    exit 1
+fi
+
 echo "==> Packaging ZIP"
 ZIP_NAME="${APP_NAME}-${VERSION}.zip"
 ZIP_PATH="${RELEASE_DIR}/${ZIP_NAME}"
