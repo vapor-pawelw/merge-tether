@@ -298,50 +298,6 @@
         }
       }
     },
-    "onboarding.notifications.denied" : {
-      "extractionState" : "manual",
-      "localizations" : {
-        "en" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "Notifications are turned off in System Settings. You can enable them later without redoing setup."
-          }
-        }
-      }
-    },
-    "onboarding.notifications.enable" : {
-      "extractionState" : "manual",
-      "localizations" : {
-        "en" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "Enable notifications"
-          }
-        }
-      }
-    },
-    "onboarding.notifications.enabled" : {
-      "extractionState" : "manual",
-      "localizations" : {
-        "en" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "Notifications are enabled."
-          }
-        }
-      }
-    },
-    "onboarding.notifications.openSystemSettings" : {
-      "extractionState" : "manual",
-      "localizations" : {
-        "en" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "Open System Settings…"
-          }
-        }
-      }
-    },
     "onboarding.notifications.title" : {
       "extractionState" : "manual",
       "localizations" : {

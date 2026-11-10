@@ -166,17 +166,6 @@
         }
       }
     },
-    "mergeActions.checking": {
-      "extractionState": "manual",
-      "localizations": {
-        "en": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "Checking merge…"
-          }
-        }
-      }
-    },
     "mergeActions.blocked": {
       "extractionState": "manual",
       "localizations": {
@@ -217,28 +206,6 @@
           "stringUnit": {
             "state": "translated",
             "value": "The action could not be verified. Refresh and check GitLab."
-          }
-        }
-      }
-    },
-    "mergeActions.manualAssessment": {
-      "extractionState": "manual",
-      "localizations": {
-        "en": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "Checking feedback before merge"
-          }
-        }
-      }
-    },
-    "mergeActions.resolveNone": {
-      "extractionState": "manual",
-      "localizations": {
-        "en": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "No verified, answered threads are ready to resolve."
           }
         }
       }

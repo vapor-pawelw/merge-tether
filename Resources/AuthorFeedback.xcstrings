@@ -167,17 +167,6 @@
         }
       }
     },
-    "authorFeedback.needsWorkChip": {
-      "extractionState": "manual",
-      "localizations": {
-        "en": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "Feedback needs attention"
-          }
-        }
-      }
-    },
     "authorFeedback.autoFollowUpOff": {
       "extractionState": "manual",
       "localizations": {
@@ -207,50 +196,6 @@
           "stringUnit": {
             "state": "translated",
             "value": "Follow-up push is off. Proposed fixes stay in the agent result until you deliver them manually or enable push."
-          }
-        }
-      }
-    },
-    "authorFeedback.retry": {
-      "extractionState": "manual",
-      "localizations": {
-        "en": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "Verify again"
-          }
-        }
-      }
-    },
-    "authorFeedback.verificationFailedChip": {
-      "extractionState": "manual",
-      "localizations": {
-        "en": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "Verification failed"
-          }
-        }
-      }
-    },
-    "authorFeedback.verifyingChip": {
-      "extractionState": "manual",
-      "localizations": {
-        "en": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "Verifying feedback"
-          }
-        }
-      }
-    },
-    "authorFeedback.pendingRepliesChip": {
-      "extractionState": "manual",
-      "localizations": {
-        "en": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "Replies pending"
           }
         }
       }

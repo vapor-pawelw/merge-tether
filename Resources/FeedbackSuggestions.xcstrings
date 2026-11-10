@@ -23,17 +23,6 @@
         }
       }
     },
-    "feedbackSuggestions.sourceRun": {
-      "extractionState": "manual",
-      "localizations": {
-        "en": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "Comment selected for this run"
-          }
-        }
-      }
-    },
     "feedbackSuggestions.sourceSaved": {
       "extractionState": "manual",
       "localizations": {

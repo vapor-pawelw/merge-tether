@@ -178,17 +178,6 @@
         }
       }
     },
-    "publication.resetBaseline.%@": {
-      "extractionState": "manual",
-      "localizations": {
-        "en": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "Individual resets use %1$@ defaults. Other settings stay as configured."
-          }
-        }
-      }
-    },
     "publication.unrestrictedShort": {
       "extractionState": "manual",
       "localizations": {

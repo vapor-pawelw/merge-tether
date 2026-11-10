@@ -276,17 +276,6 @@
           }
         }
       }
-    },
-    "mrDiscussions.aiChecking": {
-      "extractionState": "manual",
-      "localizations": {
-        "en": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "Assessing comments for AI assistance…"
-          }
-        }
-      }
     }
   },
   "version": "1.0"

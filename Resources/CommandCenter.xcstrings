@@ -12,116 +12,6 @@
         }
       }
     },
-    "commandCenter.sidebar.workspace": {
-      "extractionState": "manual",
-      "localizations": {
-        "en": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "Workspace"
-          }
-        }
-      }
-    },
-    "commandCenter.sidebar.inbox": {
-      "extractionState": "manual",
-      "localizations": {
-        "en": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "Inbox"
-          }
-        }
-      }
-    },
-    "commandCenter.sidebar.own": {
-      "extractionState": "manual",
-      "localizations": {
-        "en": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "My merge requests"
-          }
-        }
-      }
-    },
-    "commandCenter.sidebar.reviewed": {
-      "extractionState": "manual",
-      "localizations": {
-        "en": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "Reviewing"
-          }
-        }
-      }
-    },
-    "commandCenter.sidebar.activity": {
-      "extractionState": "manual",
-      "localizations": {
-        "en": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "Activity"
-          }
-        }
-      }
-    },
-    "commandCenter.search": {
-      "extractionState": "manual",
-      "localizations": {
-        "en": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "Search title, repository, or MR number"
-          }
-        }
-      }
-    },
-    "commandCenter.select.title": {
-      "extractionState": "manual",
-      "localizations": {
-        "en": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "Select a merge request"
-          }
-        }
-      }
-    },
-    "commandCenter.select.description": {
-      "extractionState": "manual",
-      "localizations": {
-        "en": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "Inspect its status, review feedback, and automation activity here."
-          }
-        }
-      }
-    },
-    "commandCenter.emptySearch.title": {
-      "extractionState": "manual",
-      "localizations": {
-        "en": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "No matching merge requests"
-          }
-        }
-      }
-    },
-    "commandCenter.emptySearch.description": {
-      "extractionState": "manual",
-      "localizations": {
-        "en": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "Try another title, repository, or MR number."
-          }
-        }
-      }
-    },
     "commandCenter.overview": {
       "extractionState": "manual",
       "localizations": {
@@ -133,39 +23,6 @@
         }
       }
     },
-    "commandCenter.automation": {
-      "extractionState": "manual",
-      "localizations": {
-        "en": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "Automation"
-          }
-        }
-      }
-    },
-    "commandCenter.activity": {
-      "extractionState": "manual",
-      "localizations": {
-        "en": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "Recent activity"
-          }
-        }
-      }
-    },
-    "commandCenter.activity.empty": {
-      "extractionState": "manual",
-      "localizations": {
-        "en": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "No activity for this merge request yet."
-          }
-        }
-      }
-    },
     "commandCenter.feedback": {
       "extractionState": "manual",
       "localizations": {
@@ -173,17 +30,6 @@
           "stringUnit": {
             "state": "translated",
             "value": "Review feedback"
-          }
-        }
-      }
-    },
-    "commandCenter.feedback.empty": {
-      "extractionState": "manual",
-      "localizations": {
-        "en": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "No pending feedback in the current snapshot."
           }
         }
       }
@@ -276,17 +122,6 @@
         }
       }
     },
-    "commandCenter.account": {
-      "extractionState": "manual",
-      "localizations": {
-        "en": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "GitLab account"
-          }
-        }
-      }
-    },
     "commandCenter.account.unavailable": {
       "extractionState": "manual",
       "localizations": {
@@ -364,17 +199,6 @@
         }
       }
     },
-    "commandCenter.stale": {
-      "extractionState": "manual",
-      "localizations": {
-        "en": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "Refresh failed. Previously loaded merge requests are still available."
-          }
-        }
-      }
-    },
     "commandCenter.noPipeline": {
       "extractionState": "manual",
       "localizations": {
@@ -382,28 +206,6 @@
           "stringUnit": {
             "state": "translated",
             "value": "No pipeline reported"
-          }
-        }
-      }
-    },
-    "commandCenter.autoApprove": {
-      "extractionState": "manual",
-      "localizations": {
-        "en": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "Approve automatically"
-          }
-        }
-      }
-    },
-    "commandCenter.reviewState": {
-      "extractionState": "manual",
-      "localizations": {
-        "en": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "Review state"
           }
         }
       }
@@ -426,61 +228,6 @@
           "stringUnit": {
             "state": "translated",
             "value": "Not reported"
-          }
-        }
-      }
-    },
-    "commandCenter.workspace.description": {
-      "extractionState": "manual",
-      "localizations": {
-        "en": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "Your merge requests, decisions, and automation in one place."
-          }
-        }
-      }
-    },
-    "commandCenter.filter.all": {
-      "extractionState": "manual",
-      "localizations": {
-        "en": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "All merge requests"
-          }
-        }
-      }
-    },
-    "commandCenter.cli.ready": {
-      "extractionState": "manual",
-      "localizations": {
-        "en": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "CLI ready"
-          }
-        }
-      }
-    },
-    "commandCenter.cli.setup": {
-      "extractionState": "manual",
-      "localizations": {
-        "en": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "CLI setup required"
-          }
-        }
-      }
-    },
-    "commandCenter.cli.checking": {
-      "extractionState": "manual",
-      "localizations": {
-        "en": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "Checking CLI…"
           }
         }
       }
@@ -580,17 +327,6 @@
           "stringUnit": {
             "state": "translated",
             "value": "Details"
-          }
-        }
-      }
-    },
-    "commandCenter.agentRunsCount.%lld": {
-      "extractionState": "manual",
-      "localizations": {
-        "en": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "Agent runs (%lld)"
           }
         }
       }

@@ -100,17 +100,6 @@
         }
       }
     },
-    "settings.automation.page.presets": {
-      "extractionState": "manual",
-      "localizations": {
-        "en": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "Profiles"
-          }
-        }
-      }
-    },
     "settings.automation.page.advanced": {
       "extractionState": "manual",
       "localizations": {
@@ -496,17 +485,6 @@
         }
       }
     },
-    "settings.automation.authoredMergeRequests.section": {
-      "extractionState": "manual",
-      "localizations": {
-        "en": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "My merge requests"
-          }
-        }
-      }
-    },
     "settings.automation.autoMerge.help": {
       "extractionState": "manual",
       "localizations": {
@@ -573,39 +551,6 @@
         }
       }
     },
-    "settings.automation.command.example": {
-      "extractionState": "manual",
-      "localizations": {
-        "en": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "\"$HOME/bin/review-mr\" \"$GITLAB_MR_URL\""
-          }
-        }
-      }
-    },
-    "settings.automation.command.help": {
-      "extractionState": "manual",
-      "localizations": {
-        "en": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "Saved scripts are retained for reference. MR automation runs through the selected coding agent CLI."
-          }
-        }
-      }
-    },
-    "settings.automation.command.variables": {
-      "extractionState": "manual",
-      "localizations": {
-        "en": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "GITLAB_TODO_ID, GITLAB_MR_IID, GITLAB_MR_URL, GITLAB_MR_TITLE, GITLAB_PROJECT_PATH, GITLAB_MR_AUTHOR, GITLAB_TODO_ACTOR, GITLAB_TODO_ACTOR_USERNAME, GITLAB_TODO_EVENT, GITLAB_TASK_TITLE"
-          }
-        }
-      }
-    },
     "settings.automation.conflicts.allowPush": {
       "extractionState": "manual",
       "localizations": {
@@ -613,17 +558,6 @@
           "stringUnit": {
             "state": "translated",
             "value": "Allow conflict fixes to be pushed"
-          }
-        }
-      }
-    },
-    "settings.automation.conflicts.help": {
-      "extractionState": "manual",
-      "localizations": {
-        "en": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "The coding agent prepares and checks conflict fixes. Enable conflict pushes to deliver them automatically; otherwise inspect the run result and deliver them manually. Project permission in Advanced also applies."
           }
         }
       }
@@ -668,17 +602,6 @@
           "stringUnit": {
             "state": "translated",
             "value": "Enabled CLI handlers need a task title and instructions. Legacy scripts cannot run as MR automation."
-          }
-        }
-      }
-    },
-    "settings.automation.markDone": {
-      "extractionState": "manual",
-      "localizations": {
-        "en": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "Mark to-do done after success"
           }
         }
       }
@@ -734,28 +657,6 @@
           "stringUnit": {
             "state": "translated",
             "value": "Check for installed coding agents"
-          }
-        }
-      }
-    },
-    "settings.automation.package.reset": {
-      "extractionState": "manual",
-      "localizations": {
-        "en": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "Use selected profile?"
-          }
-        }
-      }
-    },
-    "settings.automation.package.resetMessage": {
-      "extractionState": "manual",
-      "localizations": {
-        "en": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "Replaces rules and action permissions with the selected profile. Scope and your manual CLI starting folder are kept. Apply Changes to save."
           }
         }
       }
@@ -1134,28 +1035,6 @@
         }
       }
     },
-    "settings.general.notifications.reminderPicker": {
-      "extractionState": "manual",
-      "localizations": {
-        "en": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "Remind about unread to-dos"
-          }
-        }
-      }
-    },
-    "settings.general.notifications.reminderSoundPicker": {
-      "extractionState": "manual",
-      "localizations": {
-        "en": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "Reminder sound"
-          }
-        }
-      }
-    },
     "settings.general.notifications.section": {
       "extractionState": "manual",
       "localizations": {
@@ -1486,17 +1365,6 @@
         }
       }
     },
-    "settings.reminderSound.off": {
-      "extractionState": "manual",
-      "localizations": {
-        "en": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "Off"
-          }
-        }
-      }
-    },
     "settings.automation.page.assistant": {
       "extractionState": "manual",
       "localizations": {
@@ -1519,61 +1387,6 @@
         }
       }
     },
-    "settings.automation.page.authored": {
-      "extractionState": "manual",
-      "localizations": {
-        "en": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "My MRs"
-          }
-        }
-      }
-    },
-    "settings.automation.page.todos": {
-      "extractionState": "manual",
-      "localizations": {
-        "en": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "To-Dos"
-          }
-        }
-      }
-    },
-    "settings.automation.checkpoint.section": {
-      "extractionState": "manual",
-      "localizations": {
-        "en": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "Action permissions"
-          }
-        }
-      }
-    },
-    "settings.automation.checkpoint.publish": {
-      "extractionState": "manual",
-      "localizations": {
-        "en": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "Publish comments without asking me"
-          }
-        }
-      }
-    },
-    "settings.automation.checkpoint.help": {
-      "extractionState": "manual",
-      "localizations": {
-        "en": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "These choices control automatic publication, approvals and follow-up pushes. Thread resolution is controlled below. Scope and verification checks still apply."
-          }
-        }
-      }
-    },
     "settings.automation.checkpoint.autoApprove": {
       "extractionState": "manual",
       "localizations": {
@@ -1592,17 +1405,6 @@
           "stringUnit": {
             "state": "translated",
             "value": "Automatically publish replies to AI feedback"
-          }
-        }
-      }
-    },
-    "settings.automation.publishAIRepliesHelp": {
-      "extractionState": "manual",
-      "localizations": {
-        "en": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "Only checked replies to GitLab Duo or to comments assessed with high or very high confidence as AI-assisted. Current MR and draft evidence must also be verified; uncertain replies wait for you."
           }
         }
       }
@@ -1680,28 +1482,6 @@
           "stringUnit": {
             "state": "translated",
             "value": "Once the coding agent has no objections to the latest commit and every discussion is resolved. You can turn this off for a single MR on its Reviewing card."
-          }
-        }
-      }
-    },
-    "settings.automation.checkpoint.publishHelp": {
-      "extractionState": "manual",
-      "localizations": {
-        "en": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "On: publish verified drafts after they remain unchanged across two refreshes and current checks pass. Off: review them on the MR card; the separate AI-reply option can still publish eligible replies."
-          }
-        }
-      }
-    },
-    "settings.automation.learnMore": {
-      "extractionState": "manual",
-      "localizations": {
-        "en": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "How automation works, in detail"
           }
         }
       }
@@ -2109,39 +1889,6 @@
           "stringUnit": {
             "state": "translated",
             "value": "Keep comments and replies as private drafts until you explicitly publish them. Automatic publication is off."
-          }
-        }
-      }
-    },
-    "settings.general.automaticEventBanners.toggle": {
-      "extractionState": "manual",
-      "localizations": {
-        "en": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "Show automatically handled events"
-          }
-        }
-      }
-    },
-    "settings.general.automaticEventBanners.section": {
-      "extractionState": "manual",
-      "localizations": {
-        "en": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "In-app event banners"
-          }
-        }
-      }
-    },
-    "settings.general.automaticEventBanners.help": {
-      "extractionState": "manual",
-      "localizations": {
-        "en": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "Show brief banners for GitLab updates handled automatically. These appear only inside the app; system notifications have a separate setting."
           }
         }
       }

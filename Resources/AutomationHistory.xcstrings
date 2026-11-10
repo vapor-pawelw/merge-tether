@@ -188,17 +188,6 @@
         }
       }
     },
-    "automationHistory.task": {
-      "extractionState": "manual",
-      "localizations": {
-        "en": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "Task"
-          }
-        }
-      }
-    },
     "automationHistory.runID": {
       "extractionState": "manual",
       "localizations": {
@@ -206,17 +195,6 @@
           "stringUnit": {
             "state": "translated",
             "value": "Run ID"
-          }
-        }
-      }
-    },
-    "automationHistory.agent": {
-      "extractionState": "manual",
-      "localizations": {
-        "en": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "Agent"
           }
         }
       }
@@ -250,17 +228,6 @@
           "stringUnit": {
             "state": "translated",
             "value": "Finished"
-          }
-        }
-      }
-    },
-    "automationHistory.blocker": {
-      "extractionState": "manual",
-      "localizations": {
-        "en": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "Blocker"
           }
         }
       }

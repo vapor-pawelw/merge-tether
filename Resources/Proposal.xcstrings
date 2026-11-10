@@ -24,17 +24,6 @@
         }
       }
     },
-    "proposal.authorLabel": {
-      "extractionState": "manual",
-      "localizations": {
-        "en": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "MR author"
-          }
-        }
-      }
-    },
     "proposal.moreReasons.%lld": {
       "extractionState": "manual",
       "localizations": {

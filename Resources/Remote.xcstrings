@@ -216,23 +216,6 @@
         }
       }
     },
-    "remote.offline": {
-      "extractionState": "manual",
-      "localizations": {
-        "en": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "Waiting for Mac · actions paused"
-          }
-        },
-        "pl": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "Oczekiwanie na Maca · akcje wstrzymane"
-          }
-        }
-      }
-    },
     "remote.empty": {
       "extractionState": "manual",
       "localizations": {

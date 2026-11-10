@@ -203,50 +203,6 @@
         }
       }
     },
-    "board.attention": {
-      "extractionState": "manual",
-      "localizations": {
-        "en": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "Needs attention"
-          }
-        }
-      }
-    },
-    "board.monitoring": {
-      "extractionState": "manual",
-      "localizations": {
-        "en": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "Monitoring"
-          }
-        }
-      }
-    },
-    "board.notifications": {
-      "extractionState": "manual",
-      "localizations": {
-        "en": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "Notifications"
-          }
-        }
-      }
-    },
-    "board.drafts": {
-      "extractionState": "manual",
-      "localizations": {
-        "en": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "Preview drafts"
-          }
-        }
-      }
-    },
     "board.add": {
       "extractionState": "manual",
       "localizations": {
@@ -254,17 +210,6 @@
           "stringUnit": {
             "state": "translated",
             "value": "Add merge request\u2026"
-          }
-        }
-      }
-    },
-    "board.cliUnavailable": {
-      "extractionState": "manual",
-      "localizations": {
-        "en": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "Automation needs a signed-in Claude or Codex CLI."
           }
         }
       }
@@ -401,28 +346,6 @@
         }
       }
     },
-    "board.intent.updating": {
-      "extractionState": "manual",
-      "localizations": {
-        "en": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "Updating this merge request\u2026"
-          }
-        }
-      }
-    },
-    "board.proposal.title": {
-      "extractionState": "manual",
-      "localizations": {
-        "en": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "Merge request to manage"
-          }
-        }
-      }
-    },
     "board.proposal.description": {
       "extractionState": "manual",
       "localizations": {
@@ -511,50 +434,6 @@
         }
       }
     },
-    "board.compact.reviewChecks": {
-      "extractionState": "manual",
-      "localizations": {
-        "en": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "Review checks\u2026"
-          }
-        }
-      }
-    },
-    "board.compact.reviewDecision": {
-      "extractionState": "manual",
-      "localizations": {
-        "en": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "Review decision\u2026"
-          }
-        }
-      }
-    },
-    "board.compact.reviewDrafts": {
-      "extractionState": "manual",
-      "localizations": {
-        "en": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "Review drafts\u2026"
-          }
-        }
-      }
-    },
-    "board.compact.reviewApproval": {
-      "extractionState": "manual",
-      "localizations": {
-        "en": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "Approve\u2026"
-          }
-        }
-      }
-    },
     "board.compact.setupCli": {
       "extractionState": "manual",
       "localizations": {
@@ -562,39 +441,6 @@
           "stringUnit": {
             "state": "translated",
             "value": "Set up CLI"
-          }
-        }
-      }
-    },
-    "board.compact.verification": {
-      "extractionState": "manual",
-      "localizations": {
-        "en": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "Verify first"
-          }
-        }
-      }
-    },
-    "board.compact.recheck": {
-      "extractionState": "manual",
-      "localizations": {
-        "en": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "Recheck"
-          }
-        }
-      }
-    },
-    "board.compact.working": {
-      "extractionState": "manual",
-      "localizations": {
-        "en": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "Working"
           }
         }
       }
@@ -666,50 +512,6 @@
         }
       }
     },
-    "board.compact.feedback": {
-      "extractionState": "manual",
-      "localizations": {
-        "en": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "Feedback"
-          }
-        }
-      }
-    },
-    "board.compact.changes": {
-      "extractionState": "manual",
-      "localizations": {
-        "en": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "Changes requested"
-          }
-        }
-      }
-    },
-    "board.compact.reReview": {
-      "extractionState": "manual",
-      "localizations": {
-        "en": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "Re-review"
-          }
-        }
-      }
-    },
-    "board.compact.moreStatuses.%lld": {
-      "extractionState": "manual",
-      "localizations": {
-        "en": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "%lld more statuses in Details"
-          }
-        }
-      }
-    },
     "board.compact.proposal": {
       "extractionState": "manual",
       "localizations": {
@@ -739,28 +541,6 @@
           "stringUnit": {
             "state": "translated",
             "value": "CLI required"
-          }
-        }
-      }
-    },
-    "board.compact.reviewHandoff": {
-      "extractionState": "manual",
-      "localizations": {
-        "en": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "Review handoff\u2026"
-          }
-        }
-      }
-    },
-    "board.compact.merge": {
-      "extractionState": "manual",
-      "localizations": {
-        "en": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "Merge\u2026"
           }
         }
       }
@@ -827,17 +607,6 @@
           "stringUnit": {
             "state": "translated",
             "value": "Nothing to review"
-          }
-        }
-      }
-    },
-    "board.empty.other.title": {
-      "extractionState": "manual",
-      "localizations": {
-        "en": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "All caught up"
           }
         }
       }

@@ -35,17 +35,6 @@
         }
       }
     },
-    "draftPublication.publishSelectedHelp": {
-      "extractionState": "manual",
-      "localizations": {
-        "en": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "Publish only the selected draft versions. Automatic publication filters do not apply."
-          }
-        }
-      }
-    },
     "draftPublication.clearSelection": {
       "extractionState": "manual",
       "localizations": {

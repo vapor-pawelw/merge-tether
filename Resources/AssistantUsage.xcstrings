@@ -1,17 +1,6 @@
 {
   "sourceLanguage": "en",
   "strings": {
-    "assistantUsageTitle": {
-      "extractionState": "manual",
-      "localizations": {
-        "en": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "Agent usage · estimated USD"
-          }
-        }
-      }
-    },
     "assistantUsagePeriod": {
       "extractionState": "manual",
       "localizations": {
@@ -375,17 +364,6 @@
         }
       }
     },
-    "assistantUsageDailyTitle": {
-      "extractionState": "manual",
-      "localizations": {
-        "en": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "Daily estimates · UTC"
-          }
-        }
-      }
-    },
     "assistantUsageDailyHistory": {
       "extractionState": "manual",
       "localizations": {
@@ -415,17 +393,6 @@
           "stringUnit": {
             "state": "translated",
             "value": "Estimated USD"
-          }
-        }
-      }
-    },
-    "assistantUsageCategory": {
-      "extractionState": "manual",
-      "localizations": {
-        "en": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "Agent role"
           }
         }
       }
@@ -525,17 +492,6 @@
           "stringUnit": {
             "state": "translated",
             "value": "Tracked total · estimated USD"
-          }
-        }
-      }
-    },
-    "assistantUsageMRNotTrackedYet": {
-      "extractionState": "manual",
-      "localizations": {
-        "en": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "MR-linked totals include usage tracked from this version onward."
           }
         }
       }

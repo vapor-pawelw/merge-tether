@@ -155,28 +155,6 @@
         }
       }
     },
-    "commentReview.draftsBlocker": {
-      "extractionState": "manual",
-      "localizations": {
-        "en": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "Unpublished comments"
-          }
-        }
-      }
-    },
-    "commentReview.blocker": {
-      "extractionState": "manual",
-      "localizations": {
-        "en": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "Comment review is not finished"
-          }
-        }
-      }
-    },
     "commentReview.afterOwn": {
       "extractionState": "manual",
       "localizations": {
