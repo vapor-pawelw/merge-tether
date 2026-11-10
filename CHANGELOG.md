@@ -6,6 +6,9 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 
 ## Unreleased
 
+- Run affected verification checks by default with an explicit full-suite option, document agent test scope, and handle GitLab workflow fixtures in memory while retaining subprocess adapter coverage.
+- Preserve completed re-review status when another catalog read finishes later, so a card does not remain stuck on Checking.
+
 - Retain complete per-case test timing reports and failure diagnostics, separate build/runner time from execution, and replace avoidable test retry delays with controlled waits.
 
 - Expose draft replies and their threads below the Details publication button, default all current drafts to checked per window, publish the checked count, and keep direct MR publication as Publish all comments.

@@ -135,7 +135,7 @@ else:
 """)
             exporter.chmod(0o755)
             results = root / "results"
-            completed = subprocess.run([sys.executable, str(SCRIPT), "--results-dir", str(results)],
+            completed = subprocess.run([sys.executable, str(SCRIPT), "--only-testing", "GitLabTodosTests/FixtureTests", "--results-dir", str(results)],
                                        env=dict(os.environ, PATH=f"{root}:{os.environ['PATH']}"),
                                        capture_output=True, text=True)
             self.assertEqual(completed.returncode, 65, completed.stderr + completed.stdout)
@@ -159,7 +159,7 @@ else:
                 reader = exporter.read_text()
                 reader = reader[:reader.index("else:\n")] + "else:\n    print(json.dumps(" + repr(summary) + "))\n"
                 exporter.write_text(reader)
-                completed = subprocess.run([sys.executable, str(SCRIPT), "--results-dir", str(results)],
+                completed = subprocess.run([sys.executable, str(SCRIPT), "--only-testing", "GitLabTodosTests/FixtureTests", "--results-dir", str(results)],
                                            env=dict(os.environ, PATH=f"{root}:{os.environ['PATH']}"),
                                            capture_output=True, text=True)
                 self.assertEqual(completed.returncode, 1, completed.stdout + completed.stderr)
@@ -172,7 +172,7 @@ else:
             exporter.write_text(reader)
             executable.write_text(executable.read_text().replace("sys.exit(0)",
                 "print('MergeTether test guard rejected service CLI /fixture/glab'); sys.exit(0)"))
-            completed = subprocess.run([sys.executable, str(SCRIPT), "--results-dir", str(results)],
+            completed = subprocess.run([sys.executable, str(SCRIPT), "--only-testing", "GitLabTodosTests/FixtureTests", "--results-dir", str(results)],
                                        env=dict(os.environ, PATH=f"{root}:{os.environ['PATH']}"),
                                        capture_output=True, text=True)
             self.assertEqual(completed.returncode, 1, completed.stdout + completed.stderr)
@@ -199,7 +199,7 @@ elif 'test-without-building' in sys.argv:
 """)
             executable.chmod(0o755)
             results = root / "results"
-            process = subprocess.Popen([sys.executable, str(SCRIPT), "--results-dir", str(results)],
+            process = subprocess.Popen([sys.executable, str(SCRIPT), "--only-testing", "GitLabTodosTests/FixtureTests", "--results-dir", str(results)],
                                        env=dict(os.environ, PATH=f"{root}:{os.environ['PATH']}"),
                                        stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL, start_new_session=True)
             try:
@@ -249,7 +249,7 @@ elif 'test-without-building' in sys.argv:
             derived.mkdir()
             important = derived / "keep.txt"
             important.write_text("unowned build")
-            result = subprocess.run([sys.executable, str(SCRIPT), "--results-dir", str(root)],
+            result = subprocess.run([sys.executable, str(SCRIPT), "--only-testing", "GitLabTodosTests/FixtureTests", "--results-dir", str(root)],
                                     env=dict(os.environ, PATH=str(root)), capture_output=True, text=True)
             self.assertEqual(result.returncode, 2)
             self.assertEqual(important.read_text(), "unowned build")

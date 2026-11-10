@@ -60,7 +60,8 @@ mise exec -- tuist generate --no-open
 python3 scripts/run-tests.py
 ```
 
-The repository runner uses `xcodebuild build-for-testing` followed by
+The repository runner selects checks for the changed files by default. When app
+tests are selected, it uses `xcodebuild build-for-testing` followed by
 `test-without-building`, with a fresh isolated test home on every invocation.
 It never launches or replaces the installed app. It requires Python 3 and Xcode
 26+, and uses `xcresulttool` to retain results and diagnostic timing events.
@@ -68,7 +69,53 @@ Use this command for performance investigations: the installed XcodeBuildMCP tes
 wrapper currently exports only a summary and deletes its temporary result bundle.
 Passing an additional result-bundle argument to that wrapper does not fix this.
 
-Each timestamped run under the ignored `.test-results/` directory contains:
+### Choosing verification scope
+
+```bash
+python3 scripts/run-tests.py --plan  # inspect paths, reasons, suites and extra tasks
+python3 scripts/run-tests.py         # run those checks
+python3 scripts/run-tests.py --full  # all app and standalone repository tests
+```
+
+Default selection uses the merge base with local `main`, including committed
+branch work, staged/unstaged changes and untracked files. On dirty `main`, local
+edits define the current change; on clean `main`, it checks the latest commit
+so a clean checkout does not silently verify nothing.
+Use `--base REF` to choose another comparison. Renames include both paths;
+deletions, missing mapped suites, unavailable Git history and unmapped changes
+fall back to full verification. The runner prints its decision and retains it in
+`report.json`; `--plan` prints JSON without creating results or starting tools.
+
+| Change | Checks |
+| --- | --- |
+| Search, usage accounting, mapped presentation types/views | Feature suites and their mapped consumers |
+| Author-feedback policy, verifier or router | Feedback, publication, merge, routing and presentation consumer suites |
+| Existing top-level Swift test only | Changed suite |
+| Test tooling or helper tests only | Corresponding Python tests, without Xcode |
+| Remote package tests only | Swift package tests, without the app host |
+| Documentation only | No executable checks |
+| Shared models/settings, GitLab/process transport, test support, project graph, resources or unknown paths | Full verification |
+
+Mappings live in `scripts/test_selection.py`. They are a reviewed allowlist,
+not a Swift dependency analysis: add narrow mappings only after checking callers
+and their failure/concurrency coverage. An unknown view is not automatically a
+visual-only change, because views can dispatch remote actions. For a confirmed
+layout/color/wording-only edit, explicitly use `--build-only` and inspect the UI.
+For TDD or focused investigation, repeat `--only-testing` for the regression and
+affected caller suites. These manual overrides are recorded in the report.
+
+Use selected checks during local iteration. Use `--full` for shared-core changes
+and integration/release checkpoints; do not repeatedly run the unchanged full
+suite after every small edit. A selected run establishes only its recorded scope.
+Xcode startup and compilation still cost seconds even when test bodies are fast.
+
+Full verification includes the app suite, `Tests/TestTools`,
+`Tests/AutomationHelpers`, `Packages/MergeTetherRemote` and the legacy plugin's
+Python tests. Standalone phases retain their own compressed logs and exit codes.
+The Swift package uses an owned scratch build directory, cleaned with Derived
+Data unless `--reuse-build` was requested.
+
+Each timestamped app-test run under the ignored `.test-results/` directory contains:
 
 - `timings.csv`: one row per execution, including parameterized cases and
   repetitions, with its test ID, suite, execution number, Xcode argument identity,
@@ -100,6 +147,9 @@ Each timestamped run under the ignored `.test-results/` directory contains:
   Test failures preserve their original nonzero exit code and still export
   available timings and diagnostics. Build failures retain their log and metadata.
 
+Standalone-only and build-only runs retain `report.json` and their phase logs;
+they do not produce an app test result bundle or per-case app timings.
+
 By default the latest ten report directories and two result bundles are retained;
 older owned runs are pruned, including failed runs. Copy important evidence outside
 this directory before it ages out. `--keep-reports` and `--keep-bundles` adjust
@@ -118,12 +168,12 @@ keep identical filters and runner settings. Separate clean-build time from the
 test-command wall time; rebuilding unchanged code is usually much cheaper.
 
 ```bash
-python3 scripts/run-tests.py --reuse-build
+python3 scripts/run-tests.py --full --reuse-build
 # Make the scoped change, then run affected suites (the flag is repeatable):
 python3 scripts/run-tests.py --reuse-build \
   --only-testing GitLabTodosTests/AssistantJobCoordinatorTests
 # Comparable full run, then automatically remove the reused scratch build:
-python3 scripts/run-tests.py
+python3 scripts/run-tests.py --full
 ```
 
 `--results-dir PATH` selects a directory owned by this runner, including its
@@ -137,7 +187,15 @@ The report/retention tests run without Xcode or GitLab:
 PYTHONDONTWRITEBYTECODE=1 python3 -m unittest discover -s Tests/TestTools
 ```
 
-GitLab tests inject temporary `glab` scripts returning synthetic local data, or
+Workflow tests inject `InMemoryGitLab` through `GlabService`'s command runner.
+The real command construction, JSON decoding, workflow logic and authorization
+checks still execute; API state and rendezvous barriers are in memory. Evidence
+store and restart tests keep isolated persistence where that is the behavior
+under test. Production uses the existing `ProcessRunner` by default. This small
+transport seam avoids a broad service-protocol rewrite and lets adapter tests
+continue testing the real subprocess boundary independently.
+
+Adapter tests inject temporary `glab` scripts returning synthetic local data, or
 leave the executable unset. Paths to installed CLIs in settings tests are only
 persistence fixtures. Assistant CLI tests likewise inject local scripts/probes.
 Real shell/Python processes remain in adapter tests to cover pipe capture, exit

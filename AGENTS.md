@@ -54,3 +54,17 @@ macOS GitLab inbox and MR automation. Read [README.md](README.md) for behavior,
   real customer payloads, and local agent configuration out of the public repository.
 - Keep this file short. Add only durable constraints that prevent demonstrated mistakes;
   put task-specific procedures in the relevant documentation instead of a file map.
+
+## Test scope
+
+- Use `python3 scripts/run-tests.py --plan` to inspect the affected checks, then run
+  `python3 scripts/run-tests.py`. It includes branch, staged, unstaged and untracked
+  changes; shared or unmapped changes require the full suite. See [the build guide](docs/building.md#choosing-verification-scope).
+- During iteration, use repeatable `--only-testing GitLabTodosTests/SuiteName` for
+  the regression and affected callers. Use `--build-only` only after confirming a
+  change is purely visual; view actions and state changes need behavioral tests.
+  Add `--reuse-build` during iteration; finish without it to remove scratch builds.
+- Run `--full` for shared infrastructure changes and integration/release checkpoints,
+  rather than after every local edit. Report the selected scope and any manual overrides.
+- Workflow tests use `InMemoryGitLab` at the command boundary. Keep real local
+  executables in transport/CLI adapter tests; never use installed service CLIs or live GitLab.

@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Run isolated macOS tests and retain comparable timing reports."""
+"""Verify affected changes by default; use --full for all repository tests."""
 
 import argparse
 from collections import Counter
@@ -213,11 +213,18 @@ def run_phase(command, environment, log, timeout):
 
 
 def main():
+    from test_selection import full_plan, plan_changes
+
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--results-dir", type=Path, default=Path(__file__).resolve().parents[1] / ".test-results",
                         help="Owned results/build directory (default: .test-results)")
-    parser.add_argument("--only-testing", action="append", default=[], metavar="TEST_ID",
+    scope = parser.add_mutually_exclusive_group()
+    scope.add_argument("--only-testing", action="append", default=[], metavar="TEST_ID",
                         help="Xcode test identifier; repeat for multiple suites/cases")
+    scope.add_argument("--full", action="store_true", help="Run all app, helper, tooling, remote-package and legacy-plugin tests")
+    scope.add_argument("--build-only", action="store_true", help="Build the app only; for verified presentation-only changes")
+    parser.add_argument("--base", help="Compare against the merge base with this Git ref (default: main, or HEAD^ on main)")
+    parser.add_argument("--plan", action="store_true", help="Print the selected checks as JSON without building or creating results")
     parser.add_argument("--keep-reports", type=int, default=10, help="Retain latest N compact reports (default: 10)")
     parser.add_argument("--keep-bundles", type=int, default=2, help="Retain latest N xcresult bundles (default: 2)")
     parser.add_argument("--reuse-build", action="store_true", help="Keep owned Derived Data for incremental runs")
@@ -228,6 +235,23 @@ def main():
         parser.error("require keep-reports >= 1 and 0 <= keep-bundles <= keep-reports")
     if args.build_timeout <= 0 or args.test_timeout <= 0:
         parser.error("phase timeouts must be positive")
+    repo = Path(__file__).resolve().parents[1]
+    if args.full:
+        args.selection = full_plan([], "Explicit --full verification")
+    elif args.only_testing or args.build_only:
+        args.selection = dict(mode="targeted" if args.only_testing else "build", suites=args.only_testing,
+                              tasks=[], paths=[], reasons=["Explicit manual scope; verify affected callers too"])
+    else:
+        args.selection = plan_changes(repo, args.base)
+        args.only_testing = args.selection["suites"]
+    if args.plan:
+        print(json.dumps(args.selection, indent=2))
+        return 0
+    print("Verification: " + args.selection["mode"], flush=True)
+    for reason in args.selection["reasons"]:
+        print("  " + reason, flush=True)
+    if args.only_testing:
+        print("  Suites: " + ", ".join(args.only_testing), flush=True)
     for handled_signal in (signal.SIGTERM, signal.SIGHUP):
         signal.signal(handled_signal, interrupt_run)
     root = args.results_dir.resolve()
@@ -256,7 +280,7 @@ def run_tests(args, root):
     run.mkdir()
     derived = root / "DerivedData"
     bundle = run / "Tests.xcresult"
-    metadata = dict(started_at=stamp, phases={}, only_testing=args.only_testing,
+    metadata = dict(started_at=stamp, phases={}, only_testing=args.only_testing, selection=args.selection,
                     derived_data_preexisting=derived.exists(), reuse_build_requested=args.reuse_build)
     start = time.monotonic()
     code = 1
@@ -275,15 +299,39 @@ def run_tests(args, root):
         project = repo / "GitLabTodos.xcodeproj/project.pbxproj"
         metadata["generated_project_sha256"] = hashlib.sha256(project.read_bytes()).hexdigest() if project.exists() else None
         metadata["tuist_requirement"] = (repo / "mise.toml").read_text().strip()
-        metadata["xcode"] = subprocess.check_output(["xcodebuild", "-version"], text=True, timeout=30).strip()
+        if args.selection["mode"] != "none" or "remote" in args.selection["tasks"]:
+            metadata["xcode"] = subprocess.check_output(["xcodebuild", "-version"], text=True, timeout=30).strip()
         with tempfile.TemporaryDirectory(prefix="test-home-", dir=root) as home:
             (Path(home) / ".mergetether-test-home").write_text("MergeTether test home\n")
             environment = dict(os.environ, TEST_RUNNER_HOME=home, TEST_RUNNER_CFFIXED_USER_HOME=home,
                                TEST_RUNNER_MERGETETHER_TEST_FIXTURE_HOME=home)
+            helper_environment = dict(os.environ, HOME=home, CFFIXED_USER_HOME=home, PYTHONDONTWRITEBYTECODE="1")
+            task_commands = {
+                "tools": ([sys.executable, "-m", "unittest", "discover", "-s", "Tests/TestTools"], ""),
+                "helpers": ([sys.executable, "-m", "unittest", "discover", "-s", "Tests/AutomationHelpers"], "Helpers/Automation"),
+                "legacy": ([sys.executable, "-m", "unittest", "discover", "-s", "plugins/merge-tether/tests"], "plugins/merge-tether"),
+                "remote": (["swift", "test", "--package-path", "Packages/MergeTetherRemote",
+                            "--scratch-path", str(root / "RemoteBuild")], ""),
+            }
+            code = 0
+            for task in args.selection["tasks"]:
+                command, python_path = task_commands[task]
+                task_environment = dict(helper_environment, PYTHONPATH=str(repo / python_path))
+                metadata["phases"][task] = run_phase(command, task_environment, run / f"{task}.log", args.test_timeout)
+                code = metadata["phases"][task]["exit_code"]
+                if metadata["phases"][task]["error"]:
+                    metadata["error"] = metadata["phases"][task]["error"]
+                if code:
+                    break
+            if code:
+                return code
             base = ["xcodebuild", "-project", str(repo / "GitLabTodos.xcodeproj"), "-scheme", "GitLabTodos",
                     "-configuration", "Debug", "-destination", "platform=macOS", "-derivedDataPath", str(derived),
                     "-parallel-testing-enabled", "NO"]
-            for phase, action in (("build", "build-for-testing"), ("test", "test-without-building")):
+            actions = [] if args.selection["mode"] == "none" else [("build", "build-for-testing"), ("test", "test-without-building")]
+            if args.selection["mode"] == "build":
+                actions = [("build", "build")]
+            for phase, action in actions:
                 command = base[:]
                 if phase == "test":
                     command += ["-resultBundlePath", str(bundle)]
@@ -310,7 +358,7 @@ def run_tests(args, root):
             code = code or 1
             export_results(bundle, run, metadata)
             code = command_code
-        elif code == 0:
+        elif code == 0 and args.selection["mode"] in {"full", "targeted"}:
             raise RuntimeError("xcodebuild produced no result bundle")
     except KeyboardInterrupt as interruption:
         code = 128 + getattr(interruption, "signal_number", signal.SIGINT)
@@ -331,6 +379,8 @@ def run_tests(args, root):
             prune_results(root, args.keep_reports, args.keep_bundles)
             if not args.reuse_build and derived.exists():
                 shutil.rmtree(derived)
+            if not args.reuse_build and (root / "RemoteBuild").exists():
+                shutil.rmtree(root / "RemoteBuild")
             print(f"Reports: {run}\nWall time (including export): {metadata['wall_seconds']:.3f}s", flush=True)
     return code
 
