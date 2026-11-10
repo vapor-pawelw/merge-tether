@@ -365,11 +365,11 @@ struct RemoteCardDetail: View {
                         }
                         TimelineView(.periodic(from: .now, by: 1)) { context in
                             VStack(spacing: 12) {
+                                if model.state.pending != nil { ProgressView(.Remote.remoteRunning) }
                                 ForEach(current.actions.filter { $0.kind != .deleteDraft }) { action in
                                     Button(action.kind.title) { confirmation = action }.buttonStyle(.borderedProminent)
                                         .disabled(!model.state.canAct(now: context.date))
                                 }
-                                if model.state.pending != nil { ProgressView(.Remote.remoteRunning) }
                             }
                         }
                         .id(RemoteCardCTA.Destination.actions)

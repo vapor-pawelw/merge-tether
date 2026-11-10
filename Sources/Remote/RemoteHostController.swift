@@ -2,6 +2,16 @@ import Foundation
 import Observation
 import MergeTetherRemote
 
+@MainActor protocol RemoteHostTransport: AnyObject {
+    var onMessage: (@MainActor (RemoteMessage) async -> Void)? { get set }
+    var onStatus: (@MainActor (Bool, Bool) -> Void)? { get set }
+    func start()
+    func stop()
+    func send(_ message: RemoteMessage) async throws
+}
+
+extension RemoteConnection: RemoteHostTransport {}
+
 @MainActor @Observable final class RemoteHostController {
     private(set) var pairing: RemotePairing?
     var origin = ""
@@ -15,11 +25,12 @@ import MergeTetherRemote
     private let connectPairing: ((RemotePairing) -> Void)?
     @ObservationIgnored private(set) var startupLoadTask: Task<Void, Never>?
     private var startupGeneration = UUID()
-    private var connection: RemoteConnection?
+    private let makeConnection: (RemotePairing) throws -> any RemoteHostTransport
+    private var connection: (any RemoteHostTransport)?
     private var hostSession = UUID()
     private var account = ""
     private var accountRevision: UInt64?
-    private var gate = RemoteCommandGate()
+    private let gate = RemoteCommandGate()
     private var phoneSupportsCommentReview = false
     private var phoneSupportsMergeActions = false
     @ObservationIgnored private var resolutionPreviews: [String: ManualDiscussionResolution.Prepared] = [:]
@@ -28,13 +39,15 @@ import MergeTetherRemote
          loadPairing: (@Sendable () async throws -> RemotePairing?)? = nil,
          savePairing: ((RemotePairing) throws -> Void)? = nil,
          removePairing: (() throws -> Void)? = nil,
-         connectPairing: ((RemotePairing) -> Void)? = nil) {
+         connectPairing: ((RemotePairing) -> Void)? = nil,
+         makeConnection: @escaping (RemotePairing) throws -> any RemoteHostTransport = { try RemoteConnection(pairing: $0, role: .host) }) {
         self.monitor = monitor
         let store = RemotePairingStore(service: (Bundle.main.bundleIdentifier ?? "MergeTether") + ".remote")
         self.store = store
         self.savePairing = savePairing ?? { try store.save($0) }
         self.removePairing = removePairing ?? { try store.remove() }
         self.connectPairing = connectPairing
+        self.makeConnection = makeConnection
         let load: @Sendable () async throws -> RemotePairing? = loadPairing ?? { try store.load() }
         loadStoredPairing(using: load)
     }
@@ -82,15 +95,31 @@ import MergeTetherRemote
         if let connectPairing { connectPairing(pair); failed = false }
         else { start(pair) }
     }
+    private func resetConnectionSession() {
+        hostSession = UUID()
+        resolutionPreviews.removeAll()
+        phoneSupportsCommentReview = false
+        phoneSupportsMergeActions = false
+    }
     private func start(_ pair: RemotePairing) {
         do {
-            hostSession = UUID(); gate = RemoteCommandGate(); phoneSupportsCommentReview = false; phoneSupportsMergeActions = false
-            let connection = try RemoteConnection(pairing: pair, role: .host)
+            resetConnectionSession()
+            let connection = try makeConnection(pair)
             connection.onStatus = { [weak self, weak connection] connected, fatal in
-                self?.connected = connected; self?.failed = fatal
-                if connected { Task { try? await connection?.send(.init(type: .hostReady)) } }
+                guard let self, let connection, self.connection === connection else { return }
+                self.resetConnectionSession()
+                self.connected = connected; self.failed = fatal
+                if connected {
+                    Task { [weak self, weak connection] in
+                        guard let self, let connection, self.connection === connection else { return }
+                        try? await connection.send(.init(type: .hostReady))
+                    }
+                }
             }
-            connection.onMessage = { [weak self] message in await self?.receive(message) }
+            connection.onMessage = { [weak self, weak connection] message in
+                guard let self, let connection, self.connection === connection else { return }
+                await self.receive(message)
+            }
             self.connection = connection; connection.start(); failed = false
         } catch { failed = true }
     }
@@ -153,7 +182,7 @@ import MergeTetherRemote
     private func snapshot() -> RemoteBoard {
         let currentAccount = "\(monitor.glab.currentUsername ?? "")@\(monitor.glab.resolvedHost ?? "")"
         if account != currentAccount || accountRevision != monitor.glab.accountRevision {
-            account = currentAccount; accountRevision = monitor.glab.accountRevision; hostSession = UUID(); gate = RemoteCommandGate()
+            account = currentAccount; accountRevision = monitor.glab.accountRevision; hostSession = UUID()
             resolutionPreviews.removeAll()
         }
         var board = RemoteBoardAdapter.board(monitor: monitor, session: hostSession, account: account)

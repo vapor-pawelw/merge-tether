@@ -32,6 +32,38 @@ import MergeTetherRemote
         item.drafts = [.init(id: 11, authorID: 3, note: "Edited", discussionID: nil, position: nil)]
         #expect(RemoteBoardAdapter.card(item, account: "me@gitlab.example.org").actions.first { $0.kind == .deleteDraft }?.token != deletion.token)
     }
+    @Test(arguments: ["head", "title", "discussion", "draftBody", "draftPosition", "draftResolution"])
+    func changedWriteContextRejectsTheEarlierActionToken(_ change: String) async throws {
+        var item = try item()
+        item.mergeRequest = try MRDependencyPresentationTests().request(2, project: 1)
+        let before = RemoteBoardAdapter.card(item, account: "me@host", extraActions: [.prepare])
+        let action = try #require(before.actions.first { $0.kind == .prepare })
+        let session = UUID()
+        let initialBoard = RemoteBoard(hostSession: session, account: "me@host", lanes: [.init(id: .own, cards: [before])])
+        let valid = await RemoteCommandGate().execute(.init(hostSession: session, cardID: before.id, actionID: action.id, token: action.token),
+            board: initialBoard) { _, _ in .completed }
+        #expect(valid.status == .completed)
+        switch change {
+        case "head", "title":
+            var raw = try #require(JSONSerialization.jsonObject(with: JSONEncoder().encode(item.mergeRequest)) as? [String: Any])
+            raw[change == "head" ? "sha" : "title"] = "changed-context"
+            item.mergeRequest = try JSONDecoder().decode(GitLabMergeRequest.self, from: JSONSerialization.data(withJSONObject: raw))
+        case "discussion": item.observedDiscussionFingerprint = "new-discussion"
+        case "draftBody":
+            item.drafts = [.init(id: 11, authorID: 3, note: "Changed body", discussionID: nil, position: item.drafts[0].position)]
+        case "draftPosition":
+            item.drafts = [.init(id: 11, authorID: 3, note: item.drafts[0].note, discussionID: nil,
+                position: .init(newPath: "Sources/Other.swift", newLine: 4, oldPath: nil, oldLine: nil))]
+        case "draftResolution": item.drafts[0].resolveDiscussion = true
+        default: Issue.record("Unknown context")
+        }
+        let after = RemoteBoardAdapter.card(item, account: "me@host", extraActions: [.prepare])
+        let board = RemoteBoard(hostSession: session, account: "me@host", lanes: [.init(id: .own, cards: [after])])
+        let stale = await RemoteCommandGate().execute(.init(hostSession: session, cardID: before.id, actionID: action.id, token: action.token),
+            board: board) { _, _ in Issue.record("Stale action executed"); return .completed }
+        #expect(stale.status == .changed)
+    }
+
     @Test func optionalApprovalsKeepTheLegacyWireCountsValid() throws {
         var item = MergeRequestAttentionMonitor.Item(id: .init(projectID: 1, iid: 2), title: "Example",
             url: URL(string: "https://gitlab.example.org/g/p/-/merge_requests/2")!)

@@ -62,7 +62,9 @@ secret. The relay sees IP addresses, timing, room IDs and ciphertext, but cannot
 read tickets or commands. Credentials are stored in the native Keychain and are
 never included in source code, request query strings or application logs. Protect
 the QR like a password. Re-pairing on the Mac creates a different room; disabling
-access deletes the saved pairing and disconnects the host.
+access deletes the saved pairing and disconnects the host. Pairing has no automatic
+expiry or rotation. A copied QR remains a bearer secret until it is replaced or
+access is disabled; reconnecting does not revoke it.
 
 The operator invitation gates admission, not access to another user's inbox.
 Sharing it broadly permits others to consume the deployment's free quota. This MVP
@@ -126,15 +128,25 @@ which GitLab does not provide with an atomic content/head precondition.
 
 The phone never automatically retries commands. The host serializes writes and
 retains up to 512 receipts for the current session. Acceptance extends the phone deadline to two minutes; network heartbeats remain independent of GitLab action work. A known partial publication is reported explicitly. A lost acknowledgement is an
-uncertain result: inspect GitLab before explicitly trying again. Restarting the
-host creates a new session, so old commands are rejected. The MVP does not promise
+uncertain result: inspect GitLab before explicitly trying again. Reconnecting or restarting the
+host creates a new session, so old commands and their receipts cannot confirm a new
+session. Changing accounts also invalidates the session, even when the account later
+returns to the same username and host. Disconnecting invalidates an action still
+waiting for its acceptance send; an already started write keeps the host write lock
+until it finishes. Prepared thread-resolution IDs must be checked again after a
+reconnect. Pairing trust is retained through ordinary reconnects. The MVP does not promise
 exactly-once delivery across crashes or persist command receipts to disk.
 
 Supported actions include checked comment publication, SHA-bound approval,
 re-review confirmation, verification, pipeline handoff, marking a raw event done,
 preparing feedback, running existing MR intents and retrying stopped agent jobs.
-Proposals can be inspected and opened in GitLab; desktop adoption/ignore, settings,
-merge controls and discussion resolution are outside this phone MVP.
+Phones advertising `merge-actions-v1` can also merge, enqueue supported auto-merge
+requests and check then confirm concrete thread-resolution IDs. These commands call
+the same manual Mac executors: merge checks current account, source/target,
+dependencies, semantic feedback, published replies, drafts, unfinished work and
+submission receipts; resolution rechecks the confirmed IDs before each write.
+Proposals can be inspected and opened in GitLab; adoption/ignore and settings remain
+on the desktop.
 
 Full snapshot plaintext is capped at 128 KiB and the relay envelope at 256 KiB.
 Oversized snapshots disable readiness instead of truncating a comment preview.
