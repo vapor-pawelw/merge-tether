@@ -21,12 +21,5 @@ release/
 ## mise
 .mise.local.toml
 
-## Codex plugin marketplace (even when a global ignore excludes .agents)
-!/.agents/
-/.agents/*
-!/.agents/plugins/
-/.agents/plugins/*
-!/.agents/plugins/marketplace.json
-
-# The packaged Codex MCP manifest is source, not a personal configuration.
-!/plugins/merge-tether/.mcp.json
+## Local agent notes and configuration
+/.agents/

@@ -2,16 +2,7 @@ import Foundation
 import Testing
 @testable import GitLabTodos
 
-struct MenuMigrationTests {
-    @Test func oldNavigationRestoresIntoTheCorrespondingNewView() {
-        #expect(MainMenuSection.restored(from: "todos") == .inbox)
-        #expect(MainMenuSection.restored(from: "attention") == .inbox)
-        #expect(MainMenuSection.restored(from: "authored") == .mergeRequests)
-        #expect(MainMenuSection.restored(from: "activity") == .mergeRequests)
-        #expect(MainMenuSection.restored(from: "mergeRequests") == .mergeRequests)
-        #expect(MainMenuSection.restored(from: nil) == .inbox)
-    }
-
+struct AutomationSettingsScopeTests {
     @Test func savingAgentSettingsPreservesNewerScopeEdits() {
         var current = AutomationSettings()
         let mr = MRAutomationScope.Target(host: "gitlab.example.org", username: "me", projectID: 1, iid: 42)

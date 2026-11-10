@@ -24,10 +24,10 @@ class TestSelectionTests(unittest.TestCase):
         self.assertEqual(plan["mode"], "none")
         self.assertEqual(plan["tasks"], [])
 
-    def test_search_change_runs_its_tests_without_unrelated_workflows(self):
-        plan = self.selector.select_paths(REPO, ["Sources/Model/CommandCenterSearch.swift"])
+    def test_usage_change_runs_its_tests_without_unrelated_workflows(self):
+        plan = self.selector.select_paths(REPO, ["Sources/Model/AssistantUsage.swift"])
         self.assertEqual(plan["mode"], "targeted")
-        self.assertEqual(plan["suites"], ["GitLabTodosTests/CommandCenterSearchTests"])
+        self.assertEqual(plan["suites"], [f"GitLabTodosTests/{suite}" for suite in sorted(self.selector.GROUPS["usage"])])
 
     def test_view_actions_are_not_assumed_to_be_visual_only(self):
         plan = self.selector.select_paths(REPO, ["Sources/Views/InboxAttentionActions.swift"])
@@ -41,8 +41,8 @@ class TestSelectionTests(unittest.TestCase):
                 self.assertEqual(self.selector.select_paths(REPO, [path])["mode"], "full")
 
     def test_test_only_edit_runs_the_suite_and_deleted_test_falls_back(self):
-        plan = self.selector.select_paths(REPO, ["Tests/CommandCenterSearchTests.swift"])
-        self.assertEqual(plan["suites"], ["GitLabTodosTests/CommandCenterSearchTests"])
+        plan = self.selector.select_paths(REPO, ["Tests/AssistantUsageTests.swift"])
+        self.assertEqual(plan["suites"], ["GitLabTodosTests/AssistantUsageTests"])
         self.assertEqual(self.selector.select_paths(REPO, ["Tests/DeletedTests.swift"])["mode"], "full")
 
     def test_tooling_only_changes_run_python_without_building_app(self):
@@ -51,7 +51,7 @@ class TestSelectionTests(unittest.TestCase):
         self.assertEqual(plan["tasks"], ["tools"])
 
     def test_changes_combine_and_unknown_change_overrides_targeting(self):
-        plan = self.selector.select_paths(REPO, ["Sources/Model/CommandCenterSearch.swift",
+        plan = self.selector.select_paths(REPO, ["Sources/Model/AssistantUsage.swift",
                                                "Tests/TestTools/test_run_tests.py"])
         self.assertEqual(plan["mode"], "targeted")
         self.assertEqual(plan["tasks"], ["tools"])
@@ -70,7 +70,7 @@ class TestSelectionTests(unittest.TestCase):
 
     def test_runner_full_and_manual_plans_are_explicit_and_do_not_start_xcode(self):
         for arguments, mode in [(["--full"], "full"),
-                                (["--only-testing", "GitLabTodosTests/CommandCenterSearchTests"], "targeted")]:
+                                (["--only-testing", "GitLabTodosTests/AssistantUsageTests"], "targeted")]:
             result = subprocess.run([sys.executable, str(REPO / "scripts/run-tests.py"), "--plan", *arguments],
                                     capture_output=True, text=True, timeout=10)
             self.assertEqual(result.returncode, 0, result.stderr)

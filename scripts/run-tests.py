@@ -221,7 +221,7 @@ def main():
     scope = parser.add_mutually_exclusive_group()
     scope.add_argument("--only-testing", action="append", default=[], metavar="TEST_ID",
                         help="Xcode test identifier; repeat for multiple suites/cases")
-    scope.add_argument("--full", action="store_true", help="Run all app, helper, tooling, remote-package and legacy-plugin tests")
+    scope.add_argument("--full", action="store_true", help="Run all app, helper, tooling and remote-package tests")
     scope.add_argument("--build-only", action="store_true", help="Build the app only; for verified presentation-only changes")
     parser.add_argument("--base", help="Compare against the merge base with this Git ref (default: main, or HEAD^ on main)")
     parser.add_argument("--plan", action="store_true", help="Print the selected checks as JSON without building or creating results")
@@ -309,7 +309,6 @@ def run_tests(args, root):
             task_commands = {
                 "tools": ([sys.executable, "-m", "unittest", "discover", "-s", "Tests/TestTools"], ""),
                 "helpers": ([sys.executable, "-m", "unittest", "discover", "-s", "Tests/AutomationHelpers"], "Helpers/Automation"),
-                "legacy": ([sys.executable, "-m", "unittest", "discover", "-s", "plugins/merge-tether/tests"], "plugins/merge-tether"),
                 "remote": (["swift", "test", "--package-path", "Packages/MergeTetherRemote",
                             "--scratch-path", str(root / "RemoteBuild")], ""),
             }

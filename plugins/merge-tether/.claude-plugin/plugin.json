@@ -1,5 +1,0 @@
-{
-  "name": "merge-tether",
-  "version": "0.1.16",
-  "description": "MergeTether tools for Claude Code: read dispatched GitLab merge requests, link sessions to merge requests and record review verdicts."
-}

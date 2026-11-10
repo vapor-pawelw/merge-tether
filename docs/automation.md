@@ -98,7 +98,7 @@ MR menus and Details offer **Refresh from GitLab**. This refreshes tracked data 
 
 Old GUI handoffs and links remain decodable for migration, but are not automatically replayed. Automation does not create desktop agent chats, append messages, synchronize chat titles, install desktop plugins, monitor listener heartbeats or register permission templates. Explicit manual desktop actions remain available. Previously configured external listeners are outside the app’s control; inspect and disable those schedules separately before using headless automation for the same MRs.
 
-The app bundles standalone proof helpers under `Contents/Resources/Automation`: `evidence.py` and `author_follow_up.py`. They read GitLab state and store local evidence without an installed plugin, MCP configuration or listener. Historical sources under `plugins/merge-tether` are retained for compatibility tests and are not packaged in the app.
+The app bundles standalone proof helpers under `Contents/Resources/Automation`: `evidence.py` and `author_follow_up.py`. They read GitLab state and store local evidence without an installed plugin, MCP configuration or listener. Retired desktop plugin and listener sources are no longer included in this repository; existing external installations and schedules remain under the user's control.
 
 ## Optional manual agent actions
 

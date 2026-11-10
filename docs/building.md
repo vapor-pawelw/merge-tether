@@ -110,8 +110,8 @@ suite after every small edit. A selected run establishes only its recorded scope
 Xcode startup and compilation still cost seconds even when test bodies are fast.
 
 Full verification includes the app suite, `Tests/TestTools`,
-`Tests/AutomationHelpers`, `Packages/MergeTetherRemote` and the legacy plugin's
-Python tests. Standalone phases retain their own compressed logs and exit codes.
+`Tests/AutomationHelpers` and `Packages/MergeTetherRemote`.
+Standalone phases retain their own compressed logs and exit codes.
 The Swift package uses an owned scratch build directory, cleaned with Derived
 Data unless `--reuse-build` was requested.
 Pairing-store tests inject an in-memory Security client and exercise the real
@@ -223,7 +223,7 @@ PYTHONDONTWRITEBYTECODE=1 PYTHONPATH=Helpers/Automation \
   python3 -m unittest discover -s Tests/AutomationHelpers
 ```
 
-The app packages `Helpers/Automation` as `Contents/Resources/Automation`, containing `evidence.py` and `author_follow_up.py`. They provide read-only GitLab verification and local proof records independently of desktop plugins or MCP setup. Historical plugin sources and tests remain under `plugins/merge-tether` for compatibility, but that package is no longer bundled or required for app setup.
+The app packages `Helpers/Automation` as `Contents/Resources/Automation`, containing `evidence.py` and `author_follow_up.py`. They provide read-only GitLab verification and local proof records independently of desktop plugins or MCP setup. Their coverage lives in `Tests/AutomationHelpers`; the retired desktop plugin package and its queue tests have been removed.
 
 Remove scratch Derived Data and generated projects after validation. Preserve a
 runnable app only when requested. Local debug rebuilds must retain the installed

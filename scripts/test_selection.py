@@ -6,11 +6,10 @@ import os
 import subprocess
 
 
-TASKS = ["tools", "helpers", "remote", "legacy"]
+TASKS = ["tools", "helpers", "remote"]
 
 # These groups include callers, not only the suite named after the edited type.
 GROUPS = {
-    "search": ["CommandCenterSearchTests"],
     "usage": ["AssistantUsageTests", "AssistantUsageStoreTests", "AssistantUsageRunnerTests",
               "AssistantJobSnapshotTests", "AssistantJobInvocationTests"],
     "presentation": ["MRBoardGroupingTests", "MRHumanActionTests", "MRProgressPresentationTests",
@@ -28,7 +27,6 @@ GROUPS = {
 }
 
 RULES = [
-    ("Sources/Model/CommandCenterSearch.swift", "search"),
     ("Sources/Model/AssistantUsage*.swift", "usage"),
     ("Sources/Services/AssistantUsage*.swift", "usage"),
     ("Sources/Views/AssistantUsageMRDetailCost.swift", "usage"),
@@ -91,9 +89,6 @@ def select_paths(repo, paths):
         elif path.startswith("Tests/AutomationHelpers/") and path.endswith(".py"):
             tasks.add("helpers")
             reasons.append(f"{path}: standalone automation helpers")
-        elif path.startswith("plugins/merge-tether/"):
-            tasks.add("legacy")
-            reasons.append(f"{path}: legacy plugin")
         elif path.startswith("Packages/MergeTetherRemote/Tests/") and path.endswith(".swift"):
             tasks.add("remote")
             reasons.append(f"{path}: remote package tests")
