@@ -10,6 +10,7 @@ enum ReReviewReadiness: Equatable, Sendable {
         let reason: String
         var summary: String? = nil
         var isUncertain = false
+        var isPrivateCodeQuestion = false
     }
 
     var isUncertain: Bool {

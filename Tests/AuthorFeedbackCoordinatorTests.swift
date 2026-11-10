@@ -4,6 +4,35 @@ import Testing
 
 @MainActor
 struct AuthorFeedbackCoordinatorTests {
+    @Test func aPrivateTechnicalQuestionIsForwardedWithoutChangingTheAddressedComment() async throws {
+        // given
+        try await withFixture { fixture in
+            fixture.settings.automation.autoResolveAcceptedFeedback = false
+            fixture.settings.automation.authorFeedback.isEnabled = true
+            let assessment = try JSONDecoder().decode(ReReviewAssessment.self, from: Data(#"{"notes":[{"noteID":10,"state":"addressed","reason":"The original correction is verified."}],"codeReviewRequests":[{"sourceNoteID":10,"sourceQuote":"Fix A","kind":"potentialDefect","summary":"Check a possible failure in the related error path.","question":"Does the changed error path expose caller data in its warning context?"}]}"#.utf8))
+            let coordinator = fixture.coordinator(assessment: assessment)
+            var selected: Set<Int> = []
+            var context: AuthorFeedbackResidual?
+            coordinator.onNeedsWork = { _, ids, _, supplied in selected = ids; context = supplied }
+            // when
+            try await fixture.run(coordinator)
+            // then
+            #expect(selected == [10])
+            #expect(context != nil)
+            #expect(context?.assessedRunID == nil)
+            #expect(context?.notes.first?.state == .addressed)
+            #expect(context?.codeReviewRequests.first?.question == assessment.reviewRequests.first?.question)
+            #expect(coordinator.status(projectID: 1, iid: 2)?.followUpNoteIDs == [10])
+            #expect(coordinator.status(projectID: 1, iid: 2)?.needsAttention == true)
+            #expect(coordinator.status(projectID: 1, iid: 2)?.findings.allSatisfy { $0.state != .needsChanges } == true)
+            #expect(assessment.notes.first?.state == .addressed)
+            let request = try JSONDecoder().decode(GitLabMergeRequest.self, from: Data(Fixture.request.utf8))
+            let fingerprint = try #require(ReviewVerdict.fingerprint(try fixture.discussions()))
+            #expect(coordinator.reviewContext(for: request, fingerprint: fingerprint)?.codeReviewRequests == assessment.reviewRequests)
+            #expect(!fixture.resolved && fixture.resolutionPosts == 0 && fixture.reactionPosts == 0)
+        }
+    }
+
     @Test func sharedPublishedReplyLeavesReviewerAcceptancePendingWithoutDispatchingDuplicateWork() async throws {
         try await withFixture { fixture in
             // given
@@ -342,6 +371,8 @@ struct AuthorFeedbackCoordinatorTests {
                 try await Task.sleep(for: .milliseconds(20))
             }
             #expect(fixture.inputs.count == 2)
+            #expect(fixture.inputs.last?.completedFollowUp?.runID == fixture.settings.assistantHandoffs.last?.id)
+            #expect(fixture.inputs.last?.completedFollowUp?.summary == "No source change")
             try await fixture.run(coordinator)
             #expect(fixture.inputs.count == 2)
             #expect(fixture.resolutionPosts == 0)

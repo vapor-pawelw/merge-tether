@@ -4,6 +4,106 @@ import Testing
 
 @MainActor
 struct VerifiedAuthorFeedbackTests {
+    @Test(arguments: [ReReviewAssessment.Note.State.uncertain, .addressed])
+    func aSourceBoundCodeQuestionGetsOnlyOneScopedReviewerRecovery(_ state: ReReviewAssessment.Note.State) async throws {
+        // given
+        try await withFixture { fixture in
+            fixture.resultStatus = .succeeded
+            fixture.settings.automation.allowFollowUpPush = true
+            try await fixture.prepare()
+            try await fixture.waitForJob()
+            let original = try #require(fixture.settings.assistantHandoffs.first)
+            let question = ReReviewAssessment.CodeReviewRequest(sourceNoteID: 20, sourceQuote: "rename X",
+                kind: state == .uncertain ? .feedbackVerification : .potentialDefect,
+                summary: "Check a possible failure in the related code path.",
+                question: "Does the related warning identify the caller through its logger context?")
+            let context = AuthorFeedbackResidual(assessedRunID: original.id,
+                notes: [.init(noteID: 20, state: state, reason: "The original comment state remains independent of this code question.")],
+                codeReviewRequests: [question])
+            // when
+            try await fixture.prepare(residual: context)
+            try await fixture.waitForJob()
+            // then
+            #expect(fixture.settings.assistantHandoffs.count == 2)
+            let successor = try #require(fixture.settings.assistantHandoffs.first { $0.id != original.id })
+            #expect(successor.retryOf == original.id && successor.feedbackRecoveryRootID == original.id)
+            #expect(successor.feedbackNoteIDs == [20])
+            #expect(successor.prompt.contains(question.question))
+            #expect(successor.prompt.contains("The original comment state remains independent of this code question."))
+            #expect(successor.prompt.contains("First independently confirm or disprove each question"))
+            #expect(successor.prompt.contains("Do not change code merely to agree with the verifier"))
+            #expect(successor.prompt.contains("NOT a requirement made by the source comment's author"))
+            #expect(successor.prompt.contains("Do not create a new discussion or draft reply solely"))
+            fixture.settings.save()
+            let reloaded = SettingsManager(defaults: fixture.defaults)
+            var next = context
+            next.assessedRunID = successor.id
+            try await fixture.prepare(using: reloaded, residual: next)
+            try await fixture.waitForJob()
+            #expect(reloaded.assistantHandoffs.count == 2)
+        }
+    }
+
+    @Test(arguments: [false, true])
+    func theFirstReviewerReceivesPrivateQuestionsWithTheOriginalAssessmentAndPushPolicy(_ push: Bool) async throws {
+        // given
+        try await withFixture { fixture in
+            fixture.settings.automation.allowFollowUpPush = push
+            let question = ReReviewAssessment.CodeReviewRequest(sourceNoteID: 20, sourceQuote: "rename X",
+                kind: .feedbackVerification, summary: "Check the related warning context.",
+                question: "Does the warning retain caller identity from the request filter?")
+            let context = AuthorFeedbackResidual(notes: [.init(noteID: 20, state: .uncertain,
+                reason: "Tracing the request filter requires deeper code analysis.")], codeReviewRequests: [question])
+            // when
+            try await fixture.prepare(residual: context)
+            try await fixture.waitForJob()
+            // then
+            let job = try #require(fixture.settings.assistantHandoffs.first)
+            #expect(fixture.settings.assistantHandoffs.count == 1 && job.feedbackRecoveryRootID == nil)
+            #expect(job.prompt.contains(question.question))
+            #expect(job.prompt.contains("Tracing the request filter requires deeper code analysis."))
+            #expect(job.prompt.contains("hypotheses, not confirmed findings"))
+            #expect(job.followUpPushAllowed == push && !job.allowsPush)
+            #expect(job.workflow == .followUp && job.key.username == "me")
+        }
+    }
+
+    @Test(arguments: ["quote", "note", "kind", "head", "context", "body", "owner", "decision", "push", "failed"])
+    func aCodeQuestionCannotBypassScopeOrRecoveryProof(_ changed: String) async throws {
+        // given
+        try await withFixture { fixture in
+            fixture.resultStatus = .succeeded
+            fixture.settings.automation.allowFollowUpPush = true
+            try await fixture.prepare()
+            try await fixture.waitForJob()
+            let original = try #require(fixture.settings.assistantHandoffs.first)
+            let question = ReReviewAssessment.CodeReviewRequest(sourceNoteID: changed == "note" ? 99 : 20,
+                sourceQuote: changed == "quote" ? "An invented requirement" : "rename X",
+                kind: changed == "kind" ? .feedbackVerification : .potentialDefect,
+                summary: "Check the related code path.", question: "Can the changed path expose caller data?")
+            if changed == "head" { try fixture.write("request.json", Fixture.request.replacingOccurrences(of: Fixture.sha, with: String(repeating: "b", count: 40))) }
+            if changed == "body" { try fixture.write("discussions.json", Fixture.discussions.replacingOccurrences(of: "rename X", with: "rename X and cover retries")) }
+            if changed == "owner" { try fixture.write("request.json", Fixture.request.replacingOccurrences(of: "\"username\":\"me\"", with: "\"username\":\"someone-else\"")) }
+            if changed == "decision" {
+                let source = try #require(JSONDecoder().decode([GitLabMergeRequestDiscussion].self,
+                    from: Data(Fixture.discussions.utf8)).first?.notes.first)
+                fixture.settings.feedbackSuggestionDecisions.ignore(source, concernSummary: "Decline the exact suggestion",
+                    concernReason: "Keep the existing contract", for: .init(host: Fixture.host, username: "me", projectID: 1, iid: 2))
+            }
+            if changed == "push" { fixture.settings.automation.allowFollowUpPush = false }
+            if changed == "failed" { fixture.settings.assistantHandoffs[0].execution?.state = .failed }
+            let context = AuthorFeedbackResidual(assessedRunID: original.id,
+                notes: [.init(noteID: 20, state: .addressed, reason: "The original correction is verified.")],
+                semanticContextFingerprint: changed == "context" ? "obsolete-context" : nil,
+                codeReviewRequests: [question])
+            // when
+            try await fixture.prepare(residual: context)
+            try await fixture.waitForJob()
+            // then
+            #expect(fixture.settings.assistantHandoffs.count == 1)
+        }
+    }
+
     @Test(arguments: [AssistantJobExecution.State.succeeded, .blocked])
     func decisionChangesDoNotReplayHandledNotesThroughUnverifiedEntryPoints(_ state: AssistantJobExecution.State) async throws {
         try await withFixture { fixture in

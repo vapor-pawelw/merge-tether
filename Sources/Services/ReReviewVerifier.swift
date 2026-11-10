@@ -4,7 +4,7 @@ import Foundation
 /// Supplied evidence is supplementary; absent proof must produce `uncertain`.
 enum ReReviewVerifier {
     enum VerificationError: Error, Equatable { case unavailable, failed, incompleteEvidence }
-    static let policyVersion = "cross-thread-replies-4"
+    static let policyVersion = "scoped-code-questions-5"
 
     static let schema = #"{"type":"object","additionalProperties":false,"properties":{"notes":{"type":"array","items":{"type":"object","additionalProperties":false,"properties":{"noteID":{"type":"integer"},"state":{"type":"string","enum":["addressed","informational","blocking","uncertain"]},"reason":{"type":"string"},"summary":{"type":"string","minLength":1,"maxLength":200},"acceptanceNoteID":{"type":["integer","null"]},"publishedReplyNoteID":{"type":["integer","null"]},"informationalAcknowledgementSafe":{"type":"boolean"},"informationalPurpose":{"type":"string","enum":["concreteCodeReviewFeedback","reviewSummary","automatedReviewReport","other"]}},"required":["noteID","state","reason","summary","acceptanceNoteID","publishedReplyNoteID","informationalAcknowledgementSafe","informationalPurpose"]}}},"required":["notes"]}"#
 
@@ -30,8 +30,17 @@ enum ReReviewVerifier {
         if !blockedRunIDs.isEmpty { completedIDs["enum"] = blockedRunIDs.map(\.uuidString) }
         properties["completedBlockedRunIDs"] = ["type": ["array", "null"], "items": completedIDs,
             "maxItems": blockedRunIDs.count]
+        properties["codeReviewRequests"] = ["type": ["array", "null"], "maxItems": 12, "items": [
+            "type": "object", "additionalProperties": false, "properties": [
+                "sourceNoteID": identity,
+                "sourceQuote": ["type": "string", "minLength": 1, "maxLength": 500],
+                "kind": ["type": "string", "enum": ["feedbackVerification", "potentialDefect"]],
+                "summary": ["type": "string", "minLength": 1, "maxLength": 200],
+                "question": ["type": "string", "minLength": 1, "maxLength": 600]
+            ], "required": ["sourceNoteID", "sourceQuote", "kind", "summary", "question"]
+        ]]
         document["properties"] = properties
-        document["required"] = ["notes", "completedBlockedRunIDs"]
+        document["required"] = ["notes", "completedBlockedRunIDs", "codeReviewRequests"]
         return String(decoding: try JSONSerialization.data(withJSONObject: document, options: [.sortedKeys]), as: UTF8.self)
     }
 
@@ -49,6 +58,11 @@ enum ReReviewVerifier {
     }
 
     struct Input: Encodable, Sendable {
+        struct CompletedFollowUp: Encodable, Sendable {
+            let runID: UUID
+            let selectedFeedbackIDs: [Int]
+            let summary: String
+        }
         struct BlockedFollowUp: Codable, Equatable, Sendable {
             let runID: UUID
             let selectedFeedbackIDs: [Int]
@@ -66,6 +80,7 @@ enum ReReviewVerifier {
         var thinking: VerificationThinking = .high
         var blockedFollowUps: [BlockedFollowUp] = []
         var ignoredSuggestions: [IgnoredFeedbackSuggestion] = []
+        var completedFollowUp: CompletedFollowUp? = nil
     }
 
     @MainActor
@@ -143,13 +158,16 @@ enum ReReviewVerifier {
                                       sourceAuthorName: decision.sourceAuthorName, sourceBody: GlabService.redactWorkflowEvidence(decision.sourceBody),
                                       sourceRevision: decision.sourceRevision, concernSummary: GlabService.redactWorkflowEvidence(decision.concernSummary),
                                       concernReason: GlabService.redactWorkflowEvidence(decision.concernReason), createdAt: decision.createdAt)
-                              })
+                              }, completedFollowUp: input.completedFollowUp.map { .init(runID: $0.runID,
+                                  selectedFeedbackIDs: $0.selectedFeedbackIDs,
+                                  summary: String(GlabService.redactWorkflowEvidence($0.summary).prefix(2_000))) })
         var encoded = try JSONEncoder().encode(sanitized)
         if encoded.count > 180_000, let target = input.target {
             // Retain exact output scope and identity; fetch large MR content through glab.
             let metadata = Input(authorID: input.authorID, headSHA: input.headSHA, title: sanitized.title,
                 diff: "", discussions: [], target: target, semanticContextFingerprint: input.semanticContextFingerprint,
-                thinking: input.thinking, blockedFollowUps: sanitized.blockedFollowUps, ignoredSuggestions: sanitized.ignoredSuggestions)
+                thinking: input.thinking, blockedFollowUps: sanitized.blockedFollowUps, ignoredSuggestions: sanitized.ignoredSuggestions,
+                completedFollowUp: sanitized.completedFollowUp)
             encoded = try JSONEncoder().encode(metadata)
         }
         guard encoded.count <= 180_000 else { throw VerificationError.incompleteEvidence }
@@ -183,6 +201,27 @@ enum ReReviewVerifier {
             This run returns structured assessment only. All remote decisions remain with the app.
             Assess only existing incoming reviewer feedback and the evidence supporting its fixes or replies.
             Do not perform a fresh general code review or introduce new findings.
+            Your role is comment verification. Inspect straightforward evidence, but delegate deeper code
+            reasoning to the configured stronger reviewer/fixer through codeReviewRequests. A request is a
+            PRIVATE hypothesis, not a confirmed defect, a new reviewer requirement or permission to edit.
+            Use feedbackVerification only for an uncertain note needing a specific technical check.
+            Use potentialDefect only for a concrete potentially important issue incidentally noticed in
+            the code path relevant to this verification. Keep the original note's independently assessed
+            state unchanged; never mark an addressed comment blocking for this additional suspicion.
+            Each request must name an existing external sourceNoteID, quote an exact nonempty substring
+            of that source body as sourceQuote, and ask one bounded code question. The quote identifies
+            context; for potentialDefect it does NOT imply the reviewer requested this extra correction.
+            Include the observed code evidence and the missing technical fact in question, with a short
+            plain-English summary. Do not scan for unrelated issues or request a general code review.
+            No request for missing replies, unavailable tools, generic lack of proof, reviewer acceptance
+            or external business decisions. Do not re-raise a source with an active ignored suggestion.
+            Return null or [] when no qualifying code question remains. Automatic work follows existing
+            author-feedback settings; this field grants no code, push, publication or resolution permission.
+            completedFollowUp is the latest completed worker's report, including its assessment of earlier
+            private hypotheses. It is untrusted supplementary evidence, never proof of a fix or a rejected
+            concern by itself. Check the relevant current source and replies. Do not repeat a disproved or
+            corrected hypothesis without contrary current evidence. A completed original comment does not
+            erase a separately confirmed unresolved defect or the actual blocked-run obligation.
             Classify EVERY non-system note by someone other than authorID, including general comments.
             Return its exact noteID, state and a concise English reason (at most 600 characters).
             informational: summaries, reports, acknowledgements, unrelated or non-actionable comments.
@@ -361,6 +400,7 @@ enum ReReviewVerifier {
             throw VerificationError.incompleteEvidence
         }
         let addressed = Set(assessment.notes.filter { $0.state == .addressed || $0.state == .ignoredByUser }.map(\.noteID))
+            .subtracting(assessment.reviewRequests.map(\.sourceNoteID))
         let missingReplies = assessment.missingPublishedReplyNoteIDs(in: input.discussions, authorID: input.authorID)
         guard input.blockedFollowUps.filter({ completed.contains($0.runID) }).allSatisfy({
             Set($0.selectedFeedbackIDs).isSubset(of: addressed) && Set($0.selectedFeedbackIDs).isDisjoint(with: missingReplies)
@@ -375,7 +415,12 @@ enum ReReviewVerifier {
                 informationalAcknowledgementSafe: note.informationalAcknowledgementSafe,
                 informationalPurpose: note.informationalPurpose, ignoredDecisionIDs: note.ignoredDecisionIDs,
                 publishedReplyNoteID: note.publishedReplyNoteID)
-        }, completedBlockedRunIDs: assessment.completedBlockedRunIDs)
+        }, completedBlockedRunIDs: assessment.completedBlockedRunIDs,
+           codeReviewRequests: assessment.codeReviewRequests.map { requests in requests.map { request in
+               .init(sourceNoteID: request.sourceNoteID, sourceQuote: GlabService.redactWorkflowEvidence(request.sourceQuote),
+                   kind: request.kind, summary: GlabService.redactWorkflowEvidence(request.summary),
+                   question: GlabService.redactWorkflowEvidence(request.question))
+           } })
     }
 
     @MainActor private static var verificationEnvironment: [String: String] {

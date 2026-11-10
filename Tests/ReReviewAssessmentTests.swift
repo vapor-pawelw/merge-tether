@@ -4,6 +4,31 @@ import Testing
 
 @Suite("Re-review assessment")
 struct ReReviewAssessmentTests {
+    @Test func anIncidentalPrivateQuestionDoesNotRewriteTheOriginalCommentButHoldsReadiness() throws {
+        let threads = try discussions()
+        let assessment = try JSONDecoder().decode(ReReviewAssessment.self, from: Data(#"{"notes":[{"noteID":10,"state":"addressed","reason":"A is corrected."},{"noteID":12,"state":"informational","reason":"Summary."},{"noteID":13,"state":"addressed","reason":"B is corrected."}],"codeReviewRequests":[{"sourceNoteID":10,"sourceQuote":"Fix A","kind":"potentialDefect","summary":"Check a related error path.","question":"Can the related error path leak caller data?"}]}"#.utf8))
+        #expect(assessment.notes.first?.state == .addressed)
+        #expect(!assessment.hasNoRemainingAuthorWork(in: threads, authorID: 3))
+        #expect(try assessment.reviewers(in: threads, authorID: 3) == [9: 13])
+        #expect(assessment.readinessBlockers.count == 1)
+        #expect(assessment.readinessBlockers.first?.isPrivateCodeQuestion == true)
+        #expect(assessment.readinessBlockers.first?.summary == "Check a related error path.")
+    }
+
+    @Test(arguments: ["wrongNote", "wrongQuote", "blankQuestion", "wrongKindState", "duplicate"])
+    func technicalQuestionsCannotInventTheirSourceOrScope(_ scenario: String) throws {
+        // given
+        let id = scenario == "wrongNote" ? 11 : 10
+        let quote = scenario == "wrongQuote" ? "A request no reviewer made" : "Fix A"
+        let question = scenario == "blankQuestion" ? " " : "Does the related context identify the caller?"
+        let kind = scenario == "wrongKindState" ? "feedbackVerification" : "potentialDefect"
+        let request = #"{"sourceNoteID":\#(id),"sourceQuote":"\#(quote)","kind":"\#(kind)","summary":"Check the related path.","question":"\#(question)"}"#
+        let extra = scenario == "duplicate" ? "," + request : ""
+        let assessment = try JSONDecoder().decode(ReReviewAssessment.self, from: Data(#"{"notes":[{"noteID":10,"state":"addressed","reason":"A is corrected."},{"noteID":12,"state":"informational","reason":"Summary."},{"noteID":13,"state":"addressed","reason":"B is corrected."}],"codeReviewRequests":[\#(request)\#(extra)]}"#.utf8))
+        // when + then
+        #expect(throws: ReReviewAssessment.ValidationError.self) { try assessment.reviewers(in: discussions(), authorID: 3) }
+    }
+
     @Test func verifiedReplyInAnotherThreadSatisfiesOnlyItsAssessedConcern() throws {
         // given
         let threads = try discussions()

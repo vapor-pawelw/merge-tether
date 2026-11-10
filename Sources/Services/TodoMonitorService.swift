@@ -1344,7 +1344,7 @@ final class TodoMonitorService {
         do {
             try await automation.prepareFeedback(work: work, noteIDs: noteIDs.sorted(), username: username,
                 settings: settings, glab: glab, manual: manual, verifiedFingerprint: fingerprint, expectedHeadSHA: request.sha,
-                verifiedResidual: residual) {
+                verifiedResidual: residual ?? attention.authorFeedbackCoordinator?.reviewContext(for: request, fingerprint: fingerprint)) {
                     self.glab.resolvedHost == host && self.glab.currentUsername == username
                         && self.settings.automation == configuration
                 }

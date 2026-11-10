@@ -5,6 +5,48 @@ import Testing
 @Suite("Headless re-review verification")
 struct ReReviewVerifierTests {
     @Test(arguments: AutomationAssistant.allCases)
+    func aPrivateCodeQuestionSurvivesProviderDecodingWithoutStartingAnotherCLI(_ assistant: AutomationAssistant) async throws {
+        // given
+        let folder = FileManager.default.temporaryDirectory.appending(path: UUID().uuidString)
+        try FileManager.default.createDirectory(at: folder, withIntermediateDirectories: false)
+        defer { try? FileManager.default.removeItem(at: folder) }
+        let script = folder.appending(path: "cli")
+        try Data("""
+            #!/usr/bin/python3
+            import json,pathlib,sys
+            args=sys.argv[1:]
+            incoming=sys.stdin.read()
+            pathlib.Path(__file__+'.capture').write_text(incoming)
+            count=pathlib.Path(__file__+'.count')
+            count.write_text(str(int(count.read_text())+1) if count.exists() else '1')
+            result={'notes':[{'noteID':10,'state':'addressed','reason':'The original correction is present.'}],
+                    'codeReviewRequests':[{'sourceNoteID':10,'sourceQuote':'Fix A','kind':'potentialDefect','summary':'Check the related warning context.',
+                    'question':'Can the related warning expose caller data? token=glpat-syntheticquestion12345'}]}
+            if args[0]=='exec': json.dump(result,open(args[args.index('-o')+1],'w'))
+            else: print(json.dumps({'is_error':False,'structured_output':result}))
+            """.utf8).write(to: script)
+        try FileManager.default.setAttributes([.posixPermissions: 0o700], ofItemAtPath: script.path)
+        let threads = try JSONDecoder().decode([GitLabMergeRequestDiscussion].self, from: Data(#"[{"notes":[{"id":10,"author":{"id":7},"system":false,"body":"Fix A"}]}]"#.utf8))
+        let runID = UUID()
+        let input = ReReviewVerifier.Input(authorID: 3, headSHA: String(repeating: "a", count: 40), title: "Synthetic correction",
+            diff: "Current source", discussions: threads,
+            target: .init(host: "gitlab.example.test", projectID: 1, iid: 2,
+                url: URL(string: "https://gitlab.example.test/group/repo/-/merge_requests/2")!, expectedUsername: "me"),
+            completedFollowUp: .init(runID: runID, selectedFeedbackIDs: [10], summary: "The prior hypothesis was checked against the request filter."))
+        // when
+        let assessment = try await ReReviewVerifier.run(input, assistant: assistant, model: "fixture", executable: script, retryWait: { _ in })
+        // then
+        #expect(assessment.notes.first?.state == .addressed && assessment.reviewRequests.count == 1)
+        #expect(assessment.reviewRequests.first?.sourceNoteID == 10)
+        #expect(assessment.reviewRequests.first?.question.contains("glpat-syntheticquestion12345") == false)
+        #expect(!assessment.hasNoRemainingAuthorWork(in: threads, authorID: 3))
+        let count = try String(contentsOf: URL(fileURLWithPath: script.path + ".count"), encoding: .utf8)
+        let evidence = try String(contentsOf: URL(fileURLWithPath: script.path + ".capture"), encoding: .utf8)
+        #expect(count == "1")
+        #expect(evidence.contains(runID.uuidString) && evidence.contains("The prior hypothesis was checked"))
+    }
+
+    @Test(arguments: AutomationAssistant.allCases)
     func crossThreadReplyProofSurvivesProviderDecodingAndRedaction(_ assistant: AutomationAssistant) async throws {
         // given
         let folder = FileManager.default.temporaryDirectory.appending(path: UUID().uuidString)

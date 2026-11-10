@@ -254,6 +254,28 @@
           }
         }
       }
+    },
+    "authorFeedback.codeReviewQuestion": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Private code question for the reviewer"
+          }
+        }
+      }
+    },
+    "authorFeedback.codeReviewContext": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Related discussion (context only)"
+          }
+        }
+      }
     }
   },
   "version": "1.0"

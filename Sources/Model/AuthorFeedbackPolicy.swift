@@ -8,12 +8,13 @@ struct AuthorFeedbackAttempt: Codable, Hashable {
     var decisionRevision: String? = nil
 }
 
-/// Concrete residual work assessed after a completed follow-up. The run ID
-/// fences the assessment's timing; it does not grant permission to replay that run.
+/// Source-bound work and private code questions from a fresh assessment. An optional
+/// completed run fences recovery timing; its absence never grants a replay budget.
 struct AuthorFeedbackResidual: Sendable {
-    let assessedRunID: UUID
+    var assessedRunID: UUID? = nil
     let notes: [ReReviewAssessment.Note]
     var semanticContextFingerprint: String? = nil
+    var codeReviewRequests: [ReReviewAssessment.CodeReviewRequest] = []
 }
 
 /// Decides which external threads on the user's own MR may be resolved. A thread is ready only when

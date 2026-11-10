@@ -19,9 +19,14 @@ struct ReReviewControls: View {
                     DisclosureGroup {
                         ForEach(blockers, id: \.noteID) { blocker in
                             VStack(alignment: .leading, spacing: 2) {
-                                Text(readiness.isUncertain || blocker.isUncertain ? .FeedbackSuggestions.feedbackSuggestionsUnverifiedConcern
-                                    : .FeedbackSuggestions.feedbackSuggestionsConfirmedConcern).foregroundStyle(.secondary)
-                                Link(destination: noteURL(blocker.noteID)) { Text(.Menu.menuReReviewNote(blocker.noteID)) }
+                                if blocker.isPrivateCodeQuestion {
+                                    Text(.AuthorFeedback.authorFeedbackCodeReviewQuestion).foregroundStyle(.secondary)
+                                    Link(destination: noteURL(blocker.noteID)) { Text(.AuthorFeedback.authorFeedbackCodeReviewContext) }
+                                } else {
+                                    Text(readiness.isUncertain || blocker.isUncertain ? .FeedbackSuggestions.feedbackSuggestionsUnverifiedConcern
+                                        : .FeedbackSuggestions.feedbackSuggestionsConfirmedConcern).foregroundStyle(.secondary)
+                                    Link(destination: noteURL(blocker.noteID)) { Text(.Menu.menuReReviewNote(blocker.noteID)) }
+                                }
                                 if let summary = AgentExplanation.summary(blocker.summary) { Text(verbatim: summary) }
                                 AgentDiagnosticDetails(reason: blocker.reason)
                             }

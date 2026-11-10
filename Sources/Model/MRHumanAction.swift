@@ -56,6 +56,7 @@ struct MRHumanAction {
     }
     private enum Source {
         case none
+        case privateCodeQuestion
         case finding(AuthorFeedbackPolicy.Finding, EvidenceContext)
         case replyThread(Int, EvidenceContext)
         case reReview(ReReviewReadiness.Blocker, EvidenceContext)
@@ -65,6 +66,7 @@ struct MRHumanAction {
 
     func feedbackEvidence(for item: MergeRequestAttentionMonitor.Item) -> FeedbackEvidence {
         switch source {
+        case .privateCodeQuestion: return .none
         case .followUp(let intent, let fingerprint):
             let ids = intent.noteIDs.filter { $0 > 0 }.sorted()
             guard !ids.isEmpty, intent.headSHA == item.mergeRequest?.sha,
@@ -84,7 +86,7 @@ struct MRHumanAction {
                   status.replyNoteIDs.contains(root) else { return .unavailable(root) }
             return .replyThreads(status.replyNoteIDs.sorted())
         case .reReview(let blocker, let context):
-            let current = Self.reReviewBlockers(item)
+            let current = Self.reReviewBlockers(item).filter { !$0.isPrivateCodeQuestion }
             guard EvidenceContext(reReview: item) == context, current.contains(blocker) else { return .unavailable(blocker.noteID) }
             return .reReview(current)
         case .none:
@@ -107,7 +109,7 @@ struct MRHumanAction {
     /// Exact source of the displayed concern, which can differ from its thread root.
     var sourceNoteID: Int? {
         switch source {
-        case .none, .followUp: nil
+        case .none, .privateCodeQuestion, .followUp: nil
         case .finding(let finding, _): finding.sourceNoteID
         case .replyThread(let root, _): root
         case .reReview(let blocker, _): blocker.noteID
@@ -275,8 +277,10 @@ struct MRHumanAction {
             } else if let status = item.authorFeedbackStatus, let root = status.replyNoteIDs.min() {
                 source = .replyThread(root, EvidenceContext(status))
                 requiresPublishedReply = true
+            } else if item.authorFeedbackStatus?.codeReviewRequests.isEmpty == false {
+                source = .privateCodeQuestion
             } else if let blocker = Self.reReviewBlockers(item).first {
-                source = .reReview(blocker, EvidenceContext(reReview: item))
+                source = blocker.isPrivateCodeQuestion ? .privateCodeQuestion : .reReview(blocker, EvidenceContext(reReview: item))
             }
         }
     }
@@ -294,7 +298,7 @@ struct MRHumanAction {
     private static func feedbackSummary(_ item: MergeRequestAttentionMonitor.Item) -> String? {
         if let finding = feedbackFinding(item) { return finding.summary }
         if item.authorFeedbackStatus?.replyNoteIDs.isEmpty == false { return nil }
-        return reReviewBlockers(item).first?.summary
+        return item.authorFeedbackStatus?.codeReviewRequests.first?.summary ?? reReviewBlockers(item).first?.summary
     }
 
     private static func reReviewBlockers(_ item: MergeRequestAttentionMonitor.Item) -> [ReReviewReadiness.Blocker] {
@@ -345,7 +349,7 @@ struct MRHumanAction {
             return reason
         }
         if item.authorFeedbackStatus?.replyNoteIDs.isEmpty == false { return nil }
-        return reReviewBlockers(item).first?.reason
+        return item.authorFeedbackStatus?.codeReviewRequests.first?.question ?? reReviewBlockers(item).first?.reason
     }
 
     private static func reviewDecisionMessage(_ item: MergeRequestAttentionMonitor.Item) -> LocalizedStringResource {

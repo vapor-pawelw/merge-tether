@@ -37,6 +37,13 @@ struct AssistantJobExecution: Codable, Equatable, Sendable {
                                   currentRequest: GitLabMergeRequest? = nil,
                                   feedbackStatus: AuthorFeedbackStatus? = nil,
                                   discussionFingerprint: String? = nil) -> Bool {
+        if let currentRequest, let feedbackStatus, !feedbackStatus.codeReviewRequests.isEmpty,
+           currentRequest.author.username == username, currentRequest.projectID == work.projectID,
+           currentRequest.iid == work.iid, currentRequest.webURL.isGitLabMergeRequest(host: work.host, iid: work.iid),
+           feedbackStatus.head == currentRequest.sha, feedbackStatus.fingerprint == discussionFingerprint,
+           feedbackStatus.semanticContextFingerprint == currentRequest.semanticContextFingerprint {
+            return true
+        }
         let latest = handoffs.filter {
             !$0.isObsoleteReminder && $0.key.work == work && $0.key.username == username
                 && !PipelineJobReconciliation.isObsolete($0, request: currentRequest)

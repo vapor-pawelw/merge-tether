@@ -3,6 +3,25 @@ import Testing
 @testable import GitLabTodos
 
 @Suite struct AssistantJobExecutionTests {
+    @MainActor @Test(arguments: ["current", "head", "context", "discussion", "account", "mr"])
+    func anIndependentCodeQuestionHoldsMergeOnlyForItsCurrentContext(_ changed: String) throws {
+        // given
+        let request = try MRDependencyPresentationTests().request(2, project: 1)
+        let work = AssistantAutomationRunner.MergeRequestWork(host: "gitlab.example.test", projectID: 1, iid: 2)
+        let question = ReReviewAssessment.CodeReviewRequest(sourceNoteID: 10, sourceQuote: "Original feedback",
+            kind: .potentialDefect, summary: "Check a possible related issue.", question: "Does the related path leak caller data?")
+        let status = AuthorFeedbackStatus(head: changed == "head" ? "obsolete" : request.sha!, fingerprint: "comments",
+            semanticContextFingerprint: changed == "context" ? "obsolete" : request.semanticContextFingerprint,
+            phase: .complete, codeReviewRequests: [question], addressedNoteIDs: [10])
+        let actualWork = changed == "mr" ? AssistantAutomationRunner.MergeRequestWork(host: work.host, projectID: 1, iid: 3) : work
+        // when
+        let unfinished = AssistantJobExecution.hasUnfinishedWork(in: [], for: actualWork,
+            username: changed == "account" ? "someone-else" : request.author.username, currentRequest: request,
+            feedbackStatus: status, discussionFingerprint: changed == "discussion" ? "obsolete" : "comments")
+        // then
+        #expect(unfinished == (changed == "current"))
+    }
+
     @MainActor @Test func obsoleteReminderCannotBlockCompletionButAnOlderRealFailureStillDoes() {
         let work = AssistantAutomationRunner.MergeRequestWork(host: "gitlab.example.org", projectID: 1, iid: 2)
         let key = AssistantAutomationRunner.ChatKey(assistant: .codex, work: work, username: "me", workspace: "", access: .gitLabRead)

@@ -40,6 +40,16 @@ struct AuthorFeedbackView: View {
                                 sourceEvidence(for: finding, status: status, source: source)
                             }
                         }
+                        ForEach(status.codeReviewRequests) { question in
+                            VStack(alignment: .leading, spacing: 4) {
+                                Text(.AuthorFeedback.authorFeedbackCodeReviewQuestion).fontWeight(.medium)
+                                Text(verbatim: question.summary).textSelection(.enabled)
+                                AgentDiagnosticDetails(reason: question.question)
+                                if let url = noteURL(question.sourceNoteID) {
+                                    Link(destination: url) { Text(.AuthorFeedback.authorFeedbackCodeReviewContext) }
+                                }
+                            }
+                        }
                     }
                     HStack {
                         Button { monitor.attention.retryAuthorFeedback(item.id) } label: { Text(.AuthorFeedback.authorFeedbackRecheck) }

@@ -2479,10 +2479,7 @@ final class MergeRequestAttentionMonitor {
                 feedback.addressedByReviewer[$0.key] != nil && assessed[$0.key] != nil
                     || allFeedbackReady && earlierReviewers.contains($0.key)
             }
-            let concerns = assessment.notes.filter { $0.state == .blocking }
-                + assessment.notes.filter { $0.state == .uncertain }
-            let blockers = concerns
-                .map { ReReviewReadiness.Blocker(noteID: $0.noteID, reason: $0.reason, summary: $0.summary, isUncertain: $0.state == .uncertain) }
+            let blockers = assessment.readinessBlockers
             reReviewChecks[id]?.state = assessment.notes.contains { $0.state == .blocking } ? .blocked(blockers) : .uncertain(blockers)
             let informationalReviewers = pendingReviewers.keys.filter { reviewerID in
                 let theirNotes = discussions.flatMap(\.notes).filter { $0.author?.id == reviewerID && $0.system != true }

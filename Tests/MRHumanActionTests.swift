@@ -4,6 +4,39 @@ import Testing
 
 @MainActor
 struct MRHumanActionTests {
+    @Test func aPrivateReReviewQuestionDoesNotFallBackToQuotingRawReviewerFeedback() throws {
+        // given
+        var item = item()
+        let blocker = ReReviewReadiness.Blocker(noteID: 10, reason: "Does the related warning leak caller data?",
+            summary: "Check a possible related error-path issue.", isUncertain: true, isPrivateCodeQuestion: true)
+        item.reReviewReadiness = .uncertain([blocker])
+        item.feedback = [.init(id: 10, author: .init(id: 7, username: "reviewer", name: nil),
+            system: false, resolvable: false, resolved: false, resolvedBy: nil, body: "Original comment")]
+        // when
+        let action = try #require(MRHumanAction(row: row(item), assistantReady: true))
+        // then
+        #expect(action.summary == blocker.summary && action.detail == blocker.reason)
+        #expect(action.sourceNoteID == nil && action.feedbackEvidence(for: item) == .none)
+    }
+
+    @Test func aPrivateCodeQuestionIsShownWithoutAttributingANewRequirementToTheReviewer() throws {
+        // given
+        var item = item()
+        let question = ReReviewAssessment.CodeReviewRequest(sourceNoteID: 10, sourceQuote: "Original comment",
+            kind: .potentialDefect, summary: "Check a possible related error-path issue.",
+            question: "Does the warning context identify the caller?")
+        item.authorFeedbackStatus = .init(head: "head", fingerprint: "comments", phase: .complete,
+            codeReviewRequests: [question], followUpNoteIDs: [10], addressedNoteIDs: [10])
+        item.feedback = [.init(id: 10, author: .init(id: 7, username: "reviewer", name: nil),
+            system: false, resolvable: false, resolved: false, resolvedBy: nil, body: "Original comment")]
+        // when
+        let action = try #require(MRHumanAction(row: row(item), assistantReady: true))
+        // then
+        #expect(action.kind == .feedback && action.action == .handleFeedback)
+        #expect(action.summary == question.summary && action.detail == question.question)
+        #expect(action.feedbackEvidence(for: item) == .none)
+    }
+
     @Test func missingEvidenceKeepsTheFinishActionVisibleWhileDisabled() throws {
         var item = item()
         item.requiresCommentReview = true

@@ -9,6 +9,7 @@ struct AuthorFeedbackStatus: Equatable, Sendable {
     var readOnlyReconciliation = false
     var phase: Phase
     var findings: [AuthorFeedbackPolicy.Finding] = []
+    var codeReviewRequests: [ReReviewAssessment.CodeReviewRequest] = []
     var pendingDraftCount = 0
     var acceptedReviewerIDs: Set<Int> = []
     var followUpNoteIDs: Set<Int> = []
@@ -58,7 +59,7 @@ struct AuthorFeedbackStatus: Equatable, Sendable {
     }
 
     var needsAttention: Bool {
-        phase == .failed || phase == .waitingPublication || !replyNoteIDs.isEmpty || findings.contains {
+        phase == .failed || phase == .waitingPublication || !replyNoteIDs.isEmpty || !codeReviewRequests.isEmpty || findings.contains {
             [.needsChanges, .needsVerification].contains($0.state)
         }
     }
@@ -321,12 +322,27 @@ final class AuthorFeedbackCoordinator {
     }
 
     private func residual(_ input: Input, assessment: ReReviewAssessment, notes: Set<Int>) -> AuthorFeedbackResidual? {
-        guard let runID = input.completedFollowUpJobID, cache[input.target]?.2 == runID else { return nil }
+        let runID = input.completedFollowUpJobID
+        guard runID == nil || cache[input.target]?.2 == runID else { return nil }
+        let requests = assessment.reviewRequests.filter { notes.contains($0.sourceNoteID) }
+        let requestedIDs = Set(requests.map(\.sourceNoteID))
         let blocking = assessment.notes.filter {
-            notes.contains($0.noteID) && $0.state == .blocking && !$0.reason.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+            notes.contains($0.noteID) && ($0.state == .blocking || requestedIDs.contains($0.noteID))
+                && !$0.reason.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
         }
-        return blocking.isEmpty ? nil : .init(assessedRunID: runID, notes: blocking,
-            semanticContextFingerprint: input.request.semanticContextFingerprint)
+        guard !blocking.isEmpty, runID != nil || !requests.isEmpty else { return nil }
+        return .init(assessedRunID: runID, notes: blocking,
+            semanticContextFingerprint: input.request.semanticContextFingerprint, codeReviewRequests: requests)
+    }
+
+    func reviewContext(for request: GitLabMergeRequest, fingerprint: String) -> AuthorFeedbackResidual? {
+        guard let assessment = assessment(for: request, fingerprint: fingerprint),
+              let status = status(projectID: request.projectID, iid: request.iid),
+              !assessment.reviewRequests.isEmpty else { return nil }
+        let selected = Set(assessment.reviewRequests.map(\.sourceNoteID))
+        return .init(assessedRunID: status.completedFollowUpJobID,
+            notes: assessment.notes.filter { selected.contains($0.noteID) },
+            semanticContextFingerprint: request.semanticContextFingerprint, codeReviewRequests: assessment.reviewRequests)
     }
 
     private func latestBlockedFollowUp(_ input: Input) -> AssistantAutomationRunner.Handoff? {
@@ -359,12 +375,19 @@ final class AuthorFeedbackCoordinator {
         let diff: Data = try await glab.mergeRequestAPI("/projects/\(request.projectID)/merge_requests/\(request.iid)/raw_diffs", host: host, decode: { $0 })
         let encoder = JSONEncoder()
         encoder.outputFormatting = [.sortedKeys]
+        let completedFollowUp = completedFollowUpJob(for: request, target: input.target).flatMap { job -> ReReviewVerifier.Input.CompletedFollowUp? in
+            guard job.id == input.completedFollowUpJobID, let ids = job.feedbackNoteIDs,
+                  let summary = job.execution?.summary, !summary.isEmpty else { return nil }
+            return .init(runID: job.id, selectedFeedbackIDs: ids,
+                summary: String(GlabService.redactWorkflowEvidence(summary).prefix(2_000)))
+        }
         let key = ReReviewVerifier.policyVersion + "|" + (request.sha ?? "") + "|" + input.fingerprint + "|" + request.semanticContextFingerprint
             + "|" + UserAttentionSnapshot.digest(String(decoding: diff, as: UTF8.self))
             + "|" + (input.completedFollowUpJobID?.uuidString ?? "")
             + "|" + String(decoding: try encoder.encode(input.configuration), as: UTF8.self)
             + "|" + UserAttentionSnapshot.digest(String(decoding: try encoder.encode(blockedContexts), as: UTF8.self))
             + "|" + input.decisionRevision
+            + "|" + String(decoding: try encoder.encode(completedFollowUp), as: UTF8.self)
         let assessment: ReReviewAssessment
         if let stored = cache[input.target], stored.0 == key { assessment = stored.1 }
         else {
@@ -377,7 +400,7 @@ final class AuthorFeedbackCoordinator {
                     url: request.webURL, expectedUsername: input.user.username),
                 semanticContextFingerprint: request.semanticContextFingerprint,
                 thinking: input.configuration.verificationThinking, blockedFollowUps: blockedContexts,
-                ignoredSuggestions: input.ignoredSuggestions), input.configuration.assistant, model)
+                ignoredSuggestions: input.ignoredSuggestions, completedFollowUp: completedFollowUp), input.configuration.assistant, model)
             _ = try assessment.reviewers(in: input.discussions, authorID: input.user.id, ignoredSuggestions: input.ignoredSuggestions)
             guard isCurrent(input) else { throw CancellationError() }
             cache[input.target] = (key, assessment, input.completedFollowUpJobID)
@@ -430,6 +453,7 @@ final class AuthorFeedbackCoordinator {
             let draftedThreads = Set(drafts.compactMap(\.discussionID))
             let draftedNotes = Set(threads.filter { $0.id.map(draftedThreads.contains) == true }.flatMap(\.notes).compactMap(\.id))
             let actionable = Set(assessment.notes.filter { $0.state == .blocking || $0.state == .uncertain }.map(\.noteID))
+                .union(assessment.reviewRequests.map(\.sourceNoteID))
             let followUp = settings.automation.scope.permits(request, host: host, username: input.user.username)
                 ? actionable.union(owedNotes).subtracting(draftedNotes) : []
             if !followUp.isEmpty { await onNeedsWork?(request, followUp, input.fingerprint,
@@ -443,6 +467,7 @@ final class AuthorFeedbackCoordinator {
                 addressedNoteIDs: Set(assessment.notes.filter { $0.state == .addressed || $0.state == .informational }.map(\.noteID)).subtracting(owedNotes),
                 completedFollowUpJobID: input.completedFollowUpJobID)
             completed.feedbackDecisionRevision = input.decisionRevision
+            completed.codeReviewRequests = assessment.reviewRequests
             completed.ignoredNoteIDs = Set(assessment.notes.filter { $0.state == .ignoredByUser }.map(\.noteID))
             bindStoppedFollowUpEvidence(to: &completed, prepared: prepared, discussions: threads, authorID: input.user.id)
             let changed = statuses[input.target] != completed
@@ -501,6 +526,7 @@ final class AuthorFeedbackCoordinator {
         var followUp = Set(assessment.notes.filter {
             outstanding.contains($0.noteID) && ($0.state == .blocking || $0.state == .uncertain)
         }.map(\.noteID))
+        followUp.formUnion(assessment.reviewRequests.map(\.sourceNoteID))
         let repliesByThread = assessment.missingPublishedRepliesByThread(in: threads, authorID: input.user.id)
         // An owed published reply remains work even when approval or a disabled
         // resolution policy changes the finding's presentation state.
@@ -526,7 +552,8 @@ final class AuthorFeedbackCoordinator {
             }
         var completed = AuthorFeedbackStatus(head: request.sha ?? "", fingerprint: input.fingerprint,
             semanticContextFingerprint: request.semanticContextFingerprint, phase: .complete,
-            findings: findings, acceptedReviewerIDs: accepted, followUpNoteIDs: followUp, replyNoteIDs: missingReplies,
+            findings: findings, codeReviewRequests: assessment.reviewRequests,
+            acceptedReviewerIDs: accepted, followUpNoteIDs: followUp, replyNoteIDs: missingReplies,
             addressedNoteIDs: Set(assessment.notes.filter { $0.state == .addressed || $0.state == .informational }.map(\.noteID))
                 .subtracting(owedNotes).subtracting(acknowledgementFailures.keys),
             completedFollowUpJobID: input.completedFollowUpJobID)
