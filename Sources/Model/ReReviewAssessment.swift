@@ -39,7 +39,7 @@ struct ReReviewAssessment: Codable, Sendable {
         var informationalPurpose: InformationalPurpose? = nil
         var ignoredDecisionIDs: [UUID]? = nil
         /// A semantically verified, published author reply covering this exact concern,
-        /// including a shared response in another discussion. Never reviewer acceptance.
+        /// including supporting evidence in another discussion. Never waives this thread's reply.
         var publishedReplyNoteID: Int? = nil
     }
     let notes: [Note]
@@ -61,17 +61,16 @@ struct ReReviewAssessment: Codable, Sendable {
         return blockers
     }
 
-    /// Addressed code does not replace an explanation still owed in an open thread.
-    /// Discussion notes are published evidence; private drafts never satisfy it.
+    /// Addressed code or an explanation elsewhere does not replace this thread's reply.
+    /// Includes actionable general comments; private drafts never prove publication.
     func missingPublishedReplyNoteIDs(in discussions: [GitLabMergeRequestDiscussion], authorID: Int) -> Set<Int> {
         let addressed = Set(notes.filter { $0.state == .addressed }.map(\.noteID))
         return Set(discussions.flatMap { thread in
             thread.notes.compactMap { note -> Int? in
-                guard let id = note.id, addressed.contains(id), note.resolvable == true, note.resolved == false,
+                guard let id = note.id, addressed.contains(id), note.system == false,
+                      note.author?.id != authorID, note.resolved != true,
                       !thread.notes.contains(where: {
                           $0.system == false && $0.author?.id == authorID && ($0.id ?? 0) > id
-                      }), !notes.contains(where: {
-                          $0.noteID == id && hasPublishedReply(for: $0, in: discussions, authorID: authorID)
                       }) else { return nil }
                 return id
             }
@@ -104,9 +103,8 @@ struct ReReviewAssessment: Codable, Sendable {
                                  ignoredSuggestions: [IgnoredFeedbackSuggestion] = []) -> Bool {
         guard reviewRequests.isEmpty,
               (try? reviewers(in: discussions, authorID: authorID, ignoredSuggestions: ignoredSuggestions)) != nil else { return false }
-        let mixed = Set(notes.filter { !($0.ignoredDecisionIDs ?? []).isEmpty && $0.state == .addressed }.map(\.noteID))
         return notes.allSatisfy { [.addressed, .informational, .ignoredByUser].contains($0.state) }
-            && missingPublishedReplyNoteIDs(in: discussions, authorID: authorID).isDisjoint(with: mixed)
+            && missingPublishedReplyNoteIDs(in: discussions, authorID: authorID).isEmpty
     }
 
     func reviewers(in discussions: [GitLabMergeRequestDiscussion], authorID: Int,

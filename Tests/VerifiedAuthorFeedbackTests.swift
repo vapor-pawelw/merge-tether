@@ -364,7 +364,7 @@ struct VerifiedAuthorFeedbackTests {
             #expect(handoff.taskPrompt?.contains("conditions attached to an advance approval") == true)
             #expect(handoff.taskPrompt?.contains("Decide whether each request is justified") == true)
             #expect(handoff.taskPrompt?.contains("Correlate summaries with their underlying findings and substantive author replies across all discussions") == true)
-            #expect(handoff.taskPrompt?.contains("If the same request is already substantively answered elsewhere, do not create a duplicate reply or code change") == true)
+            #expect(handoff.taskPrompt?.contains("A correction delivered for another comment still needs a reply in each actionable feedback thread") == true)
             #expect(handoff.taskPrompt?.contains("A summary's distinct unanswered request still requires work or an evidence-based answer") == true)
             #expect(handoff.prompt.contains("Separate the observed defect from the reviewer's proposed remedy"))
             #expect(handoff.prompt.contains("Research accessible authoritative contracts, relevant callers and tests"))

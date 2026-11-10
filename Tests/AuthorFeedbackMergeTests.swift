@@ -4,6 +4,35 @@ import Testing
 
 @MainActor
 struct AuthorFeedbackMergeTests {
+    @Test(arguments: ["missing", "sharedReply", "ownReply"])
+    func automaticMergeWaitsForTheReplyInEachActionableGeneralThread(_ scenario: String) async throws {
+        try await withFixture { monitor, gitlab, _ in
+            let reply = #"{"id":20,"author":{"id":3,"username":"me"},"system":false,"resolvable":false,"body":"Fixed, thanks. See the verified shared correction."}"#
+            let ownReply = scenario == "ownReply" ? "," + reply : ""
+            let sharedThread = scenario == "sharedReply" ? #",{"id":"other-thread","notes":[\#(reply)]}"# : ""
+            gitlab.write("discussions.json", #"[{"id":"general-feedback","notes":[{"id":10,"author":{"id":7,"username":"reviewer"},"system":false,"resolvable":false,"body":"Please cover the fallback."}\#(ownReply)]}\#(sharedThread)]"#)
+            let assessment = ReReviewAssessment(notes: [
+                .init(noteID: 10, state: .addressed, reason: "The fallback correction is verified.",
+                    publishedReplyNoteID: scenario == "sharedReply" ? 20 : nil)
+            ])
+            let current = try JSONDecoder().decode([GitLabMergeRequestDiscussion].self,
+                from: gitlab.data("discussions.json"))
+            #expect(assessment.hasNoRemainingAuthorWork(in: current, authorID: 3) == (scenario == "ownReply"))
+            var assessed = false
+            monitor.authorFeedbackAllowsMerge = { _, discussions, authorID in
+                assessed = true
+                return assessment.hasNoRemainingAuthorWork(in: discussions, authorID: authorID)
+            }
+
+            try await refresh(monitor)
+
+            #expect(!monitor.hasError)
+            #expect(assessed)
+            #expect(gitlab.has("merged") == (scenario == "ownReply"))
+            #expect(assessment.notes.first?.state == .addressed)
+        }
+    }
+
     @Test(arguments: ["current", "restored", "wrongDecision", "missingIDs", "remainingInSameNote", "editedSource"])
     func onlyAnActivePreciseDecisionCanSatisfyTheSemanticFeedbackGate(_ scenario: String) throws {
         let target = MRAutomationScope.Target(host: "gitlab.example.test", username: "me", projectID: 1, iid: 2)

@@ -71,12 +71,14 @@ struct ReReviewVerifierTests {
         // when
         let assessment = try await ReReviewVerifier.run(input, assistant: assistant, model: "fixture", executable: script, retryWait: { _ in })
         // then
-        #expect(assessment.missingPublishedReplyNoteIDs(in: discussions, authorID: 3).isEmpty)
+        #expect(assessment.missingPublishedReplyNoteIDs(in: discussions, authorID: 3) == [10])
+        #expect(assessment.notes.first?.publishedReplyNoteID == 11)
         #expect(!assessment.notes[0].reason.contains("glpat-syntheticreply12345"))
         let findings = AuthorFeedbackPolicy.evaluate(discussions: discussions, assessment: assessment, authorID: 3, approvedReviewerIDs: [])
-        #expect(findings.first?.state == .waitingAcceptance)
+        #expect(findings.first?.canResolve == false)
         let captured = try String(contentsOf: URL(fileURLWithPath: script.path + ".capture"), encoding: .utf8)
         #expect(captured.contains("publishedReplyNoteID"))
+        #expect(captured.contains("Each separate actionable feedback thread still needs its own"))
         let schema = try String(contentsOf: URL(fileURLWithPath: script.path + ".schema"), encoding: .utf8)
         #expect(schema.contains("publishedReplyNoteID"))
     }

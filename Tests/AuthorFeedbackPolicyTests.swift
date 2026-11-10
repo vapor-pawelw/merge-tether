@@ -86,6 +86,17 @@ struct AuthorFeedbackPolicyTests {
         #expect(findings.first?.canResolve == true)
     }
 
+    @Test func aSharedReplyDoesNotAllowClosingAnUnansweredThreadEvenAfterApproval() throws {
+        let findings = try evaluate([
+            thread("original", note(10, by: 7, "Use the shared service", resolvable: true)),
+            thread("elsewhere", note(11, by: 3, "The shared correction also fixes note 10"))
+        ], [.init(noteID: 10, state: .addressed, reason: "The shared correction is verified", publishedReplyNoteID: 11)], approved: [7])
+
+        #expect(findings.count == 1)
+        #expect(findings.first?.state == .needsReply)
+        #expect(findings.first?.canResolve == false)
+    }
+
     @Test func purelyInformationalThreadNeedsNoApprovalAndDoesNotGrantReviewerAcceptance() throws {
         let threads = [thread("thanks", note(10, by: 7, "The access mapping looks good", resolvable: true)),
                        thread("other", note(20, by: 7, "Please cover another path", resolvable: true))]
@@ -157,11 +168,13 @@ struct AuthorFeedbackPolicyTests {
                 #expect(blocked[1].discussionID == (elsewhere == general ? nil : "d2"))
                 #expect(blocked.allSatisfy { !$0.canResolve })
             }
-            let addressed = try evaluate([alicesThread, elsewhere],
+            let answered = thread(elsewhere == general ? "g1" : "d2",
+                note(20, by: 7, "Also rename X", resolvable: elsewhere != general), note(21, by: 3, "Renamed X"))
+            let addressed = try evaluate([alicesThread, answered],
                                          [fixedA, .init(noteID: 20, state: .addressed, reason: "X renamed")], approved: [7])
             #expect(addressed.first?.id == 10)
-        #expect(!addressed.isEmpty)
-        #expect(addressed.allSatisfy { $0.canResolve })
+            #expect(!addressed.isEmpty)
+            #expect(addressed.allSatisfy { $0.canResolve })
         }
     }
 
@@ -173,7 +186,8 @@ struct AuthorFeedbackPolicyTests {
 
     @Test func oneLaterGeneralCommentCanAcceptSeveralFindings() throws {
         let threads = [alicesThread,
-                       thread("d2", note(30, by: 7, "Fix B", at: "2026-01-01T10:10:00Z", resolvable: true)),
+                       thread("d2", note(30, by: 7, "Fix B", at: "2026-01-01T10:10:00Z", resolvable: true),
+                            note(31, by: 3, "Fixed B", at: "2026-01-01T11:00:00Z")),
                        thread("g1", note(40, by: 7, "Thanks, both look good", at: "2026-01-01T12:00:00.250Z"))]
         let findings = try evaluate(threads, [
             .init(noteID: 10, state: .addressed, reason: "Fixed A", acceptanceNoteID: 40),
@@ -200,8 +214,8 @@ struct AuthorFeedbackPolicyTests {
             (note(10, by: 7, "Fix A", at: nil, resolvable: true), ack, 40, false),
         ]
         for item in cases {
-            let threads = [thread("d1", item.concern), thread("g1", item.ack)]
-            let external = try decode(threads).flatMap(\.notes).filter { $0.system == false }.compactMap(\.id)
+            let threads = [thread("d1", item.concern, note(11, by: 3, "Fixed A")), thread("g1", item.ack)]
+            let external = try decode(threads).flatMap(\.notes).filter { $0.system == false && $0.author?.id != 3 }.compactMap(\.id)
             let verdicts = external.map { id -> ReReviewAssessment.Note in
                 id == 10 ? .init(noteID: 10, state: .addressed, reason: "Fixed A", acceptanceNoteID: item.cited)
                     : .init(noteID: id, state: .informational, reason: "Acknowledgement")
@@ -215,7 +229,8 @@ struct AuthorFeedbackPolicyTests {
         let threads = [thread("d1", note(10, by: 7, "Fix A", resolvable: true),
                               note(11, by: 3, "Fixed A", at: "2026-01-01T11:00:00Z"),
                               note(12, by: 8, "Also cover nil input", at: "2026-01-01T11:30:00Z"),
-                              note(13, by: 9, "+1", at: "2026-01-01T11:40:00Z"))]
+                              note(13, by: 9, "+1", at: "2026-01-01T11:40:00Z"),
+                              note(14, by: 3, "Nil input is covered", at: "2026-01-01T11:50:00Z"))]
         let verdicts = [fixedA, .init(noteID: 12, state: .addressed, reason: "Nil input covered"),
                         .init(noteID: 13, state: .informational, reason: "Agreement only")]
         let waiting = try evaluate(threads, verdicts, approved: [7])

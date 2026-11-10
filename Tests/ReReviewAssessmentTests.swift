@@ -29,7 +29,7 @@ struct ReReviewAssessmentTests {
         #expect(throws: ReReviewAssessment.ValidationError.self) { try assessment.reviewers(in: discussions(), authorID: 3) }
     }
 
-    @Test func verifiedReplyInAnotherThreadSatisfiesOnlyItsAssessedConcern() throws {
+    @Test func verifiedReplyInAnotherThreadDoesNotReplaceTheReplyOwedInThisThread() throws {
         // given
         let threads = try discussions()
         let assessment = try JSONDecoder().decode(ReReviewAssessment.self, from: Data(#"{"notes":[{"noteID":10,"state":"addressed","reason":"Verified correction and reply."},{"noteID":12,"state":"informational","reason":"Summary."},{"noteID":13,"state":"addressed","reason":"The same correction is explained in published reply 14.","publishedReplyNoteID":14}]}"#.utf8))
@@ -38,8 +38,33 @@ struct ReReviewAssessmentTests {
         let current = threads + [replyThread]
         // then
         #expect(try assessment.reviewers(in: current, authorID: 3) == [7: 10, 9: 13])
-        #expect(assessment.missingPublishedReplyNoteIDs(in: current, authorID: 3).isEmpty)
+        #expect(assessment.missingPublishedReplyNoteIDs(in: current, authorID: 3) == [13])
+        #expect(assessment.missingPublishedRepliesByThread(in: current, authorID: 3) == [13: [13]])
         #expect(assessment.missingPublishedReplyNoteIDs(in: threads, authorID: 3) == [13])
+    }
+
+    @Test(arguments: [false, true])
+    func aSharedCorrectionNeedsOnePublishedReplyPerConcreteThread(_ sameReviewer: Bool) throws {
+        let reviewer = sameReviewer ? 7 : 9
+        let threads = try JSONDecoder().decode([GitLabMergeRequestDiscussion].self, from: Data(#"[{"id":"first","notes":[{"id":10,"author":{"id":7},"system":false,"resolvable":true,"resolved":false,"body":"Share the access check."},{"id":14,"author":{"id":3},"system":false,"body":"The shared service now performs the check. This also fixes note 13."}]},{"id":"second","notes":[{"id":13,"author":{"id":\#(reviewer)},"system":false,"resolvable":true,"resolved":false,"body":"Use the shared access service."}]}]"#.utf8))
+        let assessment = ReReviewAssessment(notes: [
+            .init(noteID: 10, state: .addressed, reason: "The shared correction is verified."),
+            .init(noteID: 13, state: .addressed, reason: "The same correction is verified.", publishedReplyNoteID: 14)
+        ])
+
+        #expect(assessment.missingPublishedReplyNoteIDs(in: threads, authorID: 3) == [13])
+        #expect(assessment.missingPublishedRepliesByThread(in: threads, authorID: 3) == [13: [13]])
+    }
+
+    @Test func addressedGeneralFeedbackAlsoNeedsItsOwnReplyButInformationalSummariesDoNot() throws {
+        let threads = try JSONDecoder().decode([GitLabMergeRequestDiscussion].self, from: Data(#"[{"id":"general-feedback","notes":[{"id":10,"author":{"id":7},"system":false,"resolvable":false,"body":"Please document the new fallback."}]},{"id":"summary","notes":[{"id":12,"author":{"id":9},"system":false,"body":"The review raised the fallback documentation issue."}]}]"#.utf8))
+        let assessment = ReReviewAssessment(notes: [
+            .init(noteID: 10, state: .addressed, reason: "The fallback documentation is corrected."),
+            .init(noteID: 12, state: .informational, reason: "Repeats the concrete finding without a new expectation.")
+        ])
+
+        #expect(assessment.missingPublishedReplyNoteIDs(in: threads, authorID: 3) == [10])
+        #expect(assessment.missingPublishedRepliesByThread(in: threads, authorID: 3) == [10: [10]])
     }
 
     @Test(arguments: ["missing", "reviewer", "system", "blank", "earlier", "duplicate", "wrongState"])
