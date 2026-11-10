@@ -5,6 +5,85 @@ import MergeTetherRemote
 
 @MainActor
 struct MRDependencyLoaderTests {
+    @Test func retainedCatalogRetargetingHidesOldLinksBeforeTheNextDependencyRead() async throws {
+        let h = try MonitorHarness()
+        defer { h.close() }
+        try await h.refresh()
+        try await h.gitlab.waitFor("metadata")
+        #expect(h.child?.dependencies?.predecessors.map(\.iid) == [1])
+
+        let changed = try MRDependencyPresentationTests().request(2, source: "child", target: "release")
+        h.settings.mrLifecycleLedger.record(changed, for: h.target)
+        h.failCatalog = true
+        h.gitlab.write("holdDependencies")
+        try await h.refresh()
+        try await h.gitlab.waitFor("dependenciesStarted")
+
+        #expect(h.child?.mergeRequest?.targetBranch == "release")
+        #expect(h.child?.dependencies == nil)
+        #expect(h.monitor.currentItems.isEmpty)
+        h.gitlab.remove("metadata")
+        h.gitlab.write("releaseDependencies")
+        try await h.gitlab.waitFor("metadata")
+    }
+
+    @Test func aSupersededDependencyReadCannotPublishItsOldBlockers() async throws {
+        let h = try MonitorHarness()
+        defer { h.close() }
+        h.dependencyBlockers = [try MRDependencyPresentationTests().request(4, project: 77)]
+        h.gitlab.write("holdDependencies")
+        try await h.refresh()
+        try await h.gitlab.waitFor("dependenciesStarted")
+        #expect(h.child?.dependencies == nil)
+        h.dependencyBlockers = []
+        try await h.refresh()
+        #expect(h.child?.dependencies == nil)
+        h.gitlab.remove("holdDependencies")
+        h.gitlab.write("releaseDependencies")
+        try await h.gitlab.waitFor("metadata")
+        #expect(h.dependencySnapshots.count == 1)
+        #expect(h.dependencySnapshots.first?.predecessors.map(\.projectID) == [34])
+        #expect(h.gitlab.requests.allSatisfy { $0.method == "GET" })
+    }
+
+    @Test func anAccountRoundTripDuringDependencyReadsCannotCommitEarlierLinks() async throws {
+        let h = try MonitorHarness()
+        defer { h.close() }
+        h.dependencyBlockers = [try MRDependencyPresentationTests().request(4, project: 77)]
+        h.gitlab.write("holdDependencies")
+        try await h.refresh()
+        try await h.gitlab.waitFor("dependenciesStarted")
+        h.glab.currentUsername = "other"
+        h.glab.currentUsername = "author7"
+        h.dependencyBlockers = []
+        try await h.refresh()
+        #expect(h.child?.dependencies == nil)
+        h.gitlab.remove("holdDependencies")
+        h.gitlab.write("releaseDependencies")
+        try await h.gitlab.waitFor("metadata")
+        #expect(h.dependencySnapshots.count == 1)
+        #expect(h.child?.dependencies?.predecessors.map(\.projectID) == [34])
+    }
+
+    @Test func completingCommentReviewRemovesAttentionWithoutDroppingCatalogDependencies() async throws {
+        let h = try MonitorHarness()
+        defer { h.close() }
+        h.settings.beginCommentReview(for: h.target)
+        try await h.refresh()
+        try await h.gitlab.waitFor("metadata")
+        let summary = try #require(h.child?.dependencies)
+        #expect(summary.predecessors.map(\.iid) == [1])
+        #expect(h.monitor.currentItems.first { $0.id.iid == 2 }?.dependencies == summary)
+
+        h.settings.completeCommentReview(for: h.target)
+        try await h.refresh()
+        #expect(!h.monitor.currentItems.contains { $0.id.iid == 2 })
+        #expect(h.child?.dependencies == summary)
+        let board = MergeRequestBoardSnapshot(own: h.monitor.currentOpenItems, reviewed: [], todos: [],
+            attention: h.monitor.currentItems, handoffs: [], host: h.host, username: "author7")
+        #expect(board.own.first { $0.id.iid == 2 }?.item.dependencies == summary)
+    }
+
     @Test func readsHiddenBlockersAndReusesEachProjectSnapshotWithinTheTTL() async throws {
         let h = try Harness()
         defer { h.cleanUp() }
@@ -220,6 +299,90 @@ struct MRDependencyLoaderTests {
         _ = await h.loader.refresh(requests: requests, glab: h.glab, host: h.host,
             now: h.start.addingTimeInterval(300))
         #expect(try h.calls("blocks-13") == 2)
+    }
+
+    @MainActor final class MonitorHarness {
+        let gitlab = InMemoryGitLab()
+        let host = "gitlab.example.test"
+        let suite = "MRDependencyMonitorTests-\(UUID())"
+        let defaults: UserDefaults
+        let settings: SettingsManager
+        let glab: GlabService
+        let directory: URL
+        var monitor: MergeRequestAttentionMonitor!
+        var requests: [GitLabMergeRequest]
+        var dependencyBlockers: [GitLabMergeRequest]?
+        var dependencySnapshots: [MergeRequestDependencySummary] = []
+        var failCatalog = false
+        var child: MergeRequestAttentionMonitor.Item? { monitor.currentOpenItems.first { $0.id.iid == 2 } }
+        var target: MRAutomationScope.Target { .init(host: host, username: "author7", projectID: 34, iid: 2) }
+
+        init() throws {
+            defaults = try #require(UserDefaults(suiteName: suite))
+            settings = SettingsManager(defaults: defaults)
+            settings.automation.disableAssistantPackage()
+            directory = FileManager.default.temporaryDirectory.appending(path: suite)
+            try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
+            let fixture = MRDependencyPresentationTests()
+            requests = [try fixture.request(1, source: "base"), try fixture.request(2, source: "child", target: "base")]
+            glab = gitlab.service(host: host, username: "author7")
+            gitlab.handler = { [weak self] call in
+                guard let self else { throw CancellationError() }
+                let path = call.endpoint
+                guard call.method == "GET" else { return try gitlab.unexpected(call) }
+                if path == "/user" { return InMemoryGitLab.output(#"{"id":7,"username":"author7"}"#) }
+                if path.hasPrefix("/merge_requests?scope=created_by_me") {
+                    if failCatalog { return InMemoryGitLab.output(code: 1) }
+                    return try encoded(requests)
+                }
+                if path.hasPrefix("/merge_requests?scope=all") { return InMemoryGitLab.output("[]") }
+                if path == "/projects/34" { return InMemoryGitLab.output(#"{"default_branch":"main"}"#) }
+                if path.hasPrefix("/projects/34/merge_requests?state=opened") { return try encoded(requests) }
+                if path.contains("/blocks?") {
+                    let blockers = path.contains("/2/blocks?") ? dependencyBlockers ?? [requests[0]] : []
+                    let json = try blockers.map { ["blocking_merge_request": try JSONSerialization.jsonObject(with: JSONEncoder().encode($0))] }
+                    let response = try InMemoryGitLab.json(json)
+                    try await gitlab.pause(ifPresent: "holdDependencies", entered: "dependenciesStarted", until: "releaseDependencies")
+                    return response
+                }
+                if path.contains("/draft_notes?") || path.contains("/discussions?") || path.contains("/reviewers?") {
+                    return InMemoryGitLab.output("[]")
+                }
+                if path.hasSuffix("/approvals") {
+                    return InMemoryGitLab.output(#"{"approvals_required":0,"approvals_left":0,"approved_by":[]}"#)
+                }
+                if path == "/projects/34/merge_requests/1" || path == "/projects/34/merge_requests/2" {
+                    if failCatalog { return InMemoryGitLab.output(code: 1) }
+                    return try encoded(requests[path.hasSuffix("/1") ? 0 : 1])
+                }
+                return try gitlab.unexpected(call)
+            }
+            monitor = MergeRequestAttentionMonitor(glab: glab, settings: settings, verdictDirectory: directory,
+                aiAssessmentDirectory: directory, followUpDirectory: directory, canAutomate: { _ in false })
+            monitor.onRefreshed = { [weak self] in
+                guard let self else { return }
+                if !monitor.isLoading { gitlab.write("catalog") }
+                if let summary = child?.dependencies {
+                    dependencySnapshots.append(summary)
+                    gitlab.write("metadata")
+                }
+            }
+        }
+
+        func refresh() async throws {
+            gitlab.remove("catalog")
+            gitlab.remove("metadata")
+            monitor.refresh(host: host, username: "author7", todos: [])
+            try await gitlab.waitFor("catalog")
+        }
+        func encoded(_ value: some Encodable) throws -> ProcessRunner.Output {
+            InMemoryGitLab.output(String(decoding: try JSONEncoder().encode(value), as: UTF8.self))
+        }
+        func close() {
+            gitlab.close()
+            defaults.removePersistentDomain(forName: suite)
+            try? FileManager.default.removeItem(at: directory)
+        }
     }
 
     @MainActor final class Harness {

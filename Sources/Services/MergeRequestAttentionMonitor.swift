@@ -262,7 +262,7 @@ final class MergeRequestAttentionMonitor {
     private var openItems: [Item] = []
     @ObservationIgnored private let dependencyLoader = MRDependencyLoader()
     @ObservationIgnored private var dependencyTask: Task<Void, Never>?
-    private var dependencyRevision: UInt64?
+    private var dependencyPresentation = MRDependencyPresentationCache()
     /// Historical chats remain recorded after their MR closes. Recheck them only
     /// after an open listing makes them current again, or after an account change.
     private var terminalCatalogRequests: Set<Item.ID> = []
@@ -455,7 +455,11 @@ final class MergeRequestAttentionMonitor {
 
     private func presentAuthorFeedback(_ original: Item) -> Item {
         var item = original
-        if dependencyRevision != glab.accountRevision { item.dependencies = nil }
+        item.dependencies = item.mergeRequest.flatMap { request in
+            guard let account, isCurrent(account) else { return nil }
+            return dependencyPresentation.summary(for: request,
+                account: .init(host: account.host, username: account.username, revision: glab.accountRevision))
+        }
         let status = authorFeedbackCoordinator?.status(projectID: item.id.projectID, iid: item.id.iid)
         item.authorFeedbackStatus = status
         if let account, isCurrent(account) {
@@ -506,7 +510,7 @@ final class MergeRequestAttentionMonitor {
         }
         if self.account != account {
             dependencyTask?.cancel()
-            dependencyRevision = nil
+            dependencyPresentation = .init()
             authorFeedbackCoordinator?.cancel()
             draftProofRecoveryCoordinator?.cancel()
             aiOriginCoordinator.cancel()
@@ -1086,14 +1090,6 @@ final class MergeRequestAttentionMonitor {
             results[index].draftCount = results[index].drafts.count
             if results[index].drafts.isEmpty { results[index].requiresDiscussionRecheck = false }
         }
-        if dependencyRevision == revision {
-            for index in results.indices {
-                guard let request = results[index].mergeRequest,
-                      let previous = previousCatalog[results[index].id], let old = previous.mergeRequest,
-                      MergeRequestDependencySummary.Context(request) == MergeRequestDependencySummary.Context(old) else { continue }
-                results[index].dependencies = previous.dependencies
-            }
-        }
         hasError = failed || explicitFetchFailed
         hasOwnListing = owned != nil
         let openIDs = Set(currentListed.filter { $0.state == "opened" }.map {
@@ -1154,6 +1150,8 @@ final class MergeRequestAttentionMonitor {
         }
         items = Item.ordered(results.filter(\.needsAttention))
         openItems = Item.ordered(openItems)
+        dependencyPresentation.reconcileCatalog(requests: (openItems + items).compactMap(\.mergeRequest),
+            account: .init(host: account.host, username: account.username, revision: revision))
         // A fast verifier needs its row to exist before it can apply its result
         // and continue the re-review workflow.
         for (request, feedback, draftCount) in reReviewCandidates {
@@ -1203,17 +1201,9 @@ final class MergeRequestAttentionMonitor {
             }
             guard !Task.isCancelled, isCurrent(account), revision == glab.accountRevision,
                   generation == refreshGeneration else { return }
-            dependencyRevision = revision
-            for index in openItems.indices {
-                guard let request = openItems[index].mergeRequest,
-                      contexts[openItems[index].id] == MergeRequestDependencySummary.Context(request) else { continue }
-                openItems[index].dependencies = summaries[openItems[index].id]
-            }
-            for index in items.indices {
-                guard let request = items[index].mergeRequest,
-                      contexts[items[index].id] == MergeRequestDependencySummary.Context(request) else { continue }
-                items[index].dependencies = summaries[items[index].id]
-            }
+            dependencyPresentation.acceptDependencies(summaries, requestedContexts: contexts,
+                currentRequests: (openItems + items).compactMap(\.mergeRequest),
+                account: .init(host: account.host, username: account.username, revision: revision))
             onRefreshed?()
         }
     }
