@@ -6,6 +6,8 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 
 ## Unreleased
 
+- Index linked assistant history once per workflow projection to reduce board and history processing while preserving current execution results and account checks.
+
 - Recheck explicit write authorization at every native GitLab process launch, including draft publication, reactions, discussion resolution, review requests and todo acknowledgements, while preserving deliberate manual actions.
 
 - Remove the retired menu-list interface and desktop plugin/listener sources while preserving manual assistant conversations, existing history and standalone verification helpers.

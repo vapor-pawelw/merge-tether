@@ -64,10 +64,10 @@ final class MergeWorkflowAutomation {
         settings.workflowActivity.filter { isCurrent(host: $0.host, user: $0.user) }
     }
     var entries: [MergeWorkflowActivityEntry] {
-        currentAdmissions.map { entry in
-            WorkflowExecutionProjection.entry(entry,
-                job: settings.assistantHandoffs.first { $0.id == entry.assistantJobID })
-        }
+        let admissions = currentAdmissions
+        guard !admissions.isEmpty else { return [] }
+        let jobs = WorkflowExecutionProjection.JobIndex(settings.assistantHandoffs)
+        return admissions.map(jobs.entry)
     }
 
     var pendingPipelineHandoffs: [MergeWorkflowActivityEntry] {
@@ -114,6 +114,16 @@ final class MergeWorkflowAutomation {
     }
 
     func isAutomaticallyProcessingPipeline(_ request: GitLabMergeRequest) -> Bool {
+        isAutomaticallyProcessingPipeline(request, projectedEntries: { self.entries })
+    }
+
+    /// Entries belong to the same synchronous presentation batch; pipeline reservations remain live.
+    func isAutomaticallyProcessingPipeline(_ request: GitLabMergeRequest, entries: [MergeWorkflowActivityEntry]) -> Bool {
+        isAutomaticallyProcessingPipeline(request, projectedEntries: { entries })
+    }
+
+    private func isAutomaticallyProcessingPipeline(_ request: GitLabMergeRequest,
+                                                   projectedEntries: () -> [MergeWorkflowActivityEntry]) -> Bool {
         guard let host = glab.resolvedHost, let username = glab.currentUsername else { return false }
         // A confirmed request can precede GitLab's next MR-detail response.
         // Keep that gap neutral even if a to-do route requested the pipeline.
@@ -124,8 +134,9 @@ final class MergeWorkflowAutomation {
                 && $0.sourceProjectID == request.sourceProjectID && $0.sourceBranch == request.sourceBranch
                 && $0.targetProjectID == request.targetProjectID && $0.targetBranch == request.targetBranch
         }) { return true }
-        return entries.contains { entry in
-            guard entry.event.kind == .pipelineFailure, entry.event.mergeRequest.projectID == request.projectID,
+        return projectedEntries().contains { entry in
+            guard entry.host == host, entry.user.username == username,
+                  entry.event.kind == .pipelineFailure, entry.event.mergeRequest.projectID == request.projectID,
                   entry.event.mergeRequest.iid == request.iid, entry.event.mergeRequest.sha == request.sha else { return false }
             switch entry.state {
             case .queued, .running, .waitingForAssistant: return true
@@ -735,15 +746,12 @@ final class MergeWorkflowAutomation {
     }
 
     private func pruneHistory() {
-        let projected = settings.workflowActivity.map { entry in
-            WorkflowExecutionProjection.entry(entry,
-                job: settings.assistantHandoffs.first { $0.id == entry.assistantJobID })
-        }
+        let jobs = WorkflowExecutionProjection.JobIndex(settings.assistantHandoffs)
+        let projected = settings.workflowActivity.map(jobs.entry)
         let protected = Set(zip(settings.workflowActivity, projected).flatMap { entry, visible -> [String] in
             let active: [MergeWorkflowActivityState] = [.queued, .running, .waitingForAssistant]
-            let job = settings.assistantHandoffs.first { $0.id == entry.assistantJobID }
             let unconfirmed = (active.contains(entry.state) || entry.assistantJobID != nil)
-                && !WorkflowExecutionProjection.hasTerminalExecution(entry, job: job)
+                && !jobs.hasTerminalExecution(entry)
             guard active.contains(visible.state) || unconfirmed,
                   let lineage = entry.pipelineClaimAssessment else { return [] }
             return [entry.id, lineage.skippedActivityID]

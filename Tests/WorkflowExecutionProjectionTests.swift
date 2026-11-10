@@ -3,6 +3,47 @@ import Testing
 @testable import GitLabTodos
 
 struct WorkflowExecutionProjectionTests {
+    @Test(arguments: ["running", "mismatched", "unexecuted"])
+    func indexedJobsKeepTheFirstDuplicateEvenWhenALaterJobWouldMatch(_ first: String) throws {
+        // given
+        let id = UUID()
+        let stored = try entry(id)
+        var original = job(id, state: .running, username: first == "mismatched" ? "other" : "author7")
+        if first == "unexecuted" { original.execution = nil }
+        let jobs = WorkflowExecutionProjection.JobIndex([original, job(id, state: .succeeded)])
+
+        // when
+        let visible = jobs.entry(stored)
+
+        // then
+        let expected: MergeWorkflowActivityState = first == "mismatched" ? .skipped
+            : first == "unexecuted" ? .waitingForAssistant : .running
+        #expect(visible.state == expected)
+        #expect(!jobs.hasTerminalExecution(stored))
+        #expect(stored.state == .waitingForAssistant && stored.summary == "Local admission")
+    }
+
+    @Test func indexedProjectionKeepsOrderFallbacksAndExactlyLinkedResultsAcrossLargeHistory() throws {
+        // given
+        let ids = (0..<512).map { _ in UUID() }
+        let history = ids.reversed().map { job($0, state: .succeeded) }
+        var stored = try (ids + [UUID()]).map { try entry($0) }
+        stored.append(try entry(nil))
+        let jobs = WorkflowExecutionProjection.JobIndex(history)
+
+        // when
+        let visible = stored.map(jobs.entry)
+
+        // then
+        #expect(visible.map(\.assistantJobID) == stored.map(\.assistantJobID))
+        #expect(visible.prefix(ids.count).allSatisfy { $0.state == .completed && $0.summary == "Current run outcome" })
+        #expect(visible[ids.count].state == .skipped)
+        #expect(visible.last?.state == .waitingForAssistant && visible.last?.summary == "Local admission")
+        #expect(stored.prefix(ids.count).allSatisfy(jobs.hasTerminalExecution))
+        #expect(!jobs.hasTerminalExecution(stored[ids.count]))
+        #expect(stored.allSatisfy { $0.state == .waitingForAssistant && $0.summary == "Local admission" })
+    }
+
     @Test(arguments: [AssistantJobExecution.State.queued, .running, .succeeded, .blocked, .failed, .interrupted, .cancelled])
     func anExactlyLinkedExecutionIsProjectedWithoutChangingAdmission(_ state: AssistantJobExecution.State) throws {
         let id = UUID()

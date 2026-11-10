@@ -172,6 +172,135 @@ import Testing
         #expect(restarted.entries.first?.state == .completed)
     }
 
+    @Test func preparedProjectionKeepsFreshResultsRetryLinksAndCurrentAccountFiltering() throws {
+        // given
+        let suite = "WorkflowPreparedProjection.\(UUID())"
+        let defaults = try #require(UserDefaults(suiteName: suite))
+        defer { defaults.removePersistentDomain(forName: suite) }
+        let settings = SettingsManager(defaults: defaults)
+        let id = UUID()
+        let stored = try entry(jobID: id)
+        settings.workflowActivity = [stored]
+        let run = AssistantAutomationRunner.Handoff(id: id,
+            key: .init(assistant: .codex, work: .init(host: stored.host, projectID: 7, iid: 11),
+                username: "me", workspace: "", access: .gitLabRead), title: "Review", prompt: "Review",
+            createdAt: Date(), allowsPush: false, execution: .init(state: .running))
+        settings.assistantHandoffs = [run]
+        settings.save()
+        let gitlab = InMemoryGitLab()
+        defer { gitlab.close() }
+        let glab = gitlab.service(host: stored.host, username: "me")
+        let automation = MergeWorkflowAutomation(settings: settings, glab: glab)
+        let prepared = automation.entries
+        #expect(automation.isAutomaticallyProcessingPipeline(stored.event.mergeRequest, entries: prepared))
+        var newerPipelineObject = try #require(JSONSerialization.jsonObject(with: JSONEncoder().encode(stored.event.mergeRequest)) as? [String: Any])
+        newerPipelineObject["head_pipeline"] = ["id": 102, "status": "pending"]
+        let newerPipeline = try JSONDecoder().decode(GitLabMergeRequest.self,
+            from: JSONSerialization.data(withJSONObject: newerPipelineObject))
+        #expect(automation.isAutomaticallyProcessingPipeline(newerPipeline, entries: prepared))
+        #expect(automation.isAutomaticallyProcessingPipeline(newerPipeline))
+
+        // when + then
+        settings.assistantHandoffs[0].execution = .init(state: .succeeded, summary: "Fresh outcome")
+        #expect(prepared.first?.state == .running)
+        #expect(automation.entries.first?.summary == "Fresh outcome")
+        #expect(!automation.isAutomaticallyProcessingPipeline(stored.event.mergeRequest))
+        #expect(!automation.isAutomaticallyProcessingPipeline(newerPipeline))
+        let retry = AssistantAutomationRunner.Handoff(id: UUID(), key: run.key, title: run.title, prompt: run.prompt,
+            createdAt: Date(), allowsPush: false, execution: .init(state: .queued, summary: "Retry"), retryOf: id)
+        settings.assistantHandoffs.insert(retry, at: 0)
+        settings.workflowActivity[0].assistantJobID = retry.id
+        #expect(automation.entries.first?.assistantJobID == retry.id)
+        #expect(automation.entries.first?.state == .waitingForAssistant)
+        settings.assistantHandoffs.removeFirst()
+        #expect(automation.entries.first?.state == .skipped)
+        glab.currentUsername = "other"
+        #expect(automation.entries.isEmpty)
+        #expect(!automation.isAutomaticallyProcessingPipeline(stored.event.mergeRequest, entries: prepared))
+        glab.currentUsername = "me"
+        glab.resolvedHost = "other.test"
+        #expect(automation.entries.isEmpty)
+        #expect(!automation.isAutomaticallyProcessingPipeline(stored.event.mergeRequest, entries: prepared))
+        #expect(SettingsManager(defaults: defaults).workflowActivity.first?.assistantJobID == id)
+        #expect(SettingsManager(defaults: defaults).workflowActivity.first?.state == .waitingForAssistant)
+        #expect(gitlab.requests.isEmpty)
+    }
+
+    @Test func preparedPipelineQueryRechecksLiveReservationsWithoutReprojectingEntries() throws {
+        // given
+        let suite = "WorkflowPreparedReservation.\(UUID())"
+        let defaults = try #require(UserDefaults(suiteName: suite))
+        defer { defaults.removePersistentDomain(forName: suite) }
+        let directory = FileManager.default.temporaryDirectory.appending(path: UUID().uuidString)
+        defer { try? FileManager.default.removeItem(at: directory) }
+        let detector = ExistingPipelineWorkDetector(directory: directory)
+        let settings = SettingsManager(defaults: defaults)
+        var stored = try entry(jobID: nil)
+        stored.state = .alreadyRegistered
+        var object = try #require(JSONSerialization.jsonObject(with: JSONEncoder().encode(stored.event.mergeRequest)) as? [String: Any])
+        object["iid"] = 48197
+        let request = try JSONDecoder().decode(GitLabMergeRequest.self, from: JSONSerialization.data(withJSONObject: object))
+        stored.event = .init(kind: .pipelineFailure, mergeRequest: request, identity: stored.id,
+            context: "Reserved CI", pipelineID: 101)
+        settings.workflowActivity = [stored]
+        let gitlab = InMemoryGitLab()
+        defer { gitlab.close() }
+        let glab = gitlab.service(host: stored.host, username: "me")
+        let automation = MergeWorkflowAutomation(settings: settings, glab: glab, detector: detector)
+        let prepared = automation.entries
+        #expect(!automation.isAutomaticallyProcessingPipeline(request, entries: prepared))
+
+        // when + then
+        let reservation = try #require(detector.registerRun(for: .init(host: stored.host,
+            projectID: 7, mergeRequestIID: 48197, pipelineID: 101)))
+        #expect(automation.isAutomaticallyProcessingPipeline(request, entries: prepared))
+        #expect(automation.isAutomaticallyProcessingPipeline(request))
+        try detector.finishHandoff(for: reservation)
+        #expect(!automation.isAutomaticallyProcessingPipeline(request, entries: prepared))
+        #expect(!automation.isAutomaticallyProcessingPipeline(request))
+        #expect(gitlab.requests.isEmpty)
+    }
+
+    @Test(arguments: ["same", "unconfirmed", "pipeline", "head", "source-project", "source-branch",
+                      "target-project", "target-branch", "author", "project", "iid", "host", "username"])
+    func preparedPipelineQueryPreservesExactConfirmedRefreshGap(_ mutation: String) throws {
+        // given
+        let suite = "WorkflowPreparedRefresh.\(UUID())"
+        let defaults = try #require(UserDefaults(suiteName: suite))
+        defer { defaults.removePersistentDomain(forName: suite) }
+        let settings = SettingsManager(defaults: defaults)
+        let stored = try entry(jobID: nil)
+        let source = try #require(stored.event.mergeRequest.sha)
+        var object = try #require(JSONSerialization.jsonObject(with: JSONEncoder().encode(stored.event.mergeRequest)) as? [String: Any])
+        object["source_project_id"] = mutation == "source-project" ? 8 : 7
+        object["source_branch"] = mutation == "source-branch" ? "other" : "feature"
+        object["target_project_id"] = mutation == "target-project" ? 8 : 7
+        object["target_branch"] = mutation == "target-branch" ? "other" : "main"
+        object["sha"] = mutation == "head" ? "other-head" : source
+        object["project_id"] = mutation == "project" ? 8 : 7
+        object["iid"] = mutation == "iid" ? 12 : 11
+        if mutation == "author" { object["author"] = ["id": 2, "username": "other", "name": "Other"] }
+        object["head_pipeline"] = ["id": mutation == "pipeline" ? 102 : 101, "status": "failed"]
+        let request = try JSONDecoder().decode(GitLabMergeRequest.self, from: JSONSerialization.data(withJSONObject: object))
+        let gitlab = InMemoryGitLab()
+        defer { gitlab.close() }
+        let glab = gitlab.service(host: stored.host, username: "me")
+        let automation = MergeWorkflowAutomation(settings: settings, glab: glab)
+        let prepared = automation.entries
+
+        // when
+        settings.pipelineRefreshAttempts.insert(.init(target: .init(host: stored.host, username: "me", projectID: 7, iid: 11),
+            userID: 1, oldPipelineID: 101, sourceProjectID: 7, sourceBranch: "feature", sourceSHA: source,
+            targetProjectID: 7, targetBranch: "main", targetSHA: "target-head", createdPipelineID: mutation == "unconfirmed" ? nil : 102))
+        if mutation == "host" { glab.resolvedHost = "other.test" }
+        if mutation == "username" { glab.currentUsername = "other" }
+
+        // then
+        #expect(automation.isAutomaticallyProcessingPipeline(request, entries: prepared) == (mutation == "same"))
+        #expect(automation.isAutomaticallyProcessingPipeline(request) == (mutation == "same"))
+        #expect(gitlab.requests.isEmpty)
+    }
+
     @Test func aRetryLinkSurvivesAnUnrelatedAdmissionFailureAfterAwait() async throws {
         let suite = "WorkflowLiveMutation.\(UUID())"
         let defaults = try #require(UserDefaults(suiteName: suite))

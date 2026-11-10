@@ -2,6 +2,36 @@ import Foundation
 
 /// Job state is display evidence, never a new workflow admission or a persisted outcome mirror.
 enum WorkflowExecutionProjection {
+    struct JobIndex {
+        private let handoffs: [AssistantAutomationRunner.Handoff]
+        private let firstIndexByID: [UUID: Int]
+
+        init(_ handoffs: [AssistantAutomationRunner.Handoff]) {
+            self.handoffs = handoffs
+            var indices: [UUID: Int] = [:]
+            indices.reserveCapacity(handoffs.count)
+            for index in handoffs.indices {
+                let id = handoffs[index].id
+                // Existing history resolves duplicate IDs to the first run, even if its context mismatches.
+                if indices[id] == nil { indices[id] = index }
+            }
+            firstIndexByID = indices
+        }
+
+        func entry(_ stored: MergeWorkflowActivityEntry) -> MergeWorkflowActivityEntry {
+            WorkflowExecutionProjection.entry(stored, job: job(for: stored.assistantJobID))
+        }
+
+        func hasTerminalExecution(_ stored: MergeWorkflowActivityEntry) -> Bool {
+            WorkflowExecutionProjection.hasTerminalExecution(stored, job: job(for: stored.assistantJobID))
+        }
+
+        private func job(for id: UUID?) -> AssistantAutomationRunner.Handoff? {
+            guard let id, let index = firstIndexByID[id] else { return nil }
+            return handoffs[index]
+        }
+    }
+
     static func entry(_ stored: MergeWorkflowActivityEntry,
                       job: AssistantAutomationRunner.Handoff?) -> MergeWorkflowActivityEntry {
         guard stored.assistantJobID != nil else { return stored }
