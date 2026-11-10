@@ -345,6 +345,8 @@ struct SettingsManagerTests {
         let defaults = try #require(UserDefaults(suiteName: suite))
         defer { defaults.removePersistentDomain(forName: suite) }
         let settings = SettingsManager(defaults: defaults)
+        settings.automation.packageDecision = .enabled
+        settings.save()
         settings.glabPath = URL(fileURLWithPath: "/usr/bin/false")
         let coordinator = AssistantJobCoordinator(maximumConcurrentJobs: 3, execute: { _, _ in
             try await Task.sleep(for: .seconds(30))

@@ -129,6 +129,7 @@ import Testing
             let defaults = try #require(UserDefaults(suiteName: suite))
             defer { defaults.removePersistentDomain(forName: suite) }
             let settings = SettingsManager(defaults: defaults)
+            settings.automation.packageDecision = .enabled
             settings.onboardingCompleted = true; settings.notificationsEnabled = false
             settings.automation.autoMergeEnabled = true
             var injected = false

@@ -55,14 +55,16 @@ struct TodoMonitorPersistenceGuardTests {
             settings.save()
             let configuration = settings.automation
             await monitor.refreshNow()
-            #expect(gitlab.requests.contains { $0.method == "POST" } == (scenario != "degraded"))
+            let automaticAcknowledgementExpected = scenario != "degraded" && preset == .full
+            #expect(gitlab.requests.contains { $0.method == "POST" } == automaticAcknowledgementExpected)
             #expect(settings.automation == configuration)
-            if scenario == "degraded" {
+            if !automaticAcknowledgementExpected {
                 #expect(monitor.currentAccountTodos.map(\.id) == [todo.id])
                 #expect(monitor.inbox.todos.map(\.id) == [todo.id])
                 await monitor.markDone(todo)
                 #expect(monitor.currentAccountTodos.isEmpty)
                 #expect(gitlab.requests.contains { $0.method == "POST" })
+                #expect(settings.automation == configuration)
             }
         }
     }

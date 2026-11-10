@@ -250,6 +250,7 @@ import Testing
         let defaults = try #require(UserDefaults(suiteName: suite))
         defer { defaults.removePersistentDomain(forName: suite) }
         let settings = SettingsManager(defaults: defaults)
+        settings.automation.packageDecision = .enabled
         settings.automation.workflowRules[.reviewWaiting].mode = .notify
         var parent = try entry(jobID: nil)
         parent.state = .skipped
@@ -721,6 +722,7 @@ import Testing
         let defaults = try #require(UserDefaults(suiteName: suite))
         defer { defaults.removePersistentDomain(forName: suite) }
         let settings = SettingsManager(defaults: defaults)
+        settings.automation.packageDecision = .enabled
         settings.automation.workflowRules[.reviewWaiting].mode = .assistant
         let glab = GlabService()
         glab.glabPath = URL(fileURLWithPath: "/usr/bin/false")
