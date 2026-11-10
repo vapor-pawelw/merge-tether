@@ -106,9 +106,7 @@ final class TodoMonitorService {
     private var inboxHost: String? { todoStore.host }
     private var inboxUsername: String? { todoStore.username }
     private var inboxAccountRevision: UInt64? { todoStore.accountRevision }
-    @ObservationIgnored private var attentionNotificationTask: Task<Void, Never>?
-    @ObservationIgnored private var attentionNotificationGeneration = UUID()
-    @ObservationIgnored private var attentionNotificationLedger = UserAttentionNotificationLedger()
+    @ObservationIgnored private let attentionNotificationScheduler: AttentionNotificationScheduler
     @ObservationIgnored private var manualAdoptions: [MRAutomationScope.Target: Int] = [:]
     private var isAutomating = false
     private(set) var assessingMentionNoteIDs: Set<Int> = []
@@ -200,7 +198,6 @@ final class TodoMonitorService {
     private var runningAttentionFeedback: Set<AssistantAutomationRunner.MergeRequestWork> = []
     private var failedAttentionFeedback: Set<AssistantAutomationRunner.MergeRequestWork> = []
     private var timer: Timer?
-    private var unreadReminderTimer: Timer?
     private var hasCompletedFirstFetch: Bool { todoStore.hasCompletedFirstFetch }
     @ObservationIgnored private var legacyGUIQueueRetired = false
 
@@ -217,6 +214,7 @@ final class TodoMonitorService {
         self.glab = glab
         self.todoStore = InboxTodoStore(settings: settings, glab: glab)
         self.notifications = notifications
+        self.attentionNotificationScheduler = AttentionNotificationScheduler(notifications: notifications)
         self.automation = automation
         self.cancelPolicyJob = cancelPolicyJob
         self.attention = MergeRequestAttentionMonitor(glab: glab, settings: settings,
@@ -364,24 +362,10 @@ final class TodoMonitorService {
     }
 
     private func scheduleUserAttentionNotifications() {
-        let previous = attentionNotificationTask
-        previous?.cancel()
-        let generation = UUID()
-        attentionNotificationGeneration = generation
-        attentionNotificationTask = Task { [weak self] in
-            // An OS submission may finish after cancellation. Record its result
-            // before selecting the next batch, so two refreshes cannot race it.
-            await previous?.value
-            do { try await Task.sleep(for: .milliseconds(800)) } catch { return }
-            guard let self, !Task.isCancelled else { return }
-            let account = userAttentionAccount
-            let status = await notifications.currentAuthorizationStatus()
-            guard !Task.isCancelled, attentionNotificationGeneration == generation, userAttentionAccount == account else { return }
-            let items = attentionNotificationLedger.update(userAttention, account: account, fresh: freshUserAttention,
-                allowed: settings.notificationsEnabled && NotificationService.permitsDelivery(status))
-            guard !Task.isCancelled, userAttentionAccount == account, freshUserAttention else { return }
-            let delivered = await notifications.deliverHumanAttention(items, enabled: settings.notificationsEnabled)
-            attentionNotificationLedger.acknowledge(delivered, account: account)
+        attentionNotificationScheduler.schedule { [weak self] in
+            guard let self else { return nil }
+            return .init(account: userAttentionAccount, snapshot: userAttention,
+                fresh: freshUserAttention, enabled: settings.notificationsEnabled)
         }
     }
 
@@ -1124,12 +1108,9 @@ final class TodoMonitorService {
     }
 
     /// Retained for settings compatibility; periodic raw-to-do reminders are retired.
-    func restartUnreadReminderTimer() { stopUnreadReminderTimer() }
+    func restartUnreadReminderTimer() { attentionNotificationScheduler.restartUnreadReminderTimer() }
 
-    private func stopUnreadReminderTimer() {
-        unreadReminderTimer?.invalidate()
-        unreadReminderTimer = nil
-    }
+    private func stopUnreadReminderTimer() { attentionNotificationScheduler.stopUnreadReminderTimer() }
 
     // MARK: - Commands
 
