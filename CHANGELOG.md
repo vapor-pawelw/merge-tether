@@ -6,6 +6,8 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 
 ## Unreleased
 
+- Hold automatic merges until every dependency is merged and stack targets are safe, including after parent merges or restarts; recheck live evidence before merging and explain the rule beside Merge when ready.
+
 - Recognize independently verified shared author replies across discussion threads, so duplicate feedback does not leave completed follow-ups stuck or start repeated work; reviewer acceptance remains separate.
 
 - Run affected verification checks by default with an explicit full-suite option, document agent test scope, and handle GitLab workflow fixtures in memory while retaining subprocess adapter coverage.

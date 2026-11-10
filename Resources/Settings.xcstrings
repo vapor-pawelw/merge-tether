@@ -480,7 +480,7 @@
         "en": {
           "stringUnit": {
             "state": "translated",
-            "value": "Merge your eligible MRs after approvals, resolved discussions, a passing pipeline and verified reviewer expectations. The project must enforce approvals and resolved discussions."
+            "value": "Merge your eligible MRs after approvals, resolved discussions, a passing pipeline and verified reviewer expectations. All required dependencies must be merged first. Stacked MRs wait for a reviewed target update; MergeTether never merges a child into its parent MR branch or retargets it automatically. Unavailable dependency checks keep merging on hold. The project must enforce approvals and resolved discussions."
           }
         }
       }

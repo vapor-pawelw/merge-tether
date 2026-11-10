@@ -8,7 +8,7 @@ struct AuthoredMergeRequestStatusTests {
         let request = try makeRequest()
         let approvals = try approvals(required: 2, approved: true)
         let status = AuthoredMergeRequestStatus(request: request, approvals: approvals, discussionsResolved: true,
-            projectRequiresResolvedDiscussions: true, autoMergeEnabled: true, pendingDraftCount: count)
+            projectRequiresResolvedDiscussions: true, autoMergeEnabled: true, dependencyReadiness: .ready, pendingDraftCount: count)
         #expect(status.mayAutoMerge == (count == 0))
         #expect(status.blockers.contains(.unpublishedDrafts) == (count.map { $0 > 0 } == true))
         #expect(status.blockers.contains(.unknown) == (count == nil))
@@ -18,7 +18,7 @@ struct AuthoredMergeRequestStatusTests {
         let request = try makeRequest()
         let approvals = try approvals(required: 2, approved: true)
         let status = AuthoredMergeRequestStatus(request: request, approvals: approvals, discussionsResolved: true,
-            projectRequiresResolvedDiscussions: true, autoMergeEnabled: true, pendingDraftCount: 0, requiresCommentReview: true)
+            projectRequiresResolvedDiscussions: true, autoMergeEnabled: true, dependencyReadiness: .ready, pendingDraftCount: 0, requiresCommentReview: true)
         #expect(!status.mayAutoMerge)
         #expect(status.blockers.contains(.commentReview))
     }
@@ -97,7 +97,7 @@ struct AuthoredMergeRequestStatusTests {
         let request = try makeRequest()
         let status = AuthoredMergeRequestStatus(
             request: request, approvals: try approvals(required: 2, approved: true), discussionsResolved: true,
-            projectRequiresResolvedDiscussions: true, autoMergeEnabled: true, canVerifyFreshApprovals: false
+            projectRequiresResolvedDiscussions: true, autoMergeEnabled: true, dependencyReadiness: .ready, canVerifyFreshApprovals: false
         )
         #expect(status.blockers.contains(.approvalPolicy))
         #expect(!status.mayAutoMerge)
@@ -277,7 +277,9 @@ struct AuthoredMergeRequestStatusTests {
                 /projects/1/merge_requests/2/draft_notes\\?*) echo '[]' ;;
                 /projects/1/merge_requests/2/discussions\\?*)
                     if [ -e resolve ]; then echo '[]'; else echo '[{"notes":[{"resolvable":true,"resolved":false}]}]'; fi ;;
-                /projects/1) echo '{"only_allow_merge_if_all_discussions_are_resolved":true}' ;;
+                /projects/1/merge_requests\\?state=opened*) printf '['; cat request.json; printf ']' ;;
+                /projects/1/merge_requests/2/blocks\\?*) echo '[]' ;;
+                /projects/1) echo '{"default_branch":"main","only_allow_merge_if_all_discussions_are_resolved":true}' ;;
                 /projects/1/merge_requests/2/merge)
                     test "$*" = "api /projects/1/merge_requests/2/merge --hostname gitlab.example.org --method PUT --raw-field sha=0123456789012345678901234567890123456789"
                     touch merged
@@ -349,7 +351,7 @@ struct AuthoredMergeRequestStatusTests {
     ) -> AuthoredMergeRequestStatus {
         AuthoredMergeRequestStatus(
             request: request, approvals: approvals, discussionsResolved: resolved,
-            projectRequiresResolvedDiscussions: policy, autoMergeEnabled: true
+            projectRequiresResolvedDiscussions: policy, autoMergeEnabled: true, dependencyReadiness: .ready
         )
     }
 

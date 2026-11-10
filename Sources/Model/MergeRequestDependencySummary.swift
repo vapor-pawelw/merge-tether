@@ -20,7 +20,7 @@ struct GitLabMRDependencySnapshot: Sendable {
     }
 }
 
-/// Read-only dependency evidence. It does not grant or restrict automation actions.
+/// Dependency evidence shared by presentation and fresh automatic merge checks.
 struct MergeRequestDependencySummary: Equatable, Sendable {
     enum Source: String, Codable, Hashable, Sendable { case gitLab, stack }
     enum Issue: String, Codable, Hashable, Sendable {
@@ -41,6 +41,50 @@ struct MergeRequestDependencySummary: Equatable, Sendable {
     let stackPosition: String?
     let predecessors: [Predecessor]
     let issues: Set<Issue>
+
+    enum MergeReadiness: Sendable {
+        case ready, waitingForDependencies, reviewStackTarget, unavailable
+
+        var holdReason: LocalizedStringResource? {
+            switch self {
+            case .ready: nil
+            case .waitingForDependencies: .MRDependencies.mrDependenciesMergeWaiting
+            case .reviewStackTarget: .MRDependencies.mrDependenciesMergeTarget
+            case .unavailable: .MRDependencies.mrDependenciesMergeUnavailable
+            }
+        }
+    }
+
+    /// Call with fresh snapshots, never the presentation loader's retained cache.
+    /// A non-default target needs historical evidence too: a merged parent is
+    /// absent from the open graph but its branch is still an unsafe stack target.
+    static func mergeReadiness(request: GitLabMergeRequest, stack: MergeRequestStackSnapshot?,
+                               dependencies: GitLabMRDependencySnapshot?,
+                               targetBranchRequests: [GitLabMergeRequest]? = nil) -> MergeReadiness {
+        let summary = Self(request: request, stack: stack, dependencies: dependencies)
+        guard summary.issues.isEmpty, let stack, let dependencies,
+              let targetProject = request.targetProjectID, targetProject == request.projectID,
+              !request.sourceBranch.isEmpty, !request.targetBranch.isEmpty,
+              dependencies.requests.allSatisfy({ valid($0, relativeTo: request)
+                  && ($0.projectID != request.projectID || $0.iid != request.iid)
+                  && ["opened", "closed", "locked", "merged"].contains($0.state) }) else { return .unavailable }
+        if dependencies.requests.contains(where: { $0.state != "merged" })
+            || summary.predecessors.contains(where: { $0.sources.contains(.stack) }) {
+            return .waitingForDependencies
+        }
+        guard request.targetBranch != stack.defaultBranch else { return .ready }
+        guard let targetBranchRequests, targetBranchRequests.allSatisfy({ valid($0, relativeTo: request)
+            && $0.projectID == targetProject && $0.sourceBranch == request.targetBranch }) else { return .unavailable }
+        let candidates = (stack.requests + targetBranchRequests + dependencies.requests).filter {
+            ($0.projectID != request.projectID || $0.iid != request.iid)
+                && $0.sourceBranch == request.targetBranch
+        }
+        guard candidates.allSatisfy({ valid($0, relativeTo: request)
+            && $0.sourceProjectID != nil && $0.targetProjectID != nil }) else { return .unavailable }
+        if candidates.contains(where: { $0.sourceProjectID == targetProject && $0.targetProjectID == targetProject
+            && $0.sourceBranch != $0.targetBranch }) { return .reviewStackTarget }
+        return .ready
+    }
 
     init(request: GitLabMergeRequest, stack: MergeRequestStackSnapshot?, dependencies: GitLabMRDependencySnapshot?,
          unavailableSources: Set<Source> = []) {

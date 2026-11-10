@@ -327,8 +327,14 @@ struct GlabMergeRequestAPITests {
           'api /projects/34/merge_requests/12/related_issues?per_page=100 --hostname \(host) --paginate')
             printf '%s' '[{"iid":19,"project_id":34,"web_url":"https://\(host)/group/repo/-/work_items/19"},{"iid":23,"project_id":34,"web_url":"https://\(host)/group/repo/-/work_items/23"}]'
             ;;
+          'api /projects/34/merge_requests?state=opened&scope=all&per_page=100 --hostname \(host) --paginate')
+            printf '%s' '[\(request)]'
+            ;;
+          'api /projects/34/merge_requests?state=all&scope=all&source_branch=release%2Fnext%2Bpatch&per_page=100 --hostname \(host) --paginate'|'api /projects/34/merge_requests/12/blocks?per_page=100 --hostname \(host) --paginate')
+            printf '%s' '[]'
+            ;;
           'api /projects/34 --hostname \(host)')
-            printf '%s' '{"only_allow_merge_if_all_discussions_are_resolved":true}'
+            printf '%s' '{"default_branch":"main","only_allow_merge_if_all_discussions_are_resolved":true}'
             ;;
           'api /projects/group%2Frepo --hostname \(host)')
             printf '%s' '{"id":34,"path_with_namespace":"group/repo"}'

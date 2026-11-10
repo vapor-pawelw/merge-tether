@@ -399,6 +399,26 @@ extension GlabService {
         try await fetchMergeRequestDependencySnapshot(projectID: projectID, iid: iid, host: host).requests
     }
 
+    func fetchMergeDependencyReadiness(for request: GitLabMergeRequest, host: String) async throws
+        -> MergeRequestDependencySummary.MergeReadiness {
+        async let stackRead = fetchMergeRequestStackSnapshot(projectID: request.projectID, host: host)
+        async let dependencyRead = fetchMergeRequestDependencySnapshot(projectID: request.projectID, iid: request.iid, host: host)
+        let (stack, dependencies) = try await (stackRead, dependencyRead)
+        var targetBranchRequests: [GitLabMergeRequest]?
+        if request.targetBranch != stack.defaultBranch {
+            let allowed = CharacterSet(charactersIn: "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789-._~")
+            guard let targetProject = request.targetProjectID, targetProject == request.projectID,
+                  !request.targetBranch.isEmpty,
+                  let branch = request.targetBranch.addingPercentEncoding(withAllowedCharacters: allowed) else {
+                return .unavailable
+            }
+            targetBranchRequests = try await fetchMergeRequestPages(
+                "/projects/\(targetProject)/merge_requests?state=all&scope=all&source_branch=\(branch)&per_page=100", host: host)
+        }
+        return MergeRequestDependencySummary.mergeReadiness(request: request, stack: stack,
+            dependencies: dependencies, targetBranchRequests: targetBranchRequests)
+    }
+
     /// A dependency without its nested MR is inaccessible, rather than absent.
     func fetchMergeRequestDependencySnapshot(projectID: Int, iid: Int, host: String) async throws -> GitLabMRDependencySnapshot {
         struct Dependency: Decodable {
@@ -469,6 +489,7 @@ extension GlabService {
         headSHA: String,
         host: String,
         expectedUser: GitLabAuthenticatedUser,
+        expectedContext: MergeRequestDependencySummary.Context? = nil,
         expectedDiscussionFingerprint: String? = nil,
         expectedSemanticContextFingerprint: String? = nil,
         shouldProceed: @MainActor () -> Bool = { true }
@@ -488,17 +509,25 @@ extension GlabService {
             throw GlabError.decoding("GitLab did not provide a full source SHA")
         }
         guard let executable = glabPath else { throw GlabError.glabNotInstalled }
+        let revision = accountRevision
         // Authenticate before the final source snapshot. An auth read must not
         // leave a same-head title/description edit unchecked before the merge.
         let user = try await fetchAuthenticatedUser(host: host, expectedUsername: expectedUser.username)
         guard user == expectedUser, glabPath == executable else { throw GlabError.notAuthenticated }
+        let current = try await fetchMergeRequest(projectID: projectID, iid: iid, host: host)
+        let context = MergeRequestDependencySummary.Context(current)
+        guard current.author.id == expectedUser.id, current.isReadyForMergeChecks, current.sha == headSHA,
+              current.webURL.isGitLabMergeRequest(host: host, iid: iid),
+              expectedContext == nil || expectedContext == context else { throw CancellationError() }
+        guard try await fetchMergeDependencyReadiness(for: current, host: host) == .ready else { throw CancellationError() }
+        // Re-read after dependency I/O so same-head retargets cannot reuse the
+        // checked graph. GitLab's merge SHA precondition protects only the source.
+        async let finalRequest = fetchMergeRequest(projectID: projectID, iid: iid, host: host)
         if expectedDiscussionFingerprint != nil || expectedSemanticContextFingerprint != nil {
-            async let request = fetchMergeRequest(projectID: projectID, iid: iid, host: host)
             async let discussions = fetchMergeRequestDiscussions(projectID: projectID, iid: iid, host: host)
             async let drafts = fetchOwnDraftNoteCount(projectID: projectID, iid: iid, host: host, userID: expectedUser.id)
-            let (live, threads, pending) = try await (request, discussions, drafts)
-            guard live.author.id == expectedUser.id, live.state == "opened", live.draft == false,
-                  live.sha == headSHA, live.webURL.isGitLabMergeRequest(host: host, iid: iid), pending == 0,
+            let (live, threads, pending) = try await (finalRequest, discussions, drafts)
+            guard pending == 0,
                   expectedSemanticContextFingerprint == nil
                     || live.semanticContextFingerprint == expectedSemanticContextFingerprint,
                   expectedDiscussionFingerprint == nil
@@ -506,7 +535,10 @@ extension GlabService {
                 throw CancellationError()
             }
         }
-        guard glabPath == executable else { throw GlabError.notAuthenticated }
+        let final = try await finalRequest
+        guard MergeRequestDependencySummary.Context(final) == context, final.isReadyForMergeChecks,
+              final.author.id == expectedUser.id else { throw CancellationError() }
+        guard glabPath == executable, accountRevision == revision else { throw GlabError.notAuthenticated }
         try Task.checkCancellation()
         guard shouldProceed() else { throw CancellationError() }
 

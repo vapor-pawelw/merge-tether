@@ -321,12 +321,12 @@ final class AuthoredMergeRequestMonitor {
             let work = AssistantAutomationRunner.MergeRequestWork(host: host, projectID: request.projectID, iid: request.iid)
             if status.mayAutoMerge, let sha = request.sha,
                automaticMergeTarget == nil || (automaticMergeTarget?.projectID == request.projectID && automaticMergeTarget?.iid == request.iid),
-               isCurrent(account), permitsAutomaticMerge(request, account: account),
+               isCurrent(account), glab.accountRevision == revision, permitsAutomaticMerge(request, account: account),
                !AssistantAutomationRunner.isWorking(on: work),
                !hasUnfinishedAssistantWork(on: work, username: user.username, currentRequest: request) {
                 let configuration = settings.automation
                 guard await canAutomate(configuration.assistant), !Task.isCancelled,
-                      isCurrent(account), settings.automation == configuration else {
+                      isCurrent(account), glab.accountRevision == revision, settings.automation == configuration else {
                     results.append(status)
                     continue
                 }
@@ -348,10 +348,12 @@ final class AuthoredMergeRequestMonitor {
                     defer { mergingRequests.removeValue(forKey: mergingID) }
                     try await glab.mergeMergeRequest(
                         projectID: request.projectID, iid: request.iid, headSHA: sha, host: host, expectedUser: user,
+                        expectedContext: .init(request),
                         expectedDiscussionFingerprint: fingerprint,
                         expectedSemanticContextFingerprint: requiresSemanticAssessment ? request.semanticContextFingerprint : nil,
                         shouldProceed: {
-                            self.isCurrent(account) && self.settings.automation == configuration
+                            self.isCurrent(account) && self.glab.accountRevision == revision
+                                && self.settings.automation == configuration
                                 && self.permitsAutomaticMerge(request, account: account)
                                 && !AssistantAutomationRunner.isWorking(on: work)
                                 && !self.hasUnfinishedAssistantWork(on: work, username: user.username,
@@ -410,6 +412,10 @@ final class AuthoredMergeRequestMonitor {
         let autoMergeEnabled = settings.automation.permitsAutoMerge(project: request.webURL.gitLabProjectPath)
             && settings.automation.scope.permits(request, host: host, username: account.username)
         let requiresResolution: Bool?
+        let dependencyReadiness: MergeRequestDependencySummary.MergeReadiness
+        if autoMergeEnabled {
+            dependencyReadiness = (try? await glab.fetchMergeDependencyReadiness(for: request, host: host)) ?? .unavailable
+        } else { dependencyReadiness = .unavailable }
         var canVerifyFreshApprovals = true
         if autoMergeEnabled, request.isReadyForMergeChecks, approvals?.hasRequiredRules == true,
            approvals?.allRequiredRulesApproved == true, resolved == true {
@@ -431,6 +437,7 @@ final class AuthoredMergeRequestMonitor {
         return AuthoredMergeRequestStatus(
             request: request, approvals: approvals, discussionsResolved: resolved,
             projectRequiresResolvedDiscussions: requiresResolution, autoMergeEnabled: autoMergeEnabled,
+            dependencyReadiness: dependencyReadiness,
             canVerifyFreshApprovals: canVerifyFreshApprovals,
             conflictTaskFailed: failedConflicts.contains {
                 $0.matches(request, host: host, userID: user.id) && $0.sourceSHA == request.sha

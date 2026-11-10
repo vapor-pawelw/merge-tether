@@ -133,6 +133,9 @@ private extension MergeRequestBlocker {
         case .discussions: .Menu.menuAuthoredBlockerDiscussions
         case .discussionPolicy: .Menu.menuAuthoredBlockerDiscussionPolicy
         case .approvalPolicy: .Menu.menuAuthoredBlockerApprovalPolicy
+        case .dependencies: .MRDependencies.mrDependenciesMergeWaiting
+        case .stackTarget: .MRDependencies.mrDependenciesMergeTarget
+        case .dependencyEvidence: .MRDependencies.mrDependenciesMergeUnavailable
         case .conflictTaskFailed: .Menu.menuAuthoredBlockerConflictTaskFailed
         case .conflicts: .Menu.menuAuthoredBlockerConflicts
         case .pipeline: .Menu.menuAuthoredBlockerPipeline

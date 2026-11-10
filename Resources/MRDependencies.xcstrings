@@ -110,6 +110,39 @@
           }
         }
       }
+    },
+    "mr.dependencies.mergeWaiting": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Automatic merge waits until every required dependency is merged. Closed dependencies still block merging."
+          }
+        }
+      }
+    },
+    "mr.dependencies.mergeTarget": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Automatic merge is on hold: the target is a stack or historical MR branch. Review the target and retarget through the existing stack workflow."
+          }
+        }
+      }
+    },
+    "mr.dependencies.mergeUnavailable": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Automatic merge is on hold until dependencies and stack order can be verified."
+          }
+        }
+      }
     }
   },
   "version": "1.0"

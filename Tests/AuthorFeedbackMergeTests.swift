@@ -254,7 +254,7 @@ struct AuthorFeedbackMergeTests {
         let suite = "AuthorFeedbackMergeTests.\(UUID())"
         let defaults = try #require(UserDefaults(suiteName: suite))
         defer { gitlab.close(); defaults.removePersistentDomain(forName: suite) }
-        let request = #"{"project_id":1,"iid":2,"author":{"id":3,"username":"me","name":"Me"},"labels":[],"title":"Feature","web_url":"https://gitlab.example.org/g/p/-/merge_requests/2","state":"opened","draft":false,"sha":"0123456789012345678901234567890123456789","source_branch":"feature","target_branch":"main","detailed_merge_status":"mergeable","has_conflicts":false,"blocking_discussions_resolved":true,"user":{"can_merge":true}}"#
+        let request = #"{"project_id":1,"iid":2,"author":{"id":3,"username":"me","name":"Me"},"labels":[],"title":"Feature","web_url":"https://gitlab.example.org/g/p/-/merge_requests/2","state":"opened","draft":false,"sha":"0123456789012345678901234567890123456789","source_project_id":1,"target_project_id":1,"source_branch":"feature","target_branch":"main","detailed_merge_status":"mergeable","has_conflicts":false,"blocking_discussions_resolved":true,"user":{"can_merge":true}}"#
         gitlab.write("request.json", request)
         gitlab.write("discussions.json", #"[{"id":"general","notes":[{"id":10,"author":{"id":7,"username":"reviewer"},"body":"Approved in advance, but please add the missing regression test.","system":false,"resolvable":false}]}]"#)
         gitlab.write("drafts.json", "[]")
@@ -277,7 +277,10 @@ struct AuthorFeedbackMergeTests {
             case let path where path.contains("/reviewers?"): return InMemoryGitLab.output(code: 100)
             case let path where path.contains("/discussions?"): return try gitlab.response("discussions.json")
             case let path where path.contains("/draft_notes?"): return try gitlab.response("drafts.json")
-            case "/projects/1": return InMemoryGitLab.output(#"{"only_allow_merge_if_all_discussions_are_resolved":true,"reset_approvals_on_push":true}"#)
+            case let path where path.hasPrefix("/projects/1/merge_requests?state=opened"):
+                return InMemoryGitLab.output("[" + gitlab.text("request.json") + "]")
+            case let path where path.contains("/blocks?"): return InMemoryGitLab.output("[]")
+            case "/projects/1": return InMemoryGitLab.output(#"{"default_branch":"main","only_allow_merge_if_all_discussions_are_resolved":true,"reset_approvals_on_push":true}"#)
             case let path where path.hasSuffix("/merge"):
                 gitlab.write("merge-started")
                 try await gitlab.pause(ifPresent: "hold-merge", entered: "merge-started", until: "release-merge")

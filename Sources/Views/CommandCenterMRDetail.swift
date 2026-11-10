@@ -317,6 +317,13 @@ private struct CommandCenterMRDetailContent: View {
             if let dependencies = item.dependencies, dependencies.hasPresentation {
                 MRDependencyRow(summary: dependencies, projectID: item.id.projectID)
             }
+            if let request = item.mergeRequest,
+               let status = monitor.authoredMergeRequests.requests.first(where: {
+                   MergeRequestDependencySummary.Context($0.request) == MergeRequestDependencySummary.Context(request)
+               }), status.blockers.contains(where: { [.dependencies, .stackTarget, .dependencyEvidence].contains($0) }),
+               let reason = status.dependencyReadiness.holdReason {
+                Text(reason).font(.caption).foregroundStyle(.secondary)
+            }
         }
     }
 

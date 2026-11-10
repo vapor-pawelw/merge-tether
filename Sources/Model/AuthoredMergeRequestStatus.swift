@@ -9,6 +9,9 @@ enum MergeRequestBlocker: Hashable {
     case discussions
     case discussionPolicy
     case approvalPolicy
+    case dependencies
+    case stackTarget
+    case dependencyEvidence
     case conflictTaskFailed
     case conflicts
     case pipeline
@@ -22,6 +25,7 @@ struct AuthoredMergeRequestStatus: Identifiable {
     let request: GitLabMergeRequest
     let blockers: [MergeRequestBlocker]
     let mayAutoMerge: Bool
+    let dependencyReadiness: MergeRequestDependencySummary.MergeReadiness
 
     var id: String { "\(request.projectID)!\(request.iid)" }
 
@@ -51,12 +55,14 @@ struct AuthoredMergeRequestStatus: Identifiable {
         discussionsResolved: Bool?,
         projectRequiresResolvedDiscussions: Bool?,
         autoMergeEnabled: Bool,
+        dependencyReadiness: MergeRequestDependencySummary.MergeReadiness = .unavailable,
         canVerifyFreshApprovals: Bool = true,
         conflictTaskFailed: Bool = false,
         pendingDraftCount: Int? = 0,
         requiresCommentReview: Bool = false
     ) {
         self.request = request
+        self.dependencyReadiness = dependencyReadiness
         var blockers: [MergeRequestBlocker] = []
 
         if request.draft == true || request.detailedMergeStatus == "draft_status" { blockers.append(.draft) }
@@ -95,6 +101,14 @@ struct AuthoredMergeRequestStatus: Identifiable {
             blockers.append(.unknown)
         }
 
+        if autoMergeEnabled {
+            switch dependencyReadiness {
+            case .ready: break
+            case .waitingForDependencies: blockers.append(.dependencies)
+            case .reviewStackTarget: blockers.append(.stackTarget)
+            case .unavailable: blockers.append(.dependencyEvidence)
+            }
+        }
         let eligibleForAutoMerge = autoMergeEnabled && blockers.isEmpty && request.isReadyForMergeChecks
             && approvals?.hasRequiredRules == true && approvals?.allRequiredRulesApproved == true
             && discussionsResolved == true
