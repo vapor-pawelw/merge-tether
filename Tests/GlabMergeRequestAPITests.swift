@@ -37,6 +37,18 @@ struct GlabMergeRequestAPITests {
         #expect(people.first?.author.avatarURL?.absoluteString == "https://gitlab.example.test/avatar.png")
         #expect(progress.completed == 1)
     }
+    @Test func mostRecentCurrentApprovalComesFirst() throws {
+        // given
+        let counts = try JSONDecoder().decode(GitLabMergeRequestApprovalCounts.self, from: Data(#"{"approvals_required":2,"approvals_left":0,"approved_by":[{"user":{"id":7,"username":"older"},"approved_at":"2026-01-01T12:00:00Z"},{"user":{"id":9,"username":"newer"},"approved_at":"2026-01-02T12:00:00.500Z"}]}"#.utf8))
+        let progress = try #require(counts.progress(projectID: 34, iid: 12))
+
+        // when
+        let people = progress.participants(reviewers: [])
+
+        // then
+        #expect(people.map(\.id) == [9, 7])
+    }
+
     @Test func requiredApprovalProgressUsesGitLabsRemainingCountInsteadOfAllApprovers() throws {
         let data = Data(#"{"project_id":34,"iid":12,"approvals_required":2,"approvals_left":1,"approved_by":[{"user":{"id":1}},{"user":{"id":2}},{"user":{"id":3}}]}"#.utf8)
         let counts = try JSONDecoder().decode(GitLabMergeRequestApprovalCounts.self, from: data)

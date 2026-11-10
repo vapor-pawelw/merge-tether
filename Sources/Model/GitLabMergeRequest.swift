@@ -4,6 +4,8 @@ struct MergeRequestApprovalProgress: Equatable, Sendable {
     let completed: Int
     let required: Int
     let approvedBy: [Todo.Author]
+    var reviewHistory = MergeRequestReviewHistory()
+    var approvalDates: [Int: Date] = [:]
     var isSatisfied: Bool { completed > 0 && (required == 0 || completed == required) }
     init?(completed: Int, required: Int, approvedBy: [Todo.Author] = []) {
         guard required >= 0, completed >= 0, required == 0 || completed <= required else { return nil }
@@ -12,20 +14,38 @@ struct MergeRequestApprovalProgress: Equatable, Sendable {
     }
 
     struct Participant: Identifiable {
+        enum Status: Int { case approved, previouslyApproved, commented, assigned }
         let author: Todo.Author
-        let approved: Bool
+        let status: Status
+        var changedAt: Date? = nil
         var id: Int { author.id }
+        var approved: Bool { status == .approved }
     }
 
     func participants(reviewers: [Todo.Author]) -> [Participant] {
-        Self.participants(approvedBy: approvedBy, reviewers: reviewers)
+        Self.participants(approvedBy: approvedBy, reviewers: reviewers, history: reviewHistory, approvalDates: approvalDates)
     }
 
-    static func participants(approvedBy: [Todo.Author] = [], reviewers: [Todo.Author]) -> [Participant] {
+    static func participants(approvedBy: [Todo.Author] = [], reviewers: [Todo.Author],
+                             history: MergeRequestReviewHistory = .init(), approvalDates: [Int: Date] = [:]) -> [Participant] {
         var seen: Set<Int> = []
-        let people = approvedBy.map { Participant(author: $0, approved: true) }
-            + reviewers.map { Participant(author: $0, approved: false) }
-        return people.filter { $0.id > 0 && seen.insert($0.id).inserted }
+        let approvedIDs = Set(approvedBy.map(\.id))
+        let authors = approvedBy + reviewers + history.activities.values.compactMap(\.author).sorted { $0.id < $1.id }
+        let people = authors.filter { $0.id > 0 && seen.insert($0.id).inserted }.map { author in
+            let activity = history.activities[author.id]
+            let status: Participant.Status = approvedIDs.contains(author.id) ? .approved
+                : activity?.previouslyApproved == true ? .previouslyApproved
+                : activity?.commented == true ? .commented : .assigned
+            return Participant(author: author, status: status,
+                changedAt: [approvalDates[author.id], activity?.changedAt].compactMap { $0 }.max())
+        }
+        return people.enumerated().sorted { lhs, rhs in
+            if lhs.element.status != rhs.element.status { return lhs.element.status.rawValue < rhs.element.status.rawValue }
+            if lhs.element.changedAt != rhs.element.changedAt {
+                return (lhs.element.changedAt ?? .distantPast) > (rhs.element.changedAt ?? .distantPast)
+            }
+            return lhs.offset < rhs.offset
+        }.map(\.element)
     }
 }
 
@@ -38,6 +58,8 @@ struct GitLabMergeRequestApprovalCounts: Decodable, Sendable {
 
     private struct Approver: Decodable, Sendable {
         let user: User
+        let approvedAt: String?
+        enum CodingKeys: String, CodingKey { case user; case approvedAt = "approved_at" }
         struct User: Decodable, Sendable {
             let id: Int
             let username: String?
@@ -59,8 +81,14 @@ struct GitLabMergeRequestApprovalCounts: Decodable, Sendable {
               self.iid == nil || self.iid == iid, let required, let remaining,
               required >= 0, remaining >= 0, remaining <= required else { return nil }
         let received = Set((approvedBy ?? []).map(\.user.id).filter { $0 > 0 }).count
-        return .init(completed: required == 0 ? received : required - remaining, required: required,
+        var result = MergeRequestApprovalProgress(completed: required == 0 ? received : required - remaining, required: required,
                      approvedBy: (approvedBy ?? []).compactMap(\.user.author))
+        for approver in approvedBy ?? [] {
+            guard let date = MergeRequestReviewHistory.date(approver.approvedAt) else { continue }
+            let previous = result?.approvalDates[approver.user.id] ?? .distantPast
+            result?.approvalDates[approver.user.id] = max(previous, date)
+        }
+        return result
     }
 }
 

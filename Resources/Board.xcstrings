@@ -16,6 +16,20 @@
         "pl": { "stringUnit": { "state": "translated", "value": "Brak zatwierdzeń i przypisanych reviewerów" } }
       }
     },
+    "board.approvals.previouslyApproved": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": { "stringUnit": { "state": "translated", "value": "Approved earlier, not currently" } },
+        "pl": { "stringUnit": { "state": "translated", "value": "Wcześniej zatwierdzono, obecnie brak zatwierdzenia" } }
+      }
+    },
+    "board.approvals.commented": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": { "stringUnit": { "state": "translated", "value": "Commented, never approved" } },
+        "pl": { "stringUnit": { "state": "translated", "value": "Skomentowano, nigdy nie zatwierdzono" } }
+      }
+    },
     "board.approvals.approved": {
       "extractionState": "manual",
       "localizations": {

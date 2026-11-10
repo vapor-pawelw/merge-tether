@@ -864,9 +864,13 @@ final class MergeRequestAttentionMonitor {
                             )
                         } else { nil as [GitLabMergeRequestDiscussion]? }
                         updated.observedDiscussionFingerprint = discussions.flatMap { ReviewVerdict.fingerprint($0) }
+                        let reviewers = try? await glab.fetchMergeRequestReviewers(projectID: item.id.projectID, iid: item.id.iid, host: host)
+                        if let discussions, let request = item.mergeRequest {
+                            updated.approvalProgress?.reviewHistory = MergeRequestReviewHistory(
+                                reviewers: reviewers ?? [], discussions: discussions, authorID: request.author.id)
+                        }
                         updated.changeRequestReviewers = nil
-                        if item.isAuthored, item.needsChanges,
-                           let reviewers = try? await glab.fetchMergeRequestReviewers(projectID: item.id.projectID, iid: item.id.iid, host: host) {
+                        if item.isAuthored, item.needsChanges, let reviewers {
                             let requests = reviewers.filter { $0.state == "requested_changes" }
                             if !requests.isEmpty, requests.allSatisfy({ $0.user.id > 0 && $0.user.username?.isEmpty == false }) {
                                 updated.changeRequestReviewers = Set(requests.compactMap(\.user.username))
@@ -1062,6 +1066,13 @@ final class MergeRequestAttentionMonitor {
             let id = Item.ID(projectID: request.projectID, iid: request.iid)
             var item = Item(id: id, title: request.title, url: request.webURL, mergeRequest: request)
             item.approvalProgress = try? await glab.fetchMergeRequestApprovalProgress(projectID: request.projectID, iid: request.iid, host: host)
+            async let reviewStates = try? glab.fetchMergeRequestReviewers(projectID: request.projectID, iid: request.iid, host: host)
+            async let reviewThreads = try? glab.fetchMergeRequestDiscussions(projectID: request.projectID, iid: request.iid, host: host)
+            let (states, threads) = await (reviewStates, reviewThreads)
+            if let threads {
+                item.approvalProgress?.reviewHistory = MergeRequestReviewHistory(
+                    reviewers: states ?? [], discussions: threads, authorID: request.author.id)
+            }
             guard isCurrent(account), revision == glab.accountRevision else { return }
             retainedCatalog[id] = item
         }
@@ -2125,9 +2136,32 @@ final class MergeRequestAttentionMonitor {
         guard let fingerprint = ReviewVerdict.fingerprint(discussions) else { return }
         let activeIgnored = settings.feedbackSuggestionDecisions.applicable(in: discussions, for: target)
         let sharedAssessment = authorFeedbackCoordinator?.assessment(for: request, fingerprint: fingerprint)
-        guard usedAssistant || observedPublication || manualReReviewApprovals[id] != nil
-                || sharedAssessment != nil else { return }
         let key = reReviewKey(request, fingerprint: fingerprint, account: account)
+        let reviewers: [GitLabMergeRequestReviewer]
+        let approvers: Set<Int>
+        do {
+            async let states = glab.fetchMergeRequestReviewers(projectID: request.projectID, iid: request.iid, host: host)
+            async let approved = glab.fetchMergeRequestApproverIDs(projectID: request.projectID, iid: request.iid, host: host)
+            (reviewers, approvers) = try await (states, approved)
+        } catch {
+            reReviewChecks[id] = .init(key: key, fingerprint: fingerprint, state: .failed)
+            updateReReviewPresentation(id, unanswered: feedback.hasUnansweredFeedback)
+            return
+        }
+        guard !Task.isCancelled, isCurrent(account), runtimePermitsReReview(id, account: account),
+              settings.automation.scope.permits(request, host: host, username: account.username),
+              usedAssistant || observedPublication || manualReReviewApprovals[id] != nil
+                || sharedAssessment != nil || reviewers.contains(where: { $0.state == "unapproved" }) else { return }
+        let history = MergeRequestReviewHistory(reviewers: reviewers, discussions: discussions, authorID: user.id)
+        let earlierReviewers = Set(reviewers.filter {
+            $0.state == "reviewed" || $0.state == "unapproved"
+                || history.activities[$0.user.id]?.previouslyApproved == true
+                || history.activities[$0.user.id]?.commented == true
+        }.map(\.user.id))
+        var candidates = feedback.addressedByReviewer
+        for reviewerID in earlierReviewers {
+            candidates[reviewerID] = max(candidates[reviewerID] ?? 0, history.activities[reviewerID]?.noteID ?? 1, 1)
+        }
         let existingCheck = reReviewChecks[id]
         let failedWithoutAssessment = existingCheck?.assessment == nil
             && (existingCheck?.state == .failed || existingCheck?.state == .unavailable)
@@ -2135,12 +2169,15 @@ final class MergeRequestAttentionMonitor {
             reReviewChecks[id] = .init(key: key, fingerprint: fingerprint, state: .checking, assessment: assessment)
         }
         var pendingReviewers: [Int: Int] = [:]
-        for (reviewerID, noteID) in feedback.addressedByReviewer {
-            if authorProgress?.phase == .complete, authorProgress?.head == head, authorProgress?.fingerprint == fingerprint,
+        for (reviewerID, noteID) in candidates {
+            guard reviewerID != user.id, !approvers.contains(reviewerID),
+                  !reviewers.contains(where: { $0.user.id == reviewerID && $0.state == "approved" }) else { continue }
+            if !reviewers.contains(where: { $0.user.id == reviewerID && $0.state == "unapproved" }),
+               authorProgress?.phase == .complete, authorProgress?.head == head, authorProgress?.fingerprint == fingerprint,
                authorProgress?.semanticContextFingerprint == request.semanticContextFingerprint,
                authorProgress?.acceptedReviewerIDs.contains(reviewerID) == true { continue }
             let receiptKey = ReReviewReceipt.Key(host: host, authorID: user.id, projectID: request.projectID, iid: request.iid, reviewerID: reviewerID)
-            guard (settings.reReviewReceipts[receiptKey]?.noteID ?? 0) < noteID else { continue }
+            guard settings.reReviewReceipts[receiptKey]?.covers(noteID: noteID, headSHA: head) != true else { continue }
             // Bot summaries never need a human review request, nor an expensive assessment.
             do {
                 if try await glab.activeHumanReviewerUsername(userID: reviewerID, host: host) != nil {
@@ -2206,7 +2243,12 @@ final class MergeRequestAttentionMonitor {
             }
             guard let assessment = reReviewChecks[id]?.assessment,
                   let assessed = try? assessment.reviewers(in: discussions, authorID: user.id, ignoredSuggestions: activeIgnored) else { return }
-            recipients = pendingReviewers.filter { assessed[$0.key] != nil }
+            let allFeedbackReady = assessment.hasNoRemainingAuthorWork(in: discussions, authorID: user.id, ignoredSuggestions: activeIgnored)
+                && assessment.missingPublishedReplyNoteIDs(in: discussions, authorID: user.id).isEmpty
+            recipients = pendingReviewers.filter {
+                feedback.addressedByReviewer[$0.key] != nil && assessed[$0.key] != nil
+                    || allFeedbackReady && earlierReviewers.contains($0.key)
+            }
             let concerns = assessment.notes.filter { $0.state == .blocking }
                 + assessment.notes.filter { $0.state == .uncertain }
             let blockers = concerns
@@ -2214,21 +2256,25 @@ final class MergeRequestAttentionMonitor {
             reReviewChecks[id]?.state = assessment.notes.contains { $0.state == .blocking } ? .blocked(blockers) : .uncertain(blockers)
             let informationalReviewers = pendingReviewers.keys.filter { reviewerID in
                 let theirNotes = discussions.flatMap(\.notes).filter { $0.author?.id == reviewerID && $0.system != true }
-                return theirNotes.allSatisfy { note in
+                return !theirNotes.isEmpty && history.activities[reviewerID]?.previouslyApproved != true && theirNotes.allSatisfy { note in
                     assessment.notes.first { $0.noteID == note.id }?.state == .informational
                 }
             }
             let ignoredOnlyReviewers = pendingReviewers.keys.filter { reviewerID in
                 let theirIDs = Set(discussions.flatMap(\.notes).filter { $0.author?.id == reviewerID && $0.system != true }.compactMap(\.id))
                 let verdicts = assessment.notes.filter { theirIDs.contains($0.noteID) }
-                return verdicts.contains { $0.state == .ignoredByUser }
+                return history.activities[reviewerID]?.previouslyApproved != true && verdicts.contains { $0.state == .ignoredByUser }
                     && verdicts.allSatisfy { $0.state == .ignoredByUser || $0.state == .informational }
             }
-            for reviewerID in ignoredOnlyReviewers { pendingReviewers.removeValue(forKey: reviewerID) }
+            for reviewerID in ignoredOnlyReviewers {
+                pendingReviewers.removeValue(forKey: reviewerID)
+                recipients.removeValue(forKey: reviewerID)
+            }
             for reviewerID in informationalReviewers {
+                recipients.removeValue(forKey: reviewerID)
                 let receipt = ReReviewReceipt.Key(host: host, authorID: user.id, projectID: request.projectID, iid: request.iid, reviewerID: reviewerID)
                 if let noteID = pendingReviewers.removeValue(forKey: reviewerID) {
-                    settings.reReviewReceipts[receipt] = ReReviewReceipt(noteID: noteID)
+                    settings.reReviewReceipts[receipt] = ReReviewReceipt(noteID: noteID, headSHA: head)
                 }
             }
             if !informationalReviewers.isEmpty { settings.save() }
@@ -2238,7 +2284,7 @@ final class MergeRequestAttentionMonitor {
         for (reviewerID, noteID) in recipients.sorted(by: { $0.key < $1.key }) {
             let receiptKey = ReReviewReceipt.Key(host: host, authorID: user.id, projectID: request.projectID,
                                                  iid: request.iid, reviewerID: reviewerID)
-            guard (settings.reReviewReceipts[receiptKey]?.noteID ?? 0) < noteID else { continue }
+            guard settings.reReviewReceipts[receiptKey]?.covers(noteID: noteID, headSHA: head) != true else { continue }
             do {
                 guard let username = try await glab.activeHumanReviewerUsername(userID: reviewerID, host: host) else { continue }
                 let reviewers = try await glab.fetchMergeRequestReviewers(projectID: request.projectID, iid: request.iid, host: host)
@@ -2256,11 +2302,11 @@ final class MergeRequestAttentionMonitor {
                       runtimePermitsReReview(id, account: account),
                       settings.automation.scope.permits(current, host: host, username: account.username) else { return }
                 if reviewer?.state == "unreviewed" || reviewer?.state == "review_started" {
-                    settings.reReviewReceipts[receiptKey] = ReReviewReceipt(noteID: noteID, requested: true)
+                    settings.reReviewReceipts[receiptKey] = ReReviewReceipt(noteID: noteID, requested: true, headSHA: head)
                     settings.save()
                     continue
                 }
-                guard (settings.reReviewReceipts[receiptKey]?.noteID ?? 0) < noteID else { continue }
+                guard settings.reReviewReceipts[receiptKey]?.covers(noteID: noteID, headSHA: head) != true else { continue }
                 if !manual {
                     guard await permitsAssistantAutomation(for: account),
                           reReviewKey(current, fingerprint: fingerprint, account: account) == key,
@@ -2278,8 +2324,11 @@ final class MergeRequestAttentionMonitor {
                 let finalUser = try await glab.fetchAuthenticatedUser(host: host, expectedUsername: account.username)
                 async let finalMR = glab.fetchMergeRequest(projectID: request.projectID, iid: request.iid, host: host)
                 async let finalThreads = glab.fetchMergeRequestDiscussions(projectID: request.projectID, iid: request.iid, host: host)
+                async let finalReviewers = glab.fetchMergeRequestReviewers(projectID: request.projectID, iid: request.iid, host: host)
+                async let finalApprovers = glab.fetchMergeRequestApproverIDs(projectID: request.projectID, iid: request.iid, host: host)
                 async let finalDrafts = glab.fetchOwnDraftNoteCount(projectID: request.projectID, iid: request.iid, host: host, userID: user.id)
-                let (checkedMR, checkedThreads, checkedDraftCount) = try await (finalMR, finalThreads, finalDrafts)
+                let (checkedMR, checkedThreads, checkedDraftCount, checkedReviewers, checkedApprovers) = try await
+                    (finalMR, finalThreads, finalDrafts, finalReviewers, finalApprovers)
                 guard !Task.isCancelled, finalUser == user, isCurrent(account),
                       runtimePermitsReReview(id, account: account),
                       settings.automation == finalConfiguration, settings.automation.autoReReviewEnabled,
@@ -2290,11 +2339,19 @@ final class MergeRequestAttentionMonitor {
                       reReviewKey(checkedMR, fingerprint: fingerprint, account: account) == key,
                       reReviewChecks[id]?.key == key,
                       settings.automation.scope.permits(checkedMR, host: host, username: account.username) else { return }
-                guard (settings.reReviewReceipts[receiptKey]?.noteID ?? 0) < noteID else { continue }
-                settings.reReviewReceipts[receiptKey] = ReReviewReceipt(noteID: noteID, unconfirmed: true)
+                guard settings.reReviewReceipts[receiptKey]?.covers(noteID: noteID, headSHA: head) != true else { continue }
+                let checkedReviewer = checkedReviewers.first { $0.user.id == reviewerID }
+                guard !checkedApprovers.contains(reviewerID), checkedReviewer?.state != "approved",
+                      checkedReviewer != nil || feedback.addressedByReviewer[reviewerID] != nil else { continue }
+                if checkedReviewer?.state == "unreviewed" || checkedReviewer?.state == "review_started" {
+                    settings.reReviewReceipts[receiptKey] = ReReviewReceipt(noteID: noteID, requested: true, headSHA: head)
+                    settings.save()
+                    continue
+                }
+                settings.reReviewReceipts[receiptKey] = ReReviewReceipt(noteID: noteID, unconfirmed: true, headSHA: head)
                 settings.save()
                 try await glab.requestReview(of: checkedMR, userID: reviewerID, username: username,
-                                             alreadyAssigned: reviewer != nil, host: host)
+                                             alreadyAssigned: checkedReviewer != nil, host: host)
                 settings.reReviewReceipts[receiptKey]?.unconfirmed = false
                 settings.reReviewReceipts[receiptKey]?.requested = true
                 settings.save()

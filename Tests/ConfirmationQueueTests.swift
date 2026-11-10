@@ -1620,6 +1620,140 @@ import Testing
         #expect(harness.log("re-review.log").isEmpty)
     }
 
+    @Test(arguments: ["unapproved", "reviewed"])
+    func readyFeedbackAlsoRequestsEarlierReviewersWithoutComments(_ state: String) async throws {
+        // given
+        let harness = try makeHarness(assistantWorked: true, authored: true)
+        defer { harness.cleanUp() }
+        try prepareAuthoredFeedback(harness)
+        try await harness.poll()
+        try harness.write("drafts.json", "[]")
+        try harness.write("discussions.json", harness.log("published-discussions.json"))
+        try harness.write("reviewers.json", """
+            [{"user":{"id":8},"state":"reviewed"},
+             {"user":{"id":9},"state":"\(state)"},
+             {"user":{"id":10},"state":"unreviewed"}]
+            """)
+
+        // when
+        try await harness.poll()
+        try await harness.poll()
+
+        // then
+        #expect(harness.log("re-review.log") == "requested\nrequested\n")
+        let requests = harness.log("re-review-targets.log")
+        #expect(requests.contains("userId=gid://gitlab/User/8"))
+        #expect(requests.contains("userId=gid://gitlab/User/9"))
+        #expect(!requests.contains("userId=gid://gitlab/User/10"))
+    }
+
+    @Test(arguments: [ReReviewAssessment.Note.State.blocking, .uncertain])
+    func earlierApproversWaitUntilAllFeedbackIsReady(_ state: ReReviewAssessment.Note.State) async throws {
+        // given
+        let harness = try makeHarness(assistantWorked: true, authored: true, assessment: .init(notes: [
+            .init(noteID: 40, state: state, reason: "Remaining work or missing evidence")
+        ]))
+        defer { harness.cleanUp() }
+        try prepareAuthoredFeedback(harness)
+        try await harness.poll()
+        try harness.write("drafts.json", "[]")
+        try harness.write("discussions.json", harness.log("published-discussions.json"))
+        try harness.write("reviewers.json", #"[{"user":{"id":8},"state":"reviewed"},{"user":{"id":9},"state":"unapproved"}]"#)
+
+        // when
+        try await harness.poll()
+
+        // then
+        #expect(harness.log("re-review.log").isEmpty)
+    }
+
+    @Test func resolvedEarlierCommentsDoNotNeedANewAuthorReplyToRequestReReview() async throws {
+        // given
+        let harness = try makeHarness(assistantWorked: true, authored: true)
+        defer { harness.cleanUp() }
+        try prepareAuthoredFeedback(harness)
+        try await harness.poll()
+        try harness.write("drafts.json", "[]")
+        let threads = harness.log("published-discussions.json").dropLast() + #",{"id":"earlier","notes":[{"id":30,"author":{"id":9},"body":"Earlier finding","system":false,"resolvable":true,"resolved":true,"resolved_by":{"id":9}}]}]"#
+        try harness.write("discussions.json", String(threads))
+        try harness.write("reviewers.json", #"[{"user":{"id":8},"state":"reviewed"},{"user":{"id":9},"state":"reviewed"}]"#)
+
+        // when
+        try await harness.poll()
+
+        // then
+        #expect(harness.log("re-review.log") == "requested\nrequested\n")
+        #expect(harness.log("re-review-targets.log").contains("userId=gid://gitlab/User/9"))
+    }
+
+    @Test func aLaterHeadCanRequestEarlierApprovalAgainWithoutNewCommentIDs() async throws {
+        // given
+        let harness = try makeHarness(assistantWorked: true, authored: true)
+        defer { harness.cleanUp() }
+        try prepareAuthoredFeedback(harness)
+        try await harness.poll()
+        try harness.write("drafts.json", "[]")
+        try harness.write("discussions.json", harness.log("published-discussions.json"))
+        try harness.write("reviewers.json", #"[{"user":{"id":8},"state":"unreviewed"},{"user":{"id":9},"state":"unapproved"}]"#)
+        try await harness.poll()
+        try #require(harness.log("re-review.log") == "requested\n")
+
+        // when
+        let nextHead = String(repeating: "b", count: 40)
+        for file in ["request.json", "authored.json"] {
+            try harness.write(file, harness.log(file).replacingOccurrences(of: head, with: nextHead))
+        }
+        try await harness.poll()
+        try await harness.poll()
+
+        // then
+        #expect(harness.log("re-review.log") == "requested\nrequested\n")
+    }
+
+    @Test(arguments: ["unapproved", "unreviewed"])
+    func approvalHoverOrdersCurrentThenEarlierThenCommentOnlyThenAssigned(_ state: String) async throws {
+        // given
+        let harness = try makeHarness(assistantWorked: false, authored: true)
+        defer { harness.cleanUp() }
+        let people = #"[{"id":10,"username":"waiting","name":"Waiting"},{"id":9,"username":"past","name":"Past"},{"id":8,"username":"comments","name":"Comments"}]"#
+        for file in ["request.json", "authored.json"] {
+            try harness.write(file, harness.log(file).replacingOccurrences(of: "\"labels\":[]", with: "\"labels\":[],\"reviewers\":\(people)"))
+        }
+        try harness.write("approvals.json", #"{"approvals_required":2,"approvals_left":1,"approved_by":[{"user":{"id":7,"username":"current","name":"Current"}}]}"#)
+        try harness.write("reviewers.json", """
+            [{"user":{"id":10},"state":"unreviewed"},{"user":{"id":9},"state":"\(state)"},{"user":{"id":8},"state":"reviewed"}]
+            """)
+        try harness.write("discussions.json", #"[{"notes":[{"id":30,"author":{"id":9,"username":"past"},"system":true,"body":"approved this merge request","created_at":"2026-01-01T12:00:00Z"}]},{"notes":[{"id":40,"author":{"id":8,"username":"comments"},"system":false,"body":"A comment","created_at":"2026-01-02T12:00:00Z"}]}]"#)
+
+        // when
+        try await harness.poll()
+
+        // then
+        let item = try #require(harness.monitor.currentOpenItems.first)
+        let progress = try #require(item.approvalProgress)
+        let participants = progress.participants(reviewers: item.mergeRequest?.reviewers ?? [])
+        #expect(participants.map(\.id) == [7, 9, 8, 10])
+        #expect(participants.map(\.status) == [.approved, .previouslyApproved, .commented, .assigned])
+    }
+
+    @Test func currentApprovalDoesNotGetResetByAReReviewRequest() async throws {
+        // given
+        let harness = try makeHarness(assistantWorked: true, authored: true)
+        defer { harness.cleanUp() }
+        try prepareAuthoredFeedback(harness)
+        try await harness.poll()
+        try harness.write("drafts.json", "[]")
+        try harness.write("discussions.json", harness.log("published-discussions.json"))
+        try harness.write("approvals.json", #"{"approved_by":[{"user":{"id":8}}]}"#)
+        try harness.write("reviewers.json", #"[{"user":{"id":8},"state":"approved"}]"#)
+
+        // when
+        try await harness.poll()
+
+        // then
+        #expect(harness.log("re-review.log").isEmpty)
+    }
+
     @Test func informationalOnlyReviewerCompletesReReviewWithoutARequestOrStaleReadiness() async throws {
         let harness = try makeHarness(assistantWorked: true, authored: true, assessment: .init(notes: [
             .init(noteID: 40, state: .informational, reason: "Informational review summary")

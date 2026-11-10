@@ -6,6 +6,8 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 
 ## Unreleased
 
+- Request re-review from earlier participating reviewers and reset approvers once all feedback is ready; show prioritized current, earlier and comment-only review status in the approvals hover list, sorted by recent activity.
+
 - Show progress indicators and elapsed stage time on busy MR cards and in Details, while routine background polling and reviewer waits stay quiet.
 
 - Recover sealed draft replies from blocked author follow-ups through independent current-source verification, without waiting for publication to mark the worker complete.

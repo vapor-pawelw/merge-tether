@@ -64,9 +64,20 @@ struct BoardApprovalProgressBadge: View {
                              ? person.author.username : person.author.name)
                             .font(.callout).foregroundStyle(.primary).lineLimit(1)
                         Spacer(minLength: 18)
-                        if person.approved {
+                        switch person.status {
+                        case .approved:
                             Image(systemName: "checkmark.seal.fill").foregroundStyle(.green)
                                 .accessibilityLabel(Text(.Board.boardApprovalsApproved))
+                                .help(Text(.Board.boardApprovalsApproved))
+                        case .previouslyApproved:
+                            Image(systemName: "checkmark.seal").foregroundStyle(.secondary)
+                                .accessibilityLabel(Text(.Board.boardApprovalsPreviouslyApproved))
+                                .help(Text(.Board.boardApprovalsPreviouslyApproved))
+                        case .commented:
+                            Image(systemName: "bubble.left").foregroundStyle(.secondary)
+                                .accessibilityLabel(Text(.Board.boardApprovalsCommented))
+                                .help(Text(.Board.boardApprovalsCommented))
+                        case .assigned: EmptyView()
                         }
                     }
                     .padding(.vertical, 8).padding(.horizontal, 12)

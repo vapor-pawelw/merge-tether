@@ -30,6 +30,11 @@ struct ReReviewAssessmentTests {
         }
     }
 
+    @Test func legacyUnconfirmedReviewRequestsCannotBeAutomaticallyReplayed() throws {
+        let receipt = try JSONDecoder().decode(ReReviewReceipt.self, from: Data(#"{"noteID":40,"unconfirmed":true}"#.utf8))
+        #expect(receipt.covers(noteID: 40, headSHA: String(repeating: "a", count: 40)))
+    }
+
     @Test func unansweredResolvableFeedbackRemainsAManualBlockerButGeneralCommentsDoNot() throws {
         let threads = try discussions()
         #expect(ReReviewFeedback(discussions: Array(threads.prefix(2)), authorID: 3).hasUnansweredFeedback == false)

@@ -38,6 +38,13 @@ struct GitLabWorkflowUser: Codable, Sendable {
     let id: Int
     let username: String?
     let name: String?
+    var avatarURL: URL? = nil
+
+    enum CodingKeys: String, CodingKey { case id, username, name; case avatarURL = "avatar_url" }
+    var author: Todo.Author? {
+        guard id > 0, let username, !username.isEmpty else { return nil }
+        return .init(id: id, username: username, name: name ?? username, avatarURL: avatarURL)
+    }
 }
 
 struct GitLabMergeRequestDiscussion: Codable, Sendable {
@@ -112,6 +119,64 @@ struct ReReviewFeedback: Sendable {
     }
 }
 
+struct MergeRequestReviewHistory: Equatable, Sendable {
+    struct Activity: Equatable, Sendable {
+        var author: Todo.Author?
+        var previouslyApproved = false
+        var commented = false
+        var noteID = 0
+        var changedAt: Date?
+    }
+    var activities: [Int: Activity] = [:]
+
+    init(reviewers: [GitLabMergeRequestReviewer] = [], discussions: [GitLabMergeRequestDiscussion] = [], authorID: Int = 0) {
+        for reviewer in reviewers where reviewer.user.id > 0 && reviewer.user.id != authorID {
+            activities[reviewer.user.id] = Activity(author: reviewer.user.author,
+                previouslyApproved: reviewer.state == "unapproved" || reviewer.state == "approved",
+                changedAt: Self.date(reviewer.createdAt))
+        }
+        let notes = discussions.flatMap(\.notes)
+        for note in notes {
+            guard let id = note.id, id > 0, let user = note.author, user.id > 0, user.id != authorID else { continue }
+            let approval = note.system == true && note.body.map { ["approved this merge request", "unapproved this merge request"].contains($0) } == true
+            let comment = note.system == false || (note.system == true && note.body == "left review comments")
+            guard approval || comment else { continue }
+            var activity = activities[user.id] ?? Activity()
+            activity.author = activity.author ?? user.author
+            activity.previouslyApproved = activity.previouslyApproved || approval
+            activity.commented = activity.commented || comment
+            activity.noteID = max(activity.noteID, id)
+            activity.changedAt = [activity.changedAt, Self.date(note.createdAt), Self.date(note.updatedAt)].compactMap { $0 }.max()
+            activities[user.id] = activity
+        }
+        // GitLab attributes reset/request events to the actor, while the changed
+        // review status belongs to the mentioned reviewers.
+        for note in notes where note.system == true {
+            guard let body = note.body,
+                  body.hasPrefix("reset approvals from @") || body.hasPrefix("requested review from @")
+                    || body.hasPrefix("removed review request for @") else { continue }
+            let handles = Set(body.split { !(($0.isLetter || $0.isNumber) || "@_.-".contains($0)) }
+                .filter { $0.hasPrefix("@") }.map { String($0.dropFirst()) })
+            for id in Array(activities.keys) {
+                guard let username = activities[id]?.author?.username, handles.contains(username) else { continue }
+                guard var activity = activities[id] else { continue }
+                if body.hasPrefix("reset approvals from @") { activity.previouslyApproved = true }
+                activity.changedAt = [activity.changedAt, Self.date(note.createdAt)].compactMap { $0 }.max()
+                activities[id] = activity
+            }
+        }
+    }
+
+    static func date(_ raw: String?) -> Date? {
+        guard let raw else { return nil }
+        let formatter = ISO8601DateFormatter()
+        formatter.formatOptions = [.withInternetDateTime, .withFractionalSeconds]
+        if let date = formatter.date(from: raw) { return date }
+        formatter.formatOptions = [.withInternetDateTime]
+        return formatter.date(from: raw)
+    }
+}
+
 struct ReReviewReceipt: Codable {
     struct Key: Codable, Hashable {
         let host: String
@@ -124,6 +189,12 @@ struct ReReviewReceipt: Codable {
     let noteID: Int
     var unconfirmed = false
     var requested: Bool?
+    var headSHA: String? = nil
+
+    func covers(noteID: Int, headSHA: String) -> Bool {
+        // Older uncertain writes have no recorded head; keep their existing replay fence.
+        (self.headSHA == headSHA || (self.headSHA == nil && unconfirmed)) && self.noteID >= noteID
+    }
 }
 
 struct GitLabPipelineJob: Decodable, Sendable {
