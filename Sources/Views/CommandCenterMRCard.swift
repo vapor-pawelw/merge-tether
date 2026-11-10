@@ -97,6 +97,7 @@ private struct CommandCenterMRCardContent: View {
                     }
                     .font(.caption).foregroundStyle(.secondary)
                 }
+                MergeActionsView(item: item, monitor: monitor, actionsBlocked: presentation.actionsBlocked)
                 if presentation.showsAdditionalCommentReview {
                     Button { start { await monitor.attention.finishCommentReview(item) } } label: {
                         Text(.CommentReview.commentReviewFinish)
@@ -165,7 +166,13 @@ private struct CommandCenterMRCardContent: View {
     }
 
     private var reviewingContext: ReviewingContext { presentation.reviewingContext }
-    private var neutralStatus: LocalizedStringResource? { presentation.neutralStatus }
+    private var neutralStatus: LocalizedStringResource? {
+        if monitor.authoredMergeRequests.requests.contains(where: {
+            $0.request.projectID == item.id.projectID && $0.request.iid == item.id.iid
+                && $0.request.sha == item.mergeRequest?.sha && $0.submissionState != .none
+        }) { return nil }
+        return presentation.neutralStatus
+    }
 
     @ViewBuilder
     private var primaryAction: some View {
@@ -173,7 +180,11 @@ private struct CommandCenterMRCardContent: View {
             Button(role: .destructive) { monitor.cancelAssistantJob(job.id) } label: { Text(.AssistantJobs.assistantJobsStop) }
                 .buttonStyle(.plain)
         } else if let action = humanAction {
-            humanActionButton(action).disabled(actionWaitsForRefresh(action) && (busy || presentation.isRefreshingAttention))
+            if action.action != .reviewMerge || !monitor.authoredMergeRequests.requests.contains(where: {
+                item.canOfferManualMerge(using: $0)
+            }) {
+                humanActionButton(action).disabled(actionWaitsForRefresh(action) && (busy || presentation.isRefreshingAttention))
+            }
         } else if !busy, allowsRemoval {
             reviewingAction
         } else if isDraft, item.isAuthored {

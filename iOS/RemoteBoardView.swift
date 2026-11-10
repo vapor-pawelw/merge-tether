@@ -394,7 +394,8 @@ struct RemoteCardDetail: View {
                 } label: { Text(confirmation?.kind == .deleteDraft ? .CommentReview.commentReviewDelete : .Remote.remoteConfirm) }
                 Button(.Remote.remoteCancel, role: .cancel) { confirmation = nil }
             } message: {
-                Text(confirmation?.kind == .deleteDraft ? .CommentReview.commentReviewDeleteHelp : .Remote.remoteConfirmHelp)
+                if let text = confirmation?.confirmationText { Text(verbatim: text) }
+                else { Text(confirmation?.kind == .deleteDraft ? .CommentReview.commentReviewDeleteHelp : .Remote.remoteConfirmHelp) }
             }
         }
     }

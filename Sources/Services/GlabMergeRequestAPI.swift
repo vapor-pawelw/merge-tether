@@ -483,6 +483,7 @@ extension GlabService {
         return result.commit.id
     }
 
+    @discardableResult
     func mergeMergeRequest(
         projectID: Int,
         iid: Int,
@@ -492,8 +493,11 @@ extension GlabService {
         expectedContext: MergeRequestDependencySummary.Context? = nil,
         expectedDiscussionFingerprint: String? = nil,
         expectedSemanticContextFingerprint: String? = nil,
+        action: MergeSubmissionAction = .mergeNow,
+        expectedPolicy: GitLabMergeActionPolicy? = nil,
+        beforeWrite: @MainActor () throws -> Void = {},
         shouldProceed: @MainActor () -> Bool = { true }
-    ) async throws {
+    ) async throws -> MergeSubmissionState {
         struct MergeResult: Decodable {
             let projectID: Int
             let iid: Int
@@ -505,8 +509,8 @@ extension GlabService {
             }
         }
 
-        guard Self.isFullGitSHA(headSHA) else {
-            throw GlabError.decoding("GitLab did not provide a full source SHA")
+        guard Self.isFullGitSHA(headSHA), action != .enqueue || expectedPolicy?.action == .enqueue else {
+            throw GlabError.decoding("GitLab did not provide a verified merge action and source SHA")
         }
         guard let executable = glabPath else { throw GlabError.glabNotInstalled }
         let revision = accountRevision
@@ -516,9 +520,30 @@ extension GlabService {
         guard user == expectedUser, glabPath == executable else { throw GlabError.notAuthenticated }
         let current = try await fetchMergeRequest(projectID: projectID, iid: iid, host: host)
         let context = MergeRequestDependencySummary.Context(current)
-        guard current.author.id == expectedUser.id, current.isReadyForMergeChecks, current.sha == headSHA,
+        guard current.projectID == projectID, current.iid == iid,
+              current.author.id == expectedUser.id, current.sha == headSHA,
               current.webURL.isGitLabMergeRequest(host: host, iid: iid),
               expectedContext == nil || expectedContext == context else { throw CancellationError() }
+        if expectedPolicy != nil {
+            let observed = try await observedMergeSubmission(current, action: action, host: host, usesMergeTrain: expectedPolicy?.usesMergeTrain == true)
+            if observed != .none {
+                // A user may enqueue during this preflight. Recheck the session
+                // and context after the awaited train read before recording it.
+                let live = try await fetchMergeRequest(projectID: projectID, iid: iid, host: host)
+                guard glabPath == executable, accountRevision == revision, resolvedHost == host,
+                      currentUsername == expectedUser.username else { throw GlabError.notAuthenticated }
+                guard MergeRequestDependencySummary.Context(live) == context, live.author.id == expectedUser.id,
+                      expectedSemanticContextFingerprint == nil
+                        || live.semanticContextFingerprint == expectedSemanticContextFingerprint else { throw CancellationError() }
+                try Task.checkCancellation()
+                return observed
+            }
+            let policy = try await fetchMergeActionPolicy(projectID: projectID, host: host, request: current)
+            guard policy == expectedPolicy, policy.action == action else { throw CancellationError() }
+            let approvals = try await fetchMergeRequestApprovalState(projectID: projectID, iid: iid, host: host)
+            guard approvals.allRequiredRulesApproved else { throw CancellationError() }
+        }
+        guard current.isReadyForMergeSubmission(action) else { throw CancellationError() }
         guard try await fetchMergeDependencyReadiness(for: current, host: host) == .ready else { throw CancellationError() }
         // Re-read after dependency I/O so same-head retargets cannot reuse the
         // checked graph. GitLab's merge SHA precondition protects only the source.
@@ -536,12 +561,34 @@ extension GlabService {
             }
         }
         let final = try await finalRequest
-        guard MergeRequestDependencySummary.Context(final) == context, final.isReadyForMergeChecks,
+        guard MergeRequestDependencySummary.Context(final) == context, final.isReadyForMergeSubmission(action),
               final.author.id == expectedUser.id else { throw CancellationError() }
-        guard glabPath == executable, accountRevision == revision else { throw GlabError.notAuthenticated }
+        guard glabPath == executable, accountRevision == revision, resolvedHost == host,
+              currentUsername == expectedUser.username else { throw GlabError.notAuthenticated }
         try Task.checkCancellation()
         guard shouldProceed() else { throw CancellationError() }
 
+        try beforeWrite()
+        if action == .enqueue {
+            let usesTrain = expectedPolicy?.usesMergeTrain == true
+            let endpoint = usesTrain ? "/projects/\(projectID)/merge_trains/merge_requests/\(iid)"
+                : "/projects/\(projectID)/merge_requests/\(iid)/merge"
+            let _: Data = try await mergeRequestAPI(endpoint, host: host,
+                arguments: ["--method", usesTrain ? "POST" : "PUT", "--raw-field", "sha=\(headSHA)", "--field", "auto_merge=true"],
+                timeout: 30, decode: { $0 })
+            let updated = try await fetchMergeRequest(projectID: projectID, iid: iid, host: host)
+            guard updated.projectID == projectID, updated.iid == iid, updated.sha == headSHA,
+                  updated.webURL == current.webURL, updated.sourceBranch == current.sourceBranch,
+                  updated.targetBranch == current.targetBranch, updated.sourceProjectID == current.sourceProjectID,
+                  updated.targetProjectID == current.targetProjectID else {
+                throw GlabError.decoding("GitLab merge queue context changed")
+            }
+            let outcome = try await observedMergeSubmission(updated, action: action, host: host, usesMergeTrain: usesTrain)
+            guard outcome == .merged || outcome.isDelegated else {
+                throw GlabError.decoding("GitLab did not confirm the merge queue request")
+            }
+            return outcome
+        }
         let result: MergeResult = try await mergeRequestAPI(
             "/projects/\(projectID)/merge_requests/\(iid)/merge",
             host: host,
@@ -551,9 +598,10 @@ extension GlabService {
         guard result.projectID == projectID, result.iid == iid, result.state == "merged" else {
             throw GlabError.decoding("GitLab did not confirm the merge")
         }
+        return .merged
     }
 
-    static func isFullGitSHA(_ sha: String) -> Bool {
+    nonisolated static func isFullGitSHA(_ sha: String) -> Bool {
         (sha.utf8.count == 40 || sha.utf8.count == 64) && sha.utf8.allSatisfy {
             (48...57).contains($0) || (65...70).contains($0) || (97...102).contains($0)
         }

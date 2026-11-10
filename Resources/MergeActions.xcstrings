@@ -1,0 +1,292 @@
+{
+  "sourceLanguage": "en",
+  "strings": {
+    "mergeActions.mergeNow": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Merge now"
+          }
+        }
+      }
+    },
+    "mergeActions.enqueue": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Set to auto-merge"
+          }
+        }
+      }
+    },
+    "mergeActions.queued": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Queued for auto-merge"
+          }
+        }
+      }
+    },
+    "mergeActions.inTrain": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "In merge train"
+          }
+        }
+      }
+    },
+    "mergeActions.uncertain": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Merge outcome unconfirmed. Check GitLab before trying again."
+          }
+        }
+      }
+    },
+    "mergeActions.changed": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Merge queue context changed. Review the queue in GitLab."
+          }
+        }
+      }
+    },
+    "mergeActions.checkGitLab": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Check merge in GitLab"
+          }
+        }
+      }
+    },
+    "mergeActions.unavailable": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Merge capability could not be verified. Check GitLab."
+          }
+        }
+      }
+    },
+    "mergeActions.confirmMerge": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Submit this merge request?"
+          }
+        }
+      }
+    },
+    "mergeActions.confirmHelp": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "The current source, target, dependencies, approvals and feedback will be checked again. GitLab controls queued merges after submission. New feedback or setting changes are detected on refresh; the app does not cancel or replace queued work."
+          }
+        }
+      }
+    },
+    "mergeActions.resolveAll": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Resolve addressed threads…"
+          }
+        }
+      }
+    },
+    "mergeActions.resolveConfirm": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Resolve checked threads"
+          }
+        }
+      }
+    },
+    "mergeActions.resolveTitle": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Resolve the verified threads?"
+          }
+        }
+      }
+    },
+    "mergeActions.resolveHelp": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Only the listed, freshly checked threads will be resolved. Unaddressed, uncertain and unanswered comments stay open. Pending replies will not be published."
+          }
+        }
+      }
+    },
+    "mergeActions.cancel": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Cancel"
+          }
+        }
+      }
+    },
+    "mergeActions.checking": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Checking merge…"
+          }
+        }
+      }
+    },
+    "mergeActions.blocked": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Merge is blocked. Refresh and review the current requirements."
+          }
+        }
+      }
+    },
+    "mergeActions.resolveResult": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Resolved %lld of %lld checked threads. %lld still require attention."
+          }
+        }
+      }
+    },
+    "mergeActions.resolvePreview": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "%lld threads ready to resolve; %lld held for work, verification or replies."
+          }
+        }
+      }
+    },
+    "mergeActions.failed": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "The action could not be verified. Refresh and check GitLab."
+          }
+        }
+      }
+    },
+    "mergeActions.manualAssessment": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Checking feedback before merge"
+          }
+        }
+      }
+    },
+    "mergeActions.resolveNone": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "No verified, answered threads are ready to resolve."
+          }
+        }
+      }
+    },
+    "mergeActions.checkThreads": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Check threads to resolve"
+          }
+        }
+      }
+    },
+    "mergeActions.checked": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Threads checked"
+          }
+        }
+      }
+    },
+    "mergeActions.resolveReadyThreads": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Ready to resolve:\n%@"
+          }
+        }
+      }
+    },
+    "mergeActions.resolveHeldThreads": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Still require work, verification or replies:\n%@"
+          }
+        }
+      }
+    }
+  },
+  "version": "1.0"
+}

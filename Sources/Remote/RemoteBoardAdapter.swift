@@ -106,9 +106,17 @@ import MergeTetherRemote
                         result.lanes[lane].cards[index] = card
                         continue
                     }
+                    let mergeStatus = monitor.authoredMergeRequests.requests.first {
+                        $0.request.projectID == item.id.projectID && $0.request.iid == item.id.iid && $0.request.sha == item.mergeRequest?.sha
+                    }
+                    if let title = mergeStatus?.submissionState.title {
+                        card.presentation?.status = String(localized: title)
+                        card.detail = String(localized: .MergeActions.mergeActionsConfirmHelp)
+                    }
                     let busy = presentation.actionsBlocked
                     if busy { card.actions = [] }
                     else {
+                        card = mergeActions(card, item: item, status: mergeStatus, monitor: monitor, account: account)
                         let intent = row.attentionIntents.first { $0.state == .failed } ?? row.attentionIntents.first { $0.state == .pending }
                         if let intent, intent.kind == .refresh || monitor.availableAssistants.contains(monitor.settings.automation.assistant),
                            let token = try? RemoteDigest.token([account, try RemoteDigest.token(intent), try RemoteDigest.token(monitor.settings.automation)]) {
@@ -139,6 +147,47 @@ import MergeTetherRemote
             for lane in result.lanes.indices { for card in result.lanes[lane].cards.indices { result.lanes[lane].cards[card].actions = [] } }
         }
         return result
+    }
+
+    static func mergeActions(_ original: RemoteCard, item: MergeRequestAttentionMonitor.Item,
+                             status: AuthoredMergeRequestStatus?, monitor: TodoMonitorService, account: String) -> RemoteCard {
+        var card = original
+        guard item.isAuthored, item.mergeRequest?.author.username == monitor.glab.currentUsername,
+              let request = item.mergeRequest, request.state == "opened",
+              let token = try? RemoteDigest.token([account, try RemoteDigest.token(request),
+                  item.observedDiscussionFingerprint ?? "", try MergeSubmissionFingerprint.configuration(monitor.settings)]) else { return card }
+        if let status, item.canOfferManualMerge(using: status), let action = status.action {
+            let kind: RemoteActionKind = action == .mergeNow ? .merge : .enqueueMerge
+            card.actions.append(.init(id: kind.rawValue, kind: kind, token: token,
+                confirmationText: String(localized: .MergeActions.mergeActionsConfirmHelp)))
+        }
+        if item.draftCount == 0, item.drafts.isEmpty, !item.requiresDiscussionRecheck,
+           item.needsDiscussion || item.hasOtherUnresolvedDiscussions || request.blockingDiscussionsResolved == false {
+            card.actions.append(.init(id: "checkThreads", kind: .checkThreads, token: token,
+                confirmationText: String(localized: .MergeActions.mergeActionsResolveHelp)))
+        }
+        return card
+    }
+
+    static func resolutionPreview(_ original: RemoteCard, item: MergeRequestAttentionMonitor.Item,
+                                  prepared: ManualDiscussionResolution.Prepared, monitor: TodoMonitorService) -> RemoteCard {
+        guard let check = original.actions.first(where: { $0.kind == .checkThreads }),
+              let request = item.authoredRequest, prepared.revision == monitor.glab.accountRevision,
+              prepared.host == monitor.glab.resolvedHost, prepared.user.username == monitor.glab.currentUsername,
+              MergeRequestDependencySummary.Context(request) == .init(prepared.request),
+              request.semanticContextFingerprint == prepared.request.semanticContextFingerprint,
+              prepared.reviewFingerprint != nil, prepared.reviewFingerprint == item.observedDiscussionFingerprint,
+              (try? MergeSubmissionFingerprint.configuration(monitor.settings)) == prepared.configuration else { return original }
+        var card = original
+        let ids = prepared.plan.eligibleIDs
+        card.detail = String(localized: .MergeActions.mergeActionsResolvePreview(ids.count, prepared.plan.heldIDs.count))
+        guard !ids.isEmpty, let fingerprint = prepared.plan.fingerprint,
+              let token = try? RemoteDigest.token([check.token, fingerprint, ids.joined(separator: ",")]) else { return card }
+        card.actions.removeAll { $0.kind == .checkThreads }
+        card.actions.append(.init(id: ManualDiscussionResolution.actionID(ids), kind: .resolveThreads, token: token,
+            confirmationText: card.detail + "\n\n" + prepared.plan.confirmationDetails + "\n\n"
+                + String(localized: .MergeActions.mergeActionsResolveHelp)))
+        return card
     }
 
     static func project(board: MergeRequestBoardSnapshot, other: [MergeRequestBoardSnapshot.OtherCard], session: UUID, account: String,

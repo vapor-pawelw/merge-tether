@@ -117,6 +117,7 @@ struct GitLabMergeRequest: Codable, Sendable {
     let hasConflicts: Bool?
     let labels: [String]
     let blockingDiscussionsResolved: Bool?
+    let mergeWhenPipelineSucceeds: Bool?
     let headPipeline: Pipeline?
     let reviewers: [Todo.Author]?
     private let user: UserPermissions?
@@ -163,6 +164,7 @@ struct GitLabMergeRequest: Codable, Sendable {
         case hasConflicts = "has_conflicts"
         case labels
         case blockingDiscussionsResolved = "blocking_discussions_resolved"
+        case mergeWhenPipelineSucceeds = "merge_when_pipeline_succeeds"
         case headPipeline = "head_pipeline"
         case user, reviewers
     }

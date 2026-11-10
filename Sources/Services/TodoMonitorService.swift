@@ -829,13 +829,13 @@ final class TodoMonitorService {
             }
         }
         if !attention.hasError, !authoredMergeRequests.hasError, let host = glab.resolvedHost, let username = glab.currentUsername {
-            for status in authoredMergeRequests.requests where status.blockers.isEmpty && status.request.isReadyForMergeChecks {
+            for status in authoredMergeRequests.requests where status.mayMergeManually {
                 let request = status.request
                 guard request.author.username == username,
                       request.webURL.isGitLabMergeRequest(host: host, iid: request.iid),
                       let current = attention.currentOpenItems.first(where: {
                           $0.id.projectID == request.projectID && $0.id.iid == request.iid
-                      }), current.mergeRequest?.author.username == username, current.canOfferMerge(using: status)
+                      }), current.mergeRequest?.author.username == username, current.canOfferManualMerge(using: status)
                 else { continue }
                 let id = MergeRequestAttentionMonitor.Item.ID(projectID: request.projectID, iid: request.iid)
                 guard (items.first(where: { $0.id == id })?.draftCount ?? 0) == 0 else { continue }

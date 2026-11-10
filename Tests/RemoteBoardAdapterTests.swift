@@ -151,6 +151,39 @@ import MergeTetherRemote
 
     }
 
+    @Test func aPhoneMustCheckTheConcreteResolutionScopeBeforeReceivingAResolveCommand() throws {
+        let suite = "RemoteResolutionPreview.\(UUID())"
+        let defaults = try #require(UserDefaults(suiteName: suite))
+        defer { defaults.removePersistentDomain(forName: suite) }
+        let settings = SettingsManager(defaults: defaults)
+        settings.resolvedHost = "gitlab.example.test"
+        let gitlab = InMemoryGitLab()
+        defer { gitlab.close() }
+        let glab = gitlab.service(host: "gitlab.example.test", username: "me")
+        settings.glabPath = glab.glabPath
+        let monitor = TodoMonitorService(settings: settings, glab: glab)
+        defer { monitor.stopTimer() }
+        let request = try JSONDecoder().decode(GitLabMergeRequest.self, from: Data(#"{"project_id":1,"iid":2,"author":{"id":3,"username":"me","name":"Me"},"title":"Feature","labels":[],"web_url":"https://gitlab.example.test/g/p/-/merge_requests/2","state":"opened","draft":false,"sha":"aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa","source_project_id":1,"target_project_id":1,"source_branch":"feature","target_branch":"main","detailed_merge_status":"discussions_not_resolved","has_conflicts":false,"blocking_discussions_resolved":false,"user":{"can_merge":true}}"#.utf8))
+        var item = MergeRequestAttentionMonitor.Item(id: .init(projectID: 1, iid: 2), title: request.title, url: request.webURL,
+            needsDiscussion: true, mergeRequest: request, isAuthored: true)
+        let threads = try JSONDecoder().decode([GitLabMergeRequestDiscussion].self, from: Data(#"[{"id":"checked","notes":[{"id":10,"author":{"id":7},"body":"Please fix","system":false,"resolvable":true,"resolved":false},{"id":11,"author":{"id":3},"body":"Fixed and verified","system":false,"resolvable":true,"resolved":false}]}]"#.utf8))
+        item.observedDiscussionFingerprint = ReviewVerdict.fingerprint(threads)
+        let card = RemoteBoardAdapter.mergeActions(RemoteBoardAdapter.card(item, account: "me@host"),
+            item: item, status: nil, monitor: monitor, account: "me@host")
+        #expect(card.actions.contains { $0.kind == .checkThreads })
+        #expect(!card.actions.contains { $0.kind == .resolveThreads })
+        let prepared = ManualDiscussionResolution.Prepared(request: request, user: .init(id: 3, username: "me"), host: "gitlab.example.test",
+            revision: glab.accountRevision, configuration: try MergeSubmissionFingerprint.configuration(settings),
+            plan: ManualDiscussionResolution.plan(discussions: threads,
+                assessment: .init(notes: [.init(noteID: 10, state: .addressed, reason: "Verified", publishedReplyNoteID: 11)]),
+                authorID: 3, pendingDraftCount: 0), reviewFingerprint: item.observedDiscussionFingerprint)
+        let checked = RemoteBoardAdapter.resolutionPreview(card, item: item, prepared: prepared, monitor: monitor)
+        #expect(checked.actions.contains { $0.kind == .resolveThreads && $0.id == "resolveThreads:checked" && $0.confirmationText?.contains("Please fix") == true })
+        settings.automation.autoMergeEnabled = true
+        let changed = RemoteBoardAdapter.resolutionPreview(card, item: item, prepared: prepared, monitor: monitor)
+        #expect(!changed.actions.contains { $0.kind == .resolveThreads })
+    }
+
     func item() throws -> MergeRequestAttentionMonitor.Item {
         var item = MergeRequestAttentionMonitor.Item(id: .init(projectID: 1, iid: 2), title: "Fix a crash",
             url: URL(string: "https://gitlab.example.org/group/project/-/merge_requests/2")!)

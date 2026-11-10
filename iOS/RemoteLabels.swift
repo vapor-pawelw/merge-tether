@@ -17,6 +17,10 @@ extension RemoteLaneID {
 extension RemoteActionKind {
     var title: LocalizedStringResource {
         switch self {
+        case .checkThreads: .MergeActions.mergeActionsCheckThreads
+        case .merge: .MergeActions.mergeActionsMergeNow
+        case .enqueueMerge: .MergeActions.mergeActionsEnqueue
+        case .resolveThreads: .MergeActions.mergeActionsResolveConfirm
         case .retryJob: .Remote.remoteRetryJob
         case .publish: .Remote.remotePublish
         case .deleteDraft: .CommentReview.commentReviewDelete
@@ -33,6 +37,9 @@ extension RemoteActionKind {
 extension RemoteCommandResult.Status {
     var title: LocalizedStringResource {
         switch self {
+        case .checked: .MergeActions.mergeActionsChecked
+        case .queued: .MergeActions.mergeActionsQueued
+        case .inTrain: .MergeActions.mergeActionsInTrain
         case .partial: .Remote.remotePartiallyCompleted
         case .running: .Remote.remoteRunning
         case .completed: .Remote.remoteCompleted

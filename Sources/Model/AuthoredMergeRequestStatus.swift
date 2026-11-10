@@ -25,6 +25,9 @@ struct AuthoredMergeRequestStatus: Identifiable {
     let request: GitLabMergeRequest
     let blockers: [MergeRequestBlocker]
     let mayAutoMerge: Bool
+    let mayMergeManually: Bool
+    let action: MergeSubmissionAction?
+    var submissionState: MergeSubmissionState
     let dependencyReadiness: MergeRequestDependencySummary.MergeReadiness
 
     var id: String { "\(request.projectID)!\(request.iid)" }
@@ -59,8 +62,12 @@ struct AuthoredMergeRequestStatus: Identifiable {
         canVerifyFreshApprovals: Bool = true,
         conflictTaskFailed: Bool = false,
         pendingDraftCount: Int? = 0,
-        requiresCommentReview: Bool = false
+        requiresCommentReview: Bool = false,
+        action: MergeSubmissionAction? = .mergeNow,
+        submissionState: MergeSubmissionState = .none
     ) {
+        self.action = action
+        self.submissionState = submissionState
         self.request = request
         self.dependencyReadiness = dependencyReadiness
         var blockers: [MergeRequestBlocker] = []
@@ -78,9 +85,10 @@ struct AuthoredMergeRequestStatus: Identifiable {
         if request.hasMergeConflict { blockers.append(.conflicts) }
         if request.canMerge == false { blockers.append(.permissions) }
 
+        let canQueuePipeline = action == .enqueue && request.isReadyForMergeSubmission(.enqueue)
         switch request.detailedMergeStatus {
         case "ci_must_pass", "ci_still_running", "security_policy_pipeline_check", "status_checks_must_pass":
-            blockers.append(.pipeline)
+            if !canQueuePipeline { blockers.append(.pipeline) }
         case "approvals_syncing", "checking", "preparing", "unchecked":
             blockers.append(.checking)
         case "mergeable", "draft_status", "not_approved", "requested_changes", "discussions_not_resolved", "conflict":
@@ -91,7 +99,7 @@ struct AuthoredMergeRequestStatus: Identifiable {
             blockers.append(.other)
         }
 
-        if let pipeline = request.headPipeline, pipeline.status != "success", !blockers.contains(.pipeline) {
+        if let pipeline = request.headPipeline, pipeline.status != "success", !canQueuePipeline, !blockers.contains(.pipeline) {
             blockers.append(.pipeline)
         }
 
@@ -101,7 +109,7 @@ struct AuthoredMergeRequestStatus: Identifiable {
             blockers.append(.unknown)
         }
 
-        if autoMergeEnabled {
+        do {
             switch dependencyReadiness {
             case .ready: break
             case .waitingForDependencies: blockers.append(.dependencies)
@@ -109,7 +117,9 @@ struct AuthoredMergeRequestStatus: Identifiable {
             case .unavailable: blockers.append(.dependencyEvidence)
             }
         }
-        let eligibleForAutoMerge = autoMergeEnabled && blockers.isEmpty && request.isReadyForMergeChecks
+        let ready = action.map { request.isReadyForMergeSubmission($0) } == true && submissionState == .none
+        self.mayMergeManually = blockers.isEmpty && ready && approvals?.allRequiredRulesApproved == true && discussionsResolved == true
+        let eligibleForAutoMerge = autoMergeEnabled && blockers.isEmpty && ready
             && approvals?.hasRequiredRules == true && approvals?.allRequiredRulesApproved == true
             && discussionsResolved == true
         if eligibleForAutoMerge && projectRequiresResolvedDiscussions != true {

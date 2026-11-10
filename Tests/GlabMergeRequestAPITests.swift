@@ -365,6 +365,8 @@ struct GlabMergeRequestAPITests {
         try FileManager.default.setAttributes([.posixPermissions: 0o700], ofItemAtPath: executable.path)
         let glab = GlabService()
         glab.glabPath = executable
+        glab.resolvedHost = host
+        glab.currentUsername = "author"
         try await body(glab)
         #expect(FileManager.default.fileExists(atPath: executable.path + "-merged") == expectMerge)
     }

@@ -26,7 +26,7 @@ struct MergeRequestBrowserSnapshotTests {
         {"rules":[{"approvals_required":1,"approved":\(approved)}]}
         """.utf8))
         return .init(request: request, approvals: approvals, discussionsResolved: true,
-                     projectRequiresResolvedDiscussions: true, autoMergeEnabled: false)
+                     projectRequiresResolvedDiscussions: true, autoMergeEnabled: false, dependencyReadiness: .ready)
     }
 
     @Test(arguments: ["me", "reviewer"])

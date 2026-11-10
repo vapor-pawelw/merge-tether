@@ -59,6 +59,8 @@ Cards combine open GitLab prerequisites and branch-stack relationships into one 
 
 ## Optional agent workflows
 
+Owned MR cards and Details offer **Merge now** independently of automatic merge settings. Projects using merge trains offer **Set to auto-merge**; ordinary projects can use it while a supported, active pipeline is still running. Queued and in-train requests remain visible until GitLab reports an actual merge. **Resolve addressed threads…** first checks the exact threads and published replies, then asks you to confirm the eligible IDs; unverified or unanswered feedback stays open. Approval counters show every current unique approver, including **5/2**.
+
 Choose a profile, coding agent and scope in **Settings → Automation**. Installed MR skills refine the work; MergeTether also supplies default instructions when no MR skill is installed.
 
 | Workflow | Behavior |

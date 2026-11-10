@@ -147,7 +147,7 @@ struct MergeRequestDependencySummary: Equatable, Sendable {
     }
 
     /// A cached graph or a late task must describe the exact displayed branch context.
-    struct Context: Hashable, Sendable {
+    struct Context: Codable, Hashable, Sendable {
         let projectID: Int
         let iid: Int
         let url: URL

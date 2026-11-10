@@ -203,7 +203,7 @@ struct MergeDependencyGateTests {
                     return try InMemoryGitLab.json(parentState == nil ? [] : [request(1)])
                 case "/projects/1":
                     return try InMemoryGitLab.json(["default_branch": defaultBranchUnavailable ? NSNull() : "main" as Any,
-                        "only_allow_merge_if_all_discussions_are_resolved": true, "reset_approvals_on_push": true])
+                        "merge_trains_enabled": false, "only_allow_merge_if_all_discussions_are_resolved": true, "reset_approvals_on_push": true])
                 case let path where path.hasSuffix("/merge"):
                     let iid = path.contains("/merge_requests/1/merge") ? 1 : 2
                     merged.append(iid)

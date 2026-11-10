@@ -313,13 +313,13 @@ final class AuthoredMergeRequestMonitor {
             let pendingDraftCount = pendingDrafts?.count
             guard isCurrent(account), glab.accountRevision == revision else { return }
             if let pendingDrafts { settings.observeCommentReview(pendingDrafts, for: reviewTarget, revision: reviewRevision) }
-            let status = await evaluate(
+            var status = await evaluate(
                 request, approvals: approvals, resolved: discussionsResolved, pendingDraftCount: pendingDraftCount,
                 account: account, user: user
             )
 
             let work = AssistantAutomationRunner.MergeRequestWork(host: host, projectID: request.projectID, iid: request.iid)
-            if status.mayAutoMerge, let sha = request.sha,
+            if status.mayAutoMerge, request.sha != nil,
                automaticMergeTarget == nil || (automaticMergeTarget?.projectID == request.projectID && automaticMergeTarget?.iid == request.iid),
                isCurrent(account), glab.accountRevision == revision, permitsAutomaticMerge(request, account: account),
                !AssistantAutomationRunner.isWorking(on: work),
@@ -331,46 +331,21 @@ final class AuthoredMergeRequestMonitor {
                     continue
                 }
                 do {
-                    let discussions = try await glab.fetchMergeRequestDiscussions(
-                        projectID: request.projectID, iid: request.iid, host: host
-                    )
-                    let requiresSemanticAssessment = discussions.flatMap(\.notes).contains {
-                        $0.system != true && $0.author?.id != user.id
-                    }
-                    guard let fingerprint = ReviewVerdict.fingerprint(discussions),
-                          !requiresSemanticAssessment || authorFeedbackAllowsMerge?(request, discussions, user.id) == true,
-                          isCurrent(account), settings.automation == configuration else {
-                        results.append(status)
-                        continue
-                    }
-                    let mergingID = MergeRequestAttentionMonitor.Item.ID(projectID: request.projectID, iid: request.iid)
-                    mergingRequests[mergingID] = .init(account: account, revision: revision, headSHA: sha)
-                    defer { mergingRequests.removeValue(forKey: mergingID) }
-                    try await glab.mergeMergeRequest(
-                        projectID: request.projectID, iid: request.iid, headSHA: sha, host: host, expectedUser: user,
-                        expectedContext: .init(request),
-                        expectedDiscussionFingerprint: fingerprint,
-                        expectedSemanticContextFingerprint: requiresSemanticAssessment ? request.semanticContextFingerprint : nil,
-                        shouldProceed: {
-                            self.isCurrent(account) && self.glab.accountRevision == revision
-                                && self.settings.automation == configuration
-                                && self.permitsAutomaticMerge(request, account: account)
-                                && !AssistantAutomationRunner.isWorking(on: work)
-                                && !self.hasUnfinishedAssistantWork(on: work, username: user.username,
-                                    currentRequest: request, discussions: discussions)
-                        }
-                    )
-                    continue
+                    let outcome = try await performSubmission(request, account: account, user: user,
+                        revision: revision, configuration: configuration, automatic: true)
+                    if outcome == .merged { continue }
+                    status.submissionState = outcome
                 } catch is CancellationError {
-                    // Settings or account changed during the final account check.
+                    // The live account, settings or checked MR changed.
                 } catch {
                     actionFailed = true
+                    status.submissionState = submissionState(for: request, account: account)
                     Log.monitor.error("Automatic merge failed: \(String(describing: error), privacy: .private)")
                 }
             }
 
             results.append(status)
-            if automaticMergeTarget == nil { await scheduleConflictIfNeeded(request, account: account, user: user) }
+            if automaticMergeTarget == nil, status.submissionState == .none { await scheduleConflictIfNeeded(request, account: account, user: user) }
         }
 
         guard isCurrent(account) else { return }
@@ -400,6 +375,119 @@ final class AuthoredMergeRequestMonitor {
             currentRequest: currentRequest, feedbackStatus: feedback, discussionFingerprint: fingerprint)
     }
 
+    private func configurationFingerprint() -> String {
+        (try? MergeSubmissionFingerprint.configuration(settings)) ?? ""
+    }
+
+    private func receipt(for request: GitLabMergeRequest, account: Account) -> MergeSubmissionReceipt? {
+        settings.mergeSubmissions.last { $0.target == .init(host: account.host, username: account.username,
+            projectID: request.projectID, iid: request.iid) }
+    }
+
+    private func submissionState(for request: GitLabMergeRequest, account: Account) -> MergeSubmissionState {
+        if let receipt = receipt(for: request, account: account) {
+            if receipt.state == .uncertain { return request.hasQueuedMerge ? .queued : .uncertain }
+            if !request.hasQueuedMerge { return .changed }
+        }
+        return request.hasQueuedMerge ? .queued : .none
+    }
+
+    /// An explicit action has its own authorization; automatic scope and global
+    /// switches still apply exclusively to background execution.
+    func mergeManually(_ expected: GitLabMergeRequest) async -> MergeSubmissionState {
+        guard let host = glab.resolvedHost, let username = glab.currentUsername,
+              !isMerging(expected) else { return .changed }
+        let account = Account(host: host, username: username)
+        let revision = glab.accountRevision
+        let configuration = settings.automation
+        do {
+            let user = try await glab.fetchAuthenticatedUser(host: host, expectedUsername: username)
+            let request = try await glab.fetchMergeRequest(projectID: expected.projectID, iid: expected.iid, host: host)
+            guard isCurrent(account), glab.accountRevision == revision, user.id == request.author.id,
+                  MergeRequestDependencySummary.Context(request) == .init(expected),
+                  request.semanticContextFingerprint == expected.semanticContextFingerprint else { return .changed }
+            let prior = submissionState(for: request, account: account)
+            if prior != .none { return prior }
+            async let approvals = glab.fetchMergeRequestApprovalState(projectID: request.projectID, iid: request.iid, host: host)
+            async let resolved = glab.mergeRequestDiscussionsAreResolved(projectID: request.projectID, iid: request.iid, host: host)
+            async let drafts = glab.fetchOwnDraftNoteCount(projectID: request.projectID, iid: request.iid, host: host, userID: user.id)
+            let status = try await evaluate(request, approvals: approvals, resolved: resolved, pendingDraftCount: drafts,
+                account: account, user: user)
+            guard status.mayMergeManually else { return .changed }
+            let outcome = try await performSubmission(request, account: account, user: user,
+                revision: revision, configuration: configuration, automatic: false)
+            if outcome == .merged { requests.removeAll { $0.id == status.id } }
+            else if let index = requests.firstIndex(where: { $0.id == status.id }) { requests[index].submissionState = outcome }
+            return outcome
+        } catch is CancellationError { return .changed }
+        catch {
+            let state = submissionState(for: expected, account: account)
+            if let index = requests.firstIndex(where: { $0.id == "\(expected.projectID)!\(expected.iid)" }) {
+                requests[index].submissionState = state
+            }
+            return state == .uncertain ? .uncertain : .changed
+        }
+    }
+
+    private func performSubmission(_ request: GitLabMergeRequest, account: Account, user: GitLabAuthenticatedUser,
+                                   revision: UInt64, configuration: AutomationSettings,
+                                   automatic: Bool) async throws -> MergeSubmissionState {
+        let work = AssistantAutomationRunner.MergeRequestWork(host: account.host, projectID: request.projectID, iid: request.iid)
+        let configurationID = configurationFingerprint()
+        func permits() -> Bool {
+            isCurrent(account) && glab.accountRevision == revision && settings.automation == configuration
+                && configurationFingerprint() == configurationID
+                && (!automatic || permitsAutomaticMerge(request, account: account))
+                && !AssistantAutomationRunner.isWorking(on: work)
+                && !settings.pendingCommentReviews.contains(.init(host: account.host, username: account.username,
+                    projectID: request.projectID, iid: request.iid))
+        }
+        guard permits(), let sha = request.sha, submissionState(for: request, account: account) == .none else { throw CancellationError() }
+        let id = MergeRequestAttentionMonitor.Item.ID(projectID: request.projectID, iid: request.iid)
+        guard mergingRequests[id] == nil else { throw CancellationError() }
+        mergingRequests[id] = .init(account: account, revision: revision, headSHA: sha)
+        defer { mergingRequests.removeValue(forKey: id) }
+        let discussions = try await glab.fetchMergeRequestDiscussions(projectID: request.projectID, iid: request.iid, host: account.host)
+        guard let fingerprint = ReviewVerdict.fingerprint(discussions), permits(),
+              !hasUnfinishedAssistantWork(on: work, username: user.username, currentRequest: request, discussions: discussions) else { throw CancellationError() }
+        let hasFeedback = discussions.flatMap(\.notes).contains { $0.system != true && $0.author?.id != user.id }
+        if hasFeedback, authorFeedbackAllowsMerge?(request, discussions, user.id) != true {
+            guard !automatic else { throw CancellationError() }
+            let assessment = try await ManualFeedbackVerification.assess(request: request, discussions: discussions,
+                user: user, host: account.host, settings: settings, glab: glab)
+            let target = MRAutomationScope.Target(host: account.host, username: user.username, projectID: request.projectID, iid: request.iid)
+            guard assessment.hasNoRemainingAuthorWork(in: discussions, authorID: user.id,
+                ignoredSuggestions: settings.feedbackSuggestionDecisions.applicable(in: discussions, for: target)) else { throw CancellationError() }
+        }
+        let policy = try await glab.fetchMergeActionPolicy(projectID: request.projectID, host: account.host, request: request)
+        guard let action = policy.action, permits() else { throw CancellationError() }
+        var receipt = MergeSubmissionReceipt(target: .init(host: account.host, username: user.username,
+            projectID: request.projectID, iid: request.iid), userID: user.id, context: .init(request),
+            semanticFingerprint: request.semanticContextFingerprint, discussionFingerprint: fingerprint,
+            configuration: .init(settings), action: action, createdAt: Date())
+        var didWrite = false
+        let outcome = try await glab.mergeMergeRequest(projectID: request.projectID, iid: request.iid,
+            headSHA: sha, host: account.host, expectedUser: user, expectedContext: .init(request),
+            expectedDiscussionFingerprint: fingerprint, expectedSemanticContextFingerprint: request.semanticContextFingerprint,
+            action: action, expectedPolicy: policy, beforeWrite: {
+                guard permits(), self.submissionState(for: request, account: account) == .none,
+                      self.settings.saveMergeSubmission(receipt) else { throw CancellationError() }
+                didWrite = true
+            }, shouldProceed: {
+                permits() && !self.hasUnfinishedAssistantWork(on: work, username: user.username,
+                    currentRequest: request, discussions: discussions)
+            })
+        if !didWrite, outcome.isDelegated {
+            guard isCurrent(account), glab.accountRevision == revision else { throw CancellationError() }
+            receipt.origin = .observedQueue
+        }
+        if didWrite || outcome.isDelegated {
+            receipt.state = outcome
+            _ = settings.saveMergeSubmission(receipt)
+        }
+        return outcome
+    }
+
     private func evaluate(
         _ request: GitLabMergeRequest,
         approvals: GitLabMergeRequestApprovalState?,
@@ -411,39 +499,56 @@ final class AuthoredMergeRequestMonitor {
         let host = account.host
         let autoMergeEnabled = settings.automation.permitsAutoMerge(project: request.webURL.gitLabProjectPath)
             && settings.automation.scope.permits(request, host: host, username: account.username)
-        let requiresResolution: Bool?
+        let policy = try? await glab.fetchMergeActionPolicy(projectID: request.projectID, host: host, request: request)
+        let canSubmit = policy?.action.map { request.isReadyForMergeSubmission($0) } == true
+        // Conflict preparation owns its own stack read after reserving a lease.
+        // Do not block that path with merge-only evidence for an ineligible MR.
         let dependencyReadiness: MergeRequestDependencySummary.MergeReadiness
-        if autoMergeEnabled {
-            dependencyReadiness = (try? await glab.fetchMergeDependencyReadiness(for: request, host: host)) ?? .unavailable
-        } else { dependencyReadiness = .unavailable }
-        var canVerifyFreshApprovals = true
-        if autoMergeEnabled, request.isReadyForMergeChecks, approvals?.hasRequiredRules == true,
-           approvals?.allRequiredRulesApproved == true, resolved == true {
-            async let policy = try? glab.projectRequiresResolvedDiscussions(projectID: request.projectID, host: host)
-            let project = request.webURL.gitLabProjectPath
-            let shellCanAct = [settings.automation.reviewRequested, settings.automation.authorFeedback].contains {
-                $0.isEnabled && $0.runner == .shell && $0.includes(project: project)
-            }
-            if settings.automation.permitsAssistantTools(project: project) || shellCanAct
-                || settings.conflictReceipts.contains(where: { $0.matches(request, host: host, userID: user.id) }) {
-                canVerifyFreshApprovals = (try? await glab.projectResetsApprovalsOnPush(
-                    projectID: request.projectID, host: host
-                )) == true
-            }
-            requiresResolution = await policy
-        } else {
-            requiresResolution = nil
+        if canSubmit { dependencyReadiness = (try? await glab.fetchMergeDependencyReadiness(for: request, host: host)) ?? .unavailable }
+        else { dependencyReadiness = .unavailable }
+        var state = submissionState(for: request, account: account)
+        if policy?.action == .enqueue, state != .uncertain, state != .changed {
+            state = (try? await glab.observedMergeSubmission(request, action: .enqueue, host: host, usesMergeTrain: policy?.usesMergeTrain == true)) ?? .uncertain
         }
+        if state.isDelegated, receipt(for: request, account: account) == nil {
+            // An observed queue belongs to the user/GitLab. Remember its presence
+            // so disappearance cannot silently turn into an automatic replacement.
+            if let threads = try? await glab.fetchMergeRequestDiscussions(projectID: request.projectID, iid: request.iid, host: host),
+               let fingerprint = ReviewVerdict.fingerprint(threads) {
+                var observed = MergeSubmissionReceipt(target: .init(host: host, username: user.username,
+                    projectID: request.projectID, iid: request.iid), userID: user.id, context: .init(request),
+                    semanticFingerprint: request.semanticContextFingerprint, discussionFingerprint: fingerprint,
+                    configuration: .init(settings), action: policy?.action ?? .enqueue, state: state, createdAt: Date())
+                observed.origin = .observedQueue
+                _ = settings.saveMergeSubmission(observed)
+            }
+        }
+        if state.isDelegated, let receipt = receipt(for: request, account: account) {
+            let threads = try? await glab.fetchMergeRequestDiscussions(projectID: request.projectID, iid: request.iid, host: host)
+            let fingerprint = threads.flatMap { ReviewVerdict.fingerprint($0) }
+            if receipt.userID != user.id || fingerprint == nil || !receipt.matches(request,
+                discussionFingerprint: fingerprint ?? "", configuration: .init(settings)) {
+                state = .changed
+            }
+        }
+        let project = request.webURL.gitLabProjectPath
+        let shellCanAct = [settings.automation.reviewRequested, settings.automation.authorFeedback].contains {
+            $0.isEnabled && $0.runner == .shell && $0.includes(project: project)
+        }
+        let requiresApprovalReset = settings.automation.permitsAssistantTools(project: project) || shellCanAct
+            || settings.conflictReceipts.contains { $0.matches(request, host: host, userID: user.id) }
+        let canVerifyFreshApprovals = !requiresApprovalReset || policy?.resetsApprovalsOnPush == true
         return AuthoredMergeRequestStatus(
             request: request, approvals: approvals, discussionsResolved: resolved,
-            projectRequiresResolvedDiscussions: requiresResolution, autoMergeEnabled: autoMergeEnabled,
+            projectRequiresResolvedDiscussions: policy?.requiresResolvedDiscussions, autoMergeEnabled: autoMergeEnabled,
             dependencyReadiness: dependencyReadiness,
             canVerifyFreshApprovals: canVerifyFreshApprovals,
             conflictTaskFailed: failedConflicts.contains {
                 $0.matches(request, host: host, userID: user.id) && $0.sourceSHA == request.sha
             }, pendingDraftCount: pendingDraftCount,
             requiresCommentReview: settings.pendingCommentReviews.contains(.init(host: host,
-                username: user.username, projectID: request.projectID, iid: request.iid))
+                username: user.username, projectID: request.projectID, iid: request.iid)),
+            action: policy?.action, submissionState: state
         )
     }
 

@@ -279,7 +279,7 @@ struct AuthoredMergeRequestStatusTests {
                     if [ -e resolve ]; then echo '[]'; else echo '[{"notes":[{"resolvable":true,"resolved":false}]}]'; fi ;;
                 /projects/1/merge_requests\\?state=opened*) printf '['; cat request.json; printf ']' ;;
                 /projects/1/merge_requests/2/blocks\\?*) echo '[]' ;;
-                /projects/1) echo '{"default_branch":"main","only_allow_merge_if_all_discussions_are_resolved":true}' ;;
+                /projects/1) echo '{"default_branch":"main","merge_trains_enabled":false,"only_allow_merge_if_all_discussions_are_resolved":true}' ;;
                 /projects/1/merge_requests/2/merge)
                     test "$*" = "api /projects/1/merge_requests/2/merge --hostname gitlab.example.org --method PUT --raw-field sha=0123456789012345678901234567890123456789"
                     touch merged

@@ -63,3 +63,16 @@ import Testing
     }
 
 }
+
+@Test func oldPhonesNeverReceiveMergeActionEnumCases() throws {
+    let actions = [RemoteAction(id: "merge", kind: .merge, token: "checked"),
+                   RemoteAction(id: "enqueue", kind: .enqueueMerge, token: "checked"),
+                   RemoteAction(id: "resolve", kind: .resolveThreads, token: "checked"),
+                   RemoteAction(id: "check", kind: .checkThreads, token: "checked")]
+    let board = RemoteBoard(hostSession: UUID(), account: "me@host", lanes: [
+        .init(id: .own, cards: [.init(id: "mr", title: "Feature", project: "g/p", url: nil, actions: actions)])])
+    #expect(board.forClient(supportsCommentReview: true).cards[0].actions.isEmpty)
+    #expect(board.forClient(supportsCommentReview: true, supportsMergeActions: true).cards[0].actions == actions)
+    let oldCompatible = try JSONSerialization.jsonObject(with: JSONEncoder().encode(board.forClient(supportsCommentReview: true)))
+    #expect(!String(describing: oldCompatible).contains("enqueueMerge"))
+}

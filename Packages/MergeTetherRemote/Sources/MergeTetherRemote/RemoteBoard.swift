@@ -2,13 +2,16 @@ import Foundation
 import CryptoKit
 
 public enum RemoteLaneID: String, Codable, CaseIterable, Sendable { case ready, attention, todos, drafts, own, reviewed, other }
-public enum RemoteActionKind: String, Codable, Sendable { case publish, approve, markDone, prepare, handoff, reReview, verify, retryJob, deleteDraft, finishCommentReview }
+public enum RemoteActionKind: String, Codable, Sendable { case publish, approve, markDone, prepare, handoff, reReview, verify, retryJob, deleteDraft, finishCommentReview, merge, enqueueMerge, resolveThreads, checkThreads }
 
 public struct RemoteAction: Codable, Equatable, Identifiable, Sendable {
     public var id: String
     public var kind: RemoteActionKind
     public var token: String
-    public init(id: String, kind: RemoteActionKind, token: String) { self.id = id; self.kind = kind; self.token = token }
+    public var confirmationText: String?
+    public init(id: String, kind: RemoteActionKind, token: String, confirmationText: String? = nil) {
+        self.id = id; self.kind = kind; self.token = token; self.confirmationText = confirmationText
+    }
 }
 
 public struct RemoteDraft: Codable, Equatable, Identifiable, Sendable {
@@ -159,13 +162,14 @@ public struct RemoteCommand: Codable, Equatable, Sendable {
 }
 
 public struct RemoteCommandResult: Codable, Equatable, Sendable {
-    public enum Status: String, Codable, Sendable { case running, completed, changed, failed, uncertain, limit, partial }
+    public enum Status: String, Codable, Sendable { case running, completed, changed, failed, uncertain, limit, partial, queued, inTrain, checked }
     public var id: UUID
     public var status: Status
     public init(id: UUID, status: Status) { self.id = id; self.status = status }
 }
 
 public struct RemoteMessage: Codable, Sendable {
+    public static let mergeActionsCapability = "merge-actions-v1"
     public static let commentReviewCapability = "comment-review-v1"
     public enum Kind: String, Codable, Sendable { case hello, snapshot, command, accepted, result, unavailable, hostReady = "host-ready" }
     public var type: Kind
@@ -182,16 +186,20 @@ public struct RemoteMessage: Codable, Sendable {
 }
 
 extension RemoteBoard {
-    public func forClient(supportsCommentReview: Bool) -> Self {
-        guard !supportsCommentReview else { return self }
+    public func forClient(supportsCommentReview: Bool, supportsMergeActions: Bool = false) -> Self {
         var compatible = self
         for lane in compatible.lanes.indices {
             for card in compatible.lanes[lane].cards.indices {
-                if compatible.lanes[lane].cards[card].drafts.isEmpty,
+                if !supportsMergeActions {
+                    compatible.lanes[lane].cards[card].actions.removeAll { [.merge, .enqueueMerge, .resolveThreads, .checkThreads].contains($0.kind) }
+                }
+                if !supportsCommentReview, compatible.lanes[lane].cards[card].drafts.isEmpty,
                    compatible.lanes[lane].cards[card].primaryCTA?.destination == .drafts {
                     compatible.lanes[lane].cards[card].primaryCTA = nil
                 }
-                compatible.lanes[lane].cards[card].actions.removeAll { $0.kind == .deleteDraft || $0.kind == .finishCommentReview }
+                if !supportsCommentReview {
+                    compatible.lanes[lane].cards[card].actions.removeAll { $0.kind == .deleteDraft || $0.kind == .finishCommentReview }
+                }
             }
         }
         return compatible

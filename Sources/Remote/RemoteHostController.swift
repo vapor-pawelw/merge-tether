@@ -21,6 +21,8 @@ import MergeTetherRemote
     private var accountRevision: UInt64?
     private var gate = RemoteCommandGate()
     private var phoneSupportsCommentReview = false
+    private var phoneSupportsMergeActions = false
+    @ObservationIgnored private var resolutionPreviews: [String: ManualDiscussionResolution.Prepared] = [:]
 
     init(monitor: TodoMonitorService,
          loadPairing: (@Sendable () async throws -> RemotePairing?)? = nil,
@@ -82,7 +84,7 @@ import MergeTetherRemote
     }
     private func start(_ pair: RemotePairing) {
         do {
-            hostSession = UUID(); gate = RemoteCommandGate(); phoneSupportsCommentReview = false
+            hostSession = UUID(); gate = RemoteCommandGate(); phoneSupportsCommentReview = false; phoneSupportsMergeActions = false
             let connection = try RemoteConnection(pairing: pair, role: .host)
             connection.onStatus = { [weak self, weak connection] connected, fatal in
                 self?.connected = connected; self?.failed = fatal
@@ -106,6 +108,7 @@ import MergeTetherRemote
         case .hello:
             guard let challenge = message.challenge else { return }
             phoneSupportsCommentReview = message.capabilities?.contains(RemoteMessage.commentReviewCapability) == true
+            phoneSupportsMergeActions = message.capabilities?.contains(RemoteMessage.mergeActionsCapability) == true
             let fresh = await refreshSource(force: false, deadline: .now + .seconds(35))
             guard connection === active else { return }
             var board = snapshot()
@@ -151,9 +154,22 @@ import MergeTetherRemote
         let currentAccount = "\(monitor.glab.currentUsername ?? "")@\(monitor.glab.resolvedHost ?? "")"
         if account != currentAccount || accountRevision != monitor.glab.accountRevision {
             account = currentAccount; accountRevision = monitor.glab.accountRevision; hostSession = UUID(); gate = RemoteCommandGate()
+            resolutionPreviews.removeAll()
         }
-        return RemoteBoardAdapter.board(monitor: monitor, session: hostSession, account: account)
-            .forClient(supportsCommentReview: phoneSupportsCommentReview)
+        var board = RemoteBoardAdapter.board(monitor: monitor, session: hostSession, account: account)
+        if !board.partial {
+            let items = monitor.boardSnapshot.own.map(\.item)
+            for lane in board.lanes.indices {
+                for index in board.lanes[lane].cards.indices {
+                    let card = board.lanes[lane].cards[index]
+                    if let prepared = resolutionPreviews[card.id],
+                       let item = items.first(where: { "mr:\($0.id.projectID):\($0.id.iid)" == card.id }) {
+                        board.lanes[lane].cards[index] = RemoteBoardAdapter.resolutionPreview(card, item: item, prepared: prepared, monitor: monitor)
+                    }
+                }
+            }
+        }
+        return board.forClient(supportsCommentReview: phoneSupportsCommentReview, supportsMergeActions: phoneSupportsMergeActions)
     }
     private func execute(_ card: RemoteCard, action: RemoteAction) async -> RemoteCommandResult.Status {
         if card.id.hasPrefix("completion:") {
@@ -185,6 +201,30 @@ import MergeTetherRemote
               RemoteBoardAdapter.card(item, account: account).drafts == card.drafts,
               item.mergeRequest?.sha == card.head else { return .changed }
         switch action.kind {
+        case .merge, .enqueueMerge:
+            guard phoneSupportsMergeActions, let request = item.authoredRequest else { return .changed }
+            let outcome = await monitor.authoredMergeRequests.mergeManually(request)
+            switch outcome {
+            case .merged: return .completed
+            case .queued: return .queued
+            case .inTrain: return .inTrain
+            case .uncertain: return .uncertain
+            case .none, .changed: return .changed
+            }
+        case .checkThreads:
+            guard phoneSupportsMergeActions, let request = item.authoredRequest else { return .changed }
+            do {
+                resolutionPreviews[card.id] = try await ManualDiscussionResolution.prepare(request, monitor: monitor,
+                    expectedFingerprint: item.observedDiscussionFingerprint)
+                return .checked
+            } catch { return .changed }
+        case .resolveThreads:
+            guard phoneSupportsMergeActions, let prepared = resolutionPreviews[card.id],
+                  action.id == ManualDiscussionResolution.actionID(prepared.plan.eligibleIDs),
+                  !prepared.plan.eligibleIDs.isEmpty else { return .changed }
+            resolutionPreviews[card.id] = nil
+            let result = await ManualDiscussionResolution.resolve(prepared, glab: monitor.glab, settings: monitor.settings)
+            return result.isComplete ? .completed : result.resolved > 0 ? .partial : .changed
         case .finishCommentReview:
             return await monitor.attention.finishCommentReview(item) ? .completed
                 : (monitor.attention.confirmationStates[item.id] == .failed ? .failed : .changed)

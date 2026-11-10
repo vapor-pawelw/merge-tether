@@ -48,7 +48,7 @@ import Testing
         let harness = try makeHarness(assistantWorked: true)
         defer { harness.cleanUp() }
         try harness.write("reviewing.json", "[]")
-        try harness.write("approvals.json", #"{"approvals_required":2,"approvals_left":1,"approved_by":[]}"#)
+        try harness.write("approvals.json", #"{"approvals_required":2,"approvals_left":1,"approved_by":[{"user":{"id":7,"username":"reviewer"}}]}"#)
         try await harness.poll()
         let item = try #require(harness.monitor.currentOpenItems.first)
         #expect(item.approvalProgress?.completed == 1 && item.approvalProgress?.required == 2)
@@ -57,7 +57,7 @@ import Testing
     @Test func anEarlyRefreshFailureDropsOnlyTheApprovalCounterAndKeepsTheMR() async throws {
         let harness = try makeHarness(assistantWorked: false, authored: true)
         defer { harness.cleanUp() }
-        try harness.write("approvals.json", #"{"approvals_required":2,"approvals_left":0,"approved_by":[]}"#)
+        try harness.write("approvals.json", #"{"approvals_required":2,"approvals_left":0,"approved_by":[{"user":{"id":7,"username":"reviewer"}},{"user":{"id":8,"username":"other"}}]}"#)
         try await harness.poll()
         let initial = try #require(harness.monitor.currentOpenItems.first)
         #expect(initial.approvalProgress?.completed == 2)
@@ -72,11 +72,11 @@ import Testing
         let harness = try makeHarness(assistantWorked: false, authored: true)
         defer { harness.cleanUp() }
         try harness.write("drafts.json", "[]")
-        try harness.write("approvals.json", #"{"approvals_required":2,"approvals_left":1,"approved_by":[]}"#)
+        try harness.write("approvals.json", #"{"approvals_required":2,"approvals_left":1,"approved_by":[{"user":{"id":7,"username":"reviewer"}}]}"#)
         try await harness.poll()
         let initial = try #require(harness.monitor.currentOpenItems.first)
         #expect(initial.approvalProgress?.completed == 1 && initial.approvalProgress?.required == 2)
-        try harness.write("approvals.json", #"{"approvals_required":2,"approvals_left":0,"approved_by":[]}"#)
+        try harness.write("approvals.json", #"{"approvals_required":2,"approvals_left":0,"approved_by":[{"user":{"id":7,"username":"reviewer"}},{"user":{"id":8,"username":"other"}}]}"#)
         try await harness.poll()
         #expect(harness.monitor.currentOpenItems.first?.approvalProgress?.completed == 2)
         try harness.write("fail-approvals", "")

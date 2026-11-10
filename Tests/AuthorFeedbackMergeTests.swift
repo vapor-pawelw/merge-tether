@@ -255,6 +255,7 @@ struct AuthorFeedbackMergeTests {
             settings.save()
             await monitor.resumeAutomaticMerge(for: target)
             #expect(gitlab.has("merged") == (gate == "ready"))
+            #expect(gitlab.has("queued") == (gate == "pipeline"))
         }
     }
 
@@ -267,6 +268,43 @@ struct AuthorFeedbackMergeTests {
             }
             try await refresh(monitor)
             #expect(!gitlab.has("merged"))
+        }
+    }
+
+    @Test(arguments: [false, true])
+    func explicitManualMergeWorksWithAutomaticMergeOffOrPaused(_ globallyEnabled: Bool) async throws {
+        try await withFixture(configure: { settings in
+            settings.automation.autoMergeEnabled = globallyEnabled
+            settings.autoMergeOptOuts.insert(.init(host: "gitlab.example.org", username: "me", projectID: 1, iid: 2))
+        }) { monitor, gitlab, _ in
+            monitor.authorFeedbackAllowsMerge = { _, _, _ in true }
+            monitor.setVisible(true)
+            try await refresh(monitor)
+            let request = try #require(monitor.requests.first?.request)
+            #expect(!gitlab.has("merged"))
+            #expect(monitor.requests.first?.mayMergeManually == true)
+            let result = await monitor.mergeManually(request)
+            #expect(result == .merged)
+            #expect(gitlab.has("merged"))
+        }
+    }
+
+    @Test func ambiguousManualMergeSurvivesRestartWithoutAutomaticReplay() async throws {
+        var settings: SettingsManager?
+        try await withFixture(configure: { settings = $0; $0.automation.autoMergeEnabled = false }) { monitor, gitlab, glab in
+            gitlab.write("uncertain-merge")
+            monitor.authorFeedbackAllowsMerge = { _, _, _ in true }
+            monitor.setVisible(true)
+            try await refresh(monitor)
+            let request = try #require(monitor.requests.first?.request)
+            #expect(await monitor.mergeManually(request) == .uncertain)
+            #expect(await monitor.mergeManually(request) == .uncertain)
+            let saved = try #require(settings)
+            saved.automation.autoMergeEnabled = true
+            let restarted = AuthoredMergeRequestMonitor(settings: saved, glab: glab, notifications: NotificationService(), canAutomate: { _ in true })
+            restarted.authorFeedbackAllowsMerge = { _, _, _ in true }
+            try await refresh(restarted)
+            #expect(gitlab.requests.filter { $0.method == "PUT" && $0.endpoint.hasSuffix("/merge") }.count == 1)
         }
     }
 
@@ -290,6 +328,7 @@ struct AuthorFeedbackMergeTests {
         gitlab.write("approval-state.json", #"{"rules":[{"approvals_required":1,"approved":true}]}"#)
         gitlab.handler = { call in
             switch call.endpoint {
+            case "/version": return InMemoryGitLab.output(#"{"version":"19.5.3-ee"}"#)
             case "/user":
                 if gitlab.has("edit-description-during-auth") {
                     gitlab.remove("edit-description-during-auth")
@@ -309,8 +348,16 @@ struct AuthorFeedbackMergeTests {
             case let path where path.hasPrefix("/projects/1/merge_requests?state=opened"):
                 return InMemoryGitLab.output("[" + gitlab.text("request.json") + "]")
             case let path where path.contains("/blocks?"): return InMemoryGitLab.output("[]")
-            case "/projects/1": return InMemoryGitLab.output(#"{"default_branch":"main","only_allow_merge_if_all_discussions_are_resolved":true,"reset_approvals_on_push":true}"#)
+            case "/projects/1": return InMemoryGitLab.output(#"{"default_branch":"main","merge_trains_enabled":false,"only_allow_merge_if_all_discussions_are_resolved":true,"reset_approvals_on_push":true}"#)
             case let path where path.hasSuffix("/merge"):
+                if call.command.contains("auto_merge=true") {
+                    gitlab.write("queued")
+                    var object = try #require(JSONSerialization.jsonObject(with: gitlab.data("request.json")) as? [String: Any])
+                    object["merge_when_pipeline_succeeds"] = true
+                    try JSONSerialization.data(withJSONObject: object).store(in: gitlab, as: "request.json")
+                    return InMemoryGitLab.output("{}")
+                }
+                if gitlab.has("uncertain-merge") { throw GlabError.timedOut }
                 gitlab.write("merge-started")
                 try await gitlab.pause(ifPresent: "hold-merge", entered: "merge-started", until: "release-merge")
                 gitlab.write("merged")

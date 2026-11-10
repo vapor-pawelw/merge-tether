@@ -28,6 +28,7 @@ final class SettingsManager {
     var autoApproveOptOuts: Set<MRAutomationScope.Target>
     var autoPublishOptOuts: Set<MRAutomationScope.Target> = []
     var autoMergeOptOuts: Set<MRAutomationScope.Target> = []
+    var mergeSubmissions: [MergeSubmissionReceipt] = []
     var ignoredMergeRequests: Set<MRAutomationScope.Target>
     var automation: AutomationSettings
     var automationReceipts: Set<TodoAutomationReceipt>
@@ -59,6 +60,8 @@ final class SettingsManager {
         automation = defaults.data(forKey: Key.automation)
             .flatMap { try? JSONDecoder().decode(AutomationSettings.self, from: $0) }
             ?? AutomationSettings()
+        mergeSubmissions = defaults.data(forKey: Key.mergeSubmissions)
+            .flatMap { try? JSONDecoder().decode([MergeSubmissionReceipt].self, from: $0) } ?? []
         automationReceipts = defaults.data(forKey: Key.automationReceipts)
             .flatMap { try? JSONDecoder().decode(Set<TodoAutomationReceipt>.self, from: $0) }
             ?? []
@@ -248,6 +251,9 @@ final class SettingsManager {
         if let data = try? JSONEncoder().encode(autoPublishOptOuts) {
             defaults.set(data, forKey: Key.autoPublishOptOuts)
         }
+        if let data = try? JSONEncoder().encode(mergeSubmissions) {
+            defaults.set(data, forKey: Key.mergeSubmissions)
+        }
         if let data = try? JSONEncoder().encode(autoMergeOptOuts) {
             defaults.set(data, forKey: Key.autoMergeOptOuts)
         }
@@ -257,6 +263,13 @@ final class SettingsManager {
             defaults.removeObject(forKey: Key.lastMenuSection)
         }
         if previousAutomation != automation { onAutomationChanged?(previousAutomation) }
+    }
+
+    func saveMergeSubmission(_ receipt: MergeSubmissionReceipt) -> Bool {
+        mergeSubmissions.removeAll { $0.target == receipt.target }
+        mergeSubmissions.append(receipt)
+        save()
+        return defaults.synchronize()
     }
 
     /// A non-idempotent CI request must not outrun its replay guard on disk.
@@ -350,6 +363,7 @@ final class SettingsManager {
         static let lastMenuSection = "lastMenuSection"
         static let autoApproveOptOuts = "autoApproveOptOuts"
         static let autoPublishOptOuts = "autoPublishOptOuts"
+        static let mergeSubmissions = "mergeSubmissions"
         static let autoMergeOptOuts = "autoMergeOptOuts"
         static let ignoredMergeRequests = "ignoredMergeRequests"
         static let feedbackSuggestionDecisions = "feedbackSuggestionDecisions"

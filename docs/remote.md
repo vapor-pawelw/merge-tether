@@ -172,3 +172,9 @@ The board fixture delays a manually reconnected snapshot to expose reconnect pro
 `RemotePhoneModelTests` compiles the same iOS model into the isolated macOS test target;
 its memory transport and clock cover lifecycle, stale callbacks, trust changes and
 pending-command safety without a live relay or GitLab.
+
+### Merge actions compatibility
+
+Phones advertising `merge-actions-v1` can explicitly merge owned ready MRs, set supported auto-merge/train requests, and prepare a bounded thread-resolution preview before confirming its exact IDs. Host-side live guards remain authoritative. Queued and in-train results do not claim a finished merge. Older phones receive the same readable board with these action cases filtered out before encoding.
+
+Approval metadata keeps the legacy `completed` field bounded for older decoders. The additive `received` field carries every current unique approver, including 5/2, and `requirementsSatisfied` preserves the distinction between total approvals and satisfaction of specific required rules. Updated phones use those fields for text, help and badge state.
