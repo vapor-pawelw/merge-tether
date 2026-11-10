@@ -98,7 +98,7 @@ Right-click an MR or choose its **Actions** button, then **Start conversation in
 
 ## Agent usage
 
-**Settings → Agent Usage** shows only CLI runs started by MergeTether, with estimated costs split between coding agents and verifiers, provider breakdowns and a chart by hour, day, week or month. Its top-five MR ranking follows the selected date range. Each MR's Details also shows its all-time tracked cost. Estimates are not subscription consumption or invoices; unknown and partial measurements remain labelled. Older records without an MR identity contribute to overall totals but are not assigned to an MR retrospectively.
+**Settings → Agent Usage** shows only CLI runs started by MergeTether, with estimated costs split between coding agents and verifiers, provider breakdowns and a chart by hour, day, week or month. Its top-five MR ranking follows the selected date range. Each MR's Details shows its all-time tracked cost, reported tokens and **Agent requests** separately for the verifier and reviewer / work agent. Requests count app-started CLI jobs, including retries, rather than internal model turns; cached checks add no request. Estimates are not subscription consumption or invoices; unknown and partial measurements remain labelled. Older records without an MR identity contribute to overall totals but are not assigned to an MR retrospectively.
 
 ## Privacy
 

@@ -4,6 +4,32 @@ import Testing
 
 @Suite("Assistant usage process capture")
 struct AssistantUsageRunnerTests {
+    @Test("MR request counts follow CLI attempts rather than internal completed turns", arguments: AssistantUsageRole.allCases)
+    func mergeRequestAttempts(_ role: AssistantUsageRole) async throws {
+        // given
+        let file = temporaryFile()
+        defer { try? FileManager.default.removeItem(at: file.deletingLastPathComponent()) }
+        let store = AssistantUsageStore(file: file)
+        let target = AssistantUsageMergeRequest(host: "gitlab.example.test", username: "me", projectID: 7, iid: 11)
+        let turn = #"{"type":"turn.completed","usage":{"input_tokens":100,"cached_input_tokens":60,"output_tokens":20}}"#
+
+        // when: one failed attempt reports two turns; the fresh retry reports one
+        let failed = try await AssistantUsageRunner.run(URL(fileURLWithPath: "/bin/sh"),
+            arguments: ["-c", #"printf '%s\n' "$1" "$1"; exit 7"#, "fixture", turn],
+            environment: [:], usage: .init(role: role, assistant: .codex, model: "gpt-6.1-sol", mergeRequest: target), store: store)
+        let retry = try await AssistantUsageRunner.run(URL(fileURLWithPath: "/bin/echo"), arguments: [turn],
+            environment: [:], usage: .init(role: role, assistant: .codex, model: "gpt-6.1-sol", mergeRequest: target), store: store)
+        let snapshot = try await AssistantUsageStore(file: file).snapshot()
+        let total = snapshot.total(for: target, role: role)
+
+        // then
+        #expect(failed.exitCode == 7 && retry.exitCode == 0)
+        #expect(total.runs == 2 && total.unknownCostRuns == 1)
+        #expect(total.inputTokens == 300 && total.cachedInputTokens == 180 && total.outputTokens == 60)
+        let otherRole: AssistantUsageRole = role == .codingAgent ? .verifier : .codingAgent
+        #expect(snapshot.total(for: target, role: otherRole).runs == 0)
+    }
+
     @Test("Transient accounting failures retain measured runs for the next successful write")
     func transientAccountingRecovery() async throws {
         let file = temporaryFile()

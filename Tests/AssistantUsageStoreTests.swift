@@ -4,6 +4,81 @@ import Testing
 
 @Suite("Assistant usage persistence")
 struct AssistantUsageStoreTests {
+    @Test("A recorded zero estimate is distinct from no MR requests and unknown cost")
+    func mergeRequestRoleZeroAndUnknownCost() async throws {
+        // given
+        let file = temporaryFile()
+        defer { try? FileManager.default.removeItem(at: file.deletingLastPathComponent()) }
+        let store = AssistantUsageStore(file: file)
+        let target = usageMR()
+        try await record(store, at: "2026-11-04T08:05:00Z", role: .codingAgent, cost: 0, mergeRequest: target)
+        try await record(store, at: "2026-11-04T08:05:00Z", role: .verifier, cost: nil, mergeRequest: target)
+
+        // when
+        let snapshot = try await store.snapshot()
+        let reviewer = snapshot.total(for: target, role: .codingAgent)
+        let verifier = snapshot.total(for: target, role: .verifier)
+
+        // then
+        #expect(reviewer.runs == 1 && reviewer.estimatedUSD == 0 && reviewer.unknownCostRuns == 0)
+        #expect(verifier.runs == 1 && verifier.estimatedUSD == 0 && verifier.unknownCostRuns == 1)
+        #expect(snapshot.total(for: usageMR(iid: 999), role: .codingAgent) == AssistantUsageTotal())
+    }
+
+    @Test("MR role totals include all recorded months and providers after compaction and restart")
+    func mergeRequestRoleLifetimeTotals() async throws {
+        // given
+        let file = temporaryFile()
+        defer { try? FileManager.default.removeItem(at: file.deletingLastPathComponent()) }
+        let store = AssistantUsageStore(file: file, receiptLimit: 1)
+        let target = usageMR()
+        try await record(store, at: "2026-09-04T08:05:00Z", role: .codingAgent, cost: 1, mergeRequest: target)
+        try await record(store, at: "2026-10-04T08:05:00Z", role: .codingAgent, cost: 2, assistant: .codex, mergeRequest: target)
+        try await record(store, at: "2026-11-04T08:05:00Z", role: .verifier, cost: 4, mergeRequest: target)
+        try await record(store, at: "2026-11-04T08:05:00Z", role: .verifier, cost: 8, assistant: .codex, mergeRequest: target)
+        try await record(store, at: "2026-11-04T08:05:00Z", role: .codingAgent, cost: 16)
+
+        // when
+        let snapshot = try await AssistantUsageStore(file: file).snapshot()
+        let reviewer = snapshot.total(for: target, role: .codingAgent)
+        let verifier = snapshot.total(for: target, role: .verifier)
+
+        // then
+        #expect(reviewer.runs == 2 && reviewer.estimatedUSD == 3)
+        #expect(verifier.runs == 2 && verifier.estimatedUSD == 12)
+        #expect(snapshot.total(for: target).runs == reviewer.runs + verifier.runs)
+        #expect(snapshot.total(for: target).estimatedUSD == reviewer.estimatedUSD + verifier.estimatedUSD)
+    }
+
+    @Test("MR requests deduplicate callbacks but count a new retry, retaining partial and missing usage")
+    func mergeRequestRoleRequestsAndPartialUsage() async throws {
+        // given
+        let file = temporaryFile()
+        defer { try? FileManager.default.removeItem(at: file.deletingLastPathComponent()) }
+        let store = AssistantUsageStore(file: file, receiptLimit: 1)
+        let target = usageMR(), id = UUID(), retry = UUID()
+        let date = try instant("2026-11-04T08:05:00Z")
+        try await store.begin(id: id, role: .verifier, assistant: .codex, date: date, mergeRequest: target)
+        try await store.begin(id: id, role: .verifier, assistant: .codex, date: date, mergeRequest: target)
+        let measured = AssistantUsageMeasurement(tokens: .init(input: 100, cachedInput: 60, output: 20),
+            estimatedUSD: 0.25, pricingVersion: "test")
+        try await store.finish(id: id, measurement: measured, complete: false)
+        try await store.finish(id: id, measurement: measured, complete: false)
+        try await store.begin(id: retry, role: .verifier, assistant: .codex, date: date, mergeRequest: target)
+
+        // when: a restart retains the interrupted retry and the compacted first attempt
+        let snapshot = try await AssistantUsageStore(file: file).snapshot()
+        let verifier = snapshot.total(for: target, role: .verifier)
+
+        // then
+        #expect(verifier.runs == 2 && verifier.unknownCostRuns == 2)
+        #expect(verifier.estimatedUSD == 0.25)
+        #expect(verifier.inputTokens == 100 && verifier.cachedInputTokens == 60 && verifier.outputTokens == 20)
+        #expect(verifier.tokensUnavailable == true)
+        #expect(snapshot.total(for: target, role: .codingAgent).runs == 0)
+        #expect(snapshot.total(for: usageMR(iid: 999), role: .verifier) == AssistantUsageTotal())
+    }
+
     @Test("Compacted MR costs retain display metadata and coding/verifier totals after restart")
     func compactedMergeRequestCostsPreserveMetadataAndTotals() async throws {
         let file = temporaryFile()
@@ -51,6 +126,8 @@ struct AssistantUsageStoreTests {
         for (index, identity) in identities.enumerated() {
             let total = snapshot.total(for: identity)
             #expect(total.runs == 1 && total.estimatedUSD == Double(1 << index))
+            #expect(snapshot.total(for: identity, role: .codingAgent) == total)
+            #expect(snapshot.total(for: identity, role: .verifier).runs == 0)
         }
         #expect(snapshot.mergeRequestTotals(interval: nil, now: try instant("2026-11-04T12:00:00Z")).count == 6)
         #expect(snapshot.total(for: .codingAgent).estimatedUSD == 127)
@@ -78,6 +155,8 @@ struct AssistantUsageStoreTests {
         #expect(legacy.total(for: .codingAgent).estimatedUSD == 5)
         #expect(legacy.entries.allSatisfy { $0.mergeRequest == nil })
         #expect(legacy.total(for: target).runs == 0)
+        #expect(legacy.total(for: target, role: .codingAgent).runs == 0)
+        #expect(legacy.total(for: target, role: .verifier).runs == 0)
         #expect(legacy.mergeRequestTotals(interval: nil, now: try instant("2026-11-04T12:00:00Z")).isEmpty)
         try await record(store, at: "2026-11-04T08:05:00Z", role: .codingAgent, cost: 4, mergeRequest: target)
         let persisted = try await AssistantUsageStore(file: file, receiptLimit: 1).snapshot()

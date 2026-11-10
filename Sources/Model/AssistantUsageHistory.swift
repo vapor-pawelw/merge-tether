@@ -67,9 +67,9 @@ struct AssistantUsageSnapshot: Sendable {
         return result
     }
 
-    func total(for mergeRequest: AssistantUsageMergeRequest) -> AssistantUsageTotal {
+    func total(for mergeRequest: AssistantUsageMergeRequest, role: AssistantUsageRole? = nil) -> AssistantUsageTotal {
         var result = AssistantUsageTotal()
-        for entry in entries where entry.mergeRequest?.id == mergeRequest.id {
+        for entry in entries where entry.mergeRequest?.id == mergeRequest.id && (role == nil || entry.role == role) {
             result.add(entry.total)
         }
         return result
