@@ -33,6 +33,25 @@ in the background and refresh every 25 seconds while foregrounded, renewing soon
 when needed to keep the host status current. The connection label remains stable
 during an in-flight refresh; remote writes still require an unexpired snapshot.
 
+After trusting a pairing, the pairing form closes as soon as it is saved, independently
+of the first Mac response. The phone shows **Connecting to Mac…** for at most 45 seconds,
+then **Mac unavailable** with a retry action if no fresh snapshot arrives. A detected
+transport or snapshot error has its own **Connection failed** state. Saved pairing
+never requires reopening the Mac's pairing window for an ordinary connection attempt;
+the current Mac app starts its saved phone connection on launch. The Mac must be awake
+and MergeTether running; Keychain authorization or a blocked relay can still prevent connection.
+
+The circular toolbar arrow is **Refresh board**: it requests data over the current
+connection and coalesces outstanding refreshes. **… → Reconnect** deliberately replaces
+the phone transport, including its retry backoff, while keeping the saved pairing.
+Reconnect is also offered directly when the Mac is unavailable, and repeated taps
+coalesce while connecting. Returning from the background creates a fresh connection.
+The last board for the same pairing remains visible with an offline notice, but actions
+wait for a fresh authenticated snapshot. Replacing pairing clears that board and its
+open details. Reconnect never repeats a GitLab command: a pending command becomes
+an unconfirmed outcome, since closing the connection cannot cancel work already accepted
+by the Mac. Inspect the actual outcome before deliberately retrying it.
+
 The Mac reads saved pairing from Keychain in the background. A system permission
 prompt does not prevent the main window or MR automation from starting. A late
 read cannot override pairing details you edit or an explicit enable/disable action.
@@ -145,3 +164,11 @@ To install on a physical iPhone, use an Apple Development signing team and selec
 the device in Xcode. A free Personal Team can be used for local development subject
 to Apple's provisioning restrictions; wider App Store/TestFlight distribution has
 separate Apple account requirements and is not provided by Cloudflare Free.
+
+Debug-only UI fixtures use `--remote-preview` (synthetic board),
+`--remote-preview-connecting`, `--remote-preview-offline` and `--remote-preview-failed`.
+They inject an in-memory pairing/transport and never open Keychain or the network.
+The board fixture delays a manually reconnected snapshot to expose reconnect progress.
+`RemotePhoneModelTests` compiles the same iOS model into the isolated macOS test target;
+its memory transport and clock cover lifecycle, stale callbacks, trust changes and
+pending-command safety without a live relay or GitLab.

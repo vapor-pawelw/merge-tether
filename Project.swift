@@ -71,7 +71,7 @@ let project = Project(
             product: .unitTests,
             bundleId: "com.vaporpw.GitLabTodosTests",
             deploymentTargets: .macOS("14.0"),
-            sources: ["Tests/**/*.swift"],
+            sources: ["Tests/**/*.swift", "iOS/RemotePhoneModel.swift"],
             resources: ["Tests/Fixtures/**"],
             dependencies: [
                 .target(name: "GitLabTodos"),

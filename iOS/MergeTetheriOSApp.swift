@@ -1,7 +1,13 @@
 import SwiftUI
 @main struct MergeTetheriOSApp: App {
-    @State private var model = RemotePhoneModel()
+    @State private var model = makeModel()
     @Environment(\.scenePhase) private var phase
+    @MainActor private static func makeModel() -> RemotePhoneModel {
+        #if DEBUG
+        if let preview = RemoteDemo.makeModel() { return preview }
+        #endif
+        return RemotePhoneModel()
+    }
     var body: some Scene {
         WindowGroup {
             RemoteBoardView(model: model)

@@ -3,6 +3,23 @@ import Foundation
 import MergeTetherRemote
 
 @MainActor enum RemoteDemo {
+    static func makeModel() -> RemotePhoneModel? {
+        let arguments = CommandLine.arguments
+        let boardPreview = arguments.contains("--remote-preview")
+        let connecting = arguments.contains("--remote-preview-connecting")
+        let offline = arguments.contains("--remote-preview-offline")
+        let failed = arguments.contains("--remote-preview-failed")
+        guard boardPreview || connecting || offline || failed else { return nil }
+        let pairing = try! RemotePairing.generate(origin: URL(string: "https://relay.example.org")!, access: String(repeating: "A", count: 43))
+        var connections = 0
+        let model = RemotePhoneModel(loadPairing: { pairing }, savePairing: { _ in }, makeConnection: { _ in
+            connections += 1
+            return PreviewTransport(board: boardPreview ? board : nil, delay: connections > 1, failed: failed)
+        }, now: { Date().addingTimeInterval(offline ? -46 : 0) })
+        if boardPreview { model.state.receive(.init(type: .snapshot, challenge: model.state.challenge(), board: board)) }
+        return model
+    }
+
     static let board = RemoteBoard(hostSession: UUID(), account: "Demo", updatedAt: .now, lanes: [
         .init(id: .own, cards: [
             .init(id: "mr:1:42", title: "Add a clearer payment confirmation", project: "example/payments-api",
@@ -29,5 +46,23 @@ import MergeTetherRemote
         ]),
         .init(id: .other, cards: []),
     ])
+}
+@MainActor private final class PreviewTransport: RemotePhoneTransport {
+    var onMessage: (@MainActor (RemoteMessage) async -> Void)?
+    var onStatus: (@MainActor (Bool, Bool) -> Void)?
+    let board: RemoteBoard?
+    let delay: Bool
+    let failed: Bool
+    init(board: RemoteBoard?, delay: Bool, failed: Bool) { self.board = board; self.delay = delay; self.failed = failed }
+    func start() { onStatus?(!failed, failed) }
+    func stop() { onStatus?(false, false) }
+    func send(_ message: RemoteMessage) async throws {
+        if message.type == .hello, let board {
+            if delay { try await Task.sleep(for: .seconds(8)) }
+            await onMessage?(.init(type: .snapshot, challenge: message.challenge, board: board))
+        } else if let command = message.command {
+            await onMessage?(.init(type: .result, result: .init(id: command.id, status: .completed)))
+        }
+    }
 }
 #endif

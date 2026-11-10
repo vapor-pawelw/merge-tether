@@ -23,12 +23,26 @@ struct RemoteBoardView: View {
                         }
                     }
                 } else {
-                    ContentUnavailableView { Label(.Remote.remoteOffline, systemImage: "laptopcomputer") }
-                        description: { Text(.Remote.remotePairHelp) }
+                    TimelineView(.periodic(from: .now, by: 1)) { context in
+                        let status = model.connectionStatus(now: context.date)
+                        ContentUnavailableView {
+                            Label(status.title, systemImage: status.symbol)
+                        } description: {
+                            Text(status.help)
+                        } actions: {
+                            if status == .connecting {
+                                ProgressView().accessibilityLabel(Text(.Remote.remoteConnecting))
+                            } else {
+                                reconnectButton
+                                    .buttonStyle(.borderedProminent)
+                            }
+                        }
+                        .accessibilityIdentifier("remote.connection.empty")
+                    }
                 }
             }
             .safeAreaInset(edge: .bottom) {
-                if model.error { Text(.Remote.remoteError).font(.caption).foregroundStyle(.red).padding() }
+                if model.error && !model.paired { Text(.Remote.remoteError).font(.caption).foregroundStyle(.red).padding() }
             }
             .navigationTitle(Text(.Remote.remoteTitle)).navigationBarTitleDisplayMode(.inline)
             .toolbar {
@@ -52,9 +66,20 @@ struct RemoteBoardView: View {
                             .accessibilityLabel(Text(.Board.boardInboxButton))
                             .accessibilityValue(Text(.Board.boardInboxAccessibilityCount(inboxCards.count)))
                             .accessibilityIdentifier("remote.inbox")
-                            Button { Task { await model.refresh() } } label: { Image(systemName: "arrow.clockwise") }
-                                .accessibilityLabel(Text(.Remote.remoteRefresh))
-                                .accessibilityIdentifier("remote.refresh")
+                            TimelineView(.periodic(from: .now, by: 1)) { context in
+                                let status = model.connectionStatus(now: context.date)
+                                HStack(spacing: 16) {
+                                    Button { Task { await model.refresh() } } label: { Image(systemName: "arrow.clockwise") }
+                                        .accessibilityLabel(Text(.Remote.remoteRefreshData))
+                                        .accessibilityIdentifier("remote.refresh")
+                                        .disabled(status != .connected)
+                                    Menu {
+                                        reconnectButton.disabled(status == .connecting)
+                                    } label: { Image(systemName: "ellipsis.circle") }
+                                        .accessibilityLabel(Text(.Remote.remoteConnectionMenu))
+                                        .accessibilityIdentifier("remote.connection.menu")
+                                }
+                            }
                         }
                     }
                     ToolbarItem(placement: .topBarLeading) {
@@ -72,7 +97,9 @@ struct RemoteBoardView: View {
                 Text(.Remote.remotePairingTrust) + Text(verbatim: "\n" + (model.pairingCandidate?.origin.absoluteString ?? ""))
             }
             .sheet(isPresented: $pairingSheet) { NavigationStack { RemotePairingView(model: model) }.presentationDetents([.medium, .large]) }
-            .onChange(of: model.state.board?.hostSession) { pairingSheet = false }
+            .onChange(of: model.pairingRevision) {
+                pairingSheet = false; selected = nil; showingInbox = false; pendingInboxCard = nil
+            }
             .popover(isPresented: $showingInbox, attachmentAnchor: .rect(.bounds), arrowEdge: .top) {
                 RemoteInboxView(cards: inboxCards, onOpen: { pendingInboxCard = $0; showingInbox = false },
                     onFinishCommentReview: finishCommentReview, canAct: { model.state.canAct(now: $0) })
@@ -99,19 +126,30 @@ struct RemoteBoardView: View {
         guard let action = card.actions.first(where: { $0.kind == .finishCommentReview }) else { return }
         Task { await model.perform(card: card, action: action) }
     }
+    private var reconnectButton: some View {
+        Button { model.reconnect() } label: { Label(.Remote.remoteReconnect, systemImage: "arrow.triangle.2.circlepath") }
+            .accessibilityIdentifier("remote.reconnect")
+    }
     private var connectionStatus: some View {
         TimelineView(.periodic(from: .now, by: 1)) { context in
-            let connected = model.state.isConnected(now: context.date)
-            let refreshing = model.state.isRefreshing(now: context.date)
-            HStack(spacing: 6) {
-                Label(connected ? .Remote.remoteConnected : .Remote.remoteOffline,
-                      systemImage: connected ? "checkmark.circle.fill" : "wifi.slash")
-                    .foregroundStyle(connected ? .green : .secondary)
-                    .accessibilityIdentifier("remote.connection.status")
-                ProgressView().controlSize(.mini).frame(width: 16, height: 16)
-                    .opacity(refreshing ? 1 : 0).accessibilityHidden(!refreshing)
-                    .accessibilityLabel(Text(.Remote.remoteRefresh))
-                    .accessibilityIdentifier("remote.refresh.progress")
+            let status = model.connectionStatus(now: context.date)
+            let refreshing = status == .connecting || (status == .connected && model.state.isRefreshing(now: context.date))
+            VStack(alignment: .leading, spacing: 6) {
+                HStack(spacing: 6) {
+                    Label(status.title, systemImage: status.symbol)
+                        .foregroundStyle(status == .connected ? .green : .secondary)
+                        .accessibilityIdentifier("remote.connection.status")
+                    ProgressView().controlSize(.mini).frame(width: 16, height: 16)
+                        .opacity(refreshing ? 1 : 0).accessibilityHidden(!refreshing)
+                        .accessibilityLabel(Text(.Remote.remoteRefreshData))
+                        .accessibilityIdentifier("remote.refresh.progress")
+                    Spacer()
+                    if status == .offline || status == .failed { reconnectButton }
+                }
+                if status != .connected {
+                    Text(.Remote.remoteCachedBoard).foregroundStyle(.secondary)
+                    if status != .connecting { Text(status.help).foregroundStyle(.secondary) }
+                }
             }
             .font(.caption).padding(.horizontal).padding(.top, 8)
         }

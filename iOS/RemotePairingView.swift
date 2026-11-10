@@ -21,7 +21,7 @@ struct RemotePairingView: View {
             .alert(Text(.Remote.remotePair), isPresented: Binding(
                 get: { model.pairingCandidate != nil }, set: { if !$0 { model.pairingCandidate = nil } }
             )) {
-                Button(.Remote.remoteConnect) { model.acceptPairing(); if !model.error { dismiss() } }
+                Button(.Remote.remoteConnect) { if model.acceptPairing() { dismiss() } }
                 Button(.Remote.remoteCancel, role: .cancel) { model.pairingCandidate = nil }
             } message: {
                 Text(.Remote.remotePairingTrust) + Text(verbatim: "\n" + (model.pairingCandidate?.origin.absoluteString ?? ""))

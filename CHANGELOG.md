@@ -6,6 +6,8 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 
 ## Unreleased
 
+- Separate saved iOS pairing from connection progress and failure, bound the initial wait, and add an explicit Reconnect action alongside board refresh without forgetting trust or replaying commands.
+
 - Escalate source-bound technical questions from comment verification to the configured feedback reviewer/fixer, keeping private hypotheses separate from original reviewer requirements and reusing the existing scoped recovery budget and permissions.
 
 - Show lifetime MR usage in Details separately for verifiers and reviewer / work agents, with estimated costs, reported tokens and app-issued request counts including retries; retain explicit partial and unavailable states.

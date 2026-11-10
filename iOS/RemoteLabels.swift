@@ -43,3 +43,32 @@ extension RemoteCommandResult.Status {
         }
     }
 }
+
+extension RemotePhoneConnectionStatus {
+    var title: LocalizedStringResource {
+        switch self {
+        case .unpaired: .Remote.remotePair
+        case .connecting: .Remote.remoteConnecting
+        case .connected: .Remote.remoteConnected
+        case .offline: .Remote.remoteUnavailable
+        case .failed: .Remote.remoteConnectionFailed
+        }
+    }
+    var help: LocalizedStringResource {
+        switch self {
+        case .unpaired: .Remote.remotePairHelp
+        case .connecting: .Remote.remoteConnectingHelp
+        case .connected, .offline: .Remote.remoteUnavailableHelp
+        case .failed: .Remote.remoteConnectionFailedHelp
+        }
+    }
+    var symbol: String {
+        switch self {
+        case .unpaired: "laptopcomputer.and.iphone"
+        case .connecting: "laptopcomputer"
+        case .connected: "checkmark.circle.fill"
+        case .offline: "wifi.slash"
+        case .failed: "exclamationmark.triangle"
+        }
+    }
+}

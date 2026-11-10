@@ -1082,6 +1082,176 @@
           }
         }
       }
+    },
+    "remote.connecting": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Connecting to Mac…"
+          }
+        },
+        "pl": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Łączenie z Makiem…"
+          }
+        }
+      }
+    },
+    "remote.connectingHelp": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Pairing is saved. Waiting for a fresh board from your Mac. Keep MergeTether open on an awake, connected Mac."
+          }
+        },
+        "pl": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Parowanie jest zapisane. Czekamy na aktualną tablicę z Maca. MergeTether musi być otwarty, a Mac wybudzony i połączony z siecią."
+          }
+        }
+      }
+    },
+    "remote.unavailable": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Mac unavailable"
+          }
+        },
+        "pl": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Mac jest niedostępny"
+          }
+        }
+      }
+    },
+    "remote.unavailableHelp": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Pairing is saved. Check that your Mac is awake, MergeTether is running and both devices have internet access. We keep trying in the background while this app is open."
+          }
+        },
+        "pl": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Parowanie jest zapisane. Sprawdź, czy Mac jest wybudzony, MergeTether działa i oba urządzenia mają internet. Gdy ta aplikacja jest otwarta, nadal próbujemy się połączyć."
+          }
+        }
+      }
+    },
+    "remote.connectionFailed": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Connection failed"
+          }
+        },
+        "pl": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Błąd połączenia"
+          }
+        }
+      }
+    },
+    "remote.connectionFailedHelp": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Could not get a fresh board. Check your internet connection and phone access in MergeTether on your Mac, then reconnect."
+          }
+        },
+        "pl": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Nie udało się pobrać aktualnej tablicy. Sprawdź internet i dostęp telefonu w MergeTether na Macu, a następnie połącz ponownie."
+          }
+        }
+      }
+    },
+    "remote.reconnect": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Reconnect"
+          }
+        },
+        "pl": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Połącz ponownie"
+          }
+        }
+      }
+    },
+    "remote.connectionMenu": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Connection options"
+          }
+        },
+        "pl": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Opcje połączenia"
+          }
+        }
+      }
+    },
+    "remote.refreshData": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Refresh board"
+          }
+        },
+        "pl": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Odśwież tablicę"
+          }
+        }
+      }
+    },
+    "remote.cachedBoard": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Showing the last received board. Actions need a fresh connection."
+          }
+        },
+        "pl": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Wyświetlamy ostatnią otrzymaną tablicę. Akcje wymagają aktualnego połączenia."
+          }
+        }
+      }
     }
   },
   "version": "1.0"
