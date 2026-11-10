@@ -363,6 +363,23 @@
           }
         }
       }
+    },
+    "automationHistory.execution.unavailable": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "The execution record is unavailable. No outcome is confirmed."
+          }
+        },
+        "pl": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Historia wykonania jest niedostępna. Wynik nie został potwierdzony."
+          }
+        }
+      }
     }
   },
   "version": "1.0"

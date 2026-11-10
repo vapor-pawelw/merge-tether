@@ -123,6 +123,7 @@ import Testing
             key: .init(assistant: .codex, work: .init(host: "gitlab.example.test", projectID: 7, iid: 11),
                        username: "me", workspace: "", access: .gitLabRead), title: "Review", prompt: "Review",
             createdAt: Date(), allowsPush: false, execution: .init(state: .running))]
+        settings.save()
         let glab = GlabService()
         glab.resolvedHost = "gitlab.example.test"
         glab.currentUsername = "me"
@@ -130,11 +131,160 @@ import Testing
         #expect(automation.entries[0].state == .running)
         #expect(automation.entries[1].state == .waitingForAssistant)
         settings.assistantHandoffs[0].execution = .init(state: .succeeded, summary: "Fix verified")
+        settings.save()
         automation.synchronizeAssistantJobs()
         #expect(automation.entries[0].state == .completed)
         #expect(automation.entries[0].summary == "Fix verified")
         #expect(automation.entries[1].state == .waitingForAssistant)
-        #expect(SettingsManager(defaults: defaults).workflowActivity[0].state == .completed)
+        #expect(SettingsManager(defaults: defaults).workflowActivity[0].state == .waitingForAssistant)
+    }
+
+    @Test func linkedCompletionAppearsWithoutSynchronizationOrAnOutcomeMirror() throws {
+        let suite = "WorkflowExecutionProjection.\(UUID())"
+        let defaults = try #require(UserDefaults(suiteName: suite))
+        defer { defaults.removePersistentDomain(forName: suite) }
+        let settings = SettingsManager(defaults: defaults)
+        let id = UUID()
+        let stored = try entry(jobID: id)
+        settings.workflowActivity = [stored]
+        settings.assistantHandoffs = [.init(id: id,
+            key: .init(assistant: .codex, work: .init(host: stored.host, projectID: 7, iid: 11),
+                username: "me", workspace: "", access: .gitLabRead), title: "Review", prompt: "Review",
+            createdAt: Date(), allowsPush: false, execution: .init(state: .running))]
+        settings.save()
+        let gitlab = InMemoryGitLab()
+        defer { gitlab.close() }
+        let glab = gitlab.service(host: stored.host, username: "me")
+        let automation = MergeWorkflowAutomation(settings: settings, glab: glab, notifications: NotificationService())
+        #expect(automation.entries.first?.state == .running)
+        #expect(settings.workflowActivity.first?.state == .waitingForAssistant)
+
+        settings.assistantHandoffs[0].execution = .init(state: .succeeded, summary: "Verified run outcome")
+        settings.save()
+
+        #expect(automation.entries.first?.state == .completed)
+        #expect(automation.entries.first?.summary == "Verified run outcome")
+        #expect(settings.workflowActivity.first?.state == .waitingForAssistant)
+        #expect(settings.workflowActivity.first?.summary == nil)
+        let restored = SettingsManager(defaults: defaults)
+        #expect(restored.workflowActivity.first?.state == .waitingForAssistant)
+        let restarted = MergeWorkflowAutomation(settings: restored, glab: glab, notifications: NotificationService())
+        #expect(restarted.entries.first?.state == .completed)
+    }
+
+    @Test func aRetryLinkSurvivesAnUnrelatedAdmissionFailureAfterAwait() async throws {
+        let suite = "WorkflowLiveMutation.\(UUID())"
+        let defaults = try #require(UserDefaults(suiteName: suite))
+        defer { defaults.removePersistentDomain(forName: suite) }
+        let settings = SettingsManager(defaults: defaults)
+        settings.automation.applyPreset(.full, for: .codex)
+        let id = UUID()
+        let stored = try entry(jobID: id)
+        let request = stored.event.mergeRequest
+        settings.workflowActivity = [stored]
+        settings.assistantHandoffs = [.init(id: id,
+            key: .init(assistant: .codex, work: .init(host: stored.host, projectID: 7, iid: 11),
+                username: "me", workspace: "", access: .gitLabRead), title: "Review", prompt: "Review",
+            createdAt: Date(), allowsPush: false, execution: .init(state: .failed), taskPrompt: "Review this source.",
+            mergeRequestURL: request.webURL, workflow: .review, expectedHeadSHA: request.sha)]
+        let gitlab = InMemoryGitLab()
+        defer { gitlab.close() }
+        gitlab.write("hold-read")
+        gitlab.handler = { call in
+            guard call.endpoint == "/user", call.method == "GET" else { return try gitlab.unexpected(call) }
+            try await gitlab.pause(ifPresent: "hold-read", entered: "read-started", until: "release-read")
+            return InMemoryGitLab.output(error: "503 temporarily unavailable", code: 1)
+        }
+        let glab = gitlab.service(host: stored.host, username: "me")
+        let automation = MergeWorkflowAutomation(settings: settings, glab: glab, notifications: NotificationService(), retryWait: { _ in })
+        let coordinator = AssistantJobCoordinator(execute: { _, _ in
+            try await Task.sleep(for: .seconds(60))
+            return .init(result: .init(status: .succeeded, summary: "Done"), output: "")
+        })
+        automation.receive(.init(kind: .blockerChange, mergeRequest: request, identity: "unrelated-admission", context: "Read failure"),
+            host: stored.host, user: stored.user)
+        automation.startNext()
+        try await gitlab.waitFor("read-started")
+        let replacement = try await AssistantAutomationRunner.retry(id, settings: settings,
+            expectedHeadSHA: request.sha, jobCoordinator: coordinator)
+        defer { coordinator.cancel(replacement.id) }
+        #expect(settings.workflowActivity.first { $0.id == stored.id }?.assistantJobID == replacement.id)
+        gitlab.remove("hold-read")
+        gitlab.write("release-read")
+        let deadline = ContinuousClock.now + .seconds(5)
+        while automation.entries.first(where: { $0.id == "unrelated-admission" })?.isReadOnlyFailure != true,
+              ContinuousClock.now < deadline { await Task.yield() }
+        #expect(automation.entries.first { $0.id == "unrelated-admission" }?.isReadOnlyFailure == true)
+        #expect(settings.workflowActivity.first { $0.id == stored.id }?.assistantJobID == replacement.id)
+        #expect(automation.entries.first { $0.id == stored.id }?.assistantJobID == replacement.id)
+        #expect(SettingsManager(defaults: defaults).workflowActivity.first { $0.id == stored.id }?.assistantJobID == replacement.id)
+        #expect(gitlab.requests.allSatisfy { $0.method == "GET" })
+        coordinator.cancel(replacement.id)
+        while coordinator.isRunning(replacement.id), ContinuousClock.now < deadline { await Task.yield() }
+    }
+
+    @Test(arguments: [MergeWorkflowActivityState.queued, .running])
+    func restoredAdmissionIsDurablySkippedWithoutDispatch(_ state: MergeWorkflowActivityState) throws {
+        let suite = "WorkflowStartupAdmission.\(UUID())"
+        let defaults = try #require(UserDefaults(suiteName: suite))
+        defer { defaults.removePersistentDomain(forName: suite) }
+        let settings = SettingsManager(defaults: defaults)
+        settings.automation.applyPreset(.full, for: .codex)
+        var stored = try entry(jobID: nil)
+        stored.state = state
+        settings.workflowActivity = [stored]
+        settings.save()
+        let gitlab = InMemoryGitLab()
+        defer { gitlab.close() }
+        let glab = gitlab.service(host: stored.host, username: "me")
+        let automation = MergeWorkflowAutomation(settings: settings, glab: glab, notifications: NotificationService())
+        automation.startNext()
+        #expect(automation.entries.first?.state == .skipped)
+        #expect(SettingsManager(defaults: defaults).workflowActivity.first?.state == .skipped)
+        #expect(settings.assistantHandoffs.isEmpty && gitlab.requests.isEmpty)
+    }
+
+    @Test(arguments: [MergeWorkflowActivityState.waitingForAssistant, .running], ["missing", "mismatched", "terminal"])
+    func claimLineageIsPrunedOnlyForVerifiedTerminalExecution(_ state: MergeWorkflowActivityState, execution: String) throws {
+        let suite = "WorkflowUnavailableLineage.\(UUID())"
+        let defaults = try #require(UserDefaults(suiteName: suite))
+        defer { defaults.removePersistentDomain(forName: suite) }
+        let settings = SettingsManager(defaults: defaults)
+        settings.automation.workflowRules[.reviewWaiting].mode = .notify
+        var parent = try entry(jobID: nil)
+        parent.state = .skipped
+        let id = UUID()
+        var assessment = try entry(jobID: id)
+        assessment.state = state
+        assessment.pipelineClaimAssessment = .init(skippedActivityID: parent.id, skippedCreatedAt: parent.createdAt)
+        settings.workflowActivity = [assessment, parent]
+        if execution != "missing" {
+            settings.assistantHandoffs = [.init(id: id,
+                key: .init(assistant: .codex, work: .init(host: parent.host, projectID: 7, iid: 11),
+                    username: execution == "mismatched" ? "other" : "me", workspace: "", access: .gitLabRead),
+                title: "History", prompt: "History", createdAt: Date(), allowsPush: false,
+                execution: .init(state: .succeeded, summary: "Terminal run outcome"))]
+        }
+        let gitlab = InMemoryGitLab()
+        defer { gitlab.close() }
+        let glab = gitlab.service(host: parent.host, username: "me")
+        let automation = MergeWorkflowAutomation(settings: settings, glab: glab, notifications: NotificationService())
+        for index in 0..<125 {
+            automation.receive(.init(kind: .reviewWaiting, mergeRequest: parent.event.mergeRequest,
+                identity: "passive-\(index)", context: "History"), host: parent.host, user: parent.user)
+        }
+        let protected = execution != "terminal"
+        #expect(settings.workflowActivity.count == 120)
+        #expect(settings.workflowActivity.contains { $0.id == assessment.id && $0.assistantJobID == id } == protected)
+        #expect(settings.workflowActivity.contains { $0.id == parent.id } == protected)
+        if protected { #expect(automation.entries.first { $0.id == assessment.id }?.state == .skipped) }
+        let restored = SettingsManager(defaults: defaults)
+        let restarted = MergeWorkflowAutomation(settings: restored, glab: glab, notifications: NotificationService())
+        restarted.startNext()
+        #expect(restored.workflowActivity.contains { $0.id == assessment.id && $0.pipelineClaimAssessment?.skippedActivityID == parent.id } == protected)
+        #expect(restored.workflowActivity.contains { $0.id == parent.id } == protected)
+        #expect(restored.assistantHandoffs.map(\.id) == (execution == "missing" ? [] : [id]))
+        #expect(gitlab.requests.isEmpty)
     }
 
     @Test func interruptedLinkedRunIsFailedRatherThanCompletedOrAutomaticallyQueued() throws {
@@ -520,7 +670,8 @@ import Testing
         if mutation == "capacity" {
             for _ in 0..<300 where launched.isEmpty { try await Task.sleep(for: .milliseconds(10)) }
             let assessment = try #require(automation.entries.first { $0.pipelineClaimAssessment != nil })
-            #expect(assessment.state == .waitingForAssistant)
+            #expect(assessment.state == .running)
+            #expect(settings.workflowActivity.first { $0.id == assessment.id }?.state == .waitingForAssistant)
             for index in 0..<130 {
                 automation.receive(.init(kind: .reviewWaiting, mergeRequest: current, identity: "passive-\(index)",
                                          context: "Passive history fixture"), host: host, user: old.user)

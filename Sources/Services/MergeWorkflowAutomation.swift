@@ -60,13 +60,18 @@ struct MergeWorkflowActivityEntry: Codable, Identifiable {
 @MainActor
 @Observable
 final class MergeWorkflowAutomation {
-    private var history: [MergeWorkflowActivityEntry]
+    private var currentAdmissions: [MergeWorkflowActivityEntry] {
+        settings.workflowActivity.filter { isCurrent(host: $0.host, user: $0.user) }
+    }
     var entries: [MergeWorkflowActivityEntry] {
-        history.filter { isCurrent(host: $0.host, user: $0.user) }
+        currentAdmissions.map { entry in
+            WorkflowExecutionProjection.entry(entry,
+                job: settings.assistantHandoffs.first { $0.id == entry.assistantJobID })
+        }
     }
 
     var pendingPipelineHandoffs: [MergeWorkflowActivityEntry] {
-        entries.filter { $0.state == .awaitingPipelineHandoff && configuredRule(for: $0.event)?.mode == .assistant }
+        currentAdmissions.filter { $0.state == .awaitingPipelineHandoff && configuredRule(for: $0.event)?.mode == .assistant }
     }
 
     private let settings: SettingsManager
@@ -83,7 +88,7 @@ final class MergeWorkflowAutomation {
     @ObservationIgnored var onRemoteChange: (() -> Void)?
 
     func hasReadOnlyFailure(for request: GitLabMergeRequest) -> Bool {
-        let current = entries.filter {
+        let current = currentAdmissions.filter {
             $0.event.mergeRequest.projectID == request.projectID && $0.event.mergeRequest.iid == request.iid
                 && $0.event.mergeRequest.sha == request.sha
                 && ($0.event.kind != .pipelineFailure || $0.event.pipelineID == request.headPipeline?.id)
@@ -91,6 +96,7 @@ final class MergeWorkflowAutomation {
         // A newer result for the same trigger supersedes its older admission failure.
         return MergeWorkflowTrigger.allCases.contains { trigger in
             guard let entry = current.first(where: { $0.event.kind == trigger }), entry.state == .failed,
+                  entry.assistantJobID == nil, entry.chatURL == nil,
                   let failure = entry.readOnlyFailure, shouldProceed(entry),
                   failure.configuration.preservingScope(from: settings.automation) == settings.automation else { return false }
             return true
@@ -98,13 +104,13 @@ final class MergeWorkflowAutomation {
     }
 
     func retryReadOnlyFailures() {
-        for index in history.indices where history[index].state == .failed && history[index].isReadOnlyFailure
-            && isCurrent(host: history[index].host, user: history[index].user) {
-            if let failure = history[index].readOnlyFailure {
-                history[index].readOnlyFailure = .init(date: .distantPast, configuration: failure.configuration)
+        for index in settings.workflowActivity.indices where settings.workflowActivity[index].state == .failed && settings.workflowActivity[index].isReadOnlyFailure
+            && isCurrent(host: settings.workflowActivity[index].host, user: settings.workflowActivity[index].user) {
+            if let failure = settings.workflowActivity[index].readOnlyFailure {
+                settings.workflowActivity[index].readOnlyFailure = .init(date: .distantPast, configuration: failure.configuration)
             }
         }
-        saveHistory()
+        settings.save()
         startNext()
     }
 
@@ -146,68 +152,56 @@ final class MergeWorkflowAutomation {
         self.jobCoordinator = jobCoordinator
         self.retryWait = retryWait
         self.now = now
-        history = settings.workflowActivity.map { stored in
-            var entry = stored
-            if entry.state == .queued || entry.state == .running { entry.state = .skipped }
-            return entry
-        }
+        normalizeRestoredAdmissions()
         synchronizeAssistantJobs()
     }
 
-    /// A CLI result completes workflow activity only when its linked run finished.
-    /// Historical desktop deliveries have no execution evidence and remain history.
-    func synchronizeAssistantJobs() {
+    private func normalizeRestoredAdmissions() {
         var changed = false
-        for index in history.indices {
-            if let updated = settings.workflowActivity.first(where: { $0.id == history[index].id }),
-               updated.assistantJobID != history[index].assistantJobID {
-                history[index].assistantJobID = updated.assistantJobID
+        for index in settings.workflowActivity.indices where [.queued, .running].contains(settings.workflowActivity[index].state) {
+            settings.workflowActivity[index].state = .skipped
+            changed = true
+        }
+        if changed { settings.save() }
+    }
+
+    /// Compatibility entry point for retiring obsolete reminder jobs only.
+    /// General job execution is projected directly from its durable run record.
+    func synchronizeAssistantJobs() {
+        retireLegacyReviewWaiting()
+    }
+
+    private func retireLegacyReviewWaiting() {
+        var changed = false
+        for entry in currentAdmissions where entry.event.kind == .reviewWaiting {
+            guard let id = entry.assistantJobID,
+                  let jobIndex = settings.assistantHandoffs.firstIndex(where: {
+                      $0.id == id && $0.key.work == workKey(entry) && $0.key.username == entry.user.username
+                          && ($0.workflow == .draftReply || $0.workflow == nil)
+                  }) else { continue }
+            if settings.assistantHandoffs[jobIndex].workflow == nil {
+                settings.assistantHandoffs[jobIndex].workflow = .draftReply
                 changed = true
             }
-            let entry = history[index]
-            if entry.event.kind == .reviewWaiting, isCurrent(host: entry.host, user: entry.user),
-               let id = entry.assistantJobID,
-               let jobIndex = settings.assistantHandoffs.firstIndex(where: {
-                   $0.id == id && $0.key.work == workKey(entry) && $0.key.username == entry.user.username
-                       && ($0.workflow == .draftReply || $0.workflow == nil)
-               }) {
-                if settings.assistantHandoffs[jobIndex].workflow == nil {
-                    settings.assistantHandoffs[jobIndex].workflow = .draftReply
+            if let state = settings.assistantHandoffs[jobIndex].execution?.state,
+               state.isActive || state == .cancelled {
+                if state.isActive {
+                    AssistantAutomationRunner.cancel(id, settings: settings)
+                    if settings.assistantHandoffs[jobIndex].execution?.state.isActive == true {
+                        settings.assistantHandoffs[jobIndex].execution?.state = .cancelled
+                        settings.assistantHandoffs[jobIndex].execution?.finishedAt = Date()
+                    }
                     changed = true
                 }
-                if let state = settings.assistantHandoffs[jobIndex].execution?.state,
-                   state.isActive || state == .cancelled {
-                    if state.isActive {
-                        AssistantAutomationRunner.cancel(id, settings: settings)
-                        if settings.assistantHandoffs[jobIndex].execution?.state.isActive == true {
-                            settings.assistantHandoffs[jobIndex].execution?.state = .cancelled
-                            settings.assistantHandoffs[jobIndex].execution?.finishedAt = Date()
-                        }
-                        changed = true
-                    }
-                    let localState: MergeWorkflowActivityState = settings.automation.workflowRules[.reviewWaiting].mode == .off ? .skipped : .preview
-                    if history[index].state != localState { history[index].state = localState; changed = true }
-                    continue
+                let localState: MergeWorkflowActivityState = settings.automation.workflowRules[.reviewWaiting].mode == .off ? .skipped : .preview
+                if let index = settings.workflowActivity.firstIndex(where: { $0.id == entry.id && $0.assistantJobID == id }),
+                   settings.workflowActivity[index].state != localState {
+                    settings.workflowActivity[index].state = localState
+                    changed = true
                 }
             }
-            guard let id = history[index].assistantJobID,
-                  let job = settings.assistantHandoffs.first(where: { $0.id == id }),
-                  let execution = job.execution else { continue }
-            let state: MergeWorkflowActivityState = switch execution.state {
-            case .queued: .waitingForAssistant
-            case .running: .running
-            case .succeeded: .completed
-            case .blocked, .failed, .interrupted: .failed
-            case .cancelled: .skipped
-            }
-            let summary = execution.summary ?? execution.error
-            if history[index].state != state || history[index].summary != summary {
-                history[index].state = state
-                history[index].summary = summary
-                changed = true
-            }
         }
-        if changed { saveHistory() }
+        if changed { settings.save() }
     }
 
     func observe(_ authored: [GitLabMergeRequest], host: String, user: GitLabAuthenticatedUser) {
@@ -215,7 +209,7 @@ final class MergeWorkflowAutomation {
         synchronizeAssistantJobs()
         let rules = settings.automation.workflowRules
         let observationScope = settings.automation.scope
-        for entry in entries where entry.state == .awaitingPipelineHandoff || entry.state == .alreadyRegistered {
+        for entry in currentAdmissions where entry.state == .awaitingPipelineHandoff || entry.state == .alreadyRegistered {
             let original = entry.event.mergeRequest
             let current = authored.first { $0.projectID == original.projectID && $0.iid == original.iid }
             if current == nil || current?.sha != original.sha
@@ -247,7 +241,7 @@ final class MergeWorkflowAutomation {
     }
 
     func confirmPipelineHandoff(_ id: String) {
-        guard let entry = entries.first(where: { $0.id == id }),
+        guard let entry = currentAdmissions.first(where: { $0.id == id }),
               entry.state == .awaitingPipelineHandoff,
               let key = pipelineKey(entry),
               isCurrent(host: entry.host, user: entry.user),
@@ -264,7 +258,7 @@ final class MergeWorkflowAutomation {
     }
 
     private func reconsiderRegisteredPipelines() {
-        for entry in entries where entry.state == .alreadyRegistered || entry.state == .awaitingPipelineHandoff {
+        for entry in currentAdmissions where entry.state == .alreadyRegistered || entry.state == .awaitingPipelineHandoff {
             guard let key = pipelineKey(entry),
                   configuredRule(for: entry.event)?.mode == .assistant
             else { continue }
@@ -277,7 +271,7 @@ final class MergeWorkflowAutomation {
     /// execution keeps the live account, source/target and atomic-claim checks.
     private func reconsiderSkippedPipelines(_ authored: [GitLabMergeRequest], user: GitLabAuthenticatedUser) {
         guard settings.automation.autoClaimPipelineFailures, settings.automation.packageDecision != .disabled else { return }
-        for entry in entries where entry.state == .skipped && entry.event.kind == .pipelineFailure && entry.pipelineClaimAssessment == nil {
+        for entry in currentAdmissions where entry.state == .skipped && entry.event.kind == .pipelineFailure && entry.pipelineClaimAssessment == nil {
             guard entry.user == user, entry.assistantJobID == nil, entry.chatURL == nil,
                   (entry.summary ?? "").trimmingCharacters(in: .whitespacesAndNewlines).isEmpty,
                   let key = pipelineKey(entry), key.projectID > 0, key.mergeRequestIID > 0, key.pipelineID > 0,
@@ -299,12 +293,12 @@ final class MergeWorkflowAutomation {
                   !AssistantAutomationRunner.isWorking(on: workKey(entry))
             else { continue }
             guard !hasRecordedPipelineEffects(entry, key: key),
-                  history.lazy.filter({ $0.state == .queued }).prefix(24).count < 24 else { continue }
+                  settings.workflowActivity.lazy.filter({ $0.state == .queued }).prefix(24).count < 24 else { continue }
             if detector.status(for: key) == .unverified {
-                if let index = history.firstIndex(where: { $0.id == entry.id }) { history[index].event = event }
+                if let index = settings.workflowActivity.firstIndex(where: { $0.id == entry.id }) { settings.workflowActivity[index].event = event }
                 update(entry.id, .queued)
             } else if !detector.hasActiveReservation(for: key), detector.hasEmptyPipelineReceipt(for: key),
-                      !history.contains(where: { $0.pipelineClaimAssessment?.skippedActivityID == entry.id }) {
+                      !settings.workflowActivity.contains(where: { $0.pipelineClaimAssessment?.skippedActivityID == entry.id }) {
                 let id = entry.id + "|claim-assessment|" + UUID().uuidString.lowercased()
                 let event = MergeWorkflowEvent(kind: .pipelineFailure, mergeRequest: current, identity: id,
                     context: String(localized: .PipelineAutomation.pipelineClaimAssessmentContext),
@@ -312,9 +306,9 @@ final class MergeWorkflowAutomation {
                 var assessment = MergeWorkflowActivityEntry(id: id, event: event, createdAt: Date(), host: entry.host,
                                                            user: entry.user, state: .queued)
                 assessment.pipelineClaimAssessment = .init(skippedActivityID: entry.id, skippedCreatedAt: entry.createdAt)
-                history.insert(assessment, at: 0)
+                settings.workflowActivity.insert(assessment, at: 0)
                 pruneHistory()
-                saveHistory()
+                settings.save()
             }
         }
     }
@@ -345,7 +339,7 @@ final class MergeWorkflowAutomation {
 
     func receive(_ event: MergeWorkflowEvent, host: String, user: GitLabAuthenticatedUser) {
         guard let rule = configuredRule(for: event),
-              !entries.contains(where: { $0.id == event.identity })
+              !currentAdmissions.contains(where: { $0.id == event.identity })
         else { return }
 
         var entry = MergeWorkflowActivityEntry(
@@ -365,17 +359,17 @@ final class MergeWorkflowAutomation {
             }
         }
 
-        if entry.state == .queued, history.lazy.filter({ $0.state == .queued }).prefix(24).count == 24 {
+        if entry.state == .queued, settings.workflowActivity.lazy.filter({ $0.state == .queued }).prefix(24).count == 24 {
             entry.state = .skipped
         }
-        history.insert(entry, at: 0)
+        settings.workflowActivity.insert(entry, at: 0)
         pruneHistory()
-        saveHistory()
+        settings.save()
     }
 
     func startNext() {
         guard work == nil else { return }
-        for entry in entries where entry.state == .failed && entry.isReadOnlyFailure
+        for entry in currentAdmissions where entry.state == .failed && entry.isReadOnlyFailure
             && entry.assistantJobID == nil && entry.chatURL == nil && shouldProceed(entry)
             && !AssistantAutomationRunner.isWorking(on: workKey(entry)) {
             guard let failure = entry.readOnlyFailure,
@@ -383,7 +377,7 @@ final class MergeWorkflowAutomation {
                     || now().timeIntervalSince(failure.date) >= ReadOnlyAssessmentRetry.cooldown else { continue }
             update(entry.id, .queued)
         }
-        while let next = entries.last(where: { $0.state == .queued }) {
+        while let next = currentAdmissions.last(where: { $0.state == .queued && $0.assistantJobID == nil && $0.chatURL == nil }) {
             let mode = configuredRule(for: next.event)?.mode
             guard next.event.kind != .reviewWaiting, mode == .assistant else {
                 update(next.id, mode == .notify || mode == .preview ? .preview : .skipped)
@@ -398,26 +392,23 @@ final class MergeWorkflowAutomation {
                 do {
                     try await execute(next)
                 } catch is CancellationError {
-                    update(next.id, .skipped)
+                    update(next.id, .skipped, ifCurrent: next)
                 } catch PipelineRefreshError.ownershipReserved {
-                    update(next.id, .alreadyRegistered)
+                    update(next.id, .alreadyRegistered, ifCurrent: next)
                 } catch PipelineClaimAssessmentError.ownershipReserved {
-                    update(next.id, .alreadyRegistered)
+                    update(next.id, .alreadyRegistered, ifCurrent: next)
                 } catch let failure as InitialReadFailure {
-                    if let index = history.firstIndex(where: { $0.id == next.id }) {
-                        history[index].state = .failed
-                        history[index].readOnlyFailure = .init(date: now(), configuration: failure.configuration)
-                        history[index].summary = String(GlabService.redactWorkflowEvidence(String(describing: failure.cause)).prefix(600))
-                        saveHistory()
+                    mutate(next.id, ifCurrent: next) {
+                        $0.state = .failed
+                        $0.readOnlyFailure = .init(date: now(), configuration: failure.configuration)
+                        $0.summary = String(GlabService.redactWorkflowEvidence(String(describing: failure.cause)).prefix(600))
                     }
                 } catch {
-                    update(next.id, .failed)
+                    update(next.id, .failed, ifCurrent: next)
                     let summary = (error as? PipelineRefreshError)?.errorDescription
                         ?? (error as? PipelineClaimAssessmentError)?.errorDescription
-                    if let summary,
-                       let index = history.firstIndex(where: { $0.id == next.id }) {
-                        history[index].summary = summary
-                        saveHistory()
+                    if let summary {
+                        mutate(next.id, ifCurrent: next) { $0.summary = summary }
                     }
                     Log.monitor.error("Merge workflow execution failed: \(String(describing: error), privacy: .private)")
                 }
@@ -457,10 +448,9 @@ final class MergeWorkflowAutomation {
             }
         } catch is CancellationError { throw CancellationError() }
         catch { throw InitialReadFailure(cause: error, configuration: assessmentConfiguration) }
-        if let index = history.firstIndex(where: { $0.id == entry.id }), history[index].readOnlyFailure != nil {
-            history[index].readOnlyFailure = nil
-            history[index].summary = nil
-            saveHistory()
+        guard ownsAdmission(entry) else { throw CancellationError() }
+        if settings.workflowActivity.first(where: { $0.id == entry.id })?.readOnlyFailure != nil {
+            mutate(entry.id, ifCurrent: entry) { $0.readOnlyFailure = nil; $0.summary = nil }
         }
         // Pipeline refresh, reservations, job retries and worker launch remain outside the read retry boundary.
 
@@ -634,10 +624,9 @@ final class MergeWorkflowAutomation {
         // Transfer this owned reservation to the CLI run; terminal completion
         // releases it through the monitor callback rather than user dismissal.
         handoff = nil
-        if let index = history.firstIndex(where: { $0.id == entry.id }) {
-            history[index].assistantJobID = job.id
-            history[index].state = .waitingForAssistant
-            saveHistory()
+        mutate(entry.id, ifCurrent: entry) {
+            $0.assistantJobID = job.id
+            $0.state = .waitingForAssistant
         }
         synchronizeAssistantJobs()
     }
@@ -655,7 +644,7 @@ final class MergeWorkflowAutomation {
         reservation: ExistingPipelineWorkDetector.Key? = nil
     ) -> Bool {
         guard let lineage = entry.pipelineClaimAssessment, let key = pipelineKey(entry),
-              let skipped = history.first(where: { $0.id == lineage.skippedActivityID }),
+              let skipped = settings.workflowActivity.first(where: { $0.id == lineage.skippedActivityID }),
               skipped.createdAt == lineage.skippedCreatedAt, skipped.state == .skipped, skipped.pipelineClaimAssessment == nil,
               skipped.host == entry.host, skipped.user == entry.user, skipped.assistantJobID == nil, skipped.chatURL == nil,
               (skipped.summary ?? "").trimmingCharacters(in: .whitespacesAndNewlines).isEmpty,
@@ -721,33 +710,52 @@ final class MergeWorkflowAutomation {
     }
 
     private func shouldProceed(_ entry: MergeWorkflowActivityEntry) -> Bool {
-        settings.automaticActionsAllowed && entry.event.kind != .reviewWaiting && isCurrent(host: entry.host, user: entry.user)
+        settings.automaticActionsAllowed && ownsAdmission(entry)
+            && entry.event.kind != .reviewWaiting && isCurrent(host: entry.host, user: entry.user)
             && configuredRule(for: entry.event)?.mode == .assistant
             && (entry.event.kind != .pipelineFailure || settings.automation.autoClaimPipelineFailures
                 || confirmedPipelineHandoffs.contains(entry.id))
     }
 
-    private func update(_ id: String, _ state: MergeWorkflowActivityState) {
-        if let index = history.firstIndex(where: { $0.id == id }) {
-            history[index].state = state
-            saveHistory()
+    private func ownsAdmission(_ entry: MergeWorkflowActivityEntry) -> Bool {
+        settings.workflowActivity.contains {
+            $0.id == entry.id && $0.host == entry.host && $0.user == entry.user
+                && $0.createdAt == entry.createdAt && $0.assistantJobID == entry.assistantJobID
         }
     }
 
-    private func saveHistory() {
-        settings.workflowActivity = history
+    private func update(_ id: String, _ state: MergeWorkflowActivityState, ifCurrent expected: MergeWorkflowActivityEntry? = nil) {
+        mutate(id, ifCurrent: expected) { $0.state = state }
+    }
+
+    private func mutate(_ id: String, ifCurrent expected: MergeWorkflowActivityEntry? = nil,
+                        _ change: (inout MergeWorkflowActivityEntry) -> Void) {
+        guard expected.map(ownsAdmission) ?? true,
+              let index = settings.workflowActivity.firstIndex(where: { $0.id == id }) else { return }
+        change(&settings.workflowActivity[index])
         settings.save()
     }
 
     private func pruneHistory() {
-        let protected = Set(history.flatMap { entry -> [String] in
-            guard [.queued, .running, .waitingForAssistant].contains(entry.state),
+        let projected = settings.workflowActivity.map { entry in
+            WorkflowExecutionProjection.entry(entry,
+                job: settings.assistantHandoffs.first { $0.id == entry.assistantJobID })
+        }
+        let protected = Set(zip(settings.workflowActivity, projected).flatMap { entry, visible -> [String] in
+            let active: [MergeWorkflowActivityState] = [.queued, .running, .waitingForAssistant]
+            let job = settings.assistantHandoffs.first { $0.id == entry.assistantJobID }
+            let unconfirmed = (active.contains(entry.state) || entry.assistantJobID != nil)
+                && !WorkflowExecutionProjection.hasTerminalExecution(entry, job: job)
+            guard active.contains(visible.state) || unconfirmed,
                   let lineage = entry.pipelineClaimAssessment else { return [] }
             return [entry.id, lineage.skippedActivityID]
         })
-        if history.count > 120,
-           let index = history.lastIndex(where: { $0.state != .queued && $0.state != .running && !protected.contains($0.id) }) {
-            history.remove(at: index)
+        if settings.workflowActivity.count > 120,
+           let index = settings.workflowActivity.indices.reversed().first(where: {
+               let state = projected[$0].state
+               return state != .queued && state != .running && !protected.contains(settings.workflowActivity[$0].id)
+           }) {
+            settings.workflowActivity.remove(at: index)
         }
     }
 }

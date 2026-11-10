@@ -180,6 +180,8 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 
 ### Fixed
 
+- Keep workflow history linked to the current retry, show worker outcomes directly from their execution records, and label unavailable records without repeating uncertain work.
+
 - Keep newer MR catalog facts when comments or review state update, bind retained action evidence to its checked context and account revision, and prevent background presentation checks from admitting retained-only rows to automation.
 
 - Preserve unreadable settings and action journals, report persistence failures without resetting saved policy, and pause automatic writes until safety records are recovered; keep read-only checks and fresh manual actions available within their required evidence boundaries.
