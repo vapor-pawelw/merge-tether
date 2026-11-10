@@ -76,7 +76,8 @@ import MergeTetherRemote
         #endif
         let requestState = state
         guard let connection, let challenge = requestState.beginRefresh(force: force) else { return }
-        do { try await connection.send(.init(type: .hello, challenge: challenge)) }
+        do { try await connection.send(.init(type: .hello, challenge: challenge,
+            capabilities: [RemoteMessage.commentReviewCapability])) }
         catch {
             guard !Task.isCancelled, self.connection === connection, self.state === requestState else { return }
             if requestState.refreshFailed(challenge: challenge) { self.error = true }

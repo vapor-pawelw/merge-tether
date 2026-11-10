@@ -50,6 +50,7 @@ import MergeTetherRemote
                item.drafts.allSatisfy({ $0.id != nil && AICommentAssessmentStore.safeForAutomaticPublication($0) }) { kinds.append(.publish) }
             if item.canApprove { kinds.append(.approve) }
             if item.canConfirmReReview { kinds.append(.reReview) }
+            if item.canFinishCommentReview { kinds.append(.finishCommentReview) }
         }
         let metadata = item.drafts.flatMap { draft in
             [String(draft.authorID), draft.discussionID ?? "", String(describing: draft.resolveDiscussion),
@@ -57,9 +58,15 @@ import MergeTetherRemote
              draft.position?.oldPath ?? "", String(describing: draft.position?.oldLine)]
         }
         if let content = try? RemoteDigest.token(card),
-           let token = try? RemoteDigest.token([account, content, item.reReviewFingerprint ?? ""] + metadata + context) {
+           let token = try? RemoteDigest.token([account, content, item.reReviewFingerprint ?? "",
+               item.observedDiscussionFingerprint ?? "", item.mergeRequest?.semanticContextFingerprint ?? "",
+               String(item.requiresCommentReview), item.commentReviewSnapshot?.discussionFingerprint ?? ""] + metadata + context) {
             card.actions = Array(Set(kinds.map(\.rawValue))).sorted().compactMap { raw in
                 RemoteActionKind(rawValue: raw).map { RemoteAction(id: raw, kind: $0, token: token) }
+            }
+            card.actions += item.drafts.compactMap { draft in
+                guard let id = draft.id, id > 0 else { return nil }
+                return RemoteAction(id: "deleteDraft:\(id)", kind: .deleteDraft, token: token)
             }
         }
         card.approvals = item.approvalProgress.flatMap {

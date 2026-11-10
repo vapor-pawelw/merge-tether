@@ -4,6 +4,25 @@ import Testing
 
 @MainActor
 struct MRHumanActionTests {
+    @Test func missingEvidenceKeepsTheFinishActionVisibleWhileDisabled() throws {
+        var item = item()
+        item.requiresCommentReview = true
+        let row = row(item)
+        let model = MRCardPresentation(row: row, reviewingContext: ReviewingContext(row: row),
+            allowsRemoval: true, assistantReady: false)
+        #expect(model.humanAction?.kind == .commentReview)
+        #expect(!item.canFinishCommentReview)
+    }
+
+    @Test func finishingCommentReviewIsACardActionEvenWithoutDraftsOrACLI() throws {
+        var item = item()
+        item.requiresCommentReview = true
+        let action = try #require(MRHumanAction(row: row(item), assistantReady: false))
+        #expect(action.kind == .commentReview)
+        #expect(action.action == .reviewDrafts)
+        #expect(!action.showsDirectPublication)
+        #expect(item.needsAttention && item.needsConfirmation)
+    }
     @Test(arguments: ["ready", "verification", "discussion", "changed"])
     func directPublicationRequiresTheNormalPublicationCheckpoint(_ state: String) throws {
         var value = item()

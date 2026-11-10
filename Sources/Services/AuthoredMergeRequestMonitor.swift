@@ -298,15 +298,24 @@ final class AuthoredMergeRequestMonitor {
                   request.webURL.isGitLabMergeRequest(host: host, iid: request.iid)
             else { continue }
 
+            let reviewTarget = MRAutomationScope.Target(host: host, username: user.username,
+                projectID: request.projectID, iid: request.iid)
+            let reviewRevision = settings.commentReviewRevision(for: reviewTarget)
             async let approvalState = try? glab.fetchMergeRequestApprovalState(
                 projectID: request.projectID, iid: request.iid, host: host
             )
             async let resolved = try? glab.mergeRequestDiscussionsAreResolved(
                 projectID: request.projectID, iid: request.iid, host: host
             )
-            let (approvals, discussionsResolved) = await (approvalState, resolved)
+            async let draftNotes = try? glab.fetchOwnDraftNotes(
+                projectID: request.projectID, iid: request.iid, host: host, userID: user.id)
+            let (approvals, discussionsResolved, pendingDrafts) = await (approvalState, resolved, draftNotes)
+            let pendingDraftCount = pendingDrafts?.count
+            guard isCurrent(account), glab.accountRevision == revision else { return }
+            if let pendingDrafts { settings.observeCommentReview(pendingDrafts, for: reviewTarget, revision: reviewRevision) }
             let status = await evaluate(
-                request, approvals: approvals, resolved: discussionsResolved, account: account, user: user
+                request, approvals: approvals, resolved: discussionsResolved, pendingDraftCount: pendingDraftCount,
+                account: account, user: user
             )
 
             let work = AssistantAutomationRunner.MergeRequestWork(host: host, projectID: request.projectID, iid: request.iid)
@@ -393,6 +402,7 @@ final class AuthoredMergeRequestMonitor {
         _ request: GitLabMergeRequest,
         approvals: GitLabMergeRequestApprovalState?,
         resolved: Bool?,
+        pendingDraftCount: Int?,
         account: Account,
         user: GitLabAuthenticatedUser
     ) async -> AuthoredMergeRequestStatus {
@@ -424,7 +434,9 @@ final class AuthoredMergeRequestMonitor {
             canVerifyFreshApprovals: canVerifyFreshApprovals,
             conflictTaskFailed: failedConflicts.contains {
                 $0.matches(request, host: host, userID: user.id) && $0.sourceSHA == request.sha
-            }
+            }, pendingDraftCount: pendingDraftCount,
+            requiresCommentReview: settings.pendingCommentReviews.contains(.init(host: host,
+                username: user.username, projectID: request.projectID, iid: request.iid))
         )
     }
 

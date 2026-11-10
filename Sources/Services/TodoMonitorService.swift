@@ -44,7 +44,7 @@ final class TodoMonitorService {
     private func isExecutingAttentionWork(_ row: MergeRequestBoardSnapshot.Row) -> Bool {
         let state = attention.confirmationStates[row.id]
         return row.latestJob?.operationalExecution?.state.isActive == true
-            || state == .publishing || state == .approving
+            || state?.isBusy == true
             || row.item.mergeRequest.map { automaticConflictIsProcessing(for: $0)
                 || authoredMergeRequests.workflow.isAutomaticallyProcessingPipeline($0) } == true
     }
@@ -228,6 +228,9 @@ final class TodoMonitorService {
             // Publish the confirmed projection before consumers observe a completed fetch.
             // Observation's asynchronous invalidation remains responsible for other changes.
             self.confirmedAttention.update(self.pendingUserAttention)
+        }
+        attention.onCommentReviewFinished = { [weak self] id in
+            Task { await self?.refreshFromGitLab(for: id) }
         }
         attention.onDisplayMetadataObserved = { [weak self] request, target, revision, readStartedAt in
             self?.recordBoardDisplayRequest(request, for: target, url: request.webURL,
@@ -963,7 +966,7 @@ final class TodoMonitorService {
             let conflictProcessing = row.item.mergeRequest.map { automaticConflictIsProcessing(for: $0) } ?? false
             let pipelineProcessing = row.item.mergeRequest.map { authoredMergeRequests.workflow.isAutomaticallyProcessingPipeline($0) } ?? false
             let recoveryWaitsForHuman = (row.item.draftProofRecoveryChecking || row.isCheckingReadOnlyReconciliation) && row.hasIndependentStoppedWork
-            let busy = row.latestJob?.operationalExecution?.state.isActive == true || state == .publishing || state == .approving
+            let busy = row.latestJob?.operationalExecution?.state.isActive == true || state?.isBusy == true
                 || row.item.aiOriginChecking
                 || (!recoveryWaitsForHuman && (row.item.authorFeedbackStatus?.phase == .checking || row.item.draftProofRecoveryChecking))
                 || conflictProcessing || pipelineProcessing
@@ -978,6 +981,9 @@ final class TodoMonitorService {
             let drafts = item.drafts.filter { !automaticDrafts.contains($0.id ?? -1) }
             for draft in drafts { add(.drafts, "\(draft.id ?? -1):" + UserAttentionSnapshot.digest(draft.note ?? "")) }
             if item.draftCount > 0 && item.drafts.isEmpty { add(.drafts, "unread-drafts") }
+            if row.item.requiresCommentReview, row.item.draftCount == 0, row.item.drafts.isEmpty {
+                add(.reviewConfirmation, "comment-review:" + (row.item.commentReviewSnapshot?.discussionFingerprint ?? "unchecked"))
+            }
             if (item.canApprove && !item.approvalWaitingForReadiness) || (item.autoApproveReady && !preparing) {
                 add(.approval, item.mergeRequest?.sha ?? "approval")
             }

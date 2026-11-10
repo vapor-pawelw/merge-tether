@@ -4,6 +4,8 @@ import MergeTetherRemote
 struct RemoteInboxView: View {
     let cards: [RemoteCard]
     let onOpen: (RemoteCard) -> Void
+    var onFinishCommentReview: ((RemoteCard) -> Void)? = nil
+    var canAct: ((Date) -> Bool)? = nil
     @Environment(\.dismiss) private var dismiss
 
     private var triageCards: [RemoteCard] {
@@ -65,7 +67,8 @@ struct RemoteInboxView: View {
                 }
                 .accessibilityAddTraits(.isHeader)
                 ForEach(cards) { card in
-                    RemoteCardView(card: card, onOpen: { onOpen(card) })
+                    RemoteCardView(card: card, onOpen: { onOpen(card) },
+                        onFinishCommentReview: onFinishCommentReview.map { action in { action(card) } }, canAct: canAct)
                 }
             }
         }

@@ -1,6 +1,52 @@
 import Foundation
 
 extension SettingsManager {
+    struct CommentReviewProgress: Codable, Equatable {
+        var observedDraftIDs: Set<Int> = []
+        var automaticallyPublishedDraftIDs: Set<Int> = []
+    }
+
+    func commentReviewRevision(for target: MRAutomationScope.Target) -> UInt64 {
+        commentReviewRevisions[target, default: 0]
+    }
+
+    func observeCommentReview(_ drafts: [GitLabDraftNote], for target: MRAutomationScope.Target, revision: UInt64) {
+        guard !drafts.isEmpty, target.iid != nil, commentReviewRevision(for: target) == revision else { return }
+        let inserted = pendingCommentReviews.insert(target).inserted
+        let previous = commentReviewProgress[target]
+        var progress = previous ?? .init()
+        progress.observedDraftIDs.formUnion(drafts.compactMap(\.id))
+        commentReviewProgress[target] = progress
+        if inserted || progress != previous { save() }
+    }
+
+    func recordAutomaticCommentPublication(_ drafts: [GitLabDraftNote], for target: MRAutomationScope.Target) {
+        guard pendingCommentReviews.contains(target) else { return }
+        let previous = commentReviewProgress[target]
+        var progress = previous ?? .init()
+        progress.automaticallyPublishedDraftIDs.formUnion(drafts.compactMap(\.id))
+        commentReviewProgress[target] = progress
+        if progress != previous { save() }
+    }
+
+    func canAutomaticallyFinishCommentReview(for target: MRAutomationScope.Target) -> Bool {
+        guard pendingCommentReviews.contains(target), let progress = commentReviewProgress[target],
+              !progress.observedDraftIDs.isEmpty else { return false }
+        return progress.observedDraftIDs.isSubset(of: progress.automaticallyPublishedDraftIDs)
+    }
+
+    func beginCommentReview(for target: MRAutomationScope.Target) {
+        guard target.iid != nil, pendingCommentReviews.insert(target).inserted else { return }
+        save()
+    }
+
+    func completeCommentReview(for target: MRAutomationScope.Target) {
+        guard pendingCommentReviews.remove(target) != nil else { return }
+        commentReviewProgress.removeValue(forKey: target)
+        commentReviewRevisions[target, default: 0] &+= 1
+        save()
+    }
+
     /// The user's two-state MR preference only; callers must still check global permission,
     /// whole-MR scope and current action evidence before performing an automatic write.
     func actionIsAutomatic(_ action: MRAutomaticAction, for target: MRAutomationScope.Target) -> Bool {
@@ -26,6 +72,7 @@ extension SettingsManager {
     /// Policy admission only. Action executors retain their current fresh evidence checks.
     func permitsAutomaticAction(_ action: MRAutomaticAction, for request: GitLabMergeRequest,
                                 target: MRAutomationScope.Target) -> Bool {
+        if action != .commentPublication, pendingCommentReviews.contains(target) { return false }
         guard request.projectID == target.projectID, request.iid == target.iid,
               request.webURL.isGitLabMergeRequest(host: target.host, iid: request.iid),
               actionIsAutomatic(action, for: target),

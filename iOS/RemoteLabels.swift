@@ -19,6 +19,8 @@ extension RemoteActionKind {
         switch self {
         case .retryJob: .Remote.remoteRetryJob
         case .publish: .Remote.remotePublish
+        case .deleteDraft: .CommentReview.commentReviewDelete
+        case .finishCommentReview: .CommentReview.commentReviewFinish
         case .approve: .Remote.remoteApprove
         case .markDone: .Remote.remoteMarkDone
         case .prepare: .Remote.remotePrepare

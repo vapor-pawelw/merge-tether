@@ -2,6 +2,8 @@ import Foundation
 
 enum MergeRequestBlocker: Hashable {
     case draft
+    case unpublishedDrafts
+    case commentReview
     case approvals
     case changesRequested
     case discussions
@@ -50,12 +52,16 @@ struct AuthoredMergeRequestStatus: Identifiable {
         projectRequiresResolvedDiscussions: Bool?,
         autoMergeEnabled: Bool,
         canVerifyFreshApprovals: Bool = true,
-        conflictTaskFailed: Bool = false
+        conflictTaskFailed: Bool = false,
+        pendingDraftCount: Int? = 0,
+        requiresCommentReview: Bool = false
     ) {
         self.request = request
         var blockers: [MergeRequestBlocker] = []
 
         if request.draft == true || request.detailedMergeStatus == "draft_status" { blockers.append(.draft) }
+        if let pendingDraftCount, pendingDraftCount > 0 { blockers.append(.unpublishedDrafts) }
+        if requiresCommentReview { blockers.append(.commentReview) }
         if approvals?.allRequiredRulesApproved == false || request.detailedMergeStatus == "not_approved" {
             blockers.append(.approvals)
         }
@@ -83,7 +89,7 @@ struct AuthoredMergeRequestStatus: Identifiable {
             blockers.append(.pipeline)
         }
 
-        if approvals == nil || discussionsResolved == nil || request.canMerge == nil
+        if pendingDraftCount == nil || approvals == nil || discussionsResolved == nil || request.canMerge == nil
             || request.draft == nil || request.detailedMergeStatus == nil
             || (request.detailedMergeStatus == "mergeable" && (request.sha == nil || request.hasConflicts == nil)) {
             blockers.append(.unknown)

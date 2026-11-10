@@ -314,6 +314,8 @@ struct TodoListView: View {
                     onApprove: { Task { await monitor.attention.approve(item.id) } },
                     onOpen: { NSWorkspace.shared.open(item.url); dismissMenuBarExtra() },
                     onManage: manageAction(for: item), onPublishSelected: publishSelected,
+                    onDelete: { draft in Task { await monitor.attention.deleteDraft(draft, from: item.id) } },
+                    onFinishCommentReview: { Task { await monitor.attention.finishCommentReview(item) } },
                     additionalActions: attentionActions(item)
                 )
             } else {
