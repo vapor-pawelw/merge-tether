@@ -96,6 +96,11 @@ struct MergeRequestBoardSnapshot {
     let proposals: [Proposal]
     let otherTodos: [Todo]
     let completions: [MergeRequestLifecycleLedger.CompletionReceipt]
+    private struct ReviewedMembership: Hashable {
+        let id: MergeRequestAttentionMonitor.Item.ID
+        let url: URL
+    }
+    private let reviewedMembership: Set<ReviewedMembership>
     private let ignoredTargets: Set<MRAutomationScope.Target>
     private let automation: AutomationSettings?
     private let grouping: MRBoardGrouping
@@ -112,6 +117,7 @@ struct MergeRequestBoardSnapshot {
          grouping: MRBoardGrouping = .withoutAutomation,
          completions: [MergeRequestLifecycleLedger.CompletionReceipt] = [],
          currentRows: [MergeRequestAttentionMonitor.Item.ID: MRCurrentRowProjection] = [:]) {
+        reviewedMembership = Set(reviewed.map { .init(id: $0.id, url: $0.url) })
         self.ignoredTargets = ignoredTargets
         self.automation = automation
         self.grouping = grouping
@@ -227,6 +233,34 @@ struct MergeRequestBoardSnapshot {
                 projectID: proposal.target.projectID, iid: proposal.target.iid ?? 0)
         }
         otherTodos = unknown
+    }
+
+    func preservingOrder(_ positions: [MergeRequestAttentionMonitor.Item.ID: Int], host: String?, username: String?,
+                         pinnedCards: Set<BoardCardPin>) -> Self {
+        guard !positions.isEmpty else { return self }
+        return .init(reordering: self, positions: positions, host: host, username: username, pinnedCards: pinnedCards)
+    }
+
+    private init(reordering original: Self, positions: [MergeRequestAttentionMonitor.Item.ID: Int],
+                 host: String?, username: String?, pinnedCards: Set<BoardCardPin>) {
+        own = Self.ordered(original.own, host: host, username: username, pinnedCards: pinnedCards,
+            preservedOrder: positions, automation: original.automation, grouping: original.grouping)
+        reviewed = Self.ordered(original.reviewed, draftsLast: true, host: host, username: username, pinnedCards: pinnedCards,
+            preservedOrder: positions, automation: original.automation, grouping: original.grouping)
+        otherMergeRequests = Self.ordered(original.otherMergeRequests, host: host, username: username, pinnedCards: pinnedCards,
+            preservedOrder: positions, automation: original.automation, grouping: original.grouping)
+        proposals = original.proposals
+        otherTodos = original.otherTodos
+        completions = original.completions
+        reviewedMembership = original.reviewedMembership
+        ignoredTargets = original.ignoredTargets
+        automation = original.automation
+        grouping = original.grouping
+        knownRequests = original.knownRequests
+    }
+
+    func isReviewed(_ item: MergeRequestAttentionMonitor.Item) -> Bool {
+        reviewedMembership.contains(.init(id: item.id, url: item.url))
     }
 
     /// An open Details selection may outlive a host change; numeric MR IDs alone are insufficient.

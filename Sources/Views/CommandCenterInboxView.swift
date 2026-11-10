@@ -4,36 +4,12 @@ struct CommandCenterInboxView: View {
     let monitor: TodoMonitorService
     @Environment(\.dismiss) private var dismiss
 
-    private var items: [MergeRequestBoardSnapshot.OtherCard] { monitor.inboxItems }
-
-    private var triageItems: [MergeRequestBoardSnapshot.OtherCard] {
-        items.filter { item in
-            switch item.content {
-            case .proposal(_), .todo(_): return true
-            case .job(_), .completion(_): return false
-            }
-        }
-    }
-
-    private var jobItems: [MergeRequestBoardSnapshot.OtherCard] {
-        items.filter {
-            if case .job(_) = $0.content { return true }
-            return false
-        }
-    }
-
-    private var updateItems: [MergeRequestBoardSnapshot.OtherCard] {
-        items.filter {
-            if case .completion(_) = $0.content { return true }
-            return false
-        }
-    }
-
     var body: some View {
+        let inbox = monitor.commandCenterDisplayFrame.inbox
         VStack(spacing: 0) {
-            header
+            header(count: inbox.items.count)
             Divider()
-            content
+            content(inbox)
         }
         .frame(width: 760, height: 700)
         .background(Color(nsColor: .windowBackgroundColor))
@@ -46,11 +22,11 @@ struct CommandCenterInboxView: View {
 
     }
 
-    private var header: some View {
+    private func header(count: Int) -> some View {
         HStack(alignment: .center, spacing: 12) {
             VStack(alignment: .leading, spacing: 3) {
                 Text(.Board.boardInboxButton).font(.title2.weight(.semibold))
-                Text(.Board.boardInboxAccessibilityCount(items.count))
+                Text(.Board.boardInboxAccessibilityCount(count))
                     .font(.caption)
                     .foregroundStyle(.secondary)
             }
@@ -65,17 +41,17 @@ struct CommandCenterInboxView: View {
     }
 
     @ViewBuilder
-    private var content: some View {
-        if items.isEmpty && monitor.boardRefreshState == .syncing {
+    private func content(_ inbox: CommandCenterDisplayFrame.Inbox) -> some View {
+        if inbox.items.isEmpty && monitor.boardRefreshState == .syncing {
             ProgressView().frame(maxWidth: .infinity, maxHeight: .infinity)
-        } else if items.isEmpty {
+        } else if inbox.items.isEmpty {
             emptyState
         } else {
             ScrollView {
                 VStack(alignment: .leading, spacing: 24) {
-                    itemSection(.Board.boardInboxTriage, symbol: "tray.2", items: triageItems)
-                    itemSection(.Board.boardInboxAssistantJobs, symbol: "cpu", items: jobItems)
-                    itemSection(.Board.boardInboxUpdates, symbol: "clock.arrow.circlepath", items: updateItems)
+                    itemSection(.Board.boardInboxTriage, symbol: "tray.2", items: inbox.triage)
+                    itemSection(.Board.boardInboxAssistantJobs, symbol: "cpu", items: inbox.jobs)
+                    itemSection(.Board.boardInboxUpdates, symbol: "clock.arrow.circlepath", items: inbox.updates)
                 }
                 .frame(maxWidth: .infinity, alignment: .leading)
                 .padding(20)

@@ -12,6 +12,7 @@ struct CommandCenterView: View {
 
     var body: some View {
         let initialRefresh = monitor.boardRefreshState
+        let display = monitor.commandCenterDisplayFrame
         VStack(spacing: 0) {
             statusBanners
             if !showActivity, initialRefresh == .syncing {
@@ -34,7 +35,7 @@ struct CommandCenterView: View {
                         .frame(minHeight: 180)
                 }
             } else {
-                CommandCenterBoardView(monitor: monitor, refreshState: initialRefresh)
+                CommandCenterBoardView(monitor: monitor, board: display.board, refreshState: initialRefresh)
                     .id("\(monitor.glab.resolvedHost ?? "")|\(monitor.glab.currentUsername ?? "")")
             }
             if let todo = monitor.undoableTodo { undoBanner(todo) }
@@ -87,7 +88,7 @@ struct CommandCenterView: View {
                     } icon: {
                         Image(systemName: "tray")
                             .overlay(alignment: .topTrailing) {
-                                let count = monitor.inboxItems.count
+                                let count = display.inbox.items.count
                                 if count > 0 {
                                     Text(count > 99 ? "99+" : String(count))
                                         .font(.system(size: 9, weight: .bold, design: .rounded))
@@ -102,7 +103,7 @@ struct CommandCenterView: View {
                     }
                 }
                 .help(Text(.Board.boardInboxButton))
-                .accessibilityLabel(Text(.Board.boardInboxAccessibilityCount(monitor.inboxItems.count)))
+                .accessibilityLabel(Text(.Board.boardInboxAccessibilityCount(display.inbox.items.count)))
                 .popover(isPresented: $showingInbox, arrowEdge: .top) {
                     CommandCenterInboxView(monitor: monitor)
                 }

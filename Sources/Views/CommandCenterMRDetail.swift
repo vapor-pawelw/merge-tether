@@ -21,10 +21,11 @@ struct CommandCenterMRDetail: View {
 
     var body: some View {
         // Resolve the shared board projection once, outside layout-driven child updates.
-        let board = monitor.boardSnapshot
-        let row = board.row(matching: item, host: monitor.glab.resolvedHost, username: monitor.glab.currentUsername)
+        let selected = CommandCenterDisplayFrame.Detail(item: item, board: monitor.boardSnapshot,
+            host: monitor.glab.resolvedHost, username: monitor.glab.currentUsername)
+        let row = selected.row
         let required = row?.item.humanActionRequired ?? item.humanActionRequired ?? needsHumanAttention
-        CommandCenterMRDetailContent(item: row?.item ?? item, catalogRow: row,
+        CommandCenterMRDetailContent(item: selected.item, catalogRow: row, isReviewed: selected.isReviewed,
             monitor: monitor, initialSection: initialSection, needsHumanAttention: required)
     }
 
@@ -38,6 +39,7 @@ struct CommandCenterMRDetail: View {
 private struct CommandCenterMRDetailContent: View {
     let item: MergeRequestAttentionMonitor.Item
     let catalogRow: MergeRequestBoardSnapshot.Row?
+    let isReviewed: Bool
     let monitor: TodoMonitorService
     let initialSection: CommandCenterMRDetailSection
     let needsHumanAttention: Bool
@@ -84,11 +86,6 @@ private struct CommandCenterMRDetailContent: View {
                 pipelineEvidence: jobs.first.flatMap { monitor.currentRequest(for: $0) },
                 pipelineEvidenceCheckedAt: monitor.currentPipelineEvidenceDate)
     }
-    private var humanAction: MRHumanAction? {
-        let reviewing = monitor.reviewedMergeRequestItems.contains { $0.id == item.id && $0.url == item.url }
-        return MRCardPresentation(row: presentationRow, monitor: monitor, allowsRemoval: reviewing).humanAction
-    }
-
     private struct FeedbackDecisionConfirmation {
         let target: MRAutomationScope.Target
         var note: GitLabMergeRequestDiscussion.Note? = nil
@@ -134,18 +131,23 @@ private struct CommandCenterMRDetailContent: View {
 
     var body: some View {
         let citationContext = self.citationContext
+        let discussions = discussionSnapshot
+        let presentation = MRCardPresentation(row: presentationRow, monitor: monitor, allowsRemoval: isReviewed)
         ScrollViewReader { proxy in
             ScrollView {
                 VStack(alignment: .leading, spacing: 20) {
-                    header.id(Anchor.overview)
+                    header(presentation).id(Anchor.overview)
                     if finishedState == nil {
                         MREffectivePolicySummary(row: presentationRow, monitor: monitor,
-                            excluding: [humanAction?.explanation ?? ""])
+                            excluding: [presentation.humanAction?.explanation ?? ""])
                         MergeActionsView(item: item, monitor: monitor, evidenceMatchesCatalogContext: presentationRow.evidenceMatchesCatalogContext, actionsBlocked: isStartingReview || isRetrying)
                     }
-                    if showsDecisions { nextStep(proxy: proxy, citationContext: citationContext).id(Anchor.drafts) }
+                    if showsDecisions {
+                        nextStep(proxy: proxy, citationContext: citationContext, discussions: discussions,
+                            humanAction: presentation.humanAction).id(Anchor.drafts)
+                    }
                     if finishedState == nil { supplementaryActions(citationContext: citationContext).id(Anchor.actions) }
-                    discussionThreads.id(Anchor.comments)
+                    discussionThreads(discussions).id(Anchor.comments)
                     details.id(Anchor.details)
                     MRAutomationEventLogView(target: target, monitor: monitor,
                         initiallyExpanded: historyExpanded, initiallyExpandedJobID: focusedJobID, readOnly: finishedState != nil)
@@ -251,10 +253,8 @@ private struct CommandCenterMRDetailContent: View {
         }
     }
 
-    private var header: some View {
-        let reviewing = monitor.reviewedMergeRequestItems.contains { $0.id == item.id && $0.url == item.url }
-        let progress = MRCardPresentation(row: presentationRow, monitor: monitor, allowsRemoval: reviewing)
-        return VStack(alignment: .leading, spacing: 10) {
+    private func header(_ progress: MRCardPresentation) -> some View {
+        VStack(alignment: .leading, spacing: 10) {
             HStack(spacing: 8) {
                 Text(verbatim: "!\(item.id.iid)").monospacedDigit()
                 if let finishedState { FinishedMergeRequestBadge(state: finishedState) }
@@ -334,12 +334,12 @@ private struct CommandCenterMRDetailContent: View {
     private var headerMenu: some View {
         BoardActionsMenu {
             MRCommonMenuItems(item: item, monitor: monitor,
-                onRemove: monitor.reviewedMergeRequestItems.contains(where: { $0.id == item.id && $0.url == item.url })
-                    ? { confirmRemoval = true } : nil)
+                onRemove: isReviewed ? { confirmRemoval = true } : nil)
         }
     }
 
-    private func nextStep(proxy: ScrollViewProxy, citationContext: MRCommentCitation.Context?) -> some View {
+    private func nextStep(proxy: ScrollViewProxy, citationContext: MRCommentCitation.Context?,
+                          discussions: MRDiscussionSnapshot, humanAction: MRHumanAction?) -> some View {
         GroupBox {
             VStack(alignment: .leading, spacing: 12) {
                 if let action = humanAction {
@@ -410,7 +410,7 @@ private struct CommandCenterMRDetailContent: View {
                     if discussionTarget == nil {
                         Text(.DraftPublication.draftPublicationUnavailable).font(.caption).foregroundStyle(.secondary)
                     }
-                    publicationThreads
+                    publicationThreads(discussions)
                 }
                 decisionActions
                 FollowUpAutomationHoldView(row: presentationRow, monitor: monitor)
@@ -719,9 +719,9 @@ private struct CommandCenterMRDetailContent: View {
             origins: current ? discussionStore.origins : [:])
     }
 
-    private var publicationThreads: some View {
+    private func publicationThreads(_ snapshot: MRDiscussionSnapshot) -> some View {
         let current = discussionTarget != nil && discussionStore.target == discussionTarget
-        return MRDiscussionThreadsView(snapshot: discussionSnapshot.pendingPublication, mergeRequestURL: item.url,
+        return MRDiscussionThreadsView(snapshot: snapshot.pendingPublication, mergeRequestURL: item.url,
             currentUsername: monitor.glab.currentUsername, isLoading: current && discussionStore.isLoading,
             hasError: current && discussionStore.hasError, hasLoaded: current && discussionStore.hasLoaded,
             expandPendingDrafts: true, selection: $publicationSession.selection,
@@ -730,9 +730,9 @@ private struct CommandCenterMRDetailContent: View {
             title: .DraftPublication.draftPublicationThreads, draftsFirst: true, onRefresh: refreshDiscussions)
     }
 
-    @ViewBuilder private var discussionThreads: some View {
+    @ViewBuilder private func discussionThreads(_ discussions: MRDiscussionSnapshot) -> some View {
         let current = discussionTarget != nil && discussionStore.target == discussionTarget
-        let snapshot = showsPublication ? discussionSnapshot.remainingDiscussions : discussionSnapshot
+        let snapshot = showsPublication ? discussions.remainingDiscussions : discussions
         if !showsPublication || !snapshot.threads.isEmpty {
             MRDiscussionThreadsView(snapshot: snapshot, mergeRequestURL: item.url,
             currentUsername: monitor.glab.currentUsername, isLoading: current && discussionStore.isLoading,

@@ -10,6 +10,8 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 
 - Reduce repeated MR-board fingerprint work by preparing exact request bindings once per projection, preserving separate catalog and action evidence.
 
+- Reuse prepared board rows, Inbox sections and Details membership during rendering, including preserved card order and shared discussion sections, to reduce repeated work when opening the command center.
+
 - Recheck explicit write authorization at every native GitLab process launch, including draft publication, reactions, discussion resolution, review requests and todo acknowledgements, while preserving deliberate manual actions.
 
 - Remove the retired menu-list interface and desktop plugin/listener sources while preserving manual assistant conversations, existing history and standalone verification helpers.

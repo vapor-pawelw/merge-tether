@@ -56,21 +56,27 @@ struct MRCardPresentation {
     }
 
     init(row: MergeRequestBoardSnapshot.Row, monitor: TodoMonitorService, allowsRemoval: Bool) {
-        let ready = monitor.assistantDependencies.available.contains(monitor.settings.automation.assistant)
+        self.init(row: row, monitor: monitor, allowsRemoval: allowsRemoval, input: monitor.boardRowInput(for: row))
+    }
+
+    init(row: MergeRequestBoardSnapshot.Row, monitor: TodoMonitorService, allowsRemoval: Bool,
+         input: MRBoardProjector.RowInput) {
+        let ready = input.assistantReady
         let target = monitor.scopeTarget(projectID: row.id.projectID, iid: row.id.iid, url: row.item.url)
         let automatic = row.evidenceMatchesCatalogContext ? target.map {
             row.item.draftIDsHandledAutomatically(automation: monitor.settings.automation, target: $0,
-                assistantPreparing: ready || monitor.assistantDependencies.isChecking,
+                assistantPreparing: ready || input.assistantChecking,
                 publicationAutomatic: monitor.settings.actionIsAutomatic(.commentPublication, for: $0))
         } ?? [] : []
-        self.init(row: row, reviewingContext: monitor.reviewingContext(for: row), allowsRemoval: allowsRemoval,
+        self.init(row: row, reviewingContext: MRBoardProjector.reviewingContext(for: row, input: input), allowsRemoval: allowsRemoval,
             assistantReady: ready, confirmationState: monitor.attention.confirmationStates[row.id],
             automaticallyPublishedDraftIDs: automatic,
-            automaticConflictProgress: row.item.mergeRequest.map { monitor.automaticConflictIsProcessing(for: $0) } ?? false,
-            automaticPipelineProgress: row.item.mergeRequest.map { monitor.authoredMergeRequests.workflow.isAutomaticallyProcessingPipeline($0) } ?? false,
+            automaticConflictProgress: input.conflictProcessing,
+            automaticPipelineProgress: input.pipelineProcessing,
             conflictReceipts: monitor.settings.conflictReceipts,
             preservedHumanAction: monitor.confirmedHumanAction(for: row),
-            isRefreshingAttention: monitor.isRecheckingAttention(for: row), refreshFailed: monitor.attentionRefreshFailed(for: row),
+            isRefreshingAttention: MRBoardProjector.isRecheckingAttention(for: row, input: input),
+            refreshFailed: MRBoardProjector.attentionRefreshFailed(for: row, input: input),
             showsReadProgress: monitor.showsRefreshProgress(for: row.id),
             automaticMergeProgress: row.item.mergeRequest.map { monitor.authoredMergeRequests.isMerging($0) } ?? false,
             cliHoldKind: monitor.cliHealth.hold(for: row.latestJob?.key.assistant ?? monitor.settings.automation.assistant)?.issue.kind)

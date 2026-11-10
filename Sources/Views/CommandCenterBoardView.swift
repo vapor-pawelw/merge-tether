@@ -3,6 +3,7 @@ import SwiftUI
 
 struct CommandCenterBoardView: View {
     let monitor: TodoMonitorService
+    let board: MergeRequestBoardSnapshot
     var refreshState: BoardRefreshState = .current
     private var dimUnverifiedContent: Bool { refreshState != .current }
     private struct Selection: Identifiable {
@@ -19,10 +20,7 @@ struct CommandCenterBoardView: View {
         return .init(host: host, username: username)
     }
 
-    private var snapshot: MergeRequestBoardSnapshot { monitor.boardSnapshot }
-
     var body: some View {
-        let board = snapshot
         HStack(alignment: .top, spacing: 18) {
             lane(title: .Board.boardLaneOwn, symbol: "arrow.triangle.pull", cardIDs: board.own.map(\.id), dependencies: board.own.map { $0.item.dependencies }) {
                 if board.own.isEmpty {
@@ -52,7 +50,7 @@ struct CommandCenterBoardView: View {
                 .padding(16)
                 Divider()
                 if selection.account == account {
-                    CommandCenterMRDetail(item: current(selection.item), monitor: monitor, initialSection: selection.section)
+                    CommandCenterMRDetail(item: selection.item, monitor: monitor, initialSection: selection.section)
                         .id(selection.id)
                 }
             }
@@ -68,11 +66,6 @@ struct CommandCenterBoardView: View {
                 do { try await Task.sleep(for: .seconds(5)) } catch { return }
             }
         }
-    }
-
-    private func current(_ original: MergeRequestAttentionMonitor.Item) -> MergeRequestAttentionMonitor.Item {
-        let board = snapshot
-        return (board.own + board.reviewed + board.otherMergeRequests).first { $0.id == original.id && $0.item.url == original.url }?.item ?? original
     }
 
     private func card(_ row: MergeRequestBoardSnapshot.Row, removable: Bool = false) -> some View {
