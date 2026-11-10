@@ -12,6 +12,7 @@ struct MRDiscussionThreadsView: View {
     var expandPendingDrafts = false
     var selection: Binding<DraftPublicationSelection>? = nil
     var selectionDisabled = false
+    var onDelete: ((GitLabDraftNote) -> Void)? = nil
     var title: LocalizedStringResource = .MRDiscussions.mrDiscussionsTitle
     var draftsFirst = false
     let onRefresh: () -> Void
@@ -47,7 +48,7 @@ struct MRDiscussionThreadsView: View {
                          : .MRDiscussions.mrDiscussionsReplyDraft)
                         .font(.caption.weight(.medium)).foregroundStyle(.secondary)
                     MRDiscussionDraftView(draft: draft, username: currentUsername,
-                        selection: selection, selectionDisabled: selectionDisabled)
+                        selection: selection, selectionDisabled: selectionDisabled, onDelete: onDelete)
                 }
                 .padding(12)
                 .frame(maxWidth: .infinity, alignment: .leading)
@@ -64,7 +65,7 @@ struct MRDiscussionThreadsView: View {
     private func threadView(_ thread: MRDiscussionSnapshot.Thread) -> some View {
         MRDiscussionThreadView(thread: thread, mergeRequestURL: mergeRequestURL,
                                currentUsername: currentUsername, initiallyExpanded: expandPendingDrafts && !thread.drafts.isEmpty,
-                               selection: selection, selectionDisabled: selectionDisabled, draftsFirst: draftsFirst)
+                               selection: selection, selectionDisabled: selectionDisabled, draftsFirst: draftsFirst, onDelete: onDelete)
     }
 }
 
@@ -76,6 +77,7 @@ private struct MRDiscussionThreadView: View {
     let selection: Binding<DraftPublicationSelection>?
     let selectionDisabled: Bool
     let draftsFirst: Bool
+    var onDelete: ((GitLabDraftNote) -> Void)? = nil
     @State private var isExpanded = false
 
     private var comments: [GitLabMergeRequestDiscussion.Note] { thread.notes.filter { $0.system != true } }
@@ -131,7 +133,7 @@ private struct MRDiscussionThreadView: View {
     private var draftRows: some View {
         ForEach(Array(thread.drafts.enumerated()), id: \.offset) { _, draft in
             MRDiscussionDraftView(draft: draft, username: currentUsername, threadLocation: thread.location,
-                selection: selection, selectionDisabled: selectionDisabled)
+                selection: selection, selectionDisabled: selectionDisabled, onDelete: onDelete)
         }
     }
 }
@@ -199,6 +201,7 @@ private struct MRDiscussionDraftView: View {
     var threadLocation: String? = nil
     var selection: Binding<DraftPublicationSelection>? = nil
     var selectionDisabled = false
+    var onDelete: ((GitLabDraftNote) -> Void)? = nil
 
     var body: some View {
         VStack(alignment: .leading, spacing: 7) {
@@ -209,6 +212,8 @@ private struct MRDiscussionDraftView: View {
                 if let username { Text(verbatim: "@\(username)").fontWeight(.medium) }
                 else { Text(.MRDiscussions.mrDiscussionsYou).fontWeight(.medium) }
                 Text(.MRDiscussions.mrDiscussionsPrivateDraft).foregroundStyle(Color.accentColor)
+                Spacer(minLength: 4)
+                if let onDelete { DraftDeleteButton(draft: draft, disabled: selectionDisabled, onDelete: onDelete) }
             }
             .font(.caption)
             if let location = discussionLocation(draft.position), location != threadLocation {

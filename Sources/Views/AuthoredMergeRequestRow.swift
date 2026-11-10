@@ -126,6 +126,8 @@ private extension MergeRequestBlocker {
     var displayLabel: LocalizedStringResource {
         switch self {
         case .draft: .Menu.menuAuthoredBlockerDraft
+        case .unpublishedDrafts: .CommentReview.commentReviewDraftsBlocker
+        case .commentReview: .CommentReview.commentReviewBlocker
         case .approvals: .Menu.menuAuthoredBlockerApprovals
         case .changesRequested: .Menu.menuAuthoredBlockerChangesRequested
         case .discussions: .Menu.menuAuthoredBlockerDiscussions

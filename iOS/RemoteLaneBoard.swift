@@ -4,6 +4,8 @@ import MergeTetherRemote
 struct RemoteLaneBoard: View {
     let lanes: [RemoteLane]
     let onOpen: (RemoteCard) -> Void
+    var onFinishCommentReview: ((RemoteCard) -> Void)? = nil
+    var canAct: ((Date) -> Bool)? = nil
     @State private var visibleLane: RemoteLaneID?
 
     var body: some View {
@@ -13,7 +15,7 @@ struct RemoteLaneBoard: View {
             ScrollView(.horizontal, showsIndicators: false) {
                 HStack(alignment: .top, spacing: 14) {
                     ForEach(lanes) { lane in
-                        RemoteLaneView(lane: lane, onOpen: onOpen)
+                        RemoteLaneView(lane: lane, onOpen: onOpen, onFinishCommentReview: onFinishCommentReview, canAct: canAct)
                             .frame(width: laneWidth, height: max(1, geometry.size.height - 12))
                             .id(lane.id)
                     }
@@ -32,6 +34,8 @@ private struct RemoteLaneView: View {
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
     let lane: RemoteLane
     let onOpen: (RemoteCard) -> Void
+    var onFinishCommentReview: ((RemoteCard) -> Void)? = nil
+    var canAct: ((Date) -> Bool)? = nil
 
     var body: some View {
         VStack(alignment: .leading, spacing: 12) {
@@ -48,7 +52,8 @@ private struct RemoteLaneView: View {
                         Text(.Remote.remoteEmpty).foregroundStyle(.secondary).padding(.top, 30)
                     }
                     ForEach(lane.cards) { card in
-                        RemoteCardView(card: card, onOpen: { onOpen(card) })
+                        RemoteCardView(card: card, onOpen: { onOpen(card) },
+                            onFinishCommentReview: onFinishCommentReview.map { action in { action(card) } }, canAct: canAct)
                     }
                 }
                 .animation(reduceMotion ? nil : .spring(duration: 0.28, bounce: 0.12), value: lane.cards.map(\.dependencies))

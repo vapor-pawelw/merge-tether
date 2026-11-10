@@ -42,6 +42,9 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 
 ### Added
 
+- Delete individual private drafts with confirmation on macOS and iOS. Finish comment review directly on an MR card, with a persistent account-scoped checkpoint and live commit, discussion and draft checks.
+- Explain which approval, re-review and merge steps are waiting for comment review in MR details.
+
 - Rank the five highest-cost MRs within the Agent Usage date range and show each MR’s all-time tracked cost, preserving account identity and explicitly unattributed historical records.
 - Quote and link the exact feedback comment behind a decision; save precise ignored suggestions with confirmation, a conditional Details list, Restore and Reset, and current-context prompts for verifiers and coding agents.
 - Offer independent per-MR automatic publication, merge and approval opt-outs, with ready-only checkpoints and fresh automatic resumption when restored to Auto.
@@ -137,6 +140,9 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 - Refresh public documentation and use the retro painted-style MergeTether icon.
 
 ### Fixed
+
+- Keep the workflow paused after drafts are handled in GitLab or deleted in the app, until comment review is explicitly finished. Successful publication can complete the checkpoint after checking the reviewed context and remaining drafts.
+- Include pending and unavailable draft checks in automatic merge readiness, and keep existing paired phones compatible with the new comment actions.
 
 - Keep app-hosted tests invisible and separate from production monitoring, notifications and remote access; refuse development relaunches while another app or test host is running instead of stopping it or forcing an extra copy.
 

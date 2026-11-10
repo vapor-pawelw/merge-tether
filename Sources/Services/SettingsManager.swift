@@ -4,6 +4,9 @@ import Observation
 @MainActor
 @Observable
 final class SettingsManager {
+    var pendingCommentReviews: Set<MRAutomationScope.Target> = []
+    var commentReviewProgress: [MRAutomationScope.Target: CommentReviewProgress] = [:]
+    @ObservationIgnored var commentReviewRevisions: [MRAutomationScope.Target: UInt64] = [:]
     private let defaults: UserDefaults
     @ObservationIgnored private var lastSavedAutomation: AutomationSettings?
     @ObservationIgnored var onAutomationChanged: ((AutomationSettings) -> Void)?
@@ -95,6 +98,10 @@ final class SettingsManager {
             .flatMap { try? JSONDecoder().decode([ReReviewReceipt.Key: ReReviewReceipt].self, from: $0) } ?? [:]
         reReviewDraftBaselines = defaults.data(forKey: Key.reReviewDraftBaselines)
             .flatMap { try? JSONDecoder().decode([MRAutomationScope.Target: Int].self, from: $0) } ?? [:]
+        pendingCommentReviews = defaults.data(forKey: Key.pendingCommentReviews)
+            .flatMap { try? JSONDecoder().decode(Set<MRAutomationScope.Target>.self, from: $0) } ?? []
+        commentReviewProgress = defaults.data(forKey: Key.commentReviewProgress)
+            .flatMap { try? JSONDecoder().decode([MRAutomationScope.Target: CommentReviewProgress].self, from: $0) } ?? [:]
 
         let rawInterval = defaults.integer(forKey: Key.refreshInterval)
         self.refreshInterval = RefreshInterval(rawValue: rawInterval) ?? .fiveMinutes
@@ -147,6 +154,12 @@ final class SettingsManager {
     }
 
     func save() {
+        if let data = try? JSONEncoder().encode(pendingCommentReviews) {
+            defaults.set(data, forKey: Key.pendingCommentReviews)
+        }
+        if let data = try? JSONEncoder().encode(commentReviewProgress) {
+            defaults.set(data, forKey: Key.commentReviewProgress)
+        }
         defaults.set(conversationDestination.rawValue, forKey: Key.conversationDestination)
         let previousAutomation = lastSavedAutomation ?? automation
         lastSavedAutomation = automation
@@ -314,6 +327,8 @@ final class SettingsManager {
         static let conflictReceipts = "conflictReceipts"
         static let reReviewReceipts = "reReviewReceipts"
         static let reReviewDraftBaselines = "reReviewDraftBaselines"
+        static let pendingCommentReviews = "pendingCommentReviews"
+        static let commentReviewProgress = "commentReviewProgress"
         static let assistantHandoffs = "assistantHandoffs"
         static let assistantChats = "assistantChats"
         static let workflowActivity = "workflowActivity"

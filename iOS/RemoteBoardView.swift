@@ -15,7 +15,8 @@ struct RemoteBoardView: View {
                     VStack(alignment: .leading, spacing: 12) {
                         connectionStatus
                         if board.partial { Text(.Remote.remotePartial).font(.caption).foregroundStyle(.orange).padding(.horizontal) }
-                        RemoteLaneBoard(lanes: board.lanes.filter { $0.id != .other }) { selected = $0 }
+                        RemoteLaneBoard(lanes: board.lanes.filter { $0.id != .other }, onOpen: { selected = $0 },
+                            onFinishCommentReview: finishCommentReview, canAct: { model.state.canAct(now: $0) })
                         if let updated = board.updatedAt {
                             HStack { Text(.Remote.remoteUpdated); Text(updated, style: .relative) }
                                 .font(.caption2).foregroundStyle(.secondary).padding(.horizontal).padding(.bottom, 4)
@@ -73,7 +74,8 @@ struct RemoteBoardView: View {
             .sheet(isPresented: $pairingSheet) { NavigationStack { RemotePairingView(model: model) }.presentationDetents([.medium, .large]) }
             .onChange(of: model.state.board?.hostSession) { pairingSheet = false }
             .popover(isPresented: $showingInbox, attachmentAnchor: .rect(.bounds), arrowEdge: .top) {
-                RemoteInboxView(cards: inboxCards) { pendingInboxCard = $0; showingInbox = false }
+                RemoteInboxView(cards: inboxCards, onOpen: { pendingInboxCard = $0; showingInbox = false },
+                    onFinishCommentReview: finishCommentReview, canAct: { model.state.canAct(now: $0) })
                     .frame(idealWidth: 520, idealHeight: 680)
                     .presentationCompactAdaptation(.sheet)
                     .presentationDetents([.medium, .large])
@@ -92,6 +94,10 @@ struct RemoteBoardView: View {
     }
     private var inboxCards: [RemoteCard] {
         model.state.board?.lanes.first(where: { $0.id == .other })?.cards ?? []
+    }
+    private func finishCommentReview(_ card: RemoteCard) {
+        guard let action = card.actions.first(where: { $0.kind == .finishCommentReview }) else { return }
+        Task { await model.perform(card: card, action: action) }
     }
     private var connectionStatus: some View {
         TimelineView(.periodic(from: .now, by: 1)) { context in
@@ -116,6 +122,8 @@ struct RemoteCardView: View {
     let card: RemoteCard
     var expanded = false
     var onOpen: (() -> Void)?
+    var onFinishCommentReview: (() -> Void)? = nil
+    var canAct: ((Date) -> Bool)? = nil
     var body: some View {
         VStack(alignment: .leading, spacing: 8) {
             if let onOpen {
@@ -130,7 +138,14 @@ struct RemoteCardView: View {
                             .font(.caption).buttonStyle(.plain).foregroundStyle(.secondary)
                     }
                     Spacer(minLength: 0)
-                    if let cta = card.primaryCTA {
+                    if card.actions.contains(where: { $0.kind == .finishCommentReview }), let onFinishCommentReview {
+                        TimelineView(.periodic(from: .now, by: 1)) { context in
+                            Button(action: onFinishCommentReview) { Text(.CommentReview.commentReviewFinish) }
+                                .font(.caption.weight(.semibold)).buttonStyle(.borderedProminent)
+                                .disabled(canAct?(context.date) != true)
+                                .accessibilityIdentifier("remote.finish-comment-review.\(card.id)")
+                        }
+                    } else if let cta = card.primaryCTA {
                         Button(action: onOpen) { Text(verbatim: cta.title) }
                             .font(.caption.weight(.semibold)).buttonStyle(.bordered)
                             .accessibilityIdentifier("remote.cta.\(card.id)")
@@ -292,6 +307,14 @@ struct RemoteCardDetail: View {
                         VStack(alignment: .leading, spacing: 12) {
                             ForEach(current.drafts) { draft in
                                 VStack(alignment: .leading, spacing: 8) {
+                                    if let action = current.actions.first(where: { $0.kind == .deleteDraft && $0.id == "deleteDraft:\(draft.id)" }) {
+                                        HStack {
+                                            Spacer()
+                                            Button { confirmation = action } label: { Image(systemName: "trash") }
+                                                .accessibilityLabel(Text(.CommentReview.commentReviewDelete))
+                                                .disabled(!model.state.canAct(now: .now))
+                                        }
+                                    }
                                     if let context = draft.context { Text(verbatim: context).font(.caption.monospaced()).foregroundStyle(.secondary) }
                                     Text(verbatim: draft.body).textSelection(.enabled)
                                 }.padding().frame(maxWidth: .infinity, alignment: .leading)
@@ -304,7 +327,7 @@ struct RemoteCardDetail: View {
                         }
                         TimelineView(.periodic(from: .now, by: 1)) { context in
                             VStack(spacing: 12) {
-                                ForEach(current.actions) { action in
+                                ForEach(current.actions.filter { $0.kind != .deleteDraft }) { action in
                                     Button(action.kind.title) { confirmation = action }.buttonStyle(.borderedProminent)
                                         .disabled(!model.state.canAct(now: context.date))
                                 }
@@ -326,13 +349,15 @@ struct RemoteCardDetail: View {
             .alert(Text(confirmation?.kind.title ?? .Remote.remoteConfirm), isPresented: Binding(
                 get: { confirmation != nil }, set: { if !$0 { confirmation = nil } }
             )) {
-                Button(.Remote.remoteConfirm) {
+                Button(role: confirmation?.kind == .deleteDraft ? .destructive : nil) {
                     guard let action = confirmation else { return }; confirmation = nil
                     let card = current
                     Task { await model.perform(card: card, action: action) }
-                }
+                } label: { Text(confirmation?.kind == .deleteDraft ? .CommentReview.commentReviewDelete : .Remote.remoteConfirm) }
                 Button(.Remote.remoteCancel, role: .cancel) { confirmation = nil }
-            } message: { Text(.Remote.remoteConfirmHelp) }
+            } message: {
+                Text(confirmation?.kind == .deleteDraft ? .CommentReview.commentReviewDeleteHelp : .Remote.remoteConfirmHelp)
+            }
         }
     }
 }

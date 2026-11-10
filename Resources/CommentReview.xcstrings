@@ -1,0 +1,227 @@
+{
+  "sourceLanguage": "en",
+  "strings": {
+    "commentReview.delete": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Delete draft"
+          }
+        }
+      }
+    },
+    "commentReview.deleteTitle": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Delete this draft from GitLab?"
+          }
+        }
+      }
+    },
+    "commentReview.deleteHelp": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "This comment will not be published. Deleting drafts keeps the workflow paused until you finish reviewing comments."
+          }
+        }
+      }
+    },
+    "commentReview.finish": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Finish comment review"
+          }
+        }
+      }
+    },
+    "commentReview.pending": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Finish reviewing comments to let the workflow continue."
+          }
+        }
+      }
+    },
+    "commentReview.publishAll": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Publish all and continue"
+          }
+        }
+      }
+    },
+    "commentReview.publishSelectedHelp": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Publishes the selected comments. The workflow can continue when no drafts remain; other readiness checks still apply."
+          }
+        }
+      }
+    },
+    "commentReview.deleting": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Deleting draft\u2026"
+          }
+        }
+      }
+    },
+    "commentReview.finishing": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Checking comments\u2026"
+          }
+        }
+      }
+    },
+    "commentReview.blocks": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Comment review is blocking the next steps"
+          }
+        }
+      }
+    },
+    "commentReview.beforeReReview": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Next: request another review after comment review is finished and the feedback is ready."
+          }
+        }
+      }
+    },
+    "commentReview.beforeMerge": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Next: merge after comment review is finished and all merge requirements are met."
+          }
+        }
+      }
+    },
+    "commentReview.beforeApproval": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Next: approve after comment review is finished, the current review has no objections, and the required discussions are resolved."
+          }
+        }
+      }
+    },
+    "commentReview.otherChecks": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "New comments, commits and pipeline problems can still be handled. The workflow continues after the remaining readiness checks pass."
+          }
+        }
+      }
+    },
+    "commentReview.draftsBlocker": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Unpublished comments"
+          }
+        }
+      }
+    },
+    "commentReview.blocker": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Comment review is not finished"
+          }
+        }
+      }
+    },
+    "commentReview.afterOwn": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Comment review \u2192 re-review readiness \u2192 merge checks"
+          }
+        }
+      }
+    },
+    "commentReview.afterReviewed": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Comment review \u2192 review verdict and discussion checks \u2192 approval"
+          }
+        }
+      }
+    },
+    "commentReview.publishSelected.%lld": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "variations": {
+            "plural": {
+              "one": {
+                "stringUnit": {
+                  "state": "translated",
+                  "value": "Publish %lld comment and continue"
+                }
+              },
+              "other": {
+                "stringUnit": {
+                  "state": "translated",
+                  "value": "Publish %lld comments and continue"
+                }
+              }
+            }
+          }
+        }
+      }
+    }
+  },
+  "version": "1.0"
+}

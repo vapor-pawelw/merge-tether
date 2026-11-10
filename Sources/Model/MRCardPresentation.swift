@@ -81,6 +81,7 @@ struct MRCardPresentation {
     }
     var busy: Bool {
         guard finishedState == nil else { return false }
+        if confirmationState?.isBusy == true { return true }
         return confirmationState == .publishing || confirmationState == .approving
             || (!recoveryWaitsForHuman && (item.authorFeedbackStatus?.phase == .checking || item.draftProofRecoveryChecking))
             || item.reReviewReadiness == .checking || item.aiOriginChecking
@@ -90,7 +91,7 @@ struct MRCardPresentation {
             || (automaticConflictProgress && row.latestJob?.execution?.state.isActive != true)
     }
     private var executingWork: Bool {
-        finishedState == nil && (confirmationState == .publishing || confirmationState == .approving
+        finishedState == nil && (confirmationState?.isBusy == true
             || row.latestJob?.operationalExecution?.state.isActive == true
             || automaticPipelineProgress || automaticConflictProgress || automaticMergeProgress
             || (!recoveryWaitsForHuman && allowsRemoval && reviewingContext.nextStep == .automaticReview))
@@ -100,7 +101,7 @@ struct MRCardPresentation {
     }
     private var waitingOnCLI: Bool {
         guard cliHoldKind != nil, row.latestJob?.execution?.state != .running,
-              confirmationState != .publishing, confirmationState != .approving,
+              confirmationState?.isBusy != true,
               !automaticMergeProgress, !automaticPipelineProgress, !automaticConflictProgress else { return false }
         return row.latestJob?.execution?.state == .queued
             || (allowsRemoval && [.runReview, .automaticReview, .verifying].contains(reviewingContext.nextStep))
@@ -111,16 +112,20 @@ struct MRCardPresentation {
     private var preservesConfirmedAttention: Bool {
         (isRefreshingAttention || refreshFailed) && row.needsAttention && preservedHumanAction != nil
             && row.latestJob?.operationalExecution?.state.isActive != true
-            && confirmationState != .publishing && confirmationState != .approving
+            && confirmationState?.isBusy != true
             && !automaticConflictProgress && !automaticPipelineProgress && !automaticMergeProgress
     }
     var humanAction: MRHumanAction? {
         guard finishedState == nil else { return nil }
         if preservesConfirmedAttention { return preservedHumanAction }
         guard row.needsAttention, !busy,
-              !(allowsRemoval && reviewingContext.nextStep == .setupAgent) else { return nil }
+              !(allowsRemoval && reviewingContext.nextStep == .setupAgent && !item.requiresCommentReview) else { return nil }
         return MRHumanAction(row: row, assistantReady: assistantReady, confirmationState: confirmationState,
                              automaticallyPublishedDraftIDs: automaticallyPublishedDraftIDs)
+    }
+    var showsAdditionalCommentReview: Bool {
+        finishedState == nil && item.requiresCommentReview && item.draftCount == 0 && item.drafts.isEmpty
+            && humanAction?.kind != .commentReview
     }
     var neutralStatus: LocalizedStringResource? {
         if let finishedState { return finishedState.status }
@@ -150,6 +155,8 @@ struct MRCardPresentation {
     private var progressTitle: LocalizedStringResource {
         if confirmationState == .publishing { return .AutomationProgress.progressPublishing }
         if confirmationState == .approving { return .AutomationProgress.progressApproving }
+        if confirmationState == .deleting { return .CommentReview.commentReviewDeleting }
+        if confirmationState == .finishingCommentReview { return .CommentReview.commentReviewFinishing }
         if automaticMergeProgress { return .AutomationProgress.progressMerging }
         if item.draftProofRecoveryChecking, !row.hasIndependentStoppedWork { return .AutomationProgress.progressReplies }
         if item.aiOriginChecking { return .AutomationProgress.progressAIAssistance }
@@ -162,7 +169,11 @@ struct MRCardPresentation {
         return isRefreshingAttention ? .AutomationProgress.progressRefreshing : .AutomationProgress.progressProcessing
     }
     var nextStep: String? {
-        finishedState == nil && allowsRemoval && humanAction == nil && !busy
+        guard finishedState == nil else { return nil }
+        if item.requiresCommentReview || item.draftCount > 0 {
+            return String(localized: item.isAuthored ? .CommentReview.commentReviewAfterOwn : .CommentReview.commentReviewAfterReviewed)
+        }
+        return finishedState == nil && allowsRemoval && humanAction == nil && !busy
             && !(quietReadCheck && reviewingContext.status == .activityUnknown)
             ? String(localized: reviewingContext.nextStepMessage) : nil
     }

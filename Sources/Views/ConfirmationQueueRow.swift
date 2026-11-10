@@ -14,12 +14,14 @@ struct ConfirmationQueueRow<AdditionalActions: View>: View {
     var selection: Binding<DraftPublicationSelection>? = nil
     var onPublishSelected: (([GitLabDraftNote]) -> Void)? = nil
     var requiresSelection = false
+    var onDelete: ((GitLabDraftNote) -> Void)? = nil
+    var onFinishCommentReview: (() -> Void)? = nil
     let additionalActions: AdditionalActions
 
     @State private var showsComments = false
     @State private var localSelection = DraftPublicationSelection()
 
-    private var isBusy: Bool { state == .publishing || state == .approving }
+    private var isBusy: Bool { state?.isBusy == true }
     private var draftSelection: Binding<DraftPublicationSelection> { selection ?? $localSelection }
 
     var body: some View {
@@ -60,6 +62,8 @@ struct ConfirmationQueueRow<AdditionalActions: View>: View {
                         Text(.Menu.menuConfirmShowComments)
                     }
                 }
+            } else if item.requiresCommentReview {
+                Text(.CommentReview.commentReviewPending)
             } else if item.canApprove {
                 Text(.Menu.menuConfirmApproveReady)
             }
@@ -83,16 +87,21 @@ struct ConfirmationQueueRow<AdditionalActions: View>: View {
                     let selected = draftSelection.wrappedValue.selectedDrafts(from: item.drafts)
                     if requiresSelection {
                         Button { onPublishSelected?(selected) } label: {
-                            Text(.DraftPublication.draftPublicationPublishSelected(selected.count))
+                            Text(selected.count == item.drafts.count ? .CommentReview.commentReviewPublishSelected(selected.count)
+                                 : .DraftPublication.draftPublicationPublishSelected(selected.count))
                         }
-                        .help(Text(.DraftPublication.draftPublicationPublishSelectedHelp))
+                        .help(Text(.CommentReview.commentReviewPublishSelectedHelp))
                         .buttonStyle(.borderedProminent)
                         .disabled(selected.isEmpty || onPublishSelected == nil)
                     } else {
-                        Button(action: onPublish) { Text(.Menu.menuConfirmPublish) }
+                        Button(action: onPublish) { Text(.CommentReview.commentReviewPublishAll) }
                             .help(Text(.Menu.menuConfirmPublishHelp))
                             .buttonStyle(.borderedProminent)
                     }
+                } else if item.requiresCommentReview, let onFinishCommentReview {
+                    Button(action: onFinishCommentReview) { Text(.CommentReview.commentReviewFinish) }
+                        .buttonStyle(.borderedProminent)
+                        .disabled(!item.canFinishCommentReview)
                 } else if item.canApprove {
                     Button(action: onApprove) { Text(.Menu.menuConfirmApprove) }
                         .buttonStyle(.borderedProminent)
@@ -129,6 +138,10 @@ struct ConfirmationQueueRow<AdditionalActions: View>: View {
             Text(.Menu.menuConfirmPublishing).foregroundStyle(.secondary)
         case .approving:
             Text(.Menu.menuConfirmApproving).foregroundStyle(.secondary)
+        case .deleting:
+            Text(.CommentReview.commentReviewDeleting).foregroundStyle(.secondary)
+        case .finishingCommentReview:
+            Text(.CommentReview.commentReviewFinishing).foregroundStyle(.secondary)
         case .failed:
             Text(.Menu.menuConfirmFailed).foregroundStyle(.orange)
         case .changed:
@@ -144,6 +157,7 @@ struct ConfirmationQueueRow<AdditionalActions: View>: View {
                 DraftPublicationCheckbox(draft: draft, selection: draftSelection, disabled: isBusy)
             }
             draftContent(draft)
+            if let onDelete { DraftDeleteButton(draft: draft, disabled: isBusy, onDelete: onDelete) }
         }
     }
 

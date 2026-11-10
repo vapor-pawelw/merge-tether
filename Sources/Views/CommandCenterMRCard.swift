@@ -95,6 +95,13 @@ private struct CommandCenterMRCardContent: View {
                     }
                     .font(.caption).foregroundStyle(.secondary)
                 }
+                if presentation.showsAdditionalCommentReview {
+                    Button { start { await monitor.attention.finishCommentReview(item) } } label: {
+                        Text(.CommentReview.commentReviewFinish)
+                    }
+                    .buttonStyle(.bordered)
+                    .disabled(presentation.actionsBlocked || !item.canFinishCommentReview)
+                }
                 if let nextStep = presentation.nextStep {
                     Text(verbatim: nextStep)
                         .font(.subheadline).foregroundStyle(.secondary)
@@ -222,8 +229,12 @@ private struct CommandCenterMRCardContent: View {
                 }
             }
         case .reviewDrafts:
-            if action.showsDirectPublication && !item.drafts.isEmpty {
-                primary(.Menu.menuConfirmPublish, enabled: scopeTarget != nil) {
+            if action.kind == .commentReview {
+                primary(.CommentReview.commentReviewFinish, enabled: item.canFinishCommentReview) {
+                    start { await monitor.attention.finishCommentReview(item) }
+                }
+            } else if action.showsDirectPublication && !item.drafts.isEmpty {
+                primary(.CommentReview.commentReviewPublishAll, enabled: scopeTarget != nil) {
                     start { await monitor.attention.publishDrafts(of: item.id) }
                 }
             } else {

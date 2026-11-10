@@ -3,6 +3,26 @@ import Testing
 @testable import GitLabTodos
 
 struct AuthoredMergeRequestStatusTests {
+    @Test(arguments: [0, 1, 3, nil])
+    func draftsOrUnknownDraftsBlockMergeReadiness(count: Int?) throws {
+        let request = try makeRequest()
+        let approvals = try approvals(required: 2, approved: true)
+        let status = AuthoredMergeRequestStatus(request: request, approvals: approvals, discussionsResolved: true,
+            projectRequiresResolvedDiscussions: true, autoMergeEnabled: true, pendingDraftCount: count)
+        #expect(status.mayAutoMerge == (count == 0))
+        #expect(status.blockers.contains(.unpublishedDrafts) == (count.map { $0 > 0 } == true))
+        #expect(status.blockers.contains(.unknown) == (count == nil))
+    }
+
+    @Test func anUnfinishedCommentReviewBlocksMergeWithoutDrafts() throws {
+        let request = try makeRequest()
+        let approvals = try approvals(required: 2, approved: true)
+        let status = AuthoredMergeRequestStatus(request: request, approvals: approvals, discussionsResolved: true,
+            projectRequiresResolvedDiscussions: true, autoMergeEnabled: true, pendingDraftCount: 0, requiresCommentReview: true)
+        #expect(!status.mayAutoMerge)
+        #expect(status.blockers.contains(.commentReview))
+    }
+
     @Test func ordersReadyThenActionableThenWaitingAndDrafts() throws {
         let approved = try approvals(required: 2, approved: true)
         let unapproved = try approvals(required: 2, approved: false)
@@ -208,6 +228,8 @@ struct AuthoredMergeRequestStatusTests {
         #expect(!FileManager.default.fileExists(atPath: sent.path))
         try write("discussions.json", "[\(answered)]")
         try await poll()
+        await monitor.finishCommentReview(try #require(monitor.currentItems.first))
+        try await poll()
         #expect(!FileManager.default.fileExists(atPath: sent.path))
 
         try write("drafts.json", #"[{"author_id":3}]"#)
@@ -217,6 +239,7 @@ struct AuthoredMergeRequestStatusTests {
         try write("drafts.json", "[]")
         try write("discussions.json", "[\(answered)]")
         try await poll()
+        await monitor.finishCommentReview(try #require(monitor.currentItems.first))
         try await poll()
         #expect(!FileManager.default.fileExists(atPath: sent.path))
         let item = try #require(monitor.currentOpenItems.first)

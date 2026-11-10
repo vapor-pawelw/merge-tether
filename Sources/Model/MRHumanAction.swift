@@ -96,7 +96,7 @@ struct MRHumanAction {
         }
     }
 
-    enum Kind: Equatable { case blockedRun, interruptedRun, publication, uncheckedDrafts, verificationFailure, setupAssistant, reviewDecision, approval, pipelineHandoff, merge, feedback, intent }
+    enum Kind: Equatable { case blockedRun, interruptedRun, publication, commentReview, uncheckedDrafts, verificationFailure, setupAssistant, reviewDecision, approval, pipelineHandoff, merge, feedback, intent }
     enum Action: Equatable { case reviewRun, retryRun, reviewDrafts, verifyFeedback, retryDraftVerification, setupAssistant, reviewDecision, reviewApproval, reviewHandoff, reviewMerge, handleFeedback, retryIntent, reviewFeedback, reviewIssue }
     let kind: Kind
     let action: Action
@@ -123,6 +123,7 @@ struct MRHumanAction {
         return explanation == subject ? subject : subject + " " + explanation
     }
     var actionLabel: LocalizedStringResource {
+        if kind == .commentReview { return .CommentReview.commentReviewFinish }
         if preparedReply != nil { return .PreparedReplies.preparedRepliesReviewAction }
         return switch action {
         case .reviewRun: .MRHumanAction.mrHumanActionActionReviewRun
@@ -154,7 +155,7 @@ struct MRHumanAction {
               !item.aiOriginChecking,
               item.authorFeedbackStatus?.phase != .checking || item.draftProofRecoveryChecking || row.isCheckingReadOnlyReconciliation,
               item.reReviewReadiness != .checking,
-              confirmationState != .publishing, confirmationState != .approving else { return nil }
+              confirmationState?.isBusy != true else { return nil }
 
         let stoppedRun = row.stoppedJobNeedsAttention ? row.latestJob?.operationalExecution : nil
         let previousHead = row.latestJob?.expectedHeadSHA
@@ -177,6 +178,11 @@ struct MRHumanAction {
                       message: interrupted ? .MRHumanAction.mrHumanActionInterruptedRun : .MRHumanAction.mrHumanActionBlockedRun,
                       detail: execution.attentionExplanation, summary: currentSummary)
             if let remaining, let status = item.authorFeedbackStatus { source = .finding(remaining, EvidenceContext(status)) }
+            return
+        }
+
+        if item.requiresCommentReview, item.draftCount == 0, item.drafts.isEmpty {
+            self.init(kind: .commentReview, action: .reviewDrafts, message: .CommentReview.commentReviewPending)
             return
         }
 

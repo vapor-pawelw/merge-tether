@@ -196,7 +196,7 @@ private struct CommandCenterMRDetailContent: View {
                 }
             }
             .onChange(of: monitor.attention.confirmationStates[item.id]) { old, current in
-                if old == .publishing && current != .publishing { refreshDiscussions() }
+                if old?.isBusy == true && current?.isBusy != true { refreshDiscussions() }
             }
             .onChange(of: jobs.first?.id) { _, _ in retryError = nil }
             .onAppear { publicationSession.open(with: item.drafts, accountAvailable: discussionTarget != nil) }
@@ -420,7 +420,10 @@ private struct CommandCenterMRDetailContent: View {
             onApprove: { Task { await monitor.attention.approve(item.id) } },
             onOpen: { NSWorkspace.shared.open(item.url) }, initiallyExpanded: initialSection == .drafts,
             showDraftPreview: false, showHeader: false, selection: $publicationSession.selection,
-            onPublishSelected: publishSelected, requiresSelection: true, additionalActions: EmptyView())
+            onPublishSelected: publishSelected, requiresSelection: true,
+            onDelete: { draft in Task { await monitor.attention.deleteDraft(draft, from: item.id) } },
+            onFinishCommentReview: { Task { await monitor.attention.finishCommentReview(item) } },
+            additionalActions: EmptyView())
     }
 
     @ViewBuilder
@@ -428,7 +431,7 @@ private struct CommandCenterMRDetailContent: View {
         let selected = publicationSession.selection.selectedDrafts(from: item.drafts)
         if !selected.isEmpty, let target = discussionTarget {
             let state = monitor.attention.confirmationStates[item.id]
-            let busy = state == .publishing || state == .approving
+            let busy = state?.isBusy == true
             HStack(spacing: 12) {
                 Button { publicationSession.clearSelection() } label: {
                     Text(.DraftPublication.draftPublicationClearSelection)
@@ -437,9 +440,10 @@ private struct CommandCenterMRDetailContent: View {
                 Spacer()
                 if busy { ProgressView().controlSize(.small) }
                 Button { Task { await monitor.attention.publishDrafts(selected, for: target) } } label: {
-                    Text(.DraftPublication.draftPublicationPublishSelected(selected.count))
+                    Text(selected.count == item.drafts.count ? .CommentReview.commentReviewPublishSelected(selected.count)
+                         : .DraftPublication.draftPublicationPublishSelected(selected.count))
                 }
-                .help(Text(.DraftPublication.draftPublicationPublishSelectedHelp))
+                .help(Text(.CommentReview.commentReviewPublishSelectedHelp))
                 .buttonStyle(.borderedProminent)
             }
             .controlSize(.small)
@@ -452,6 +456,7 @@ private struct CommandCenterMRDetailContent: View {
 
     private var decisionActions: some View {
         VStack(alignment: .leading, spacing: 12) {
+            CommentReviewImpactView(item: item, reReviewEnabled: monitor.settings.automation.autoReReviewEnabled)
             BoardMRIntentActions(row: presentationRow, monitor: monitor)
             ReReviewControls(item: presentationItem, monitor: monitor.attention)
             InboxAttentionActions(item: presentationItem, feedbackAction: monitor.attentionFeedbackAction(for: item),
@@ -711,8 +716,8 @@ private struct CommandCenterMRDetailContent: View {
             currentUsername: monitor.glab.currentUsername, isLoading: current && discussionStore.isLoading,
             hasError: current && discussionStore.hasError, hasLoaded: current && discussionStore.hasLoaded,
             expandPendingDrafts: true, selection: $publicationSession.selection,
-            selectionDisabled: discussionTarget == nil || monitor.attention.confirmationStates[item.id] == .publishing
-                || monitor.attention.confirmationStates[item.id] == .approving,
+            selectionDisabled: discussionTarget == nil || monitor.attention.confirmationStates[item.id]?.isBusy == true,
+            onDelete: { draft in Task { await monitor.attention.deleteDraft(draft, from: item.id) } },
             title: .DraftPublication.draftPublicationThreads, draftsFirst: true, onRefresh: refreshDiscussions)
     }
 

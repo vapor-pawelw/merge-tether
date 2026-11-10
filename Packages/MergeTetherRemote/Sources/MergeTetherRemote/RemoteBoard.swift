@@ -2,7 +2,7 @@ import Foundation
 import CryptoKit
 
 public enum RemoteLaneID: String, Codable, CaseIterable, Sendable { case ready, attention, todos, drafts, own, reviewed, other }
-public enum RemoteActionKind: String, Codable, Sendable { case publish, approve, markDone, prepare, handoff, reReview, verify, retryJob }
+public enum RemoteActionKind: String, Codable, Sendable { case publish, approve, markDone, prepare, handoff, reReview, verify, retryJob, deleteDraft, finishCommentReview }
 
 public struct RemoteAction: Codable, Equatable, Identifiable, Sendable {
     public var id: String
@@ -163,15 +163,35 @@ public struct RemoteCommandResult: Codable, Equatable, Sendable {
 }
 
 public struct RemoteMessage: Codable, Sendable {
+    public static let commentReviewCapability = "comment-review-v1"
     public enum Kind: String, Codable, Sendable { case hello, snapshot, command, accepted, result, unavailable, hostReady = "host-ready" }
     public var type: Kind
     public var challenge: UUID?
     public var board: RemoteBoard?
     public var command: RemoteCommand?
     public var result: RemoteCommandResult?
+    public var capabilities: [String]?
     public init(type: Kind, challenge: UUID? = nil, board: RemoteBoard? = nil,
-                command: RemoteCommand? = nil, result: RemoteCommandResult? = nil) {
+                command: RemoteCommand? = nil, result: RemoteCommandResult? = nil, capabilities: [String]? = nil) {
         self.type = type; self.challenge = challenge; self.board = board; self.command = command; self.result = result
+        self.capabilities = capabilities
+    }
+}
+
+extension RemoteBoard {
+    public func forClient(supportsCommentReview: Bool) -> Self {
+        guard !supportsCommentReview else { return self }
+        var compatible = self
+        for lane in compatible.lanes.indices {
+            for card in compatible.lanes[lane].cards.indices {
+                if compatible.lanes[lane].cards[card].drafts.isEmpty,
+                   compatible.lanes[lane].cards[card].primaryCTA?.destination == .drafts {
+                    compatible.lanes[lane].cards[card].primaryCTA = nil
+                }
+                compatible.lanes[lane].cards[card].actions.removeAll { $0.kind == .deleteDraft || $0.kind == .finishCommentReview }
+            }
+        }
+        return compatible
     }
 }
 
