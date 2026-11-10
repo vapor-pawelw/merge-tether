@@ -254,6 +254,7 @@ enum AssistantAutomationRunner {
         let automaticConfiguration = configurationSnapshot ?? settings.automation
         let target = MRAutomationScope.Target(host: work.host, username: username, projectID: work.projectID, iid: work.iid)
         func validateLaunchPolicy() throws {
+            try AssistantJobExecutor.validatePersistence(settings)
             guard !settings.ignoredMergeRequests.contains(target),
                   manual || (automaticConfiguration.preservingScope(from: settings.automation) == settings.automation
                     && settings.automation.scope.resolve(target).active)
@@ -373,6 +374,7 @@ enum AssistantAutomationRunner {
         }
         settings.assistantHandoffs.append(handoff)
         settings.save()
+        try validateLaunchPolicy()
         if mrWorkflow == .followUp { FollowUpVerificationStore.register(handoff, settings: settings) }
         guard executionCoordinator.schedule(handoff, settings: settings) else { throw HandoffError.executionUnavailable }
         return handoff

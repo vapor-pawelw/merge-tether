@@ -364,7 +364,7 @@ struct SettingsManagerTests {
 }
 
 /// Fault injection stays at the preferences adapter; successful reads/writes use a real isolated suite.
-private final class PersistenceFaultDefaults: UserDefaults, @unchecked Sendable {
+final class PersistenceFaultDefaults: UserDefaults {
     var rejectedKey: String?
     var synchronizationFails = false
     override func set(_ value: Any?, forKey defaultName: String) {

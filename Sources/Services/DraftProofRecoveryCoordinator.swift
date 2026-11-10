@@ -107,7 +107,7 @@ final class DraftProofRecoveryCoordinator {
             if state.retryAfter != nil { state.retryAfter = .distantPast }
             if state.repairRetryAfter != nil { state.repairRetryAfter = .distantPast }
             states[work] = state
-            try? persistAttempt(state, work: work, username: username)
+            persistAttempt(state, work: work, username: username)
         }
     }
     func failure(work: AssistantAutomationRunner.MergeRequestWork) -> String? {
@@ -188,6 +188,7 @@ final class DraftProofRecoveryCoordinator {
            presentationContexts[snapshot.work] == presentation { return }
         presentationContexts[snapshot.work] = presentation
         let previous = priorAttempts(snapshot: snapshot, origin: origin, configuration: configuration, key: key)
+        guard permitted(snapshot, configuration: configuration) else { return }
         let matching = previous.filter { attempt in
             !(attempt.assessment == nil && attempt.retryAfter.map { $0 <= now() } == true)
                 && attempt.context?.key == key && attempt.context.map {
@@ -244,6 +245,8 @@ final class DraftProofRecoveryCoordinator {
     }
 
     func retry(work: AssistantAutomationRunner.MergeRequestWork, username: String) {
+        _ = storedAttempts(work: work, username: username)
+        guard !settings.persistenceDegraded.contains("draftProofRecoveryAttempts") else { return }
         settings.recordAutomationEvent(target: .init(host: work.host, username: username, projectID: work.projectID, iid: work.iid),
             action: .verification, origin: .manual, state: .requested,
             message: String(localized: .DraftProofRecovery.draftProofRecoveryRetryRequested))
@@ -256,7 +259,7 @@ final class DraftProofRecoveryCoordinator {
             try FileManager.default.createDirectory(at: folder, withIntermediateDirectories: true, attributes: [.posixPermissions: 0o700])
             try JSONEncoder().encode(UUID()).write(to: folder.appending(path: "retry-generation.json"), options: .atomic)
         } catch {
-            Log.monitor.error("Could not reset draft verification attempts: \(String(describing: error), privacy: .private)")
+            markPersistenceFailure(work: work)
         }
     }
 
@@ -293,7 +296,7 @@ final class DraftProofRecoveryCoordinator {
                         assessment: nil, context: request.context,
                         retryAfter: error is Blocked || error is CancellationError ? nil : now().addingTimeInterval(ReadOnlyAssessmentRetry.cooldown),
                         pendingAssessment: semanticPending)
-                    try? writeAttempt(states[work]!, request: request)
+                    saveAttempt(states[work]!, request: request)
                     record(request, state: .failed, message: reason)
                 }
             }
@@ -321,7 +324,7 @@ final class DraftProofRecoveryCoordinator {
     }
 
     private func scheduleRepair(_ input: Request, assessment: DraftProofRecoveryVerifier.Assessment) {
-        guard repairTasks[input.snapshot.work] == nil, onNeedsRepair != nil,
+        guard settings.automaticActionsAllowed, repairTasks[input.snapshot.work] == nil, onNeedsRepair != nil,
               DraftReplyRepair.preparationAllowed(input.snapshot.request, configuration: input.configuration) else { return }
         let work = input.snapshot.work
         let policy = input.configuration.assistant.rawValue + "|" + input.configuration.codexReviewModel.rawValue
@@ -359,7 +362,7 @@ final class DraftProofRecoveryCoordinator {
                 case .blocked(let reason):
                     states[work]?.phase = .blocked; states[work]?.reason = reason
                     states[work]?.repairTerminal = true
-                    if let state = states[work] { try? writeAttempt(state, request: input) }
+                    if let state = states[work] { saveAttempt(state, request: input) }
                     notify = true
                 }
             } catch {
@@ -369,7 +372,7 @@ final class DraftProofRecoveryCoordinator {
                 states[work]?.repairTerminal = error is Blocked || error is CancellationError
                 states[work]?.repairRetryAfter = error is Blocked || error is CancellationError
                     ? nil : now().addingTimeInterval(ReadOnlyAssessmentRetry.cooldown)
-                if let state = states[work] { try? writeAttempt(state, request: input) }
+                if let state = states[work] { saveAttempt(state, request: input) }
                 notify = true
             }
         }
@@ -481,7 +484,7 @@ final class DraftProofRecoveryCoordinator {
     }
 
     private func permitted(_ snapshot: Snapshot, configuration: AutomationSettings) -> Bool {
-        accountIsCurrent(snapshot) && configuration.preservingScope(from: settings.automation) == settings.automation
+        settings.automaticActionsAllowed && accountIsCurrent(snapshot) && configuration.preservingScope(from: settings.automation) == settings.automation
             && settings.automation.packageDecision != .disabled
             && settings.automation.allowFollowUpPush
             && (settings.automation.publicationMode != .manual
@@ -539,14 +542,51 @@ final class DraftProofRecoveryCoordinator {
                     iid: snapshot.request.iid, in: verdictDirectory))
     }
 
+    private func markPersistenceFailure(work: AssistantAutomationRunner.MergeRequestWork) {
+        var state = states[work] ?? .init(id: "persistence", phase: .blocked)
+        state.phase = .blocked
+        state.reason = String(localized: .Settings.settingsPersistenceActionBlocked)
+        state.retryAfter = nil
+        state.repairRetryAfter = nil
+        state.repairTerminal = true
+        states[work] = state
+        settings.recordPersistenceFailure("draftProofRecoveryAttempts")
+        onChange?()
+    }
+
     private func storedAttempts(work: AssistantAutomationRunner.MergeRequestWork, username: String) -> [Attempt] {
         let folder = attemptFolder(work: work, username: username)
-        return ((try? FileManager.default.contentsOfDirectory(at: folder, includingPropertiesForKeys: nil)) ?? []).compactMap { path in
-            guard path.pathExtension == "json", (try? path.resourceValues(forKeys: [.isSymbolicLinkKey]).isSymbolicLink) != true,
-                  let size = try? path.resourceValues(forKeys: [.fileSizeKey]).fileSize, size < 250_000,
-                  let data = try? Data(contentsOf: path), let record = try? JSONDecoder().decode(Attempt.self, from: data),
-                  record.id == path.deletingPathExtension().lastPathComponent else { return nil }
-            return record
+        let paths: [URL]
+        do {
+            let values = try folder.resourceValues(forKeys: [.isSymbolicLinkKey])
+            guard values.isSymbolicLink == false else { throw CocoaError(.coderReadCorrupt) }
+            paths = try FileManager.default.contentsOfDirectory(at: folder, includingPropertiesForKeys: nil)
+        } catch let error as CocoaError where error.code == .fileNoSuchFile || error.code == .fileReadNoSuchFile {
+            return []
+        } catch {
+            markPersistenceFailure(work: work)
+            return []
+        }
+        do {
+            var attempts: [Attempt] = []
+            for path in paths.sorted(by: { $0.lastPathComponent < $1.lastPathComponent }) where path.pathExtension == "json" {
+                let values = try path.resourceValues(forKeys: [.isSymbolicLinkKey, .isRegularFileKey, .fileSizeKey])
+                guard values.isSymbolicLink == false, values.isRegularFile == true,
+                      let size = values.fileSize, size < 250_000 else { throw CocoaError(.coderReadCorrupt) }
+                let data = try Data(contentsOf: path)
+                if path.lastPathComponent == "retry-generation.json" {
+                    _ = try JSONDecoder().decode(UUID.self, from: data)
+                    continue
+                }
+                let record = try JSONDecoder().decode(Attempt.self, from: data)
+                guard record.id == path.deletingPathExtension().lastPathComponent else { throw CocoaError(.coderReadCorrupt) }
+                attempts.append(record)
+            }
+            return attempts
+        } catch {
+            // Do not reinterpret an unreadable rejection/reservation as a fresh attempt.
+            markPersistenceFailure(work: work)
+            return []
         }
     }
 
@@ -568,7 +608,7 @@ final class DraftProofRecoveryCoordinator {
                 drafts: record.origin.drafts.filter { scope.contains($0.id) })
             let imported = Attempt(id: record.attemptID, phase: rejected == nil ? .verified : .blocked,
                 reason: rejected?.reason, assessment: record.assessment, context: context)
-            try? persistAttempt(imported, work: snapshot.work, username: snapshot.user.username)
+            persistAttempt(imported, work: snapshot.work, username: snapshot.user.username)
             attempts.removeAll { $0.id == record.attemptID }; attempts.append(imported)
         }
         // Old failed/interrupted records lacked scope and context metadata. Migrate
@@ -577,26 +617,44 @@ final class DraftProofRecoveryCoordinator {
             let context = AttemptContext(key: key, discussionFingerprint: ReviewVerdict.fingerprint(snapshot.discussions) ?? "",
                 drafts: origin.drafts)
             var imported = legacy; imported.context = context
-            try? persistAttempt(imported, work: snapshot.work, username: snapshot.user.username)
+            persistAttempt(imported, work: snapshot.work, username: snapshot.user.username)
             if let index = attempts.firstIndex(where: { $0.id == legacy.id }) { attempts[index] = imported }
         }
         return attempts
     }
 
-    private func persistAttempt(_ attempt: Attempt, work: AssistantAutomationRunner.MergeRequestWork, username: String) throws {
+    @discardableResult
+    private func persistAttempt(_ attempt: Attempt, work: AssistantAutomationRunner.MergeRequestWork, username: String) -> Bool {
+        // Recheck before every replacement, including corruption arriving after scheduling.
+        _ = storedAttempts(work: work, username: username)
+        guard !settings.persistenceDegraded.contains("draftProofRecoveryAttempts") else { return false }
         let folder = attemptFolder(work: work, username: username)
-        try FileManager.default.createDirectory(at: folder, withIntermediateDirectories: true, attributes: [.posixPermissions: 0o700])
-        try JSONEncoder().encode(attempt).write(to: folder.appending(path: "\(attempt.id).json"), options: .atomic)
+        do {
+            try FileManager.default.createDirectory(at: folder, withIntermediateDirectories: true, attributes: [.posixPermissions: 0o700])
+            try JSONEncoder().encode(attempt).write(to: folder.appending(path: "\(attempt.id).json"), options: .atomic)
+            return true
+        } catch {
+            markPersistenceFailure(work: work)
+            return false
+        }
     }
 
-    private func writeAttempt(_ attempt: Attempt, request: Request) throws {
+    @discardableResult
+    private func saveAttempt(_ attempt: Attempt, request: Request) -> Bool {
         var bound = attempt
         bound.context = request.context
         if bound.phase == .checking, bound.assessment == nil {
             bound.retryAfter = now().addingTimeInterval(ReadOnlyAssessmentRetry.cooldown)
         }
-        try persistAttempt(bound, work: request.snapshot.work, username: request.snapshot.user.username)
+        return persistAttempt(bound, work: request.snapshot.work, username: request.snapshot.user.username)
     }
+
+    private func writeAttempt(_ attempt: Attempt, request: Request) throws {
+        guard saveAttempt(attempt, request: request) else {
+            throw Blocked(reason: String(localized: .Settings.settingsPersistenceActionBlocked))
+        }
+    }
+
 }
 
 private extension JSONEncoder {

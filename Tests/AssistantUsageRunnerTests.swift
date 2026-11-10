@@ -4,6 +4,41 @@ import Testing
 
 @Suite("Assistant usage process capture")
 struct AssistantUsageRunnerTests {
+    @MainActor @Test func latePersistenceHoldPreventsTheExecutableAfterUsagePreparation() async throws {
+        // given
+        let file = temporaryFile()
+        let folder = file.deletingLastPathComponent()
+        defer { try? FileManager.default.removeItem(at: folder) }
+        try FileManager.default.createDirectory(at: folder, withIntermediateDirectories: true)
+        let script = folder.appending(path: "fixture-cli")
+        let started = folder.appending(path: "started")
+        try Data("#!/bin/sh\n/usr/bin/touch \"$1\"\n".utf8).write(to: script)
+        try FileManager.default.setAttributes([.posixPermissions: 0o700], ofItemAtPath: script.path)
+        let suite = "LateWorkerPersistence.\(UUID())"
+        let defaults = try #require(UserDefaults(suiteName: suite))
+        defer { defaults.removePersistentDomain(forName: suite) }
+        let settings = SettingsManager(defaults: defaults)
+        let store = AssistantUsageStore(file: file)
+
+        // when
+        await #expect(throws: CancellationError.self) {
+            _ = try await AssistantUsageRunner.run(script, arguments: [started.path], environment: [:],
+                usage: .init(role: .codingAgent, assistant: .codex), store: store,
+                beforeLaunch: { @MainActor in
+                    let prepared = try await store.snapshot()
+                    #expect(prepared.total(for: .codingAgent).runs == 1)
+                    settings.recordPersistenceFailure("assistantHandoffs")
+                    guard settings.automaticActionsAllowed else { throw CancellationError() }
+                })
+        }
+
+        // then
+        #expect(!settings.automaticActionsAllowed)
+        #expect(!FileManager.default.fileExists(atPath: started.path))
+        let snapshot = try await store.snapshot()
+        #expect(snapshot.total(for: .codingAgent).runs == 0)
+    }
+
     @Test("MR request counts follow CLI attempts rather than internal completed turns", arguments: AssistantUsageRole.allCases)
     func mergeRequestAttempts(_ role: AssistantUsageRole) async throws {
         // given

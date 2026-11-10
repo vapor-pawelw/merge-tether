@@ -74,22 +74,50 @@ enum DraftReplyRepair {
         FollowUpVerificationStore.recordURL(kind: "draft-repair-attempts", work: snapshot.work,
             username: snapshot.user.username, in: directory).deletingPathExtension()
     }
-    private static func records(_ snapshot: DraftProofRecoveryCoordinator.Snapshot, directory: URL) -> [Attempt] {
-        ((try? FileManager.default.contentsOfDirectory(at: folder(snapshot, directory: directory), includingPropertiesForKeys: nil)) ?? []).compactMap { path in
-            guard path.pathExtension == "json", (try? path.resourceValues(forKeys: [.isSymbolicLinkKey]).isSymbolicLink) != true,
-                  let size = try? path.resourceValues(forKeys: [.fileSizeKey]).fileSize, size < 100_000,
-                  let data = try? Data(contentsOf: path), let record = try? JSONDecoder().decode(Attempt.self, from: data),
-                  record.context.key == path.deletingPathExtension().lastPathComponent,
+    private struct PersistenceFailure: Error {}
+    private static var persistenceReason: String { String(localized: .Settings.settingsPersistenceActionBlocked) }
+
+    private static func records(_ snapshot: DraftProofRecoveryCoordinator.Snapshot, directory: URL) throws -> [Attempt] {
+        let location = folder(snapshot, directory: directory)
+        let paths: [URL]
+        do {
+            let values = try location.resourceValues(forKeys: [.isSymbolicLinkKey])
+            guard values.isSymbolicLink == false else { throw PersistenceFailure() }
+            paths = try FileManager.default.contentsOfDirectory(at: location, includingPropertiesForKeys: nil)
+        } catch let error as CocoaError where error.code == .fileNoSuchFile || error.code == .fileReadNoSuchFile {
+            return []
+        }
+        var result: [Attempt] = []
+        for path in paths.sorted(by: { $0.lastPathComponent < $1.lastPathComponent }) where path.pathExtension == "json" {
+            let values = try path.resourceValues(forKeys: [.isSymbolicLinkKey, .isRegularFileKey, .fileSizeKey])
+            guard values.isSymbolicLink == false, values.isRegularFile == true,
+                  let size = values.fileSize, size < 100_000 else { throw PersistenceFailure() }
+            let record = try JSONDecoder().decode(Attempt.self, from: Data(contentsOf: path))
+            guard record.context.key == path.deletingPathExtension().lastPathComponent,
                   record.context.origin.host == snapshot.host, record.context.origin.username == snapshot.user.username,
                   record.context.origin.userID == snapshot.user.id,
-                  record.context.origin.projectID == snapshot.request.projectID, record.context.origin.iid == snapshot.request.iid else { return nil }
-            return record
+                  record.context.origin.projectID == snapshot.request.projectID,
+                  record.context.origin.iid == snapshot.request.iid else { throw PersistenceFailure() }
+            result.append(record)
         }
+        return result
     }
+
     private static func save(_ attempt: Attempt, snapshot: DraftProofRecoveryCoordinator.Snapshot, directory: URL) throws {
-        let folder = folder(snapshot, directory: directory)
-        try FileManager.default.createDirectory(at: folder, withIntermediateDirectories: true, attributes: [.posixPermissions: 0o700])
-        try JSONEncoder().encode(attempt).write(to: folder.appending(path: "\(attempt.context.key).json"), options: .atomic)
+        do {
+            _ = try records(snapshot, directory: directory)
+            let folder = folder(snapshot, directory: directory)
+            try FileManager.default.createDirectory(at: folder, withIntermediateDirectories: true, attributes: [.posixPermissions: 0o700])
+            try JSONEncoder().encode(attempt).write(to: folder.appending(path: "\(attempt.context.key).json"), options: .atomic)
+        } catch { throw PersistenceFailure() }
+    }
+
+    private static func removeReservation(_ context: Context, snapshot: DraftProofRecoveryCoordinator.Snapshot, directory: URL) throws {
+        do {
+            _ = try records(snapshot, directory: directory)
+            let path = folder(snapshot, directory: directory).appending(path: "\(context.key).json")
+            if FileManager.default.fileExists(atPath: path.path) { try FileManager.default.removeItem(at: path) }
+        } catch { throw PersistenceFailure() }
     }
     private static func job(_ context: Context, settings: SettingsManager) -> AssistantAutomationRunner.Handoff? {
         settings.assistantHandoffs.filter { $0.draftRepair?.key == context.key
@@ -109,10 +137,16 @@ enum DraftReplyRepair {
     static func dispatch(snapshot: DraftProofRecoveryCoordinator.Snapshot, origin: FollowUpVerification,
                          assessment: DraftProofRecoveryVerifier.Assessment, settings: SettingsManager, directory: URL,
                          launch: DraftProofRecoveryCoordinator.Repair) async -> Status {
+        guard settings.automaticActionsAllowed else { return .blocked(persistenceReason) }
         var blocked = assessment.drafts.first(where: { $0.state != .valid })?.reason ?? "The reply still lacks verified evidence."
         for rejection in assessment.drafts.filter({ $0.state != .valid }).sorted(by: { $0.draftID < $1.draftID }) {
             guard let context = context(snapshot: snapshot, origin: origin, rejection: rejection, configuration: settings.automation) else { continue }
-            let previous = records(snapshot, directory: directory).filter { $0.context.lineage == context.lineage }
+            let previous: [Attempt]
+            do { previous = try records(snapshot, directory: directory).filter { $0.context.lineage == context.lineage } }
+            catch {
+                settings.recordPersistenceFailure("draftReplyRepairAttempts")
+                return .blocked(persistenceReason)
+            }
             if let exact = previous.first(where: { $0.context.key == context.key }) {
                 if let job = job(context, settings: settings), job.execution?.state.isActive == true { return .working }
                 blocked = stopped(exact, settings: settings)
@@ -128,8 +162,9 @@ enum DraftReplyRepair {
             var attempt = Attempt(context: context)
             do {
                 try save(attempt, snapshot: snapshot, directory: directory)
+                guard settings.automaticActionsAllowed else { throw PersistenceFailure() }
                 guard let id = try await launch(snapshot, origin, .init(drafts: [rejection])) else {
-                    try FileManager.default.removeItem(at: folder(snapshot, directory: directory).appending(path: "\(context.key).json"))
+                    try removeReservation(context, snapshot: snapshot, directory: directory)
                     return .working
                 }
                 guard let launched = job(context, settings: settings), launched.id == id else {
@@ -142,11 +177,24 @@ enum DraftReplyRepair {
                 // A confirmed pre-launch capacity refusal has no effects to replay.
                 if let launchError = error as? AssistantAutomationRunner.HandoffError,
                    case .executionUnavailable = launchError, job(context, settings: settings) == nil {
-                    try? FileManager.default.removeItem(at: folder(snapshot, directory: directory).appending(path: "\(context.key).json"))
-                    return .working
+                    do {
+                        try removeReservation(context, snapshot: snapshot, directory: directory)
+                        return .working
+                    } catch {
+                        settings.recordPersistenceFailure("draftReplyRepairAttempts")
+                        return .blocked(persistenceReason)
+                    }
+                }
+                if error is PersistenceFailure {
+                    settings.recordPersistenceFailure("draftReplyRepairAttempts")
+                    return .blocked(persistenceReason)
                 }
                 attempt.failure = GlabService.redactWorkflowEvidence(String(describing: error))
-                try? save(attempt, snapshot: snapshot, directory: directory)
+                do { try save(attempt, snapshot: snapshot, directory: directory) }
+                catch {
+                    settings.recordPersistenceFailure("draftReplyRepairAttempts")
+                    return .blocked(persistenceReason)
+                }
                 blocked = attempt.failure ?? blocked
             }
         }

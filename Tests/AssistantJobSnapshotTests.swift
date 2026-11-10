@@ -3,6 +3,57 @@ import Testing
 @testable import GitLabTodos
 
 @Suite struct AssistantJobSnapshotTests {
+    @MainActor @Test(arguments: [false, true])
+    func persistenceFailureDuringFreshLaunchReadsCannotCreateAnotherWorker(_ manual: Bool) async throws {
+        // given
+        let suite = "AssistantLaunchPersistence.\(UUID())"
+        let defaults = try #require(UserDefaults(suiteName: suite))
+        defer { defaults.removePersistentDomain(forName: suite) }
+        let settings = SettingsManager(defaults: defaults)
+        settings.automation.applyPreset(.full, for: .codex)
+        settings.glabPath = URL(fileURLWithPath: "/in-memory/glab")
+        let host = "gitlab.example.test"
+        let sha = String(repeating: "a", count: 40)
+        let gitlab = InMemoryGitLab()
+        defer { gitlab.close() }
+        let glab = gitlab.service(host: host, username: "me")
+        gitlab.handler = { call in
+            if call.arguments == ["config", "get", "host"] { return InMemoryGitLab.output(host) }
+            if call.arguments == ["auth", "status"] {
+                return InMemoryGitLab.output(error: "Logged in to \(host) as me")
+            }
+            if call.endpoint == "/user" { return InMemoryGitLab.output(#"{"id":1,"username":"me"}"#) }
+            if call.endpoint == "/projects/7/merge_requests/11" {
+                settings.recordPersistenceFailure("assistantHandoffs")
+                return InMemoryGitLab.output("""
+                    {"project_id":7,"iid":11,"author":{"id":1,"username":"me","name":"Me"},"title":"Fixture",
+                     "web_url":"https://\(host)/team/repo/-/merge_requests/11","state":"opened","draft":false,
+                     "sha":"\(sha)","source_branch":"feature","target_branch":"main","labels":[]}
+                    """)
+            }
+            return try gitlab.unexpected(call)
+        }
+        var executions = 0
+        let coordinator = AssistantJobCoordinator(execute: { _, _ in
+            executions += 1
+            return .init(result: .init(status: .succeeded, summary: "Fixture"), output: "")
+        })
+
+        // when
+        await #expect(throws: (any Error).self) {
+            _ = try await AssistantAutomationRunner.launch(.codex, title: "Fixture",
+                mergeRequestURL: URL(string: "https://\(host)/team/repo/-/merge_requests/11")!, prompt: "Read fixture",
+                workspace: "", access: .gitLabRead, work: .init(host: host, projectID: 7, iid: 11), username: "me",
+                settings: settings, manual: manual, expectedHeadSHA: sha, jobCoordinator: coordinator,
+                configurationSnapshot: settings.automation, glab: glab)
+        }
+        await coordinator.waitForTermination()
+
+        // then
+        #expect(!settings.automaticActionsAllowed)
+        #expect(settings.assistantHandoffs.isEmpty && executions == 0)
+    }
+
     @MainActor @Test func legacyJobsDecodeWithoutAssigningANewRoleOrCodingModel() throws {
         let old = AssistantAutomationRunner.Handoff(id: UUID(),
             key: .init(assistant: .codex, work: .init(host: "gitlab.example.test", projectID: 1, iid: 2),

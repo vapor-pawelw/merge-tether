@@ -139,6 +139,7 @@ struct CommandCenterView: View {
 
     @ViewBuilder
     private var statusBanners: some View {
+        PersistenceDegradedBanner(settings: monitor.settings)
         if let error = monitor.lastError {
             ErrorBannerView(error: error) { openWindow(id: "onboarding") }
         } else if !showActivity, monitor.boardRefreshState == .unavailable {

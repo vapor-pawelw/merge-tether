@@ -2047,7 +2047,8 @@ final class MergeRequestAttentionMonitor {
                 }
             }
             try await glab.approveMergeRequest(projectID: id.projectID, iid: id.iid, headSHA: head,
-                host: account.host, userID: user.id, willSubmit: { submitted = true })
+                host: account.host, userID: user.id, willSubmit: { submitted = true },
+                shouldProceed: { permits(evidence) })
             guard currentAccount() else { return false }
             return confirmed()
         } catch {
@@ -2509,6 +2510,11 @@ final class MergeRequestAttentionMonitor {
         }
         var finished = true
         for (reviewerID, noteID) in recipients.sorted(by: { $0.key < $1.key }) {
+            guard settings.automaticActionsAllowed else {
+                reReviewChecks[id]?.state = .unavailable
+                updateReReviewPresentation(id, unanswered: feedback.hasUnansweredFeedback)
+                return
+            }
             let receiptKey = ReReviewReceipt.Key(host: host, authorID: user.id, projectID: request.projectID,
                                                  iid: request.iid, reviewerID: reviewerID)
             guard settings.reReviewReceipts[receiptKey]?.covers(noteID: noteID, headSHA: head) != true else { continue }
@@ -2556,7 +2562,7 @@ final class MergeRequestAttentionMonitor {
                 async let finalDrafts = glab.fetchOwnDraftNoteCount(projectID: request.projectID, iid: request.iid, host: host, userID: user.id)
                 let (checkedMR, checkedThreads, checkedDraftCount, checkedReviewers, checkedApprovers) = try await
                     (finalMR, finalThreads, finalDrafts, finalReviewers, finalApprovers)
-                guard !Task.isCancelled, finalUser == user, isCurrent(account),
+                guard settings.automaticActionsAllowed, !Task.isCancelled, finalUser == user, isCurrent(account),
                       runtimePermitsReReview(id, account: account),
                       settings.automation == finalConfiguration, settings.automation.autoReReviewEnabled,
                       checkedDraftCount == 0, !settings.pendingCommentReviews.contains(target), checkedMR.state == "opened",
@@ -2577,6 +2583,7 @@ final class MergeRequestAttentionMonitor {
                 }
                 settings.reReviewReceipts[receiptKey] = ReReviewReceipt(noteID: noteID, unconfirmed: true, headSHA: head)
                 settings.save()
+                guard settings.automaticActionsAllowed else { throw CancellationError() }
                 try await glab.requestReview(of: checkedMR, userID: reviewerID, username: username,
                                              alreadyAssigned: checkedReviewer != nil, host: host)
                 settings.reReviewReceipts[receiptKey]?.unconfirmed = false

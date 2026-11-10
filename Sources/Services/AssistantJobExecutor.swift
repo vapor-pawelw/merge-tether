@@ -3,6 +3,13 @@ import Foundation
 /// CLI subprocess adapter. Remote effects remain subject to MergeTether's existing evidence gates.
 enum AssistantJobExecutor {
     enum ExecutionError: Error, Equatable { case cliUnavailable, wrongAccount, inactiveMergeRequest, missingResult, disabledPermission, headChanged }
+    struct PersistenceUnavailable: Error, CustomStringConvertible {
+        var description: String { String(localized: .Settings.settingsPersistenceActionBlocked) }
+    }
+
+    @MainActor static func validatePersistence(_ settings: SettingsManager) throws {
+        guard settings.automaticActionsAllowed else { throw PersistenceUnavailable() }
+    }
 
     @MainActor
     static func execute(_ handoff: AssistantAutomationRunner.Handoff, settings: SettingsManager) async throws -> AssistantJobCoordinator.Outcome {
@@ -12,6 +19,7 @@ enum AssistantJobExecutor {
     @MainActor
     static func execute(_ handoff: AssistantAutomationRunner.Handoff, settings: SettingsManager,
                         detectCLI: @MainActor (AutomationAssistant) async -> AssistantDependencyStatus) async throws -> AssistantJobCoordinator.Outcome {
+        try validatePersistence(settings)
         try validateConfiguration(handoff, automation: settings.automation)
         try validateIgnoredTarget(handoff, ignored: settings.ignoredMergeRequests)
         guard case .ready(let executable) = await detectCLI(handoff.key.assistant) else {
@@ -71,6 +79,7 @@ enum AssistantJobExecutor {
             recordFeedbackContext(ignoredFeedback.decisionRevision, for: handoff, at: index, settings: settings)
             settings.save()
         }
+        try validatePersistence(settings)
         let evidenceDirectory = ReviewVerdictStore.directory.deletingLastPathComponent()
         try FileManager.default.createDirectory(at: evidenceDirectory, withIntermediateDirectories: true,
                                                 attributes: [.posixPermissions: 0o700])
@@ -149,7 +158,8 @@ enum AssistantJobExecutor {
                                                   outputDirectory: folder.appendingPathComponent("cli-output"),
                                                   usage: .init(role: .codingAgent, assistant: handoff.key.assistant,
                                                     model: (handoff.codingModel ?? handoff.reviewModel)?.rawValue,
-                                                    mergeRequest: usageMergeRequest))
+                                                    mergeRequest: usageMergeRequest),
+                                                  beforeLaunch: { @MainActor in try validatePersistence(settings) })
             capturedOutput = output
             guard output.exitCode == 0 else { throw CLIProcessError(exitCode: output.exitCode, diagnostic: output.stderr) }
             try AssistantJobResult.validateCodexEvents(output.stdout)
@@ -162,7 +172,8 @@ enum AssistantJobExecutor {
                                                   outputDirectory: folder.appendingPathComponent("cli-output"),
                                                   usage: .init(role: .codingAgent, assistant: handoff.key.assistant,
                                                     model: (handoff.codingModel ?? handoff.reviewModel)?.rawValue,
-                                                    mergeRequest: usageMergeRequest))
+                                                    mergeRequest: usageMergeRequest),
+                                                  beforeLaunch: { @MainActor in try validatePersistence(settings) })
             capturedOutput = output
             guard output.exitCode == 0 else { throw CLIProcessError(exitCode: output.exitCode, diagnostic: output.stderr) }
             result = try AssistantJobResult.claude(output.stdout)

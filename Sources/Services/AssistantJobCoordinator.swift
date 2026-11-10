@@ -48,7 +48,7 @@ final class AssistantJobCoordinator {
 
     @discardableResult
     func schedule(_ handoff: Handoff, settings: SettingsManager) -> Bool {
-        guard !terminating, !handoff.isObsoleteReminder, handoff.execution?.state == .queued,
+        guard settings.automaticActionsAllowed, !terminating, !handoff.isObsoleteReminder, handoff.execution?.state == .queued,
               !isWorking(on: handoff.key.work), tasks[handoff.id] == nil else { return false }
         work[handoff.id] = handoff.key.work
         pending.append((handoff, settings))
@@ -58,7 +58,9 @@ final class AssistantJobCoordinator {
 
     private func startPendingJobs() {
         while !terminating, tasks.count < maximumConcurrentJobs, !pending.isEmpty {
-            guard let index = pending.firstIndex(where: { healthStore.hold(for: $0.handoff.key.assistant) == nil }) else { break }
+            guard let index = pending.firstIndex(where: {
+                $0.settings.automaticActionsAllowed && healthStore.hold(for: $0.handoff.key.assistant) == nil
+            }) else { break }
             let next = pending.remove(at: index)
             start(next.handoff, settings: next.settings)
         }
@@ -73,6 +75,7 @@ final class AssistantJobCoordinator {
             }
             do {
                 try Task.checkCancellation()
+                try AssistantJobExecutor.validatePersistence(settings)
                 let outcome = try await execute(handoff, settings)
                 try Task.checkCancellation()
                 self.update(handoff.id, settings: settings) {

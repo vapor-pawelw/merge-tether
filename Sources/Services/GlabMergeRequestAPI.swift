@@ -242,7 +242,8 @@ extension GlabService {
 
     /// Approves the merge request only if its head is still `headSHA`.
     func approveMergeRequest(projectID: Int, iid: Int, headSHA: String, host: String, userID: Int,
-                             willSubmit: (() -> Void)? = nil) async throws {
+                             willSubmit: (() -> Void)? = nil,
+                             shouldProceed: @MainActor () -> Bool = { true }) async throws {
         struct Approval: Decodable {
             struct Approver: Decodable {
                 struct User: Decodable { let id: Int }
@@ -254,6 +255,7 @@ extension GlabService {
         }
         let currentUser: GitLabAuthenticatedUser = try await mergeRequestAPI("/user", host: host)
         guard currentUser.id == userID else { throw GlabError.notAuthenticated }
+        guard shouldProceed() else { throw CancellationError() }
         willSubmit?()
         let result: Approval = try await mergeRequestAPI(
             "/projects/\(projectID)/merge_requests/\(iid)/approve",

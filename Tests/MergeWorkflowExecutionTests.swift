@@ -765,10 +765,14 @@ import Testing
                                          infrastructureRetry: true, draftOnJobRead: duringJobRead)
     }
 
+    @Test func persistenceFailureBeforeInfrastructureRetryPreventsTheWrite() async throws {
+        try await exercisePipelineRefresh(ambiguousResponse: false, infrastructureRetry: true, persistenceOnJobRead: true)
+    }
+
     private func exercisePipelineRefresh(
         ambiguousResponse: Bool, wrongCreatedParents: Bool = false, priorReceipt: Bool = false, ownershipRace: Bool = false,
         prelaunchFailures: Int = 0, draftAfterRead: Int? = nil, infrastructureRetry: Bool = false,
-        draftOnJobRead: Bool = false
+        draftOnJobRead: Bool = false, persistenceOnJobRead: Bool = false
     ) async throws {
         let directory = FileManager.default.temporaryDirectory.appending(path: UUID().uuidString)
         try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
@@ -792,6 +796,7 @@ import Testing
         let gitlab = InMemoryGitLab()
         defer { gitlab.close() }
         var userReads = 0, mrReads = 0
+        var liveSettings: SettingsManager?
         gitlab.handler = { call in
             switch call.endpoint {
             case "/user":
@@ -803,6 +808,7 @@ import Testing
                 gitlab.append("posted", "x")
                 return try InMemoryGitLab.json(["id": 200, "status": "pending", "allow_failure": false, "failure_reason": "runner_system_failure", "pipeline": ["id": 100]])
             case "/projects/7/jobs/200":
+                if persistenceOnJobRead { liveSettings?.recordPersistenceFailure("workflowActivity") }
                 if draftOnJobRead { gitlab.write("job-read") }
                 return try InMemoryGitLab.json(["id": 200, "status": "failed", "allow_failure": false, "failure_reason": "runner_system_failure", "pipeline": ["id": 100]])
             case "/projects/7/merge_requests/11/pipelines":
@@ -843,6 +849,7 @@ import Testing
         let draftPaused = draftAfterRead != nil || draftOnJobRead
         for attemptIndex in 0..<2 {
             let settings = SettingsManager(defaults: defaults)
+            liveSettings = settings
             settings.automation.applyPreset(.full, for: .codex)
             if infrastructureRetry {
                 settings.automation.workflowRules[.pipelineFailure].projects = "team/repo"
@@ -861,6 +868,10 @@ import Testing
                 try await Task.sleep(for: .milliseconds(10))
             }
             #expect(settings.assistantHandoffs.isEmpty)
+            if persistenceOnJobRead {
+                #expect(!settings.automaticActionsAllowed && !gitlab.has("posted"))
+                continue
+            }
             if prelaunchFailures > 0 { #expect(retryDelays == (attemptIndex == 0 ? [.seconds(2)] : [])) }
             if attemptIndex == 0 {
                 let expected: MergeWorkflowActivityState = draftPaused ? .skipped : ownershipRace ? .alreadyRegistered
@@ -878,6 +889,7 @@ import Testing
             try? FileManager.default.removeItem(at: claims)
         }
         let posted = gitlab.files["posted"]
+        if persistenceOnJobRead { #expect(posted == nil); return }
         #expect(posted == (ownershipRace || draftPaused ? nil : "x"))
         let attempts = defaults.data(forKey: "pipelineRefreshAttempts")
         let attemptCount = try attempts.map { (try JSONSerialization.jsonObject(with: $0) as? [Any])?.count ?? 0 } ?? 0

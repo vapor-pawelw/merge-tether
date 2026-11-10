@@ -14,7 +14,8 @@ enum AssistantUsageRunner {
                     currentDirectory: URL? = nil, timeout: TimeInterval = 30, input: Data? = nil,
                     outputDirectory: URL? = nil,
                     usage: Context, store: AssistantUsageStore = .shared,
-                    healthStore: AssistantCLIHealthStore? = nil) async throws -> ProcessRunner.Output {
+                    healthStore: AssistantCLIHealthStore? = nil,
+                    beforeLaunch: (@Sendable () async throws -> Void)? = nil) async throws -> ProcessRunner.Output {
         let health = await MainActor.run { healthStore ?? AssistantCLIHealthStore.shared }
         if let hold = await health.hold(for: usage.assistant) { throw AccessError.temporarilyUnavailable(hold.issue.kind) }
         let startedAt = Date()
@@ -23,6 +24,13 @@ enum AssistantUsageRunner {
                 mergeRequest: usage.mergeRequest)
         } catch {
             Log.monitor.error("Could not start agent usage receipt: \(String(describing: error), privacy: .private)")
+        }
+        do { try await beforeLaunch?() }
+        catch {
+            // This request never reached a subprocess and is not a CLI attempt.
+            do { try await store.discard(id: usage.id) }
+            catch { Log.monitor.error("Could not discard an unstarted agent usage receipt") }
+            throw error
         }
         let capture = MeasurementCapture()
         let healthCapture = HealthCapture()

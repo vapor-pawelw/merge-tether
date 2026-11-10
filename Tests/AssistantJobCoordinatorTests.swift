@@ -4,6 +4,77 @@ import Testing
 
 @MainActor
 @Suite struct AssistantJobCoordinatorTests {
+    @Test(arguments: [false, true])
+    func corruptedRequiredJournalDeniesExecutableWorkIncludingManualJobs(_ manual: Bool) async throws {
+        // given
+        let (_, name, defaults) = try fixture()
+        defer { defaults.removePersistentDomain(forName: name) }
+        defaults.set(Data("unsupported job history".utf8), forKey: "assistantHandoffs")
+        let settings = SettingsManager(defaults: defaults)
+        var value = job()
+        value.manual = manual
+        settings.assistantHandoffs = [value]
+        var executions = 0
+        let coordinator = AssistantJobCoordinator(execute: { _, _ in
+            executions += 1
+            return .init(result: .init(status: .succeeded, summary: "Fixture"), output: "")
+        })
+
+        // when
+        let scheduled = coordinator.schedule(value, settings: settings)
+        await coordinator.waitForTermination()
+
+        // then
+        #expect(!scheduled && executions == 0)
+        #expect(defaults.data(forKey: "assistantHandoffs") == Data("unsupported job history".utf8))
+    }
+
+    @Test func queuedWorkWaitsWhenPersistenceDegradesBeforeItsExecutionSlot() async throws {
+        // given
+        let (settings, name, defaults) = try fixture()
+        defer { defaults.removePersistentDomain(forName: name) }
+        let first = job(iid: 1), second = job(iid: 2)
+        settings.assistantHandoffs = [first, second]
+        var gate: CheckedContinuation<Void, Never>?
+        var started: [UUID] = []
+        let coordinator = AssistantJobCoordinator(maximumConcurrentJobs: 1, execute: { value, _ in
+            started.append(value.id)
+            if value.id == first.id { await withCheckedContinuation { gate = $0 } }
+            return .init(result: .init(status: .succeeded, summary: "Fixture"), output: "")
+        })
+        #expect(coordinator.schedule(first, settings: settings))
+        #expect(coordinator.schedule(second, settings: settings))
+        for _ in 0..<100 where gate == nil { try await Task.sleep(for: .milliseconds(5)) }
+        try #require(gate != nil)
+
+        // when
+        settings.recordPersistenceFailure("workflowActivity")
+        gate?.resume()
+        await coordinator.waitForTermination()
+
+        // then
+        #expect(started == [first.id])
+        #expect(settings.assistantHandoffs[1].execution?.state == .queued)
+        coordinator.cancel(second.id)
+    }
+
+    @Test func failureSavingTheRunningStateCannotLaunchTheExecutor() async throws {
+        let (settings, name, defaults) = try fixture()
+        defer { defaults.removePersistentDomain(forName: name) }
+        let value = AssistantAutomationRunner.Handoff(id: UUID(), key: job().key, title: "Fixture", prompt: "",
+            createdAt: Date(timeIntervalSinceReferenceDate: .nan), allowsPush: false, execution: .init(state: .queued))
+        settings.assistantHandoffs = [value]
+        var executions = 0
+        let coordinator = AssistantJobCoordinator(execute: { _, _ in
+            executions += 1
+            return .init(result: .init(status: .succeeded, summary: "Fixture"), output: "")
+        })
+        #expect(coordinator.schedule(value, settings: settings))
+        await coordinator.waitForTermination()
+        #expect(executions == 0)
+        #expect(settings.persistenceDegraded.contains("assistantHandoffs"))
+    }
+
     @Test func cancellationDuringAProviderHoldDoesNotRequeueCancelledWork() async throws {
         let (settings, name, defaults) = try fixture()
         defer { defaults.removePersistentDomain(forName: name) }
