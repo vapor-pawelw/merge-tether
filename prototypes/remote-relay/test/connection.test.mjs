@@ -9,7 +9,7 @@ import { PhoneProbe } from '../public/phone.mjs';
 
 test('R1/R3: real WebSocket clients get a snapshot and completed test CTA through the relay', async () => {
   const runtime = new Miniflare({
-    modules: true, script: await readFile(new URL('../worker.mjs', import.meta.url), 'utf8'),
+    modules: true, script: await readFile(new URL('../../../Services/RemoteRelay/worker.mjs', import.meta.url), 'utf8'),
     compatibilityDate: '2026-07-30', bindings: { RELAY_ACCESS_TOKEN: 'a'.repeat(43) },
     durableObjects: { ROOMS: { className: 'RelayRoom', useSQLite: true } },
   });

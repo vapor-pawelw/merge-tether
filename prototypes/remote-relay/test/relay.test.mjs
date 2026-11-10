@@ -8,7 +8,7 @@ const room = 'b'.repeat(43);
 let runtime;
 before(async () => {
   runtime = new Miniflare({
-    modules: true, script: await readFile(new URL('../worker.mjs', import.meta.url), 'utf8'),
+    modules: true, script: await readFile(new URL('../../../Services/RemoteRelay/worker.mjs', import.meta.url), 'utf8'),
     compatibilityDate: '2026-07-30', bindings: { RELAY_ACCESS_TOKEN: access },
     durableObjects: { ROOMS: { className: 'RelayRoom', useSQLite: true } },
   });

@@ -10,7 +10,7 @@ import { parsePairingURL } from '../public/probe.mjs';
 
 test('R2/R3: host pairs without logging credentials and removes private pairing artifacts on rejection', { timeout: 15000 }, async () => {
   const runtime = new Miniflare({
-    modules: true, script: await readFile(new URL('../worker.mjs', import.meta.url), 'utf8'),
+    modules: true, script: await readFile(new URL('../../../Services/RemoteRelay/worker.mjs', import.meta.url), 'utf8'),
     compatibilityDate: '2026-07-30', bindings: { RELAY_ACCESS_TOKEN: 'a'.repeat(43) },
     durableObjects: { ROOMS: { className: 'RelayRoom', useSQLite: true } },
   });

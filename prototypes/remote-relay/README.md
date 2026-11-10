@@ -6,6 +6,12 @@ It does not read GitLab, execute shell commands, expose a Mac listener, modify
 network settings, or change the installed MergeTether app. The Safari client is a
 temporary transport probe, not the native iOS MVP.
 
+The shared Worker source lives in `../../Services/RemoteRelay/worker.mjs` and also
+serves the native app's production relay. This directory keeps only the probe
+clients, pinned npm tooling and shared transport tests. Its Wrangler configuration
+adds the browser assets to a separate probe deployment; the production
+configuration in `Services/RemoteRelay` does not serve those assets.
+
 ## Local verification
 
 Requires Node.js 22 or newer. Dependencies are pinned in `package-lock.json`.

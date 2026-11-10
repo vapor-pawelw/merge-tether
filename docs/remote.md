@@ -72,6 +72,11 @@ has no public self-service signup, account recovery or per-user quota service.
 
 ## Deploy on Cloudflare Free
 
+The production Worker source and deployment configuration live in
+`Services/RemoteRelay`. The diagnostic browser probe under
+`prototypes/remote-relay` uses the same Worker source with a separate deployment
+and static probe assets; its pinned npm tooling and integration tests cover both.
+
 Use a Cloudflare account with Workers Free and SQLite Durable Objects Free.
 Do not enable a paid subscription. Free quotas are shared across the deployment;
 exhaustion interrupts service rather than guaranteeing unlimited free capacity.
