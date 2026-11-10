@@ -50,8 +50,8 @@ struct BoardCompactJobCard: View {
             if let finishedItem {
                 FinishedMergeRequestStatus(item: finishedItem, monitor: monitor)
             } else {
-                BoardJobStatusActions(handoff: handoff, monitor: monitor, muted: isMuted)
                 AssistantJobPreflightNotice(jobID: handoff.id, monitor: monitor)
+                BoardJobStatusActions(handoff: handoff, monitor: monitor, muted: isMuted)
             }
             Button { showingDetails = true } label: {
                 Text(.MRHumanAction.mrHumanActionActionReviewRun)

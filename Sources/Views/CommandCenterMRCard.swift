@@ -84,26 +84,14 @@ private struct CommandCenterMRCardContent: View {
                             }
                         } else if presentation.refreshFailed {
                             Label { Text(.AutomationProgress.progressRefreshFailed) } icon: { Image(systemName: "arrow.clockwise") }
-                        } else if humanAction?.action == .retryRun {
-                            Button { openAttention(.assistantRuns) } label: { Text(.MRHumanAction.mrHumanActionActionReviewRun) }
-                                .buttonStyle(.plain)
                         } else if humanAction == nil, let status = neutralStatus {
                             Text(status).font(.callout).foregroundStyle(isMuted ? Color.secondary : Color.primary).lineLimit(2)
                                 .help(Text(reviewingContext.presenceMessage)
                                       + Text(verbatim: "\n") + Text(reviewingContext.statusMessage))
                         }
                         Spacer(minLength: 6)
-                        primaryAction
                     }
                     .font(.caption).foregroundStyle(.secondary)
-                }
-                MergeActionsView(item: item, monitor: monitor, actionsBlocked: presentation.actionsBlocked)
-                if presentation.showsAdditionalCommentReview {
-                    Button { start { await monitor.attention.finishCommentReview(item) } } label: {
-                        Text(.CommentReview.commentReviewFinish)
-                    }
-                    .buttonStyle(.bordered)
-                    .disabled(presentation.actionsBlocked || !item.canFinishCommentReview)
                 }
                 if let nextStep = presentation.nextStep {
                     Text(verbatim: nextStep)
@@ -115,6 +103,21 @@ private struct CommandCenterMRCardContent: View {
                         ForEach(Array(chips.enumerated()), id: \.offset) { _, chip in
                             BoardStatusChip(title: chip.title, symbol: chip.symbol)
                         }
+                    }
+                }
+                MergeActionsView(item: item, monitor: monitor, actionsBlocked: presentation.actionsBlocked) {
+                    if humanAction?.action == .retryRun {
+                        Button { openAttention(.assistantRuns) } label: { Text(.MRHumanAction.mrHumanActionActionReviewRun) }
+                            .buttonStyle(.plain)
+                    }
+                    Spacer(minLength: 6)
+                    primaryAction
+                    if presentation.showsAdditionalCommentReview {
+                        Button { start { await monitor.attention.finishCommentReview(item) } } label: {
+                            Text(.CommentReview.commentReviewFinish)
+                        }
+                        .buttonStyle(.bordered)
+                        .disabled(presentation.actionsBlocked || !item.canFinishCommentReview)
                     }
                 }
             }

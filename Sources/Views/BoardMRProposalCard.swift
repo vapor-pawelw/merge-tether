@@ -75,6 +75,11 @@ struct BoardMRProposalCard: View {
                 FinishedMergeRequestStatus(item: finishedItem, monitor: monitor)
             } else {
                 reasons
+                if failed {
+                    BoardStatusChip(title: .Board.boardCompactBlocked, symbol: "exclamationmark.circle", tint: isMuted ? .secondary : .orange)
+                        .help(Text(.Menu.menuMrAddFailed))
+                }
+                runResult
                 HStack {
                     Button {
                         isWorking = true
@@ -98,11 +103,6 @@ struct BoardMRProposalCard: View {
                     if isWorking { ProgressView().controlSize(.small) }
                 }
                 .disabled(isWorking)
-                if failed {
-                    BoardStatusChip(title: .Board.boardCompactBlocked, symbol: "exclamationmark.circle", tint: isMuted ? .secondary : .orange)
-                        .help(Text(.Menu.menuMrAddFailed))
-                }
-                runResult
             }
         }
         .confirmationDialog(Text(.Board.boardProposalIgnore), isPresented: $confirmIgnore, titleVisibility: .visible) {

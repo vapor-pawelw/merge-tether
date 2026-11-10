@@ -8,6 +8,7 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 
 - Offer guarded manual merge independently of automatic settings, support GitLab auto-merge and merge trains with verified pending states and persistent replay protection, and add explicit previews for resolving addressed, answered threads on Mac and compatible phones.
 - Show every current unique approval, including 5/2, while preserving required-rule satisfaction and compatibility with older phones.
+- Keep MR-card flow, blocker and error information above the final action row, including proposal and compact-run cards.
 
 - Distinguish general discussion threads with a purple status label in MR Details, and group open, resolved and general threads while preserving GitLab order within each group.
 
