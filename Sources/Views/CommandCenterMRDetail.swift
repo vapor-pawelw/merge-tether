@@ -139,7 +139,11 @@ private struct CommandCenterMRDetailContent: View {
             ScrollView {
                 VStack(alignment: .leading, spacing: 20) {
                     header.id(Anchor.overview)
-                    if finishedState == nil { MergeActionsView(item: item, monitor: monitor, actionsBlocked: isStartingReview || isRetrying) }
+                    if finishedState == nil {
+                        MREffectivePolicySummary(row: presentationRow, monitor: monitor,
+                            excluding: [humanAction?.explanation ?? ""])
+                        MergeActionsView(item: item, monitor: monitor, actionsBlocked: isStartingReview || isRetrying)
+                    }
                     if showsDecisions { nextStep(proxy: proxy, citationContext: citationContext).id(Anchor.drafts) }
                     if finishedState == nil { supplementaryActions(citationContext: citationContext).id(Anchor.actions) }
                     discussionThreads.id(Anchor.comments)

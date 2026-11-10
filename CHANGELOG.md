@@ -73,6 +73,8 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 
 ### Added
 
+- Explain effective automation on MR cards and Details, including saved-data holds, manual delivery choices and GitLab queue status, without changing action permissions.
+
 - Delete individual private drafts with confirmation on macOS and iOS. Finish comment review directly on an MR card, with a persistent account-scoped checkpoint and live commit, discussion and draft checks.
 - Explain which approval, re-review and merge steps are waiting for comment review in MR details.
 
