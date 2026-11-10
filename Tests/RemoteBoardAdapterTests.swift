@@ -42,6 +42,14 @@ import MergeTetherRemote
         let decoded = try JSONDecoder().decode(RemoteCard.self, from: JSONEncoder().encode(card))
         #expect(decoded.approvals == card.approvals)
     }
+    @Test func excessApprovalsKeepTheLegacyNumeratorBoundedAndTheCurrentNumeratorComplete() throws {
+        var item = try item()
+        item.approvalProgress = MergeRequestApprovalProgress(completed: 5, required: 2)
+        let card = RemoteBoardAdapter.card(item, account: "me@host")
+        #expect(card.approvals?.completed == 2 && card.approvals?.required == 2)
+        #expect(card.approvals?.received == 5)
+    }
+
     @Test func approvalCountChangesCannotInvalidateAnOtherwiseCurrentPhoneAction() throws {
         var item = MergeRequestAttentionMonitor.Item(id: .init(projectID: 1, iid: 2), title: "Example",
             url: URL(string: "https://gitlab.example.org/g/p/-/merge_requests/2")!)

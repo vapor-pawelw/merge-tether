@@ -80,13 +80,15 @@ public struct RemoteApprovalProgress: Codable, Equatable, Sendable {
     public let completed: Int
     public let required: Int
     public let received: Int?
-    public init?(completed: Int, required: Int, received: Int? = nil) {
+    public var requirementsSatisfied: Bool? = nil
+    public init?(completed: Int, required: Int, received: Int? = nil, requirementsSatisfied: Bool? = nil) {
         guard required >= 0, completed >= 0, completed <= required,
               received.map({ $0 >= 0 }) ?? true else { return nil }
         self.completed = completed; self.required = required
         self.received = received
+        self.requirementsSatisfied = requirementsSatisfied
     }
-    private enum CodingKeys: String, CodingKey { case completed, required, received }
+    private enum CodingKeys: String, CodingKey { case completed, required, received, requirementsSatisfied }
     public init(from decoder: Decoder) throws {
         let values = try decoder.container(keyedBy: CodingKeys.self)
         let completed = try values.decode(Int.self, forKey: .completed)
@@ -96,6 +98,7 @@ public struct RemoteApprovalProgress: Codable, Equatable, Sendable {
             throw DecodingError.dataCorruptedError(forKey: .completed, in: values, debugDescription: "Invalid required approval progress")
         }
         self = progress
+        self.requirementsSatisfied = try values.decodeIfPresent(Bool.self, forKey: .requirementsSatisfied)
     }
 }
 

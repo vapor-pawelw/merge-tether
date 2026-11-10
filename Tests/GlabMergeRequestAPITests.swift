@@ -11,11 +11,19 @@ struct GlabMergeRequestAPITests {
         #expect(people.map(\.author.id) == [8])
         #expect(people.map(\.approved) == [false])
     }
-    @Test(arguments: [(0, 0, false), (2, 0, true), (0, 2, false), (1, 2, false), (2, 2, true)])
+    @Test(arguments: [(0, 0, false), (2, 0, true), (0, 2, false), (1, 2, false), (2, 2, true), (5, 2, true)])
     func approvalSatisfactionDependsOnlyOnTheApprovalRequirement(_ example: (Int, Int, Bool)) throws {
         let progress = try #require(MergeRequestApprovalProgress(completed: example.0, required: example.1))
         #expect(progress.isSatisfied == example.2)
     }
+    @Test func fiveApprovalsForTwoRequiredAreNotClampedOrDoubleCounted() throws {
+        let data = Data(#"{"approvals_required":2,"approvals_left":0,"approved_by":[{"user":{"id":1}},{"user":{"id":2}},{"user":{"id":3}},{"user":{"id":4}},{"user":{"id":5}},{"user":{"id":5}}]}"#.utf8)
+        let counts = try JSONDecoder().decode(GitLabMergeRequestApprovalCounts.self, from: data)
+        let progress = try #require(counts.progress(projectID: 34, iid: 12))
+        #expect(progress.completed == 5 && progress.required == 2)
+        #expect(progress.isSatisfied)
+    }
+
     @Test func optionalApprovalsCountActualApproversWithoutARequiredDenominator() throws {
         let counts = try JSONDecoder().decode(GitLabMergeRequestApprovalCounts.self, from: Data(#"{"approvals_required":0,"approvals_left":0,"approved_by":[{"user":{"id":7,"username":"reviewer","name":"Reviewer","avatar_url":"https://gitlab.example.test/avatar.png"}},{"user":{"id":8,"username":"other","name":"Other"}}]}"#.utf8))
         let progress = try #require(counts.progress(projectID: 34, iid: 12))
@@ -35,7 +43,7 @@ struct GlabMergeRequestAPITests {
         #expect(people.map(\.author.id) == [7, 9, 8])
         #expect(people.map(\.approved) == [true, true, false])
         #expect(people.first?.author.avatarURL?.absoluteString == "https://gitlab.example.test/avatar.png")
-        #expect(progress.completed == 1)
+        #expect(progress.completed == 2)
     }
     @Test func mostRecentCurrentApprovalComesFirst() throws {
         // given
@@ -49,11 +57,12 @@ struct GlabMergeRequestAPITests {
         #expect(people.map(\.id) == [9, 7])
     }
 
-    @Test func requiredApprovalProgressUsesGitLabsRemainingCountInsteadOfAllApprovers() throws {
+    @Test func requiredApprovalProgressCountsEveryUniqueCurrentApprover() throws {
         let data = Data(#"{"project_id":34,"iid":12,"approvals_required":2,"approvals_left":1,"approved_by":[{"user":{"id":1}},{"user":{"id":2}},{"user":{"id":3}}]}"#.utf8)
         let counts = try JSONDecoder().decode(GitLabMergeRequestApprovalCounts.self, from: data)
         let progress = try #require(counts.progress(projectID: 34, iid: 12))
-        #expect(progress.completed == 1 && progress.required == 2)
+        #expect(progress.completed == 3 && progress.required == 2)
+        #expect(!progress.isSatisfied)
         #expect(counts.progress(projectID: 35, iid: 12) == nil)
         #expect(counts.progress(projectID: 34, iid: 13) == nil)
     }
@@ -319,7 +328,7 @@ struct GlabMergeRequestAPITests {
             printf '%s' '{"rules":[{"approvals_required":1,"approved":true},{"approvals_required":0,"approved":false}]}'
             ;;
           'api /projects/34/merge_requests/12/approvals --hostname \(host)')
-            printf '%s' '{"project_id":34,"iid":12,"approvals_required":2,"approvals_left":1,"approved_by":[]}'
+            printf '%s' '{"project_id":34,"iid":12,"approvals_required":2,"approvals_left":1,"approved_by":[{"user":{"id":7,"username":"reviewer"}}]}'
             ;;
           'api /projects/34/merge_requests/12/closes_issues?per_page=100 --hostname \(host) --paginate')
             printf '%s' '[]'

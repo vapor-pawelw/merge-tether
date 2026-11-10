@@ -71,8 +71,8 @@ import MergeTetherRemote
         }
         card.approvals = item.approvalProgress.flatMap {
             // Older phones require completed <= required; optional approvals use an additive field.
-            .init(completed: $0.required == 0 ? 0 : $0.completed, required: $0.required,
-                  received: $0.required == 0 ? $0.completed : nil)
+            .init(completed: min($0.completed, $0.required), required: $0.required,
+                  received: $0.completed, requirementsSatisfied: $0.requirementsSatisfied)
         }
         return card
     }

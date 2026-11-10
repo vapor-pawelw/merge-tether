@@ -6,6 +6,8 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 
 ## Unreleased
 
+- Show every current unique approval, including 5/2, while preserving required-rule satisfaction and compatibility with older phones.
+
 - Distinguish general discussion threads with a purple status label in MR Details, and group open, resolved and general threads while preserving GitLab order within each group.
 
 - Prepare a reply in every actionable feedback thread even when another comment already led to the fix, linking the earlier explanation and keeping simple acknowledgements brief; retain remote verification and publication checks.

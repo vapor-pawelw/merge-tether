@@ -4,11 +4,12 @@ struct MergeRequestApprovalProgress: Equatable, Sendable {
     let completed: Int
     let required: Int
     let approvedBy: [Todo.Author]
+    var requirementsSatisfied: Bool? = nil
     var reviewHistory = MergeRequestReviewHistory()
     var approvalDates: [Int: Date] = [:]
-    var isSatisfied: Bool { completed > 0 && (required == 0 || completed == required) }
+    var isSatisfied: Bool { completed > 0 && (requirementsSatisfied ?? (required == 0 || completed >= required)) }
     init?(completed: Int, required: Int, approvedBy: [Todo.Author] = []) {
-        guard required >= 0, completed >= 0, required == 0 || completed <= required else { return nil }
+        guard required >= 0, completed >= 0 else { return nil }
         self.completed = completed; self.required = required
         self.approvedBy = approvedBy
     }
@@ -81,8 +82,9 @@ struct GitLabMergeRequestApprovalCounts: Decodable, Sendable {
               self.iid == nil || self.iid == iid, let required, let remaining,
               required >= 0, remaining >= 0, remaining <= required else { return nil }
         let received = Set((approvedBy ?? []).map(\.user.id).filter { $0 > 0 }).count
-        var result = MergeRequestApprovalProgress(completed: required == 0 ? received : required - remaining, required: required,
+        var result = MergeRequestApprovalProgress(completed: approvedBy == nil ? required - remaining : received, required: required,
                      approvedBy: (approvedBy ?? []).compactMap(\.user.author))
+        result?.requirementsSatisfied = remaining == 0
         for approver in approvedBy ?? [] {
             guard let date = MergeRequestReviewHistory.date(approver.approvedAt) else { continue }
             let previous = result?.approvalDates[approver.user.id] ?? .distantPast

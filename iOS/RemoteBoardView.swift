@@ -293,17 +293,17 @@ private struct RemoteApprovalProgressBadge: View {
 
     private var explanation: Text {
         if let progress, progress.required == 0 { Text(.Board.boardApprovalsReceived(received)) }
-        else if let progress { Text(.Board.boardApprovalsHelp(progress.completed, progress.required)) }
+        else if let progress { Text(.Board.boardApprovalsHelp(received, progress.required)) }
         else { Text(.Board.boardApprovalsUnavailable) }
     }
-    private var complete: Bool { progress.map { ($0.required == 0 ? received > 0 : $0.completed == $0.required) } ?? false }
+    private var complete: Bool { progress.map { received > 0 && ($0.requirementsSatisfied ?? ($0.required == 0 || received >= $0.required)) } ?? false }
 
     var body: some View {
         if progress.map({ $0.required > 0 || received > 0 }) ?? true {
             HStack(spacing: 3) {
                 Image(systemName: complete ? "checkmark.seal.fill" : "checkmark.seal").accessibilityHidden(true)
                 if let progress, progress.required == 0 { Text(verbatim: "\(received)") }
-                else if let progress { Text(.Board.boardApprovalRatio(progress.completed, progress.required)) }
+                else if let progress { Text(.Board.boardApprovalRatio(received, progress.required)) }
                 else { Text(.Board.boardApprovalsUnknownRatio) }
             }
             .font(.caption2).monospacedDigit().foregroundStyle(complete ? Color.green : .secondary)
