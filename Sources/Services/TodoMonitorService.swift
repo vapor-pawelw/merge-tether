@@ -92,11 +92,9 @@ final class TodoMonitorService {
     var availableAssistants: Set<AutomationAssistant> {
         assistantDependencies.available.filter { cliHealth.hold(for: $0) == nil }
     }
-    private(set) var codexListenerHealth: CodexDesktopRelay.ListenerHealth = .off
-    private(set) var codexPluginInstallation: CodexPluginInstaller.Installation?
-    private var lastListenerCheck: Date?
-    private var lastPluginCheck: Date?
-    private var isCheckingCodexPlugin = false
+    private let codexIntegrationHealth = CodexIntegrationHealth()
+    var codexListenerHealth: CodexDesktopRelay.ListenerHealth { codexIntegrationHealth.listenerHealth }
+    var codexPluginInstallation: CodexPluginInstaller.Installation? { codexIntegrationHealth.pluginInstallation }
 
     private var optimisticallyDone: Set<Int> = []
     private var pendingMarkDoneTask: Task<Void, Never>?
@@ -928,8 +926,10 @@ final class TodoMonitorService {
     }
 
     // Retained for decoding old integration state; desktop listeners no longer execute work.
-    func checkCodexListener(force: Bool = false, now: Date = Date()) {}
-    var codexListenerWarning: LocalizedStringResource? { nil }
+    func checkCodexListener(force: Bool = false, now: Date = Date()) {
+        codexIntegrationHealth.checkListener(force: force, now: now)
+    }
+    var codexListenerWarning: LocalizedStringResource? { codexIntegrationHealth.listenerWarning }
 
     func automaticConflictIsProcessing(for request: GitLabMergeRequest) -> Bool {
         guard availableAssistants.contains(settings.automation.assistant) || assistantDependencies.isChecking,
