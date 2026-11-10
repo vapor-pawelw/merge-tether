@@ -41,13 +41,14 @@ struct CommandCenterBoardView: View {
         .sheet(item: $selected) { selection in
             VStack(spacing: 0) {
                 HStack {
-                    Text(selection.section.title).font(.headline)
+                    Text(selection.section.title).font(.subheadline.weight(.medium)).foregroundStyle(.secondary)
                     Spacer()
                     Button { selected = nil } label: { Image(systemName: "xmark") }
+                        .buttonStyle(.borderless).foregroundStyle(.secondary)
                         .keyboardShortcut(.cancelAction)
                         .accessibilityLabel(Text(.CommandCenter.commandCenterClose))
                 }
-                .padding(16)
+                .padding(.horizontal, 20).padding(.vertical, 10)
                 Divider()
                 if selection.account == account {
                     CommandCenterMRDetail(item: selection.item, monitor: monitor, initialSection: selection.section)

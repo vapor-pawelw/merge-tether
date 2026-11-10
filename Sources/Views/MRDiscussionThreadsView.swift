@@ -32,27 +32,38 @@ struct MRDiscussionThreadsView: View {
             }
             if hasError {
                 Label { Text(.MRDiscussions.mrDiscussionsFailed) } icon: { Image(systemName: "exclamationmark.triangle") }
-                    .font(.caption).foregroundStyle(.orange)
+                    .font(.callout).foregroundStyle(.orange)
             } else if !hasLoaded {
                 Text(isLoading ? .MRDiscussions.mrDiscussionsLoading : .MRDiscussions.mrDiscussionsUnavailable)
-                    .font(.caption).foregroundStyle(.secondary)
+                    .font(.callout).foregroundStyle(.secondary)
             }
-            ForEach(snapshot.threads) { thread in threadView(thread) }
-            ForEach(Array(snapshot.standaloneDrafts.enumerated()), id: \.offset) { _, draft in
-                VStack(alignment: .leading, spacing: 9) {
-                    Text(draft.discussionID == nil ? .MRDiscussions.mrDiscussionsNewComment
-                         : hasLoaded || hasError ? .MRDiscussions.mrDiscussionsUnmatchedReply
-                         : .MRDiscussions.mrDiscussionsReplyDraft)
-                        .font(.caption.weight(.medium)).foregroundStyle(.secondary)
-                    MRDiscussionDraftView(draft: draft, username: currentUsername,
-                        selection: selection, selectionDisabled: selectionDisabled, onDelete: onDelete)
+            VStack(alignment: .leading, spacing: 0) {
+                ForEach(snapshot.threads) { thread in
+                    if thread.id != snapshot.threads.first?.id { Divider() }
+                    threadView(thread)
                 }
-                .padding(12)
-                .frame(maxWidth: .infinity, alignment: .leading)
-                .background(Color.accentColor.opacity(0.04), in: RoundedRectangle(cornerRadius: 8))
+                ForEach(Array(snapshot.standaloneDrafts.enumerated()), id: \.offset) { index, draft in
+                    if index > 0 || !snapshot.threads.isEmpty { Divider() }
+                    VStack(alignment: .leading, spacing: 9) {
+                        Text(draft.discussionID == nil ? .MRDiscussions.mrDiscussionsNewComment
+                             : hasLoaded || hasError ? .MRDiscussions.mrDiscussionsUnmatchedReply
+                             : .MRDiscussions.mrDiscussionsReplyDraft)
+                            .font(.caption.weight(.medium)).foregroundStyle(.secondary)
+                        MRDiscussionDraftView(draft: draft, username: currentUsername,
+                            selection: selection, selectionDisabled: selectionDisabled, onDelete: onDelete)
+                    }
+                    .padding(12)
+                    .frame(maxWidth: .infinity, alignment: .leading)
+                }
+            }
+            .background {
+                if !snapshot.threads.isEmpty || !snapshot.standaloneDrafts.isEmpty {
+                    RoundedRectangle(cornerRadius: 10).fill(Color.secondary.opacity(0.035))
+                        .overlay { RoundedRectangle(cornerRadius: 10).strokeBorder(Color.secondary.opacity(0.1), lineWidth: 0.5) }
+                }
             }
             if hasLoaded && !isLoading && snapshot.threads.isEmpty && snapshot.standaloneDrafts.isEmpty {
-                Text(.MRDiscussions.mrDiscussionsEmpty).font(.subheadline).foregroundStyle(.secondary)
+                Text(.MRDiscussions.mrDiscussionsEmpty).font(.callout).foregroundStyle(.secondary)
             }
         }
         .frame(maxWidth: .infinity, alignment: .leading)
@@ -86,8 +97,8 @@ private struct MRDiscussionThreadView: View {
     }
     private var stateColor: Color {
         switch thread.state {
-        case .open: .secondary
-        case .resolved: .green
+        case .open: .primary
+        case .resolved: .secondary
         case .general: .purple
         }
     }
@@ -112,10 +123,8 @@ private struct MRDiscussionThreadView: View {
             }
             .disclosureGroupStyle(MRDiscussionDisclosureStyle())
         }
-        .padding(12)
+        .padding(.horizontal, 12).padding(.vertical, 11)
         .frame(maxWidth: .infinity, alignment: .leading)
-        .background(Color.secondary.opacity(0.045), in: RoundedRectangle(cornerRadius: 8))
-        .overlay { RoundedRectangle(cornerRadius: 8).strokeBorder(Color.secondary.opacity(0.1)) }
         .onAppear { if initiallyExpanded { isExpanded = true } }
     }
 
@@ -123,31 +132,40 @@ private struct MRDiscussionThreadView: View {
         let summary = thread.replySummary(currentUsername: currentUsername)
         return VStack(alignment: .leading, spacing: 7) {
             HStack(alignment: .firstTextBaseline, spacing: 8) {
+                HStack(spacing: 4) {
+                    if thread.state == .resolved { Image(systemName: "checkmark") }
+                    Text(stateLabel)
+                }
+                .font(.caption.weight(.medium)).foregroundStyle(stateColor)
+                .fixedSize(horizontal: true, vertical: false)
+                .padding(.horizontal, 7).padding(.vertical, 3)
+                .background(stateColor.opacity(thread.state == .open ? 0.055 : 0.08), in: Capsule())
                 if let location = thread.location {
                     MRDiscussionLocationLabel(location: .init(full: location))
                         .layoutPriority(1)
-                    Spacer(minLength: 4)
+                } else {
+                    MRDiscussionAuthorView(author: comments.first?.author)
                 }
-                Text(stateLabel)
-                    .font(.caption2.weight(.medium)).foregroundStyle(stateColor)
-                    .padding(.horizontal, 7).padding(.vertical, 3)
-                    .background(stateColor.opacity(0.08), in: Capsule())
-                if thread.location == nil { Spacer(minLength: 4) }
-            }
-            HStack(alignment: .firstTextBaseline, spacing: 8) {
-                MRDiscussionAuthorView(author: comments.first?.author)
                 Spacer(minLength: 4)
                 if let posted = comments.first?.createdAt {
                     Text(verbatim: discussionTimestamp(posted))
-                        .font(.caption2).foregroundStyle(.secondary).help(posted)
+                        .font(.caption).foregroundStyle(.secondary).help(posted)
+                        .lineLimit(1)
                 }
             }
             ViewThatFits(in: .horizontal) {
-                HStack(spacing: 8) { replyStatus(summary) }
-                VStack(alignment: .leading, spacing: 5) { replyStatus(summary) }
+                HStack(alignment: .firstTextBaseline, spacing: 10) {
+                    if thread.location != nil { MRDiscussionAuthorView(author: comments.first?.author) }
+                    replyStatus(summary)
+                }
+                VStack(alignment: .leading, spacing: 5) {
+                    if thread.location != nil { MRDiscussionAuthorView(author: comments.first?.author) }
+                    replyStatus(summary)
+                }
             }
             if !isExpanded, let body = comments.first?.body {
-                Text(verbatim: body).font(.subheadline).foregroundStyle(.secondary).lineLimit(2)
+                Text(verbatim: body).font(.callout)
+                    .foregroundStyle(thread.state == .resolved ? Color.secondary : Color.primary).lineLimit(2)
                     .padding(.top, 1)
             }
         }
@@ -160,7 +178,7 @@ private struct MRDiscussionThreadView: View {
             Label { Text(.MRDiscussions.mrDiscussionsDraftCount(summary.draftCount)) } icon: {
                 Image(systemName: "square.and.pencil")
             }
-            .font(.caption2.weight(.medium)).foregroundStyle(Color.accentColor)
+            .font(.caption.weight(.medium)).foregroundStyle(Color.accentColor)
         }
     }
 
@@ -211,15 +229,16 @@ private struct MRDiscussionNoteView: View {
                 if let origin { MRDiscussionAIBadge(origin: origin) }
                 Spacer(minLength: 4)
                 if let posted = note.createdAt {
-                    Text(verbatim: discussionTimestamp(posted)).foregroundStyle(.secondary).help(posted)
+                    Text(verbatim: discussionTimestamp(posted)).font(.caption).foregroundStyle(.secondary).help(posted)
                 }
                 if let id = note.id, id > 0, let url = discussionNoteURL(mergeRequestURL, id: id) {
                     Link(destination: url) { Image(systemName: "arrow.up.right.square") }
+                        .buttonStyle(.borderless).foregroundStyle(.secondary)
                         .help(Text(.MRDiscussions.mrDiscussionsOpenInGitLab))
                         .accessibilityLabel(Text(.MRDiscussions.mrDiscussionsOpenInGitLab))
                 }
             }
-            .font(.caption)
+            .font(.callout)
             if let location = MRDiscussionLocation(position: note.position), location.full != threadLocation {
                 MRDiscussionLocationLabel(location: location).textSelection(.enabled)
             }
@@ -245,19 +264,19 @@ private struct MRDiscussionDraftView: View {
                 }
                 if let username { Text(verbatim: "@\(username)").fontWeight(.medium) }
                 else { Text(.MRDiscussions.mrDiscussionsYou).fontWeight(.medium) }
-                Text(.MRDiscussions.mrDiscussionsPrivateDraft).foregroundStyle(Color.accentColor)
+                Text(.MRDiscussions.mrDiscussionsPrivateDraft).font(.caption.weight(.semibold)).foregroundStyle(Color.accentColor)
                 Spacer(minLength: 4)
                 if let onDelete { DraftDeleteButton(draft: draft, disabled: selectionDisabled, onDelete: onDelete) }
             }
-            .font(.caption)
+            .font(.callout)
             if let location = MRDiscussionLocation(position: draft.position), location.full != threadLocation {
                 MRDiscussionLocationLabel(location: location).textSelection(.enabled)
             }
             MRDiscussionBody(source: draft.note)
         }
-        .padding(10)
+        .padding(12)
         .frame(maxWidth: .infinity, alignment: .leading)
-        .background(Color.accentColor.opacity(0.055), in: RoundedRectangle(cornerRadius: 6))
+        .background(Color.accentColor.opacity(0.07), in: RoundedRectangle(cornerRadius: 8))
         .overlay(alignment: .leading) { Rectangle().fill(Color.accentColor.opacity(0.45)).frame(width: 2) }
     }
 }
@@ -299,7 +318,7 @@ private struct MRDiscussionBody: View {
             else if let source { Text(verbatim: source) }
             else { Text(.MRDiscussions.mrDiscussionsBodyUnavailable).foregroundStyle(.secondary) }
         }
-        .font(.subheadline).textSelection(.enabled).fixedSize(horizontal: false, vertical: true)
+        .font(.body).textSelection(.enabled).fixedSize(horizontal: false, vertical: true)
         .frame(maxWidth: .infinity, alignment: .leading)
     }
 }
@@ -333,7 +352,7 @@ private struct MRDiscussionAuthorView: View {
                 Text(.MRDiscussions.mrDiscussionsUnknownAuthor).foregroundStyle(.secondary)
             }
         }
-        .font(.caption).lineLimit(1).truncationMode(.middle)
+        .font(.callout).lineLimit(1).truncationMode(.middle)
     }
 }
 
@@ -368,7 +387,7 @@ private struct MRDiscussionReplyBadge: View {
 
     var body: some View {
         Label { Text(label) } icon: { Image(systemName: symbol) }
-            .font(.caption2).foregroundStyle(.secondary)
+            .font(.caption).foregroundStyle(.secondary)
             .help(Text(explanation)).accessibilityHint(Text(explanation))
     }
 }

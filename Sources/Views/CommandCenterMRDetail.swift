@@ -135,7 +135,7 @@ private struct CommandCenterMRDetailContent: View {
         let presentation = MRCardPresentation(row: presentationRow, monitor: monitor, allowsRemoval: isReviewed)
         ScrollViewReader { proxy in
             ScrollView {
-                VStack(alignment: .leading, spacing: 20) {
+                VStack(alignment: .leading, spacing: 22) {
                     header(presentation).id(Anchor.overview)
                     if finishedState == nil {
                         MREffectivePolicySummary(row: presentationRow, monitor: monitor,
@@ -148,7 +148,9 @@ private struct CommandCenterMRDetailContent: View {
                     }
                     if finishedState == nil { supplementaryActions(citationContext: citationContext).id(Anchor.actions) }
                     discussionThreads(discussions).id(Anchor.comments)
+                    Divider().padding(.vertical, 4)
                     details.id(Anchor.details)
+                    Divider().padding(.vertical, 4)
                     MRAutomationEventLogView(target: target, monitor: monitor,
                         initiallyExpanded: historyExpanded, initiallyExpandedJobID: focusedJobID, readOnly: finishedState != nil)
                         .id(historyNavigationID).id(Anchor.assistantRuns)
@@ -254,7 +256,7 @@ private struct CommandCenterMRDetailContent: View {
     }
 
     private func header(_ progress: MRCardPresentation) -> some View {
-        VStack(alignment: .leading, spacing: 10) {
+        VStack(alignment: .leading, spacing: 12) {
             HStack(spacing: 8) {
                 Text(verbatim: "!\(item.id.iid)").monospacedDigit()
                 if let finishedState { FinishedMergeRequestBadge(state: finishedState) }
@@ -277,12 +279,13 @@ private struct CommandCenterMRDetailContent: View {
                     headerMenu
                 }
             }
-            .font(.subheadline).foregroundStyle(.secondary)
-            Text(verbatim: presentationRow.displayTitle).font(.title2.weight(.semibold)).textSelection(.enabled)
+            .font(.callout).foregroundStyle(.secondary)
+            Text(verbatim: presentationRow.displayTitle).font(.title2.weight(.semibold))
+                .lineLimit(3).textSelection(.enabled).padding(.top, 2)
             HStack {
                 VStack(alignment: .leading, spacing: 4) {
                     if let finishedState {
-                        Text(finishedState.status).font(.subheadline).foregroundStyle(.secondary)
+                        Text(finishedState.status).font(.callout).foregroundStyle(.secondary)
                     } else {
                         if needsHumanAttention || !progress.working {
                             Label {
@@ -290,33 +293,20 @@ private struct CommandCenterMRDetailContent: View {
                                      : item.section == .draftMergeRequests ? .CommandCenter.commandCenterStatusDraft
                                      : .CommandCenter.commandCenterStatusMonitoring)
                             } icon: { Image(systemName: needsHumanAttention ? "exclamationmark.circle" : "arrow.triangle.pull") }
-                            .font(.subheadline).foregroundStyle(needsHumanAttention ? .orange : .secondary)
+                            .font(.callout.weight(needsHumanAttention ? .medium : .regular))
+                            .foregroundStyle(needsHumanAttention ? .orange : .secondary)
                         }
                         if progress.working, let status = progress.status {
                             MRActivityStatus(status: status,
                                 startedAt: monitor.activityStartedAt(for: item, activity: progress.activity))
-                            .font(.subheadline).foregroundStyle(.secondary)
+                            .font(.callout).foregroundStyle(.secondary)
                         } else if progress.refreshFailed {
                             Label { Text(.AutomationProgress.progressRefreshFailed) } icon: { Image(systemName: "arrow.clockwise") }
-                                .font(.subheadline).foregroundStyle(.secondary)
+                                .font(.callout).foregroundStyle(.secondary)
                         }
                     }
                 }
                 Spacer()
-                if finishedState != nil {
-                    Button { monitor.acknowledgeFinishedMergeRequest(item) } label: { Text(.MRLifecycle.seen) }
-                        .buttonStyle(.bordered).help(Text(.MRLifecycle.seenHelp))
-                } else {
-                    MarkMergeRequestReadyButton(item: item, monitor: monitor).buttonStyle(.bordered)
-                }
-                GitLabRefreshButton(monitor: monitor, itemID: item.id) {
-                    if let target = discussionTarget { await discussionStore.refresh(target: target, glab: monitor.glab) }
-                }
-                .buttonStyle(.bordered)
-                Link(destination: item.url) {
-                    Label { Text(.CommandCenter.commandCenterOpenGitLab) } icon: { Image(systemName: "arrow.up.right.square") }
-                }
-                .buttonStyle(.bordered)
             }
             if let dependencies = item.dependencies, dependencies.hasPresentation {
                 MRDependencyRow(summary: dependencies, projectID: item.id.projectID)
@@ -326,7 +316,23 @@ private struct CommandCenterMRDetailContent: View {
                    MergeRequestDependencySummary.Context($0.request) == MergeRequestDependencySummary.Context(request)
                }), status.blockers.contains(where: { [.dependencies, .stackTarget, .dependencyEvidence].contains($0) }),
                let reason = status.dependencyReadiness.holdReason {
-                Text(reason).font(.caption).foregroundStyle(.secondary)
+                Text(reason).font(.callout).foregroundStyle(.secondary)
+            }
+            HStack(spacing: 10) {
+                if finishedState != nil {
+                    Button { monitor.acknowledgeFinishedMergeRequest(item) } label: { Text(.MRLifecycle.seen) }
+                        .buttonStyle(.bordered).help(Text(.MRLifecycle.seenHelp))
+                } else {
+                    MarkMergeRequestReadyButton(item: item, monitor: monitor).buttonStyle(.bordered)
+                }
+                GitLabRefreshButton(monitor: monitor, itemID: item.id) {
+                    if let target = discussionTarget { await discussionStore.refresh(target: target, glab: monitor.glab) }
+                }
+                .buttonStyle(.borderless)
+                Link(destination: item.url) {
+                    Label { Text(.CommandCenter.commandCenterOpenGitLab) } icon: { Image(systemName: "arrow.up.right.square") }
+                }
+                .buttonStyle(.bordered)
             }
         }
     }
@@ -340,11 +346,12 @@ private struct CommandCenterMRDetailContent: View {
 
     private func nextStep(proxy: ScrollViewProxy, citationContext: MRCommentCitation.Context?,
                           discussions: MRDiscussionSnapshot, humanAction: MRHumanAction?) -> some View {
-        GroupBox {
+        VStack(alignment: .leading, spacing: 12) {
+            Text(.CommandCenter.commandCenterNextStep).font(.headline)
             VStack(alignment: .leading, spacing: 12) {
                 if let action = humanAction {
                     if !item.needsConfirmation || (action.kind != .publication && action.kind != .approval) {
-                        Text(verbatim: action.explanation).textSelection(.enabled)
+                        Text(verbatim: action.explanation).font(.body).foregroundStyle(.primary).textSelection(.enabled)
                     }
                     if let detail = action.detail, detail != action.explanation,
                        AgentExplanation.summary(detail) != action.explanation, action.preparedReply == nil {
@@ -408,7 +415,7 @@ private struct CommandCenterMRDetailContent: View {
                 if item.needsConfirmation || showsPublication { confirmationControls }
                 if showsPublication {
                     if discussionTarget == nil {
-                        Text(.DraftPublication.draftPublicationUnavailable).font(.caption).foregroundStyle(.secondary)
+                        Text(.DraftPublication.draftPublicationUnavailable).font(.callout).foregroundStyle(.secondary)
                     }
                     publicationThreads(discussions)
                 }
@@ -416,8 +423,16 @@ private struct CommandCenterMRDetailContent: View {
                 FollowUpAutomationHoldView(row: presentationRow, monitor: monitor)
                 if item.authorFeedbackStatus != nil { feedbackCheck(citationContext: citationContext).id(Anchor.feedbackStatus) }
             }
-            .font(.subheadline).padding(8).frame(maxWidth: .infinity, alignment: .leading)
-        } label: { Text(.CommandCenter.commandCenterNextStep).font(.headline) }
+            .font(.body).padding(14).frame(maxWidth: .infinity, alignment: .leading)
+            .background(Color.secondary.opacity(0.045), in: RoundedRectangle(cornerRadius: 10))
+            .overlay { RoundedRectangle(cornerRadius: 10).strokeBorder(Color.secondary.opacity(0.12), lineWidth: 0.5) }
+            .overlay(alignment: .leading) {
+                if needsHumanAttention {
+                    RoundedRectangle(cornerRadius: 2).fill(Color.orange.opacity(0.7))
+                        .frame(width: 3).padding(.vertical, 12)
+                }
+            }
+        }
     }
 
     private var confirmationControls: some View {
@@ -481,27 +496,29 @@ private struct CommandCenterMRDetailContent: View {
                 AuthorFeedbackView(item: presentationItem, monitor: monitor, citationContext: citationContext, sourceLoading: feedbackSourceLoading,
                     decisionUpdating: isUpdatingFeedbackDecision, onIgnoreSuggestion: presentIgnoreSuggestion).padding(.top, 8)
             }
-        } label: { Text(.CommandCenter.commandCenterFeedbackCheck).font(.subheadline.weight(.medium)) }
+        } label: { Text(.CommandCenter.commandCenterFeedbackCheck).font(.callout.weight(.medium)) }
     }
 
     private var details: some View {
         DisclosureGroup(isExpanded: $detailsExpanded) {
             if detailsExpanded {
-                VStack(alignment: .leading, spacing: 10) {
+                VStack(alignment: .leading, spacing: 14) {
                     AssistantUsageMRDetailCost(mergeRequest: usageMergeRequest)
                     if let request = item.mergeRequest {
-                        metadata(.CommandCenter.commandCenterAuthor,
-                            value: request.author.name.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty ? request.author.username : request.author.name)
-                            .help(Text(verbatim: "@\(request.author.username)"))
-                        metadata(.CommandCenter.commandCenterSource, value: request.sourceBranch)
-                        metadata(.CommandCenter.commandCenterTarget, value: request.targetBranch)
-                        if let sha = request.sha { metadata(.CommandCenter.commandCenterCommit, value: sha, monospaced: true) }
-                        metadata(.CommandCenter.commandCenterMergeState,
-                            value: request.detailedMergeStatus?.replacingOccurrences(of: "_", with: " ")
-                                ?? String(localized: .CommandCenter.commandCenterStatusUnavailable))
-                        metadata(.CommandCenter.commandCenterPipeline,
-                            value: request.headPipeline?.status.replacingOccurrences(of: "_", with: " ")
-                                ?? String(localized: .CommandCenter.commandCenterNoPipeline))
+                        Grid(alignment: .leading, horizontalSpacing: 20, verticalSpacing: 10) {
+                            metadata(.CommandCenter.commandCenterAuthor,
+                                value: request.author.name.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty ? request.author.username : request.author.name)
+                                .help(Text(verbatim: "@\(request.author.username)"))
+                            metadata(.CommandCenter.commandCenterSource, value: request.sourceBranch)
+                            metadata(.CommandCenter.commandCenterTarget, value: request.targetBranch)
+                            if let sha = request.sha { metadata(.CommandCenter.commandCenterCommit, value: sha, monospaced: true) }
+                            metadata(.CommandCenter.commandCenterMergeState,
+                                value: request.detailedMergeStatus?.replacingOccurrences(of: "_", with: " ")
+                                    ?? String(localized: .CommandCenter.commandCenterStatusUnavailable))
+                            metadata(.CommandCenter.commandCenterPipeline,
+                                value: request.headPipeline?.status.replacingOccurrences(of: "_", with: " ")
+                                    ?? String(localized: .CommandCenter.commandCenterNoPipeline))
+                        }
                     }
                     if finishedState == nil { statusReasons }
                     IgnoredFeedbackSuggestionsView(entries: ignoredSuggestions, mergeRequestURL: item.url,
@@ -557,12 +574,12 @@ private struct CommandCenterMRDetailContent: View {
     }
 
     private func metadata(_ label: LocalizedStringResource, value: String, monospaced: Bool = false) -> some View {
-        HStack(alignment: .firstTextBaseline, spacing: 16) {
-            Text(label).foregroundStyle(.secondary).frame(width: 120, alignment: .leading)
-            Text(verbatim: value).font(monospaced ? .caption.monospaced() : .subheadline)
+        GridRow(alignment: .firstTextBaseline) {
+            Text(label).foregroundStyle(.secondary)
+            Text(verbatim: value).font(monospaced ? .callout.monospaced() : .callout)
                 .textSelection(.enabled).frame(maxWidth: .infinity, alignment: .leading)
         }
-        .font(.subheadline)
+        .font(.callout)
     }
 
     @ViewBuilder
