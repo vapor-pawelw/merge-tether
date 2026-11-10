@@ -1,0 +1,140 @@
+import Foundation
+import Observation
+import os
+import Testing
+@testable import GitLabTodos
+
+@MainActor
+struct InboxTodoStoreTests {
+    private let host = "gitlab.example.test"
+    private let todoJSON = #"[{"id":401,"action_name":"assigned","target_type":"Issue","target_url":"https://gitlab.example.test/group/repo/-/issues/42","body":"Unread issue","state":"pending","created_at":"2026-11-06T10:00:00Z","project":{"id":1,"name_with_namespace":"Group / Repo","path_with_namespace":"group/repo"},"author":{"id":9,"username":"reviewer","name":"Reviewer"},"target":{"id":42,"iid":42,"title":"Unread issue","state":"opened"}}]"#
+
+    private func fixture(_ body: (InboxTodoStore, InMemoryGitLab, SettingsManager) async throws -> Void) async throws {
+        let name = "InboxTodoStoreTests-\(UUID())"
+        let defaults = try #require(UserDefaults(suiteName: name))
+        defer { defaults.removePersistentDomain(forName: name) }
+        let gitlab = InMemoryGitLab()
+        defer { gitlab.close() }
+        gitlab.handler = { request in
+            if request.arguments.contains(where: { $0.hasPrefix("/todos?") }) { return InMemoryGitLab.output(todoJSON) }
+            return InMemoryGitLab.output("{}")
+        }
+        let settings = SettingsManager(defaults: defaults)
+        let store = InboxTodoStore(settings: settings, glab: gitlab.service(host: host, username: "alice"))
+        try await body(store, gitlab, settings)
+    }
+
+    private func fetch(_ store: InboxTodoStore) async throws {
+        store.beginRefresh()
+        defer { store.finishRefresh() }
+        let fetched = try #require(await store.fetch())
+        let todos = try fetched.result.get()
+        store.bindAccount(host: fetched.host, username: fetched.username, revision: fetched.revision)
+        store.accept(todos)
+    }
+
+    @Test func failedReadRetainsInboxAndAccountEpochPreventsReuse() async throws {
+        try await fixture { store, gitlab, _ in
+            try await fetch(store)
+            gitlab.handler = { _ in InMemoryGitLab.output(error: "network unavailable", code: 1) }
+            let failed = try #require(await store.fetch())
+            if case .failure(let error) = failed.result { store.lastError = error }
+            #expect(store.lastError != nil)
+            #expect(store.currentAccountTodos.map(\.id) == [401])
+            store.glab.currentUsername = "bob"
+            store.glab.currentUsername = "alice"
+            #expect(store.currentAccountTodos.isEmpty)
+            #expect(store.allTodos.map(\.id) == [401])
+        }
+    }
+
+    @Test func undoRestoresVisibleTodoWithoutAcknowledgingIt() async throws {
+        try await fixture { store, gitlab, _ in
+            try await fetch(store)
+            let todo = try #require(store.visibleTodos.first)
+            store.markDoneWithUndo(todo)
+            #expect(store.visibleTodos.isEmpty)
+            #expect(store.undoableTodo?.id == todo.id)
+            store.undoMarkDone()
+            #expect(store.visibleTodos.map(\.id) == [401])
+            #expect(store.undoableTodo == nil)
+            #expect(!gitlab.requests.contains { $0.method == "POST" })
+        }
+    }
+
+    @Test func acknowledgementDuringFetchCannotResurrectDoneTodo() async throws {
+        try await fixture { store, gitlab, settings in
+            try await fetch(store)
+            let todo = try #require(store.visibleTodos.first)
+            settings.lastSeenTodoIDs = [todo.id]
+            gitlab.write("pause")
+            gitlab.handler = { request in
+                if request.arguments.contains(where: { $0.hasPrefix("/todos?") }) {
+                    try await gitlab.pause(ifPresent: "pause", entered: "reading", until: "release")
+                    return InMemoryGitLab.output(todoJSON)
+                }
+                return InMemoryGitLab.output("{}")
+            }
+            store.beginRefresh()
+            let read = Task { await store.fetch() }
+            try await gitlab.waitFor("reading")
+            await store.markDone(todo)
+            gitlab.write("release")
+            let fetched = try #require(await read.value)
+            let todos = try fetched.result.get()
+            store.bindAccount(host: fetched.host, username: fetched.username, revision: fetched.revision)
+            store.accept(todos)
+            store.finishRefresh()
+            #expect(store.allTodos.isEmpty)
+            #expect(!settings.lastSeenTodoIDs.contains(todo.id))
+        }
+    }
+
+    @Test func failedAcknowledgementRestoresOptimisticTodoAndNotifiesObservers() async throws {
+        try await fixture { store, gitlab, _ in
+            try await fetch(store)
+            let todo = try #require(store.visibleTodos.first)
+            gitlab.handler = { _ in InMemoryGitLab.output(error: "network unavailable", code: 1) }
+            let changed = OSAllocatedUnfairLock(initialState: false)
+            withObservationTracking { _ = store.visibleTodos } onChange: { changed.withLock { $0 = true } }
+            await store.markDone(todo)
+            #expect(changed.withLock { $0 })
+            #expect(store.visibleTodos.map(\.id) == [401])
+            #expect(store.lastError != nil)
+        }
+    }
+
+    @Test func monitorForwardingKeepsUndoAndInboxReadsObservable() async throws {
+        try await fixture { store, gitlab, settings in
+            settings.glabPath = store.glab.glabPath
+            settings.resolvedHost = host
+            settings.onboardingCompleted = false
+            gitlab.handler = { request in
+                if request.arguments.first == "config" { return InMemoryGitLab.output(host) }
+                if request.arguments.first == "auth" {
+                    return InMemoryGitLab.output(error: "Logged in to \(host) as alice")
+                }
+                if request.arguments.contains(where: { $0.hasPrefix("/todos?") }) { return InMemoryGitLab.output(todoJSON) }
+                return InMemoryGitLab.output("[]")
+            }
+            let notifications = NotificationService(authorization: { .denied }, post: { _ in })
+            let monitor = TodoMonitorService(settings: settings, glab: store.glab, notifications: notifications)
+            await monitor.bootstrap()
+            await monitor.refreshNow()
+            defer { monitor.stopTimer() }
+            let todo = try #require(monitor.currentAccountTodos.first)
+            let changed = OSAllocatedUnfairLock(initialState: false)
+            withObservationTracking {
+                _ = monitor.visibleTodos
+                _ = monitor.undoableTodo
+            } onChange: { changed.withLock { $0 = true } }
+            monitor.markDoneWithUndo(todo)
+            #expect(changed.withLock { $0 })
+            #expect(monitor.currentAccountTodos.isEmpty)
+            #expect(monitor.undoableTodo?.id == todo.id)
+            monitor.undoMarkDone()
+            #expect(monitor.currentAccountTodos.map(\.id) == [401])
+        }
+    }
+
+}

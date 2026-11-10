@@ -71,11 +71,15 @@ final class TodoMonitorService {
             || (!row.item.isAuthored && reviewingContext(for: row).nextStep == .verifying)
     }
 
-    private(set) var allTodos: [Todo] = []
-    private(set) var lastError: GlabError?
+    private let todoStore: InboxTodoStore
+    var allTodos: [Todo] { todoStore.allTodos }
+    private(set) var lastError: GlabError? {
+        get { todoStore.lastError }
+        set { todoStore.lastError = newValue }
+    }
     private(set) var failedAutomationTodoID: Int?
-    private(set) var lastRefresh: Date?
-    private(set) var isLoading = false
+    var lastRefresh: Date? { todoStore.lastRefresh }
+    var isLoading: Bool { todoStore.isLoading }
     private let refreshProgress = RefreshProgressState()
     var showsGlobalRefreshProgress: Bool {
         boardRefreshState == .syncing || refreshProgress.showsGlobal(accountRevision: glab.accountRevision)
@@ -96,14 +100,12 @@ final class TodoMonitorService {
     var codexListenerHealth: CodexDesktopRelay.ListenerHealth { codexIntegrationHealth.listenerHealth }
     var codexPluginInstallation: CodexPluginInstaller.Installation? { codexIntegrationHealth.pluginInstallation }
 
-    private var optimisticallyDone: Set<Int> = []
-    private var pendingMarkDoneTask: Task<Void, Never>?
-    private(set) var undoableTodo: Todo?
-    static let undoWindow: Duration = .seconds(4)
-    private var acknowledgedDuringFetch: Set<Int> = []
-    private var inboxHost: String?
-    private var inboxUsername: String?
-    private var inboxAccountRevision: UInt64?
+    private var optimisticallyDone: Set<Int> { todoStore.optimisticallyDone }
+    var undoableTodo: Todo? { todoStore.undoableTodo }
+    static let undoWindow = InboxTodoStore.undoWindow
+    private var inboxHost: String? { todoStore.host }
+    private var inboxUsername: String? { todoStore.username }
+    private var inboxAccountRevision: UInt64? { todoStore.accountRevision }
     @ObservationIgnored private var attentionNotificationTask: Task<Void, Never>?
     @ObservationIgnored private var attentionNotificationGeneration = UUID()
     @ObservationIgnored private var attentionNotificationLedger = UserAttentionNotificationLedger()
@@ -199,7 +201,7 @@ final class TodoMonitorService {
     private var failedAttentionFeedback: Set<AssistantAutomationRunner.MergeRequestWork> = []
     private var timer: Timer?
     private var unreadReminderTimer: Timer?
-    private var hasCompletedFirstFetch = false
+    private var hasCompletedFirstFetch: Bool { todoStore.hasCompletedFirstFetch }
     @ObservationIgnored private var legacyGUIQueueRetired = false
 
     init(
@@ -213,12 +215,16 @@ final class TodoMonitorService {
     ) {
         self.settings = settings
         self.glab = glab
+        self.todoStore = InboxTodoStore(settings: settings, glab: glab)
         self.notifications = notifications
         self.automation = automation
         self.cancelPolicyJob = cancelPolicyJob
         self.attention = MergeRequestAttentionMonitor(glab: glab, settings: settings,
                                                        reportDirectory: CodexDesktopRelay.directory)
         self.authoredMergeRequests = AuthoredMergeRequestMonitor(settings: settings, glab: glab, notifications: notifications)
+        todoStore.onAcknowledged = { [weak self] id in
+            if self?.failedAutomationTodoID == id { self?.failedAutomationTodoID = nil }
+        }
         attention.onRefreshed = { [weak self] in
             guard let self else { return }
             self.deliverLifecycleTransitions()
@@ -428,19 +434,10 @@ final class TodoMonitorService {
 
     // MARK: - Derived state
 
-    var visibleTodos: [Todo] {
-        allTodos
-            .filter { !optimisticallyDone.contains($0.id) }
-            .sorted { $0.createdAt > $1.createdAt }
-    }
+    var visibleTodos: [Todo] { todoStore.visibleTodos }
 
     /// Display only the inbox fetched for this exact authenticated account epoch.
-    var currentAccountTodos: [Todo] {
-        guard let host = glab.resolvedHost, let username = glab.currentUsername,
-              inboxHost == host, inboxUsername == username,
-              inboxAccountRevision == glab.accountRevision else { return [] }
-        return visibleTodos
-    }
+    var currentAccountTodos: [Todo] { todoStore.currentAccountTodos }
 
     var pipelineHandoffs: [MergeWorkflowActivityEntry] {
         authoredMergeRequests.workflow.pendingPipelineHandoffs
@@ -529,8 +526,7 @@ final class TodoMonitorService {
         })
         let acknowledged = await mrTodoRouter.process(allTodos, host: host, username: username, managed: managed, automatically: automatically)
         guard glab.resolvedHost == host, glab.currentUsername == username else { return }
-        allTodos.removeAll { acknowledged.contains($0.id) }
-        acknowledgedDuringFetch.formUnion(acknowledged)
+        todoStore.acknowledge(acknowledged)
         if let error = mrTodoRouter.acknowledgementError { assistantJobActionError = error.localizedDescription }
         if automatically { await environmentRecovery.recover(host: host, username: username) }
     }
@@ -1157,12 +1153,9 @@ final class TodoMonitorService {
         retireLegacyGUIQueueIfNeeded()
         refreshAvailableAssistants()
         refreshAssistantRelay()
-        guard !isLoading else { return }
-        isLoading = true
+        guard todoStore.beginRefresh() else { return }
         defer {
-            isLoading = false
-            acknowledgedDuringFetch.removeAll()
-            lastRefresh = Date()
+            todoStore.finishRefresh()
             confirmedAttention.update(pendingUserAttention)
             scheduleUserAttentionNotifications()
         }
@@ -1173,21 +1166,15 @@ final class TodoMonitorService {
             if await recheckIntegration() != nil { return }
         }
         authoredMergeRequests.refreshIfNeeded()
-        let username = glab.currentUsername
-        let host = username == nil ? nil : glab.resolvedHost
-        let revision = glab.accountRevision
-        let result = await glab.fetchTodos(host: host)
-        guard glab.accountRevision == revision, glab.currentUsername == username,
-              username == nil || glab.resolvedHost == host else { return }
-        switch result {
-        case .success(let fetched):
-            let fetchedFiltered = fetched.filter { !acknowledgedDuringFetch.contains($0.id) }
+        guard let fetched = await todoStore.fetch() else { return }
+        let host = fetched.host
+        let username = fetched.username
+        switch fetched.result {
+        case .success(let fetchedFiltered):
             let fetchedIDs = Set(fetchedFiltered.map(\.id))
             glab.resolveHostFromTodos(fetchedFiltered)
             settings.resolvedHost = glab.resolvedHost
-            inboxHost = host
-            inboxUsername = username
-            inboxAccountRevision = revision
+            todoStore.bindAccount(host: host, username: username, revision: fetched.revision)
 
             if let failedAutomationTodoID, !fetchedIDs.contains(failedAutomationTodoID) {
                 self.failedAutomationTodoID = nil
@@ -1200,9 +1187,7 @@ final class TodoMonitorService {
             settings.lastSeenTodoIDs = fetchedIDs
             settings.save()
 
-            allTodos = fetchedFiltered
-            lastError = nil
-            hasCompletedFirstFetch = true
+            todoStore.accept(fetchedFiltered)
             restartUnreadReminderTimer()
             if let host, let username {
                 if settings.onboardingCompleted {
@@ -1649,63 +1634,12 @@ final class TodoMonitorService {
         settings.save()
     }
 
-    func markDone(_ todo: Todo) async {
-        guard optimisticallyDone.insert(todo.id).inserted else { return }
-        await performMarkDone(todo)
-    }
+    func markDone(_ todo: Todo) async { await todoStore.markDone(todo) }
 
-    /// Hides the to-do immediately but waits `undoWindow` before calling GitLab,
-    /// so a misclick can be reverted with `undoMarkDone()`.
-    func markDoneWithUndo(_ todo: Todo) {
-        commitPendingMarkDone()
-        guard optimisticallyDone.insert(todo.id).inserted else { return }
-        undoableTodo = todo
-        pendingMarkDoneTask = Task { [weak self] in
-            try? await Task.sleep(for: Self.undoWindow)
-            guard !Task.isCancelled else { return }
-            self?.commitPendingMarkDone()
-        }
-    }
+    /// Hides the to-do immediately but waits `undoWindow` before calling GitLab.
+    func markDoneWithUndo(_ todo: Todo) { todoStore.markDoneWithUndo(todo) }
 
-    func undoMarkDone() {
-        guard let todo = undoableTodo else { return }
-        pendingMarkDoneTask?.cancel()
-        pendingMarkDoneTask = nil
-        undoableTodo = nil
-        optimisticallyDone.remove(todo.id)
-    }
-
-    private func commitPendingMarkDone() {
-        guard let todo = undoableTodo else { return }
-        pendingMarkDoneTask?.cancel()
-        pendingMarkDoneTask = nil
-        undoableTodo = nil
-        Task { await performMarkDone(todo) }
-    }
-
-    /// Expects `todo.id` to already be in `optimisticallyDone`.
-    private func performMarkDone(_ todo: Todo) async {
-        let host = inboxHost
-        let username = glab.currentUsername
-        let result = await glab.markAsDone(id: todo.id, host: host)
-        optimisticallyDone.remove(todo.id)
-        guard inboxHost == host, glab.currentUsername == username else { return }
-        switch result {
-        case .success:
-            if isLoading { acknowledgedDuringFetch.insert(todo.id) }
-            allTodos.removeAll { $0.id == todo.id }
-            if failedAutomationTodoID == todo.id { failedAutomationTodoID = nil }
-            settings.lastSeenTodoIDs.remove(todo.id)
-            if let host, let username {
-                settings.pendingTodoAcknowledgements.remove(.init(host: host, username: username, todo: todo.feedbackIdentity))
-            }
-            settings.save()
-        case .failure(let err):
-            lastError = err
-            Log.monitor.error("Mark-as-done failed for \(todo.id, privacy: .public): \(String(describing: err), privacy: .public)")
-        }
-        restartUnreadReminderTimer()
-    }
+    func undoMarkDone() { todoStore.undoMarkDone() }
 
     /// Refreshes glab authentication and shares the current host with settings.
     @discardableResult
