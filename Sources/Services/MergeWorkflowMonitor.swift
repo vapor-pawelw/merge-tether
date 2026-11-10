@@ -90,16 +90,17 @@ final class MergeWorkflowMonitor {
     }
 
     private static let storageKey = "automation.mergeWorkflowBaselines.v1"
-    private let defaults: UserDefaults
+    private let persistenceStore: DurableSettingsStore
     private let verdictDirectory: URL
     private var baselines: [Account: Baselines]
     private var isPolling = false
 
-    init(defaults: UserDefaults = .standard, verdictDirectory: URL = ReviewVerdictStore.directory) {
-        self.defaults = defaults
+    init(defaults: UserDefaults = .standard, verdictDirectory: URL = ReviewVerdictStore.directory,
+         persistenceStore: DurableSettingsStore? = nil) {
+        let store = persistenceStore ?? DurableSettingsStore(defaults: defaults)
+        self.persistenceStore = store
         self.verdictDirectory = verdictDirectory
-        baselines = defaults.data(forKey: Self.storageKey)
-            .flatMap { try? JSONDecoder().decode([Account: Baselines].self, from: $0) } ?? [:]
+        baselines = store.load(Self.storageKey, fallback: [:])
     }
 
     func poll(
@@ -112,6 +113,11 @@ final class MergeWorkflowMonitor {
         deliver: @MainActor (MergeWorkflowEvent) -> Void
     ) async {
         guard !isPolling, !Task.isCancelled, isCurrent() else { return }
+        guard persistenceStore.failures[Self.storageKey] == nil else {
+            persistenceStore.preserveCorruptValues()
+            persistenceStore.recordFailure(Self.storageKey)
+            return
+        }
         let accountRevision = glab.accountRevision
         isPolling = true
         defer { isPolling = false }
@@ -174,10 +180,14 @@ final class MergeWorkflowMonitor {
 
         guard !Task.isCancelled, glab.accountRevision == accountRevision, isCurrent() else { return }
         if prior != next {
-            baselines[account] = next
-            if let encoded = try? JSONEncoder().encode(baselines) {
-                defaults.set(encoded, forKey: Self.storageKey)
+            var proposed = baselines
+            proposed[account] = next
+            guard persistenceStore.save(proposed, forKey: Self.storageKey) else { return }
+            guard persistenceStore.synchronize() else {
+                persistenceStore.recordFailure(Self.storageKey)
+                return
             }
+            baselines = proposed
         }
         for event in events { deliver(event) }
     }

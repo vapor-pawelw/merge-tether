@@ -3,6 +3,32 @@ import Testing
 @testable import GitLabTodos
 
 @MainActor struct MergeSubmissionTests {
+    @Test(arguments: [false, true])
+    func corruptRequiredReceiptStoreDeniesManualMergeAndEnqueueAtTheWriteBoundary(_ train: Bool) async throws {
+        try await fixture { glab, gitlab, request in
+            let suite = "CorruptManualMergeReceipt.\(UUID())"
+            let defaults = try #require(UserDefaults(suiteName: suite))
+            defer { defaults.removePersistentDomain(forName: suite) }
+            let raw = Data("unsupported submission receipt".utf8)
+            defaults.set(raw, forKey: "mergeSubmissions")
+            let settings = SettingsManager(defaults: defaults)
+            settings.onboardingCompleted = true
+            settings.notificationsEnabled = false
+            if !train { gitlab.write("ordinary-project") }
+            let monitor = AuthoredMergeRequestMonitor(settings: settings, glab: glab,
+                notifications: NotificationService(), canAutomate: { _ in true })
+            monitor.setVisible(true)
+            while monitor.isLoading { await Task.yield() }
+            let ready = try #require(monitor.requests.first)
+            #expect(ready.mayMergeManually)
+            #expect(ready.action == (train ? .enqueue : .mergeNow))
+            let outcome = await monitor.mergeManually(request)
+            #expect(![MergeSubmissionState.merged, .queued, .inTrain].contains(outcome))
+            #expect(gitlab.requests.allSatisfy { $0.method == "GET" })
+            #expect(defaults.data(forKey: "mergeSubmissions") == raw)
+        }
+    }
+
     @Test(arguments: ["queued", "train", "merged"])
     func submitsThroughTheTrainAPIAndReportsOnlyTheObservedOutcome(_ response: String) async throws {
         try await fixture { glab, gitlab, request in

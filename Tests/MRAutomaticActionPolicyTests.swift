@@ -4,6 +4,22 @@ import Testing
 
 @MainActor
 struct MRAutomaticActionPolicyTests {
+    @Test(arguments: MRAutomaticAction.allCases)
+    func corruptedSafetyHistoryBlocksEveryAutomaticActionWithoutChangingPolicy(_ action: MRAutomaticAction) async throws {
+        try await fixture { settings, defaults in
+            settings.automation.applyPreset(.full, for: .codex)
+            settings.save()
+            let expected = settings.automation
+            defaults.set(Data("unreadable admission history".utf8), forKey: "workflowActivity")
+            let restored = SettingsManager(defaults: defaults)
+            let ready = try request()
+            #expect(!restored.automaticActionsAllowed)
+            #expect(!restored.permitsAutomaticAction(action, for: ready, target: target))
+            #expect(restored.actionIsAutomatic(action, for: target))
+            #expect(restored.automation == expected)
+        }
+    }
+
     private let target = MRAutomationScope.Target(host: "gitlab.example.test", username: "me", projectID: 1, iid: 2)
 
     private func request(draft: Bool = false) throws -> GitLabMergeRequest {

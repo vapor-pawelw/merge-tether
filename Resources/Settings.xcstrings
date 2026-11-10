@@ -1,6 +1,39 @@
 {
   "sourceLanguage": "en",
   "strings": {
+    "settings.persistence.pausedTitle": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Automatic actions paused"
+          }
+        }
+      }
+    },
+    "settings.persistence.pausedHelp": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Saved action history or permissions could not be read or saved. Existing records and your policy have been kept. Read-only checks remain available; restore the affected records before resuming actions that need them."
+          }
+        }
+      }
+    },
+    "settings.persistence.actionBlocked": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Saved action history or permissions are unavailable. Restore the affected records before trying this action."
+          }
+        }
+      }
+    },
     "settings.automation.workflow.reviewWaitingHelp": {
       "extractionState": "manual",
       "localizations": {

@@ -1297,6 +1297,44 @@ import Testing
         #expect(harness.log("approve.log").split(separator: "\n").count == 1)
     }
 
+    @Test func persistenceHoldStopsAutomaticApprovalButKeepsExplicitFreshApproval() async throws {
+        let harness = try makeHarness(assistantWorked: true)
+        defer { harness.cleanUp() }
+        harness.settings.recordPersistenceFailure("workflowActivity")
+        try harness.recordVerdict("no_objections", head: head)
+        try await harness.poll()
+        #expect(harness.log("approve.log").isEmpty)
+        let item = try #require(harness.monitor.currentItems.first)
+        #expect(item.canApprove)
+        await harness.monitor.approve(item.id)
+        #expect(harness.log("approve.log").split(separator: "\n").count == 1)
+    }
+
+    @Test func persistenceFailureDuringTheFinalApprovalAuthReadCannotSubmit() async throws {
+        // given
+        let harness = try makeHarness(assistantWorked: true)
+        defer { harness.cleanUp() }
+        try harness.recordVerdict("no_objections", head: head)
+        let original = try #require(harness.gitlab.handler)
+        let id = MergeRequestAttentionMonitor.Item.ID(projectID: 1, iid: 2)
+        var approvalAuthReads = 0
+        harness.gitlab.handler = { call in
+            if call.endpoint == "/user", harness.monitor.confirmationStates[id] == .approving {
+                approvalAuthReads += 1
+                if approvalAuthReads == 2 { harness.settings.recordPersistenceFailure("automationAttemptReceipts") }
+            }
+            return try await original(call)
+        }
+
+        // when
+        try await harness.poll()
+
+        // then
+        #expect(approvalAuthReads == 2)
+        #expect(harness.log("approve.log").isEmpty)
+        #expect(!harness.settings.automaticActionsAllowed)
+    }
+
     @Test(arguments: [1, 3])
     func automaticApprovalReadFailuresDoNotPermanentlyRequireManualApproval(_ failures: Int) async throws {
         let probe = ApprovalUserReadProbe()
@@ -1429,6 +1467,22 @@ import Testing
         try await harness.poll()
         #expect(harness.log("approve.log").isEmpty)
         #expect(harness.monitor.currentItems.first?.canApprove == true)
+    }
+
+    @Test func persistenceHoldStopsAutomaticPublicationButKeepsExplicitFreshPublication() async throws {
+        let harness = try makeHarness(assistantWorked: true)
+        defer { harness.cleanUp() }
+        harness.settings.automation.publishDraftsWithoutConfirmation = true
+        harness.settings.recordPersistenceFailure("assistantHandoffs")
+        try harness.write("drafts.json", draftJSON)
+        try harness.recordVerdict("objections", head: head)
+        try await harness.poll()
+        try await harness.poll()
+        #expect(harness.log("selected.log").isEmpty && harness.log("publish.log").isEmpty)
+        #expect(harness.monitor.currentItems.first?.drafts.count == 2)
+
+        await harness.monitor.publishDrafts(of: .init(projectID: 1, iid: 2))
+        #expect(harness.log("publish.log") == "published\n")
     }
 
     @Test func unavailableCLIBlocksAutomaticPublicationButKeepsManualPublication() async throws {
@@ -1884,6 +1938,28 @@ import Testing
         try await harness.poll()
         #expect(calls == 2)
         #expect(harness.log("re-review.log") == "requested\n")
+    }
+
+    @Test func persistenceHoldAllowsReReviewChecksButCannotRequestReviewer() async throws {
+        // given
+        let harness = try makeHarness(assistantWorked: true, authored: true)
+        defer { harness.cleanUp() }
+        try prepareAuthoredFeedback(harness)
+        try await harness.poll()
+        try harness.write("drafts.json", "[]")
+        try harness.write("discussions.json", harness.log("published-discussions.json"))
+        harness.settings.recordPersistenceFailure("reReviewReceipts")
+        try await harness.poll()
+        let displayed = try #require(harness.monitor.currentOpenItems.first)
+
+        // when
+        let finished = await harness.monitor.finishCommentReview(displayed)
+        try await harness.settleVerification()
+
+        // then
+        #expect(finished)
+        #expect(!harness.log("verification.log").isEmpty)
+        #expect(harness.log("re-review.log").isEmpty)
     }
 
     private func prepareAuthoredFeedback(_ harness: Harness) throws {

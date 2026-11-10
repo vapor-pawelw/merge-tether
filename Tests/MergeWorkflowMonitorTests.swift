@@ -4,6 +4,71 @@ import Testing
 
 @MainActor
 struct MergeWorkflowMonitorTests {
+    @Test func corruptWorkflowBaselinesCannotBeOverwrittenOrReplayFailureWork() async throws {
+        // given
+        let suite = "CorruptWorkflowBaselines.\(UUID())"
+        let defaults = try #require(UserDefaults(suiteName: suite))
+        defer { defaults.removePersistentDomain(forName: suite) }
+        let key = "automation.mergeWorkflowBaselines.v1"
+        let raw = Data("unsupported baseline history".utf8)
+        defaults.set(raw, forKey: key)
+        let gitlab = persistenceGitLab()
+        let glab = gitlab.service(host: "gitlab.example.test", username: "owner")
+        let failed = try JSONDecoder().decode(GitLabMergeRequest.self,
+            from: Data(mergeRequest(11, sha: String(repeating: "a", count: 40), pipeline: "failed").utf8))
+        var events: [MergeWorkflowEvent] = []
+
+        // when
+        for _ in 0..<2 {
+            let monitor = MergeWorkflowMonitor(defaults: defaults)
+            await monitor.poll(glab: glab, host: "gitlab.example.test", user: .init(id: 1, username: "owner"),
+                authored: [failed], enabled: [.pipelineFailure], reviewSLA: 7_200) { events.append($0) }
+        }
+
+        // then
+        #expect(events.isEmpty)
+        #expect(defaults.data(forKey: key) == raw)
+        #expect(!SettingsManager(defaults: defaults).automaticActionsAllowed)
+        #expect(gitlab.requests.allSatisfy { $0.method == "GET" })
+    }
+
+    @Test func workflowEventsWaitForTheirBaselineWriteAndStayHeldAfterRestart() async throws {
+        // given
+        let suite = "FailedWorkflowBaselineWrite.\(UUID())"
+        let defaults = try #require(PersistenceFaultDefaults(suiteName: suite))
+        defer { defaults.removePersistentDomain(forName: suite) }
+        defaults.rejectedKey = "automation.mergeWorkflowBaselines.v1"
+        let gitlab = persistenceGitLab()
+        let glab = gitlab.service(host: "gitlab.example.test", username: "owner")
+        let failed = try JSONDecoder().decode(GitLabMergeRequest.self,
+            from: Data(mergeRequest(11, sha: String(repeating: "a", count: 40), pipeline: "failed").utf8))
+        var events: [MergeWorkflowEvent] = []
+        let monitor = MergeWorkflowMonitor(defaults: defaults)
+
+        // when
+        await monitor.poll(glab: glab, host: "gitlab.example.test", user: .init(id: 1, username: "owner"),
+            authored: [failed], enabled: [.pipelineFailure], reviewSLA: 7_200) { events.append($0) }
+        defaults.rejectedKey = nil
+        let restarted = MergeWorkflowMonitor(defaults: defaults)
+        await restarted.poll(glab: glab, host: "gitlab.example.test", user: .init(id: 1, username: "owner"),
+            authored: [failed], enabled: [.pipelineFailure], reviewSLA: 7_200) { events.append($0) }
+
+        // then
+        #expect(events.isEmpty)
+        #expect(!SettingsManager(defaults: defaults).automaticActionsAllowed)
+    }
+
+    private func persistenceGitLab() -> InMemoryGitLab {
+        let gitlab = InMemoryGitLab()
+        gitlab.handler = { call in
+            if call.endpoint.contains("/pipelines/310/jobs") {
+                return InMemoryGitLab.output(#"[{"id":42,"status":"failed","allow_failure":false,"failure_reason":"script_failure"}]"#)
+            }
+            return try gitlab.unexpected(call)
+        }
+        return gitlab
+    }
+
     @Test func pausedDraftFailureIsNotConsumedBeforeExplicitOptInEvenAcrossRestart() async throws {
         let directory = FileManager.default.temporaryDirectory.appending(path: UUID().uuidString)
         try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)

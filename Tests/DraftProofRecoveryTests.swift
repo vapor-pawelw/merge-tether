@@ -4,6 +4,120 @@ import Testing
 
 @MainActor
 struct DraftProofRecoveryTests {
+    @Test(arguments: ["known", "unknown"])
+    func corruptRecoveryRecordsRemainBlockedAndSurviveExplicitRetry(_ record: String) async throws {
+        // given
+        let f = try Fixture()
+        defer { f.clean() }
+        let folder = FollowUpVerificationStore.recordURL(kind: "follow-up-proof-recovery-attempts",
+            work: f.work, username: "me", in: f.folder).deletingPathExtension()
+        var path = folder.appending(path: "unknown.json")
+        if record == "known" {
+            f.claimState = .invalid
+            let first = f.coordinator()
+            first.schedule(snapshot: f.snapshot, origin: f.proof, configuration: f.settings.automation)
+            try await f.settle(first)
+            path = try #require(FileManager.default.contentsOfDirectory(at: folder, includingPropertiesForKeys: nil)
+                .first { $0.pathExtension == "json" })
+        } else {
+            try FileManager.default.createDirectory(at: folder, withIntermediateDirectories: true)
+        }
+        let raw = Data("unsupported recovery attempt".utf8)
+        try raw.write(to: path)
+        f.assessments = 0
+        f.claimState = .valid
+        let coordinator = f.coordinator()
+        f.enableRepairs(coordinator)
+
+        // when
+        coordinator.schedule(snapshot: f.snapshot, origin: f.proof, configuration: f.settings.automation)
+        try await f.settle(coordinator)
+        coordinator.retry(work: f.work, username: "me")
+
+        // then
+        #expect(f.assessments == 0 && f.repairJobs.isEmpty && f.publication().isEmpty)
+        #expect(coordinator.failure(work: f.work) != nil)
+        #expect(!coordinator.isReadOnlyFailure(work: f.work))
+        #expect((try? Data(contentsOf: path)) == raw)
+        #expect(!SettingsManager(defaults: f.defaults).automaticActionsAllowed)
+    }
+
+    @Test(arguments: ["beforeStart", "afterAssessment"])
+    func recoveryJournalWriteFailureCannotRenewTheRetryBudget(_ phase: String) async throws {
+        // given
+        let f = try Fixture()
+        defer { f.clean() }
+        let folder = FollowUpVerificationStore.recordURL(kind: "follow-up-proof-recovery-attempts",
+            work: f.work, username: "me", in: f.folder).deletingPathExtension()
+        if phase == "beforeStart" {
+            try FileManager.default.createDirectory(at: folder.deletingLastPathComponent(), withIntermediateDirectories: true)
+            try Data("not a directory".utf8).write(to: folder)
+        } else {
+            f.duringAssessment = {
+                do {
+                    try FileManager.default.moveItem(at: folder, to: folder.appendingPathExtension("retained"))
+                    try Data("not a directory".utf8).write(to: folder)
+                } catch { Issue.record(error) }
+            }
+        }
+        let coordinator = f.coordinator()
+
+        // when
+        coordinator.schedule(snapshot: f.snapshot, origin: f.proof, configuration: f.settings.automation)
+        try await f.settle(coordinator)
+        let assessments = f.assessments
+        f.clock = f.clock.addingTimeInterval(3_600)
+        let restarted = f.coordinator()
+        restarted.schedule(snapshot: f.snapshot, origin: f.proof, configuration: f.settings.automation)
+        try await f.settle(restarted)
+
+        // then
+        #expect(assessments == (phase == "beforeStart" ? 0 : 1))
+        #expect(f.assessments == assessments && f.publication().isEmpty)
+        #expect(coordinator.failure(work: f.work) != nil)
+        #expect(!coordinator.isReadOnlyFailure(work: f.work))
+        #expect(f.settings.persistenceDegraded.contains("draftProofRecoveryAttempts"))
+        #expect(!SettingsManager(defaults: f.defaults).automaticActionsAllowed)
+    }
+
+    @Test func corruptRepairReservationCannotResetTheTwoAttemptLimit() async throws {
+        // given
+        let f = try Fixture()
+        defer { f.clean() }
+        let folder = FollowUpVerificationStore.recordURL(kind: "draft-repair-attempts", work: f.work,
+            username: "me", in: f.folder).deletingPathExtension()
+        try FileManager.default.createDirectory(at: folder, withIntermediateDirectories: true)
+        var paths: [URL] = []
+        for reason in ["first correction", "second correction"] {
+            let rejection = DraftProofRecoveryVerifier.Assessment.Draft(draftID: 12, state: .invalid, reason: reason)
+            let context = try #require(DraftReplyRepair.context(snapshot: f.snapshot, origin: f.proof,
+                rejection: rejection, configuration: f.settings.automation))
+            let job = AssistantAutomationRunner.Handoff(id: UUID(), key: f.settings.assistantHandoffs[0].key,
+                title: "Fixture repair", prompt: "", createdAt: Date(), allowsPush: false, draftRepair: context,
+                execution: .init(state: .succeeded))
+            f.settings.assistantHandoffs.append(job)
+            let object = try JSONSerialization.jsonObject(with: JSONEncoder().encode(context))
+            let path = folder.appending(path: context.key + ".json")
+            try JSONSerialization.data(withJSONObject: ["context": object, "jobID": job.id.uuidString]).write(to: path)
+            paths.append(path)
+        }
+        let raw = Data("unsupported reservation".utf8)
+        try raw.write(to: paths[0])
+        var launches = 0
+
+        // when
+        let status = await DraftReplyRepair.dispatch(snapshot: f.snapshot, origin: f.proof,
+            assessment: .init(drafts: [.init(draftID: 12, state: .invalid, reason: "third correction")]),
+            settings: f.settings, directory: f.folder, launch: { _, _, _ in launches += 1; return UUID() })
+
+        // then
+        if case .working = status { Issue.record("Corrupt reservation cannot admit another worker") }
+        #expect(launches == 0)
+        #expect((try? Data(contentsOf: paths[0])) == raw)
+        #expect(FileManager.default.fileExists(atPath: paths[1].path))
+        #expect(f.settings.persistenceDegraded.contains("draftReplyRepairAttempts"))
+    }
+
     @Test(arguments: ["default", "forceOn", "revoked"])
     func draftClaimRecoveryRequiresCurrentEffectivePermission(_ policy: String) async throws {
         let f = try Fixture()

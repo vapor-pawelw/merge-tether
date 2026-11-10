@@ -4,6 +4,20 @@ import Testing
 
 @MainActor
 struct AuthorFeedbackCoordinatorTests {
+    @Test(arguments: ["before", "duringVerification"])
+    func persistenceHoldKeepsSemanticReadsButCannotResolveAcceptedFeedback(_ phase: String) async throws {
+        try await withFixture { fixture in
+            if phase == "before" { fixture.settings.recordPersistenceFailure("reReviewReceipts") }
+            let coordinator = fixture.coordinator(duringVerification: {
+                if phase == "duringVerification" { fixture.settings.recordPersistenceFailure("reReviewReceipts") }
+            })
+            try await fixture.run(coordinator)
+            #expect(fixture.verified)
+            #expect(!fixture.resolved && fixture.resolutionPosts == 0 && fixture.reactionPosts == 0)
+            #expect(!fixture.settings.automaticActionsAllowed)
+        }
+    }
+
     @Test func aPrivateTechnicalQuestionIsForwardedWithoutChangingTheAddressedComment() async throws {
         // given
         try await withFixture { fixture in

@@ -74,7 +74,7 @@ final class MergeWorkflowAutomation {
     private let notifications: NotificationService
     private let detector: ExistingPipelineWorkDetector
     private let jobCoordinator: AssistantJobCoordinator?
-    private let monitor = MergeWorkflowMonitor()
+    private let monitor: MergeWorkflowMonitor
     private let retryWait: ReadOnlyAssessmentRetry.Wait
     private let now: ReadOnlyAssessmentRetry.Clock
     private var work: Task<Void, Never>?
@@ -139,6 +139,7 @@ final class MergeWorkflowAutomation {
         now: @escaping ReadOnlyAssessmentRetry.Clock = { Date() }
     ) {
         self.settings = settings
+        self.monitor = MergeWorkflowMonitor(persistenceStore: settings.persistenceStore)
         self.glab = glab
         self.notifications = notifications
         self.detector = detector
@@ -720,7 +721,7 @@ final class MergeWorkflowAutomation {
     }
 
     private func shouldProceed(_ entry: MergeWorkflowActivityEntry) -> Bool {
-        entry.event.kind != .reviewWaiting && isCurrent(host: entry.host, user: entry.user)
+        settings.automaticActionsAllowed && entry.event.kind != .reviewWaiting && isCurrent(host: entry.host, user: entry.user)
             && configuredRule(for: entry.event)?.mode == .assistant
             && (entry.event.kind != .pipelineFailure || settings.automation.autoClaimPipelineFailures
                 || confirmedPipelineHandoffs.contains(entry.id))
