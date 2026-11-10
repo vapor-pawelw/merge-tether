@@ -186,6 +186,7 @@ struct CommandCenterDisplayFrameTests {
         draft.draftFromTodo = true
         let own = [checkpoint, item(44), item(45)]
         let reviewed = [draft, item(46)]
+        let todos = [todo(8)]
         let pins: Set<BoardCardPin> = [try #require(BoardCardPin.mergeRequest(host: host, username: "me", projectID: 1, iid: 45))]
         let positions = [own[1].id: 1, checkpoint.id: 2, reviewed[1].id: 0]
         let accountHost = scenario == "missing-account" ? nil : host
@@ -194,7 +195,7 @@ struct CommandCenterDisplayFrameTests {
         automation.applyPreset(.full, for: .codex)
         let grouping: MRBoardGrouping = scenario == "drafts" ? .drafts : .withoutAutomation
         func make(_ ranks: [MergeRequestAttentionMonitor.Item.ID: Int]) -> MergeRequestBoardSnapshot {
-            .init(own: own, reviewed: reviewed, todos: [todo(8)], attention: [checkpoint, item(47)],
+            .init(own: own, reviewed: reviewed, todos: todos, attention: [checkpoint, item(47)],
                 handoffs: [], host: accountHost, username: username, pinnedCards: pins, preservedOrder: ranks,
                 automation: automation, grouping: grouping)
         }
