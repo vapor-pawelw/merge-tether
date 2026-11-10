@@ -4,6 +4,38 @@ import Testing
 
 @Suite("Re-review assessment")
 struct ReReviewAssessmentTests {
+    @Test func verifiedReplyInAnotherThreadSatisfiesOnlyItsAssessedConcern() throws {
+        // given
+        let threads = try discussions()
+        let assessment = try JSONDecoder().decode(ReReviewAssessment.self, from: Data(#"{"notes":[{"noteID":10,"state":"addressed","reason":"Verified correction and reply."},{"noteID":12,"state":"informational","reason":"Summary."},{"noteID":13,"state":"addressed","reason":"The same correction is explained in published reply 14.","publishedReplyNoteID":14}]}"#.utf8))
+        let replyThread = try JSONDecoder().decode(GitLabMergeRequestDiscussion.self, from: Data(#"{"notes":[{"id":14,"author":{"id":3},"system":false,"body":"The shared correction also addresses the same concern in note 13."}]}"#.utf8))
+        // when
+        let current = threads + [replyThread]
+        // then
+        #expect(try assessment.reviewers(in: current, authorID: 3) == [7: 10, 9: 13])
+        #expect(assessment.missingPublishedReplyNoteIDs(in: current, authorID: 3).isEmpty)
+        #expect(assessment.missingPublishedReplyNoteIDs(in: threads, authorID: 3) == [13])
+    }
+
+    @Test(arguments: ["missing", "reviewer", "system", "blank", "earlier", "duplicate", "wrongState"])
+    func invalidCrossThreadReplyEvidenceIsRejected(_ scenario: String) throws {
+        // given
+        let author = scenario == "reviewer" ? 7 : 3
+        let id = scenario == "earlier" ? 9 : 14
+        let body = scenario == "blank" ? " " : "Verified shared correction."
+        let reply = #"{"id":\#(id),"author":{"id":\#(author)},"system":\#(scenario == "system"),"body":"\#(body)"}"#
+        let extra = scenario == "duplicate" ? "," + reply : ""
+        let appended = try JSONDecoder().decode([GitLabMergeRequestDiscussion].self,
+            from: Data((scenario == "missing" ? "[]" : #"[{"notes":[\#(reply)\#(extra)]}]"#).utf8))
+        let assessment = try JSONDecoder().decode(ReReviewAssessment.self, from: Data(#"{"notes":[{"noteID":10,"state":"addressed","reason":"Verified."},{"noteID":12,"state":"informational","reason":"Summary."},{"noteID":13,"state":"\#(scenario == "wrongState" ? "blocking" : "addressed")","reason":"Claimed shared reply.","publishedReplyNoteID":\#(id)}]}"#.utf8))
+        let current = try discussions() + appended
+        // when + then
+        #expect(throws: ReReviewAssessment.ValidationError.self) {
+            try assessment.reviewers(in: current, authorID: 3)
+        }
+        #expect(assessment.missingPublishedReplyNoteIDs(in: current, authorID: 3).contains(13) == (scenario != "wrongState"))
+    }
+
     private func discussions() throws -> [GitLabMergeRequestDiscussion] {
         try JSONDecoder().decode([GitLabMergeRequestDiscussion].self, from: Data("""
             [{"notes":[{"id":10,"author":{"id":7},"system":false,"resolvable":true,"resolved":false,"body":"Fix A"},

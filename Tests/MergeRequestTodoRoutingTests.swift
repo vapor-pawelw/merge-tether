@@ -489,6 +489,37 @@ import Testing
         #expect(retained.first?.jobID == f.settings.mrActionIntents[0].jobID)
     }
 
+    @Test(arguments: [false, true])
+    func verifiedCrossThreadReplyCompletesFollowUpWithoutRepeatingWorkerOrReply(replyEditedDuringRead: Bool) async throws {
+        // given
+        let f = try fixture(owned: true); defer { f.cleanup() }
+        try completedFollowUp(f, withReply: false)
+        f.settings.mrActionIntents[0].state = .failed
+        f.settings.mrActionIntents[0].error = "Current feedback evidence is missing."
+        try #"[{"id":"d","notes":[{"id":42,"author":{"id":2,"username":"other"},"system":false,"resolvable":true,"resolved":false,"body":"Please fix shared access."}]},{"id":"other-thread","notes":[{"id":43,"author":{"id":1,"username":"me"},"system":false,"body":"Shared access is corrected; this also addresses note 42."}]}]"#
+            .store(in: f.gitlab, as: "discussions")
+        let assessment = try JSONDecoder().decode(ReReviewAssessment.self, from: Data(#"{"notes":[{"noteID":42,"state":"addressed","reason":"Current code and the published reply in another thread cover the same concern.","publishedReplyNoteID":43}]}"#.utf8))
+        var launches = 0
+        let router = MergeRequestTodoRouter(settings: f.settings, glab: f.glab, canAutomate: { true }, launcher: { _, _ in
+            launches += 1; return UUID()
+        }, proofDirectory: f.root.appending(path: "proofs"))
+        router.followUpAssessment = { _, _ in
+            if replyEditedDuringRead {
+                try? f.gitlab.text("discussions").replacingOccurrences(of: "Shared access is corrected; this also addresses note 42.",
+                    with: "This reply now concerns an unrelated change.").store(in: f.gitlab, as: "discussions")
+            }
+            return assessment
+        }
+        // when
+        await router.refreshCompletionEvidence(host: target.host, username: target.username)
+        // then
+        #expect(f.settings.mrActionIntents[0].state == (replyEditedDuringRead ? .failed : .completed))
+        #expect((f.settings.mrActionIntents[0].error == nil) == !replyEditedDuringRead)
+        #expect(f.settings.assistantHandoffs.count == 1)
+        #expect(launches == 0)
+        #expect(!f.gitlab.has("acks"))
+    }
+
     @Test(arguments: [AssistantJobExecution.State.succeeded, .failed])
     func backgroundStatusChangesAreAutomaticEvenWhenTheWorkerWasStartedManually(state: AssistantJobExecution.State) async throws {
         let f = try fixture(owned: true); defer { f.cleanup() }

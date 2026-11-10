@@ -4,9 +4,9 @@ import Foundation
 /// Supplied evidence is supplementary; absent proof must produce `uncertain`.
 enum ReReviewVerifier {
     enum VerificationError: Error, Equatable { case unavailable, failed, incompleteEvidence }
-    static let policyVersion = "precise-user-decisions-3"
+    static let policyVersion = "cross-thread-replies-4"
 
-    static let schema = #"{"type":"object","additionalProperties":false,"properties":{"notes":{"type":"array","items":{"type":"object","additionalProperties":false,"properties":{"noteID":{"type":"integer"},"state":{"type":"string","enum":["addressed","informational","blocking","uncertain"]},"reason":{"type":"string"},"summary":{"type":"string","minLength":1,"maxLength":200},"acceptanceNoteID":{"type":["integer","null"]},"informationalAcknowledgementSafe":{"type":"boolean"},"informationalPurpose":{"type":"string","enum":["concreteCodeReviewFeedback","reviewSummary","automatedReviewReport","other"]}},"required":["noteID","state","reason","summary","acceptanceNoteID","informationalAcknowledgementSafe","informationalPurpose"]}}},"required":["notes"]}"#
+    static let schema = #"{"type":"object","additionalProperties":false,"properties":{"notes":{"type":"array","items":{"type":"object","additionalProperties":false,"properties":{"noteID":{"type":"integer"},"state":{"type":"string","enum":["addressed","informational","blocking","uncertain"]},"reason":{"type":"string"},"summary":{"type":"string","minLength":1,"maxLength":200},"acceptanceNoteID":{"type":["integer","null"]},"publishedReplyNoteID":{"type":["integer","null"]},"informationalAcknowledgementSafe":{"type":"boolean"},"informationalPurpose":{"type":"string","enum":["concreteCodeReviewFeedback","reviewSummary","automatedReviewReport","other"]}},"required":["noteID","state","reason","summary","acceptanceNoteID","publishedReplyNoteID","informationalAcknowledgementSafe","informationalPurpose"]}}},"required":["notes"]}"#
 
     private static func outputSchema(noteIDs: [Int], blockedRunIDs: [UUID], decisionIDs: [UUID]) throws -> String {
         guard var document = try JSONSerialization.jsonObject(with: Data(schema.utf8)) as? [String: Any],
@@ -261,6 +261,17 @@ enum ReReviewVerifier {
             Referenced findings awaiting reviewer acceptance make informationalAcknowledgementSafe false.
             An informational summary classification does not accept the referenced corrections or
             authorize closing their original threads.
+            For each addressed note, set publishedReplyNoteID to the exact ID of a later, substantive,
+            published MR-author reply that answers ALL remaining expectations in that note. Read its
+            full body and verify the correction or explanation against current evidence. The reply
+            may be in another discussion, including a shared answer to duplicate concrete findings;
+            do not require duplicate replies when the same concern is already fully answered.
+            Identify the matching concern and reply in reason. A link or claim of completion alone
+            is insufficient. Never cite a private draft, system note, another person's comment,
+            an unrelated answer or a promise of future work. Return null when no such reply is proven,
+            and for every state other than addressed. This proves an author response only, never
+            reviewer consent or permission to resolve a discussion. Existing same-thread replies
+            remain separate evidence; missing cross-thread proof must not silently waive a reply.
             Read every discussion together with its author replies. Do not require a reply to an
             informational note. A remaining unrelated concern from another reviewer does not block a
             reviewer whose own concerns are addressed. If a shared prerequisite is missing, classify the
@@ -362,7 +373,8 @@ enum ReReviewVerifier {
                 reason: GlabService.redactWorkflowEvidence(note.reason),
                 summary: note.summary.map(GlabService.redactWorkflowEvidence), acceptanceNoteID: note.acceptanceNoteID,
                 informationalAcknowledgementSafe: note.informationalAcknowledgementSafe,
-                informationalPurpose: note.informationalPurpose, ignoredDecisionIDs: note.ignoredDecisionIDs)
+                informationalPurpose: note.informationalPurpose, ignoredDecisionIDs: note.ignoredDecisionIDs,
+                publishedReplyNoteID: note.publishedReplyNoteID)
         }, completedBlockedRunIDs: assessment.completedBlockedRunIDs)
     }
 

@@ -4,6 +4,41 @@ import Testing
 
 @Suite("Headless re-review verification")
 struct ReReviewVerifierTests {
+    @Test(arguments: AutomationAssistant.allCases)
+    func crossThreadReplyProofSurvivesProviderDecodingAndRedaction(_ assistant: AutomationAssistant) async throws {
+        // given
+        let folder = FileManager.default.temporaryDirectory.appending(path: UUID().uuidString)
+        try FileManager.default.createDirectory(at: folder, withIntermediateDirectories: false)
+        defer { try? FileManager.default.removeItem(at: folder) }
+        let script = folder.appending(path: "cli")
+        try Data("""
+            #!/usr/bin/python3
+            import json,pathlib,sys
+            args=sys.argv[1:]
+            pathlib.Path(__file__+'.capture').write_text(' '.join(args)+sys.stdin.read())
+            schema=json.load(open(args[args.index('--output-schema')+1])) if args[0]=='exec' else json.loads(args[args.index('--json-schema')+1])
+            pathlib.Path(__file__+'.schema').write_text(json.dumps(schema))
+            result={'notes':[{'noteID':10,'state':'addressed','reason':'Verified shared correction. token=glpat-syntheticreply12345','publishedReplyNoteID':11}]}
+            if args[0]=='exec': json.dump(result,open(args[args.index('-o')+1],'w'))
+            else: print(json.dumps({'is_error':False,'structured_output':result}))
+            """.utf8).write(to: script)
+        try FileManager.default.setAttributes([.posixPermissions: 0o700], ofItemAtPath: script.path)
+        let discussions = try JSONDecoder().decode([GitLabMergeRequestDiscussion].self, from: Data(#"[{"id":"feedback","notes":[{"id":10,"author":{"id":7},"system":false,"resolvable":true,"resolved":false,"body":"Correct shared access."}]},{"id":"reply","notes":[{"id":11,"author":{"id":3},"system":false,"body":"The shared correction also addresses note 10."}]}]"#.utf8))
+        let input = ReReviewVerifier.Input(authorID: 3, headSHA: String(repeating: "a", count: 40), title: "Shared correction",
+            diff: "Verified current correction", discussions: discussions)
+        // when
+        let assessment = try await ReReviewVerifier.run(input, assistant: assistant, model: "fixture", executable: script, retryWait: { _ in })
+        // then
+        #expect(assessment.missingPublishedReplyNoteIDs(in: discussions, authorID: 3).isEmpty)
+        #expect(!assessment.notes[0].reason.contains("glpat-syntheticreply12345"))
+        let findings = AuthorFeedbackPolicy.evaluate(discussions: discussions, assessment: assessment, authorID: 3, approvedReviewerIDs: [])
+        #expect(findings.first?.state == .waitingAcceptance)
+        let captured = try String(contentsOf: URL(fileURLWithPath: script.path + ".capture"), encoding: .utf8)
+        #expect(captured.contains("publishedReplyNoteID"))
+        let schema = try String(contentsOf: URL(fileURLWithPath: script.path + ".schema"), encoding: .utf8)
+        #expect(schema.contains("publishedReplyNoteID"))
+    }
+
     @Test(arguments: AutomationAssistant.allCases, ["exact", "missingIDs", "wrongID", "restored", "editedSource"])
     func ignoredConcernVerdictsRemainBoundToCurrentSourceAndActiveDecision(_ assistant: AutomationAssistant, _ scenario: String) async throws {
         let folder = FileManager.default.temporaryDirectory.appending(path: UUID().uuidString)

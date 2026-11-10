@@ -4,6 +4,28 @@ import Testing
 
 @MainActor
 struct AuthorFeedbackCoordinatorTests {
+    @Test func sharedPublishedReplyLeavesReviewerAcceptancePendingWithoutDispatchingDuplicateWork() async throws {
+        try await withFixture { fixture in
+            // given
+            fixture.settings.automation.authorFeedback.isEnabled = true
+            try fixture.write("approvals.json", #"{"approved_by":[]}"#)
+            try fixture.write("discussions.json", #"[{"id":"thread-a","notes":[{"id":10,"author":{"id":7,"username":"alice"},"system":false,"resolvable":true,"resolved":false,"body":"Fix shared access."}]},{"id":"thread-b","notes":[{"id":11,"author":{"id":3,"username":"me"},"system":false,"body":"The verified shared correction also answers note 10."}]}]"#)
+            let assessment = try JSONDecoder().decode(ReReviewAssessment.self, from: Data(#"{"notes":[{"noteID":10,"state":"addressed","reason":"The current correction and published shared answer fully address this concern.","publishedReplyNoteID":11}]}"#.utf8))
+            let coordinator = fixture.coordinator(assessment: assessment)
+            var requested: Set<Int> = []
+            coordinator.onNeedsWork = { _, ids, _, _ in requested.formUnion(ids) }
+            // when
+            try await fixture.run(coordinator)
+            // then
+            let status = try #require(coordinator.status(projectID: 1, iid: 2))
+            #expect(status.phase == .complete && status.addressedNoteIDs == [10])
+            #expect(status.replyNoteIDs.isEmpty && status.followUpNoteIDs.isEmpty && requested.isEmpty)
+            #expect(status.waitingForReviewer && !status.needsAttention)
+            #expect(status.acceptedReviewerIDs.isEmpty)
+            #expect(fixture.resolutionPosts == 0 && fixture.reactionPosts == 0)
+        }
+    }
+
     @Test(arguments: [false, true])
     func addressingAnotherConcernInAnIgnoredSourceStillRequiresItsPublishedReply(_ withReply: Bool) async throws {
         try await withFixture { fixture in

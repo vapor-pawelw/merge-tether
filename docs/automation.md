@@ -116,6 +116,8 @@ A new foreign MR is proposed in **Inbox** with **Add and handle** or **Ignore th
 
 A submitted review is handled by its event type and live MR evidence, regardless of the reviewer identity. Open threads on your MR enter the configured follow-up action. General reviewer comments are assessed by the shared semantic verifier before it starts warranted follow-up work; informational summaries do not require code changes. Reviews with no open threads refresh the durable MR state. A failed evidence read leaves the event unread.
 
+A substantive published author reply can cover the same concern in another discussion. The shared verifier names the exact reply ID after checking the concern, current correction and reply body; the app checks that the reply still exists uniquely, belongs to the MR author and is a later non-system comment. Fresh account, commit, context and discussion checks still fence completion. Missing or changed evidence requires reassessment. This avoids duplicate answers and repeated follow-ups while keeping reviewer acceptance and discussion resolution separate.
+
 Events that cannot be classified safely remain in **Inbox** for manual reading; they are never acknowledged as understood. Marking a routed event read does not prove a review finished, a fix was pushed or a draft can be published. Those outcomes keep their separate execution and remote-evidence checks.
 
 ## Automation profiles

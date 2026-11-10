@@ -18,6 +18,9 @@ struct ReReviewAssessment: Codable, Sendable {
         // Purpose describes the note, never whether a human used AI to write it.
         var informationalPurpose: InformationalPurpose? = nil
         var ignoredDecisionIDs: [UUID]? = nil
+        /// A semantically verified, published author reply covering this exact concern,
+        /// including a shared response in another discussion. Never reviewer acceptance.
+        var publishedReplyNoteID: Int? = nil
     }
     let notes: [Note]
     var completedBlockedRunIDs: [UUID]? = nil
@@ -31,6 +34,8 @@ struct ReReviewAssessment: Codable, Sendable {
                 guard let id = note.id, addressed.contains(id), note.resolvable == true, note.resolved == false,
                       !thread.notes.contains(where: {
                           $0.system == false && $0.author?.id == authorID && ($0.id ?? 0) > id
+                      }), !notes.contains(where: {
+                          $0.noteID == id && hasPublishedReply(for: $0, in: discussions, authorID: authorID)
                       }) else { return nil }
                 return id
             }
@@ -50,6 +55,15 @@ struct ReReviewAssessment: Codable, Sendable {
     }
 
     enum ValidationError: Error { case incompleteEvidence }
+
+    private func hasPublishedReply(for note: Note, in discussions: [GitLabMergeRequestDiscussion], authorID: Int) -> Bool {
+        guard note.state == .addressed, let replyID = note.publishedReplyNoteID, replyID > note.noteID else { return false }
+        let matching = discussions.flatMap(\.notes).filter { $0.id == replyID }
+        guard matching.count == 1, let reply = matching.first, reply.system == false, reply.author?.id == authorID,
+              let body = reply.body, !body.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else { return false }
+        return true
+    }
+
     func hasNoRemainingAuthorWork(in discussions: [GitLabMergeRequestDiscussion], authorID: Int,
                                  ignoredSuggestions: [IgnoredFeedbackSuggestion] = []) -> Bool {
         guard (try? reviewers(in: discussions, authorID: authorID, ignoredSuggestions: ignoredSuggestions)) != nil else { return false }
@@ -81,6 +95,7 @@ struct ReReviewAssessment: Codable, Sendable {
                   assessment.state != .ignoredByUser || !ignoredIDs.isEmpty,
                   assessment.state != .ignoredByUser || (assessment.acceptanceNoteID == nil && assessment.informationalAcknowledgementSafe != true),
                   ignoredIDs.isEmpty || [.ignoredByUser, .addressed, .blocking, .uncertain].contains(assessment.state),
+                  assessment.publishedReplyNoteID == nil || hasPublishedReply(for: assessment, in: discussions, authorID: authorID),
                   ignoredSuggestions.filter({ ignoredIDs.contains($0.id) }).allSatisfy({ $0.matches(note) })
             else { throw ValidationError.incompleteEvidence }
             switch assessment.state {
