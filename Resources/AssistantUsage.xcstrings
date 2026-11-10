@@ -682,6 +682,72 @@
           }
         }
       }
+    },
+    "assistantUsageMRTitle": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Agent usage · all tracked time"
+          }
+        }
+      }
+    },
+    "assistantUsageMRReviewer": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Reviewer / work agent"
+          }
+        }
+      }
+    },
+    "assistantUsageMRVerifier": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Verifier"
+          }
+        }
+      }
+    },
+    "assistantUsageMRAgentRequests": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Agent requests: %lld"
+          }
+        }
+      }
+    },
+    "assistantUsageMRAgentRequestsHelp": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "One prompt issued by MergeTether per CLI invocation. Retries count separately; cached checks add no request. Internal model turns and tool calls are not counted."
+          }
+        }
+      }
+    },
+    "assistantUsageMRHistoryHelp": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "All recorded history for this MR and account, independent of the Settings date filter. Earlier or unattributed runs are not included."
+          }
+        }
+      }
     }
   },
   "version": "1.0"
