@@ -48,6 +48,17 @@ struct CommentReviewSnapshotTests {
         #expect(!snapshot.matches(request, discussions: changed, publishedDrafts: [draft], userID: 3))
     }
 
+    @Test func duplicateBodiesCannotHideMoreDiscussionChangesThanWerePublished() throws {
+        let request = try MRDependencyPresentationTests().request(2, project: 1)
+        let original = try discussions(#"[{"id":"thread","notes":[{"id":10,"author":{"id":8},"body":"Please fix this","system":false}]}]"#)
+        let twoReplies = try discussions(#"[{"id":"thread","notes":[{"id":10,"author":{"id":8},"body":"Please fix this","system":false},{"id":11,"author":{"id":3},"body":"Fixed","system":false},{"id":12,"author":{"id":3},"body":"Fixed","system":false}]}]"#)
+        let snapshot = try #require(CommentReviewSnapshot(request: request, discussions: original))
+        let first = GitLabDraftNote(id: 91, authorID: 3, note: "Fixed", discussionID: "thread", position: nil)
+        let second = GitLabDraftNote(id: 92, authorID: 3, note: "Fixed", discussionID: "thread", position: nil)
+        #expect(!snapshot.matches(request, discussions: twoReplies, publishedDrafts: [first], userID: 3))
+        #expect(snapshot.matches(request, discussions: twoReplies, publishedDrafts: [first, second], userID: 3))
+    }
+
     @Test func aSameHeadContextEditRequiresAnotherCompletionDecision() throws {
         let request = try MRDependencyPresentationTests().request(2, project: 1, title: "Original")
         let changed = try MRDependencyPresentationTests().request(2, project: 1, title: "New acceptance criteria")

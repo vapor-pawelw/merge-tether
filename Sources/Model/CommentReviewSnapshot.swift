@@ -20,15 +20,19 @@ struct CommentReviewSnapshot: Equatable, Sendable {
               request.semanticContextFingerprint == semanticContext else { return false }
         if ReviewVerdict.fingerprint(discussions) == discussionFingerprint { return true }
         // Permit only the new own comments this publication actually sent.
-        let bodies = Set(publishedDrafts.compactMap(\.note).map(AICommentAssessmentStore.digest))
-        let ownPublished = discussions.flatMap(\.notes).compactMap { note -> Int? in
-            guard note.system != true, note.author?.id == userID, let body = note.body,
-                  bodies.contains(AICommentAssessmentStore.digest(body)) else { return nil }
-            return note.id
-        }.sorted(by: >)
+        var bodies = Dictionary(grouping: publishedDrafts.compactMap(\.note), by: AICommentAssessmentStore.digest)
+            .mapValues(\.count)
+        let ownPublished = discussions.flatMap(\.notes).compactMap { note -> (id: Int, digest: String)? in
+            guard note.system != true, note.author?.id == userID, let body = note.body, let id = note.id else { return nil }
+            let digest = AICommentAssessmentStore.digest(body)
+            guard bodies[digest] != nil else { return nil }
+            return (id, digest)
+        }.sorted { $0.id > $1.id }
         var excluded = Set<Int>()
-        for id in ownPublished {
-            excluded.insert(id)
+        for note in ownPublished {
+            guard let remaining = bodies[note.digest], remaining > 0 else { continue }
+            bodies[note.digest] = remaining - 1
+            excluded.insert(note.id)
             if ReviewVerdict.fingerprint(discussions, excluding: excluded) == discussionFingerprint { return true }
         }
         return false
