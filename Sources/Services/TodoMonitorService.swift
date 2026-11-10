@@ -110,22 +110,27 @@ final class TodoMonitorService {
 
     private func makeEnvironmentRecovery() -> AutomaticEnvironmentRecovery {
         let recovery = AutomaticEnvironmentRecovery(settings: settings, fetch: { [weak self] original in
-            guard let self, self.glab.resolvedHost == original.key.work.host,
+            guard let self, self.settings.automaticActionsAllowed, !Task.isCancelled,
+                  self.glab.resolvedHost == original.key.work.host,
                   self.glab.currentUsername == original.key.username else { throw CancellationError() }
             let revision = self.glab.accountRevision
+            let configuration = self.settings.automation
             async let user = self.glab.fetchAuthenticatedUser(host: original.key.work.host, expectedUsername: original.key.username)
             async let request = self.glab.fetchMergeRequest(projectID: original.key.work.projectID,
                 iid: original.key.work.iid, host: original.key.work.host)
             async let discussions = self.glab.fetchMergeRequestDiscussions(projectID: original.key.work.projectID,
                 iid: original.key.work.iid, host: original.key.work.host)
             let snapshot = try await AutomaticEnvironmentRecovery.Snapshot(request: request, user: user, discussions: discussions)
-            guard self.glab.resolvedHost == original.key.work.host,
+            guard self.settings.automaticActionsAllowed, self.settings.automation == configuration,
+                  !Task.isCancelled, self.glab.resolvedHost == original.key.work.host,
                   self.glab.currentUsername == original.key.username, self.glab.accountRevision == revision else {
                 throw CancellationError()
             }
             return snapshot
         }, launch: { [weak self] original, snapshot, prompt in
-            guard let self else { throw CancellationError() }
+            guard let self, self.settings.automaticActionsAllowed, !Task.isCancelled,
+                  self.glab.resolvedHost == original.key.work.host,
+                  self.glab.currentUsername == original.key.username else { throw CancellationError() }
             return try await AssistantAutomationRunner.launch(original.key.assistant, title: original.title,
                 mergeRequestURL: snapshot.request.webURL, prompt: prompt,
                 workspace: self.settings.automation.assistantWorkspace, access: original.key.access,
@@ -141,7 +146,12 @@ final class TodoMonitorService {
     @ObservationIgnored private lazy var mrTodoRouter: MergeRequestTodoRouter = {
         let router = MergeRequestTodoRouter(settings: settings, glab: glab, canAutomate: { [weak self] in
             guard let self else { return false }
-            return await AssistantCLI.detect(self.settings.automation.assistant, requireCLI: true).isReady
+            let configuration = self.settings.automation
+            let revision = self.glab.accountRevision
+            let ready = await AssistantCLI.detect(configuration.assistant, requireCLI: true).isReady
+            // This probe also serves manual work; persistence is checked at each action boundary.
+            return ready && !Task.isCancelled && self.settings.automation == configuration
+                && self.glab.accountRevision == revision
         })
         router.onAcceptedIntent = { [weak self] intent in
             guard let self, self.manualAdoptions[intent.target, default: 0] == 0 else { return }
@@ -494,14 +504,20 @@ final class TodoMonitorService {
     }
 
     private func routeMRTodos(host: String, username: String, automatically: Bool = true) async {
+        guard !automatically || settings.automaticActionsAllowed else { return }
+        let revision = glab.accountRevision
         let managed = Set(reviewedMergeRequestItems.compactMap {
             scopeTarget(projectID: $0.id.projectID, iid: $0.id.iid, url: $0.url)
         })
         let acknowledged = await mrTodoRouter.process(allTodos, host: host, username: username, managed: managed, automatically: automatically)
-        guard glab.resolvedHost == host, glab.currentUsername == username else { return }
+        guard glab.resolvedHost == host, glab.currentUsername == username,
+              glab.accountRevision == revision else { return }
+        // Apply confirmed GitLab acknowledgements even if a later step degraded persistence.
         todoStore.acknowledge(acknowledged)
         if let error = mrTodoRouter.acknowledgementError { assistantJobActionError = error.localizedDescription }
-        if automatically { await environmentRecovery.recover(host: host, username: username) }
+        if automatically, settings.automaticActionsAllowed {
+            await environmentRecovery.recover(host: host, username: username)
+        }
     }
 
     func reviewingContext(for row: MergeRequestBoardSnapshot.Row) -> ReviewingContext {
@@ -863,7 +879,8 @@ final class TodoMonitorService {
     }
 
     private func automaticallyHandlesFeedback(_ item: MergeRequestAttentionMonitor.Item) -> Bool {
-        guard let target = scopeTarget(projectID: item.id.projectID, iid: item.id.iid, url: item.url),
+        guard settings.automaticActionsAllowed,
+              let target = scopeTarget(projectID: item.id.projectID, iid: item.id.iid, url: item.url),
               let request = item.authoredRequest, request.state == "opened",
               settings.automation.scope.permits(request, host: target.host, username: target.username),
               request.author.username == target.username else { return false }
@@ -1129,7 +1146,7 @@ final class TodoMonitorService {
     }
 
     private func scheduleAutomation(host: String, username: String) {
-        guard !isAutomating,
+        guard settings.automaticActionsAllowed, !isAutomating,
               settings.onboardingCompleted,
               settings.automation.reviewRequested.isEnabled || settings.automation.authorFeedback.isEnabled
         else { return }
@@ -1180,8 +1197,10 @@ final class TodoMonitorService {
     }
 
     func runAttentionFeedback(for item: MergeRequestAttentionMonitor.Item, manual: Bool = true) async {
-        guard let action = attentionFeedbackAction(for: item), action == .ready(.assistant) || action == .failed,
+        guard manual || settings.automaticActionsAllowed,
+              let action = attentionFeedbackAction(for: item), action == .ready(.assistant) || action == .failed,
               let host = glab.resolvedHost, let username = glab.currentUsername else { return }
+        let revision = glab.accountRevision
         let work = AssistantAutomationRunner.MergeRequestWork(host: host, projectID: item.id.projectID, iid: item.id.iid)
         guard runningAttentionFeedback.insert(work).inserted else { return }
         defer { runningAttentionFeedback.remove(work) }
@@ -1190,6 +1209,7 @@ final class TodoMonitorService {
         do {
             try await automation.prepareFeedback(work: work, noteIDs: notes, username: username, settings: settings, glab: glab, manual: manual) {
                 self.glab.resolvedHost == host && self.glab.currentUsername == username && self.inboxHost == host
+                    && self.glab.accountRevision == revision
                     && self.attentionFeedbackNoteIDs(for: item, work: work, username: username) == notes
                     && (manual || self.automaticallyHandlesFeedback(item))
             }
@@ -1201,8 +1221,10 @@ final class TodoMonitorService {
 
     func runVerifiedAuthorFeedback(request: GitLabMergeRequest, noteIDs: Set<Int>, fingerprint: String,
                                   residual: AuthorFeedbackResidual? = nil, manual: Bool = true) async {
-        guard let host = glab.resolvedHost, let username = glab.currentUsername,
+        guard manual || settings.automaticActionsAllowed,
+              let host = glab.resolvedHost, let username = glab.currentUsername,
               request.author.username == username, !noteIDs.isEmpty else { return }
+        let revision = glab.accountRevision
         let configuration = settings.automation
         let rule = configuration.authorFeedback
         let workflow = configuration.workflowRules[.newDiscussion]
@@ -1219,7 +1241,9 @@ final class TodoMonitorService {
                 settings: settings, glab: glab, manual: manual, verifiedFingerprint: fingerprint, expectedHeadSHA: request.sha,
                 verifiedResidual: residual ?? attention.authorFeedbackCoordinator?.reviewContext(for: request, fingerprint: fingerprint)) {
                     self.glab.resolvedHost == host && self.glab.currentUsername == username
+                        && self.glab.accountRevision == revision
                         && self.settings.automation == configuration
+                        && (manual || self.settings.automaticActionsAllowed)
                 }
         } catch {
             failedAttentionFeedback.insert(work)
@@ -1228,6 +1252,8 @@ final class TodoMonitorService {
     }
 
     private func acknowledgeHandledTodos(host: String, username: String) async {
+        guard settings.automaticActionsAllowed else { return }
+        let revision = glab.accountRevision
         var handled = Set(assistantHandoffs.flatMap(\.deliveredFeedbackTodos))
         handled.formUnion(settings.pendingTodoAcknowledgements.lazy
             .filter { $0.host == host && $0.username == username }.map(\.todo))
@@ -1235,7 +1261,9 @@ final class TodoMonitorService {
             if todo.targetType == .mergeRequest,
                !settings.routedMRTodoReceipts.contains(where: { $0.target.host == host && $0.target.username == username && $0.event == todo.feedbackIdentity }),
                !settings.pendingTodoAcknowledgements.contains(where: { $0.host == host && $0.username == username && $0.todo == todo.feedbackIdentity }) { continue }
-            guard glab.resolvedHost == host, glab.currentUsername == username, inboxHost == host else { return }
+            guard settings.automaticActionsAllowed, glab.resolvedHost == host,
+                  glab.currentUsername == username, glab.accountRevision == revision,
+                  inboxHost == host else { return }
             await markDone(todo)
         }
     }
@@ -1250,8 +1278,10 @@ final class TodoMonitorService {
     private func runAutomation(
         _ todo: Todo, event: TodoAutomationEvent, host: String, username: String, manual: Bool
     ) async {
+        let revision = glab.accountRevision
         @MainActor func isPending() -> Bool {
             glab.resolvedHost == host && glab.currentUsername == username && inboxHost == host
+                && glab.accountRevision == revision && (manual || settings.automaticActionsAllowed)
                 && !optimisticallyDone.contains(todo.id) && allTodos.contains { $0.id == todo.id }
         }
 

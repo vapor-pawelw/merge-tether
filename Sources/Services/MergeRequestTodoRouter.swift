@@ -40,15 +40,20 @@ final class MergeRequestTodoRouter {
 
     func process(_ todos: [Todo], host: String, username: String,
                  managed: Set<MRAutomationScope.Target>, automatically: Bool = true) async -> Set<Int> {
-        guard isCurrent(host, username) else { return [] }
+        let revision = glab.accountRevision
+        func isCurrentPass() -> Bool {
+            isCurrent(host, username) && glab.accountRevision == revision
+                && (!automatically || settings.automaticActionsAllowed)
+        }
+        guard isCurrentPass() else { return [] }
         // A manual Add/handle pass must wait for the current refresh, not be
         // discarded. The wait yields the actor and exits promptly on cancellation.
         while processing {
             do { try await Task.sleep(for: .milliseconds(10)) }
             catch { return [] }
-            guard isCurrent(host, username) else { return [] }
+            guard isCurrentPass() else { return [] }
         }
-        guard !Task.isCancelled, isCurrent(host, username) else { return [] }
+        guard !Task.isCancelled, isCurrentPass() else { return [] }
         processing = true
         defer { processing = false }
         acknowledgementError = nil
@@ -56,10 +61,10 @@ final class MergeRequestTodoRouter {
         let user: GitLabAuthenticatedUser
         do { user = try await glab.fetchAuthenticatedUser(host: host, expectedUsername: username) }
         catch { return [] }
-        guard isCurrent(host, username) else { return [] }
+        guard isCurrentPass() else { return [] }
         var requests: [MRAutomationScope.Target: GitLabMergeRequest] = [:]
         for todo in todos {
-            guard !Task.isCancelled, isCurrent(host, username), todo.targetType == .mergeRequest, let iid = todo.target.iid,
+            guard !Task.isCancelled, isCurrentPass(), todo.targetType == .mergeRequest, let iid = todo.target.iid,
                   todo.targetURL.gitLabTodoMergeRequestURL(host: host, iid: iid) != nil else { continue }
             let target = MRAutomationScope.Target(host: host, username: username, projectID: todo.project.id, iid: iid)
             let priorReceipt = settings.routedMRTodoReceipts.first { $0.target == target && $0.event == todo.feedbackIdentity }
@@ -76,7 +81,7 @@ final class MergeRequestTodoRouter {
                     requests[target] = request
                 }
             } catch { continue }
-            guard isCurrent(host, username), let head = request.sha, !head.isEmpty,
+            guard isCurrentPass(), let head = request.sha, !head.isEmpty,
                   request.projectID == target.projectID, request.iid == iid,
                   request.webURL.isGitLabMergeRequest(host: host, iid: iid) else { continue }
             let classification: (MRTodoIntent.Kind, Set<Int>)
@@ -84,7 +89,8 @@ final class MergeRequestTodoRouter {
                 guard let result = try await classify(todo, request: request, user: user, host: host) else { continue }
                 classification = result
             } catch { continue }
-            guard isCurrent(host, username) else { continue }
+            guard isCurrentPass() else { continue }
+            guard settings.automaticActionsAllowed else { return acknowledged }
             let kind = classification.0
             let explicitlyPaused = settings.automation.scope[target] == .paused
                 || (settings.automation.scope[target] == .inherit && settings.automation.scope[target.repository] == .paused)
@@ -95,7 +101,7 @@ final class MergeRequestTodoRouter {
             var autoAdopt = false
             if shouldAdoptAutomatically(kind, request: request, target: target) {
                 autoAdopt = await canAutomate()
-                guard isCurrent(host, username) else { return acknowledged }
+                guard isCurrentPass() else { return acknowledged }
                 autoAdopt = autoAdopt && shouldAdoptAutomatically(kind, request: request, target: target)
             }
             // A content-verified notice records receipt only. It never grants
@@ -107,6 +113,7 @@ final class MergeRequestTodoRouter {
                 settings.automation.scope[target] = .active
                 settings.automation.scope.rememberRepository(request.webURL.gitLabProjectPath, for: target)
                 settings.save()
+                guard settings.automaticActionsAllowed, isCurrentPass() else { return acknowledged }
             }
             let attempt = TodoAutomationReceipt(host: host, username: username, todoID: todo.id)
             let previousAttempt = settings.automationReceipts.contains(attempt) || settings.automationAttemptReceipts.contains(attempt)
@@ -118,6 +125,7 @@ final class MergeRequestTodoRouter {
                 }
             let intentID = persist(todo, kind: kind, notes: classification.1, request: request, target: target,
                                    head: head, previousAttempt: previousAttempt)
+            guard settings.automaticActionsAllowed, isCurrentPass() else { return acknowledged }
             // The action is durable before any remote acknowledgement or worker dispatch.
             if automatically, let accepted = settings.mrActionIntents.first(where: { $0.id == intentID }) {
                 onAcceptedIntent?(accepted)
@@ -125,7 +133,7 @@ final class MergeRequestTodoRouter {
             if await acknowledge(todo, target: target, intentID: intentID) { acknowledged.insert(todo.id) }
         }
         await synchronize(host: host, username: username, cachedRequests: requests)
-        guard !Task.isCancelled, isCurrent(host, username) else { return acknowledged }
+        guard !Task.isCancelled, isCurrentPass() else { return acknowledged }
         for intent in settings.mrActionIntents where intent.target.host == host && intent.target.username == username
             && intent.state == .pending && intent.jobID == nil {
             if shouldRunAutomatically(intent.kind, request: intent.request, target: intent.target), await canAutomate() {
@@ -138,8 +146,13 @@ final class MergeRequestTodoRouter {
     func run(_ id: UUID, manual: Bool) async {
         guard launching.insert(id).inserted else { return }
         defer { launching.remove(id) }
+        guard manual || settings.automaticActionsAllowed else { return }
         guard !Task.isCancelled, let original = settings.mrActionIntents.first(where: { $0.id == id }), original.state != .completed,
               let iid = original.target.iid, isCurrent(original.target.host, original.target.username) else { return }
+        let revision = glab.accountRevision
+        func isCurrentRun() -> Bool {
+            isCurrent(original.target.host, original.target.username) && glab.accountRevision == revision
+        }
         let origin: MRAutomationEvent.Origin = manual ? .manual : .automatic
         if manual {
             settings.recordAutomationEvent(target: original.target, action: .retry, origin: .manual, state: .requested,
@@ -203,7 +216,7 @@ final class MergeRequestTodoRouter {
         do {
             let request = try await glab.fetchMergeRequest(projectID: original.target.projectID, iid: iid, host: original.target.host)
             guard invocationConfiguration.preservingScope(from: settings.automation) == settings.automation,
-                  isCurrent(original.target.host, original.target.username), request.state == "opened",
+                  isCurrentRun(), request.state == "opened",
                   request.projectID == original.target.projectID, request.iid == iid,
                   request.webURL.isGitLabMergeRequest(host: original.target.host, iid: iid),
                   let head = request.sha, !settings.ignoredMergeRequests.contains(original.target),
@@ -219,7 +232,7 @@ final class MergeRequestTodoRouter {
                 let originalJob = original.jobID.flatMap { id in settings.assistantHandoffs.first { $0.id == id } }
                 let refreshed = try await glab.refreshStaleFailedPipeline(for: request, host: original.target.host,
                     expectedUser: user, settings: settings, shouldProceed: {
-                        self.isCurrent(original.target.host, original.target.username)
+                        isCurrentRun()
                             && !self.settings.ignoredMergeRequests.contains(original.target)
                             && invocationConfiguration.preservingScope(from: self.settings.automation) == self.settings.automation
                             && self.matchesCompletionSnapshot(original, job: originalJob)
@@ -229,16 +242,17 @@ final class MergeRequestTodoRouter {
                     update(id, origin: origin) { $0.request = request; $0.state = .completed; $0.error = nil }
                     return
                 }
-                guard isCurrent(original.target.host, original.target.username),
+                guard isCurrentRun(),
                       invocationConfiguration.preservingScope(from: settings.automation) == settings.automation else { return }
             }
+            guard settings.automaticActionsAllowed, isCurrentRun() else { return }
             var current = original
             current.request = request
             current.headSHA = head
             let jobID: UUID
             if let launcher { jobID = try await launcher(current, manual) }
             else { jobID = try await launch(current, manual: manual) }
-            guard isCurrent(original.target.host, original.target.username),
+            guard isCurrentRun(),
                   !settings.ignoredMergeRequests.contains(original.target),
                   invocationConfiguration.preservingScope(from: settings.automation) == settings.automation,
                   manual || shouldRunAutomatically(original.kind, request: request, target: original.target) else {
@@ -392,11 +406,15 @@ final class MergeRequestTodoRouter {
     }
 
     private func acknowledge(_ todo: Todo, target: MRAutomationScope.Target, intentID: UUID?) async -> Bool {
-        guard isCurrent(target.host, target.username) else { return false }
+        guard settings.automaticActionsAllowed, isCurrent(target.host, target.username) else { return false }
+        let revision = glab.accountRevision
         // Persist acceptance before the remote write. A failed acknowledgement
         // retries only this receipt, even if the worker finishes in the meantime.
         settings.routedMRTodoReceipts.insert(.init(target: target, event: todo.feedbackIdentity, intentID: intentID))
         settings.save()
+        // Durable acceptance is required for both automatic routing and manual Add/handle.
+        guard settings.automaticActionsAllowed, isCurrent(target.host, target.username),
+              glab.accountRevision == revision else { return false }
         switch await glab.markAsDone(id: todo.id, host: target.host) {
         case .success:
             settings.routedMRTodoReceipts.insert(.init(target: target, event: todo.feedbackIdentity, intentID: intentID))
@@ -415,7 +433,8 @@ final class MergeRequestTodoRouter {
     /// Tracking follows ordinary scope; execution separately applies the current Draft policy.
     private func shouldAdoptAutomatically(_ kind: MRTodoIntent.Kind, request: GitLabMergeRequest,
                                           target: MRAutomationScope.Target) -> Bool {
-        guard settings.automation.packageDecision != .disabled, !settings.ignoredMergeRequests.contains(target),
+        guard settings.automaticActionsAllowed, settings.automation.packageDecision != .disabled,
+              !settings.ignoredMergeRequests.contains(target),
               settings.automation.scope.resolve(target).active, request.state == "opened" else { return false }
         let project = request.webURL.gitLabProjectPath
         switch kind {
