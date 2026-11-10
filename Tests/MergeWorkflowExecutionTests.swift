@@ -251,8 +251,9 @@ import Testing
         #expect(!automation.isAutomaticallyProcessingPipeline(request, entries: prepared))
 
         // when + then
-        let reservation = try #require(detector.registerRun(for: .init(host: stored.host,
-            projectID: 7, mergeRequestIID: 48197, pipelineID: 101)))
+        let registered = try detector.registerRun(for: .init(host: stored.host,
+            projectID: 7, mergeRequestIID: 48197, pipelineID: 101))
+        let reservation = try #require(registered)
         #expect(automation.isAutomaticallyProcessingPipeline(request, entries: prepared))
         #expect(automation.isAutomaticallyProcessingPipeline(request))
         try detector.finishHandoff(for: reservation)
