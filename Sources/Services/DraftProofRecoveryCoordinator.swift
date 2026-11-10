@@ -324,7 +324,7 @@ final class DraftProofRecoveryCoordinator {
     }
 
     private func scheduleRepair(_ input: Request, assessment: DraftProofRecoveryVerifier.Assessment) {
-        guard settings.automaticActionsAllowed, repairTasks[input.snapshot.work] == nil, onNeedsRepair != nil,
+        guard settings.automaticWritesAllowed, repairTasks[input.snapshot.work] == nil, onNeedsRepair != nil,
               DraftReplyRepair.preparationAllowed(input.snapshot.request, configuration: input.configuration) else { return }
         let work = input.snapshot.work
         let policy = input.configuration.assistant.rawValue + "|" + input.configuration.codexReviewModel.rawValue
@@ -484,8 +484,8 @@ final class DraftProofRecoveryCoordinator {
     }
 
     private func permitted(_ snapshot: Snapshot, configuration: AutomationSettings) -> Bool {
-        settings.automaticActionsAllowed && accountIsCurrent(snapshot) && configuration.preservingScope(from: settings.automation) == settings.automation
-            && settings.automation.packageDecision != .disabled
+        settings.automaticWritesAllowed && accountIsCurrent(snapshot) && configuration.preservingScope(from: settings.automation) == settings.automation
+            && settings.automation.hasAutomaticActionConsent
             && settings.automation.allowFollowUpPush
             && (settings.automation.publicationMode != .manual
                 || DraftReplyRepair.preparationAllowed(snapshot.request, configuration: settings.automation))

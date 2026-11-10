@@ -461,7 +461,7 @@ struct AutomationPackageTests {
         #expect(MergeWorkflowTrigger.allCases.allSatisfy { settings.workflowRules[$0].mode == .off })
     }
 
-    @Test func legacyCodexConfigurationEnablesNewDefaultsOnceWithoutChangingExplicitWorkflowModes() throws {
+    @Test func legacyCodexFlagsCannotGrantConsentOrEnableNewDefaults() throws {
         let legacy = Data("""
             {"codexRelayEnabled":true,"autoReReviewEnabled":false,
              "workflowRules":{"rules":{"pipelineFailure":{"mode":"off","projects":"","targetBranches":"",
@@ -469,9 +469,10 @@ struct AutomationPackageTests {
             """.utf8)
         let decoder = JSONDecoder()
         var migrated = try decoder.decode(AutomationSettings.self, from: legacy)
-        #expect(!migrated.autoReReviewEnabled && migrated.conflictTasksEnabled)
-        #expect(migrated.reviewRequested.isEnabled && migrated.authorFeedback.isEnabled)
-        #expect(migrated.workflowRules[.newDiscussion].mode == .assistant)
+        #expect(!migrated.autoReReviewEnabled && !migrated.conflictTasksEnabled)
+        #expect(migrated.packageDecision == .undecided && !migrated.hasEnabledAutomation)
+        #expect(!migrated.reviewRequested.isEnabled && !migrated.authorFeedback.isEnabled)
+        #expect(migrated.workflowRules[.newDiscussion].mode == .off)
         #expect(migrated.workflowRules[.pipelineFailure].mode == .off)
         #expect(!migrated.autoMergeEnabled && !migrated.allowConflictPush)
         migrated.autoReReviewEnabled = false
@@ -483,6 +484,7 @@ struct AutomationPackageTests {
 
     @Test func enabledProjectPermissionsUseOptionalExactAllowlists() {
         var settings = AutomationSettings()
+        settings.packageDecision = .enabled
         settings.allowAssistantTools = true
         settings.allowConflictPush = true
         settings.conflictTasksEnabled = true
@@ -714,6 +716,7 @@ struct AutomationPackageTests {
         let defaults = try #require(UserDefaults(suiteName: suite))
         defer { defaults.removePersistentDomain(forName: suite) }
         let settings = SettingsManager(defaults: defaults)
+        settings.automation.packageDecision = .enabled
         settings.automation.assistant = assistant
         let work = AssistantAutomationRunner.MergeRequestWork(host: "gitlab.example.test", projectID: 7, iid: 11)
         let url = try #require(URL(string: "https://gitlab.example.test/team/repo/-/merge_requests/11"))
@@ -746,6 +749,7 @@ struct AutomationPackageTests {
         let defaults = try #require(UserDefaults(suiteName: suite))
         defer { defaults.removePersistentDomain(forName: suite) }
         let settings = SettingsManager(defaults: defaults)
+        settings.automation.packageDecision = .enabled
         settings.automation.assistant = .claude
         let work = AssistantAutomationRunner.MergeRequestWork(host: "gitlab.example.test", projectID: 7, iid: 11)
         let url = try #require(URL(string: "https://gitlab.example.test/team/repo/-/merge_requests/11"))
@@ -799,6 +803,7 @@ struct AutomationPackageTests {
         let defaults = try #require(UserDefaults(suiteName: suite))
         defer { defaults.removePersistentDomain(forName: suite) }
         let settings = SettingsManager(defaults: defaults)
+        settings.automation.packageDecision = .enabled
         let work = AssistantAutomationRunner.MergeRequestWork(host: "gitlab.example.org", projectID: 1, iid: 2)
         let url = try #require(URL(string: "https://gitlab.example.org/group/repo/-/merge_requests/2"))
         for publishAll in [false, true] {

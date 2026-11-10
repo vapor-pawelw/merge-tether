@@ -171,9 +171,7 @@ final class AuthorFeedbackCoordinator {
             || (workflow.mode == .assistant && workflow.includes(request))
         guard request.author.id == user.id, request.state == "opened", request.draft != nil,
               configuration.autoResolveAcceptedFeedback || configuration.autoMergeEnabled || followsFeedback,
-              settings.automation.packageDecision != .disabled,
-              settings.automation.packageDecision == .enabled || settings.automation.usesAssistant
-                || settings.automation.autoReReviewEnabled || settings.automation.autoMergeEnabled,
+              settings.automation.hasAutomaticActionConsent,
               settings.automation.scope.permits(request, host: host, username: user.username),
               let fingerprint = ReviewVerdict.fingerprint(discussions), let head = request.sha else { return }
         let hasFeedback = discussions.contains { $0.notes.contains { $0.system == false && $0.author?.id != user.id } }
@@ -300,7 +298,7 @@ final class AuthorFeedbackCoordinator {
             && settings.feedbackSuggestionDecisions.revision(for: input.target) == input.decisionRevision
             && settings.automation == input.configuration
             && completedFollowUpJob(for: input.request, target: input.target)?.id == input.completedFollowUpJobID
-            && settings.automation.packageDecision != .disabled
+            && settings.automation.hasAutomaticActionConsent
             && !settings.ignoredMergeRequests.contains(input.target)
             && settings.automation.scope.permits(input.request, host: input.target.host, username: input.user.username)
     }
@@ -456,7 +454,7 @@ final class AuthorFeedbackCoordinator {
                 .union(assessment.reviewRequests.map(\.sourceNoteID))
             let followUp = settings.automation.scope.permits(request, host: host, username: input.user.username)
                 ? actionable.union(owedNotes).subtracting(draftedNotes) : []
-            if settings.automaticActionsAllowed, !followUp.isEmpty { await onNeedsWork?(request, followUp, input.fingerprint,
+            if settings.automaticWritesAllowed, !followUp.isEmpty { await onNeedsWork?(request, followUp, input.fingerprint,
                 residual(input, assessment: assessment, notes: followUp)) }
             guard isCurrent(input) else { throw CancellationError() }
             var completed = AuthorFeedbackStatus(head: request.sha ?? "", fingerprint: input.fingerprint,
@@ -484,10 +482,10 @@ final class AuthorFeedbackCoordinator {
         let informationalThreads = Set(AuthorFeedbackPolicy.informationalAcknowledgements(discussions: threads,
             assessment: assessment, authorID: input.user.id, ignoredSuggestions: input.ignoredSuggestions).filter(\.canResolve).compactMap(\.discussionID))
         for finding in initial where finding.canResolve && !informationalThreads.contains(finding.discussionID ?? "") {
-            guard settings.automaticActionsAllowed else { break }
+            guard settings.automaticWritesAllowed else { break }
             guard isCurrent(input) else { throw CancellationError() }
             guard await canAutomate(input.configuration.assistant) else { throw ReReviewVerifier.VerificationError.unavailable }
-            guard settings.automaticActionsAllowed else { break }
+            guard settings.automaticWritesAllowed else { break }
             guard isCurrent(input), let discussionID = finding.discussionID else { throw CancellationError() }
             async let currentMR = glab.fetchMergeRequest(projectID: request.projectID, iid: request.iid, host: host)
             async let currentThreads = glab.fetchMergeRequestDiscussions(projectID: request.projectID, iid: request.iid, host: host)
@@ -496,7 +494,7 @@ final class AuthorFeedbackCoordinator {
             async let approvals = glab.fetchMergeRequestApproverIDs(projectID: request.projectID, iid: request.iid, host: host)
             let (live, discussions, user, count, liveApproved) = try await (currentMR, currentThreads, currentUser, drafts, approvals)
             approved = liveApproved
-            guard settings.automaticActionsAllowed else { break }
+            guard settings.automaticWritesAllowed else { break }
             guard isCurrent(input), live.sha == request.sha, live.state == "opened",
                   live.semanticContextFingerprint == request.semanticContextFingerprint,
                   live.author.id == input.user.id, user == input.user, count == 0,
@@ -538,7 +536,7 @@ final class AuthorFeedbackCoordinator {
             notes.formUnion(repliesByThread[rootID] ?? [])
         }
         followUp.formUnion(owedNotes)
-        if settings.automaticActionsAllowed, !followUp.isEmpty, isCurrent(input) { await onNeedsWork?(request, followUp, input.fingerprint,
+        if settings.automaticWritesAllowed, !followUp.isEmpty, isCurrent(input) { await onNeedsWork?(request, followUp, input.fingerprint,
             residual(input, assessment: assessment, notes: followUp)) }
         guard isCurrent(input) else { throw CancellationError() }
         // Courtesy acknowledgement is optional and must never suppress independent correction work.
@@ -596,7 +594,7 @@ final class AuthorFeedbackCoordinator {
     }
 
     private func liveInformationalDiscussions(_ input: Input) async throws -> [GitLabMergeRequestDiscussion] {
-        guard settings.automaticActionsAllowed, isCurrent(input), !input.readOnly,
+        guard settings.automaticWritesAllowed, isCurrent(input), !input.readOnly,
               input.configuration.autoResolveAcceptedFeedback else { throw CancellationError() }
         let request = input.request
         let host = input.target.host
@@ -605,7 +603,7 @@ final class AuthorFeedbackCoordinator {
         async let currentUser = glab.fetchAuthenticatedUser(host: host, expectedUsername: input.user.username)
         async let currentDrafts = glab.fetchOwnDraftNoteCount(projectID: request.projectID, iid: request.iid, host: host, userID: input.user.id)
         let (live, discussions, user, count) = try await (currentMR, currentThreads, currentUser, currentDrafts)
-        guard settings.automaticActionsAllowed, isCurrent(input), live.sha == request.sha, live.state == "opened",
+        guard settings.automaticWritesAllowed, isCurrent(input), live.sha == request.sha, live.state == "opened",
               live.semanticContextFingerprint == request.semanticContextFingerprint,
               live.author.id == input.user.id, user == input.user, count == 0, live.webURL == request.webURL,
               settings.automation.scope.permits(live, host: host, username: user.username),
@@ -616,7 +614,7 @@ final class AuthorFeedbackCoordinator {
     private func acknowledgeInformational(_ input: Input, assessment: ReReviewAssessment,
                                           discussions: [GitLabMergeRequestDiscussion]) async throws
         -> (threads: [GitLabMergeRequestDiscussion], changed: Bool) {
-        guard settings.automaticActionsAllowed, input.configuration.autoResolveAcceptedFeedback else { return (discussions, false) }
+        guard settings.automaticWritesAllowed, input.configuration.autoResolveAcceptedFeedback else { return (discussions, false) }
         let candidates = AuthorFeedbackPolicy.informationalAcknowledgements(discussions: discussions,
             assessment: assessment, authorID: input.user.id, ignoredSuggestions: input.ignoredSuggestions)
         if acknowledgementAttempts[input.target]?.userID != input.user.id {

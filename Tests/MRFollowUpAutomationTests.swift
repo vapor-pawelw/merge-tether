@@ -7,6 +7,7 @@ struct MRFollowUpAutomationTests {
         let request = try MRDependencyPresentationTests().request(2, project: 1)
         let target = MRAutomationScope.Target(host: "gitlab.example.test", username: "author7", projectID: 1, iid: 2)
         var configuration = AutomationSettings()
+        configuration.packageDecision = .enabled
         configuration.authorFeedback.projects = "another/project"
         configuration.authorFeedback.promptTemplate = ""
         configuration.workflowRules[.newDiscussion].mode = .assistant
@@ -17,7 +18,8 @@ struct MRFollowUpAutomationTests {
     @Test func anEnabledScopeDoesNotEnableTheFollowUpRule() throws {
         let request = try MRDependencyPresentationTests().request(2, project: 1)
         let target = MRAutomationScope.Target(host: "gitlab.example.test", username: "author7", projectID: 1, iid: 2)
-        let configuration = AutomationSettings()
+        var configuration = AutomationSettings()
+        configuration.packageDecision = .enabled
         #expect(configuration.scope.permits(request, host: target.host, username: target.username))
         #expect(configuration.followUpAutomationHold(for: request, target: target) == .ruleDisabled)
     }
@@ -27,6 +29,7 @@ struct MRFollowUpAutomationTests {
         let request = try MRDependencyPresentationTests().request(2, project: 1)
         let target = MRAutomationScope.Target(host: "gitlab.example.test", username: "author7", projectID: 1, iid: 2)
         var configuration = AutomationSettings()
+        configuration.packageDecision = .enabled
         configuration.workflowRules[.newDiscussion].mode = .assistant
         // when + then
         #expect(configuration.followUpAutomationHold(for: request, target: target) == nil)
@@ -41,6 +44,7 @@ struct MRFollowUpAutomationTests {
         let request = try MRDependencyPresentationTests().request(2, project: 1, draft: true)
         let target = MRAutomationScope.Target(host: "gitlab.example.test", username: "author7", projectID: 1, iid: 2)
         var configuration = AutomationSettings()
+        configuration.packageDecision = .enabled
         configuration.authorFeedback.isEnabled = true
         // when + then
         #expect(configuration.followUpAutomationHold(for: request, target: target) == .draftPaused)
@@ -56,6 +60,7 @@ struct MRFollowUpAutomationTests {
         let request = try MRDependencyPresentationTests().request(2, project: 1)
         let target = MRAutomationScope.Target(host: "gitlab.example.test", username: "author7", projectID: 1, iid: 2)
         var configuration = AutomationSettings()
+        configuration.packageDecision = .enabled
         configuration.allowFollowUpPush = true
         // when + then
         #expect(configuration.followUpAutomationHold(for: request, target: target) == .ruleDisabled)

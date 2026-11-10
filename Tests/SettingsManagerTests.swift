@@ -68,6 +68,24 @@ struct SettingsManagerTests {
         #expect(settings.persistenceDegraded == ["automation"])
     }
 
+    @Test(arguments: [AutomationPackageDecision.undecided, .disabled])
+    func manualSubmissionJournalRemainsAvailableWithoutAutomaticConsent(_ decision: AutomationPackageDecision) throws {
+        // given
+        let suite = "ManualSubmissionConsent.\(UUID())"
+        let defaults = try #require(UserDefaults(suiteName: suite))
+        defer { defaults.removePersistentDomain(forName: suite) }
+        let settings = SettingsManager(defaults: defaults)
+        settings.automation.packageDecision = decision
+        let receipt = try mergeReceipt(settings)
+
+        // when
+        let saved = settings.saveMergeSubmission(receipt)
+
+        // then
+        #expect(saved && settings.automaticActionsAllowed && !settings.automaticWritesAllowed)
+        #expect(SettingsManager(defaults: defaults).mergeSubmissions == [receipt])
+    }
+
     @Test(arguments: ["encode", "write", "synchronize"])
     func failedMergeReceiptPersistenceCannotAuthorizeASubmissionOrClearOnRestart(_ failure: String) throws {
         // given

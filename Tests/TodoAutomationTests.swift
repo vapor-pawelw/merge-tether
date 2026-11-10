@@ -91,6 +91,7 @@ struct TodoAutomationTests {
         let directory = FileManager.default.temporaryDirectory.appending(path: UUID().uuidString)
         defer { try? FileManager.default.removeItem(at: directory) }
         let settings = SettingsManager(defaults: defaults)
+        settings.automation.packageDecision = .enabled
         let coordinator = AssistantJobCoordinator(execute: { _, _ in
             .init(result: .init(status: .blocked, summary: "Fixture has no remote write permission"), output: "")
         })
@@ -163,6 +164,7 @@ struct TodoAutomationTests {
         let defaults = try #require(UserDefaults(suiteName: name))
         defer { defaults.removePersistentDomain(forName: name) }
         let settings = SettingsManager(defaults: defaults)
+        settings.automation.packageDecision = .enabled
         settings.automation.reviewRequested.isEnabled = true
         settings.automation.reviewRequested.markDoneOnSuccess = !manual
         let coordinator = AssistantJobCoordinator(execute: { _, _ in
@@ -204,6 +206,7 @@ struct TodoAutomationTests {
         let defaults = try #require(UserDefaults(suiteName: name))
         defer { defaults.removePersistentDomain(forName: name) }
         let settings = SettingsManager(defaults: defaults)
+        settings.automation.packageDecision = .enabled
         settings.automation.reviewRequested.isEnabled = true
         settings.automation.reviewRequested.runner = .shell
         settings.automation.reviewRequested.projects = "bank/cards-api"
@@ -228,6 +231,7 @@ struct TodoAutomationTests {
         defer { try? FileManager.default.removeItem(at: folder) }
         let marker = folder.appending(path: "started")
         let settings = SettingsManager(defaults: defaults)
+        settings.automation.packageDecision = .enabled
         settings.automation.reviewRequested.isEnabled = true
         settings.automation.reviewRequested.runner = .shell
         settings.automation.reviewRequested.projects = "bank/cards-api"
@@ -279,6 +283,7 @@ struct TodoAutomationTests {
         try FileManager.default.createDirectory(at: folder, withIntermediateDirectories: false)
         defer { try? FileManager.default.removeItem(at: folder) }
         let settings = SettingsManager(defaults: defaults)
+        settings.automation.packageDecision = .enabled
         settings.glabPath = URL(fileURLWithPath: "/usr/bin/false")
         settings.resolvedHost = "gitlab.example.org"
         settings.automation.authorFeedback.isEnabled = true
@@ -342,6 +347,7 @@ struct TodoAutomationTests {
         let defaults = try #require(UserDefaults(suiteName: name))
         defer { defaults.removePersistentDomain(forName: name) }
         let settings = SettingsManager(defaults: defaults)
+        settings.automation.packageDecision = .enabled
         let glab = GlabService()
         let automation = TodoAutomationService(canAutomate: { _ in true })
 
@@ -518,6 +524,7 @@ struct TodoAutomationTests {
         let defaults = try #require(UserDefaults(suiteName: name))
         defer { defaults.removePersistentDomain(forName: name) }
         let settings = SettingsManager(defaults: defaults)
+        settings.automation.packageDecision = .enabled
         let glab = GlabService()
         glab.glabPath = executable
         let service = TodoAutomationService(canAutomate: { _ in true })

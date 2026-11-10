@@ -52,7 +52,7 @@ enum DraftReplyRepair {
         let feedback = configuration.authorFeedback
         let workflow = configuration.workflowRules[.newDiscussion]
         return configuration.scope.permits(request, host: authority, username: request.author.username)
-            && configuration.packageDecision != .disabled && configuration.allowFollowUpPush
+            && configuration.hasAutomaticActionConsent && configuration.allowFollowUpPush
             && feedback.runner == .assistant && feedback.isConfigured
             && feedback.includes(project: request.webURL.gitLabProjectPath)
             && (feedback.isEnabled || (workflow.mode == .assistant && workflow.includes(request)))

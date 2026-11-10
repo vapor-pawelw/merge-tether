@@ -211,7 +211,7 @@ struct MRBoardProjector {
 
     func attentionIntentIsAutomatic(_ intent: MRTodoIntent, ready: Bool) -> Bool {
         let configuration = input.automation
-        guard configuration.packageDecision != .disabled, configuration.scope.resolve(intent.target).active,
+        guard configuration.hasAutomaticActionConsent, configuration.scope.resolve(intent.target).active,
               !input.ignoredTargets.contains(intent.target), intent.request.state == "opened",
               intent.isDeferredReview || (ready && configuration.scope.permits(intent.request,
                   host: intent.target.host, username: intent.target.username)) else { return false }
@@ -275,7 +275,7 @@ struct MRBoardProjector {
     static func isRecheckingAttention(for row: MergeRequestBoardSnapshot.Row, input: RowInput) -> Bool {
         BoardAttentionPresenter.isRecheckingAttention(row: rowState(row, input: input), refresh: .init(
             catalogLoading: input.catalogLoading,
-            providerChecking: input.assistantChecking && input.automation.packageDecision != .disabled,
+            providerChecking: input.assistantChecking && input.automation.hasAutomaticActionConsent,
             reviewingVerifying: !row.item.isAuthored && reviewingContext(for: row, input: input).nextStep == .verifying))
     }
     func reviewingContext(for row: MergeRequestBoardSnapshot.Row) -> ReviewingContext {

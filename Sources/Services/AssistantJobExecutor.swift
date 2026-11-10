@@ -41,7 +41,7 @@ enum AssistantJobExecutor {
         try validateReviewOwnership(isReview: handoff.workflow == .review || handoff.reviewModel != nil,
             authorID: request.author.id, userID: user.id)
         if handoff.followUpPushAllowed == true {
-            guard settings.automation.allowFollowUpPush, request.author.id == user.id else { throw ExecutionError.disabledPermission }
+            guard settings.automation.hasAutomaticActionConsent, settings.automation.allowFollowUpPush, request.author.id == user.id else { throw ExecutionError.disabledPermission }
         }
         if let repair = handoff.draftRepair {
             guard handoff.workflow == .followUp, handoff.followUpPushAllowed == true,
@@ -64,7 +64,7 @@ enum AssistantJobExecutor {
         let project = request.webURL.gitLabProjectPath
         guard settings.automation.assistant == handoff.key.assistant,
               handoff.manual == true || settings.automation.scope.permits(request, host: handoff.key.work.host, username: handoff.key.username),
-              handoff.resolvesOwnThreads != true || settings.automation.autoResolveOwnReviewThreads,
+              handoff.resolvesOwnThreads != true || (settings.automation.hasAutomaticActionConsent && settings.automation.autoResolveOwnReviewThreads),
               !handoff.allowsPush || settings.automation.permitsConflictPush(project: project),
               handoff.key.access != .configuredTools || settings.automation.permitsAssistantTools(project: project)
         else { throw ExecutionError.disabledPermission }
@@ -159,7 +159,10 @@ enum AssistantJobExecutor {
                                                   usage: .init(role: .codingAgent, assistant: handoff.key.assistant,
                                                     model: (handoff.codingModel ?? handoff.reviewModel)?.rawValue,
                                                     mergeRequest: usageMergeRequest),
-                                                  beforeLaunch: { @MainActor in try validatePersistence(settings) })
+                                                  beforeLaunch: { @MainActor in
+                                                      try validatePersistence(settings)
+                                                      try validateConfiguration(handoff, automation: settings.automation)
+                                                  })
             capturedOutput = output
             guard output.exitCode == 0 else { throw CLIProcessError(exitCode: output.exitCode, diagnostic: output.stderr) }
             try AssistantJobResult.validateCodexEvents(output.stdout)
@@ -173,7 +176,10 @@ enum AssistantJobExecutor {
                                                   usage: .init(role: .codingAgent, assistant: handoff.key.assistant,
                                                     model: (handoff.codingModel ?? handoff.reviewModel)?.rawValue,
                                                     mergeRequest: usageMergeRequest),
-                                                  beforeLaunch: { @MainActor in try validatePersistence(settings) })
+                                                  beforeLaunch: { @MainActor in
+                                                      try validatePersistence(settings)
+                                                      try validateConfiguration(handoff, automation: settings.automation)
+                                                  })
             capturedOutput = output
             guard output.exitCode == 0 else { throw CLIProcessError(exitCode: output.exitCode, diagnostic: output.stderr) }
             result = try AssistantJobResult.claude(output.stdout)
@@ -227,7 +233,12 @@ enum AssistantJobExecutor {
 
     static func validateConfiguration(_ handoff: AssistantAutomationRunner.Handoff, automation: AutomationSettings) throws {
         guard !handoff.isObsoleteReminder else { throw ExecutionError.disabledPermission }
-        guard handoff.manual == true || handoff.configurationSnapshot?.preservingScope(from: automation) == automation else {
+        let project = handoff.mergeRequestURL?.gitLabProjectPath ?? ""
+        guard handoff.followUpPushAllowed != true || (automation.hasAutomaticActionConsent && automation.allowFollowUpPush),
+              handoff.resolvesOwnThreads != true || (automation.hasAutomaticActionConsent && automation.autoResolveOwnReviewThreads),
+              !handoff.allowsPush || automation.permitsConflictPush(project: project) else { throw ExecutionError.disabledPermission }
+        guard handoff.manual == true || (automation.hasAutomaticActionConsent
+            && handoff.configurationSnapshot?.preservingScope(from: automation) == automation) else {
             throw ExecutionError.disabledPermission
         }
     }

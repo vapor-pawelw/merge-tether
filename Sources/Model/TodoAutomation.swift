@@ -188,7 +188,8 @@ struct AutomationSettings: Codable, Equatable, Sendable {
     /// Whether any of these drafts could be published without the user's confirmation.
     /// The AI-feedback rule only ever covers replies in existing threads.
     func publishesAutomatically(any drafts: [GitLabDraftNote]) -> Bool {
-        switch publicationMode {
+        guard hasAutomaticActionConsent else { return false }
+        return switch publicationMode {
         case .all: true
         case .filtered:
             publicationRestrictions.hasConditions
@@ -217,6 +218,7 @@ struct AutomationSettings: Codable, Equatable, Sendable {
     var allowAssistantTools = false
     var assistantToolProjects = ""
     var packageDecision: AutomationPackageDecision = .undecided
+    var hasAutomaticActionConsent: Bool { packageDecision == .enabled }
     var workflowRules = MergeWorkflowRules()
     var scope = MRAutomationScope()
     private var assistantDefaultsVersion = 1
@@ -322,8 +324,7 @@ struct AutomationSettings: Codable, Equatable, Sendable {
             authorFeedback = storedFeedback
         }
         let storedDefaults = try values.decodeIfPresent(Int.self, forKey: .assistantDefaultsVersion) ?? 0
-        if storedDefaults == 0, packageDecision != .disabled,
-           packageDecision == .enabled || codexRelayEnabled || usesAssistant {
+        if storedDefaults == 0, hasAutomaticActionConsent {
             let previousReReview = autoReReviewEnabled
             let previousConflicts = conflictTasksEnabled
             let previousReview = reviewRequested
@@ -464,10 +465,10 @@ struct AutomationSettings: Codable, Equatable, Sendable {
             || workflowRules.enabled.contains { workflowRules[$0].mode == .assistant }
     }
 
-    var canClassifyIncomingNotices: Bool { packageDecision != .disabled && usesAssistant }
+    var canClassifyIncomingNotices: Bool { hasAutomaticActionConsent && usesAssistant }
 
     var hasEnabledAutomation: Bool {
-        packageDecision != .disabled && (usesAssistant || reviewRequested.isEnabled || authorFeedback.isEnabled || !workflowRules.enabled.isEmpty
+        hasAutomaticActionConsent && (usesAssistant || reviewRequested.isEnabled || authorFeedback.isEnabled || !workflowRules.enabled.isEmpty
             || autoMergeEnabled || autoReReviewEnabled || autoApproveEnabled || autoResolveAcceptedFeedback
             || publicationMode != .manual)
     }
@@ -479,7 +480,7 @@ struct AutomationSettings: Codable, Equatable, Sendable {
     }
 
     func permitsAutoMerge(project: String) -> Bool {
-        autoMergeEnabled && matchesOptionalProjectRestriction(project, paths: autoMergeProjects)
+        hasAutomaticActionConsent && autoMergeEnabled && matchesOptionalProjectRestriction(project, paths: autoMergeProjects)
     }
 
     func permitsAssistantTools(project: String) -> Bool {
@@ -487,7 +488,7 @@ struct AutomationSettings: Codable, Equatable, Sendable {
     }
 
     func permitsConflictPush(project: String) -> Bool {
-        conflictTasksEnabled && permitsAssistantTools(project: project) && allowConflictPush
+        hasAutomaticActionConsent && conflictTasksEnabled && permitsAssistantTools(project: project) && allowConflictPush
             && matchesOptionalProjectRestriction(project, paths: conflictPushProjects)
     }
 

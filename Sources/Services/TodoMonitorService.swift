@@ -115,7 +115,7 @@ final class TodoMonitorService {
 
     private func makeEnvironmentRecovery() -> AutomaticEnvironmentRecovery {
         let recovery = AutomaticEnvironmentRecovery(settings: settings, fetch: { [weak self] original in
-            guard let self, self.settings.automaticActionsAllowed, !Task.isCancelled,
+            guard let self, self.settings.automaticWritesAllowed, !Task.isCancelled,
                   self.glab.resolvedHost == original.key.work.host,
                   self.glab.currentUsername == original.key.username else { throw CancellationError() }
             let revision = self.glab.accountRevision
@@ -126,14 +126,14 @@ final class TodoMonitorService {
             async let discussions = self.glab.fetchMergeRequestDiscussions(projectID: original.key.work.projectID,
                 iid: original.key.work.iid, host: original.key.work.host)
             let snapshot = try await AutomaticEnvironmentRecovery.Snapshot(request: request, user: user, discussions: discussions)
-            guard self.settings.automaticActionsAllowed, self.settings.automation == configuration,
+            guard self.settings.automaticWritesAllowed, self.settings.automation == configuration,
                   !Task.isCancelled, self.glab.resolvedHost == original.key.work.host,
                   self.glab.currentUsername == original.key.username, self.glab.accountRevision == revision else {
                 throw CancellationError()
             }
             return snapshot
         }, launch: { [weak self] original, snapshot, prompt in
-            guard let self, self.settings.automaticActionsAllowed, !Task.isCancelled,
+            guard let self, self.settings.automaticWritesAllowed, !Task.isCancelled,
                   self.glab.resolvedHost == original.key.work.host,
                   self.glab.currentUsername == original.key.username else { throw CancellationError() }
             return try await AssistantAutomationRunner.launch(original.key.assistant, title: original.title,
@@ -573,7 +573,7 @@ final class TodoMonitorService {
     }
 
     private func routeMRTodos(host: String, username: String, automatically: Bool = true) async {
-        guard !automatically || settings.automaticActionsAllowed else { return }
+        guard !automatically || settings.automaticWritesAllowed else { return }
         let revision = glab.accountRevision
         let managed = Set(reviewedMergeRequestItems.compactMap {
             scopeTarget(projectID: $0.id.projectID, iid: $0.id.iid, url: $0.url)
@@ -584,7 +584,7 @@ final class TodoMonitorService {
         // Apply confirmed GitLab acknowledgements even if a later step degraded persistence.
         todoStore.acknowledge(acknowledged)
         if let error = mrTodoRouter.acknowledgementError { assistantJobActionError = error.localizedDescription }
-        if automatically, settings.automaticActionsAllowed {
+        if automatically, settings.automaticWritesAllowed {
             await environmentRecovery.recover(host: host, username: username)
         }
     }
@@ -1063,7 +1063,7 @@ final class TodoMonitorService {
     }
 
     private func scheduleAutomation(host: String, username: String) {
-        guard settings.automaticActionsAllowed, !isAutomating,
+        guard settings.automaticWritesAllowed, !isAutomating,
               settings.onboardingCompleted,
               settings.automation.reviewRequested.isEnabled || settings.automation.authorFeedback.isEnabled
         else { return }
@@ -1107,7 +1107,7 @@ final class TodoMonitorService {
     }
 
     private func acknowledgeHandledTodos(host: String, username: String) async {
-        guard settings.automaticActionsAllowed else { return }
+        guard settings.automaticWritesAllowed else { return }
         let revision = glab.accountRevision
         var handled = Set(assistantHandoffs.flatMap(\.deliveredFeedbackTodos))
         handled.formUnion(settings.pendingTodoAcknowledgements.lazy
@@ -1116,10 +1116,10 @@ final class TodoMonitorService {
             if todo.targetType == .mergeRequest,
                !settings.routedMRTodoReceipts.contains(where: { $0.target.host == host && $0.target.username == username && $0.event == todo.feedbackIdentity }),
                !settings.pendingTodoAcknowledgements.contains(where: { $0.host == host && $0.username == username && $0.todo == todo.feedbackIdentity }) { continue }
-            guard settings.automaticActionsAllowed, glab.resolvedHost == host,
+            guard settings.automaticWritesAllowed, glab.resolvedHost == host,
                   glab.currentUsername == username, glab.accountRevision == revision,
                   inboxHost == host else { return }
-            await markDone(todo)
+            await todoStore.markDone(todo, automatically: true)
         }
     }
 
@@ -1136,7 +1136,7 @@ final class TodoMonitorService {
         let revision = glab.accountRevision
         @MainActor func isPending() -> Bool {
             glab.resolvedHost == host && glab.currentUsername == username && inboxHost == host
-                && glab.accountRevision == revision && (manual || settings.automaticActionsAllowed)
+                && glab.accountRevision == revision && (manual || settings.automaticWritesAllowed)
                 && !optimisticallyDone.contains(todo.id) && allTodos.contains { $0.id == todo.id }
         }
 
@@ -1150,7 +1150,7 @@ final class TodoMonitorService {
                settings.automationReceipts.contains(.init(host: host, username: username, todoID: todo.id)) {
                 failedAutomationTodoID = nil
             }
-            if shouldAcknowledge, isPending() { await markDone(todo) }
+            if shouldAcknowledge, isPending() { await todoStore.markDone(todo, automatically: !manual) }
         } catch {
             if isPending() { failedAutomationTodoID = todo.id }
             Log.monitor.error("Automation failed for todo \(todo.id, privacy: .public): \(String(describing: error), privacy: .private)")
@@ -1387,7 +1387,7 @@ final class TodoMonitorService {
         settings.save()
     }
 
-    func markDone(_ todo: Todo) async { await todoStore.markDone(todo) }
+    func markDone(_ todo: Todo) async { await todoStore.markDone(todo, automatically: false) }
 
     /// Hides the to-do immediately but waits `undoWindow` before calling GitLab.
     func markDoneWithUndo(_ todo: Todo) { todoStore.markDoneWithUndo(todo) }

@@ -84,9 +84,9 @@ final class InboxTodoStore {
         acknowledgedDuringFetch.formUnion(ids)
     }
 
-    func markDone(_ todo: Todo) async {
+    func markDone(_ todo: Todo, automatically: Bool) async {
         guard optimisticallyDone.insert(todo.id).inserted else { return }
-        await performMarkDone(todo)
+        await performMarkDone(todo, automatically: automatically)
     }
 
     /// Preserve the current pending action before replacing the single undo slot.
@@ -114,10 +114,14 @@ final class InboxTodoStore {
         pendingMarkDoneTask?.cancel()
         pendingMarkDoneTask = nil
         undoableTodo = nil
-        Task { await performMarkDone(todo) }
+        Task { await performMarkDone(todo, automatically: false) }
     }
 
-    private func performMarkDone(_ todo: Todo) async {
+    private func performMarkDone(_ todo: Todo, automatically: Bool) async {
+        guard !automatically || settings.automaticWritesAllowed else {
+            optimisticallyDone.remove(todo.id)
+            return
+        }
         let host = self.host
         let username = glab.currentUsername
         let result = await glab.markAsDone(id: todo.id, host: host)

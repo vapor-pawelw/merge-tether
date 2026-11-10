@@ -290,6 +290,7 @@ struct AutomaticPublicationPolicyTests {
 
     @Test func automaticDraftHintUsesCanonicalModeRatherThanCompatibilityFlags() throws {
         var settings = AutomationSettings()
+        settings.packageDecision = .enabled
         settings.publicationMode = .filtered
         #expect(try !settings.publishesAutomatically(any: [draft(reply: false)]))
         settings.publicationRestrictions.repositories = [identity(1)]
