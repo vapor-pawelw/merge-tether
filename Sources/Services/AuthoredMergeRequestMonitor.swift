@@ -428,12 +428,12 @@ final class AuthoredMergeRequestMonitor {
                                    automatic: Bool) async throws -> MergeSubmissionState {
         let work = AssistantAutomationRunner.MergeRequestWork(host: account.host, projectID: request.projectID, iid: request.iid)
         let configurationID = configurationFingerprint()
-        @MainActor @Sendable func permits() -> Bool {
-            isCurrent(account) && glab.accountRevision == revision && settings.automation == configuration
-                && configurationFingerprint() == configurationID
-                && (!automatic || permitsAutomaticMerge(request, account: account))
+        let permits: @MainActor @Sendable () -> Bool = {
+            self.isCurrent(account) && self.glab.accountRevision == revision && self.settings.automation == configuration
+                && self.configurationFingerprint() == configurationID
+                && (!automatic || self.permitsAutomaticMerge(request, account: account))
                 && !AssistantAutomationRunner.isWorking(on: work)
-                && !settings.pendingCommentReviews.contains(.init(host: account.host, username: account.username,
+                && !self.settings.pendingCommentReviews.contains(.init(host: account.host, username: account.username,
                     projectID: request.projectID, iid: request.iid))
         }
         guard permits(), let sha = request.sha, submissionState(for: request, account: account) == .none else { throw CancellationError() }

@@ -141,7 +141,7 @@ enum ManualDiscussionResolution {
         let request = prepared.request
         for id in prepared.plan.eligibleIDs {
             do {
-                @MainActor @Sendable func checkSession() throws {
+                let checkSession: @MainActor @Sendable () throws -> Void = {
                     guard glab.accountRevision == prepared.revision, glab.resolvedHost == prepared.host,
                           glab.currentUsername == prepared.user.username,
                           try MergeSubmissionFingerprint.configuration(settings) == prepared.configuration else { throw CancellationError() }

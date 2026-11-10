@@ -150,8 +150,8 @@ final class MergeRequestTodoRouter {
         guard !Task.isCancelled, let original = settings.mrActionIntents.first(where: { $0.id == id }), original.state != .completed,
               let iid = original.target.iid, isCurrent(original.target.host, original.target.username) else { return }
         let revision = glab.accountRevision
-        @MainActor @Sendable func isCurrentRun() -> Bool {
-            isCurrent(original.target.host, original.target.username) && glab.accountRevision == revision
+        let isCurrentRun: @MainActor @Sendable () -> Bool = {
+            self.isCurrent(original.target.host, original.target.username) && self.glab.accountRevision == revision
         }
         let origin: MRAutomationEvent.Origin = manual ? .manual : .automatic
         if manual {

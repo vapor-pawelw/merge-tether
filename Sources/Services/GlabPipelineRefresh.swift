@@ -62,7 +62,7 @@ extension GlabService {
         let configuration = settings.automation
         let target = MRAutomationScope.Target(host: host, username: expectedUser.username,
                                              projectID: request.projectID, iid: request.iid)
-        @MainActor @Sendable func permitted() -> Bool {
+        let permitted: @MainActor @Sendable () -> Bool = {
             configuration == settings.automation && configuration.autoClaimPipelineFailures
                 && configuration.workflowRules[.pipelineFailure].mode == .assistant
                 && configuration.workflowRules[.pipelineFailure].includes(request)
@@ -70,8 +70,8 @@ extension GlabService {
                 && configuration.scope.permits(proof.request, host: host, username: expectedUser.username)
                 && !settings.ignoredMergeRequests.contains(target)
                 && request.author.id == expectedUser.id && request.hasConflicts == false
-                && resolvedHost == host && currentUsername == expectedUser.username
-                && accountRevision == proof.accountRevision && shouldProceed()
+                && self.resolvedHost == host && self.currentUsername == expectedUser.username
+                && self.accountRevision == proof.accountRevision && shouldProceed()
         }
         guard permitted(), let oldID = proof.pipeline.id, let sourceProject = request.sourceProjectID,
               let source = request.sha, let targetProject = request.targetProjectID else { throw CancellationError() }

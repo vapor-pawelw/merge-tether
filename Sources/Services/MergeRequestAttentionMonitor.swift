@@ -1502,7 +1502,9 @@ final class MergeRequestAttentionMonitor {
               let displayed = (items + openItems).first(where: { $0.id == id }),
               displayed.drafts.contains(expected) else { return }
         let generation = accountGeneration, revision = glab.accountRevision
-        @MainActor @Sendable func current() -> Bool { generation == accountGeneration && revision == glab.accountRevision && isCurrent(account) }
+        let current: @MainActor @Sendable () -> Bool = {
+            generation == self.accountGeneration && revision == self.glab.accountRevision && self.isCurrent(account)
+        }
         confirmationStates[id] = .deleting
         defer {
             if current(), confirmationStates[id] == .deleting { confirmationStates[id] = nil }
@@ -1634,8 +1636,8 @@ final class MergeRequestAttentionMonitor {
             return
         }
         let generation = accountGeneration, revision = glab.accountRevision
-        @MainActor @Sendable func currentContext() -> Bool {
-            generation == accountGeneration && revision == glab.accountRevision && isCurrent(account)
+        let currentContext: @MainActor @Sendable () -> Bool = {
+            generation == self.accountGeneration && revision == self.glab.accountRevision && self.isCurrent(account)
         }
         func display(_ drafts: [GitLabDraftNote]) {
             let visible = drafts.filter { publishedDrafts[id]?.contains($0) != true }
@@ -1984,9 +1986,9 @@ final class MergeRequestAttentionMonitor {
               Set(expectedDrafts.compactMap(\.id)).count == expectedDrafts.count,
               let displayed = items.first(where: { $0.id == id }), displayed.drafts == expectedDrafts else { return .changed }
         let generation = accountGeneration, revision = glab.accountRevision
-        @MainActor @Sendable func currentContext() -> Bool {
-            generation == accountGeneration && revision == glab.accountRevision
-                && executable == glab.glabPath && isCurrent(account)
+        let currentContext: @MainActor @Sendable () -> Bool = {
+            generation == self.accountGeneration && revision == self.glab.accountRevision
+                && executable == self.glab.glabPath && self.isCurrent(account)
         }
         confirmationStates[id] = .publishing
         defer {
@@ -2057,8 +2059,8 @@ final class MergeRequestAttentionMonitor {
         var checkedSemanticContext: String?
         typealias Evidence = (request: GitLabMergeRequest, drafts: [GitLabDraftNote],
                               discussions: [GitLabMergeRequestDiscussion], user: GitLabAuthenticatedUser, approvers: Set<Int>)
-        @MainActor @Sendable func currentAccount() -> Bool {
-            generation == accountGeneration && revision == glab.accountRevision && isCurrent(account)
+        let currentAccount: @MainActor @Sendable () -> Bool = {
+            generation == self.accountGeneration && revision == self.glab.accountRevision && self.isCurrent(account)
         }
         @MainActor func readEvidence() async throws -> Evidence {
             let current = try await glab.fetchMergeRequest(projectID: id.projectID, iid: id.iid, host: account.host)
@@ -2068,17 +2070,17 @@ final class MergeRequestAttentionMonitor {
             let approved = try await glab.fetchMergeRequestApproverIDs(projectID: id.projectID, iid: id.iid, host: account.host)
             return (current, drafts, discussions, currentUser, approved)
         }
-        @MainActor @Sendable func permits(_ evidence: Evidence) -> Bool {
+        let permits: @MainActor @Sendable (Evidence) -> Bool = { evidence in
             let current = evidence.request
-            let verdict = ReviewVerdictStore.verdict(host: account.host, projectID: id.projectID, iid: id.iid, in: verdictDirectory)
-            return currentAccount() && !commentReviewPending(id, account: account)
+            let verdict = ReviewVerdictStore.verdict(host: account.host, projectID: id.projectID, iid: id.iid, in: self.verdictDirectory)
+            return currentAccount() && !self.commentReviewPending(id, account: account)
                 && evidence.user == user && current.state == "opened" && current.draft != nil
                 && current.sha == head && current.author.id != user.id && evidence.drafts.isEmpty
                 && verdict?.approves(head: head, discussions: evidence.discussions, reviewerID: user.id,
                     publishedDrafts: ReviewVerdictStore.seenDrafts(host: account.host, projectID: id.projectID,
-                        iid: id.iid, in: verdictDirectory)) == true
+                        iid: id.iid, in: self.verdictDirectory)) == true
                 && (!requireAllResolved || (Self.allResolved(evidence.discussions)
-                    && autoApproveApplies(to: current, host: account.host, username: account.username)))
+                    && self.autoApproveApplies(to: current, host: account.host, username: account.username)))
         }
         @MainActor func confirmed() -> Bool {
             approvedHeads[id] = head
