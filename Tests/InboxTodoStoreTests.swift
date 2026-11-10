@@ -128,10 +128,21 @@ struct InboxTodoStoreTests {
                 _ = monitor.visibleTodos
                 _ = monitor.undoableTodo
             } onChange: { changed.withLock { $0 = true } }
+            #expect(monitor.userAttention.items.contains { $0.id.hasSuffix("/todo/401") })
+            let attentionChanged = OSAllocatedUnfairLock(initialState: false)
+            withObservationTracking { _ = monitor.userAttention } onChange: {
+                attentionChanged.withLock { $0 = true }
+            }
             monitor.markDoneWithUndo(todo)
             #expect(changed.withLock { $0 })
             #expect(monitor.currentAccountTodos.isEmpty)
             #expect(monitor.undoableTodo?.id == todo.id)
+            let deadline = ContinuousClock.now + .seconds(2)
+            while !attentionChanged.withLock({ $0 }), ContinuousClock.now < deadline {
+                try await Task.sleep(for: .milliseconds(1))
+            }
+            #expect(attentionChanged.withLock { $0 })
+            #expect(!monitor.userAttention.items.contains { $0.id.hasSuffix("/todo/401") })
             monitor.undoMarkDone()
             #expect(monitor.currentAccountTodos.map(\.id) == [401])
         }
