@@ -5,6 +5,160 @@ import Testing
 @MainActor
 @Suite("SettingsManager")
 struct SettingsManagerTests {
+    @Test(arguments: ["automation", "mergeSubmissions", "automationReceipts", "automationAttemptReceipts",
+        "authorFeedbackAttempts", "feedbackSuggestionDecisions", "pipelineRefreshAttempts",
+        "pipelineClaimAssessmentAttempts", "pendingTodoAcknowledgements", "assistantHandoffs", "assistantChats",
+        "workflowActivity", "automationEvents", "mrActionIntents", "routedMRTodoReceipts", "boardPins",
+        "mrLifecycleLedger", "conflictReceipts", "reReviewReceipts", "reReviewDraftBaselines",
+        "pendingCommentReviews", "commentReviewProgress", "ignoredMergeRequests", "autoApproveOptOuts",
+        "autoPublishOptOuts", "autoMergeOptOuts", "lastSeenTodoIDs"])
+    func corruptRecordsSurviveUnrelatedSavesAndRestart(_ key: String) {
+        // given
+        let defaults = makeDefaults()
+        let corrupt = Data("{unreadable historical record".utf8)
+        defaults.set(corrupt, forKey: key)
+        let settings = SettingsManager(defaults: defaults)
+        let convenience = ["assistantChats", "automationEvents", "boardPins", "lastSeenTodoIDs"].contains(key)
+        #expect(settings.automaticActionsAllowed == convenience)
+        #expect(settings.persistenceDegraded.contains(key) == !convenience)
+        #expect(defaults.object(forKey: key + ".corrupt") == nil)
+
+        // when
+        settings.notificationsEnabled = false
+        settings.save()
+        SettingsManager(defaults: defaults).save()
+
+        // then
+        #expect(defaults.data(forKey: key) == corrupt)
+        #expect(defaults.data(forKey: key + ".corrupt") == corrupt)
+        #expect(defaults.dictionaryRepresentation().keys.filter { $0.hasPrefix(key + ".corrupt") }.count == 1)
+        #expect(SettingsManager(defaults: defaults).automaticActionsAllowed == convenience)
+        #expect(!SettingsManager(defaults: defaults).notificationsEnabled)
+    }
+
+    @Test func corruptReceiptDoesNotResetSavedProfileOrPermissions() throws {
+        // given
+        let defaults = makeDefaults()
+        let settings = SettingsManager(defaults: defaults)
+        settings.automation.applyPreset(.checkpoints, for: .claude)
+        settings.automation.allowFollowUpPush = false
+        settings.automation.autoResolveAcceptedFeedback = false
+        settings.save()
+        let expected = settings.automation
+        defaults.set(Data("unsupported journal".utf8), forKey: "mergeSubmissions")
+
+        // when
+        let restored = SettingsManager(defaults: defaults)
+        restored.notificationsEnabled.toggle()
+        restored.save()
+
+        // then
+        #expect(!restored.automaticActionsAllowed)
+        #expect(restored.automation == expected)
+        #expect(SettingsManager(defaults: defaults).automation == expected)
+    }
+
+    @Test func wrongStorageTypeIsPreservedRatherThanTreatedAsAMissingProfile() {
+        let defaults = makeDefaults()
+        defaults.set("unsupported profile", forKey: "automation")
+        let settings = SettingsManager(defaults: defaults)
+        settings.save()
+        #expect(defaults.string(forKey: "automation") == "unsupported profile")
+        #expect(defaults.string(forKey: "automation.corrupt") == "unsupported profile")
+        #expect(settings.persistenceDegraded == ["automation"])
+    }
+
+    @Test(arguments: ["encode", "write", "synchronize"])
+    func failedMergeReceiptPersistenceCannotAuthorizeASubmissionOrClearOnRestart(_ failure: String) throws {
+        // given
+        let suite = "SettingsPersistenceFailure.\(UUID())"
+        let defaults = try #require(PersistenceFaultDefaults(suiteName: suite))
+        defer { defaults.removePersistentDomain(forName: suite) }
+        let settings = SettingsManager(defaults: defaults)
+        let original = try mergeReceipt(settings)
+        #expect(settings.saveMergeSubmission(original))
+        let saved = defaults.data(forKey: "mergeSubmissions")
+        defaults.rejectedKey = failure == "write" ? "mergeSubmissions" : nil
+        defaults.synchronizationFails = failure == "synchronize"
+        let next = try mergeReceipt(settings,
+            date: failure == "encode" ? Date(timeIntervalSinceReferenceDate: .nan) : Date(timeIntervalSince1970: 20))
+
+        // when
+        let authorized = settings.saveMergeSubmission(next)
+        if failure != "synchronize" { #expect(defaults.data(forKey: "mergeSubmissions") == saved) }
+        defaults.rejectedKey = nil
+        defaults.synchronizationFails = false
+        settings.save()
+        let restarted = SettingsManager(defaults: defaults)
+
+        // then
+        #expect(!authorized && !settings.automaticActionsAllowed && !restarted.automaticActionsAllowed)
+        #expect(!restarted.saveMergeSubmission(original))
+        if failure == "encode" || failure == "write" {
+            // A failed attempt cannot erase the last known receipt.
+            #expect(saved != nil)
+            #expect(settings.persistenceDegraded.contains("mergeSubmissions"))
+        } else {
+            #expect(settings.persistenceDegraded.contains("settingsPersistence"))
+        }
+    }
+
+    @Test(arguments: ["origin", "missingOrigin", "configuration", "extraCorruptRow"])
+    func unsupportedMergeReceiptSnapshotsStayRawAndCannotAuthorizeManualEnqueue(_ field: String) throws {
+        // given
+        let defaults = makeDefaults()
+        let settings = SettingsManager(defaults: defaults)
+        let receipt = try mergeReceipt(settings)
+        #expect(settings.saveMergeSubmission(receipt))
+        let encoded = try JSONEncoder().encode([receipt])
+        let object = try JSONSerialization.jsonObject(with: encoded)
+        var rows = try #require(object as? [[String: Any]])
+        switch field {
+        case "origin": rows[0]["origin"] = "unknown-origin"
+        case "missingOrigin": rows[0].removeValue(forKey: "origin")
+        case "configuration": rows[0]["configuration"] = ["automation": "unsupported snapshot"]
+        default: rows.append(["origin": "unknown-origin"])
+        }
+        let raw = try JSONSerialization.data(withJSONObject: rows)
+        defaults.set(raw, forKey: "mergeSubmissions")
+
+        // when
+        let restored = SettingsManager(defaults: defaults)
+        let authorized = restored.saveMergeSubmission(receipt)
+        restored.save()
+
+        // then
+        #expect(!authorized && !restored.automaticActionsAllowed)
+        #expect(defaults.data(forKey: "mergeSubmissions") == raw)
+        #expect(defaults.data(forKey: "mergeSubmissions.corrupt") == raw)
+    }
+
+    @Test func validTypedMergeReceiptsKeepObservedQueueOriginAndExplicitPolicy() throws {
+        let defaults = makeDefaults()
+        let settings = SettingsManager(defaults: defaults)
+        settings.automation.applyPreset(.checkpoints, for: .claude)
+        settings.automation.allowFollowUpPush = false
+        let receipt = try mergeReceipt(settings)
+        #expect(settings.saveMergeSubmission(receipt))
+        let restored = SettingsManager(defaults: defaults)
+        #expect(restored.mergeSubmissions == [receipt])
+        #expect(restored.automation == settings.automation)
+        #expect(restored.automaticActionsAllowed)
+    }
+
+    private func mergeReceipt(_ settings: SettingsManager, date: Date = Date(timeIntervalSince1970: 10)) throws -> MergeSubmissionReceipt {
+        let request = try JSONDecoder().decode(GitLabMergeRequest.self, from: Data("""
+            {"project_id":1,"iid":2,"author":{"id":3,"username":"me","name":"Me"},"title":"Fixture",
+             "web_url":"https://gitlab.example.test/g/p/-/merge_requests/2","state":"opened","draft":false,
+             "sha":"0123456789012345678901234567890123456789","source_project_id":1,"target_project_id":1,
+             "source_branch":"feature","target_branch":"main","labels":[]}
+            """.utf8))
+        return .init(origin: .observedQueue,
+            target: .init(host: "gitlab.example.test", username: "me", projectID: 1, iid: 2), userID: 3,
+            context: .init(request), semanticFingerprint: request.semanticContextFingerprint,
+            discussionFingerprint: "checked", configuration: .init(settings), action: .enqueue, createdAt: date)
+    }
+
     @Test func manualConversationDestinationPersistsOnlyOnSaveAndIgnoresAutomationChoice() {
         let defaults = makeDefaults()
         let settings = SettingsManager(defaults: defaults)
@@ -207,4 +361,17 @@ struct SettingsManagerTests {
         }
     }
 
+}
+
+/// Fault injection stays at the preferences adapter; successful reads/writes use a real isolated suite.
+private final class PersistenceFaultDefaults: UserDefaults, @unchecked Sendable {
+    var rejectedKey: String?
+    var synchronizationFails = false
+    override func set(_ value: Any?, forKey defaultName: String) {
+        if defaultName != rejectedKey { super.set(value, forKey: defaultName) }
+    }
+    override func synchronize() -> Bool {
+        let result = super.synchronize()
+        return !synchronizationFails && result
+    }
 }

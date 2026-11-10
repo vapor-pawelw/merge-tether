@@ -8,6 +8,17 @@ final class SettingsManager {
     var commentReviewProgress: [MRAutomationScope.Target: CommentReviewProgress] = [:]
     @ObservationIgnored var commentReviewRevisions: [MRAutomationScope.Target: UInt64] = [:]
     private let defaults: UserDefaults
+    let persistenceStore: DurableSettingsStore
+    /// Convenience caches are preserved and diagnosed without stopping MR actions.
+    var persistenceDegraded: Set<String> {
+        Set(persistenceStore.failures.keys).subtracting(Self.conveniencePersistenceKeys)
+    }
+    var automaticActionsAllowed: Bool { persistenceDegraded.isEmpty }
+    private static let conveniencePersistenceKeys: Set<String> = [
+        "assistantChats", "automationEvents", "boardPins", "lastSeenTodoIDs"
+    ]
+
+    func recordPersistenceFailure(_ key: String) { persistenceStore.recordFailure(key) }
     @ObservationIgnored private var lastSavedAutomation: AutomationSettings?
     @ObservationIgnored var onAutomationChanged: ((AutomationSettings) -> Void)?
 
@@ -53,58 +64,35 @@ final class SettingsManager {
     var mrLifecycleLedger = MergeRequestLifecycleLedger()
     init(defaults: UserDefaults = .standard) {
         self.defaults = defaults
+        let store = DurableSettingsStore(defaults: defaults)
+        persistenceStore = store
         Self.registerDefaults(in: defaults)
         conversationDestination = defaults.string(forKey: Key.conversationDestination)
             .flatMap(AssistantContextLauncher.Destination.init(rawValue:)) ?? .codexApp
 
-        automation = defaults.data(forKey: Key.automation)
-            .flatMap { try? JSONDecoder().decode(AutomationSettings.self, from: $0) }
-            ?? AutomationSettings()
-        mergeSubmissions = defaults.data(forKey: Key.mergeSubmissions)
-            .flatMap { try? JSONDecoder().decode([MergeSubmissionReceipt].self, from: $0) } ?? []
-        automationReceipts = defaults.data(forKey: Key.automationReceipts)
-            .flatMap { try? JSONDecoder().decode(Set<TodoAutomationReceipt>.self, from: $0) }
-            ?? []
-        automationAttemptReceipts = defaults.data(forKey: Key.automationAttemptReceipts)
-            .flatMap { try? JSONDecoder().decode(Set<TodoAutomationReceipt>.self, from: $0) } ?? []
-        authorFeedbackAttempts = defaults.data(forKey: Key.authorFeedbackAttempts)
-            .flatMap { try? JSONDecoder().decode(Set<AuthorFeedbackAttempt>.self, from: $0) } ?? []
-        feedbackSuggestionDecisions = defaults.data(forKey: Key.feedbackSuggestionDecisions)
-            .flatMap { try? JSONDecoder().decode(FeedbackSuggestionDecisions.self, from: $0) } ?? FeedbackSuggestionDecisions()
-        pipelineRefreshAttempts = defaults.data(forKey: Key.pipelineRefreshAttempts)
-            .flatMap { try? JSONDecoder().decode(Set<PipelineRefreshAttempt>.self, from: $0) } ?? []
-        pipelineClaimAssessmentAttempts = defaults.data(forKey: Key.pipelineClaimAssessmentAttempts)
-            .flatMap { try? JSONDecoder().decode([PipelineClaimAssessmentAttempt].self, from: $0) } ?? []
-        pendingTodoAcknowledgements = defaults.data(forKey: Key.pendingTodoAcknowledgements)
-            .flatMap { try? JSONDecoder().decode(Set<TodoActionAcknowledgement>.self, from: $0) } ?? []
-        assistantHandoffs = defaults.data(forKey: Key.assistantHandoffs)
-            .flatMap { try? JSONDecoder().decode([AssistantAutomationRunner.Handoff].self, from: $0) } ?? []
-        assistantChats = defaults.data(forKey: Key.assistantChats)
-            .flatMap { try? JSONDecoder().decode([AssistantAutomationRunner.ChatKey: String].self, from: $0) } ?? [:]
-        workflowActivity = defaults.data(forKey: Key.workflowActivity)
-            .flatMap { try? JSONDecoder().decode([MergeWorkflowActivityEntry].self, from: $0) } ?? []
-        automationEvents = defaults.data(forKey: Key.automationEvents)
-            .flatMap { try? JSONDecoder().decode([MRAutomationEvent].self, from: $0) } ?? []
-        mrActionIntents = defaults.data(forKey: Key.mrActionIntents)
-            .flatMap { try? JSONDecoder().decode([MRTodoIntent].self, from: $0) } ?? []
-        routedMRTodoReceipts = defaults.data(forKey: Key.routedMRTodoReceipts)
-            .flatMap { try? JSONDecoder().decode(Set<MRTodoRouteReceipt>.self, from: $0) } ?? []
+        automation = store.load(Key.automation, fallback: AutomationSettings())
+        mergeSubmissions = store.load(Key.mergeSubmissions, fallback: [])
+        automationReceipts = store.load(Key.automationReceipts, fallback: [])
+        automationAttemptReceipts = store.load(Key.automationAttemptReceipts, fallback: [])
+        authorFeedbackAttempts = store.load(Key.authorFeedbackAttempts, fallback: [])
+        feedbackSuggestionDecisions = store.load(Key.feedbackSuggestionDecisions, fallback: FeedbackSuggestionDecisions())
+        pipelineRefreshAttempts = store.load(Key.pipelineRefreshAttempts, fallback: [])
+        pipelineClaimAssessmentAttempts = store.load(Key.pipelineClaimAssessmentAttempts, fallback: [])
+        pendingTodoAcknowledgements = store.load(Key.pendingTodoAcknowledgements, fallback: [])
+        assistantHandoffs = store.load(Key.assistantHandoffs, fallback: [])
+        assistantChats = store.load(Key.assistantChats, fallback: [:])
+        workflowActivity = store.load(Key.workflowActivity, fallback: [])
+        automationEvents = store.load(Key.automationEvents, fallback: [])
+        mrActionIntents = store.load(Key.mrActionIntents, fallback: [])
+        routedMRTodoReceipts = store.load(Key.routedMRTodoReceipts, fallback: [])
         boardGrouping = defaults.string(forKey: Key.boardGrouping).flatMap(MRBoardGrouping.init(rawValue:)) ?? .withoutAutomation
-        boardPins = defaults.data(forKey: Key.boardPins)
-            .flatMap { try? JSONDecoder().decode(Set<BoardCardPin>.self, from: $0) } ?? []
-        mrLifecycleLedger = defaults.data(forKey: Key.mrLifecycleLedger)
-            .flatMap { try? JSONDecoder().decode(MergeRequestLifecycleLedger.self, from: $0) } ?? .init()
-        conflictReceipts = defaults.data(forKey: Key.conflictReceipts)
-            .flatMap { try? JSONDecoder().decode(Set<MergeConflictReceipt>.self, from: $0) }
-            ?? []
-        reReviewReceipts = defaults.data(forKey: Key.reReviewReceipts)
-            .flatMap { try? JSONDecoder().decode([ReReviewReceipt.Key: ReReviewReceipt].self, from: $0) } ?? [:]
-        reReviewDraftBaselines = defaults.data(forKey: Key.reReviewDraftBaselines)
-            .flatMap { try? JSONDecoder().decode([MRAutomationScope.Target: Int].self, from: $0) } ?? [:]
-        pendingCommentReviews = defaults.data(forKey: Key.pendingCommentReviews)
-            .flatMap { try? JSONDecoder().decode(Set<MRAutomationScope.Target>.self, from: $0) } ?? []
-        commentReviewProgress = defaults.data(forKey: Key.commentReviewProgress)
-            .flatMap { try? JSONDecoder().decode([MRAutomationScope.Target: CommentReviewProgress].self, from: $0) } ?? [:]
+        boardPins = store.load(Key.boardPins, fallback: [])
+        mrLifecycleLedger = store.load(Key.mrLifecycleLedger, fallback: .init())
+        conflictReceipts = store.load(Key.conflictReceipts, fallback: [])
+        reReviewReceipts = store.load(Key.reReviewReceipts, fallback: [:])
+        reReviewDraftBaselines = store.load(Key.reReviewDraftBaselines, fallback: [:])
+        pendingCommentReviews = store.load(Key.pendingCommentReviews, fallback: [])
+        commentReviewProgress = store.load(Key.commentReviewProgress, fallback: [:])
 
         let rawInterval = defaults.integer(forKey: Key.refreshInterval)
         self.refreshInterval = RefreshInterval(rawValue: rawInterval) ?? .fiveMinutes
@@ -123,14 +111,10 @@ final class SettingsManager {
             : nil
 
         self.lastMenuSection = defaults.string(forKey: Key.lastMenuSection)
-        self.ignoredMergeRequests = defaults.data(forKey: Key.ignoredMergeRequests)
-            .flatMap { try? JSONDecoder().decode(Set<MRAutomationScope.Target>.self, from: $0) } ?? []
-        self.autoApproveOptOuts = defaults.data(forKey: Key.autoApproveOptOuts)
-            .flatMap { try? JSONDecoder().decode(Set<MRAutomationScope.Target>.self, from: $0) } ?? []
-        self.autoPublishOptOuts = defaults.data(forKey: Key.autoPublishOptOuts)
-            .flatMap { try? JSONDecoder().decode(Set<MRAutomationScope.Target>.self, from: $0) } ?? []
-        self.autoMergeOptOuts = defaults.data(forKey: Key.autoMergeOptOuts)
-            .flatMap { try? JSONDecoder().decode(Set<MRAutomationScope.Target>.self, from: $0) } ?? []
+        self.ignoredMergeRequests = store.load(Key.ignoredMergeRequests, fallback: [])
+        self.autoApproveOptOuts = store.load(Key.autoApproveOptOuts, fallback: [])
+        self.autoPublishOptOuts = store.load(Key.autoPublishOptOuts, fallback: [])
+        self.autoMergeOptOuts = store.load(Key.autoMergeOptOuts, fallback: [])
 
         if let pathString = defaults.string(forKey: Key.glabPath), !pathString.isEmpty {
             self.glabPath = URL(fileURLWithPath: pathString)
@@ -138,13 +122,7 @@ final class SettingsManager {
             self.glabPath = nil
         }
 
-        if let data = defaults.data(forKey: Key.lastSeenTodoIDs),
-           let decoded = try? JSONDecoder().decode([Int].self, from: data)
-        {
-            self.lastSeenTodoIDs = Set(decoded)
-        } else {
-            self.lastSeenTodoIDs = []
-        }
+        lastSeenTodoIDs = store.load(Key.lastSeenTodoIDs, fallback: [])
         for handoff in assistantHandoffs {
             let target = MRAutomationScope.Target(host: handoff.key.work.host, username: handoff.key.username,
                 projectID: handoff.key.work.projectID, iid: handoff.key.work.iid)
@@ -157,66 +135,34 @@ final class SettingsManager {
     }
 
     func save() {
-        if let data = try? JSONEncoder().encode(pendingCommentReviews) {
-            defaults.set(data, forKey: Key.pendingCommentReviews)
-        }
-        if let data = try? JSONEncoder().encode(commentReviewProgress) {
-            defaults.set(data, forKey: Key.commentReviewProgress)
-        }
+        persistenceStore.preserveCorruptValues()
+        persistenceStore.save(pendingCommentReviews, forKey: Key.pendingCommentReviews)
+        persistenceStore.save(commentReviewProgress, forKey: Key.commentReviewProgress)
         defaults.set(conversationDestination.rawValue, forKey: Key.conversationDestination)
         let previousAutomation = lastSavedAutomation ?? automation
-        lastSavedAutomation = automation
-        if let data = try? JSONEncoder().encode(automation) {
-            defaults.set(data, forKey: Key.automation)
-        }
-        if let data = try? JSONEncoder().encode(automationReceipts) {
-            defaults.set(data, forKey: Key.automationReceipts)
-        }
-        if let data = try? JSONEncoder().encode(automationAttemptReceipts) {
-            defaults.set(data, forKey: Key.automationAttemptReceipts)
-        }
-        if let data = try? JSONEncoder().encode(authorFeedbackAttempts) {
-            defaults.set(data, forKey: Key.authorFeedbackAttempts)
-        }
-        if let data = try? JSONEncoder().encode(feedbackSuggestionDecisions) {
-            defaults.set(data, forKey: Key.feedbackSuggestionDecisions)
-        }
-        if let data = try? JSONEncoder().encode(pipelineRefreshAttempts) {
-            defaults.set(data, forKey: Key.pipelineRefreshAttempts)
-        }
-        if let data = try? JSONEncoder().encode(pipelineClaimAssessmentAttempts) {
-            defaults.set(data, forKey: Key.pipelineClaimAssessmentAttempts)
-        }
-        if let data = try? JSONEncoder().encode(pendingTodoAcknowledgements) {
-            defaults.set(data, forKey: Key.pendingTodoAcknowledgements)
-        }
-        if let data = try? JSONEncoder().encode(assistantHandoffs) {
-            defaults.set(data, forKey: Key.assistantHandoffs)
-        }
-        if let data = try? JSONEncoder().encode(assistantChats) {
-            defaults.set(data, forKey: Key.assistantChats)
-        }
-        if let data = try? JSONEncoder().encode(workflowActivity) {
-            defaults.set(data, forKey: Key.workflowActivity)
-        }
-        if let data = try? JSONEncoder().encode(automationEvents) { defaults.set(data, forKey: Key.automationEvents) }
-        if let data = try? JSONEncoder().encode(mrActionIntents) { defaults.set(data, forKey: Key.mrActionIntents) }
-        if let data = try? JSONEncoder().encode(routedMRTodoReceipts) { defaults.set(data, forKey: Key.routedMRTodoReceipts) }
-        if let data = try? JSONEncoder().encode(boardPins) { defaults.set(data, forKey: Key.boardPins) }
-        if let data = try? JSONEncoder().encode(mrLifecycleLedger) { defaults.set(data, forKey: Key.mrLifecycleLedger) }
+        let automationSaved = persistenceStore.save(automation, forKey: Key.automation)
+        persistenceStore.save(automationReceipts, forKey: Key.automationReceipts)
+        persistenceStore.save(automationAttemptReceipts, forKey: Key.automationAttemptReceipts)
+        persistenceStore.save(authorFeedbackAttempts, forKey: Key.authorFeedbackAttempts)
+        persistenceStore.save(feedbackSuggestionDecisions, forKey: Key.feedbackSuggestionDecisions)
+        persistenceStore.save(pipelineRefreshAttempts, forKey: Key.pipelineRefreshAttempts)
+        persistenceStore.save(pipelineClaimAssessmentAttempts, forKey: Key.pipelineClaimAssessmentAttempts)
+        persistenceStore.save(pendingTodoAcknowledgements, forKey: Key.pendingTodoAcknowledgements)
+        persistenceStore.save(assistantHandoffs, forKey: Key.assistantHandoffs)
+        persistenceStore.save(assistantChats, forKey: Key.assistantChats)
+        persistenceStore.save(workflowActivity, forKey: Key.workflowActivity)
+        persistenceStore.save(automationEvents, forKey: Key.automationEvents)
+        persistenceStore.save(mrActionIntents, forKey: Key.mrActionIntents)
+        persistenceStore.save(routedMRTodoReceipts, forKey: Key.routedMRTodoReceipts)
+        persistenceStore.save(boardPins, forKey: Key.boardPins)
+        persistenceStore.save(mrLifecycleLedger, forKey: Key.mrLifecycleLedger)
         defaults.removeObject(forKey: Key.autoRemoveFinishedMRs)
         defaults.removeObject(forKey: Key.showMergedMRCompletions)
         defaults.removeObject(forKey: Key.showClosedMRCompletions)
         defaults.set(boardGrouping.rawValue, forKey: Key.boardGrouping)
-        if let data = try? JSONEncoder().encode(conflictReceipts) {
-            defaults.set(data, forKey: Key.conflictReceipts)
-        }
-        if let data = try? JSONEncoder().encode(reReviewReceipts) {
-            defaults.set(data, forKey: Key.reReviewReceipts)
-        }
-        if let data = try? JSONEncoder().encode(reReviewDraftBaselines) {
-            defaults.set(data, forKey: Key.reReviewDraftBaselines)
-        }
+        persistenceStore.save(conflictReceipts, forKey: Key.conflictReceipts)
+        persistenceStore.save(reReviewReceipts, forKey: Key.reReviewReceipts)
+        persistenceStore.save(reReviewDraftBaselines, forKey: Key.reReviewDraftBaselines)
         defaults.set(refreshInterval.rawValue, forKey: Key.refreshInterval)
         defaults.set(unreadReminderInterval.rawValue, forKey: Key.unreadReminderInterval)
         defaults.set(unreadReminderSound.rawValue, forKey: Key.unreadReminderSound)
@@ -234,53 +180,47 @@ final class SettingsManager {
         } else {
             defaults.removeObject(forKey: Key.resolvedHost)
         }
-        if let data = try? JSONEncoder().encode(Array(lastSeenTodoIDs).sorted()) {
-            defaults.set(data, forKey: Key.lastSeenTodoIDs)
-        }
+        persistenceStore.save(Array(lastSeenTodoIDs).sorted(), forKey: Key.lastSeenTodoIDs)
         if let lastMenuOpenedAt {
             defaults.set(lastMenuOpenedAt.timeIntervalSince1970, forKey: Key.lastMenuOpenedAt)
         } else {
             defaults.removeObject(forKey: Key.lastMenuOpenedAt)
         }
-        if let data = try? JSONEncoder().encode(ignoredMergeRequests) {
-            defaults.set(data, forKey: Key.ignoredMergeRequests)
-        }
-        if let data = try? JSONEncoder().encode(autoApproveOptOuts) {
-            defaults.set(data, forKey: Key.autoApproveOptOuts)
-        }
-        if let data = try? JSONEncoder().encode(autoPublishOptOuts) {
-            defaults.set(data, forKey: Key.autoPublishOptOuts)
-        }
-        if let data = try? JSONEncoder().encode(mergeSubmissions) {
-            defaults.set(data, forKey: Key.mergeSubmissions)
-        }
-        if let data = try? JSONEncoder().encode(autoMergeOptOuts) {
-            defaults.set(data, forKey: Key.autoMergeOptOuts)
-        }
+        persistenceStore.save(ignoredMergeRequests, forKey: Key.ignoredMergeRequests)
+        persistenceStore.save(autoApproveOptOuts, forKey: Key.autoApproveOptOuts)
+        persistenceStore.save(autoPublishOptOuts, forKey: Key.autoPublishOptOuts)
+        persistenceStore.save(mergeSubmissions, forKey: Key.mergeSubmissions)
+        persistenceStore.save(autoMergeOptOuts, forKey: Key.autoMergeOptOuts)
         if let lastMenuSection {
             defaults.set(lastMenuSection, forKey: Key.lastMenuSection)
         } else {
             defaults.removeObject(forKey: Key.lastMenuSection)
         }
-        if previousAutomation != automation { onAutomationChanged?(previousAutomation) }
+        let synchronized = persistenceStore.synchronize()
+        if automationSaved && synchronized {
+            lastSavedAutomation = automation
+            if previousAutomation != automation { onAutomationChanged?(previousAutomation) }
+        }
     }
 
     func saveMergeSubmission(_ receipt: MergeSubmissionReceipt) -> Bool {
+        guard automaticActionsAllowed else { return false }
         mergeSubmissions.removeAll { $0.target == receipt.target }
         mergeSubmissions.append(receipt)
         save()
-        return defaults.synchronize()
+        return automaticActionsAllowed
     }
 
     /// A non-idempotent CI request must not outrun its replay guard on disk.
     func savePipelineRefreshAttempt(_ attempt: PipelineRefreshAttempt) -> Bool {
+        guard automaticActionsAllowed else { return false }
         pipelineRefreshAttempts.insert(attempt)
         save()
-        return defaults.synchronize()
+        return automaticActionsAllowed
     }
 
     func savePipelineClaimAssessmentAttempt(_ attempt: PipelineClaimAssessmentAttempt) -> Bool {
-        guard !pipelineClaimAssessmentAttempts.contains(where: {
+        guard automaticActionsAllowed, !pipelineClaimAssessmentAttempts.contains(where: {
             $0.target == attempt.target && $0.userID == attempt.userID && $0.lineage == attempt.lineage
                 && $0.pipelineID == attempt.pipelineID && $0.pipelineSHA == attempt.pipelineSHA
                 && $0.pipelineProjectID == attempt.pipelineProjectID
@@ -289,15 +229,15 @@ final class SettingsManager {
         }) else { return false }
         pipelineClaimAssessmentAttempts.append(attempt)
         save()
-        return defaults.synchronize()
+        return automaticActionsAllowed
     }
 
     func saveEnvironmentRecoveryAttempt(_ id: UUID) -> Bool {
-        guard let index = assistantHandoffs.firstIndex(where: { $0.id == id }),
+        guard automaticActionsAllowed, let index = assistantHandoffs.firstIndex(where: { $0.id == id }),
               assistantHandoffs[index].environmentRecoveryAttempted != true else { return false }
         assistantHandoffs[index].environmentRecoveryAttempted = true
         save()
-        return defaults.synchronize()
+        return automaticActionsAllowed
     }
 
     var isFirstLaunch: Bool {
