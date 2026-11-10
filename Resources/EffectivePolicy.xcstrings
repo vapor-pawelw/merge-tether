@@ -1,0 +1,303 @@
+{
+  "sourceLanguage": "en",
+  "strings": {
+    "policy.publicationAll": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Eligible comments can publish after checks"
+          }
+        }
+      }
+    },
+    "policy.publicationAi": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Qualifying replies can publish after checks"
+          }
+        }
+      }
+    },
+    "policy.publicationFiltered": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Matching comments can publish after checks"
+          }
+        }
+      }
+    },
+    "policy.publicationManual": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Comments wait for your review"
+          }
+        }
+      }
+    },
+    "policy.mergeManual": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Merge waits for you"
+          }
+        }
+      }
+    },
+    "policy.mergeChecks": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Automatic merge requires current checks"
+          }
+        }
+      }
+    },
+    "policy.approvalManual": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Approval waits for you"
+          }
+        }
+      }
+    },
+    "policy.approvalChecks": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Automatic approval requires current checks"
+          }
+        }
+      }
+    },
+    "policy.deliveryManual": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Pushing fixes waits for you"
+          }
+        }
+      }
+    },
+    "policy.draftPaused": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Automation paused for this Draft"
+          }
+        }
+      }
+    },
+    "policy.scopePaused": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Automation paused for this MR"
+          }
+        }
+      }
+    },
+    "policy.off": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Automatic work is off"
+          }
+        }
+      }
+    },
+    "policy.savedData": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Automatic actions paused: saved data needs attention"
+          }
+        }
+      }
+    },
+    "policy.verification": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Automation needs current verification"
+          }
+        }
+      }
+    },
+    "policy.assistant": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Automatic work needs a signed-in coding agent"
+          }
+        }
+      }
+    },
+    "policy.login": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Automatic work paused: sign in to the coding agent"
+          }
+        }
+      }
+    },
+    "policy.limit": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Automatic work paused: coding agent usage limit"
+          }
+        }
+      }
+    },
+    "policy.commentReview": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Finish comment review before approval or merge"
+          }
+        }
+      }
+    },
+    "settings.preparation": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Preparation"
+          }
+        }
+      }
+    },
+    "settings.delivery": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Delivery"
+          }
+        }
+      }
+    },
+    "settings.completion": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Completion"
+          }
+        }
+      }
+    },
+    "settings.preparationRules": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Review & feedback"
+          }
+        }
+      }
+    },
+    "settings.legacyTitle": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Saved shell handler"
+          }
+        }
+      }
+    },
+    "settings.legacyEnabled": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Saved as enabled. This legacy handler does not run automatically."
+          }
+        }
+      }
+    },
+    "settings.legacyDisabled": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Saved as disabled. This legacy handler does not run automatically."
+          }
+        }
+      }
+    },
+    "settings.legacyLocation": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "The saved title and command are in Advanced. Choose the coding agent here to migrate explicitly."
+          }
+        }
+      }
+    },
+    "settings.conflictsHelp": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "The coding agent prepares and checks conflict fixes. Enable conflict pushes to deliver them automatically; otherwise inspect the run result and deliver them manually. Project permission under Delivery also applies."
+          }
+        }
+      }
+    }
+  },
+  "version": "1.0"
+}

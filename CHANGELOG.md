@@ -77,6 +77,8 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 
 ### Added
 
+- Explain effective automation on MR cards and Details, including saved-data holds, manual delivery choices and GitLab queue status, without changing action permissions.
+
 - Delete individual private drafts with confirmation on macOS and iOS. Finish comment review directly on an MR card, with a persistent account-scoped checkpoint and live commit, discussion and draft checks.
 - Explain which approval, re-review and merge steps are waiting for comment review in MR details.
 
@@ -137,6 +139,8 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 - Configure automation globally, per repository or per MR, with workflow preview, event tracking and CLI execution modes.
 
 ### Changed
+
+- Group automation permissions into preparation, publication, delivery and completion, keeping existing choices and saved legacy handlers available in Advanced.
 
 - Default feedback, draft-claim and AI-assistance verification to High reasoning for Codex and Claude, with a shared Low, Medium or High setting independent of coding reasoning.
 

@@ -105,6 +105,8 @@ private struct CommandCenterMRCardContent: View {
                         }
                     }
                 }
+                MREffectivePolicySummary(row: row, monitor: monitor,
+                    excluding: [presentation.message, presentation.nextStep ?? ""])
                 MergeActionsView(item: item, monitor: monitor, actionsBlocked: presentation.actionsBlocked) {
                     if humanAction?.action == .retryRun {
                         Button { openAttention(.assistantRuns) } label: { Text(.MRHumanAction.mrHumanActionActionReviewRun) }
