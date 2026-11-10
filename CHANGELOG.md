@@ -180,6 +180,8 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 
 ### Fixed
 
+- Keep newer MR catalog facts when comments or review state update, bind retained action evidence to its checked context and account revision, and prevent background presentation checks from admitting retained-only rows to automation.
+
 - Preserve unreadable settings and action journals, report persistence failures without resetting saved policy, and pause automatic writes until safety records are recovered; keep read-only checks and fresh manual actions available within their required evidence boundaries.
 
 - Keep the workflow paused after drafts are handled in GitLab or deleted in the app, until comment review is explicitly finished. Successful publication can complete the checkpoint after checking the reviewed context and remaining drafts.

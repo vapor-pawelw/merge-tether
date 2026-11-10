@@ -44,6 +44,116 @@ import Testing
         #expect(item.approvalProgress == nil)
     }
 
+    @Test func aManualDraftUpdateCannotReplaceANewerCatalogContextWithItsOlderEvidence() async throws {
+        let harness = try makeHarness(assistantWorked: false)
+        defer { harness.cleanUp() }
+        harness.settings.automation.disableAssistantPackage()
+        try harness.write("drafts.json", draftJSON)
+        let monitor = harness.monitor, gitlab = harness.gitlab
+        var peer = try #require(JSONSerialization.jsonObject(with: gitlab.data("request.json")) as? [String: Any])
+        peer["iid"] = 3
+        peer["title"] = "Retained peer"
+        peer["web_url"] = "https://gitlab.example.org/g/p/-/merge_requests/3"
+        let peerData = try JSONSerialization.data(withJSONObject: peer)
+        let peerRequest = try JSONDecoder().decode(GitLabMergeRequest.self, from: peerData)
+        harness.settings.mrLifecycleLedger.record(peerRequest,
+            for: .init(host: host, username: "me", projectID: 1, iid: 3))
+        let original = try #require(gitlab.handler)
+        gitlab.handler = { request in
+            if request.endpoint == "/projects/1/merge_requests/3" {
+                return InMemoryGitLab.output(String(decoding: peerData, as: UTF8.self))
+            }
+            if request.endpoint.hasPrefix("/projects/1/merge_requests/3/") {
+                if request.endpoint.contains("/reviewers?") {
+                    // This retained-only peer is read after the first row's safety checks.
+                    gitlab.write("final-catalog-read")
+                    try await gitlab.waitFor("release-catalog-read")
+                }
+                if request.endpoint.hasSuffix("/approvals") {
+                    return InMemoryGitLab.output(#"{"approvals_required":0,"approvals_left":0}"#)
+                }
+                return InMemoryGitLab.output("[]")
+            }
+            return try await original(request)
+        }
+        monitor.onRefreshed = { [weak monitor] in
+            if monitor?.isLoading == false { gitlab.write("catalog-finished") }
+        }
+        monitor.refresh(host: host, username: "me", todos: [])
+        try await gitlab.waitFor("final-catalog-read")
+        let nextHead = String(repeating: "b", count: 40)
+        let newer = try JSONDecoder().decode(GitLabMergeRequest.self,
+            from: Data(harness.log("request.json").replacingOccurrences(of: head, with: nextHead).utf8))
+        let target = MRAutomationScope.Target(host: host, username: "me", projectID: 1, iid: 2)
+        harness.settings.mrLifecycleLedger.record(newer, for: target)
+        try JSONEncoder().encode(newer).store(in: gitlab, as: "request.json")
+        gitlab.write("release-catalog-read")
+        try await gitlab.waitFor("catalog-finished")
+        let evidence = try #require(monitor.currentItems.first { $0.id.iid == 2 })
+        #expect(evidence.mergeRequest?.sha == head)
+        #expect(monitor.currentOpenItems.first { $0.id.iid == 2 }?.mergeRequest?.sha == nextHead)
+
+        let deleted = try #require(evidence.drafts.first)
+        await monitor.deleteDraft(deleted, from: evidence.id)
+
+        #expect(monitor.currentOpenItems.first { $0.id.iid == 2 }?.mergeRequest?.sha == nextHead)
+        #expect(monitor.currentOpenItems.first { $0.id.iid == 2 }?.drafts.isEmpty == true)
+        #expect(monitor.currentItems.first { $0.id.iid == 2 }?.mergeRequest?.sha == head)
+        #expect(monitor.currentItems.first { $0.id.iid == 2 }?.drafts.contains { $0.id == deleted.id } == false)
+        #expect(harness.log("publish.log").isEmpty && harness.log("approve.log").isEmpty)
+    }
+
+    @Test func anAccountRoundTripCannotExposeEarlierAttentionOrCatalogEvidence() async throws {
+        let harness = try await manualHarness()
+        defer { harness.cleanUp() }
+        #expect(!harness.monitor.currentItems.isEmpty && !harness.monitor.currentOpenItems.isEmpty)
+        harness.glab.currentUsername = "another"
+        harness.glab.currentUsername = "me"
+        #expect(harness.monitor.currentItems.isEmpty)
+        #expect(harness.monitor.currentOpenItems.isEmpty)
+        #expect(harness.log("publish.log").isEmpty && harness.log("approve.log").isEmpty)
+    }
+
+    @Test func aBackgroundVerifierCannotAdmitARetainedOnlyCatalogRow() async throws {
+        var boundary: InMemoryGitLab?
+        let harness = try makeHarness(assistantWorked: true, authored: true, reReviewGate: {
+            boundary?.write("verifier-entered")
+            try await boundary?.waitFor("finish-verification")
+        })
+        boundary = harness.gitlab
+        defer { harness.cleanUp() }
+        defer { harness.gitlab.write("finish-verification") }
+        try prepareAuthoredFeedback(harness)
+        try await harness.poll()
+        try harness.write("drafts.json", "[]")
+        try harness.write("discussions.json", harness.log("published-discussions.json"))
+        try harness.write("fail-verification", "yes")
+        let monitor = harness.monitor, gitlab = harness.gitlab
+        monitor.onRefreshed = { [weak monitor] in
+            if monitor?.isLoading == false { gitlab.write("catalog-finished") }
+        }
+        monitor.refresh(host: host, username: "me", todos: [])
+        try await gitlab.waitFor("verifier-entered")
+        try await gitlab.waitFor("catalog-finished")
+        let displayed = try #require(monitor.currentOpenItems.first)
+        #expect(await monitor.finishCommentReview(displayed))
+
+        try harness.write("authored.json", "[]")
+        gitlab.remove("request.json")
+        gitlab.remove("catalog-finished")
+        monitor.refresh(host: host, username: "me", todos: [])
+        try await gitlab.waitFor("catalog-finished")
+        #expect(monitor.hasError && !monitor.currentOpenItems.isEmpty)
+        #expect(monitor.currentItems.isEmpty)
+        gitlab.write("finish-verification")
+        try await harness.settleVerification()
+
+        #expect(monitor.currentOpenItems.first?.reReviewReadiness == .failed)
+        #expect(monitor.currentItems.isEmpty)
+        #expect(harness.log("publish.log").isEmpty && harness.log("approve.log").isEmpty
+            && harness.log("re-review.log").isEmpty)
+    }
+
     @Test func trackedReviewsKeepTheirApprovalCountsAfterReviewerAssignmentIsRemoved() async throws {
         let harness = try makeHarness(assistantWorked: true)
         defer { harness.cleanUp() }
@@ -2711,11 +2821,19 @@ import Testing
         try harness.write("drafts.json", draftJSON)
         try harness.recordVerdict("objections", head: head)
         try await harness.poll()
+        let checkedIDs = try #require(harness.monitor.currentItems.first).automaticDraftIDs
+        #expect(checkedIDs == [11, 12])
         try harness.write("inject-unseen-draft", "yes")
         try await harness.poll()
         #expect(harness.log("publish.log").isEmpty)
         #expect(!harness.log("selected.log").contains("/draft_notes/99/publish"))
         #expect(harness.monitor.currentItems.first?.drafts.map(\.id) == [99])
+        let writes = harness.gitlab.requests.filter { $0.method != "GET" }
+        let expected = checkedIDs.sorted().map { "/projects/1/merge_requests/2/draft_notes/\($0)/publish" }
+        #expect(writes.map(\.endpoint) == expected)
+        #expect(writes.allSatisfy { $0.method == "PUT" })
+        #expect(!harness.gitlab.requests.contains { $0.endpoint.contains("/bulk_publish") })
+        #expect(harness.log("drafts.json").contains("/merge"))
     }
 
     @Test func automaticAIReplyPublicationImmediatelyRequestsEligibleReReview() async throws {

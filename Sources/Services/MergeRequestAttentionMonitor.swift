@@ -15,8 +15,8 @@ final class MergeRequestAttentionMonitor {
         }
 
         let id: ID
-        let title: String
-        let url: URL
+        var title: String
+        var url: URL
         var lifecycleCompletionID: UUID?
         var draftCount = 0
         var requiresCommentReview = false
@@ -240,7 +240,14 @@ final class MergeRequestAttentionMonitor {
         }
     }
 
-    private(set) var items: [Item] = []
+    private var attentionRecords: [Item.ID: MRAttentionRecord] = [:]
+    private var attentionRecordsRevision: UInt64?
+    private var attentionCandidateIDs: Set<Item.ID> = []
+    private var catalogIDs: Set<Item.ID> = []
+    var items: [Item] {
+        guard attentionRecordsRevision == glab.accountRevision else { return [] }
+        return Item.ordered(attentionCandidateIDs.compactMap { attentionRecords[$0]?.evidence }.filter(\.needsAttention))
+    }
     private(set) var confirmationStates: [Item.ID: ConfirmationState] = [:]
     private var user: GitLabAuthenticatedUser?
     /// Drafts seen on the previous poll, so automatic publishing waits until they stop changing.
@@ -259,7 +266,10 @@ final class MergeRequestAttentionMonitor {
         let configuration: AutomationSettings?
     }
     @ObservationIgnored private var approvalReadFailures: [Item.ID: (context: ApprovalReadContext, retryAfter: Date)] = [:]
-    private var openItems: [Item] = []
+    private var openItems: [Item] {
+        guard attentionRecordsRevision == glab.accountRevision else { return [] }
+        return Item.ordered(catalogIDs.compactMap { attentionRecords[$0]?.catalogItem })
+    }
     @ObservationIgnored private let dependencyLoader = MRDependencyLoader()
     @ObservationIgnored private var dependencyTask: Task<Void, Never>?
     private var dependencyPresentation = MRDependencyPresentationCache()
@@ -515,8 +525,10 @@ final class MergeRequestAttentionMonitor {
             draftProofRecoveryCoordinator?.cancel()
             aiOriginCoordinator.cancel()
             accountGeneration += 1
-            items = []
-            openItems = []
+            attentionRecords = [:]
+            attentionRecordsRevision = nil
+            attentionCandidateIDs = []
+            catalogIDs = []
             terminalCatalogRequests = []
             recentTodos = []
             hasError = false
@@ -558,8 +570,7 @@ final class MergeRequestAttentionMonitor {
             } catch {
                 if isCurrent(account), revision == glab.accountRevision {
                     hasError = true
-                    for index in items.indices { items[index].reviewingProgress = nil }
-                    for index in openItems.indices { openItems[index].reviewingProgress = nil }
+                    for id in attentionRecords.keys { attentionRecords[id]?.evidence.reviewingProgress = nil }
                     clearApprovalProgress()
                 }
             }
@@ -571,8 +582,7 @@ final class MergeRequestAttentionMonitor {
     }
 
     private func clearApprovalProgress() {
-        for index in items.indices { items[index].approvalProgress = nil }
-        for index in openItems.indices { openItems[index].approvalProgress = nil }
+        for id in attentionRecords.keys { attentionRecords[id]?.clearApprovalProgress() }
     }
 
     /// A policy restoration reads current evidence and enters the automatic executor only.
@@ -1082,14 +1092,6 @@ final class MergeRequestAttentionMonitor {
             }
         }
         guard isCurrent(account), revision == glab.accountRevision else { return }
-        for index in results.indices {
-            let id = results[index].id
-            guard let published = publishedDrafts[id] else { continue }
-            // Suppress only exact drafts already sent; preserve newly added/edited ones.
-            results[index].drafts.removeAll { published.contains($0) }
-            results[index].draftCount = results[index].drafts.count
-            if results[index].drafts.isEmpty { results[index].requiresDiscussionRecheck = false }
-        }
         hasError = failed || explicitFetchFailed
         hasOwnListing = owned != nil
         let openIDs = Set(currentListed.filter { $0.state == "opened" }.map {
@@ -1124,7 +1126,10 @@ final class MergeRequestAttentionMonitor {
                 where !settings.ignoredMergeRequests.contains(target(for: request)) {
                 let id = Item.ID(projectID: request.projectID, iid: request.iid)
                 if request.state == "opened", var item = retainedCatalog[id] {
-                    if item.mergeRequest?.sha != request.sha { item.approvalProgress = nil }
+                    if !MRAttentionRecord.sameContext(item.mergeRequest, request) {
+                        item.approvalProgress = nil
+                        item.reviewingActivity = nil
+                    }
                     item.mergeRequest = request
                     retainedCatalog[id] = item
                 } else {
@@ -1136,20 +1141,34 @@ final class MergeRequestAttentionMonitor {
         }
         // Retention belongs only to the read-only catalog. Stale rows do not become
         // new publication, approval or re-review action candidates.
-        openItems = Item.ordered(Array(retainedCatalog.values))
         // Verifiers can finish while another row or retained review is being read.
         // Commit their current state, rather than the earlier per-row snapshot.
-        for index in results.indices where results[index].isAuthored {
+        for index in results.indices {
             let id = results[index].id
-            let unanswered = authoredUnansweredFeedback[id] ?? true
-            applyReReviewPresentation(&results[index], unanswered: unanswered)
-            if let catalogIndex = openItems.firstIndex(where: { $0.id == id }) {
-                applyReReviewPresentation(&openItems[catalogIndex], unanswered: unanswered)
-                retainedCatalog[id] = openItems[catalogIndex]
+            if let published = publishedDrafts[id] {
+                // Use the latest action tombstones after all catalog reads have drained.
+                results[index].drafts.removeAll { published.contains($0) }
+                results[index].draftCount = results[index].drafts.count
+                if results[index].drafts.isEmpty { results[index].requiresDiscussionRecheck = false }
+            }
+            results[index].requiresCommentReview = commentReviewPending(id, account: account)
+            if results[index].requiresCommentReview {
+                results[index].canApprove = false
+                results[index].autoApproveReady = false
+                results[index].canConfirmReReview = false
+            }
+            if results[index].isAuthored {
+                applyReReviewPresentation(&results[index], unanswered: authoredUnansweredFeedback[id] ?? true)
             }
         }
-        items = Item.ordered(results.filter(\.needsAttention))
-        openItems = Item.ordered(openItems)
+        var records = retainedCatalog.mapValues { MRAttentionRecord(evidence: $0, catalog: $0) }
+        for item in results {
+            records[item.id] = MRAttentionRecord(evidence: item, catalog: retainedCatalog[item.id])
+        }
+        attentionRecords = records
+        attentionRecordsRevision = revision
+        attentionCandidateIDs = Set(results.map(\.id))
+        catalogIDs = Set(retainedCatalog.keys)
         dependencyPresentation.reconcileCatalog(requests: (openItems + items).compactMap(\.mergeRequest),
             account: .init(host: account.host, username: account.username, revision: revision))
         // A fast verifier needs its row to exist before it can apply its result
@@ -2082,8 +2101,9 @@ final class MergeRequestAttentionMonitor {
         confirmationStates[id]?.isBusy == true
     }
 
-    private func updateItem(_ id: Item.ID, _ change: (inout Item) -> Void) {
-        guard var item = items.first(where: { $0.id == id }) ?? openItems.first(where: { $0.id == id }) else { return }
+    private func updateItem(_ id: Item.ID, introducesAttention: Bool = true, _ change: (inout Item) -> Void) {
+        guard attentionRecordsRevision == glab.accountRevision, var record = attentionRecords[id] else { return }
+        var item = record.evidence
         change(&item)
         if let account {
             item.requiresCommentReview = commentReviewPending(id, account: account)
@@ -2109,11 +2129,9 @@ final class MergeRequestAttentionMonitor {
                         })
             }
         }
-        items.removeAll { $0.id == id }
-        if item.needsAttention { items.append(item) }
-        if let index = openItems.firstIndex(where: { $0.id == id }) { openItems[index] = item }
-        items = Item.ordered(items)
-        openItems = Item.ordered(openItems)
+        record.replaceEvidence(item)
+        attentionRecords[id] = record
+        if introducesAttention, item.needsAttention { attentionCandidateIDs.insert(id) }
     }
 
     /// Recheck visible confirmations against live discussions, including unchanged drafts.
@@ -2232,7 +2250,9 @@ final class MergeRequestAttentionMonitor {
     }
 
     private func updateReReviewPresentation(_ id: Item.ID, unanswered: Bool = false) {
-        updateItem(id) { applyReReviewPresentation(&$0, unanswered: unanswered) }
+        // A background presentation update can surface a current evaluated candidate,
+        // but cannot admit an otherwise retained-only catalog row.
+        updateItem(id, introducesAttention: false) { applyReReviewPresentation(&$0, unanswered: unanswered) }
     }
 
     func retryReReview(_ id: Item.ID) async {
