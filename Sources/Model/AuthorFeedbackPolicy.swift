@@ -23,7 +23,7 @@ struct AuthorFeedbackResidual: Sendable {
 /// informational thread needs no approval and grants no consent for other concerns. The caller
 /// supplies current evidence and rechecks live account/head/discussion/draft state before every write.
 struct AuthorFeedbackPolicy {
-    enum State: String, Codable, Sendable { case ready, needsChanges, needsVerification, waitingAcceptance, waitingPublication, disabled }
+    enum State: String, Codable, Sendable { case ready, needsChanges, needsVerification, needsReply, waitingAcceptance, waitingPublication, disabled }
 
     struct Finding: Identifiable, Equatable, Sendable {
         let id: Int
@@ -93,6 +93,7 @@ struct AuthorFeedbackPolicy {
         let gate: State? = !enabled ? .disabled : pendingDraftCount > 0 ? .waitingPublication : nil
         let verified = assessment.flatMap { (try? $0.reviewers(in: discussions, authorID: authorID, ignoredSuggestions: ignoredSuggestions)) == nil ? nil : $0 }
         let verdicts = Dictionary(uniqueKeysWithValues: (verified?.notes ?? []).map { ($0.noteID, $0) })
+        let missingReplies = verified?.missingPublishedReplyNoteIDs(in: discussions, authorID: authorID) ?? []
         let informationalThreads = Set(verified.map {
             informationalAcknowledgements(discussions: discussions, assessment: $0, authorID: authorID, ignoredSuggestions: ignoredSuggestions)
                 .filter(\.canResolve).compactMap(\.discussionID)
@@ -146,6 +147,7 @@ struct AuthorFeedbackPolicy {
                 : (localConcern ?? inherited.first { $0.state == .blocking } ?? inherited.first)
             let semanticState: State = verified == nil ? .needsVerification
                 : !blocked.isEmpty ? (explanation?.state == .blocking ? .needsChanges : .needsVerification)
+                : thread.contains(where: { missingReplies.contains($0.id ?? 0) }) ? .needsReply
                 : !waiting.isEmpty ? .waitingAcceptance : .ready
             let state = pendingDraftCount > 0 ? .waitingPublication
                 : semanticState == .ready ? (gate ?? .ready) : semanticState
@@ -157,10 +159,12 @@ struct AuthorFeedbackPolicy {
 
         for (index, discussion) in discussions.enumerated() where !represented.contains(index) {
             for note in discussion.notes {
-                guard let id = note.id, let author = note.author, let verdict = verdicts[id], isBlocking(verdict) else { continue }
+                guard let id = note.id, let author = note.author, let verdict = verdicts[id],
+                      isBlocking(verdict) || missingReplies.contains(id) && discussion.id?.isEmpty == false else { continue }
                 findings.append(Finding(id: id, discussionID: note.resolvable == true ? discussion.id : nil,
                                         reviewerID: author.id, reviewerUsername: handle(author),
                                         state: pendingDraftCount > 0 ? .waitingPublication
+                                            : missingReplies.contains(id) ? .needsReply
                                             : verdict.state == .blocking ? .needsChanges : .needsVerification,
                                         reason: verdict.reason, waitingForReviewers: [handle(author)], summary: verdict.summary, sourceNoteID: verdict.noteID))
             }

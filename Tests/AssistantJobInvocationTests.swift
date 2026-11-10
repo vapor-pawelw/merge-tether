@@ -3,6 +3,18 @@ import Testing
 @testable import GitLabTodos
 
 struct AssistantJobInvocationTests {
+    @Test(arguments: [false, true])
+    func feedbackInstructionsRequireAReplyInEachThreadWithoutRepeatingDeliveredFixes(_ push: Bool) {
+        let instructions = AssistantAutomationRunner.MRWorkflow.followUp.instructions(
+            allowFollowUpPush: push, autoResolveOwnReviewThreads: false)
+
+        #expect(instructions.contains("Each actionable feedback thread needs its own private reply draft"))
+        #expect(instructions.contains("For a simple verified fix, prefer a brief reply"))
+        #expect(instructions.contains("link to the original feedback or published explanation"))
+        #expect(instructions.contains("Follow applicable user skills and workflow instructions for reply wording"))
+        #expect(instructions.contains("Do not repeat a delivered code change"))
+    }
+
     @MainActor @Test(arguments: AutomationAssistant.allCases)
     func bothWorkersReceiveBoundedRequiredRuntimeRecoveryWithoutExtraPermissions(_ assistant: AutomationAssistant) async throws {
         // given

@@ -33,11 +33,12 @@ struct AuthorFeedbackCoordinatorTests {
         }
     }
 
-    @Test func sharedPublishedReplyLeavesReviewerAcceptancePendingWithoutDispatchingDuplicateWork() async throws {
+    @Test(arguments: [false, true])
+    func sharedPublishedReplyStillDispatchesTheReplyOwedInTheOriginalThread(_ approved: Bool) async throws {
         try await withFixture { fixture in
             // given
             fixture.settings.automation.authorFeedback.isEnabled = true
-            try fixture.write("approvals.json", #"{"approved_by":[]}"#)
+            if !approved { try fixture.write("approvals.json", #"{"approved_by":[]}"#) }
             try fixture.write("discussions.json", #"[{"id":"thread-a","notes":[{"id":10,"author":{"id":7,"username":"alice"},"system":false,"resolvable":true,"resolved":false,"body":"Fix shared access."}]},{"id":"thread-b","notes":[{"id":11,"author":{"id":3,"username":"me"},"system":false,"body":"The verified shared correction also answers note 10."}]}]"#)
             let assessment = try JSONDecoder().decode(ReReviewAssessment.self, from: Data(#"{"notes":[{"noteID":10,"state":"addressed","reason":"The current correction and published shared answer fully address this concern.","publishedReplyNoteID":11}]}"#.utf8))
             let coordinator = fixture.coordinator(assessment: assessment)
@@ -47,10 +48,10 @@ struct AuthorFeedbackCoordinatorTests {
             try await fixture.run(coordinator)
             // then
             let status = try #require(coordinator.status(projectID: 1, iid: 2))
-            #expect(status.phase == .complete && status.addressedNoteIDs == [10])
-            #expect(status.replyNoteIDs.isEmpty && status.followUpNoteIDs.isEmpty && requested.isEmpty)
-            #expect(status.waitingForReviewer && !status.needsAttention)
-            #expect(status.acceptedReviewerIDs.isEmpty)
+            #expect(status.phase == .complete && status.addressedNoteIDs.isEmpty)
+            #expect(status.replyNoteIDs == [10] && status.followUpNoteIDs == [10] && requested == [10])
+            #expect(status.needsAttention)
+            #expect(status.acceptedReviewerIDs == (approved ? [7] : []))
             #expect(fixture.resolutionPosts == 0 && fixture.reactionPosts == 0)
         }
     }
@@ -304,7 +305,7 @@ struct AuthorFeedbackCoordinatorTests {
             try await fixture.run(coordinator)
             let status = try #require(coordinator.status(projectID: 1, iid: 2))
             let fingerprint = ReviewVerdict.fingerprint(try fixture.discussions())
-            #expect(status.findings.first?.state == .disabled)
+            #expect(status.findings.first?.state == .needsReply)
             #expect(!status.reconciles(job, request: request, discussionFingerprint: fingerprint))
             #expect(AssistantJobExecution.hasUnfinishedWork(in: [job], for: job.key.work, username: "me",
                 currentRequest: request, feedbackStatus: status, discussionFingerprint: fingerprint))
@@ -607,7 +608,7 @@ struct AuthorFeedbackCoordinatorTests {
             #expect(status.followUpNoteIDs == expectedWork && requested == expectedWork)
             #expect(status.phase == (pendingDrafts > 0 ? .waitingPublication : .complete))
             #expect(status.needsAttention == !published)
-            if !readOnly { #expect(status.findings.first?.state == .waitingAcceptance) }
+            if !readOnly { #expect(status.findings.first?.state == (published ? .waitingAcceptance : .needsReply)) }
             #expect(status.findings.allSatisfy { !$0.canResolve })
             #expect(!fixture.resolved)
             let request = try JSONDecoder().decode(GitLabMergeRequest.self, from: Data(requestJSON.utf8))
@@ -639,7 +640,7 @@ struct AuthorFeedbackCoordinatorTests {
             #expect(status.replyNoteIDs == (requiresReply ? [10] : []))
             #expect(status.followUpNoteIDs == (requiresReply ? [10] : []))
             #expect(requested == (requiresReply ? [10] : []))
-            #expect(status.findings.first?.state == .waitingAcceptance)
+            #expect(status.findings.first?.state == (requiresReply ? .needsReply : .waitingAcceptance))
             #expect(status.findings.allSatisfy { !$0.canResolve })
             #expect(!fixture.resolved)
             let request = try JSONDecoder().decode(GitLabMergeRequest.self, from: Data(Fixture.request.utf8))

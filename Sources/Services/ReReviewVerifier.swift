@@ -4,7 +4,7 @@ import Foundation
 /// Supplied evidence is supplementary; absent proof must produce `uncertain`.
 enum ReReviewVerifier {
     enum VerificationError: Error, Equatable { case unavailable, failed, incompleteEvidence }
-    static let policyVersion = "scoped-code-questions-5"
+    static let policyVersion = "per-thread-feedback-replies-6"
 
     static let schema = #"{"type":"object","additionalProperties":false,"properties":{"notes":{"type":"array","items":{"type":"object","additionalProperties":false,"properties":{"noteID":{"type":"integer"},"state":{"type":"string","enum":["addressed","informational","blocking","uncertain"]},"reason":{"type":"string"},"summary":{"type":"string","minLength":1,"maxLength":200},"acceptanceNoteID":{"type":["integer","null"]},"publishedReplyNoteID":{"type":["integer","null"]},"informationalAcknowledgementSafe":{"type":"boolean"},"informationalPurpose":{"type":"string","enum":["concreteCodeReviewFeedback","reviewSummary","automatedReviewReport","other"]}},"required":["noteID","state","reason","summary","acceptanceNoteID","publishedReplyNoteID","informationalAcknowledgementSafe","informationalPurpose"]}}},"required":["notes"]}"#
 
@@ -303,8 +303,11 @@ enum ReReviewVerifier {
             For each addressed note, set publishedReplyNoteID to the exact ID of a later, substantive,
             published MR-author reply that answers ALL remaining expectations in that note. Read its
             full body and verify the correction or explanation against current evidence. The reply
-            may be in another discussion, including a shared answer to duplicate concrete findings;
-            do not require duplicate replies when the same concern is already fully answered.
+            may be in another discussion as supporting evidence for the verified correction, including
+            duplicate concrete findings. Each separate actionable feedback thread still needs its own
+            author response, including general comments; an answer elsewhere does not waive it. Keep
+            a verified correction addressed while its local reply is still owed. The worker can prepare
+            a brief reply linking the original feedback or published explanation, without repeating code work.
             Identify the matching concern and reply in reason. A link or claim of completion alone
             is insufficient. Never cite a private draft, system note, another person's comment,
             an unrelated answer or a promise of future work. Return null when no such reply is proven,

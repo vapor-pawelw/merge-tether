@@ -34,7 +34,9 @@ struct AuthorFeedbackView: View {
                                     }
                                 }
                                 Text(message(finding))
-                                if status.replyNoteIDs.contains(finding.id) { Text(.AuthorFeedback.authorFeedbackReplyNeeded) }
+                                if status.replyNoteIDs.contains(finding.id), finding.state != .needsReply {
+                                    Text(.AuthorFeedback.authorFeedbackReplyNeeded)
+                                }
                                 if let summary = AgentExplanation.summary(finding.summary) { Text(verbatim: summary).textSelection(.enabled) }
                                 if let reason = finding.reason { AgentDiagnosticDetails(reason: reason) }
                                 sourceEvidence(for: finding, status: status, source: source)
@@ -102,6 +104,7 @@ struct AuthorFeedbackView: View {
         case .waitingAcceptance: .AuthorFeedback.authorFeedbackWaitingAcceptance(finding.waitingForReviewers.map { "@" + $0 }.joined(separator: ", "))
         case .needsChanges: .AuthorFeedback.authorFeedbackNeedsChanges
         case .needsVerification: .AuthorFeedback.authorFeedbackNeedsVerification
+        case .needsReply: .AuthorFeedback.authorFeedbackReplyNeeded
         case .disabled: .AuthorFeedback.authorFeedbackDisabled
         case .waitingPublication: .AuthorFeedback.authorFeedbackWaitingPublication(item.draftCount)
         case .ready: .AuthorFeedback.authorFeedbackReady
