@@ -4,6 +4,29 @@ import MergeTetherRemote
 @testable import GitLabTodos
 
 @MainActor @Suite struct RemoteBoardAdapterTests {
+    @Test func aSafetyStorageFailureIsVisibleWithoutInvalidatingManualReadiness() throws {
+        let suite = "RemoteStorageStatusTests.\(UUID())"
+        let defaults = try #require(UserDefaults(suiteName: suite))
+        defer { defaults.removePersistentDomain(forName: suite) }
+        let settings = SettingsManager(defaults: defaults)
+        settings.onboardingCompleted = false
+        settings.automation.applyPreset(.manual, for: .codex)
+        settings.save()
+        let monitor = TodoMonitorService(settings: settings, glab: GlabService())
+        defer { monitor.stopTimer() }
+        let session = UUID()
+        let ready = RemoteBoardAdapter.board(monitor: monitor, session: session, account: "me@host")
+        let original = settings.automation
+        settings.recordPersistenceFailure("mergeSubmissions")
+        let paused = RemoteBoardAdapter.board(monitor: monitor, session: session, account: "me@host")
+        let readyWire = try #require(JSONSerialization.jsonObject(with: JSONEncoder().encode(ready)) as? [String: Any])
+        let pausedWire = try #require(JSONSerialization.jsonObject(with: JSONEncoder().encode(paused)) as? [String: Any])
+        #expect(readyWire["automationPaused"] as? Bool == false)
+        #expect(pausedWire["automationPaused"] as? Bool == true)
+        #expect(ready.partial == false && paused.partial == false)
+        #expect(settings.automation == original)
+    }
+
     @Test func phoneCompletionBindsTheCurrentCommentReviewAndDiscussionText() throws {
         var item = try item()
         item.drafts = []; item.draftCount = 0

@@ -140,6 +140,7 @@ import MergeTetherRemote
             }
         }
         result.updatedAt = monitor.lastRefresh
+        result.automationPaused = !monitor.settings.automaticActionsAllowed
         result.partial = monitor.boardRefreshState != .current || monitor.lastError != nil
             || monitor.attention.hasError || monitor.authoredMergeRequests.hasError || monitor.isLoading
             || monitor.attention.isLoading || monitor.authoredMergeRequests.isLoading

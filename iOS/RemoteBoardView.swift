@@ -14,6 +14,9 @@ struct RemoteBoardView: View {
                 else if let board = model.state.board {
                     VStack(alignment: .leading, spacing: 12) {
                         connectionStatus
+                        if board.automationPaused == true {
+                            Text(.Remote.remoteAutomationPaused).font(.caption).foregroundStyle(.orange).padding(.horizontal)
+                        }
                         if board.partial { Text(.Remote.remotePartial).font(.caption).foregroundStyle(.orange).padding(.horizontal) }
                         RemoteLaneBoard(lanes: board.lanes.filter { $0.id != .other }, onOpen: { selected = $0 },
                             onFinishCommentReview: finishCommentReview, canAct: { model.state.canAct(now: $0) })
