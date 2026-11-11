@@ -126,6 +126,18 @@ final class BoardAttentionPresenter {
             if item.needsChanges { add(.discussion, "changes-requested") }
             if let feedback = row.item.authorFeedbackStatus, feedback.needsAttention {
                 if feedback.phase == .failed { add(.failedWork, "author-feedback:" + feedback.fingerprint) }
+                if row.evidenceMatchesCatalogContext, row.item.isAuthored,
+                   let request = row.item.mergeRequest, request.author.username == input.username,
+                   request.webURL.isGitLabMergeRequest(host: input.host, iid: request.iid),
+                   feedback.head == request.sha, feedback.semanticContextFingerprint == request.semanticContextFingerprint,
+                   feedback.fingerprint == row.item.observedDiscussionFingerprint {
+                    for rootID in feedback.replyNoteIDs {
+                        add(.discussion, "author-reply:\(rootID):" + feedback.fingerprint)
+                    }
+                    for question in feedback.codeReviewRequests {
+                        add(.discussion, "feedback-question:\(question.sourceNoteID):" + UserAttentionSnapshot.digest(question.question))
+                    }
+                }
                 for finding in feedback.findings where [.needsChanges, .needsVerification].contains(finding.state) {
                     add(.discussion, "\(finding.id):" + UserAttentionSnapshot.digest(finding.reason ?? ""))
                 }

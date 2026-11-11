@@ -484,9 +484,11 @@ final class MergeRequestAttentionMonitor {
 
     var presentationSnapshot: PresentationSnapshot? {
         guard let account, isCurrent(account), attentionRecordsRevision == glab.accountRevision else { return nil }
+        let evidence = attentionRecords.mapValues { presentAuthorFeedback($0.evidence) }
+        let candidates = attentionCandidateIDs.compactMap { evidence[$0] }
         return .init(host: account.host, username: account.username, revision: glab.accountRevision,
-            evidence: attentionRecords.values.map { presentAuthorFeedback($0.evidence) },
-            attention: items.map(presentAuthorFeedback), catalog: openItems.map(presentAuthorFeedback))
+            evidence: Array(evidence.values),
+            attention: Item.ordered(candidates.filter(\.needsAttention)), catalog: openItems.map(presentAuthorFeedback))
     }
 
     private func presentAuthorFeedback(_ original: Item) -> Item {

@@ -112,15 +112,9 @@ import MergeTetherRemote
                     }
                     let mergeStatus = monitor.authoredMergeRequests.hasSyncedCurrentCatalog
                         ? matchingMergeStatus(for: row, statuses: monitor.authoredMergeRequests.requests) : nil
-                    if let conflict = mergeStatus?.request.mergeTrainConflict {
-                        card.presentation?.status = String(localized: .MergeActions.mergeActionsTrainRebaseConflict)
-                        card.detail = conflict.noteURL.absoluteString
-                    } else if mergeStatus?.request.mergeTrainEvidenceUnavailable == true {
-                        card.presentation?.status = String(localized: .MergeActions.mergeActionsTrainEvidenceUnavailable)
-                    } else if let title = mergeStatus?.submissionState.title {
-                        card.presentation?.status = String(localized: title)
-                        card.detail = String(localized: .MergeActions.mergeActionsConfirmHelp)
-                    }
+                    card = mergePresentation(card, item: item, status: mergeStatus,
+                        evidenceMatchesCatalogContext: row.evidenceMatchesCatalogContext,
+                        hasCurrentCatalog: monitor.authoredMergeRequests.hasSyncedCurrentCatalog)
                     let busy = presentation.actionsBlocked
                     if busy { card.actions = [] }
                     else {
@@ -163,6 +157,55 @@ import MergeTetherRemote
                                     statuses: [AuthoredMergeRequestStatus]) -> AuthoredMergeRequestStatus? {
         guard row.evidenceMatchesCatalogContext, let request = row.displayRequest else { return nil }
         return statuses.first { $0.matchesCurrentRequest(request) }
+    }
+
+    static func mergePresentation(_ original: RemoteCard, item: MergeRequestAttentionMonitor.Item,
+                                  status: AuthoredMergeRequestStatus?, evidenceMatchesCatalogContext: Bool = true,
+                                  hasCurrentCatalog: Bool = true) -> RemoteCard {
+        guard item.isAuthored, let request = item.mergeRequest, request.state == "opened" else { return original }
+        let checked = hasCurrentCatalog && evidenceMatchesCatalogContext && status?.matchesCurrentRequest(request) == true ? status : nil
+        let title: LocalizedStringResource
+        let detail: String?
+        let blocker: ManualMergeBlocker
+        if let conflict = checked?.request.mergeTrainConflict, conflict.matches(request) {
+            title = .MergeActions.mergeActionsTrainRebaseConflict
+            detail = conflict.noteURL.absoluteString
+            blocker = .prerequisite(.conflicts)
+        } else if checked?.request.mergeTrainEvidenceUnavailable == true {
+            title = .MergeActions.mergeActionsTrainEvidenceUnavailable
+            detail = nil
+            blocker = .prerequisite(.unknown)
+        } else if let stateTitle = checked?.submissionState.title {
+            title = stateTitle
+            detail = String(localized: .MergeActions.mergeActionsConfirmHelp)
+            blocker = .submission
+        } else {
+            let currentBlocker: ManualMergeBlocker? = !evidenceMatchesCatalogContext ? .context
+                : !hasCurrentCatalog ? .checking : item.manualMergeBlocker(using: status)
+            guard let currentBlocker else { return original }
+            if original.presentation?.working == true {
+                var busy = original
+                busy.actions.removeAll { [.merge, .enqueueMerge].contains($0.kind) }
+                return busy
+            }
+            title = currentBlocker.title
+            detail = nil
+            blocker = currentBlocker
+        }
+        var card = original
+        card.presentation = card.presentation ?? .init(repository: request.webURL.gitLabProjectPath.split(separator: "/").last.map(String.init) ?? "")
+        card.presentation?.status = String(localized: title)
+        if let detail { card.detail = detail }
+        else if card.detail.isEmpty { card.detail = String(localized: title) }
+        card.actions.removeAll { [.merge, .enqueueMerge].contains($0.kind) }
+        if card.primaryCTA == nil {
+            if case .feedback = blocker {
+                card.primaryCTA = .init(title: String(localized: .MRHumanAction.mrHumanActionActionReviewFeedback), destination: .feedback)
+            } else {
+                card.primaryCTA = .init(title: String(localized: .Board.boardDetails), destination: .overview)
+            }
+        }
+        return card
     }
 
     static func mergeActions(_ original: RemoteCard, item: MergeRequestAttentionMonitor.Item,

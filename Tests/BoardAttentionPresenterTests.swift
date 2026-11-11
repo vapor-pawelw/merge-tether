@@ -6,6 +6,30 @@ import Testing
 
 @MainActor
 struct BoardAttentionPresenterTests {
+    @Test(arguments: ["reply", "question"], ["current", "head", "body", "discussion", "catalog", "account"])
+    func semanticOnlyAttentionRequiresTheCurrentAccountAndFeedbackContext(_ kind: String, _ context: String) throws {
+        let request = try JSONDecoder().decode(GitLabMergeRequest.self, from: Data(#"{"project_id":1,"iid":2,"author":{"id":3,"username":"me","name":"Me"},"title":"Feature","web_url":"https://host/group/repo/-/merge_requests/2","state":"opened","draft":false,"sha":"head","source_branch":"feature","target_branch":"main","labels":[]}"#.utf8))
+        var item = MergeRequestAttentionMonitor.Item(id: .init(projectID: 1, iid: 2), title: request.title,
+            url: request.webURL, mergeRequest: request, isAuthored: true)
+        item.observedDiscussionFingerprint = "conversation"
+        item.authorFeedbackStatus = .init(head: context == "head" ? "old" : "head",
+            fingerprint: context == "discussion" ? "old" : "conversation",
+            semanticContextFingerprint: context == "body" ? "old" : request.semanticContextFingerprint,
+            phase: .complete,
+            codeReviewRequests: kind == "question" ? [.init(sourceNoteID: 20, sourceQuote: "Cover retries",
+                kind: .potentialDefect, summary: "Check retry identity", question: "Does retrying preserve identity?")] : [],
+            replyNoteIDs: kind == "reply" ? [20] : [])
+        let row = MergeRequestBoardSnapshot.Row(item: item, latestJob: nil, intents: [],
+            evidenceMatchesCatalogContext: context != "catalog")
+        let result = BoardAttentionPresenter.project(.init(account: "host/me/1", host: "host",
+            username: context == "account" ? "other" : "me", rows: [
+                .init(row: row, item: item, confirmationState: nil, busy: false, automaticDraftIDs: [],
+                    checking: false, automaticIntentIDs: [])
+            ], proposals: [], otherTodos: [], inboxLoading: false, assessingMentionNoteIDs: [],
+            assistantReady: true, assistantPreparing: true))
+        #expect(UserAttentionSnapshot(candidates: result.candidates).hasAttention == (context == "current"))
+    }
+
     @Test func confirmedAttentionIsObservableAndCannotCrossAnAccountEpoch() {
         let presenter = BoardAttentionPresenter()
         let changed = OSAllocatedUnfairLock(initialState: false)

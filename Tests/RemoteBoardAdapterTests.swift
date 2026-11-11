@@ -30,6 +30,57 @@ import MergeTetherRemote
         #expect(!request.matches(current))
     }
 
+    @Test(arguments: ["reply", "question", "failed", "dependencies", "unavailable", "context", "staleCatalog", "train", "queued", "ready"])
+    func phoneMergeReadinessExplainsTheExactHeldGateInsteadOfNeutralMonitoring(_ gate: String) throws {
+        var request = try JSONDecoder().decode(GitLabMergeRequest.self, from: Data(#"{"project_id":1,"iid":2,"author":{"id":3,"username":"me","name":"Me"},"title":"Feature","labels":[],"web_url":"https://gitlab.example.test/g/p/-/merge_requests/2","state":"opened","draft":false,"sha":"aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa","source_project_id":1,"target_project_id":1,"source_branch":"feature","target_branch":"main","detailed_merge_status":"mergeable","has_conflicts":false,"user":{"can_merge":true}}"#.utf8))
+        if gate == "train" {
+            request.mergeTrainConflict = .init(context: .init(request), noteID: 10,
+                sourceSHA: request.sha!, targetSHA: String(repeating: "b", count: 40))
+        }
+        let approvals = try JSONDecoder().decode(GitLabMergeRequestApprovalState.self,
+            from: Data(#"{"rules":[{"approvals_required":2,"approved":true}]}"#.utf8))
+        let status = AuthoredMergeRequestStatus(request: request, approvals: approvals, discussionsResolved: true,
+            projectRequiresResolvedDiscussions: true, autoMergeEnabled: false,
+            dependencyReadiness: gate == "dependencies" ? .waitingForDependencies : .ready,
+            action: .enqueue, submissionState: gate == "queued" ? .queued : .none)
+        var item = MergeRequestAttentionMonitor.Item(id: .init(projectID: 1, iid: 2), title: request.title,
+            url: request.webURL, humanActionRequired: false, mergeRequest: request, isAuthored: true)
+        item.observedDiscussionFingerprint = "current-conversation"
+        if ["reply", "question", "failed"].contains(gate) {
+            item.authorFeedbackStatus = .init(head: request.sha!, fingerprint: "current-conversation",
+                semanticContextFingerprint: request.semanticContextFingerprint, phase: gate == "failed" ? .failed : .complete,
+                codeReviewRequests: gate == "question" ? [.init(sourceNoteID: 20, sourceQuote: "Cover retries",
+                    kind: .potentialDefect, summary: "Check retry context", question: "Does the retry preserve identity?")] : [],
+                replyNoteIDs: gate == "reply" ? [20] : [])
+        }
+        let row = MergeRequestBoardSnapshot.Row(item: item, latestJob: nil, intents: [])
+        let model = MRCardPresentation(row: row, reviewingContext: ReviewingContext(row: row, assistantReady: true),
+            allowsRemoval: false, assistantReady: true)
+        let original = RemoteBoardAdapter.presentation(RemoteBoardAdapter.card(item, account: "me@gitlab.example.test"), model: model)
+        #expect(original.presentation?.status == String(localized: .AutomationProgress.progressMonitoring))
+        let card = RemoteBoardAdapter.mergePresentation(original, item: item, status: gate == "unavailable" ? nil : status,
+            evidenceMatchesCatalogContext: gate != "context", hasCurrentCatalog: gate != "staleCatalog")
+        if gate == "ready" {
+            #expect(card == original)
+        } else {
+            let expected: LocalizedStringResource = switch gate {
+            case "reply": ManualMergeBlocker.feedback(.reply).title
+            case "question": ManualMergeBlocker.feedback(.codeReview).title
+            case "failed": ManualMergeBlocker.feedback(.verificationFailed).title
+            case "dependencies": ManualMergeBlocker.prerequisite(.dependencies).title
+            case "train": .MergeActions.mergeActionsTrainRebaseConflict
+            case "queued": .MergeActions.mergeActionsQueued
+            case "context": ManualMergeBlocker.context.title
+            default: ManualMergeBlocker.checking.title
+            }
+            #expect(card.presentation?.status == String(localized: expected))
+            #expect(!card.actions.contains { [.merge, .enqueueMerge].contains($0.kind) })
+            if ["reply", "question", "failed"].contains(gate) { #expect(card.primaryCTA?.destination == .feedback) }
+            #expect(!card.actions.contains { $0.kind == .verify })
+            if gate == "train" { #expect(card.detail == request.mergeTrainConflict?.noteURL.absoluteString) }
+        }
+    }
+
     @Test(arguments: ["conflict", "unavailable", "uncertain"], ["same", "target", "description", "draft", "host", "author", "stale-catalog"])
     func mergeStatusForThePhoneRequiresTheDisplayedContext(_ reason: String, _ change: String) throws {
         // given

@@ -1,10 +1,77 @@
 import Foundation
 import Observation
 import Testing
+import MergeTetherRemote
 @testable import GitLabTodos
 
 @MainActor
 @Suite struct ConfirmationQueueTests {
+    @Test(arguments: ["reply", "question", "clean"])
+    func semanticFeedbackOnAResolvedMRReachesTheBoardAndPhoneWithoutRawAttentionFlags(_ outcome: String) async throws {
+        let question = ReReviewAssessment.CodeReviewRequest(sourceNoteID: 20, sourceQuote: "Cover retries",
+            kind: .potentialDefect, summary: "Check the retry contract", question: "Does retrying preserve the request identity?")
+        let assessment = ReReviewAssessment(notes: [.init(noteID: 20,
+            state: outcome == "clean" ? .informational : .addressed,
+            reason: "The current semantic feedback outcome is independent of GitLab thread resolution.")],
+            codeReviewRequests: outcome == "question" ? [question] : nil)
+        let harness = try makeHarness(assistantWorked: false, authored: true, assessment: assessment)
+        defer { harness.cleanUp() }
+        harness.settings.automation.authorFeedback.isEnabled = true
+        harness.settings.automation.autoReReviewEnabled = false
+        let answer = outcome == "question"
+            ? #",{"id":21,"author":{"id":3},"system":false,"resolvable":false,"body":"The retry correction and focused regression are verified."}"# : ""
+        try harness.write("discussions.json", #"[{"id":"general","notes":[{"id":20,"author":{"id":8,"username":"reviewer"},"system":false,"resolvable":false,"body":"Cover retries"}\#(answer)]}]"#)
+        try await harness.poll()
+        let coordinator = try #require(harness.monitor.authorFeedbackCoordinator)
+        let deadline = ContinuousClock.now + .seconds(5)
+        while (coordinator.status(projectID: 1, iid: 2)?.phase != .complete || harness.monitor.isLoading), ContinuousClock.now < deadline {
+            try await Task.sleep(for: .milliseconds(20))
+        }
+        #expect(coordinator.status(projectID: 1, iid: 2)?.phase == .complete)
+        #expect(harness.monitor.items.isEmpty)
+        let snapshot = try #require(harness.monitor.presentationSnapshot)
+        #expect(snapshot.attention.isEmpty == (outcome == "clean"))
+        let request = try JSONDecoder().decode(GitLabMergeRequest.self, from: harness.gitlab.data("request.json"))
+        let approvals = try JSONDecoder().decode(GitLabMergeRequestApprovalState.self,
+            from: Data(#"{"rules":[{"approvals_required":1,"approved":true}]}"#.utf8))
+        let checked = AuthoredMergeRequestStatus(request: request, approvals: approvals, discussionsResolved: true,
+            projectRequiresResolvedDiscussions: true, autoMergeEnabled: false, dependencyReadiness: .ready, action: .enqueue)
+        let account = MRBoardProjector.Account(host: host, username: "me", revision: harness.glab.accountRevision)
+        var input = MRBoardProjector.Input(account: account)
+        input.attention = snapshot
+        input.authored = [checked]
+        input.automation = harness.settings.automation
+        input.assistantReady = true
+        input.reviewAssistantReady = true
+        let projector = MRBoardProjector(input: input)
+        let presenter = BoardAttentionPresenter()
+        presenter.updateAttention(projector.pendingUserAttention)
+        let attention = presenter.userAttention(account: account.presentationKey)
+        let row = try #require(projector.board(humanAttention: attention).own.first)
+        let model = MRCardPresentation(row: row, reviewingContext: projector.reviewingContext(for: row),
+            allowsRemoval: false, assistantReady: true)
+        let human = try #require(model.humanAction)
+        #expect(human.kind == (outcome == "clean" ? .merge : .feedback))
+        let service = TodoMonitorService(settings: harness.settings, glab: harness.glab)
+        defer { service.stopTimer() }
+        let card = RemoteBoardAdapter.mergeActions(
+            RemoteBoardAdapter.presentation(RemoteBoardAdapter.card(row.item, account: "me@\(host)"), model: model),
+            item: row.item, status: checked, monitor: service, account: "me@\(host)")
+        #expect(card.primaryCTA?.destination == (outcome == "clean" ? .overview : .feedback))
+        #expect(card.actions.contains { $0.kind == .enqueueMerge } == (outcome == "clean"))
+        #expect(row.item.canOfferManualMerge(using: checked) == (outcome == "clean"))
+        var staleAccount = MRBoardProjector.Input(account: .init(host: host, username: "other", revision: account.revision + 1))
+        staleAccount.attention = snapshot
+        #expect(MRBoardProjector(input: staleAccount).board().own.isEmpty)
+        var fields = try #require(JSONSerialization.jsonObject(with: JSONEncoder().encode(request)) as? [String: Any])
+        fields["sha"] = String(repeating: "b", count: 40)
+        let changed = try JSONDecoder().decode(GitLabMergeRequest.self, from: JSONSerialization.data(withJSONObject: fields))
+        let changedStatus = AuthoredMergeRequestStatus(request: changed, approvals: approvals, discussionsResolved: true,
+            projectRequiresResolvedDiscussions: true, autoMergeEnabled: false, dependencyReadiness: .ready, action: .enqueue)
+        #expect(!row.item.canOfferManualMerge(using: changedStatus))
+        #expect(harness.gitlab.requests.allSatisfy { $0.method == "GET" })
+    }
+
     @Test(arguments: ["fresh", "legacy110", "legacyFlags", "enabled", "disabled"])
     func completedManualReviewDoesNotGrantAutomaticWriteConsent(_ installation: String) async throws {
         // given
