@@ -4,7 +4,41 @@
   "compatibility_date": "2026-07-30",
   "workers_dev": true,
   "preview_urls": false,
-  "durable_objects": { "bindings": [{ "name": "ROOMS", "class_name": "RelayRoom" }] },
-  "migrations": [{ "tag": "v1", "new_sqlite_classes": ["RelayRoom"] }],
-  "observability": { "enabled": false }
+  "durable_objects": {
+    "bindings": [
+      {
+        "name": "ROOMS",
+        "class_name": "RelayRoom"
+      }
+    ]
+  },
+  "migrations": [
+    {
+      "tag": "v1",
+      "new_sqlite_classes": [
+        "RelayRoom"
+      ]
+    }
+  ],
+  "observability": {
+    "enabled": false
+  },
+  "ratelimits": [
+    {
+      "name": "IP_ADMISSION",
+      "namespace_id": "112601",
+      "simple": {
+        "limit": 30,
+        "period": 60
+      }
+    },
+    {
+      "name": "DEPLOYMENT_ADMISSION",
+      "namespace_id": "112602",
+      "simple": {
+        "limit": 120,
+        "period": 60
+      }
+    }
+  ]
 }

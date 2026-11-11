@@ -116,6 +116,10 @@ upgrade; this experiment is specifically intended to establish compatibility.
   the previous socket of the same role. Transport heartbeats use hibernation
   auto-responses; the visible phone's end-to-end checks wake the room briefly.
   These bounds reduce accidental load; they are not a global abuse-prevention system.
+- Connection attempts are limited before authentication to approximately 30/IP/minute
+  and 120/deployment/minute per Cloudflare location. Missing admission bindings
+  fail closed. These are not billing caps; keep the account on Workers Free and
+  never distribute the private operator invitation with source or an IPA.
 - Encrypted command IDs are deduplicated within the host process. A host-session
   ID rejects stale commands after restart. At 256 commands the host refuses new
   ones rather than forgetting IDs. There is no offline command queue.

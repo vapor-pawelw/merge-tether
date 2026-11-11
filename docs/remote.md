@@ -75,9 +75,26 @@ secret, room and sessions. Disabling access stops transport before deleting trus
 a Keychain deletion failure is reported and cannot promise revocation after a
 restart. Already-started GitLab requests can still finish.
 
+The relay is self-hosted: public source does not provide a shared hosted service.
+Keep each operator invitation private, outside source control and application builds.
+An endpoint URL is public information, not an authorization credential.
+
 The operator invitation gates admission, not access to another user's inbox.
 Sharing it broadly permits others to consume the deployment's free quota. This MVP
 has no public self-service signup, account recovery or per-user quota service.
+Rotate the operator invitation if it leaks; rotating only the pairing QR does not
+revoke the deployment invitation. Clients then need the replacement invitation.
+
+Before token hashing or room allocation, Cloudflare rate-limit bindings restrict
+connection attempts to approximately 30 per client IP and 120 for the deployment
+per minute, independently in each Cloudflare location. Missing or failing bindings
+reject admission; HTTP 429/503 responses include a 60-second retry hint. Separate
+production and diagnostic bindings use separate namespace IDs. Keep namespace IDs
+unique within your account when deploying another instance. These limits reduce
+unauthorized load but do not run before the Worker invocation and cannot guarantee
+service availability or cap billing. A distributed attack can still exhaust Free
+quotas. Existing per-socket message bounds are not per-user quotas and reset on
+reconnect. Do not treat them as protection for a leaked invitation on a paid plan.
 
 ## Deploy on Cloudflare Free
 
@@ -87,7 +104,11 @@ The production Worker source and deployment configuration live in
 and static probe assets; its pinned npm tooling and integration tests cover both.
 
 Use a Cloudflare account with Workers Free and SQLite Durable Objects Free.
-Do not enable a paid subscription. Free quotas are shared across the deployment;
+Do not enable a paid subscription. Verify **Workers Free** in the Cloudflare
+account dashboard; deployment configuration does not select or enforce that plan.
+If the account is on Workers Paid, this relay cannot promise zero usage overages.
+No shared token should be bundled into a public IPA or distributed to repository users.
+Free quotas are shared across the deployment;
 exhaustion interrupts service rather than guaranteeing unlimited free capacity.
 The current limits and billing terms are maintained by Cloudflare:
 https://developers.cloudflare.com/durable-objects/platform/pricing/

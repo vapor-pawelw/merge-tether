@@ -23,3 +23,6 @@ release/
 
 ## Local agent notes and configuration
 /.agents/
+
+# Local Cloudflare deployment cache and account metadata
+.wrangler/

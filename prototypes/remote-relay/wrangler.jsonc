@@ -3,8 +3,46 @@
   "main": "../../Services/RemoteRelay/worker.mjs",
   "compatibility_date": "2026-07-30",
   "workers_dev": true,
-  "assets": { "directory": "./public", "binding": "ASSETS", "run_worker_first": true },
-  "durable_objects": { "bindings": [{ "name": "ROOMS", "class_name": "RelayRoom" }] },
-  "migrations": [{ "tag": "v1", "new_sqlite_classes": ["RelayRoom"] }],
-  "observability": { "enabled": false }
+  "assets": {
+    "directory": "./public",
+    "binding": "ASSETS",
+    "run_worker_first": true
+  },
+  "durable_objects": {
+    "bindings": [
+      {
+        "name": "ROOMS",
+        "class_name": "RelayRoom"
+      }
+    ]
+  },
+  "migrations": [
+    {
+      "tag": "v1",
+      "new_sqlite_classes": [
+        "RelayRoom"
+      ]
+    }
+  ],
+  "observability": {
+    "enabled": false
+  },
+  "ratelimits": [
+    {
+      "name": "IP_ADMISSION",
+      "namespace_id": "112603",
+      "simple": {
+        "limit": 30,
+        "period": 60
+      }
+    },
+    {
+      "name": "DEPLOYMENT_ADMISSION",
+      "namespace_id": "112604",
+      "simple": {
+        "limit": 120,
+        "period": 60
+      }
+    }
+  ]
 }

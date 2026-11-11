@@ -1,6 +1,7 @@
 import { test, before, after } from 'node:test';
 import assert from 'node:assert/strict';
 import { Miniflare } from 'miniflare';
+import { admissionLimits } from './rate-limits.mjs';
 import { readFile } from 'node:fs/promises';
 
 const access = 'a'.repeat(43);
@@ -10,6 +11,7 @@ before(async () => {
   runtime = new Miniflare({
     modules: true, script: await readFile(new URL('../../../Services/RemoteRelay/worker.mjs', import.meta.url), 'utf8'),
     compatibilityDate: '2026-07-30', bindings: { RELAY_ACCESS_TOKEN: access },
+    ratelimits: admissionLimits,
     durableObjects: { ROOMS: { className: 'RelayRoom', useSQLite: true } },
   });
   await runtime.ready;

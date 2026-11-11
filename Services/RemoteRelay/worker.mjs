@@ -7,6 +7,22 @@ const securityHeaders = {
   'Content-Security-Policy': "default-src 'self'; script-src 'self'; style-src 'self'; connect-src 'self'; img-src 'self'; frame-ancestors 'none'; base-uri 'none'; form-action 'none'",
 };
 
+function admissionResponse(status, message) {
+  return new Response(message, { status, headers: { 'Cache-Control': 'no-store', 'Retry-After': '60' } });
+}
+
+async function admit(request, env) {
+  // These approximate, per-location counters reduce abuse; Workers Free is the billing boundary.
+  if (!env.IP_ADMISSION || !env.DEPLOYMENT_ADMISSION) return admissionResponse(503, 'Relay admission is not configured');
+  try {
+    const ip = request.headers.get('CF-Connecting-IP') ?? 'unknown';
+    if (!(await env.IP_ADMISSION.limit({ key: ip })).success) return admissionResponse(429, 'Connection attempt limit reached');
+    if (!(await env.DEPLOYMENT_ADMISSION.limit({ key: 'relay-connect' })).success) return admissionResponse(429, 'Relay connection limit reached');
+  } catch {
+    return admissionResponse(503, 'Relay admission is unavailable');
+  }
+}
+
 export default {
   async fetch(request, env) {
     const url = new URL(request.url);
@@ -17,6 +33,8 @@ export default {
       for (const [name, value] of Object.entries(securityHeaders)) response.headers.set(name, value);
       return response;
     }
+    const denied = await admit(request, env);
+    if (denied) return denied;
     if (!keyPattern.test(env.RELAY_ACCESS_TOKEN ?? '')) return new Response('Relay invitation is not configured', { status: 503 });
     if (request.method !== 'GET' || request.headers.get('Upgrade')?.toLowerCase() !== 'websocket') {
       return new Response('WebSocket required', { status: 426 });

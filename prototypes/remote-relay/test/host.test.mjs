@@ -5,6 +5,7 @@ import { mkdtemp, readFile, rm, access } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { Miniflare } from 'miniflare';
+import { admissionLimits } from './rate-limits.mjs';
 import { connectPair } from '../public/connection.mjs';
 import { parsePairingURL } from '../public/probe.mjs';
 
@@ -12,6 +13,7 @@ test('R2/R3: host pairs without logging credentials and removes private pairing 
   const runtime = new Miniflare({
     modules: true, script: await readFile(new URL('../../../Services/RemoteRelay/worker.mjs', import.meta.url), 'utf8'),
     compatibilityDate: '2026-07-30', bindings: { RELAY_ACCESS_TOKEN: 'a'.repeat(43) },
+    ratelimits: admissionLimits,
     durableObjects: { ROOMS: { className: 'RelayRoom', useSQLite: true } },
   });
   const directory = await mkdtemp(join(tmpdir(), 'mt-probe-test-'));

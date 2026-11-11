@@ -6,6 +6,8 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 
 ## Unreleased
 
+- Limit connection attempts before relay authentication, fail closed when admission checks are unavailable, and document the Workers Free boundary for avoiding usage overages.
+
 - Avoid duplicate author replies to verified review summaries with no new requirement, and show specific feedback merge blockers with recheck or review actions.
 - Show compact GitLab connection warnings with retry or targeted setup actions and expandable diagnostics, preserving the previous inbox during network failures.
 - Recognize exactly recorded app-generated comments and their AI-only threads without reclassification, while keeping manual comments and publication permissions separate.
