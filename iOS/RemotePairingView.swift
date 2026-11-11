@@ -10,13 +10,22 @@ struct RemotePairingView: View {
         VStack(spacing: 22) {
             Image(systemName: "laptopcomputer.and.iphone").font(.system(size: 60)).foregroundStyle(.tint)
             Text(.Remote.remotePair).font(.title2.bold())
-            Text(.Remote.remotePairHelp).foregroundStyle(.secondary).multilineTextAlignment(.center)
-            if DataScannerViewController.isSupported {
-                Button(.Remote.remoteScan) { scanning = true }.buttonStyle(.borderedProminent)
+            if let origin = model.relayConfiguration.origin {
+                Text(.Remote.remoteRelayConfigured).font(.headline)
+                Text(verbatim: origin.absoluteString).font(.caption).textSelection(.enabled)
+                Text(.Remote.remoteRelayOwnership).font(.caption).foregroundStyle(.secondary).multilineTextAlignment(.center)
+                Text(.Remote.remotePairHelp).foregroundStyle(.secondary).multilineTextAlignment(.center)
+                if DataScannerViewController.isSupported {
+                    Button(.Remote.remoteScan) { scanning = true }.buttonStyle(.borderedProminent)
+                }
+                SecureField(.Remote.remotePaste, text: $link).textInputAutocapitalization(.never).autocorrectionDisabled().textFieldStyle(.roundedBorder)
+                Button(.Remote.remoteConnect) { model.offerPairing(link) }.buttonStyle(.bordered).disabled(link.isEmpty)
+            } else {
+                Text(model.relayConfiguration.status == .missing ? .Remote.remoteRelayMissing : .Remote.remoteRelayInvalid)
+                    .foregroundStyle(.secondary).multilineTextAlignment(.center)
             }
-            SecureField(.Remote.remotePaste, text: $link).textInputAutocapitalization(.never).autocorrectionDisabled().textFieldStyle(.roundedBorder)
-            Button(.Remote.remoteConnect) { model.offerPairing(link) }.buttonStyle(.bordered).disabled(link.isEmpty)
-            if model.error { Text(.Remote.remoteInvalidPairing).font(.caption).foregroundStyle(.red) }
+            if model.relayMismatch { Text(.Remote.remoteRelayMismatch).font(.caption).foregroundStyle(.orange) }
+            else if model.error { Text(.Remote.remoteInvalidPairing).font(.caption).foregroundStyle(.red) }
         }.padding(28)
             .alert(Text(.Remote.remotePair), isPresented: Binding(
                 get: { model.pairingCandidate != nil }, set: { if !$0 { model.pairingCandidate = nil } }

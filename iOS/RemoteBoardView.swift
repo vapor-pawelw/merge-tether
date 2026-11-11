@@ -78,6 +78,12 @@ struct RemoteBoardView: View {
                                         .accessibilityIdentifier("remote.refresh")
                                         .disabled(status != .connected)
                                     Menu {
+                                        if let origin = model.relayConfiguration.origin {
+                                            Text(.Remote.remoteRelayConfigured)
+                                            Text(verbatim: origin.absoluteString)
+                                            Text(.Remote.remoteRelayOwnership)
+                                            Divider()
+                                        }
                                         reconnectButton.disabled(status == .connecting)
                                     } label: { Image(systemName: "ellipsis.circle") }
                                         .accessibilityLabel(Text(.Remote.remoteConnectionMenu))

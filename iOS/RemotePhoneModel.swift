@@ -14,6 +14,8 @@ extension RemoteConnection: RemotePhoneTransport {}
 enum RemotePhoneConnectionStatus { case unpaired, connecting, connected, offline, failed }
 
 @MainActor @Observable final class RemotePhoneModel {
+    let relayConfiguration: RemoteRelayConfiguration
+    private(set) var relayMismatch = false
     var state = RemotePhoneState()
     var paired = false
     var error = false
@@ -46,6 +48,7 @@ enum RemotePhoneConnectionStatus { case unpaired, connecting, connected, offline
     private var connectionFailed = false
     private let now: () -> Date
     init(
+        relayConfiguration: RemoteRelayConfiguration = .bundled(),
         loadPairing: () throws -> RemotePairing? = { try RemotePairingStore(service: "com.vaporpw.MergeTether.iOS.remote").load() },
         savePairing: @escaping (RemotePairing) throws -> Void = { try RemotePairingStore(service: "com.vaporpw.MergeTether.iOS.remote").save($0) },
         loadRecovery: () throws -> RemoteCommandRecovery? = { try RemoteCommandRecoveryStore(service: "com.vaporpw.MergeTether.iOS.remote").load() },
@@ -54,11 +57,16 @@ enum RemotePhoneConnectionStatus { case unpaired, connecting, connected, offline
         makeConnection: @escaping (RemotePairing) throws -> any RemotePhoneTransport = { try RemoteConnection(pairing: $0, role: .phone) },
         now: @escaping () -> Date = Date.init
     ) {
+        self.relayConfiguration = relayConfiguration
         self.savePairing = savePairing; self.makeConnection = makeConnection; self.now = now
         self.saveRecovery = saveRecovery; self.removeRecovery = removeRecovery
+        guard relayConfiguration.status == .configured else { bindResultAcknowledgement(); return }
         do {
             let loaded = try loadPairing()
             guard loaded == nil || loaded?.role == .phone else { throw RemoteProtocolError.invalid }
+            if let loaded, !relayConfiguration.accepts(origin: loaded.origin) {
+                relayMismatch = true; bindResultAcknowledgement(); return
+            }
             pairing = loaded; paired = loaded != nil
             if let loaded, let previous = try loadRecovery(), previous.pairingSession == loaded.sessionID {
                 recovery = previous; shouldRecoverCommand = true
@@ -70,17 +78,21 @@ enum RemotePhoneConnectionStatus { case unpaired, connecting, connected, offline
     func offerPairing(_ raw: String) {
         do {
             guard let url = URL(string: raw.trimmingCharacters(in: .whitespacesAndNewlines)) else { throw RemoteProtocolError.invalid }
-            pairingCandidate = try RemotePairing(url: url, now: now())
-            error = false
+            let candidate = try RemotePairing(url: url, now: now())
+            guard relayConfiguration.accepts(origin: candidate.origin) else {
+                pairingCandidate = nil; relayMismatch = true; error = true; return
+            }
+            pairingCandidate = candidate; relayMismatch = false; error = false
         } catch { pairingCandidate = nil; self.error = true }
     }
     @discardableResult func acceptPairing() -> Bool {
-        guard let pairing = pairingCandidate, pairing.role == .phone, pairing.invitationIsValid(now: now()) else {
+        guard let pairing = pairingCandidate, pairing.role == .phone, pairing.invitationIsValid(now: now()),
+              relayConfiguration.accepts(origin: pairing.origin) else {
             error = true; return false
         }
         do { try savePairing(pairing) } catch { self.error = true; return false }
         disconnect(); self.pairing = pairing; state = RemotePhoneState(); paired = true; error = false
-        recovery = nil; shouldRecoverCommand = false; recoveryUnavailable = false
+        recovery = nil; shouldRecoverCommand = false; recoveryUnavailable = false; relayMismatch = false
         bindResultAcknowledgement()
         pairingCandidate = nil; pairingRevision = UUID(); connect()
         // Trust was saved even if the transport cannot start yet.
@@ -98,7 +110,7 @@ enum RemotePhoneConnectionStatus { case unpaired, connecting, connected, offline
         disconnect(); connect()
     }
     func connect() {
-        guard connection == nil, let pairing else { return }
+        guard connection == nil, let pairing, relayConfiguration.accepts(origin: pairing.origin) else { return }
         connectingUntil = now().addingTimeInterval(45); connectionFailed = false; error = false
         do {
             let connection = try makeConnection(pairing)

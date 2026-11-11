@@ -8,6 +8,7 @@ usage() {
 Usage: scripts/build-release.sh [X.Y.Z] [options]
   --build-number N             Positive integer (default: Project.swift setting)
   --platform macos|ios|all     Separate platform artifacts (default: macos)
+  --relay-config FILE         External origin-only JSON (required for iOS distribution)
   --signing-identity NAME|SHA  Developer ID Application identity for macOS
   --ios-signing-identity NAME|SHA  Apple Distribution identity for iOS
   --team-id ID                Distribution team for the selected platforms
@@ -28,11 +29,12 @@ REPO_ROOT="$(cd "${SCRIPT_DIR}/.." && pwd)"
 cd "${REPO_ROOT}"
 VERSION="" BUILD_NUMBER="" PLATFORM="macos" UNSIGNED=0
 SIGNING_IDENTITY="" IOS_SIGNING_IDENTITY="" TEAM_ID="" NOTARY_PROFILE="" IOS_EXPORT_OPTIONS=""
+RELAY_CONFIG="${TUIST_MERGETETHER_RELAY_CONFIG_FILE:-}"
 while [[ $# -gt 0 ]]; do
     case "$1" in
         --help|-h) usage; exit 0 ;;
         --unsigned) UNSIGNED=1; shift ;;
-        --build-number|--platform|--signing-identity|--ios-signing-identity|--team-id|--notary-profile|--ios-export-options)
+        --build-number|--platform|--signing-identity|--ios-signing-identity|--team-id|--notary-profile|--ios-export-options|--relay-config)
             [[ $# -ge 2 && -n "$2" && "$2" != --* ]] || fail "missing value for $1 (see --help)"
             case "$1" in
                 --build-number) BUILD_NUMBER="$2" ;;
@@ -42,6 +44,7 @@ while [[ $# -gt 0 ]]; do
                 --team-id) TEAM_ID="$2" ;;
                 --notary-profile) NOTARY_PROFILE="$2" ;;
                 --ios-export-options) IOS_EXPORT_OPTIONS="$2" ;;
+                --relay-config) RELAY_CONFIG="$2" ;;
             esac
             shift 2 ;;
         -*) fail "unknown option $1 (see --help)" ;;
@@ -77,6 +80,36 @@ if len(matches) != 1:
 print(matches[0][0])
 ' "$requested" "$prefix"
 }
+if [[ -n "$RELAY_CONFIG" ]]; then
+    [[ -f "$RELAY_CONFIG" ]] || fail "--relay-config must name a readable external origin-only JSON file"
+    RELAY_CONFIG="$(python3 - "$RELAY_CONFIG" "$REPO_ROOT" <<'PY'
+import json, pathlib, sys, urllib.parse
+try:
+    path = pathlib.Path(sys.argv[1]).resolve(strict=True)
+    root = pathlib.Path(sys.argv[2]).resolve()
+    if path == root or root in path.parents:
+        raise ValueError()
+    with path.open() as source:
+        config = json.load(source)
+    if not isinstance(config, dict) or set(config) != {'origin'} or not isinstance(config['origin'], str):
+        raise ValueError()
+    raw = config['origin'].strip()
+    parts = urllib.parse.urlsplit(raw)
+    if (not raw or not raw.isascii() or any(c.isspace() or ord(c) < 32 for c in raw)
+            or '%' in raw or '\\' in raw or '?' in raw or '#' in raw
+            or parts.scheme.lower() != 'https' or not parts.hostname or parts.username is not None
+            or parts.password is not None or parts.path not in ('', '/')
+            or (parts.port is not None and not 1 <= parts.port <= 65535)):
+        raise ValueError()
+except (OSError, ValueError, TypeError):
+    sys.exit('error: relay config must be outside the checkout and contain only an HTTPS origin without credentials, path, query or fragment; never include tokens or keys')
+print(path)
+PY
+)"
+fi
+if [[ "$IOS" -eq 1 && "$UNSIGNED" -eq 0 && -z "$RELAY_CONFIG" ]]; then
+    fail "iOS distribution requires --relay-config with your own relay origin; use --unsigned only for explicit inspection"
+fi
 if [[ "$UNSIGNED" -eq 0 ]]; then
     [[ -n "$TEAM_ID" ]] || fail "--team-id is required for distribution"
     for tool in security codesign xcrun; do command -v "$tool" >/dev/null 2>&1 || fail "missing $tool"; done
@@ -123,7 +156,7 @@ mkdir -p "$SCRATCH/artifacts"
 ARTIFACTS=()
 COMMON_SETTINGS=("MARKETING_VERSION=${VERSION}" "CURRENT_PROJECT_VERSION=${BUILD_NUMBER}")
 echo "==> Generating project for ${VERSION} (${BUILD_NUMBER}), platform ${PLATFORM}"
-tuist generate --no-open
+TUIST_MERGETETHER_RELAY_CONFIG_FILE="$RELAY_CONFIG" tuist generate --no-open
 
 validate_bundle() {
     python3 - "$1" "$VERSION" "$BUILD_NUMBER" "$2" <<'PY'

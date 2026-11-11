@@ -53,7 +53,7 @@ struct RemoteHostStartupTests {
         let f = try Fixture()
         defer { f.clean() }
         let host = f.host()
-        host.origin = "https://new-relay.example.test"
+        host.origin = f.oldPair.origin.absoluteString
         host.invitation = String(repeating: "b", count: 43)
         host.enable()
         let current = try #require(host.pairing)
@@ -88,7 +88,7 @@ struct RemoteHostStartupTests {
         let host = f.host()
         if operation == "save" {
             f.saveFails = true
-            host.origin = "https://new-relay.example.test"
+            host.origin = f.oldPair.origin.absoluteString
             host.invitation = String(repeating: "b", count: 43)
             host.enable()
         } else {
@@ -100,6 +100,52 @@ struct RemoteHostStartupTests {
         #expect(host.failed)
         #expect(host.pairing == nil)
         #expect(f.connections.isEmpty)
+    }
+
+    @Test(arguments: [nil, "http://insecure.example.test"] as [String?])
+    func unavailableRelayConfigurationDoesNotReadPairingOrCreateTransport(_ origin: String?) async throws {
+        let f = try Fixture()
+        defer { f.clean() }
+        let host = f.host(configuration: .init(rawOrigin: origin))
+        #expect(host.startupLoadTask == nil)
+        #expect(await f.load.readWasOnMainThread == nil)
+        #expect(host.pairing == nil)
+        #expect(f.connections.isEmpty)
+        host.invitation = String(repeating: "a", count: 43)
+        host.enable()
+        #expect(host.failed)
+        #expect(f.saved.isEmpty)
+        #expect(f.removals == 0)
+    }
+
+    @Test func storedPairingForAnotherOriginIsKeptWithoutReconnectingOrMigratingTrust() async throws {
+        let f = try Fixture()
+        defer { f.clean() }
+        let configured = RemoteRelayConfiguration(rawOrigin: "https://new-relay.example.test")
+        let host = f.host(configuration: configured)
+        await f.load.finish(.success(f.oldPair))
+        await host.startupLoadTask?.value
+        #expect(host.pairing == nil)
+        #expect(host.relayMismatch)
+        #expect(host.origin == configured.origin?.absoluteString)
+        #expect(host.invitation.isEmpty)
+        #expect(f.saved.isEmpty)
+        #expect(f.removals == 0)
+        #expect(f.connections.isEmpty)
+    }
+
+    @Test func manuallyChangedOriginCannotReplaceConfiguredPairing() async throws {
+        let f = try Fixture()
+        defer { f.clean() }
+        let host = f.host()
+        await f.load.finish(.success(f.oldPair))
+        await host.startupLoadTask?.value
+        host.origin = "https://other-relay.example.test"
+        host.enable()
+        #expect(host.failed)
+        #expect(host.pairing == f.oldPair)
+        #expect(f.saved.isEmpty)
+        #expect(f.connections == [f.oldPair])
     }
 
     private enum ProbeError: Error { case failed }
@@ -134,9 +180,9 @@ struct RemoteHostStartupTests {
             oldPair = try .generate(origin: URL(string: "https://old-relay.example.test")!, access: String(repeating: "a", count: 43))
         }
         nonisolated private static func readIsOnMainThread() -> Bool { Thread.isMainThread }
-        func host() -> RemoteHostController {
+        func host(configuration: RemoteRelayConfiguration? = nil) -> RemoteHostController {
             let load = self.load
-            return .init(monitor: monitor, loadPairing: { try await load.read(onMainThread: Self.readIsOnMainThread()) },
+            return .init(monitor: monitor, relayConfiguration: configuration ?? .init(rawOrigin: oldPair.origin.absoluteString), loadPairing: { try await load.read(onMainThread: Self.readIsOnMainThread()) },
                 savePairing: { [self] pair in
                     if saveFails { throw ProbeError.failed }
                     saved.append(pair)
@@ -305,7 +351,7 @@ struct RemoteHostSessionTests {
         }
         f.host.disable()
         let transport = Transport(), pair = f.pair
-        let restarted = RemoteHostController(monitor: f.monitor, loadPairing: { pair }, savePairing: { _ in }, removePairing: {},
+        let restarted = RemoteHostController(monitor: f.monitor, relayConfiguration: .init(rawOrigin: pair.origin.absoluteString), loadPairing: { pair }, savePairing: { _ in }, removePairing: {},
             commandGate: RemoteCommandGate(store: store), makeConnection: { _ in transport })
         defer { restarted.disable() }
         await restarted.startupLoadTask?.value
@@ -380,7 +426,7 @@ struct RemoteHostSessionTests {
             settings.mrLifecycleLedger.record(request, for: target)
             pair = try .generate(origin: #require(URL(string: "https://relay.example.test")), access: String(repeating: "a", count: 43))
             let pair = self.pair, transport = self.transport, saveState = self.saveState
-            host = RemoteHostController(monitor: monitor, loadPairing: { pair }, savePairing: {
+            host = RemoteHostController(monitor: monitor, relayConfiguration: .init(rawOrigin: pair.origin.absoluteString), loadPairing: { pair }, savePairing: {
                 if saveState.fails { throw RemoteProtocolError.invalid }; saveState.saved.append($0)
             }, removePairing: {}, commandGate: RemoteCommandGate(store: receiptStore), makeConnection: { _ in transport })
         }

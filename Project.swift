@@ -1,4 +1,29 @@
 import ProjectDescription
+import Foundation
+
+let relayOrigin: String = {
+    guard let path = ProcessInfo.processInfo.environment["TUIST_MERGETETHER_RELAY_CONFIG_FILE"], !path.isEmpty else { return "" }
+    guard let data = FileManager.default.contents(atPath: path),
+          let values = try? JSONSerialization.jsonObject(with: data) as? [String: String],
+          Set(values.keys) == ["origin"], let raw = values["origin"] else {
+        fatalError("Relay configuration must be a readable external JSON file containing only a string origin; never include credentials.")
+    }
+    let rawOrigin = raw.trimmingCharacters(in: .whitespacesAndNewlines)
+    guard !rawOrigin.contains("%"), !rawOrigin.contains("\\"),
+          !rawOrigin.unicodeScalars.contains(where: { CharacterSet.whitespacesAndNewlines.union(.controlCharacters).contains($0) }),
+          var parts = URLComponents(string: rawOrigin), parts.scheme?.lowercased() == "https",
+          let host = parts.host, !host.isEmpty, host.unicodeScalars.allSatisfy({ $0.isASCII }),
+          parts.user == nil, parts.password == nil, parts.query == nil, parts.fragment == nil,
+          parts.path.isEmpty || parts.path == "/", parts.url != nil,
+          parts.port.map({ (1...65535).contains($0) }) ?? true else {
+        fatalError("Relay configuration requires an HTTPS origin without credentials, path, query or fragment.")
+    }
+    parts.scheme = "https"; parts.host = host.lowercased(); parts.path = ""
+    if parts.port == 443 { parts.port = nil }
+    guard let normalized = parts.url else { fatalError("Relay origin is invalid.") }
+    return normalized.absoluteString
+}()
+
 
 let project = Project(
     name: "GitLabTodos",
@@ -33,6 +58,7 @@ let project = Project(
             deploymentTargets: .iOS("17.0"),
             infoPlist: .extendingDefault(with: [
                 "CFBundleDisplayName": .string("MergeTether"),
+                "MergeTetherRelayOrigin": .string(relayOrigin),
                 "CFBundleShortVersionString": .string("$(MARKETING_VERSION)"),
                 "CFBundleVersion": .string("$(CURRENT_PROJECT_VERSION)"),
                 "CFBundleURLTypes": .array([.dictionary([
@@ -60,6 +86,7 @@ let project = Project(
             infoPlist: .extendingDefault(with: [
                 "LSUIElement": .boolean(false),
                 "CFBundleDisplayName": .string("MergeTether"),
+                "MergeTetherRelayOrigin": .string(relayOrigin),
                 "CFBundleName": .string("MergeTether"),
                 "CFBundleShortVersionString": .string("$(MARKETING_VERSION)"),
                 "CFBundleVersion": .string("$(CURRENT_PROJECT_VERSION)"),

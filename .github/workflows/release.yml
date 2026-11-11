@@ -51,8 +51,9 @@ jobs:
           MACOS_RELEASE_IDENTITY: ${{ vars.MACOS_RELEASE_IDENTITY }}
           IOS_RELEASE_IDENTITY: ${{ vars.IOS_RELEASE_IDENTITY }}
           IOS_EXPORT_METHOD: ${{ vars.IOS_EXPORT_METHOD }}
+          MERGETETHER_RELAY_CONFIG_JSON: ${{ secrets.MERGETETHER_RELAY_CONFIG_JSON }}
         run: |
-          for name in APPLE_CERTIFICATES_P12_BASE64 APPLE_CERTIFICATES_PASSWORD IOS_PROFILE_BASE64 NOTARY_API_PRIVATE_KEY NOTARY_KEY_ID NOTARY_ISSUER_ID APPLE_TEAM_ID MACOS_RELEASE_IDENTITY IOS_RELEASE_IDENTITY IOS_EXPORT_METHOD; do
+          for name in APPLE_CERTIFICATES_P12_BASE64 APPLE_CERTIFICATES_PASSWORD IOS_PROFILE_BASE64 NOTARY_API_PRIVATE_KEY NOTARY_KEY_ID NOTARY_ISSUER_ID APPLE_TEAM_ID MACOS_RELEASE_IDENTITY IOS_RELEASE_IDENTITY IOS_EXPORT_METHOD MERGETETHER_RELAY_CONFIG_JSON; do
             if [[ -z "${!name:-}" ]]; then
               echo "::error::Missing distribution configuration: ${name}. Configure existing distribution credentials before publishing; Apple Development is insufficient."
               exit 1
@@ -69,8 +70,11 @@ jobs:
           NOTARY_ISSUER_ID: ${{ secrets.NOTARY_ISSUER_ID }}
           APPLE_TEAM_ID: ${{ vars.APPLE_TEAM_ID }}
           IOS_EXPORT_METHOD: ${{ vars.IOS_EXPORT_METHOD }}
+          MERGETETHER_RELAY_CONFIG_JSON: ${{ secrets.MERGETETHER_RELAY_CONFIG_JSON }}
         run: |
           umask 077
+          printf '%s' "$MERGETETHER_RELAY_CONFIG_JSON" > "$RUNNER_TEMP/relay-build.json"
+          chmod 600 "$RUNNER_TEMP/relay-build.json"
           KEYCHAIN_PATH="$RUNNER_TEMP/release-signing.keychain-db"
           KEYCHAIN_PASSWORD="$(openssl rand -hex 32)"
           echo "::add-mask::$KEYCHAIN_PASSWORD"
@@ -117,7 +121,8 @@ jobs:
         run: |
           mise exec -- bash scripts/build-release.sh "$RELEASE_VERSION" --build-number "$RELEASE_BUILD_NUMBER" --platform all \
             --signing-identity "$MACOS_RELEASE_IDENTITY" --ios-signing-identity "$IOS_RELEASE_IDENTITY" \
-            --team-id "$APPLE_TEAM_ID" --notary-profile mergetether-release --ios-export-options "$RUNNER_TEMP/ExportOptions.plist"
+            --team-id "$APPLE_TEAM_ID" --notary-profile mergetether-release --ios-export-options "$RUNNER_TEMP/ExportOptions.plist" \
+            --relay-config "$RUNNER_TEMP/relay-build.json"
 
       - name: Verify distribution inventory and retain stable macOS names
         env:
@@ -228,7 +233,7 @@ jobs:
             PROFILE_UUID="$(/usr/libexec/PlistBuddy -c 'Print :UUID' "$RUNNER_TEMP/profile.plist")"
             rm -f "$HOME/Library/MobileDevice/Provisioning Profiles/${PROFILE_UUID}.mobileprovision"
           fi
-          rm -f "$RUNNER_TEMP/distribution.p12" "$RUNNER_TEMP/distribution.mobileprovision" "$RUNNER_TEMP/profile.plist" "$RUNNER_TEMP/notary-key.p8" "$RUNNER_TEMP/ExportOptions.plist"
+          rm -f "$RUNNER_TEMP/distribution.p12" "$RUNNER_TEMP/distribution.mobileprovision" "$RUNNER_TEMP/profile.plist" "$RUNNER_TEMP/notary-key.p8" "$RUNNER_TEMP/ExportOptions.plist" "$RUNNER_TEMP/relay-build.json"
 
   # Updates the Homebrew tap only if HOMEBREW_TAP_TOKEN is configured.
   # Without the token this job fails on checkout, so guard on the secret being

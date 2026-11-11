@@ -29,7 +29,7 @@ class ReleaseScriptFixture(unittest.TestCase):
         self.env = dict(os.environ, PATH=f"{self.bin}:/usr/bin:/bin", HOME=str(self.root),
                         TMPDIR=str(self.root), PYTHONDONTWRITEBYTECODE="1",
                         GITLABTODOS_RELEASE_REPO="fixture/release",
-                        GITLABTODOS_HOMEBREW_TAP_REPO="")
+                        GITLABTODOS_HOMEBREW_TAP_REPO="", TUIST_MERGETETHER_RELAY_CONFIG_FILE="")
 
     def executable(self, name, body):
         path = self.bin / name
@@ -44,7 +44,16 @@ class ReleaseScriptFixture(unittest.TestCase):
 class ReleaseBuildTests(ReleaseScriptFixture):
     def setUp(self):
         super().setUp()
-        self.executable("tuist", "")
+        self.executable("tuist", """
+import os, pathlib
+path = os.environ.get('TUIST_MERGETETHER_RELAY_CONFIG_FILE', '')
+if path: pathlib.Path('generated-relay-config-path').write_text(path)
+""")
+        relay_config = tempfile.NamedTemporaryFile(prefix="mergetether-relay-", suffix=".json", delete=False)
+        self.relay_config = Path(relay_config.name)
+        relay_config.close()
+        self.relay_config.write_text(json.dumps({"origin": "https://private-relay.example.test"}))
+        self.addCleanup(self.relay_config.unlink, missing_ok=True)
         self.executable("security", """
 print('  1) AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA "Developer ID Application: Fixture (TEAM123)"')
 print('  2) BBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBB "Apple Distribution: Fixture (TEAM123)"')
@@ -125,7 +134,7 @@ if os.environ.get('STAPLE_FAIL') and 'stapler' in sys.argv: sys.exit(1)
         return info
 
     def signed_build(self, *arguments):
-        return self.run_script("build-release.sh", "9.8.7", "--build-number", "456",
+        return self.run_script("build-release.sh", "9.8.7", "--build-number", "456", "--relay-config", str(self.relay_config),
                                "--signing-identity", "Developer ID Application: Fixture (TEAM123)",
                                "--team-id", "TEAM123", "--notary-profile", "fixture-notary", *arguments)
 
@@ -256,7 +265,7 @@ if os.environ.get('STAPLE_FAIL') and 'stapler' in sys.argv: sys.exit(1)
         self.assertEqual(len(json.loads((release / "release-manifest.json").read_text())["artifacts"]), 3)
 
     def test_ios_wrong_export_team_fails_before_building(self):
-        result = self.run_script("build-release.sh", "9.8.7", "--platform", "ios", "--team-id", "TEAM123",
+        result = self.run_script("build-release.sh", "9.8.7", "--platform", "ios", "--relay-config", str(self.relay_config), "--team-id", "TEAM123",
                                  "--ios-signing-identity", "Apple Distribution: Fixture (TEAM123)",
                                  "--ios-export-options", self.ios_export_options(team="OTHER"))
         self.assertNotEqual(result.returncode, 0)
@@ -266,12 +275,36 @@ if os.environ.get('STAPLE_FAIL') and 'stapler' in sys.argv: sys.exit(1)
         for key in ["NO_IPA", "EXPORTED_WRONG_VERSION"]:
             with self.subTest(key=key):
                 self.env[key] = "1"
-                result = self.run_script("build-release.sh", "9.8.7", "--platform", "ios", "--team-id", "TEAM123",
+                result = self.run_script("build-release.sh", "9.8.7", "--platform", "ios", "--relay-config", str(self.relay_config), "--team-id", "TEAM123",
                                          "--ios-signing-identity", "Apple Distribution: Fixture (TEAM123)",
                                          "--ios-export-options", self.ios_export_options())
                 self.assertNotEqual(result.returncode, 0)
                 self.assertFalse(list((self.root / "release").glob("*.ipa")))
                 self.env.pop(key)
+
+    def test_ios_distribution_requires_explicit_relay_before_building(self):
+        result = self.run_script("build-release.sh", "9.8.7", "--platform", "ios")
+        self.assertNotEqual(result.returncode, 0)
+        self.assertIn("--relay-config", result.stderr)
+        self.assertFalse((self.root / "build-calls.jsonl").exists())
+
+    def test_relay_origin_file_reaches_generation_without_logging_its_value(self):
+        result = self.signed_build()
+        self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
+        self.assertEqual((self.root / "generated-relay-config-path").read_text(), str(self.relay_config.resolve()))
+        self.assertNotIn("private-relay.example.test", result.stdout + result.stderr)
+        self.assertNotIn("private-relay.example.test", (self.root / "Project.swift").read_text())
+
+    def test_relay_config_cannot_package_credentials_or_unsafe_origins(self):
+        for config in [{"origin": "https://relay.example.test", "RELAY_ACCESS_TOKEN": "fixture-private"},
+                       {"origin": "https://user:fixture-private@relay.example.test"},
+                       {"origin": "http://relay.example.test"}, {"origin": "https://relay.example.test/path"}]:
+            with self.subTest(config=config):
+                self.relay_config.write_text(json.dumps(config))
+                result = self.run_script("build-release.sh", "9.8.7", "--unsigned", "--relay-config", str(self.relay_config))
+                self.assertNotEqual(result.returncode, 0)
+                self.assertNotIn("fixture-private", result.stdout + result.stderr)
+                self.assertFalse((self.root / "build-calls.jsonl").exists())
 
     def test_both_apps_bind_shared_version_build_settings(self):
         source = (self.root / "Project.swift").read_text()
@@ -495,7 +528,7 @@ class ReleaseWorkflowTests(ReleaseScriptFixture):
     def test_missing_ci_distribution_configuration_fails_without_exposing_values(self):
         names = ["APPLE_CERTIFICATES_P12_BASE64", "APPLE_CERTIFICATES_PASSWORD", "IOS_PROFILE_BASE64",
                  "NOTARY_API_PRIVATE_KEY", "NOTARY_KEY_ID", "NOTARY_ISSUER_ID", "APPLE_TEAM_ID",
-                 "MACOS_RELEASE_IDENTITY", "IOS_RELEASE_IDENTITY", "IOS_EXPORT_METHOD"]
+                 "MACOS_RELEASE_IDENTITY", "IOS_RELEASE_IDENTITY", "IOS_EXPORT_METHOD", "MERGETETHER_RELAY_CONFIG_JSON"]
         private_value = "fixture-private-value-never-log"
         for missing_name in names:
             for missing_value in [None, ""]:
@@ -526,6 +559,7 @@ pathlib.Path('mise-arguments.json').write_text(json.dumps(sys.argv[1:]))
         self.assertEqual(args[args.index("--build-number") + 1], "456")
         self.assertEqual(args[args.index("--platform") + 1], "all")
         self.assertNotIn("--unsigned", args)
+        self.assertEqual(args[args.index("--relay-config") + 1], str(self.root / "relay-build.json"))
         self.assertEqual((self.root / "Project.swift").read_bytes(), original)
 
     def prepare_inventory(self):
@@ -572,7 +606,7 @@ pathlib.Path('mise-arguments.json').write_text(json.dumps(sys.argv[1:]))
         self.env.update(RUNNER_TEMP=str(self.root), APPLE_TEAM_ID="TEAM123", IOS_EXPORT_METHOD="release-testing",
                         APPLE_CERTIFICATES_P12_BASE64="Zml4dHVyZQ==", APPLE_CERTIFICATES_PASSWORD="fixture-only",
                         NOTARY_API_PRIVATE_KEY="fixture-private-key", NOTARY_KEY_ID="fixture-id",
-                        NOTARY_ISSUER_ID="fixture-issuer")
+                        NOTARY_ISSUER_ID="fixture-issuer", MERGETETHER_RELAY_CONFIG_JSON=json.dumps({"origin": "https://relay.example.test"}))
         import base64
         profile = {"UUID": "FIXTURE-UUID", "Name": "Fixture Distribution", "TeamIdentifier": ["TEAM123"]}
         self.env["IOS_PROFILE_BASE64"] = base64.b64encode(plistlib.dumps(profile)).decode()
@@ -586,6 +620,8 @@ if sys.argv[1] == 'cms': sys.stdout.buffer.write(pathlib.Path(sys.argv[-1]).read
         self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
         options = plistlib.loads((self.root / "ExportOptions.plist").read_bytes())
         self.assertEqual(options["teamID"], "TEAM123")
+        self.assertEqual(json.loads((self.root / "relay-build.json").read_text()), {"origin": "https://relay.example.test"})
+        self.assertEqual((self.root / "relay-build.json").stat().st_mode & 0o777, 0o600)
         self.assertEqual(options["provisioningProfiles"], {"com.vaporpw.MergeTether.iOS": "Fixture Distribution"})
         self.assertFalse((self.root / "notary-key.p8").exists())
         self.assertFalse((self.root / "distribution.p12").exists())
@@ -598,6 +634,7 @@ if sys.argv[1] == 'cms': sys.stdout.buffer.write(pathlib.Path(sys.argv[-1]).read
         self.assertTrue(unrelated.exists())
         self.assertFalse(unrelated.with_name("FIXTURE-UUID.mobileprovision").exists())
         self.assertFalse((self.root / "ExportOptions.plist").exists())
+        self.assertFalse((self.root / "relay-build.json").exists())
 
 
 

@@ -732,13 +732,13 @@
         "en": {
           "stringUnit": {
             "state": "translated",
-            "value": "One-time Mac setup. Deploy the free relay, then enter its address and invitation. The phone only scans a code."
+            "value": "Use your own relay deployment. Enter its private runtime invitation; the address comes from this build. No shared relay is provided."
           }
         },
         "pl": {
           "stringUnit": {
             "state": "translated",
-            "value": "Jednorazowe ustawienie na Macu. Wdróż darmowy relay i podaj jego adres oraz zaproszenie. Telefon skanuje tylko kod."
+            "value": "Użyj własnej instancji relaya. Podaj jej prywatne zaproszenie; adres pochodzi z tego buildu. Nie ma domyślnego wspólnego relaya."
           }
         }
       }
@@ -1300,6 +1300,91 @@
           "stringUnit": {
             "state": "translated",
             "value": "Telefon jest sparowany. Utworzenie nowego kodu odbierze mu dostęp i wymaga ponownego parowania."
+          }
+        }
+      }
+    },
+    "remote.relay.configured": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Relay configured for this build"
+          }
+        },
+        "pl": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Relay skonfigurowany dla tego buildu"
+          }
+        }
+      }
+    },
+    "remote.relay.ownership": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Operator: the person or organization controlling this address. Confirm this is your deployment."
+          }
+        },
+        "pl": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Operator: osoba lub organizacja zarządzająca tym adresem. Upewnij się, że to Twoja instancja."
+          }
+        }
+      }
+    },
+    "remote.relay.missing": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Phone access is unavailable in this build. Deploy your own relay and rebuild both apps with its HTTPS origin. The Mac works without phone access."
+          }
+        },
+        "pl": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Dostęp z telefonu jest niedostępny w tym buildzie. Wdróż własny relay i zbuduj obie aplikacje z jego adresem HTTPS. Mac działa bez dostępu z telefonu."
+          }
+        }
+      }
+    },
+    "remote.relay.invalid": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "This build has an invalid relay origin. Rebuild both apps with an HTTPS origin without credentials, path, query or fragment."
+          }
+        },
+        "pl": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Ten build ma nieprawidłowy adres relaya. Zbuduj obie aplikacje z adresem HTTPS bez danych logowania, ścieżki, zapytania i fragmentu."
+          }
+        }
+      }
+    },
+    "remote.relay.mismatch": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "This pairing uses another relay. Use matching builds or explicitly pair with the relay configured here. Existing trust remains unchanged until you confirm a new matching pairing."
+          }
+        },
+        "pl": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "To parowanie używa innego relaya. Użyj zgodnych buildów lub jawnie sparuj urządzenia z relayem skonfigurowanym tutaj. Dotychczasowe zaufanie pozostaje bez zmian do potwierdzenia nowego, zgodnego parowania."
           }
         }
       }

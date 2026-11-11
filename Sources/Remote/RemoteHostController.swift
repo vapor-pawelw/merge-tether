@@ -15,6 +15,8 @@ extension RemoteConnection: RemoteHostTransport {}
 
 @MainActor @Observable final class RemoteHostController {
     private(set) var pairing: RemotePairing?
+    let relayConfiguration: RemoteRelayConfiguration
+    private(set) var relayMismatch = false
     var origin = ""
     var invitation = ""
     private(set) var failed = false
@@ -38,6 +40,7 @@ extension RemoteConnection: RemoteHostTransport {}
     @ObservationIgnored private var resolutionPreviews: [String: ManualDiscussionResolution.Prepared] = [:]
 
     init(monitor: TodoMonitorService,
+         relayConfiguration: RemoteRelayConfiguration = .bundled(),
          loadPairing: (@Sendable () async throws -> RemotePairing?)? = nil,
          savePairing: ((RemotePairing) throws -> Void)? = nil,
          removePairing: (() throws -> Void)? = nil,
@@ -46,6 +49,8 @@ extension RemoteConnection: RemoteHostTransport {}
          now: @escaping () -> Date = Date.init,
          makeConnection: @escaping (RemotePairing) throws -> any RemoteHostTransport = { try RemoteConnection(pairing: $0, role: .host) }) {
         self.monitor = monitor
+        self.relayConfiguration = relayConfiguration
+        origin = relayConfiguration.origin?.absoluteString ?? ""
         self.now = now
         self.gate = commandGate ?? RemoteCommandGate(store: RemoteCommandReceiptStore(service: (Bundle.main.bundleIdentifier ?? "MergeTether") + ".remote"))
         let store = RemotePairingStore(service: (Bundle.main.bundleIdentifier ?? "MergeTether") + ".remote")
@@ -55,7 +60,7 @@ extension RemoteConnection: RemoteHostTransport {}
         self.connectPairing = connectPairing
         self.makeConnection = makeConnection
         let load: @Sendable () async throws -> RemotePairing? = loadPairing ?? { try store.load() }
-        loadStoredPairing(using: load)
+        if relayConfiguration.status == .configured { loadStoredPairing(using: load) }
     }
 
     private func loadStoredPairing(using load: @escaping @Sendable () async throws -> RemotePairing?) {
@@ -70,6 +75,10 @@ extension RemoteConnection: RemoteHostTransport {}
                 guard !Task.isCancelled, let self,
                       startupGeneration == generation, origin == initialOrigin, invitation == initialInvitation else { return }
                 guard loaded == nil || loaded?.role == .host else { throw RemoteProtocolError.invalid }
+                if let loaded, !relayConfiguration.accepts(origin: loaded.origin) {
+                    relayMismatch = true
+                    return
+                }
                 pairing = loaded
                 if let loaded {
                     origin = loaded.origin.absoluteString; invitation = loaded.access
@@ -86,11 +95,12 @@ extension RemoteConnection: RemoteHostTransport {}
     func enable() {
         startupGeneration = UUID(); startupLoadTask?.cancel()
         do {
-            guard let url = URL(string: origin.trimmingCharacters(in: .whitespacesAndNewlines)) else { throw RemoteProtocolError.invalid }
-            let pair = try RemotePairing.generate(origin: url, access: invitation.trimmingCharacters(in: .whitespacesAndNewlines), now: now())
+            guard let url = URL(string: origin.trimmingCharacters(in: .whitespacesAndNewlines)),
+                  relayConfiguration.accepts(origin: url), let configured = relayConfiguration.origin else { throw RemoteProtocolError.invalid }
+            let pair = try RemotePairing.generate(origin: configured, access: invitation.trimmingCharacters(in: .whitespacesAndNewlines), now: now())
             try savePairing(pair)
             connection?.stop(); connection = nil; resetConnectionSession()
-            pairing = pair; activatePairing(pair)
+            pairing = pair; relayMismatch = false; activatePairing(pair)
         } catch { failed = true }
     }
     func disable() {
@@ -142,7 +152,8 @@ extension RemoteConnection: RemoteHostTransport {}
         guard let data = try? Data(contentsOf: folder.appending(path: "operator.json")),
               let values = try? JSONDecoder().decode([String: String].self, from: data),
               let origin = try? String(contentsOf: folder.appending(path: "origin.txt"), encoding: .utf8) else { return }
-        self.origin = origin.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard let url = URL(string: origin.trimmingCharacters(in: .whitespacesAndNewlines)),
+              relayConfiguration.accepts(origin: url) else { return }
         invitation = values["RELAY_ACCESS_TOKEN"] ?? ""
     }
     private func receive(_ message: RemoteMessage) async {

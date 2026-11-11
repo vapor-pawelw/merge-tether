@@ -6,7 +6,15 @@ struct RemoteAccessView: View {
     var body: some View {
         VStack(alignment: .leading, spacing: 18) {
             Label(.Remote.remoteMacPairPhone, systemImage: "iphone").font(.title2.bold())
-            if let pairing = remote.pairing {
+            if let origin = remote.relayConfiguration.origin {
+                Text(.Remote.remoteRelayConfigured).font(.headline)
+                Text(verbatim: origin.absoluteString).font(.caption).textSelection(.enabled)
+                Text(.Remote.remoteRelayOwnership).font(.caption).foregroundStyle(.secondary)
+            }
+            if remote.relayConfiguration.status != .configured {
+                Text(remote.relayConfiguration.status == .missing ? .Remote.remoteRelayMissing : .Remote.remoteRelayInvalid)
+                    .foregroundStyle(.secondary)
+            } else if let pairing = remote.pairing {
                 Text(.Remote.remoteMacHelp).font(.callout).foregroundStyle(.secondary)
                 TimelineView(.periodic(from: .now, by: 1)) { context in
                     if pairing.peerPublicKey != nil {
@@ -28,12 +36,11 @@ struct RemoteAccessView: View {
                         Text(.Remote.remoteMacInvitationExpired).foregroundStyle(.secondary)
                     }
                 }
-                Text(verbatim: pairing.origin.absoluteString).font(.caption).foregroundStyle(.secondary)
                 Button(.Remote.remoteNewCode) { remote.enable() }
                 Button(.Remote.remoteDisable, role: .destructive) { remote.disable() }
             } else {
+                if remote.relayMismatch { Text(.Remote.remoteRelayMismatch).font(.caption).foregroundStyle(.orange) }
                 Text(.Remote.remoteRelayHelp).foregroundStyle(.secondary)
-                TextField(text: $remote.origin) { Text(.Remote.remoteRelay) }.textFieldStyle(.roundedBorder)
                 SecureField(text: $remote.invitation) { Text(.Remote.remoteInvitation) }.textFieldStyle(.roundedBorder)
                 Button(.Remote.remoteEnable) { remote.enable() }.buttonStyle(.borderedProminent)
                     .disabled(remote.origin.isEmpty || remote.invitation.isEmpty)

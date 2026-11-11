@@ -3,6 +3,48 @@ import Testing
 import MergeTetherRemote
 
 @MainActor @Suite struct RemotePhoneModelTests {
+    @Test(arguments: [nil, "http://insecure.example.org"] as [String?])
+    func unavailableRelayNeverReadsTrustOrRecoveryAndNeverConnects(_ origin: String?) throws {
+        let model = RemotePhoneModel(relayConfiguration: .init(rawOrigin: origin),
+            loadPairing: { Issue.record("Unconfigured build read trust"); return nil },
+            savePairing: { _ in Issue.record("Unconfigured build wrote trust") },
+            loadRecovery: { Issue.record("Unconfigured build read recovery"); return nil },
+            makeConnection: { _ in Issue.record("Unconfigured build created transport"); return PhoneTransport() })
+        model.connect(); model.reconnect()
+        #expect(!model.paired)
+        let host = try RemotePairing.generate(origin: URL(string: "https://relay.example.org")!, access: String(repeating: "A", count: 43))
+        model.offerPairing(host.deepLink.absoluteString)
+        #expect(model.pairingCandidate == nil)
+        #expect(!model.acceptPairing())
+    }
+
+    @Test func savedPairingForAnotherOriginStaysUntouchedAndOffline() throws {
+        let fixture = try PhoneFixture()
+        let model = RemotePhoneModel(relayConfiguration: .init(rawOrigin: "https://different.example.org"),
+            loadPairing: { fixture.pairing }, savePairing: { _ in Issue.record("Migrated existing trust") },
+            loadRecovery: { Issue.record("Loaded recovery for mismatched relay"); return nil },
+            makeConnection: { _ in Issue.record("Connected to mismatched relay"); return PhoneTransport() })
+        model.connect()
+        #expect(!model.paired)
+        #expect(model.relayMismatch)
+        #expect(model.state.board == nil)
+        #expect(model.pairingCandidate == nil)
+    }
+
+    @Test func otherOriginInvitationAndDirectCandidateCannotReplaceCurrentTrust() throws {
+        let fixture = try PhoneFixture(), model = fixture.model
+        let host = try RemotePairing.generate(origin: URL(string: "https://relay.example.org.evil.test")!,
+            access: String(repeating: "B", count: 43), now: fixture.date)
+        model.offerPairing(host.deepLink.absoluteString)
+        #expect(model.relayMismatch)
+        #expect(model.pairingCandidate == nil)
+        model.pairingCandidate = try RemotePairing(url: host.deepLink, now: fixture.date)
+        #expect(!model.acceptPairing())
+        #expect(model.paired)
+        #expect(fixture.saved.isEmpty)
+        #expect(fixture.transports.isEmpty)
+    }
+
     @Test func refreshUsesExistingTransportAndCoalescesOutstandingRequests() async throws {
         let fixture = try PhoneFixture()
         let model = fixture.model
@@ -116,7 +158,7 @@ import MergeTetherRemote
         model.connect(); await model.refresh(); await fixture.reply()
         let previousState = model.state
         fixture.failConnection = true
-        let replacement = try RemotePairing.generate(origin: URL(string: "https://other.example.org")!, access: String(repeating: "B", count: 43), now: fixture.date)
+        let replacement = try RemotePairing.generate(origin: URL(string: "https://relay.example.org")!, access: String(repeating: "B", count: 43), now: fixture.date)
         model.offerPairing(replacement.deepLink.absoluteString)
         // when
         let candidate = try #require(model.pairingCandidate)
@@ -151,7 +193,7 @@ import MergeTetherRemote
 
     @Test func unpairedStartupAndReconnectNeverCreateATransport() throws {
         var connections = 0
-        let model = RemotePhoneModel(loadPairing: { nil }, savePairing: { _ in Issue.record("Unexpected pairing write") },
+        let model = RemotePhoneModel(relayConfiguration: .init(rawOrigin: "https://relay.example.org"), loadPairing: { nil }, savePairing: { _ in Issue.record("Unexpected pairing write") },
             makeConnection: { _ in connections += 1; return PhoneTransport() })
         model.connect(); model.reconnect()
         #expect(model.connectionStatus() == .unpaired)
@@ -323,7 +365,7 @@ import MergeTetherRemote
     var recoveryFailure: String?
     lazy var model = makeModel()
     func makeModel() -> RemotePhoneModel {
-        RemotePhoneModel(loadPairing: { self.pairing }, savePairing: { if self.failSave { throw RemoteProtocolError.invalid }; self.saved.append($0) },
+        RemotePhoneModel(relayConfiguration: .init(rawOrigin: pairing.origin.absoluteString), loadPairing: { self.pairing }, savePairing: { if self.failSave { throw RemoteProtocolError.invalid }; self.saved.append($0) },
             loadRecovery: { if self.recoveryFailure == "read" { throw RemoteProtocolError.invalid }; return self.pendingRecovery },
             saveRecovery: { if self.recoveryFailure == "save" { throw RemoteProtocolError.invalid }; self.pendingRecovery = $0 },
             removeRecovery: { if self.recoveryFailure == "remove" { throw RemoteProtocolError.invalid }; self.pendingRecovery = nil },

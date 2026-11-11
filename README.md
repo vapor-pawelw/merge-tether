@@ -120,4 +120,6 @@ The hand-painted icon and its generation prompt are included in [docs/branding](
 
 ## iOS companion MVP
 
-The optional iOS companion mirrors the Mac board and offers guarded actions over an encrypted outbound Cloudflare relay connection. See [pairing, deployment and limitations](docs/remote.md).
+The optional iOS companion mirrors the Mac board and offers guarded actions through **your own relay deployment**. The server source is public in [`Services/RemoteRelay`](Services/RemoteRelay). Deploy your instance first, keep its origin in a private file outside the checkout, and build both apps for that origin. MergeTether provides no default shared relay. A build without relay configuration keeps the Mac inbox working and disables phone access.
+
+The origin is public metadata visible in the app and IPA, not a credential. Use a unique private runtime invitation and confirm the relay origin when pairing; never put operator tokens or private keys in build configuration. The relay operator owns availability and usage. To avoid paid overages, keep that deployment on **Workers Free**, where quota exhaustion interrupts service; the relay cannot guarantee zero cost on a Paid account. Rate limiting reduces abuse but is not a billing cap. See the [BYO relay setup](docs/byo-relay.md), [Cloudflare Free/Paid behavior](https://developers.cloudflare.com/durable-objects/platform/pricing/), and [pairing guarantees and limitations](docs/remote.md).
