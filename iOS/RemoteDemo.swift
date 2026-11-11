@@ -28,10 +28,10 @@ import MergeTetherRemote
                 url: URL(string: "https://gitlab.example.org/example/payments-api/-/merge_requests/42")!,
                 head: "a9f36b246dde", detail: String(localized: .MRHumanAction.mrHumanActionPublicationSingle),
                 drafts: [.init(id: 1, body: "Handled the retry case and added coverage for the duplicate response.", context: "Sources/Checkout.swift:42")],
-                actions: [.init(id: "publish", kind: .publish, token: "preview")],
+                actions: [.init(id: "publish", kind: .publish, token: "preview"), .init(id: "deleteDraft:1", kind: .deleteDraft, token: "preview")],
                 needsAttention: true, mergeRequestIID: 42,
                 primaryCTA: .init(title: String(localized: .MRHumanAction.mrHumanActionActionReviewDrafts), destination: .drafts),
-                presentation: .init(author: "Alex Example", repository: "payments-api"), approvals: .init(completed: 1, required: 2)),
+                presentation: .init(author: "Alex Example", repository: "payments-api"), approvals: .init(completed: 2, required: 2, received: 5, requirementsSatisfied: false)),
             .init(id: "mr:1:43", title: "Keep cached account details available", project: "example/payments-api",
                 url: URL(string: "https://gitlab.example.org/example/payments-api/-/merge_requests/43"),
                 head: "b1c2d3e4", needsAttention: false, mergeRequestIID: 43,
@@ -48,6 +48,45 @@ import MergeTetherRemote
         ]),
         .init(id: .other, cards: []),
     ])
+
+    static func details(for card: RemoteCard) -> RemoteMRDetails {
+        let people = (1...5).map { index in
+            RemoteApprovalPerson(id: index, name: index == 1 ? "Alexandra Example With A Long Display Name" : "Reviewer \(index)",
+                username: "reviewer\(index)", status: .approved, changedAt: .now.addingTimeInterval(Double(-index * 600)))
+        } + [.init(id: 6, name: "Earlier Reviewer", username: "earlier", status: .previouslyApproved, changedAt: .now.addingTimeInterval(-7200)),
+             .init(id: 7, name: "Comment Author", username: "commenter", status: .commented),
+             .init(id: 8, name: "Assigned Reviewer", username: "assigned", status: .assigned)]
+        let location = "Sources/Payments/Checkout/Confirmation/PaymentConfirmationCoordinator.swift:142"
+        let url = card.url
+        return .init(checkedAt: .now, metadata: [
+            .init(label: String(localized: .RemoteDetail.remoteDetailSourceBranch), value: "feature/payment-confirmation-with-long-branch-name"),
+            .init(label: String(localized: .RemoteDetail.remoteDetailTargetBranch), value: "main"),
+            .init(label: String(localized: .RemoteSecurity.remoteSecurityCommit), value: card.head ?? ""),
+            .init(label: String(localized: .RemoteDetail.remoteDetailPipeline), value: "success"),
+        ], description: "Keep payment confirmation readable after a retry, including duplicate and interrupted responses.\n\nThe confirmation remains visible while the next request runs, so people can check the original payment and retry safely.\n\nThe test plan covers a successful retry, a duplicate response, offline recovery and long translated messages.",
+        approvals: .init(progress: .init(completed: 2, required: 2, received: 5, requirementsSatisfied: false), people: people,
+            rules: [.init(id: "owners", name: "Code owners", required: 1, approved: true, approvedBy: ["@reviewer1"]),
+                    .init(id: "security", name: "Security team review of payment recovery", required: 1, approved: false)],
+            requirementsSatisfied: false, historyAvailable: true),
+        threads: [
+            .init(id: "open", state: .open, location: location, notes: [
+                .init(id: "1", author: "Alexandra Example With A Long Display Name", username: "reviewer1",
+                    body: "Please preserve the previous confirmation when the retry fails. A duplicate server response should not replace it with an empty state.",
+                    location: location, createdAt: .now.addingTimeInterval(-3600), url: url, origin: .ai),
+                .init(id: "2", author: "Alex Example", username: "alex", body: "The previous confirmation stays visible. The duplicate-response path now has a regression test.",
+                    createdAt: .now.addingTimeInterval(-1800), url: url)
+            ], reply: .published, draftCount: card.drafts.count),
+            .init(id: "resolved", state: .resolved, notes: [
+                .init(id: "3", author: "Earlier Reviewer", username: "earlier", body: "The longer translated button title now wraps correctly.", createdAt: .now, url: url, origin: .human)
+            ], reply: .earlier),
+            .init(id: "general", state: .general, notes: [
+                .init(id: "4", author: "Comment Author", username: "commenter", body: "Please check the offline recovery example before publishing the final review.", createdAt: .now, url: url, origin: .uncertain)
+            ], reply: .none),
+        ], reasons: ["One approval rule is still pending."], policy: ["Comment publication waits for review. Merge readiness is checked independently."],
+        feedback: [.init(label: "@reviewer1", value: "The reply is prepared. Check the discussion and pending draft before publishing.")],
+        activity: [.init(id: "run1", title: "Handle payment confirmation feedback", status: "Completed", summary: "Preserved the cached confirmation and added duplicate-response coverage.", createdAt: .now.addingTimeInterval(-900), head: card.head)],
+        usage: [.init(label: "Reviewer / work agent", value: "$0.1420 · 2 agent requests"), .init(label: "Verifier", value: "$0.0081 · 4 agent requests")])
+    }
 }
 @MainActor private final class PreviewTransport: RemotePhoneTransport {
     var onMessage: (@MainActor (RemoteMessage) async -> Void)?
@@ -61,7 +100,12 @@ import MergeTetherRemote
     func send(_ message: RemoteMessage) async throws {
         if message.type == .hello, let board {
             if delay { try await Task.sleep(for: .seconds(8)) }
-            await onMessage?(.init(type: .snapshot, challenge: message.challenge, board: board))
+            await onMessage?(.init(type: .snapshot, challenge: message.challenge, board: board,
+                capabilities: [RemoteMessage.detailsCapability]))
+        } else if message.type == .detailRequest, let request = message.detailRequest, let board,
+                  request.matches(board), let card = board.cards.first(where: { $0.id == request.cardID }) {
+            await onMessage?(.init(type: .details, detailResponse: .init(request: request, status: .current,
+                details: RemoteDemo.details(for: card))))
         } else if let command = message.command {
             await onMessage?(.init(type: .result, result: .init(id: command.id, status: .completed)))
         }

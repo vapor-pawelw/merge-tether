@@ -6,6 +6,8 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 
 ## Unreleased
 
+- Add touch-friendly iOS MR details with on-demand descriptions, metadata, approval people and rules, discussions, feedback, agent history and usage, with explicit offline and partial-data states.
+
 - Configure a separate operator-owned relay for each native build using an external origin-only file, and reject pairing with another relay while keeping credentials out of app artifacts.
 
 - Limit connection attempts before relay authentication, fail closed when admission checks are unavailable, and document the Workers Free boundary for avoiding usage overages.

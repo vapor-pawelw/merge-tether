@@ -4,6 +4,32 @@ import MergeTetherRemote
 @testable import GitLabTodos
 
 @MainActor @Suite struct RemoteBoardAdapterTests {
+    @Test(arguments: ["target", "description", "head", "author"])
+    func readOnlyDetailsBindEveryRelevantDisplayedContextEvenWithoutActions(_ change: String) throws {
+        let source = try MRDependencyPresentationTests().request(2, project: 1)
+        var fields = try #require(JSONSerialization.jsonObject(with: JSONEncoder().encode(source)) as? [String: Any])
+        switch change {
+        case "target": fields["target_branch"] = "different-target"
+        case "description": fields["description"] = "Edited description"
+        case "head": fields["sha"] = "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb"
+        case "author": fields["author"] = ["id": 10, "username": "other", "name": "Other"]
+        default: break
+        }
+        let changed = try JSONDecoder().decode(GitLabMergeRequest.self, from: JSONSerialization.data(withJSONObject: fields))
+        let before = MergeRequestAttentionMonitor.Item(id: .init(projectID: 1, iid: 2), title: source.title,
+            url: source.webURL, mergeRequest: source)
+        var after = before; after.mergeRequest = changed
+        let card = RemoteBoardAdapter.card(before, account: "me@host")
+        let other = RemoteBoardAdapter.card(after, account: "me@host")
+        #expect(card.actions.isEmpty && other.actions.isEmpty)
+        #expect(card.contextRevision != other.contextRevision)
+        let session = UUID()
+        let board = RemoteBoard(hostSession: session, account: "me@host", lanes: [.init(id: .own, cards: [card])])
+        let request = try RemoteDetailRequest(card: card, board: board)
+        let current = RemoteBoard(hostSession: session, account: "me@host", lanes: [.init(id: .own, cards: [other])])
+        #expect(!request.matches(current))
+    }
+
     @Test(arguments: ["conflict", "unavailable", "uncertain"], ["same", "target", "description", "draft", "host", "author", "stale-catalog"])
     func mergeStatusForThePhoneRequiresTheDisplayedContext(_ reason: String, _ change: String) throws {
         // given

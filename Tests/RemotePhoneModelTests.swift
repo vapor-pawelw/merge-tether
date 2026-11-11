@@ -352,6 +352,72 @@ import MergeTetherRemote
         #expect(fixture.pendingRecovery == nil)
     }
 
+    @Test func detailRequestsRequireHostCapabilityAndDoNotRenewTheBoardLeaseOrSendAWrite() async throws {
+        let f = try PhoneFixture(), model = f.model
+        model.connect(); await model.refresh()
+        var board = f.board
+        board.lanes[0].cards[0].id = "mr:1:2"
+        board.lanes[0].cards[0].actions = []
+        let card = board.cards[0]
+        await f.reply(board: board)
+        await model.requestDetails(card: card)
+        #expect(f.transports[0].sent.allSatisfy { $0.type != .detailRequest })
+        await model.refresh()
+        await f.reply(board: board, capabilities: [RemoteMessage.detailsCapability])
+        await model.requestDetails(card: card)
+        let request = try #require(f.transports[0].sent.last?.detailRequest)
+        let lease = f.date
+        f.date += 46
+        await f.transports[0].onMessage?(.init(type: .details, detailResponse: .init(request: request,
+            status: .current, details: .init(checkedAt: f.date))))
+        #expect(model.detailState.details(for: card, board: board) != nil)
+        #expect(!model.state.canAct(now: f.date))
+        #expect(!model.state.isConnected(now: f.date))
+        #expect(model.state.canAct(now: lease))
+        #expect(model.state.pending == nil && model.state.result == nil)
+        #expect(f.transports[0].sent.allSatisfy { $0.type != .command })
+    }
+
+    @Test func closingDetailsCancelsOnlyTheReadAndAnObsoleteTransportCannotSupplyNewDetails() async throws {
+        let f = try PhoneFixture(), model = f.model
+        model.connect(); await model.refresh()
+        var board = f.board; board.lanes[0].cards[0].id = "mr:1:2"
+        await f.reply(board: board, capabilities: [RemoteMessage.detailsCapability])
+        let old = f.transports[0], card = board.cards[0]
+        await model.requestDetails(card: card)
+        let request = try #require(old.sent.last?.detailRequest)
+        model.cancelDetails()
+        #expect(model.detailState.pending == nil)
+        await old.onMessage?(.init(type: .details, detailResponse: .init(request: request, status: .current, details: .init(checkedAt: f.date))))
+        #expect(model.detailState.response == nil)
+        model.disconnect(); model.connect(); await model.refresh()
+        await f.reply(board: board, capabilities: [RemoteMessage.detailsCapability])
+        await model.requestDetails(card: card)
+        let current = try #require(f.transports[1].sent.last?.detailRequest)
+        await old.onMessage?(.init(type: .details, detailResponse: .init(request: current, status: .current, details: .init(checkedAt: f.date))))
+        #expect(model.detailState.response == nil)
+        await f.transports[1].onMessage?(.init(type: .details, detailResponse: .init(request: current, status: .current, details: .init(checkedAt: f.date))))
+        #expect(model.detailState.response?.request == current)
+        #expect(model.state.pending == nil && model.state.result == nil)
+    }
+
+    @Test func detailsForADifferentAccountCannotReplaceTheCurrentReadOrRearmApprovalConfirmation() async throws {
+        let f = try PhoneFixture(), model = f.model
+        model.connect(); await model.refresh()
+        var board = f.approvalBoard; board.lanes[0].cards[0].id = "mr:1:2"
+        await f.reply(board: board, capabilities: [RemoteMessage.detailsCapability])
+        let card = board.cards[0], action = card.actions[0]
+        let approval = try #require(model.prepareApproval(card: card, action: action))
+        await model.requestDetails(card: card)
+        let request = try #require(f.transports[0].sent.last?.detailRequest)
+        board.account = "other@host"
+        await model.refresh()
+        await f.reply(board: board, capabilities: [RemoteMessage.detailsCapability])
+        await f.transports[0].onMessage?(.init(type: .details, detailResponse: .init(request: request, status: .current, details: .init(checkedAt: f.date))))
+        #expect(model.detailState.response == nil)
+        await model.perform(card: card, action: action, approvalID: approval)
+        #expect(f.transports[0].sent.allSatisfy { $0.type != .command })
+    }
 }
 
 @MainActor private final class PhoneFixture {
@@ -385,9 +451,9 @@ import MergeTetherRemote
         board.lanes[0].cards[0].actions = [.init(id: "approve", kind: .approve, token: "approval-token")]
         return board
     }
-    func reply(board supplied: RemoteBoard? = nil) async {
+    func reply(board supplied: RemoteBoard? = nil, capabilities: [String]? = nil) async {
         let transport = transports.last!
-        await transport.onMessage?(.init(type: .snapshot, challenge: transport.sent.last?.challenge, board: supplied ?? board))
+        await transport.onMessage?(.init(type: .snapshot, challenge: transport.sent.last?.challenge, board: supplied ?? board, capabilities: capabilities))
     }
 }
 

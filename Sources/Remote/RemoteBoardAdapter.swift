@@ -39,6 +39,7 @@ import MergeTetherRemote
         var card = RemoteCard(id: "mr:\(item.id.projectID):\(item.id.iid)", title: item.title,
             project: item.url.gitLabProjectPath, url: item.url,
             head: item.mergeRequest?.sha, detail: detail(item), drafts: drafts)
+        card.contextRevision = item.mergeRequest.flatMap(contextRevision)
         card.dependencies = dependencyPresentation(item.dependencies, projectID: item.id.projectID)
         var kinds = extraActions
         if item.mergeRequest?.sha != nil {
@@ -274,6 +275,8 @@ import MergeTetherRemote
         card.title = model.row.displayTitle
         card.project = model.row.displayURL.gitLabProjectPath
         card.url = model.row.displayURL
+        card.head = model.row.displayRequest?.sha
+        card.contextRevision = model.row.displayRequest.flatMap(contextRevision)
         card.dependencies = dependencyPresentation(model.row.displayItem.dependencies, projectID: model.row.id.projectID)
         card.approvals = model.row.displayItem.approvalProgress.flatMap {
             .init(completed: min($0.completed, $0.required), required: $0.required,
@@ -314,7 +317,13 @@ import MergeTetherRemote
         return card
     }
 
-    private static func detail(_ item: MergeRequestAttentionMonitor.Item) -> String {
+    static func contextRevision(_ request: GitLabMergeRequest) -> String? {
+        guard let identity = try? RemoteDigest.token(MergeRequestDependencySummary.Context(request)) else { return nil }
+        return try? RemoteDigest.token([identity, request.semanticContextFingerprint, String(describing: request.draft),
+            String(request.author.id), request.author.username])
+    }
+
+    static func detail(_ item: MergeRequestAttentionMonitor.Item) -> String {
         var reasons: [LocalizedStringResource] = []
         if item.mergeRequest?.draft == true { reasons.append(.Remote.remoteDraftMR) }
         if item.hasConflict { reasons.append(.Remote.remoteConflict) }

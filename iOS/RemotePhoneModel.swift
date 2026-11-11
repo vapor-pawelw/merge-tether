@@ -17,6 +17,8 @@ enum RemotePhoneConnectionStatus { case unpaired, connecting, connected, offline
     let relayConfiguration: RemoteRelayConfiguration
     private(set) var relayMismatch = false
     var state = RemotePhoneState()
+    let detailState = RemoteDetailState()
+    private(set) var supportsDetails = false
     var paired = false
     var error = false
     private(set) var pairingRevision = UUID()
@@ -118,6 +120,7 @@ enum RemotePhoneConnectionStatus { case unpaired, connecting, connected, offline
                 guard let self, let connection, self.connection === connection else { return }
                 if !connected {
                     self.connectionRevision = UUID(); self.cancelApproval(); self.state.disconnected()
+                    self.detailState.disconnect(); self.supportsDetails = false
                     self.shouldRecoverCommand = self.recovery != nil
                     self.receiptChallenge = nil; self.receiptRevision = nil
                 }
@@ -144,8 +147,15 @@ enum RemotePhoneConnectionStatus { case unpaired, connecting, connected, offline
                     self.shouldRecoverCommand = result.status == .running
                     return
                 }
-                self.state.receive(message, now: self.now())
-                if message.type == .snapshot, self.state.isConnected(now: self.now()) {
+                if message.type == .details {
+                    guard self.supportsDetails, let response = message.detailResponse, let board = self.state.board else { return }
+                    self.detailState.receive(response, board: board)
+                    return
+                }
+                let accepted = self.state.receive(message, now: self.now())
+                if accepted, message.type == .snapshot, self.state.isConnected(now: self.now()) {
+                    self.supportsDetails = message.capabilities?.contains(RemoteMessage.detailsCapability) == true
+                    if let board = self.state.board { self.detailState.update(board: board) }
                     self.error = self.recoveryUnavailable; self.connectionFailed = false; self.connectingUntil = .distantPast
                     await self.recoverLastCommand()
                     // A slow reply can consume most of its lease; renew before the next timer tick.
@@ -162,17 +172,34 @@ enum RemotePhoneConnectionStatus { case unpaired, connecting, connected, offline
     func disconnect() {
         let old = connection; connection = nil; connectionRevision = UUID()
         old?.stop(); cancelApproval(); state.disconnected(); connectingUntil = .distantPast
+        detailState.disconnect(); supportsDetails = false
         shouldRecoverCommand = recovery != nil; receiptChallenge = nil; receiptRevision = nil
     }
     func refresh(force: Bool = false) async {
         let requestState = state
         guard let connection, let challenge = requestState.beginRefresh(force: force, now: now()) else { return }
         do { try await connection.send(.init(type: .hello, challenge: challenge,
-            capabilities: [RemoteMessage.commentReviewCapability, RemoteMessage.mergeActionsCapability])) }
+            capabilities: [RemoteMessage.commentReviewCapability, RemoteMessage.mergeActionsCapability, RemoteMessage.detailsCapability])) }
         catch {
             guard !Task.isCancelled, self.connection === connection, self.state === requestState else { return }
             if requestState.refreshFailed(challenge: challenge) { self.error = true; self.connectionFailed = true }
         }
+    }
+    func requestDetails(card: RemoteCard, force: Bool = false) async {
+        guard supportsDetails, state.isConnected(now: now()), let board = state.board, let connection,
+              let request = detailState.begin(card: card, board: board, now: now(), force: force) else { return }
+        let revision = connectionRevision
+        do { try await connection.send(.init(type: .detailRequest, detailRequest: request)) }
+        catch {
+            guard self.connection === connection, connectionRevision == revision, let current = state.board else { return }
+            detailState.receive(.init(request: request, status: .unavailable), board: current)
+        }
+    }
+    func cancelDetails() {
+        let request = detailState.pending
+        detailState.disconnect()
+        guard supportsDetails, let request, let connection else { return }
+        Task { try? await connection.send(.init(type: .cancelDetails, detailRequest: request)) }
     }
     func prepareApproval(card: RemoteCard, action: RemoteAction) -> UUID? {
         cancelApproval()

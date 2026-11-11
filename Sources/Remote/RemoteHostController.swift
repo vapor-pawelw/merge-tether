@@ -14,6 +14,7 @@ import MergeTetherRemote
 extension RemoteConnection: RemoteHostTransport {}
 
 @MainActor @Observable final class RemoteHostController {
+    typealias DetailReader = @MainActor (GitLabMergeRequest, [GitLabDraftNote], GlabService) async throws -> RemoteMRDetails
     private(set) var pairing: RemotePairing?
     let relayConfiguration: RemoteRelayConfiguration
     private(set) var relayMismatch = false
@@ -37,6 +38,11 @@ extension RemoteConnection: RemoteHostTransport {}
     private let now: () -> Date
     private var phoneSupportsCommentReview = false
     private var phoneSupportsMergeActions = false
+    private var phoneSupportsDetails = false
+    @ObservationIgnored private(set) var detailTask: Task<Void, Never>?
+    private let detailReader: DetailReader
+    private var activeDetailRequest: RemoteDetailRequest?
+    private var lastDetailRead = Date.distantPast
     @ObservationIgnored private var resolutionPreviews: [String: ManualDiscussionResolution.Prepared] = [:]
 
     init(monitor: TodoMonitorService,
@@ -47,11 +53,13 @@ extension RemoteConnection: RemoteHostTransport {}
          connectPairing: ((RemotePairing) -> Void)? = nil,
          commandGate: RemoteCommandGate? = nil,
          now: @escaping () -> Date = Date.init,
+         detailReader: @escaping DetailReader = { try await RemoteMRDetailLoader.load(source: $0, drafts: $1, glab: $2) },
          makeConnection: @escaping (RemotePairing) throws -> any RemoteHostTransport = { try RemoteConnection(pairing: $0, role: .host) }) {
         self.monitor = monitor
         self.relayConfiguration = relayConfiguration
         origin = relayConfiguration.origin?.absoluteString ?? ""
         self.now = now
+        self.detailReader = detailReader
         self.gate = commandGate ?? RemoteCommandGate(store: RemoteCommandReceiptStore(service: (Bundle.main.bundleIdentifier ?? "MergeTether") + ".remote"))
         let store = RemotePairingStore(service: (Bundle.main.bundleIdentifier ?? "MergeTether") + ".remote")
         self.store = store
@@ -118,6 +126,9 @@ extension RemoteConnection: RemoteHostTransport {}
         resolutionPreviews.removeAll()
         phoneSupportsCommentReview = false
         phoneSupportsMergeActions = false
+        phoneSupportsDetails = false
+        detailTask?.cancel(); detailTask = nil; activeDetailRequest = nil
+        lastDetailRead = .distantPast
     }
     private func start(_ pair: RemotePairing) {
         do {
@@ -163,16 +174,25 @@ extension RemoteConnection: RemoteHostTransport {}
             guard let challenge = message.challenge else { return }
             phoneSupportsCommentReview = message.capabilities?.contains(RemoteMessage.commentReviewCapability) == true
             phoneSupportsMergeActions = message.capabilities?.contains(RemoteMessage.mergeActionsCapability) == true
+            phoneSupportsDetails = message.capabilities?.contains(RemoteMessage.detailsCapability) == true
             let fresh = await refreshSource(force: false, deadline: .now + .seconds(35))
             guard connection === active else { return }
             var board = snapshot()
             if !fresh { board.partial = true }
-            do { try await active.send(.init(type: .snapshot, challenge: challenge, board: board)) }
+            do { try await active.send(.init(type: .snapshot, challenge: challenge, board: board,
+                capabilities: [RemoteMessage.detailsCapability])) }
             catch { failed = true; try? await active.send(.init(type: .unavailable)) }
         case .receipt:
             guard let command = message.command, let challenge = message.challenge, let pairing else { return }
             let result = gate.receipt(for: command, account: snapshot().account, pairingSession: pairing.sessionID)
             try? await active.send(.init(type: .receiptResult, challenge: challenge, result: result))
+        case .detailRequest:
+            guard phoneSupportsDetails, let request = message.detailRequest else { return }
+            beginDetails(request, connection: active)
+        case .cancelDetails:
+            if message.detailRequest == activeDetailRequest {
+                detailTask?.cancel(); detailTask = nil; activeDetailRequest = nil
+            }
         case .command:
             guard let command = message.command, let pairing else { return }
             let fresh = await refreshSource(force: true, deadline: .now + .seconds(35))
@@ -193,6 +213,49 @@ extension RemoteConnection: RemoteHostTransport {}
             }
             try? await active.send(.init(type: .result, result: result))
         default: break
+        }
+    }
+    private func beginDetails(_ request: RemoteDetailRequest, connection active: any RemoteHostTransport) {
+        guard request.isValid, activeDetailRequest != request else { return }
+        let board = snapshot()
+        let sourceBoard = monitor.boardSnapshot
+        let proposals = sourceBoard.proposals.compactMap { proposal in
+            proposal.item.map { MergeRequestBoardSnapshot.Row(item: $0, latestJob: proposal.latestJob, intents: proposal.intents) }
+        }
+        let rows = sourceBoard.own + sourceBoard.reviewed + sourceBoard.otherMergeRequests + proposals
+        guard request.matches(board), let pairingSession = pairing?.sessionID,
+              let row = rows.first(where: { "mr:\($0.id.projectID):\($0.id.iid)" == request.cardID }),
+              let source = row.displayRequest,
+              board.cards.first(where: { $0.id == request.cardID })?.contextRevision == RemoteBoardAdapter.contextRevision(source) else {
+            Task { try? await active.send(.init(type: .details, detailResponse: .init(request: request, status: .changed))) }
+            return
+        }
+        guard now().timeIntervalSince(lastDetailRead) >= 1 else {
+            Task { try? await active.send(.init(type: .details, detailResponse: .init(request: request, status: .unavailable))) }
+            return
+        }
+        detailTask?.cancel(); activeDetailRequest = request; lastDetailRead = now()
+        let revision = monitor.glab.accountRevision
+        detailTask = Task { [weak self, weak active] in
+            guard let self, let active else { return }
+            defer {
+                if activeDetailRequest == request { activeDetailRequest = nil; detailTask = nil }
+            }
+            let response: RemoteDetailResponse
+            do {
+                var details = try await detailReader(source, row.evidenceMatchesCatalogContext ? row.item.drafts : [], monitor.glab)
+                let usage = try? await AssistantUsageStore.shared.snapshot()
+                try Task.checkCancellation()
+                RemoteMRDetailSupplement.append(to: &details, row: row, monitor: monitor, usage: usage)
+                response = .init(request: request, status: .current, details: details)
+            } catch RemoteMRDetailLoader.ReadError.changed { response = .init(request: request, status: .changed) }
+            catch { response = .init(request: request, status: .unavailable) }
+            let bounded = await Task.detached(priority: .utility) { response.bounded() }.value
+            guard !Task.isCancelled, phoneSupportsDetails, connection === active, self.pairing?.sessionID == pairingSession,
+                  monitor.glab.accountRevision == revision, activeDetailRequest == request else { return }
+            var checked = bounded
+            if !request.matches(snapshot()) { checked = .init(request: request, status: .changed) }
+            try? await active.send(.init(type: .details, detailResponse: checked))
         }
     }
     private func refreshSource(force: Bool, deadline: ContinuousClock.Instant) async -> Bool {

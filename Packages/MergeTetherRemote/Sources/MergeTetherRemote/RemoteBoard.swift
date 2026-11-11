@@ -121,13 +121,15 @@ public struct RemoteCard: Codable, Equatable, Identifiable, Sendable {
     public var presentation: RemoteCardText?
     public var dependencies: RemoteMRDependencies?
     public var approvals: RemoteApprovalProgress?
+    public var contextRevision: String?
     public init(id: String, title: String, project: String, url: URL?, head: String? = nil,
                 detail: String = "", drafts: [RemoteDraft] = [], actions: [RemoteAction] = [],
-                needsAttention: Bool? = nil, mergeRequestIID: Int? = nil, primaryCTA: RemoteCardCTA? = nil, presentation: RemoteCardText? = nil, dependencies: RemoteMRDependencies? = nil, approvals: RemoteApprovalProgress? = nil) {
+                needsAttention: Bool? = nil, mergeRequestIID: Int? = nil, primaryCTA: RemoteCardCTA? = nil, presentation: RemoteCardText? = nil, dependencies: RemoteMRDependencies? = nil, approvals: RemoteApprovalProgress? = nil, contextRevision: String? = nil) {
         self.id = id; self.title = title; self.project = project; self.url = url; self.head = head
         self.detail = detail; self.drafts = drafts; self.actions = actions
         self.needsAttention = needsAttention; self.mergeRequestIID = mergeRequestIID; self.primaryCTA = primaryCTA; self.presentation = presentation; self.dependencies = dependencies
         self.approvals = approvals
+        self.contextRevision = contextRevision
     }
 }
 
@@ -173,17 +175,22 @@ public struct RemoteCommandResult: Codable, Equatable, Sendable {
 public struct RemoteMessage: Codable, Sendable {
     public static let mergeActionsCapability = "merge-actions-v1"
     public static let commentReviewCapability = "comment-review-v1"
-    public enum Kind: String, Codable, Sendable { case hello, snapshot, command, accepted, result, receipt, receiptResult = "receipt-result", unavailable, hostReady = "host-ready" }
+    public static let detailsCapability = "mr-details-v1"
+    public enum Kind: String, Codable, Sendable { case hello, snapshot, command, accepted, result, receipt, receiptResult = "receipt-result", unavailable, hostReady = "host-ready", detailRequest = "detail-request", details, cancelDetails = "cancel-details" }
     public var type: Kind
     public var challenge: UUID?
     public var board: RemoteBoard?
     public var command: RemoteCommand?
     public var result: RemoteCommandResult?
     public var capabilities: [String]?
+    public var detailRequest: RemoteDetailRequest?
+    public var detailResponse: RemoteDetailResponse?
     public init(type: Kind, challenge: UUID? = nil, board: RemoteBoard? = nil,
-                command: RemoteCommand? = nil, result: RemoteCommandResult? = nil, capabilities: [String]? = nil) {
+                command: RemoteCommand? = nil, result: RemoteCommandResult? = nil, capabilities: [String]? = nil,
+                detailRequest: RemoteDetailRequest? = nil, detailResponse: RemoteDetailResponse? = nil) {
         self.type = type; self.challenge = challenge; self.board = board; self.command = command; self.result = result
         self.capabilities = capabilities
+        self.detailRequest = detailRequest; self.detailResponse = detailResponse
     }
 }
 

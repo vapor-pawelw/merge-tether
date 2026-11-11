@@ -27,23 +27,24 @@ import Observation
         if keepConnectionVisible { connectedUntil = challengeUntil }
         return value
     }
-    public func receive(_ message: RemoteMessage, now: Date = Date()) {
+    @discardableResult public func receive(_ message: RemoteMessage, now: Date = Date()) -> Bool {
         switch message.type {
         case .snapshot:
-            guard let board = message.board, let expected, message.challenge == expected else { return }
+            guard let board = message.board, let expected, message.challenge == expected else { return false }
             self.board = board
             self.expected = nil
             validUntil = challengeUntil
             connectedUntil = challengeUntil
         case .accepted:
-            guard message.result?.id == pending?.id, pending != nil else { return }
+            guard message.result?.id == pending?.id, pending != nil else { return false }
             pendingUntil = now.addingTimeInterval(120)
         case .result:
-            guard let result = message.result, result.id == pending?.id else { return }
+            guard let result = message.result, result.id == pending?.id else { return false }
             self.result = result
             if result.status != .running { pending = nil }
-        default: break
+        default: return false
         }
+        return true
     }
     public func disconnected() {
         refreshFailed()
