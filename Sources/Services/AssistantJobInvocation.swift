@@ -16,6 +16,7 @@ struct AssistantJobInvocation {
     var temporaryDirectory: URL { workspace.appending(path: "tmp", directoryHint: .isDirectory) }
     func childEnvironment(_ base: [String: String]) -> [String: String] {
         var environment = base
+        environment[InstallationStorage.environmentKey] = evidenceRoot.deletingLastPathComponent().path
         for key in ["TMPDIR", "TMP", "TEMP"] { environment[key] = temporaryDirectory.path }
         // Java on macOS does not derive java.io.tmpdir from TMPDIR. Quotes are
         // parsed by the JVM itself and preserve Application Support paths.

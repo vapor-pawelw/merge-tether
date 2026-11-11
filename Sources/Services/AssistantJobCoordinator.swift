@@ -159,10 +159,15 @@ final class AssistantJobCoordinator {
             if recovered != execution { settings.assistantHandoffs[index].execution = recovered; changed = true }
         }
         if changed { settings.save() }
+        let detector = ExistingPipelineWorkDetector()
+        for handoff in settings.assistantHandoffs {
+            guard let execution = handoff.execution, !execution.state.isActive, execution.state != .interrupted,
+                  work[handoff.id] == nil, let reservation = handoff.pipelineReservation else { continue }
+            try? detector.recoverTerminalRun(handoff.id, reservation: reservation, state: execution.state)
+        }
         if !restoringCheckpointKey, !AssistantJobJournal.isKeyReady,
            settings.assistantHandoffs.contains(where: {
-               ($0.execution?.state.isActive == true || $0.execution?.state == .interrupted)
-                   && work[$0.id] == nil && AssistantJobJournal.hasCheckpoint($0.id)
+               work[$0.id] == nil && AssistantJobJournal.hasCheckpoint($0.id)
            }) {
             restoringCheckpointKey = true
             Task { @MainActor [weak self, weak settings] in

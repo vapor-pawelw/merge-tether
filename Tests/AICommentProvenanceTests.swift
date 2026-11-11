@@ -3,6 +3,27 @@ import Testing
 @testable import GitLabTodos
 
 struct AICommentProvenanceTests: Sendable {
+    @Test func legacyDisplayOriginsRemainExactAndNeverPopulateTheNewInstallationDirectory() throws {
+        let root = try temporaryDirectory()
+        defer { try? FileManager.default.removeItem(at: root) }
+        let legacy = root.appending(path: "legacy"), current = root.appending(path: "current")
+        let generated = draft(11), runID = UUID()
+        try AICommentProvenanceStore.recordGenerated([.init(id: 11, bodySHA256: AICommentAssessmentStore.digest(generated.note!))],
+            baseline: [], current: [generated], context: context, runID: runID, headSHA: String(repeating: "a", count: 40), in: legacy)
+        let publication = try #require(AICommentProvenanceStore.capturePublication([generated], context: context, before: [], in: legacy))
+        let after = try discussions(#"[{"id":20,"body":"Generated reply","author":{"id":9,"username":"me"}}]"#)
+        try AICommentProvenanceStore.recordPublished(publication, after: after, in: legacy)
+        #expect(AICommentProvenanceStore.generation(for: generated, context: context, in: current, legacyDirectory: legacy) == runID)
+        let snapshot = AICommentProvenanceStore.snapshot(context: context, in: current, legacyDirectory: legacy)
+        #expect(snapshot.contains(after[0].notes[0], discussionID: "thread"))
+        var edited = after[0].notes[0]; edited.body = "Later user edit"
+        #expect(!snapshot.contains(edited, discussionID: "thread"))
+        let other = AICommentProvenanceStore.Context(host: context.host, username: "other", userID: 19, projectID: 1, iid: 2)
+        #expect(!AICommentProvenanceStore.snapshot(context: other, in: current, legacyDirectory: legacy)
+            .contains(after[0].notes[0], discussionID: "thread"))
+        #expect(!FileManager.default.fileExists(atPath: current.path))
+    }
+
     private let context = AICommentProvenanceStore.Context(host: "gitlab.example.test", username: "me", userID: 9, projectID: 1, iid: 2)
     private func draft(_ id: Int, body: String = "Generated reply", thread: String? = "thread") -> GitLabDraftNote {
         .init(id: id, authorID: 9, note: body, discussionID: thread, position: nil)

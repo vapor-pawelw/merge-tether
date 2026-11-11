@@ -8,6 +8,8 @@ struct AssistantUsageSettingsTab: View {
     @State private var refreshID = UUID()
     @State private var boundaryRefreshID = UUID()
     @State private var loadFailed = false
+    @State private var legacyTotal: AssistantUsageTotal?
+    @State private var legacyLoadFailed = false
     @State private var summary = AssistantUsageSummary()
     @State private var chartData = AssistantUsageChartData()
     @State private var mergeRequestRanking: [AssistantUsageMergeRequestTotal] = []
@@ -38,6 +40,21 @@ struct AssistantUsageSettingsTab: View {
                     trackingFooter(snapshot)
                 } else if !loadFailed {
                     ProgressView().frame(maxWidth: .infinity)
+                }
+
+                if let legacyTotal {
+                    VStack(alignment: .leading, spacing: 8) {
+                        AssistantUsageTotalCard(title: .AssistantUsage.assistantUsageLegacyTitle,
+                            detail: .AssistantUsage.assistantUsageLegacyHelp, total: legacyTotal)
+                        Button {
+                            NSWorkspace.shared.activateFileViewerSelecting([InstallationStorage.current.legacy.usageFile])
+                        } label: { Text(.AssistantUsage.assistantUsageLegacySource) }
+                    }
+                } else if legacyLoadFailed {
+                    Label { Text(.AssistantUsage.assistantUsageLegacyUnavailable) } icon: {
+                        Image(systemName: "exclamationmark.triangle")
+                    }
+                    .font(.caption).foregroundStyle(.secondary)
                 }
 
                 estimateExplanation
@@ -157,6 +174,17 @@ struct AssistantUsageSettingsTab: View {
     }
 
     private func refresh() async {
+        if legacyTotal == nil {
+            do {
+                let legacy = try await Task.detached { try AssistantUsageStore.legacySharedSnapshot() }.value
+                guard !Task.isCancelled else { return }
+                legacyTotal = legacy?.summary().overall
+                legacyLoadFailed = false
+            } catch {
+                guard !Task.isCancelled else { return }
+                legacyLoadFailed = true
+            }
+        }
         do {
             let current = try await AssistantUsageStore.shared.snapshot()
             guard !Task.isCancelled else { return }

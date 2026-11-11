@@ -141,20 +141,39 @@ enum FollowUpVerificationStore {
         let handoffs: [AssistantAutomationRunner.Handoff]
         let events: [MRAutomationEvent]
         let assistant: AutomationAssistant
+        let authenticatedRecoveries: [String: Data]
+        var legacyEvidenceDirectory: URL? = nil
     }
 
     @MainActor
     static func receiptReadInput(work: AssistantAutomationRunner.MergeRequestWork, username: String,
-                                 settings: SettingsManager) -> ReceiptReadInput {
-        .init(handoffs: settings.assistantHandoffs.filter { $0.key.work == work && $0.key.username == username },
-              events: settings.automationEvents, assistant: settings.automation.assistant)
+                                 settings: SettingsManager, in directory: URL = directory) -> ReceiptReadInput {
+        let folder = recordURL(kind: "follow-up-proof-recoveries", work: work, username: username, in: directory).deletingPathExtension()
+        let paths = (try? FileManager.default.contentsOfDirectory(at: folder, includingPropertiesForKeys: nil)) ?? []
+        if !paths.isEmpty && !AssistantJobJournal.isKeyReady {
+            Task { _ = await AssistantJobJournal.loadKey() }
+        }
+        var authenticated: [String: Data] = [:]
+        for path in paths {
+            guard path.pathExtension == "json", (try? path.resourceValues(forKeys: [.isSymbolicLinkKey]).isSymbolicLink) != true,
+                  let size = try? path.resourceValues(forKeys: [.fileSizeKey]).fileSize, size < 1_500_000,
+                  let data = try? Data(contentsOf: path),
+                  let payload = AssistantJobJournal.authenticatedEvidence(data, context: "follow-up-proof-recovery") else { continue }
+            authenticated[path.lastPathComponent] = payload
+        }
+        let legacy = directory.standardizedFileURL == Self.directory.standardizedFileURL
+            && InstallationStorage.current.root != InstallationStorage.current.legacy.root
+            ? InstallationStorage.current.legacy.evidence : nil
+        return .init(handoffs: settings.assistantHandoffs.filter { $0.key.work == work && $0.key.username == username },
+              events: settings.automationEvents, assistant: settings.automation.assistant,
+              authenticatedRecoveries: authenticated, legacyEvidenceDirectory: legacy)
     }
 
     @MainActor
     static func contextReceipts(work: AssistantAutomationRunner.MergeRequestWork, username: String,
                                 settings: SettingsManager, in directory: URL = directory) -> [FollowUpVerification] {
         contextReceipts(work: work, username: username,
-            input: receiptReadInput(work: work, username: username, settings: settings), in: directory)
+            input: receiptReadInput(work: work, username: username, settings: settings, in: directory), in: directory)
     }
 
     nonisolated static func contextReceipts(work: AssistantAutomationRunner.MergeRequestWork, username: String,
@@ -236,7 +255,7 @@ enum FollowUpVerificationStore {
     nonisolated static func recordingInstructions(work: AssistantAutomationRunner.MergeRequestWork, runID: UUID) -> String {
         let helper = Bundle.main.resourceURL?.appending(path: "Automation/author_follow_up.py").path ?? "<MergeTether.app>/Contents/Resources/Automation/author_follow_up.py"
         let quoted = "'" + helper.replacingOccurrences(of: "'", with: "'\\''") + "'"
-        let command = "/usr/bin/python3 -B \(quoted)"
+        let command = InstallationStorage.current.helperEnvironmentPrefix + " /usr/bin/python3 -B \(quoted)"
         let target = "--host \(work.host) --project-id \(work.projectID) --iid \(work.iid)"
         let run = runID.uuidString.lowercased()
         return """
@@ -272,11 +291,11 @@ extension FollowUpVerificationStore {
                                 settings: SettingsManager, in directory: URL = directory,
                                 excludingRunID: UUID? = nil, excludingPredecessorID: UUID? = nil) -> [FollowUpVerification] {
         recoveryOrigins(work: work, username: username,
-            input: receiptReadInput(work: work, username: username, settings: settings), in: directory,
+            input: receiptReadInput(work: work, username: username, settings: settings, in: directory), in: directory,
             excludingRunID: excludingRunID, excludingPredecessorID: excludingPredecessorID)
     }
 
-    nonisolated private static func recoveryOrigins(work: AssistantAutomationRunner.MergeRequestWork, username: String,
+    nonisolated static func recoveryOrigins(work: AssistantAutomationRunner.MergeRequestWork, username: String,
         input: ReceiptReadInput, in directory: URL, excludingRunID: UUID? = nil,
         excludingPredecessorID: UUID? = nil) -> [FollowUpVerification] {
         let runs = input.handoffs.filter {
@@ -288,16 +307,22 @@ extension FollowUpVerificationStore {
                 && (origin.execution == nil || origin.execution?.state == .succeeded || origin.execution?.state == .blocked)
         }
         guard !origins.isEmpty else { return [] }
-        var paths = [recordURL(kind: "follow-up-verifications", work: work, username: username, in: directory)]
-        let archive = recordURL(kind: "follow-up-verifications-archive", work: work, username: username, in: directory).deletingPathExtension()
-        paths += ((try? FileManager.default.contentsOfDirectory(at: archive, includingPropertiesForKeys: nil)) ?? [])
-            .filter { $0.pathExtension == "json" }
-        for origin in origins {
-            let folder = directory.deletingLastPathComponent().appending(path: "Assistant Runs/\(origin.id.uuidString)")
-            if let working = origin.execution?.workingDirectory,
-               URL(fileURLWithPath: working).standardizedFileURL == folder.standardizedFileURL,
-               (try? folder.resourceValues(forKeys: [.isSymbolicLinkKey]).isSymbolicLink) != true {
-                paths.append(folder.appending(path: "seal-receipt.json"))
+        var paths: [URL] = []
+        var archives: Set<URL> = []
+        // Legacy records are candidates only for exact persisted runs; no legacy recovery authorizes publication.
+        for evidence in [directory] + (input.legacyEvidenceDirectory.map { [$0] } ?? []) {
+            paths.append(recordURL(kind: "follow-up-verifications", work: work, username: username, in: evidence))
+            let archive = recordURL(kind: "follow-up-verifications-archive", work: work, username: username, in: evidence).deletingPathExtension()
+            archives.insert(archive.standardizedFileURL)
+            paths += ((try? FileManager.default.contentsOfDirectory(at: archive, includingPropertiesForKeys: nil)) ?? [])
+                .filter { $0.pathExtension == "json" }
+            for origin in origins {
+                let folder = evidence.deletingLastPathComponent().appending(path: "Assistant Runs/\(origin.id.uuidString)")
+                if let working = origin.execution?.workingDirectory,
+                   URL(fileURLWithPath: working).standardizedFileURL == folder.standardizedFileURL,
+                   (try? folder.resourceValues(forKeys: [.isSymbolicLinkKey]).isSymbolicLink) != true {
+                    paths.append(folder.appending(path: "seal-receipt.json"))
+                }
             }
         }
         var unique: [UUID: FollowUpVerification] = [:]
@@ -318,7 +343,7 @@ extension FollowUpVerificationStore {
                       proof.iid == repair.origin.iid, proof.sourceProjectID == repair.origin.sourceProjectID,
                       proof.sourceBranch == repair.origin.sourceBranch else { continue }
             }
-            if path.deletingLastPathComponent().standardizedFileURL == archive.standardizedFileURL,
+            if archives.contains(path.deletingLastPathComponent().standardizedFileURL),
                UUID(uuidString: path.deletingPathExtension().lastPathComponent) != proof.verificationID { continue }
             if let previous = unique[proof.verificationID], previous != proof { ambiguous.insert(proof.verificationID) }
             else { unique[proof.verificationID] = proof }
@@ -449,7 +474,8 @@ extension FollowUpVerificationStore {
                                 username: String, in directory: URL) throws {
         let folder = recordURL(kind: "follow-up-proof-recoveries", work: work, username: username, in: directory).deletingPathExtension()
         try FileManager.default.createDirectory(at: folder, withIntermediateDirectories: true, attributes: [.posixPermissions: 0o700])
-        try JSONEncoder().encode(record).write(to: folder.appending(path: "\(record.attemptID).json"), options: .atomic)
+        let sealed = try AssistantJobJournal.sealEvidence(JSONEncoder().encode(record), context: "follow-up-proof-recovery")
+        try sealed.write(to: folder.appending(path: "\(record.attemptID).json"), options: .atomic)
     }
 
     @MainActor
@@ -462,7 +488,7 @@ extension FollowUpVerificationStore {
     static func recoveryRecords(work: AssistantAutomationRunner.MergeRequestWork, username: String,
                                 settings: SettingsManager, in directory: URL) -> [RecoveryRecord] {
         recoveryRecords(work: work, username: username,
-            input: receiptReadInput(work: work, username: username, settings: settings), in: directory)
+            input: receiptReadInput(work: work, username: username, settings: settings, in: directory), in: directory)
     }
 
     nonisolated private static func recoveryRecords(work: AssistantAutomationRunner.MergeRequestWork, username: String,
@@ -472,8 +498,8 @@ extension FollowUpVerificationStore {
         let folder = recordURL(kind: "follow-up-proof-recoveries", work: work, username: username, in: directory).deletingPathExtension()
         return ((try? FileManager.default.contentsOfDirectory(at: folder, includingPropertiesForKeys: nil)) ?? []).compactMap { path in
             guard path.pathExtension == "json", (try? path.resourceValues(forKeys: [.isSymbolicLinkKey]).isSymbolicLink) != true,
-                  let size = try? path.resourceValues(forKeys: [.fileSizeKey]).fileSize, size < 1_000_000,
-                  let data = try? Data(contentsOf: path), let record = try? JSONDecoder().decode(RecoveryRecord.self, from: data),
+                  let data = input.authenticatedRecoveries[path.lastPathComponent],
+                  let record = try? JSONDecoder().decode(RecoveryRecord.self, from: data),
                   [1, 2].contains(record.version), path.deletingPathExtension().lastPathComponent == record.attemptID,
                   isHex(record.attemptID, lengths: [64]), origins.contains(record.origin),
                   record.assistant == input.assistant, !record.model.isEmpty,

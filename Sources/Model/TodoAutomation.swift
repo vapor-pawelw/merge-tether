@@ -155,6 +155,7 @@ struct AutomationSettings: Codable, Equatable, Sendable {
     var assistant: AutomationAssistant = .codex
     var codexReviewModel: CodexReviewModel = .sol
     var codexReviewThinking: CodexReviewThinking = .high
+    var workerExecutionTimeout = WorkerExecutionTimeout()
     var assistantWorkspace = ""
     var reuseAssistantChats = true
     var codexRelayEnabled = false
@@ -296,6 +297,7 @@ struct AutomationSettings: Codable, Equatable, Sendable {
         assistant = try values.decodeIfPresent(AutomationAssistant.self, forKey: .assistant) ?? assistant
         codexReviewModel = (try? values.decode(CodexReviewModel.self, forKey: .codexReviewModel)) ?? codexReviewModel
         codexReviewThinking = (try? values.decode(CodexReviewThinking.self, forKey: .codexReviewThinking)) ?? codexReviewThinking
+        workerExecutionTimeout = (try? values.decode(WorkerExecutionTimeout.self, forKey: .workerExecutionTimeout)) ?? .init()
         assistantWorkspace = try values.decodeIfPresent(String.self, forKey: .assistantWorkspace)
             ?? legacy.decodeIfPresent(String.self, forKey: .codexWorkspace) ?? assistantWorkspace
         codexRelayEnabled = try values.decodeIfPresent(Bool.self, forKey: .codexRelayEnabled) ?? false
@@ -375,6 +377,7 @@ struct AutomationSettings: Codable, Equatable, Sendable {
         case allowAssistantTools, assistantToolProjects, packageDecision, workflowRules, allowAutomaticPublicActions
         case autoMergeProjects, allowConflictPush, allowFollowUpPush, conflictPushProjects, autoReReviewEnabled, publishDraftsWithoutConfirmation, publishAIRepliesWithoutConfirmation, autoApproveEnabled, autoResolveOwnReviewThreads
         case codexReviewModel, codexReviewThinking, assistantDefaultsVersion, scope
+        case workerExecutionTimeout
         case autoVerifyReReview, codexVerificationModel, claudeVerificationModel, verificationThinking
         case autoResolveAcceptedFeedback, publicationRestrictions, publicationPolicyMode, baselinePreset, projectPermissionsVersion, autoClaimPipelineFailures
     }

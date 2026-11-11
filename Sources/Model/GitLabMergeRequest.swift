@@ -196,7 +196,7 @@ struct GitLabMergeRequestApprovalState: Decodable, Sendable {
 }
 
 /// One of the current user's unpublished (private) draft notes on a merge request.
-struct GitLabDraftNote: Decodable, Equatable, Sendable {
+struct GitLabDraftNote: Codable, Equatable, Sendable {
     let id: Int?
     let authorID: Int
     let note: String?

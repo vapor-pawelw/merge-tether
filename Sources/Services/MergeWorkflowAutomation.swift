@@ -67,7 +67,14 @@ final class MergeWorkflowAutomation {
         let admissions = currentAdmissions
         guard !admissions.isEmpty else { return [] }
         let jobs = WorkflowExecutionProjection.JobIndex(settings.assistantHandoffs)
-        return admissions.map(jobs.entry)
+        return admissions.map {
+            var entry = jobs.entry($0)
+            if entry.state == .alreadyRegistered, let key = pipelineKey(entry),
+               let diagnostic = detector.reservationSummary(for: key) {
+                entry.summary = diagnostic
+            }
+            return entry
+        }
     }
 
     var pendingPipelineHandoffs: [MergeWorkflowActivityEntry] {

@@ -1,3 +1,4 @@
+import Darwin
 import Foundation
 
 /// Stores numeric usage receipts and MR identity. Recent IDs deduplicate completion callbacks;
@@ -10,7 +11,7 @@ actor AssistantUsageStore {
             || ProcessInfo.processInfo.environment["XCTestConfigurationFilePath"] != nil
         let file = testing
             ? FileManager.default.temporaryDirectory.appending(path: "MergeTether-UsageTests-\(UUID())/usage.json")
-            : URL.homeDirectory.appending(path: "Library/Application Support/com.vaporpw.GitLabTodos/Assistant Usage/usage.json")
+            : InstallationStorage.current.usageFile
         return AssistantUsageStore(file: file)
     }()
     let file: URL
@@ -63,6 +64,32 @@ actor AssistantUsageStore {
     func snapshot() throws -> AssistantUsageSnapshot {
         guard !writeFailed else { throw StoreError.writeFailed }
         let state = try load()
+        return Self.snapshot(state)
+    }
+
+    /// Historical counters may include more than one installation. Reading them
+    /// never creates, compacts or rewrites the shared source file.
+    nonisolated static func legacySharedSnapshot(storage: InstallationStorage = .current) throws -> AssistantUsageSnapshot? {
+        guard storage.usageFile != storage.legacy.usageFile else { return nil }
+        let file = open(storage.legacy.usageFile.path, O_RDONLY | O_NOFOLLOW | O_CLOEXEC | O_NONBLOCK)
+        guard file >= 0 else {
+            if errno == ENOENT { return nil }
+            throw POSIXError(POSIXErrorCode(rawValue: errno) ?? .EIO)
+        }
+        defer { close(file) }
+        var info = stat()
+        let limit = 16 * 1024 * 1024
+        guard fstat(file, &info) == 0, info.st_mode & S_IFMT == S_IFREG,
+              info.st_size >= 0, info.st_size <= limit else { throw StoreError.unsupportedVersion }
+        let reader = FileHandle(fileDescriptor: file, closeOnDealloc: false)
+        let bytes = try reader.read(upToCount: limit + 1) ?? Data()
+        guard bytes.count <= limit else { throw StoreError.unsupportedVersion }
+        let state = try JSONDecoder().decode(State.self, from: bytes)
+        guard state.version == 1 else { throw StoreError.unsupportedVersion }
+        return snapshot(state)
+    }
+
+    nonisolated private static func snapshot(_ state: State) -> AssistantUsageSnapshot {
         let entries = state.archived.map {
             AssistantUsageEntry(date: $0.hour, role: $0.role, assistant: $0.assistant, total: $0.total,
                 mergeRequest: $0.mergeRequest)

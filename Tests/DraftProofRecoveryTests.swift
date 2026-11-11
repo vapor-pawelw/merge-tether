@@ -4,6 +4,55 @@ import Testing
 
 @MainActor
 struct DraftProofRecoveryTests {
+    @Test func onlyTheExactAppAuthenticatedAssessmentCanAuthorizePublication() async throws {
+        let f = try Fixture()
+        defer { f.clean() }
+        let coordinator = f.coordinator()
+        coordinator.schedule(snapshot: f.snapshot, origin: f.proof, configuration: f.settings.automation)
+        try await f.settle(coordinator)
+        #expect(f.publication().count == 1)
+        let folder = FollowUpVerificationStore.recordURL(kind: "follow-up-proof-recoveries",
+            work: f.work, username: "me", in: f.folder).deletingPathExtension()
+        let paths = try FileManager.default.contentsOfDirectory(at: folder, includingPropertiesForKeys: nil)
+        let path = try #require(paths.first)
+        let sealed = try Data(contentsOf: path)
+        let payload = try #require(AssistantJobJournal.authenticatedEvidence(sealed, context: "follow-up-proof-recovery"))
+        // Copying the app's payload without its authentication cannot substitute a verifier result.
+        try payload.write(to: path)
+        #expect(f.publication().isEmpty)
+        try sealed.write(to: path)
+        #expect(f.publication().count == 1)
+        let envelopeObject = try JSONSerialization.jsonObject(with: sealed)
+        var envelope = try #require(envelopeObject as? [String: Any])
+        envelope["payload"] = Data("rewritten assessment".utf8).base64EncodedString()
+        try JSONSerialization.data(withJSONObject: envelope).write(to: path)
+        #expect(f.publication().isEmpty)
+    }
+
+    @Test func anUnsignedHistoricalAssessmentOffersVerificationRetryWithoutPromotingItsClaims() async throws {
+        let f = try Fixture()
+        defer { f.clean() }
+        let first = f.coordinator()
+        first.schedule(snapshot: f.snapshot, origin: f.proof, configuration: f.settings.automation)
+        try await f.settle(first)
+        let folder = FollowUpVerificationStore.recordURL(kind: "follow-up-proof-recoveries",
+            work: f.work, username: "me", in: f.folder).deletingPathExtension()
+        let paths = try FileManager.default.contentsOfDirectory(at: folder, includingPropertiesForKeys: nil)
+        let path = try #require(paths.first)
+        let bytes = try Data(contentsOf: path)
+        let payload = try #require(AssistantJobJournal.authenticatedEvidence(bytes, context: "follow-up-proof-recovery"))
+        try payload.write(to: path)
+        let restarted = f.coordinator()
+        restarted.schedule(snapshot: f.snapshot, origin: f.proof, configuration: f.settings.automation)
+        try await f.settle(restarted)
+        #expect(f.publication().isEmpty && restarted.failure(work: f.work) != nil)
+        #expect(f.assessments == 1)
+        restarted.retry(work: f.work, username: "me")
+        restarted.schedule(snapshot: f.snapshot, origin: f.proof, configuration: f.settings.automation)
+        try await f.settle(restarted)
+        #expect(f.assessments == 2 && f.publication().count == 1)
+    }
+
     @Test(arguments: ["known", "unknown"])
     func corruptRecoveryRecordsRemainBlockedAndSurviveExplicitRetry(_ record: String) async throws {
         // given
@@ -1135,7 +1184,9 @@ struct DraftProofRecoveryTests {
         #expect(proof.runID == fixture.proof.runID)
         let directory = FollowUpVerificationStore.recordURL(kind: "follow-up-proof-recoveries", work: fixture.work, username: "me", in: fixture.folder).deletingPathExtension()
         let path = try #require(try FileManager.default.contentsOfDirectory(at: directory, includingPropertiesForKeys: nil).first)
-        let record = try JSONDecoder().decode(FollowUpVerificationStore.RecoveryRecord.self, from: Data(contentsOf: path))
+        let bytes = try Data(contentsOf: path)
+        let payload = try #require(AssistantJobJournal.authenticatedEvidence(bytes, context: "follow-up-proof-recovery"))
+        let record = try JSONDecoder().decode(FollowUpVerificationStore.RecoveryRecord.self, from: payload)
         #expect(record.origin == fixture.proof)
         #expect(record.requestedDraftIDs == [13])
     }

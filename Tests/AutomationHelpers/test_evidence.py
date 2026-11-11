@@ -3,6 +3,7 @@ import json
 from pathlib import Path
 import tempfile
 import unittest
+import uuid
 from unittest.mock import patch
 
 from evidence import ReviewEvidenceRecorder, gitlab_get
@@ -83,6 +84,35 @@ class ReviewEvidenceTests(unittest.TestCase):
             self.assertIn("HOME", environment)
             self.assertIn("PATH", environment)
             self.assertNotIn("ANTHROPIC_API_KEY", environment)
+
+    def test_run_verdict_binds_the_actual_authenticated_account(self):
+        run_id = str(uuid.uuid4())
+        original = self.read
+        def authenticated(host, endpoint):
+            if endpoint == "/user": return {"id": 3, "username": "reviewer"}
+            return original(host, endpoint)
+        recorder = ReviewEvidenceRecorder(self.root, authenticated)
+        recorder.record_verdict("gitlab.example.org", "1", "2", self.head, "no_objections",
+                                username="reviewer", run_id=run_id)
+        receipt = json.loads((self.root / "verdicts/gitlab.example.org/1-2.json").read_text())
+        self.assertEqual(receipt["username"], "reviewer")
+        self.assertEqual(receipt["userID"], 3)
+        self.assertEqual(receipt["runID"], run_id)
+
+    def test_account_switch_during_a_review_cannot_record_a_verdict(self):
+        original = self.read
+        reads = 0
+        def switching(host, endpoint):
+            nonlocal reads
+            if endpoint == "/user":
+                reads += 1
+                return {"id": 3, "username": "reviewer"} if reads == 1 else {"id": 4, "username": "other"}
+            return original(host, endpoint)
+        recorder = ReviewEvidenceRecorder(self.root, switching)
+        with self.assertRaises(ValueError):
+            recorder.record_verdict("gitlab.example.org", "1", "2", self.head, "no_objections",
+                                    username="reviewer", run_id=str(uuid.uuid4()))
+        self.assertFalse((self.root / "verdicts").exists())
 
     def test_getter_preserves_sandbox_proxy_and_certificates_without_forwarding_secrets(self):
         with patch("evidence.shutil.which", return_value="/usr/local/bin/glab"), \

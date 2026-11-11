@@ -3,8 +3,7 @@ import Darwin
 
 @MainActor
 enum CodexDesktopRelay {
-    static let directory = URL.homeDirectory
-        .appending(path: "Library/Application Support/com.vaporpw.GitLabTodos/Codex Desktop Relay", directoryHint: .isDirectory)
+    static let directory = InstallationStorage.current.evidence
 
     static func clearMergeRequestStatus(in directory: URL = directory) {
         try? FileManager.default.removeItem(at: directory.appending(path: "mr-status.json"))

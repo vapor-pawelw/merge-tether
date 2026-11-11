@@ -188,6 +188,43 @@ import Testing
         #expect(settings.assistantHandoffs[0].execution?.state == .interrupted)
     }
 
+    @Test func authenticatedReviewEvidenceBindsTheExactRunAccountHeadAndVerdict() async throws {
+        var original = job(state: .running)
+        original.workflow = .review
+        original.expectedHeadSHA = String(repeating: "a", count: 40)
+        var verdict = ReviewVerdict(version: 1, host: original.key.work.host, projectID: 1, iid: 2,
+            headSHA: original.expectedHeadSHA!, verdict: .noObjections,
+            discussionFingerprint: ReviewVerdict.fingerprint([]))
+        verdict.username = "me"; verdict.userID = 3; verdict.runID = original.id
+        let draft = GitLabDraftNote(id: 11, authorID: 3, note: "Reviewed draft", discussionID: "thread",
+            resolveDiscussion: true, position: .init(newPath: "Sources/Changed.swift", newLine: 12,
+                oldPath: "Sources/Previous.swift", oldLine: 9))
+        let outcome = AssistantJobCoordinator.Outcome(result: .init(status: .succeeded, summary: "Reviewed"), output: "")
+        try await AssistantJobJournal.save(outcome, for: original, reviewVerdict: verdict, reviewDrafts: [draft])
+        #expect(AssistantJobJournal.reviewVerdict(for: original) == verdict)
+        #expect(AssistantJobJournal.reviewDrafts(for: original) == [draft])
+
+        var changed = original
+        changed.expectedHeadSHA = String(repeating: "b", count: 40)
+        #expect(AssistantJobJournal.reviewVerdict(for: changed) == nil)
+        #expect(AssistantJobJournal.reviewVerdict(for: job(state: .succeeded)) == nil)
+        let rewritten = ReviewVerdict(version: 1, host: verdict.host, projectID: 1, iid: 2,
+            headSHA: verdict.headSHA, verdict: .objections, discussionFingerprint: verdict.discussionFingerprint,
+            username: verdict.username, userID: verdict.userID, runID: verdict.runID)
+        #expect(AssistantJobJournal.reviewVerdict(for: original) != rewritten)
+
+        let path = AssistantJobJournal.checkpointURL(for: original.id)
+        let envelopeObject = try JSONSerialization.jsonObject(with: Data(contentsOf: path))
+        var envelope = try #require(envelopeObject as? [String: Any])
+        let payloadObject = try JSONSerialization.jsonObject(with: Data(base64Encoded: envelope["payload"] as! String)!)
+        var payload = try #require(payloadObject as? [String: Any])
+        payload["reviewVerdict"] = try JSONSerialization.jsonObject(with: JSONEncoder().encode(rewritten))
+        envelope["payload"] = try JSONSerialization.data(withJSONObject: payload).base64EncodedString()
+        try JSONSerialization.data(withJSONObject: envelope).write(to: path)
+        #expect(AssistantJobJournal.reviewVerdict(for: original) == nil)
+        #expect(AssistantJobJournal.reviewDrafts(for: original) == nil)
+    }
+
     @Test func terminationWaitsForExecutorCleanupAndPersistsInterruption() async throws {
         let (settings, name, defaults) = try fixture()
         defer { defaults.removePersistentDomain(forName: name) }

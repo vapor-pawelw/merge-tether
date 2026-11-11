@@ -358,7 +358,7 @@ struct MergeWorkflowMonitorTests {
             let discussions = try JSONDecoder().decode([GitLabMergeRequestDiscussion].self, from: Data(threads.utf8))
             let verdict = ReviewVerdict(version: 1, host: "gitlab.example.test", projectID: 7, iid: 13,
                 headSHA: String(repeating: "a", count: 40), verdict: .noObjections,
-                discussionFingerprint: ReviewVerdict.fingerprint(discussions))
+                discussionFingerprint: ReviewVerdict.fingerprint(discussions), username: "owner", userID: 1)
             let file = ReviewVerdictStore.fileURL(host: "gitlab.example.test", projectID: 7, iid: 13, in: verdictDirectory)
             try FileManager.default.createDirectory(at: file.deletingLastPathComponent(), withIntermediateDirectories: true)
             try JSONEncoder().encode(verdict).write(to: file)

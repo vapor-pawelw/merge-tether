@@ -423,7 +423,7 @@ final class MergeWorkflowMonitor {
             var previous = baselines.reviews[key] ?? ReviewCheckpoint(head: head, hasReviewed: hasReviewEvidence,
                 reportedHeads: [head], seenAuthorReplies: replies)
             let verdict = ReviewVerdictStore.verdict(host: account.host, projectID: request.projectID,
-                iid: request.iid, in: verdictDirectory)
+                iid: request.iid, user: .init(id: account.userID, username: username), in: verdictDirectory)
             let verdictDigest: String? = {
                 guard let verdict, verdict.version == 1, verdict.headSHA == head else { return nil }
                 let encoder = JSONEncoder()

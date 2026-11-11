@@ -557,18 +557,18 @@ final class MergeRequestTodoRouter {
     }
 
     private func reviewMatches(_ job: AssistantAutomationRunner.Handoff, request: GitLabMergeRequest) async -> Bool {
-        guard let verdict = ReviewVerdictStore.verdict(host: job.key.work.host, projectID: request.projectID,
-                    iid: request.iid, in: proofDirectory), verdict.headSHA == request.sha,
+        guard let user = try? await glab.fetchAuthenticatedUser(host: job.key.work.host, expectedUsername: job.key.username),
+              let verdict = ReviewVerdictStore.verdict(host: job.key.work.host, projectID: request.projectID,
+                    iid: request.iid, user: user, in: proofDirectory), verdict.headSHA == request.sha, verdict.runID == job.id,
+              AssistantJobJournal.reviewVerdict(for: job) == verdict,
               verdict.discussionFingerprint != nil,
               let modified = try? ReviewVerdictStore.fileURL(host: job.key.work.host, projectID: request.projectID,
                     iid: request.iid, in: proofDirectory).resourceValues(forKeys: [.contentModificationDateKey]).contentModificationDate,
               modified >= job.createdAt,
               let discussions = try? await glab.fetchMergeRequestDiscussions(projectID: request.projectID,
                     iid: request.iid, host: job.key.work.host) else { return false }
-        guard let user = try? await glab.fetchAuthenticatedUser(host: job.key.work.host, expectedUsername: job.key.username) else { return false }
-        return verdict.covers(head: request.sha ?? "", discussions: discussions, reviewerID: user.id,
-            publishedDrafts: ReviewVerdictStore.seenDrafts(host: job.key.work.host,
-                projectID: request.projectID, iid: request.iid, in: proofDirectory))
+        return ReviewVerdictStore.contentMatches(verdict, head: request.sha ?? "", discussions: discussions,
+            user: user, in: proofDirectory)
     }
 
     private func followUpMatches(_ job: AssistantAutomationRunner.Handoff, request: GitLabMergeRequest) -> Bool {

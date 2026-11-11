@@ -125,6 +125,25 @@ struct FollowUpPushPermissionTests {
         return proof
     }
 
+    @Test func legacySharedProofIsOnlyARecoveryCandidateForThisInstallationsExactPersistedRun() throws {
+        let folder = FileManager.default.temporaryDirectory.appending(path: UUID().uuidString)
+        defer { try? FileManager.default.removeItem(at: folder) }
+        let legacy = folder.appending(path: "legacy/Codex Desktop Relay")
+        let current = folder.appending(path: "current/Codex Desktop Relay")
+        let run = job(.succeeded)
+        let receipt = proof(run: run, draftID: 12)
+        let path = FollowUpVerificationStore.recordURL(kind: "follow-up-verifications", work: work, username: "me", in: legacy)
+        try write(receipt, to: path)
+        let input = FollowUpVerificationStore.ReceiptReadInput(handoffs: [run], events: [], assistant: .codex,
+            authenticatedRecoveries: [:], legacyEvidenceDirectory: legacy)
+        #expect(FollowUpVerificationStore.recoveryOrigins(work: work, username: "me", input: input, in: current) == [receipt])
+        #expect(FollowUpVerificationStore.contextReceipts(work: work, username: "me", input: input, in: current).isEmpty)
+        #expect(FollowUpVerificationStore.recoveryOrigins(work: work, username: "other", input: input, in: current).isEmpty)
+        let unrelated = FollowUpVerificationStore.ReceiptReadInput(handoffs: [job(.succeeded)], events: [], assistant: .codex,
+            authenticatedRecoveries: [:], legacyEvidenceDirectory: legacy)
+        #expect(FollowUpVerificationStore.recoveryOrigins(work: work, username: "me", input: unrelated, in: current).isEmpty)
+    }
+
     @Test func publicationProofsRetainDistinctSucceededOriginsAfterNewerRun() throws {
         let folder = FileManager.default.temporaryDirectory.appending(path: UUID().uuidString)
         let suite = "FollowUpPushPermissionTests.\(UUID())"

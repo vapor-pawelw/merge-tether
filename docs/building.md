@@ -73,6 +73,27 @@ For a local installation paired with iOS, also keep a consistent certificate-bac
 
 `scripts/rebuild-and-relaunch.sh` regenerates, builds and launches a Debug app from its build directory. It refuses while a MergeTether app or app-hosted test is running and prints the running executable paths; finish active work/tests and quit the intended app before retrying. It never kills another process or forces an additional instance. Use `--help` for its options. The helper uses the project's default bundle identifier and is not an installer for a custom-identifier app. Use an explicit build and copy step when preserving an existing installation, including its bundle identifier, certificate-backed signing identity and installation path. Launch that installed path once rather than also opening a scratch build.
 
+## Installation-specific runtime data
+
+Runtime files use `~/Library/Application Support/<actual-bundle-identifier>/` for
+assistant runs/preparation, evidence, pipeline reservations, usage and worker
+checkpoints. The release identity remains `com.vaporpw.GitLabTodos`. A development
+copy with another identifier gets its own new writes, matching its preferences.
+The app passes `MERGETETHER_STORAGE_ROOT` explicitly to bundled helpers; a helper
+run directly from an app bundle can derive the same identity from `Info.plist`.
+Unbundled helper use retains the release fallback unless an explicit root is set.
+
+Existing run directories remain in place, referenced only by the installation's
+known history; migration does not copy large clones or silently trust shared old
+proof. Older shared usage is available separately as read-only legacy history,
+with its attribution limits stated. Legacy pipeline locks/receipts are honored as
+negative deduplication checks and are not deleted or promoted into new authority.
+Known historical checkpoints still require the unchanged per-bundle HMAC key.
+
+The interactive-instance lock deliberately remains shared across installed and
+development copies. Signing identity, Keychain pairing records and the external
+operator relay configuration are preserved independently of this runtime root.
+
 ## Running tests
 
 Keep the test runner's home/preferences separate from a running installation so

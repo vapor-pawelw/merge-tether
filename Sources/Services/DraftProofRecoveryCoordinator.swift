@@ -459,6 +459,8 @@ final class DraftProofRecoveryCoordinator {
         let proof = FollowUpVerificationStore.recoveredProof(origin: input.origin, assessmentID: assessmentID,
             fingerprint: prepared.fingerprint, semanticContext: final.request.semanticContextFingerprint,
             recoveryContext: final.request.draftProofRecoveryContextFingerprint, draftIDs: valid, headSHA: prepared.head, files: prepared.files)
+        _ = await AssistantJobJournal.loadKey()
+        guard current(input) else { throw CancellationError() }
         try FollowUpVerificationStore.persistRecovery(.init(version: 2, attemptID: input.id, assessmentID: assessmentID,
             assistant: input.configuration.assistant, model: prepared.model, origin: input.origin, proof: proof,
             assessment: assessment, requestedDraftIDs: input.draftIDs),

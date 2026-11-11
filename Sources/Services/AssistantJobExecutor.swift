@@ -19,6 +19,7 @@ enum AssistantJobExecutor {
     @MainActor
     static func execute(_ handoff: AssistantAutomationRunner.Handoff, settings: SettingsManager,
                         detectCLI: @MainActor (AutomationAssistant) async -> AssistantDependencyStatus) async throws -> AssistantJobCoordinator.Outcome {
+        let workerTimeout = workerExecutionTimeout(for: handoff)
         try validatePersistence(settings)
         try validateConfiguration(handoff, automation: settings.automation)
         try validateIgnoredTarget(handoff, ignored: settings.ignoredMergeRequests)
@@ -69,7 +70,7 @@ enum AssistantJobExecutor {
               handoff.key.access != .configuredTools || settings.automation.permitsAssistantTools(project: project)
         else { throw ExecutionError.disabledPermission }
         try Task.checkCancellation()
-        let folder = URL.homeDirectory.appending(path: "Library/Application Support/com.vaporpw.GitLabTodos/Assistant Runs")
+        let folder = InstallationStorage.current.runs
             .appending(path: handoff.id.uuidString, directoryHint: .isDirectory)
         try FileManager.default.createDirectory(at: folder, withIntermediateDirectories: true, attributes: [.posixPermissions: 0o700])
         // A failed or local-only fix may contain changes the user still needs.
@@ -90,6 +91,8 @@ enum AssistantJobExecutor {
         let instructions = handoff.prompt + """
 
             This is a headless MergeTether run. Do not open coding-agent desktop apps, create GUI chats, or request interactive input.
+            This worker has a fixed execution limit of \(workerTimeout.minutes) minutes for this run. Expiry stops the worker
+            and records failure; it does not automatically restart the task or repeat a push.
             Keep working files and isolated Git worktrees beneath this run's working directory. Never modify another checkout.
             Preserve the MR's Draft or Ready status. Never mark a Draft ready, undraft it, or merge it in this worker.
             MergeTether handles an explicit user's Mark ready action separately; Draft automation does not authorize that change.
@@ -161,7 +164,7 @@ enum AssistantJobExecutor {
             let arguments = invocation.codexArguments(model: handoff.codingModel ?? handoff.reviewModel,
                 thinking: handoff.codingThinking ?? handoff.reviewThinking)
             output = try await AssistantUsageRunner.run(executable, arguments: arguments, environment: invocation.childEnvironment(environment),
-                                                  currentDirectory: folder, timeout: 1_800, input: input,
+                                                  currentDirectory: folder, timeout: workerTimeout.seconds, input: input,
                                                   outputDirectory: folder.appendingPathComponent("cli-output"),
                                                   usage: .init(role: .codingAgent, assistant: handoff.key.assistant,
                                                     model: (handoff.codingModel ?? handoff.reviewModel)?.rawValue,
@@ -178,7 +181,7 @@ enum AssistantJobExecutor {
         } else {
             let arguments = invocation.claudeArguments
             output = try await AssistantUsageRunner.run(executable, arguments: arguments, environment: invocation.childEnvironment(environment),
-                                                  currentDirectory: folder, timeout: 1_800, input: input,
+                                                  currentDirectory: folder, timeout: workerTimeout.seconds, input: input,
                                                   outputDirectory: folder.appendingPathComponent("cli-output"),
                                                   usage: .init(role: .codingAgent, assistant: handoff.key.assistant,
                                                     model: (handoff.codingModel ?? handoff.reviewModel)?.rawValue,
@@ -201,10 +204,55 @@ enum AssistantJobExecutor {
         let outcome = AssistantJobCoordinator.Outcome(result: result, output: transcript)
         await recordGeneratedDrafts(result, baseline: generationBaseline, user: user, request: request,
             handoff: handoff, settings: settings, glab: glab)
-        do { try await AssistantJobJournal.save(outcome, for: handoff) }
+        let review = await reviewVerdictForCompletion(result, user: user, handoff: handoff, settings: settings, glab: glab)
+        do { try await AssistantJobJournal.save(outcome, for: handoff, reviewVerdict: review?.verdict, reviewDrafts: review?.drafts) }
         catch { Log.monitor.error("Could not checkpoint worker completion: \(String(describing: error), privacy: .private)") }
         try Task.checkCancellation()
         return outcome
+    }
+
+    @MainActor
+    struct ReviewCompletionEvidence {
+        let verdict: ReviewVerdict
+        let drafts: [GitLabDraftNote]
+    }
+
+    @MainActor
+    static func reviewVerdictForCompletion(_ result: AssistantJobResult, user: GitLabAuthenticatedUser,
+        handoff: AssistantAutomationRunner.Handoff, settings: SettingsManager, glab: GlabService,
+        directory: URL = ReviewVerdictStore.directory) async -> ReviewCompletionEvidence? {
+        let work = handoff.key.work, revision = glab.accountRevision
+        func current() -> Bool {
+            !Task.isCancelled && glab.accountRevision == revision && glab.resolvedHost == work.host
+                && glab.currentUsername == handoff.key.username && settings.assistantHandoffs.contains {
+                    $0.id == handoff.id && $0.key == handoff.key && $0.expectedHeadSHA == handoff.expectedHeadSHA
+                        && $0.execution?.state.isActive == true
+                }
+        }
+        guard result.status == .succeeded, handoff.workflow == .review || handoff.reviewModel != nil,
+              current(), let expectedHead = handoff.expectedHeadSHA,
+              let verdict = ReviewVerdictStore.verdict(host: work.host, projectID: work.projectID, iid: work.iid,
+                user: user, in: directory), verdict.runID == handoff.id,
+              verdict.headSHA == expectedHead, verdict.discussionFingerprint != nil else { return nil }
+        do {
+            let authenticated = try await glab.fetchAuthenticatedUser(host: work.host, expectedUsername: handoff.key.username)
+            let request = try await glab.fetchMergeRequest(projectID: work.projectID, iid: work.iid, host: work.host)
+            let discussions = try await glab.fetchMergeRequestDiscussions(projectID: work.projectID, iid: work.iid, host: work.host)
+            let drafts = try await glab.fetchOwnDraftNotes(projectID: work.projectID, iid: work.iid, host: work.host, userID: user.id)
+            guard current(), authenticated == user, request.projectID == work.projectID, request.iid == work.iid,
+                  request.state == "opened", request.author.id != user.id, request.sha == expectedHead,
+                  request.webURL == handoff.mergeRequestURL,
+                  verdict.discussionFingerprint == ReviewVerdict.fingerprint(discussions),
+                  drafts.count <= 100, Set(drafts.compactMap(\.id)).count == drafts.count,
+                  drafts.allSatisfy({ ($0.id ?? 0) > 0 && $0.authorID == user.id && $0.note != nil }),
+                  (try? JSONEncoder().encode(drafts).count).map({ $0 <= 131_072 }) == true,
+                  ReviewVerdictStore.verdict(host: work.host, projectID: work.projectID, iid: work.iid,
+                    user: user, in: directory) == verdict else { return nil }
+            return .init(verdict: verdict, drafts: drafts)
+        } catch {
+            Log.monitor.error("Could not authenticate review verdict: \(String(describing: error), privacy: .private)")
+            return nil
+        }
     }
 
     @MainActor
@@ -269,6 +317,12 @@ enum AssistantJobExecutor {
             current.decisionRevision = revision
             settings.authorFeedbackAttempts.insert(current)
         }
+    }
+
+    static func workerExecutionTimeout(for handoff: AssistantAutomationRunner.Handoff) -> WorkerExecutionTimeout.Limit {
+        // Legacy handoffs have no immutable configuration; retain their original 30-minute budget.
+        (handoff.configurationSnapshot?.workerExecutionTimeout ?? .init())
+            .limit(host: handoff.key.work.host, projectID: handoff.key.work.projectID)
     }
 
     static func validateIgnoredTarget(_ handoff: AssistantAutomationRunner.Handoff, ignored: Set<MRAutomationScope.Target>) throws {

@@ -6,6 +6,9 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 
 ## Unreleased
 
+- Bind automatic review approval to the current account and app-authenticated completed run, and authenticate fresh follow-up verification records before publication.
+- Separate runtime storage by installation identity, retain read-only legacy history and recover only provably stopped, precisely owned pipeline reservations.
+- Configure coding-worker time limits with exact repository overrides while retaining the 30-minute default.
 - Put automation profiles above their editable permissions, fill controls immediately on selection, recognize matching presets and remember the last Custom configuration for later reuse.
 
 - Publish only the explicitly reviewed draft IDs for manual Publish all, stop publication while an agent is preparing drafts and share the final automatic-publication safety checks.

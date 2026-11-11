@@ -90,6 +90,8 @@ struct AutomationSettingsTab: View {
                 HStack(alignment: .center, spacing: 16) {
                     if saveState.failed {
                         Text(.AutomationProfiles.saveFailed).foregroundStyle(.red).font(.caption)
+                    } else if draft.workerExecutionTimeout.hasInvalidOverrides {
+                        Text(.WorkerTimeout.invalidOverrides).foregroundStyle(.red).font(.caption)
                     } else if hasIncompleteRule {
                         Text(.Settings.settingsAutomationIncomplete)
                             .foregroundStyle(.red)
@@ -117,7 +119,8 @@ struct AutomationSettingsTab: View {
                         Text(.Settings.settingsAutomationApply)
                     }
                     .disabled(!saveState.canApply(draft: draft, custom: sessionCustom,
-                        savedCustom: settings.automationProfileHistory.lastGood) || hasIncompleteRule)
+                        savedCustom: settings.automationProfileHistory.lastGood) || hasIncompleteRule
+                        || draft.workerExecutionTimeout.hasInvalidOverrides)
                 }
                 .padding(.horizontal, 20)
                 .padding(.vertical, 12)
@@ -154,7 +157,8 @@ struct AutomationSettingsTab: View {
     private var checkpointFields: some View {
         Group {
             preparationFields
-            MergeWorkflowPermissionSettingsSection(rules: $draft.workflowRules)
+            MergeWorkflowPermissionSettingsSection(rules: $draft.workflowRules,
+                infrastructureRetryAvailable: draft.canConfigureInfrastructureRetry)
             publicationFields
             deliveryFields
             completionFields
@@ -436,6 +440,7 @@ struct AutomationSettingsTab: View {
 
     @ViewBuilder
     private var advancedFields: some View {
+        WorkerExecutionTimeoutSettingsView(policy: $draft.workerExecutionTimeout, repositories: timeoutRepositories)
         Section {
             HStack {
                 TextField(text: $draft.assistantWorkspace) {
@@ -461,6 +466,34 @@ struct AutomationSettingsTab: View {
         }
         AutomationRuleTemplateSettings(rule: $draft.reviewRequested, title: .Settings.settingsAutomationReviewRequested)
         AutomationRuleTemplateSettings(rule: $draft.authorFeedback, title: .Settings.settingsAutomationAuthorFeedback)
+    }
+
+    private var timeoutRepositories: [PublicationIdentity] {
+        var repositories: [String: PublicationIdentity] = [:]
+        func remember(host: String, projectID: Int, path: String) {
+            guard projectID > 0, !path.isEmpty else { return }
+            let identity = PublicationIdentity(host: host, entityID: projectID, label: path)
+            repositories[identity.id] = identity
+        }
+        for item in monitor.attention.currentOpenItems {
+            if let repository = WorkerExecutionTimeoutSettingsView.repositoryChoice(projectID: item.id.projectID, url: item.url) {
+                repositories[repository.id] = repository
+            }
+        }
+        for status in monitor.authoredMergeRequests.requests {
+            if let repository = WorkerExecutionTimeoutSettingsView.repositoryChoice(projectID: status.request.projectID, url: status.request.webURL) {
+                repositories[repository.id] = repository
+            }
+        }
+        if let host = monitor.glab.resolvedHost, let username = monitor.glab.currentUsername {
+            let scope = draft.scope
+            for target in scope.repositoryOverrides(host: host, username: username) + scope.individualTargets(host: host, username: username) {
+                if let path = scope.repositoryLabel(for: target) {
+                    remember(host: host, projectID: target.projectID, path: path)
+                }
+            }
+        }
+        return repositories.values.sorted { ($0.label, $0.host, $0.entityID) < ($1.label, $1.host, $1.entityID) }
     }
 
     private var todoFields: some View {

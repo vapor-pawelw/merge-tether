@@ -66,7 +66,7 @@ struct AssistantJobInvocationTests {
             createdAt: Date(), allowsPush: false, codingModel: assistant == .codex ? .astra : nil,
             codingThinking: assistant == .codex ? .high : nil, followUpPushAllowed: true, workflow: .followUp,
             manual: true, expectedHeadSHA: sha)
-        let run = URL.homeDirectory.appending(path: "Library/Application Support/com.vaporpw.GitLabTodos/Assistant Runs/\(handoff.id.uuidString)")
+        let run = InstallationStorage.current.runs.appending(path: handoff.id.uuidString)
         defer { try? FileManager.default.removeItem(at: run) }
 
         // when
@@ -186,7 +186,7 @@ struct AssistantJobInvocationTests {
             prompt: "Existing worker", createdAt: Date(), allowsPush: false, execution: .init(state: .running))
         running.feedbackDecisionRevision = queuedContext
         settings.assistantHandoffs = [handoff, running]
-        let run = URL.homeDirectory.appending(path: "Library/Application Support/com.vaporpw.GitLabTodos/Assistant Runs/\(handoff.id.uuidString)")
+        let run = InstallationStorage.current.runs.appending(path: handoff.id.uuidString)
         defer { try? FileManager.default.removeItem(at: run) }
         let detect: @MainActor (AutomationAssistant) async -> AssistantDependencyStatus = { _ in
             if scenario == "removed" { settings.feedbackSuggestionDecisions.remove(decision.id, for: target) }

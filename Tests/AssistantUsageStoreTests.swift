@@ -4,6 +4,41 @@ import Testing
 
 @Suite("Assistant usage persistence")
 struct AssistantUsageStoreTests {
+    @Test("legacy shared lifetime usage stays read-only and separate from installation totals")
+    func legacySharedLifetimeUsage() async throws {
+        let home = FileManager.default.temporaryDirectory.appending(path: UUID().uuidString)
+        defer { try? FileManager.default.removeItem(at: home) }
+        let local = InstallationStorage(bundleIdentifier: "com.test.local", home: home)
+        let legacy = InstallationStorage(bundleIdentifier: nil, home: home)
+        let original = AssistantUsageStore(file: legacy.usageFile)
+        try await record(original, at: "2026-09-04T08:05:00Z", role: .codingAgent, cost: 3)
+        let bytes = try Data(contentsOf: legacy.usageFile)
+        let legacySnapshot = try AssistantUsageStore.legacySharedSnapshot(storage: local)
+        let snapshot = try #require(legacySnapshot)
+        #expect(snapshot.summary().overall.runs == 1)
+        #expect(snapshot.summary().overall.estimatedUSD == 3)
+        #expect(try Data(contentsOf: legacy.usageFile) == bytes)
+        let current = try await AssistantUsageStore(file: local.usageFile).snapshot()
+        #expect(current.summary().overall.runs == 0)
+        #expect(try AssistantUsageStore.legacySharedSnapshot(storage: legacy) == nil)
+    }
+
+    @Test("legacy usage is not followed through symlinks or silently treated as empty when corrupt")
+    func invalidLegacyUsage() throws {
+        let home = FileManager.default.temporaryDirectory.appending(path: UUID().uuidString)
+        defer { try? FileManager.default.removeItem(at: home) }
+        let local = InstallationStorage(bundleIdentifier: "com.test.local", home: home)
+        let legacy = InstallationStorage(bundleIdentifier: nil, home: home).usageFile
+        try FileManager.default.createDirectory(at: legacy.deletingLastPathComponent(), withIntermediateDirectories: true)
+        try Data("invalid".utf8).write(to: legacy)
+        #expect(throws: (any Error).self) { try AssistantUsageStore.legacySharedSnapshot(storage: local) }
+        try FileManager.default.removeItem(at: legacy)
+        let target = home.appending(path: "other.json")
+        try Data("{}".utf8).write(to: target)
+        try FileManager.default.createSymbolicLink(at: legacy, withDestinationURL: target)
+        #expect(throws: (any Error).self) { try AssistantUsageStore.legacySharedSnapshot(storage: local) }
+    }
+
     @Test("A recorded zero estimate is distinct from no MR requests and unknown cost")
     func mergeRequestRoleZeroAndUnknownCost() async throws {
         // given

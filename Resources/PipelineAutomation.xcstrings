@@ -77,6 +77,28 @@
           }
         }
       }
+    },
+    "pipeline.reservation.owner": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Pipeline work is reserved by installation %@, process %@, run %@. Unknown or interrupted work is preserved; only a known terminal run with a confirmed dead owner can be recovered."
+          }
+        }
+      }
+    },
+    "pipeline.reservation.unknownOwner": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Pipeline work has an external, legacy or unrecognized reservation. Its owner cannot be proven; it is preserved for manual inspection."
+          }
+        }
+      }
     }
   },
   "version": "1.0"

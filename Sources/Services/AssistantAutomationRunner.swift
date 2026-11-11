@@ -269,7 +269,7 @@ enum AssistantAutomationRunner {
         let configured = (workspace.trimmingCharacters(in: .whitespacesAndNewlines) as NSString).expandingTildeInPath
         let directory = switch access {
         case .preparation:
-            URL.homeDirectory.appending(path: "Library/Application Support/com.vaporpw.GitLabTodos/Assistant Preparation").path
+            InstallationStorage.current.preparation.path
         case .gitLabRead:
             ""
         case .configuredTools:
@@ -301,7 +301,8 @@ enum AssistantAutomationRunner {
                 """
         }
         let verdict = isReview || mrWorkflow == .review
-            ? "\n\n" + ReviewVerdictStore.recordingInstructions(host: work.host, projectID: work.projectID, iid: work.iid)
+            ? "\n\n" + ReviewVerdictStore.recordingInstructions(host: work.host, projectID: work.projectID, iid: work.iid,
+                username: username, runID: id)
             : ""
         let aiAssessment = settings.automation.needsAIAssessment
             && (mrWorkflow != .followUp || followUpPush)
@@ -367,6 +368,10 @@ enum AssistantAutomationRunner {
                     recoveryRootID: feedbackRecoveryRootID, decisionRevision: decisionContext))
             }
         }
+        if let reservation = handoff.pipelineReservation {
+            let detector = ExistingPipelineWorkDetector()
+            if detector.ownsReservation(for: reservation) { try detector.bindRun(handoff.id, to: reservation) }
+        }
         settings.assistantHandoffs.append(handoff)
         settings.save()
         try validateLaunchPolicy()
@@ -376,6 +381,10 @@ enum AssistantAutomationRunner {
     }
 
     static func synchronizeInterruptedRuns(settings: SettingsManager) {
+        try? InstallationStorage.current.preserveLegacyHistory(runs: settings.assistantHandoffs.compactMap {
+            guard let path = $0.execution?.workingDirectory else { return nil }
+            return .init(id: $0.id, workingDirectory: path)
+        })
         coordinator.synchronizeInterruptedRuns(settings: settings)
     }
 

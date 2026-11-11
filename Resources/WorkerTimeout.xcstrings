@@ -1,0 +1,17 @@
+{
+  "sourceLanguage": "en",
+  "strings": {
+    "title": { "extractionState": "manual", "localizations": { "en": { "stringUnit": { "state": "translated", "value": "Worker execution timeout" } } } },
+    "defaultLimit": { "extractionState": "manual", "localizations": { "en": { "stringUnit": { "state": "translated", "value": "Default limit" } } } },
+    "minutes": { "extractionState": "manual", "localizations": { "en": { "stringUnit": { "state": "translated", "value": "minutes" } } } },
+    "savedRepository": { "extractionState": "manual", "localizations": { "en": { "stringUnit": { "state": "translated", "value": "Saved repository" } } } },
+    "noRepositories": { "extractionState": "manual", "localizations": { "en": { "stringUnit": { "state": "translated", "value": "Add a merge request to your board or Scope to choose its repository here." } } } },
+    "addOverride": { "extractionState": "manual", "localizations": { "en": { "stringUnit": { "state": "translated", "value": "Add project override" } } } },
+    "removeOverride": { "extractionState": "manual", "localizations": { "en": { "stringUnit": { "state": "translated", "value": "Remove project override" } } } },
+    "help": { "extractionState": "manual", "localizations": { "en": { "stringUnit": { "state": "translated", "value": "Codex and Claude coding workers allow 30 minutes by default. Choose 1–1,440 minutes to allow longer builds and tests. This limit covers the whole worker process." } } } },
+    "overridesHelp": { "extractionState": "manual", "localizations": { "en": { "stringUnit": { "state": "translated", "value": "Choose a repository from your current board or managed list. Each override applies to that exact project on the displayed host. Profiles and restoring Custom preserve these limits." } } } },
+    "invalidOverrides": { "extractionState": "manual", "localizations": { "en": { "stringUnit": { "state": "translated", "value": "A saved timeout override has an invalid or repeated repository. Remove it and select the repository again before applying changes." } } } },
+    "runHelp": { "extractionState": "manual", "localizations": { "en": { "stringUnit": { "state": "translated", "value": "Each run keeps its saved timeout. Apply Changes follows the existing automation policy behavior and cancels active workers. An expired task fails and requires an explicit retry; it is never restarted automatically." } } } }
+  },
+  "version": "1.0"
+}

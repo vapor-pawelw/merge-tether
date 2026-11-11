@@ -5,6 +5,38 @@ import Testing
 
 @MainActor
 struct AutomationProfileHistoryTests {
+    @Test(arguments: ["consent", "publicActions", "eventOff", "eventPreview", "eventNotify", "projects", "ready"])
+    func infrastructureRetryConfigurationReflectsPrerequisitesWithoutErasingTheSavedChoice(_ missing: String) {
+        var configuration = AutomationSettings()
+        configuration.applyPreset(.trusted, for: .codex)
+        configuration.workflowRules[.pipelineFailure].mode = .assistant
+        configuration.workflowRules[.pipelineFailure].projects = "team/repo"
+        configuration.workflowRules[.pipelineFailure].retryInfrastructureFailure = true
+        switch missing {
+        case "consent": configuration.packageDecision = .disabled
+        case "publicActions": configuration.allowAutomaticPublicActions = false
+        case "eventOff": configuration.workflowRules[.pipelineFailure].mode = .off
+        case "eventPreview": configuration.workflowRules[.pipelineFailure].mode = .preview
+        case "eventNotify": configuration.workflowRules[.pipelineFailure].mode = .notify
+        case "projects": configuration.workflowRules[.pipelineFailure].projects = " , \n "
+        default: break
+        }
+        let before = configuration
+        #expect(configuration.canConfigureInfrastructureRetry == (missing == "ready"))
+        #expect(configuration == before)
+        #expect(configuration.workflowRules[.pipelineFailure].retryInfrastructureFailure)
+        #expect(AutomationProfileSnapshot(configuration).infrastructureRetry)
+    }
+
+    @Test func appManagedInfrastructureRetryDoesNotRequireWorkerToolPermission() {
+        var configuration = AutomationSettings()
+        configuration.applyPreset(.trusted, for: .codex)
+        configuration.workflowRules[.pipelineFailure].mode = .assistant
+        configuration.workflowRules[.pipelineFailure].projects = "team/repo"
+        configuration.allowAssistantTools = false
+        #expect(configuration.canConfigureInfrastructureRetry)
+    }
+
     private func fixture(faults: Bool = false, _ body: (UserDefaults, SettingsManager) throws -> Void) throws {
         let suite = "AutomationProfileHistoryTests.\(UUID())"
         let defaults: UserDefaults = try #require(faults ? PersistenceFaultDefaults(suiteName: suite) : UserDefaults(suiteName: suite))
@@ -57,11 +89,16 @@ struct AutomationProfileHistoryTests {
             draft.scope.mode = .selected
             draft.publicationRestrictions.repositories = [.init(host: "gitlab.example.test", entityID: 7, label: "Later repository")]
             draft.workflowRules[.pipelineFailure].projects = "later/pipeline"
+            draft.workerExecutionTimeout = .init(defaultLimit: .init(minutes: 90), projectOverrides: [
+                .init(host: "gitlab.example.test", projectID: 7, limit: .init(minutes: 120))
+            ])
             selection.wrappedValue = .custom
             #expect(!draft.allowFollowUpPush && draft.autoApproveEnabled)
             #expect(draft.codexReviewModel == .terra && draft.authorFeedback.promptTemplate == "Later custom instructions")
             #expect(draft.scope.mode == .selected && draft.publicationRestrictions.repositories.first?.entityID == 7)
             #expect(draft.workflowRules[.pipelineFailure].projects == "later/pipeline")
+            #expect(draft.workerExecutionTimeout.defaultLimit.minutes == 90)
+            #expect(draft.workerExecutionTimeout.limit(host: "gitlab.example.test", projectID: 7).minutes == 120)
             #expect(defaults.object(forKey: AutomationProfileHistoryStore.key) == nil)
             let reopened = SettingsManager(defaults: defaults)
             #expect(reopened.automation.matchingPreset == .manual)

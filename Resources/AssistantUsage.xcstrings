@@ -704,6 +704,50 @@
           }
         }
       }
+    },
+    "assistantUsageLegacyTitle": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Legacy shared history (all time)"
+          }
+        }
+      }
+    },
+    "assistantUsageLegacyHelp": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Read-only history saved before installation isolation. It may include other installations and is kept separate from the totals above."
+          }
+        }
+      }
+    },
+    "assistantUsageLegacySource": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Show legacy history source"
+          }
+        }
+      }
+    },
+    "assistantUsageLegacyUnavailable": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Legacy shared usage history could not be read. Its original file is preserved."
+          }
+        }
+      }
     }
   },
   "version": "1.0"

@@ -11,9 +11,10 @@ import re
 import shutil
 import subprocess
 import tempfile
+import uuid
+from installation_storage import storage_root
 
-# Preserve the existing evidence location so upgrades retain verified draft history.
-ROOT = Path.home() / "Library/Application Support/com.vaporpw.GitLabTodos/Codex Desktop Relay"
+ROOT = storage_root() / "Codex Desktop Relay"
 GLAB_PATH = str(Path.home() / ".local/bin") + ":/opt/homebrew/bin:/usr/local/bin:/opt/local/bin:/usr/bin:/bin"
 HOST_PATTERN = re.compile(r"[A-Za-z0-9][A-Za-z0-9.-]{0,252}(?::[0-9]{1,5})?")
 VERDICTS = ("no_objections", "objections")
@@ -72,7 +73,7 @@ class ReviewEvidenceRecorder:
             try: yield
             finally: fcntl.flock(lock.fileno(), fcntl.LOCK_UN)
 
-    def record_verdict(self, host, projectID, iid, headSHA, verdict):
+    def record_verdict(self, host, projectID, iid, headSHA, verdict, *, username=None, run_id=None):
         number = re.compile(r"[1-9][0-9]{0,11}")
         if not (isinstance(host, str) and HOST_PATTERN.fullmatch(host) and ".." not in host):
             raise ValueError("Invalid host")
@@ -80,6 +81,20 @@ class ReviewEvidenceRecorder:
             raise ValueError("Invalid merge request")
         if not (isinstance(headSHA, str) and re.fullmatch(r"[0-9a-f]{40}|[0-9a-f]{64}", headSHA)) or verdict not in VERDICTS:
             raise ValueError("Invalid verdict")
+        if (username is None) != (run_id is None):
+            raise ValueError("Both account and run identity are required")
+        if run_id is not None:
+            try: run_id = str(uuid.UUID(run_id))
+            except (ValueError, TypeError, AttributeError) as error:
+                raise ValueError("Invalid review run") from error
+        def check_account():
+            if username is None: return None
+            user = self.read(host, "/user")
+            if (not isinstance(user, dict) or user.get("username") != username
+                    or type(user.get("id")) is not int or user["id"] <= 0):
+                raise ValueError("The authenticated review account has changed")
+            return {"username": username, "userID": user["id"], "runID": run_id}
+        account = check_account()
         endpoint = f"/projects/{projectID}/merge_requests/{iid}"
 
         def check_head():
@@ -110,12 +125,15 @@ class ReviewEvidenceRecorder:
             raise ValueError("Too many discussions to bind a review safely")
         fingerprint = hashlib.sha256("".join(f"{note}:{author}:{body}\n" for note, author, body in sorted(notes)).encode()).hexdigest()
         check_head()
+        if check_account() != account:
+            raise ValueError("The authenticated review account has changed")
         with self.exclusive():
             folder = self.root / "verdicts" / host
             folder.mkdir(parents=True, exist_ok=True, mode=0o700)
             write_object(folder / f"{projectID}-{iid}.json", {
                 "version": 1, "host": host, "projectID": int(projectID), "iid": int(iid),
                 "headSHA": headSHA, "verdict": verdict, "discussionFingerprint": fingerprint,
+                **(account or {}),
             })
         return {"recorded": True, "discussionFingerprint": fingerprint}
 
@@ -128,9 +146,12 @@ def main():
     parser.add_argument("iid")
     parser.add_argument("head_sha")
     parser.add_argument("verdict", choices=VERDICTS)
+    parser.add_argument("--username")
+    parser.add_argument("--run-id")
     args = parser.parse_args()
     try:
-        result = ReviewEvidenceRecorder(ROOT).record_verdict(args.host, args.project_id, args.iid, args.head_sha, args.verdict)
+        result = ReviewEvidenceRecorder(ROOT).record_verdict(args.host, args.project_id, args.iid, args.head_sha, args.verdict,
+                                                            username=args.username, run_id=args.run_id)
         print(json.dumps(result))
     except (ValueError, OSError, KeyError, TypeError) as error:
         parser.exit(1, f"Review evidence could not be recorded: {error}\nNo approval is authorized.\n")

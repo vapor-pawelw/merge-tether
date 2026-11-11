@@ -378,14 +378,25 @@ import MergeTetherRemote
             gitlab.write(name, text)
         }
 
-        func recordVerdict(_ verdict: String, head: String) throws {
+        func recordVerdict(_ verdict: String, head: String, authenticated: Bool = true) throws {
             let folder = self.folder.appending(path: "verdicts/gitlab.example.org")
             try FileManager.default.createDirectory(at: folder, withIntermediateDirectories: true)
             let discussions = try JSONDecoder().decode([GitLabMergeRequestDiscussion].self, from: gitlab.data("discussions.json"))
+            let key = AssistantAutomationRunner.ChatKey(assistant: settings.automation.assistant,
+                work: .init(host: "gitlab.example.org", projectID: 1, iid: 2), username: "me", workspace: "", access: .gitLabRead)
+            let run = AssistantAutomationRunner.Handoff(id: UUID(), key: key, title: "Review", prompt: "", createdAt: Date(),
+                allowsPush: false, execution: .init(state: .succeeded), workflow: .review, expectedHeadSHA: head)
             let value = ReviewVerdict(version: 1, host: "gitlab.example.org", projectID: 1, iid: 2, headSHA: head,
                                       verdict: try #require(ReviewVerdict.Kind(rawValue: verdict)),
-                                      discussionFingerprint: ReviewVerdict.fingerprint(discussions))
+                                      discussionFingerprint: ReviewVerdict.fingerprint(discussions),
+                                      username: "me", userID: 3, runID: run.id)
             try JSONEncoder().encode(value).write(to: folder.appending(path: "1-2.json"))
+            if authenticated {
+                settings.assistantHandoffs.append(run)
+                let drafts = try JSONDecoder().decode([GitLabDraftNote].self, from: gitlab.data("drafts.json")).filter { $0.authorID == 3 }
+                try AssistantJobJournal.saveWithLoadedKey(.init(result: .init(status: .succeeded, summary: "Reviewed"), output: ""),
+                    for: run, reviewVerdict: value, reviewDrafts: drafts)
+            }
         }
 
         func assess(noteID: Int, body: String) throws {
@@ -2049,6 +2060,35 @@ import MergeTetherRemote
         #expect(harness.log("approve.log").split(separator: "\n").count == 1)
     }
 
+    @Test(arguments: ["raw", "otherAccount", "substitutedRun", "tamperedCheckpoint"])
+    func automaticApprovalRequiresTheExactAccountAndAuthenticatedCompletedReview(_ evidence: String) async throws {
+        let harness = try makeHarness(assistantWorked: true)
+        defer { harness.cleanUp() }
+        try harness.recordVerdict("no_objections", head: head, authenticated: evidence != "raw")
+        let path = harness.folder.appending(path: "verdicts/gitlab.example.org/1-2.json")
+        if evidence == "otherAccount" || evidence == "substitutedRun" {
+            var value = try JSONDecoder().decode(ReviewVerdict.self, from: Data(contentsOf: path))
+            if evidence == "otherAccount" { value.username = "other"; value.userID = 9 }
+            else { value.runID = UUID() }
+            try JSONEncoder().encode(value).write(to: path)
+        }
+        if evidence == "tamperedCheckpoint" {
+            let run = try #require(harness.settings.assistantHandoffs.last)
+            try Data("worker-written completion".utf8).write(to: AssistantJobJournal.checkpointURL(for: run.id))
+        }
+        try await harness.poll()
+        #expect(harness.log("approve.log").isEmpty)
+        if evidence == "raw" {
+            let item = try #require(harness.monitor.currentItems.first)
+            #expect(item.canApprove && !item.autoApproveReady)
+            await harness.monitor.approve(item.id)
+            #expect(harness.log("approve.log").contains("/approve"))
+        }
+        if evidence == "otherAccount" {
+            #expect(harness.monitor.currentOpenItems.allSatisfy { !$0.canApprove && !$0.autoApproveReady })
+        }
+    }
+
     @Test func persistenceHoldStopsAutomaticApprovalButKeepsExplicitFreshApproval() async throws {
         let harness = try makeHarness(assistantWorked: true)
         defer { harness.cleanUp() }
@@ -2060,6 +2100,73 @@ import MergeTetherRemote
         #expect(item.canApprove)
         await harness.monitor.approve(item.id)
         #expect(harness.log("approve.log").split(separator: "\n").count == 1)
+    }
+
+    @Test func forgingObservedDraftHistoryCannotNormalizeNewFeedbackForAutomaticApproval() async throws {
+        let harness = try makeHarness(assistantWorked: true)
+        defer { harness.cleanUp() }
+        try harness.recordVerdict("no_objections", head: head)
+        try harness.write("discussions.json", #"[{"id":"own","notes":[{"id":40,"author":{"id":3,"username":"me"},"body":"Block this merge","system":false}]}]"#)
+        ReviewVerdictStore.rememberDrafts([.init(id: 11, authorID: 3, note: "Block this merge", discussionID: nil, position: nil)],
+            host: host, projectID: 1, iid: 2, in: harness.folder.appending(path: "verdicts"))
+        try await harness.poll()
+        #expect(harness.log("approve.log").isEmpty)
+        #expect(harness.monitor.currentOpenItems.allSatisfy { !$0.autoApproveReady })
+    }
+
+    @Test func confirmedAppPublicationPreservesAutomaticApprovalWithoutAIOriginEvidence() async throws {
+        let harness = try makeHarness(assistantWorked: true)
+        defer { harness.cleanUp() }
+        harness.settings.automation.publishDraftsWithoutConfirmation = false
+        try harness.write("drafts.json", #"[{"id":11,"author_id":3,"note":"Checked reply","discussion_id":"own"}]"#)
+        try harness.write("discussions.json", #"[{"id":"own","notes":[]}]"#)
+        try harness.recordVerdict("no_objections", head: head)
+        try harness.write("published-discussions.json", #"[{"id":"own","notes":[{"id":40,"author":{"id":3,"username":"me"},"body":"Checked reply","system":false}]}]"#)
+        try await harness.poll()
+        #expect(harness.log("selected.log").isEmpty)
+        await harness.monitor.publishDrafts(of: .init(projectID: 1, iid: 2))
+        try await harness.poll()
+        #expect(harness.log("selected.log").contains("/draft_notes/11/publish"))
+        #expect(harness.log("approve.log").contains("/approve"))
+    }
+
+    @Test func validatedReviewCompletionCapturesExactPendingDraftsAndFailsClosedWhenTheyCannotBeRead() async throws {
+        let harness = try makeHarness(assistantWorked: true)
+        defer { harness.cleanUp() }
+        try harness.write("drafts.json", #"[{"id":11,"author_id":3,"note":"Reviewed draft","discussion_id":"own"}]"#)
+        try harness.recordVerdict("no_objections", head: head)
+        let index = try #require(harness.settings.assistantHandoffs.indices.last)
+        harness.settings.assistantHandoffs[index].execution?.state = .running
+        harness.settings.assistantHandoffs[index].mergeRequestURL = URL(string: "https://gitlab.example.org/g/p/-/merge_requests/2")
+        let run = harness.settings.assistantHandoffs[index]
+        let result = AssistantJobResult(status: .succeeded, summary: "Reviewed")
+        let captured = await AssistantJobExecutor.reviewVerdictForCompletion(result, user: .init(id: 3, username: "me"),
+            handoff: run, settings: harness.settings, glab: harness.glab, directory: harness.folder.appending(path: "verdicts"))
+        let evidence = try #require(captured)
+        #expect(evidence.drafts == [.init(id: 11, authorID: 3, note: "Reviewed draft", discussionID: "own", position: nil)])
+        try harness.write("fail-next-draft-read", "yes")
+        let missing = await AssistantJobExecutor.reviewVerdictForCompletion(result, user: .init(id: 3, username: "me"),
+            handoff: run, settings: harness.settings, glab: harness.glab, directory: harness.folder.appending(path: "verdicts"))
+        #expect(missing == nil)
+    }
+
+    @Test(arguments: ["created", "edited"])
+    func publishingALaterDraftCannotNormalizeAnOlderCompletedReview(_ change: String) async throws {
+        let harness = try makeHarness(assistantWorked: true)
+        defer { harness.cleanUp() }
+        harness.settings.automation.publishDraftsWithoutConfirmation = false
+        try harness.write("discussions.json", #"[{"id":"own","notes":[]}]"#)
+        if change == "edited" {
+            try harness.write("drafts.json", #"[{"id":11,"author_id":3,"note":"Earlier draft","discussion_id":"own"}]"#)
+        }
+        try harness.recordVerdict("no_objections", head: head)
+        try harness.write("drafts.json", #"[{"id":11,"author_id":3,"note":"New blocking concern","discussion_id":"own"}]"#)
+        try harness.write("published-discussions.json", #"[{"id":"own","notes":[{"id":40,"author":{"id":3,"username":"me"},"body":"New blocking concern","system":false}]}]"#)
+        try await harness.poll()
+        await harness.monitor.publishDrafts(of: .init(projectID: 1, iid: 2))
+        try await harness.poll()
+        #expect(harness.log("selected.log").contains("/draft_notes/11/publish"))
+        #expect(harness.log("approve.log").isEmpty)
     }
 
     @Test func persistenceFailureDuringTheFinalApprovalAuthReadCannotSubmit() async throws {
@@ -2429,7 +2536,8 @@ import MergeTetherRemote
         defer { harness.cleanUp() }
         try harness.write("drafts.json", draftJSON)
         try harness.write("discussions.json", duoDiscussion)
-        try harness.recordVerdict("objections", head: head)
+        // Raw helper evidence does not create an app-owned review run for this unmanaged MR.
+        try harness.recordVerdict("objections", head: head, authenticated: false)
         try await harness.poll()
         try await harness.poll()
         #expect(harness.log("selected.log").isEmpty)
@@ -4077,9 +4185,16 @@ import MergeTetherRemote
             default: return try await originalHandler(request)
             }
         }
+        let review = AssistantAutomationRunner.Handoff(id: UUID(),
+            key: .init(assistant: .codex, work: .init(host: host, projectID: 1, iid: 3), username: "me", workspace: "", access: .gitLabRead),
+            title: "Completed review", prompt: "", createdAt: Date(), allowsPush: false,
+            execution: .init(state: .succeeded), workflow: .review, expectedHeadSHA: head)
+        harness.settings.assistantHandoffs.append(review)
         let verdict = ReviewVerdict(version: 1, host: host, projectID: 1, iid: 3, headSHA: head,
             verdict: try #require(ReviewVerdict.Kind(rawValue: "no_objections")),
-            discussionFingerprint: ReviewVerdict.fingerprint([]))
+            discussionFingerprint: ReviewVerdict.fingerprint([]), username: "me", userID: 3, runID: review.id)
+        try AssistantJobJournal.saveWithLoadedKey(.init(result: .init(status: .succeeded, summary: "Reviewed"), output: ""),
+            for: review, reviewVerdict: verdict, reviewDrafts: [])
         let verdictURL = harness.folder.appending(path: "verdicts/gitlab.example.org/1-3.json")
         try FileManager.default.createDirectory(at: verdictURL.deletingLastPathComponent(), withIntermediateDirectories: true)
         try JSONEncoder().encode(verdict).write(to: verdictURL)

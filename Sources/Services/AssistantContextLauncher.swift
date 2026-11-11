@@ -65,8 +65,7 @@ enum AssistantContextLauncher {
     }
 
     private static var contextRoot: URL {
-        URL.homeDirectory.appending(path: "Library/Application Support")
-            .appending(path: Bundle.main.bundleIdentifier ?? "com.vaporpw.GitLabTodos")
+        InstallationStorage.current.root
             .appending(path: "Manual Contexts")
     }
 

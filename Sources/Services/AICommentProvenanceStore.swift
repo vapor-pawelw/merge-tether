@@ -105,11 +105,14 @@ enum AICommentProvenanceStore {
         try write(record, to: file(kind: "drafts", id: id, context: context, in: directory))
     }
 
-    nonisolated static func generation(for draft: GitLabDraftNote, context: Context, in directory: URL = directory) -> UUID? {
-        guard context.isValid, let id = draft.id, id > 0,
-              let record: GeneratedDraft = read(file(kind: "drafts", id: id, context: context, in: directory)),
-              record.matches(draft, context: context) else { return nil }
-        return record.runID
+    nonisolated static func generation(for draft: GitLabDraftNote, context: Context, in directory: URL = directory,
+                                      legacyDirectory: URL? = nil) -> UUID? {
+        guard context.isValid, let id = draft.id, id > 0 else { return nil }
+        for source in displayDirectories(directory, legacyDirectory: legacyDirectory) {
+            if let record: GeneratedDraft = read(file(kind: "drafts", id: id, context: context, in: source)),
+               record.matches(draft, context: context) { return record.runID }
+        }
+        return nil
     }
 
     nonisolated static func preparePublication(_ drafts: [GitLabDraftNote], context: Context,
@@ -181,18 +184,27 @@ enum AICommentProvenanceStore {
         }
     }
 
-    nonisolated static func snapshot(context: Context, in directory: URL = directory) -> Snapshot {
-        let folder = file(kind: "notes", id: 0, context: context, in: directory).deletingLastPathComponent()
-        guard context.isValid,
-              let files = try? FileManager.default.contentsOfDirectory(at: folder, includingPropertiesForKeys: [.fileSizeKey]),
-              files.count <= 10_000 else { return .init(context: context, notes: [:]) }
+    nonisolated static func snapshot(context: Context, in directory: URL = directory, legacyDirectory: URL? = nil) -> Snapshot {
+        guard context.isValid else { return .init(context: context, notes: [:]) }
         var notes: [Int: PublishedNote] = [:]
-        for url in files where url.pathExtension == "json" {
-            guard let record: PublishedNote = read(url), record.context == context, record.version == 1,
-                  record.noteID > 0, url.deletingPathExtension().lastPathComponent == String(record.noteID) else { continue }
-            notes[record.noteID] = record
+        for source in displayDirectories(directory, legacyDirectory: legacyDirectory).reversed() {
+            let folder = file(kind: "notes", id: 0, context: context, in: source).deletingLastPathComponent()
+            guard let files = try? FileManager.default.contentsOfDirectory(at: folder, includingPropertiesForKeys: [.fileSizeKey]),
+                  files.count <= 10_000 else { continue }
+            for url in files where url.pathExtension == "json" {
+                guard let record: PublishedNote = read(url), record.context == context, record.version == 1,
+                      record.noteID > 0, url.deletingPathExtension().lastPathComponent == String(record.noteID) else { continue }
+                notes[record.noteID] = record
+            }
         }
         return .init(context: context, notes: notes)
+    }
+
+    private nonisolated static func displayDirectories(_ directory: URL, legacyDirectory: URL?) -> [URL] {
+        if let legacyDirectory { return [directory, legacyDirectory] }
+        guard directory.standardizedFileURL == Self.directory.standardizedFileURL,
+              InstallationStorage.current.root != InstallationStorage.current.legacy.root else { return [directory] }
+        return [directory, InstallationStorage.current.legacyEvidence.appending(path: "display-comment-origins")]
     }
 
     nonisolated static func isGenerated(_ note: GitLabMergeRequestDiscussion.Note, discussionID: String?, context: Context,
