@@ -25,6 +25,32 @@ Build and run the `GitLabTodos` scheme from Xcode. MergeTether is a regular Dock
 
 Manual GitLab management requires authenticated `glab`. Agent automation additionally requires a compatible, signed-in Codex CLI or Claude CLI. Desktop agent applications and their listener/plugin setup are not prerequisites.
 
+## Local relay configuration
+
+The companion requires an operator-owned relay. Its origin-only build configuration
+must live outside source control; see [Bring your own relay](byo-relay.md).
+To keep local agents and repeated builds using that configuration, create an ignored
+`.mise.local.toml` in the checkout:
+
+```toml
+[env]
+TUIST_MERGETETHER_RELAY_CONFIG_FILE = "/absolute/private/relay-build.json"
+```
+
+The configured external file contains only `{"origin":"https://your-relay.example.org"}`.
+Keep the operator invitation in its separate private runtime file and pairing/Keychain,
+never in this build config. All documented `mise exec -- ...` / `mise x -- ...`
+commands load the ignored local environment, including Tuist generation and the
+rebuild/release helpers. Regenerate before building so both app Info.plist files
+contain the intended origin. Verify those values in the finished Mac app and IPA.
+A bare Tuist call outside mise does not guarantee this local environment is loaded.
+
+Worktrees do not copy ignored files. Before building in one, create its own ignored
+`.mise.local.toml` pointing to the same external JSON, or explicitly set
+`TUIST_MERGETETHER_RELAY_CONFIG_FILE` for `mise exec -- tuist generate --no-open`.
+Do not copy a personal origin or token into tracked files. A public checkout without
+an operator's local configuration has no shared relay; companion access stays disabled.
+
 ## Command-line build
 
 ```bash
@@ -240,7 +266,8 @@ mise exec -- bash scripts/build-release.sh 1.2.0 --build-number 1 --platform all
   --signing-identity 'Developer ID Application: Example (TEAMID)' \
   --ios-signing-identity 'Apple Distribution: Example (TEAMID)' \
   --team-id TEAMID --notary-profile existing-notary-profile \
-  --ios-export-options /absolute/path/ExportOptions.plist
+  --ios-export-options /absolute/path/ExportOptions.plist \
+  --relay-config /absolute/private/relay-build.json
 ```
 
 The signed macOS path **uploads the ZIP and DMG to Apple for notarization**. Run it only after that upload is authorized. It checks the available Developer ID identity and notary credentials before building, enables hardened runtime and a secure timestamp, verifies bundle metadata and signatures, requires an Accepted notarization result, staples and validates tickets, and checks Gatekeeper. A local Apple Development identity supports development and stable pairing; it cannot replace Developer ID distribution signing. Missing identities, rejected notarization, invalid signatures or Gatekeeper failures exit nonzero before new artifacts are copied to the release directory.

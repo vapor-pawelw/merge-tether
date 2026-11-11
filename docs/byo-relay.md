@@ -58,6 +58,11 @@ TUIST_MERGETETHER_RELAY_CONFIG_FILE="$HOME/.config/mergetether/relay-build.json"
   mise exec -- tuist generate --no-open
 ```
 
+For repeated local builds, configure the ignored `.mise.local.toml` described in
+[the local relay build guide](building.md#local-relay-configuration). This preserves
+the external config selection for local agents; each worktree needs its own ignored
+file or an explicit environment variable.
+
 Open the generated workspace and build the Mac `GitLabTodos` and iOS `MergeTetheriOS` schemes using your normal signing settings. Generation embeds only the validated origin in `MergeTetherRelayOrigin` in both app Info.plist files. Re-run generation after changing the external file; editing it does not update an existing binary. Generated projects are ignored by Git. No runtime invitation or operator key is packaged in either app.
 
 For the release helper, add `--relay-config "$HOME/.config/mergetether/relay-build.json"` to your otherwise configured command. For example, this explicit inspection command builds unsigned artifacts without notarization or distribution export:

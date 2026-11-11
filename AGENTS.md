@@ -11,6 +11,10 @@ macOS GitLab inbox and MR automation. Read [README.md](README.md) for behavior,
   A local installation may use a different identifier; preserve its settings on rebuild.
   Paired local installations also need a stable certificate-backed signing identity;
   ad hoc rebuilds invalidate Keychain’s remembered approval.
+- Local builds must preserve the operator relay configuration: use the ignored
+  `.mise.local.toml` or explicitly pass the external origin-only config in worktrees.
+  Follow [the local relay build guide](docs/building.md#local-relay-configuration);
+  verify both app origins and keep operator credentials out of artifacts.
 - Tuist owns the generated Xcode project. Use the version pinned in `mise.toml`;
   regenerate deliberately after project-graph changes. Do not commit generated projects.
 - Keep dependencies in-tree and the app unsandboxed: authenticated `glab` is a subprocess.
