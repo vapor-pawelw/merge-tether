@@ -6,6 +6,11 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 
 ## Unreleased
 
+- Put automation profiles above their editable permissions, fill controls immediately on selection, recognize matching presets and remember the last Custom configuration for later reuse.
+
+- Publish only the explicitly reviewed draft IDs for manual Publish all, stop publication while an agent is preparing drafts and share the final automatic-publication safety checks.
+- Distinguish a successful automation-settings save from a separate safety-data hold, allowing Custom history to save without misreporting a failed write.
+
 - Offer Manual, Safe, Trusted and Max automation profiles with clear permission summaries, enforce private-only automatic work in Safe, and preserve existing customized permissions until explicitly changed.
 
 - Add touch-friendly iOS MR details with on-demand descriptions, metadata, approval people and rules, discussions, feedback, agent history and usage, with explicit offline and partial-data states.
