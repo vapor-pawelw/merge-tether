@@ -39,7 +39,7 @@ struct GlabWriteAuthorizationTests {
     }
 
     enum Write: CaseIterable, Sendable {
-        case bulkPublish, publish, delete, resolve, thumbsUp, markDone, rereview, newReviewer
+        case publish, delete, resolve, thumbsUp, markDone, rereview, newReviewer
     }
 
     @MainActor private final class Admission {
@@ -50,8 +50,6 @@ struct GlabWriteAuthorizationTests {
         let host = "gitlab.example.test"
         let proceed: @MainActor @Sendable () -> Bool = { admission.allowed }
         switch operation {
-        case .bulkPublish:
-            try await glab.publishDraftNotes(projectID: 1, iid: 2, host: host, shouldProceed: proceed)
         case .publish:
             try await glab.publishDraftNote(projectID: 1, iid: 2, draftID: 3, host: host, shouldProceed: proceed)
         case .delete:
@@ -99,7 +97,6 @@ struct GlabWriteAuthorizationTests {
         if operation == .thumbsUp { #expect(gitlab.requests.last?.method == "GET") }
         let first = try #require(gitlab.requests.first)
         switch operation {
-        case .bulkPublish: #expect(first.method == "POST" && first.endpoint.hasSuffix("/draft_notes/bulk_publish"))
         case .publish: #expect(first.method == "PUT" && first.endpoint.hasSuffix("/draft_notes/3/publish"))
         case .delete: #expect(first.method == "DELETE" && first.endpoint.hasSuffix("/draft_notes/3"))
         case .resolve: #expect(first.method == "PUT" && first.command.contains("resolved=true"))

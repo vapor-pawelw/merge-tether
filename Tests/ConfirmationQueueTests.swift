@@ -534,11 +534,9 @@ import MergeTetherRemote
                 return gitlab.has("fail-owned-list") ? InMemoryGitLab.output(code: 1) : try gitlab.response("authored.json")
             case let path where path.hasPrefix("/merge_requests?scope=all"): return try gitlab.response("reviewing.json")
             case let path where path.hasSuffix("/draft_notes/bulk_publish"):
-                gitlab.append("publish.log", "published\n")
-                gitlab.write("drafts.json", "[]")
-                if gitlab.has("request-after-publish.json") { try gitlab.copy("request-after-publish.json", "request.json") }
-                if gitlab.has("published-discussions.json") { try gitlab.copy("published-discussions.json", "discussions.json") }
-                return InMemoryGitLab.output()
+                Issue.record("Publication must name the checked draft ID")
+                gitlab.append("publish.log", "unexpected bulk publication\n")
+                return InMemoryGitLab.output(code: 1)
             case "graphql":
                 gitlab.append("re-review-targets.log", request.command + "\n")
                 gitlab.append("re-review.log", "requested\n")
@@ -559,7 +557,26 @@ import MergeTetherRemote
                         drafts.append(["id": 99, "author_id": 3, "note": "/merge"])
                     }
                 }
-                if gitlab.has("published-discussions.json") { try gitlab.copy("published-discussions.json", "discussions.json") }
+                if gitlab.has("published-discussions.json") {
+                    let existing = try JSONDecoder().decode([GitLabMergeRequestDiscussion].self, from: gitlab.data("discussions.json"))
+                    let existingIDs = Set(existing.flatMap(\.notes).compactMap(\.id))
+                    let remaining = try JSONDecoder().decode([GitLabDraftNote].self, from: gitlab.data("drafts.json"))
+                    let privateBodies = Set(remaining.filter { $0.authorID == 3 }.compactMap(\.note))
+                    var threads = try #require(JSONSerialization.jsonObject(with: gitlab.data("published-discussions.json")) as? [[String: Any]])
+                    for index in threads.indices {
+                        var notes = try #require(threads[index]["notes"] as? [[String: Any]])
+                        // Apply an own note only once its corresponding draft was actually sent.
+                        notes.removeAll { note in
+                            let author = note["author"] as? [String: Any]
+                            return author?["id"] as? Int == 3 && !existingIDs.contains(note["id"] as? Int ?? 0)
+                                && privateBodies.contains(note["body"] as? String ?? "")
+                        }
+                        threads[index]["notes"] = notes
+                    }
+                    try JSONSerialization.data(withJSONObject: threads).store(in: gitlab, as: "discussions.json")
+                }
+                if gitlab.has("request-after-publish.json") { try gitlab.copy("request-after-publish.json", "request.json") }
+                if gitlab.has("ambiguous-publish-id"), gitlab.text("ambiguous-publish-id") == String(id) { return InMemoryGitLab.output(code: 1) }
                 if gitlab.has("fail-read-after-publish") { gitlab.write("fail-next-draft-read") }
                 return InMemoryGitLab.output("{}")
             case let path where path.contains("/draft_notes/"):
@@ -896,7 +913,8 @@ import MergeTetherRemote
         let item = try #require(harness.monitor.currentItems.first)
         try harness.write("request-after-publish.json", harness.log("request.json").replacingOccurrences(of: head, with: String(repeating: "f", count: 40)))
         await harness.monitor.publishDrafts(of: item.id)
-        #expect(harness.monitor.currentItems.first?.draftCount == 0)
+        #expect(harness.monitor.currentItems.first?.draftCount == 1)
+        #expect(harness.monitor.confirmationStates[item.id] == .changed)
         #expect(harness.monitor.currentItems.first?.requiresCommentReview == true)
         #expect(!harness.settings.pendingCommentReviews.isEmpty)
     }
@@ -1002,7 +1020,7 @@ import MergeTetherRemote
     }
 
 
-    @Test(arguments: ["selected", "bulk", "remote"], ["current", "captureFailure", "postFailure"])
+    @Test(arguments: ["selected", "all", "remote"], ["current", "captureFailure", "postFailure"])
     func publicationRecordsOnlyCertainAppOriginsAndDisplayFailuresNeverChangePublication(flow: String, evidence: String) async throws {
         // given
         let harness = try makeHarness(assistantWorked: false)
@@ -1030,8 +1048,9 @@ import MergeTetherRemote
             }
             return try await handler(call)
         }
+        if flow != "remote" { try harness.write("inject-unseen-draft", "yes") }
         // when
-        if flow == "bulk" { await harness.monitor.publishDrafts(of: item.id) }
+        if flow == "all" { await harness.monitor.publishDrafts(of: item.id) }
         else if flow == "remote" {
             let result = await harness.monitor.publishRemoteDrafts(of: item.id, head: head, expectedDrafts: [draft])
             #expect(result == .completed)
@@ -1041,6 +1060,10 @@ import MergeTetherRemote
         // then
         let writes = harness.gitlab.requests.filter { $0.method != "GET" && $0.endpoint.contains("draft_notes") }
         #expect(writes.count == 1)
+        #expect(writes.first?.method == "PUT" && writes.first?.endpoint.hasSuffix("/draft_notes/11/publish") == true)
+        if flow != "remote" {
+            #expect(harness.monitor.currentOpenItems.first?.drafts.compactMap(\.id) == [99])
+        }
         #expect(harness.monitor.confirmationStates[item.id] == nil)
         let published = try JSONDecoder().decode([GitLabMergeRequestDiscussion].self, from: Data(after.utf8))[0].notes[1]
         #expect(AICommentProvenanceStore.isGenerated(published, discussionID: "thread", context: context, in: directory) == (evidence == "current"))
@@ -1191,8 +1214,137 @@ import MergeTetherRemote
         // when
         await harness.monitor.publishDrafts(of: item.id)
         // then
-        #expect(!harness.log("publish.log").isEmpty)
+        #expect(harness.log("publish.log").isEmpty)
+        #expect(harness.log("selected.log").split(separator: "\n").count == 3)
         #expect(harness.monitor.currentOpenItems.first?.drafts.isEmpty == true)
+    }
+
+    @Test func manualPublishAllNeverIncludesAnUnseenQuickActionArrivingAfterTheFirstWrite() async throws {
+        let harness = try await manualHarness(); defer { harness.cleanUp() }
+        let item = try #require(harness.monitor.currentOpenItems.first)
+        try harness.write("inject-unseen-draft", "yes")
+        await harness.monitor.publishDrafts(of: item.id)
+        #expect(harness.log("publish.log").isEmpty)
+        #expect(harness.log("selected.log").split(separator: "\n").count == 3)
+        #expect(!harness.log("selected.log").contains("/draft_notes/99/publish"))
+        #expect(harness.monitor.currentOpenItems.first?.drafts.compactMap(\.id) == [99])
+    }
+
+    @Test(arguments: ["all", "selected"], ["/merge", "resolve"])
+    func explicitManualConsentStillPublishesCheckedQuickActions(flow: String, action: String) async throws {
+        let harness = try await manualHarness(); defer { harness.cleanUp() }
+        try harness.write("drafts.json", action == "resolve"
+            ? #"[{"id":11,"author_id":3,"note":"Checked resolution","discussion_id":"human","resolve_discussion":true}]"#
+            : #"[{"id":11,"author_id":3,"note":"/merge"}]"#)
+        try await harness.poll()
+        let item = try #require(harness.monitor.currentOpenItems.first)
+        if flow == "all" { await harness.monitor.publishDrafts(of: item.id) }
+        else { await harness.monitor.publishDrafts(item.drafts, for: manualTarget) }
+        #expect(harness.log("selected.log").contains("/draft_notes/11/publish"))
+        #expect(harness.log("publish.log").isEmpty)
+    }
+
+    @Test(arguments: ["head", "source", "semantic", "discussion"])
+    func manualPublicationRejectsChangesToTheReviewedSourceAndDiscussion(change: String) async throws {
+        let harness = try await manualHarness(); defer { harness.cleanUp() }
+        let item = try #require(harness.monitor.currentOpenItems.first)
+        if change == "discussion" {
+            try harness.write("discussions.json", #"[{"id":"new","notes":[{"id":40,"author":{"id":9},"body":"Incoming feedback","system":false}]}]"#)
+        } else {
+            let source = harness.log("request.json")
+            let changed = change == "head" ? source.replacingOccurrences(of: head, with: String(repeating: "f", count: 40))
+                : change == "source" ? source.replacingOccurrences(of: #""source_branch":"fix""#, with: #""source_branch":"other""#)
+                : source.replacingOccurrences(of: #""title":"Fix""#, with: #""title":"Different scope""#)
+            try harness.write("request.json", changed)
+        }
+        await harness.monitor.publishDrafts(of: item.id)
+        #expect(harness.log("selected.log").isEmpty && harness.log("publish.log").isEmpty)
+        #expect(harness.monitor.confirmationStates[item.id] == .changed)
+    }
+
+    @Test(arguments: ["read", "transport"])
+    func aWorkerStartingDuringManualPublicationStopsTheCommandBoundary(stage: String) async throws {
+        let harness = try await manualHarness(); defer { harness.cleanUp() }
+        let item = try #require(harness.monitor.currentOpenItems.first)
+        let worker = try publicationWorker(harness, authored: false, state: .running)
+        if stage == "read" { try harness.write("pause-selected-read", "yes") }
+        else {
+            harness.gitlab.beforeCommand = { request in
+                guard request.endpoint.hasSuffix("/publish") else { return }
+                harness.gitlab.write("selected-read-entered")
+                try await harness.gitlab.waitFor("release-selected-read")
+            }
+        }
+        let pending = Task { await harness.monitor.publishDrafts(of: item.id) }
+        defer { pending.cancel(); try? harness.write("release-selected-read", "yes") }
+        try await harness.gitlab.waitFor("selected-read-entered")
+        harness.settings.assistantHandoffs.append(worker)
+        try harness.write("release-selected-read", "yes")
+        await pending.value
+        #expect(harness.log("selected.log").isEmpty && harness.log("publish.log").isEmpty)
+        #expect(harness.monitor.confirmationStates[item.id] == .changed)
+    }
+
+    @Test func ownPublishedNotesPermitTheNextManualIDButIncomingFeedbackStopsIt() async throws {
+        for incoming in [false, true] {
+            let harness = try await manualHarness(); defer { harness.cleanUp() }
+            let selected = try manualSelection(harness)
+            let external = incoming ? #",{"id":41,"author":{"id":9},"body":"New objection","system":false}"# : ""
+            try harness.write("published-discussions.json", #"[{"id":"own","notes":[{"id":40,"author":{"id":3},"body":"First selected comment","system":false}"# + external + "]}]")
+            await harness.monitor.publishDrafts(selected, for: manualTarget)
+            #expect(harness.log("selected.log").contains("/draft_notes/11/publish"))
+            #expect(harness.log("selected.log").contains("/draft_notes/14/publish") == !incoming)
+            #expect(harness.log("publish.log").isEmpty)
+        }
+    }
+
+    @Test(arguments: ["failure", "ambiguous"], [(false, false), (false, true), (true, false), (true, true)])
+    func retryPublishesOnlyRemainingIDsAfterPartialOrAmbiguousManualPublication(outcome: String, scenario: (Bool, Bool)) async throws {
+        let (authored, incoming) = scenario
+        let harness = try await manualHarness(authored: authored); defer { harness.cleanUp() }
+        let id = try #require(harness.monitor.currentOpenItems.first?.id)
+        let published = #"[{"id":"human","notes":[{"id":40,"author":{"id":3,"username":"me"},"body":"First selected comment","system":false},{"id":41,"author":{"id":3,"username":"me"},"body":"Keep this private","system":false},{"id":42,"author":{"id":3,"username":"me"},"body":"Second selected comment","system":false}]}]"#
+        try harness.write("published-discussions.json", published)
+        if outcome == "failure" { try harness.write("fail-publish-id", "14") }
+        else { try harness.write("ambiguous-publish-id", "11") }
+        await harness.monitor.publishDrafts(of: id)
+        #expect(harness.monitor.currentOpenItems.first?.drafts.contains { $0.id == 11 } == false)
+        let firstWrites = harness.log("selected.log").split(separator: "\n").count
+        #expect(firstWrites == (outcome == "failure" ? 2 : 1))
+        harness.gitlab.remove("fail-publish-id")
+        harness.gitlab.remove("ambiguous-publish-id")
+        if incoming {
+            let changed = harness.log("discussions.json").dropLast() + #",{"id":"new","notes":[{"id":50,"author":{"id":9,"username":"alice"},"body":"New objection","system":false}]}]"#
+            try harness.write("discussions.json", String(changed))
+        }
+        await harness.monitor.publishDrafts(of: id)
+        #expect(harness.log("selected.log").components(separatedBy: "/draft_notes/11/publish").count == 2)
+        #expect(harness.log("selected.log").split(separator: "\n").count == (incoming ? firstWrites : 3))
+        #expect(harness.monitor.currentOpenItems.first?.drafts.isEmpty == !incoming)
+        if incoming { #expect(harness.monitor.confirmationStates[id] == .changed) }
+        #expect(harness.log("publish.log").isEmpty)
+    }
+
+    @Test(arguments: [false, true])
+    func anAmbiguousManualResponseNeverClaimsAIProvenanceOrCompletesTheHumanCheckpoint(hasPublicNote: Bool) async throws {
+        let harness = try await manualHarness(); defer { harness.cleanUp() }
+        try harness.write("drafts.json", #"[{"id":11,"author_id":3,"note":"First selected comment"}]"#)
+        try await harness.poll()
+        let item = try #require(harness.monitor.currentOpenItems.first)
+        let context = AICommentProvenanceStore.Context(host: host, username: "me", userID: 3, projectID: 1, iid: 2)
+        let directory = harness.folder.appending(path: "comment-origins")
+        try AICommentProvenanceStore.recordGenerated([.init(id: 11, bodySHA256: AICommentAssessmentStore.digest("First selected comment"))],
+            baseline: [], current: item.drafts, context: context, runID: UUID(), headSHA: head, in: directory)
+        let after = #"[{"id":"own","notes":[{"id":40,"author":{"id":3,"username":"me"},"body":"First selected comment","system":false}]}]"#
+        if hasPublicNote { try harness.write("published-discussions.json", after) }
+        try harness.write("ambiguous-publish-id", "11")
+        await harness.monitor.publishDrafts(of: item.id)
+        let note = try JSONDecoder().decode([GitLabMergeRequestDiscussion].self, from: Data(after.utf8))[0].notes[0]
+        #expect(!AICommentProvenanceStore.isGenerated(note, discussionID: "own", context: context, in: directory))
+        #expect(harness.monitor.currentOpenItems.first?.drafts.isEmpty == true)
+        #expect(harness.monitor.confirmationStates[item.id] == .failed)
+        #expect(!harness.settings.pendingCommentReviews.isEmpty)
+        #expect(harness.log("selected.log").split(separator: "\n").count == 1)
     }
 
     @Test(arguments: [false, true])
@@ -1418,16 +1570,17 @@ import MergeTetherRemote
         #expect(item.needsConfirmation && !item.canApprove)
         #expect(item.drafts.map(\.kind) == [.line("Sources/A.swift:12"), .reply])
 
-        // A new draft appears after the user looked: nothing is published.
+        // Publish only the shown IDs; a new arrival remains private and visible.
         try harness.write("drafts.json", draftJSON.replacingOccurrences(of: "\"id\":13,\"author_id\":8", with: "\"id\":13,\"author_id\":3"))
         await harness.monitor.publishDrafts(of: item.id)
         #expect(harness.log("publish.log").isEmpty)
-        #expect(harness.monitor.confirmationStates[item.id] == .changed)
-        #expect(harness.monitor.currentItems.first?.drafts.count == 3)
+        #expect(harness.log("selected.log").split(separator: "\n").count == 2)
+        #expect(!harness.log("selected.log").contains("/draft_notes/13/publish"))
+        #expect(harness.monitor.currentItems.first?.drafts.compactMap(\.id) == [13])
 
-        // Publishing what is shown sends a single bulk publish and clears the queue.
+        // A separate confirmation publishes the newly displayed ID.
         await harness.monitor.publishDrafts(of: item.id)
-        #expect(harness.log("publish.log") == "published\n")
+        #expect(harness.log("publish.log").isEmpty && !harness.log("selected.log").isEmpty)
         #expect(harness.monitor.confirmationStates[item.id] == nil)
         #expect(harness.monitor.currentItems.isEmpty)
         #expect(harness.monitor.currentOpenItems.first?.draftCount == 0)
@@ -2085,7 +2238,7 @@ import MergeTetherRemote
         #expect(harness.log("selected.log").isEmpty && harness.log("publish.log").isEmpty)
         #expect(harness.monitor.currentItems.first?.drafts.count == 2)
         await harness.monitor.publishDrafts(of: .init(projectID: 1, iid: 2))
-        #expect(harness.log("publish.log") == "published\n")
+        #expect(harness.log("publish.log").isEmpty && !harness.log("selected.log").isEmpty)
     }
 
     @Test func persistenceHoldStopsAutomaticPublicationButKeepsExplicitFreshPublication() async throws {
@@ -2101,7 +2254,7 @@ import MergeTetherRemote
         #expect(harness.monitor.currentItems.first?.drafts.count == 2)
 
         await harness.monitor.publishDrafts(of: .init(projectID: 1, iid: 2))
-        #expect(harness.log("publish.log") == "published\n")
+        #expect(harness.log("publish.log").isEmpty && !harness.log("selected.log").isEmpty)
     }
 
     @Test func unavailableCLIBlocksAutomaticPublicationButKeepsManualPublication() async throws {
@@ -2117,7 +2270,14 @@ import MergeTetherRemote
         #expect(harness.monitor.currentItems.first?.drafts.count == 2)
 
         await harness.monitor.publishDrafts(of: .init(projectID: 1, iid: 2))
-        #expect(!harness.log("publish.log").isEmpty)
+        #expect(harness.log("publish.log").isEmpty)
+        let writes = harness.gitlab.requests.filter { $0.method != "GET" && $0.endpoint.contains("/draft_notes") }
+        #expect(writes.map(\.method) == ["PUT", "PUT"])
+        #expect(writes.map(\.endpoint) == [
+            "/projects/1/merge_requests/2/draft_notes/11/publish",
+            "/projects/1/merge_requests/2/draft_notes/12/publish"
+        ])
+        #expect(harness.monitor.currentOpenItems.first?.drafts.isEmpty == true)
     }
 
     @Test func unavailableCLIBlocksAutomaticAIReplyPublication() async throws {
@@ -3500,16 +3660,22 @@ import MergeTetherRemote
     }
 
     @Test(arguments: [false, true])
-    func explicitManualPublicationRemainsAuthorizedDuringActiveWork(_ authored: Bool) async throws {
+    func activeWorkBlocksExplicitManualPublication(_ authored: Bool) async throws {
         let harness = try makeHarness(assistantWorked: true, authored: authored, verifyDraftRecovery: { input, _, _ in
             .init(drafts: input.requestedDraftIDs.map { .init(draftID: $0, state: .uncertain, reason: "Reply B remains unverified") })
         })
         defer { harness.monitor.draftProofRecoveryCoordinator?.cancel(); harness.cleanUp() }
         harness.settings.automation.publicationMode = .manual
         try await prepareIndependentPublicationReply(harness, authored: authored)
-        harness.settings.assistantHandoffs.append(try publicationWorker(harness, authored: authored, state: .running))
+        let job = try publicationWorker(harness, authored: authored, state: .running)
+        harness.settings.assistantHandoffs.append(job)
         await harness.monitor.publishDrafts(of: .init(projectID: 1, iid: 2))
-        #expect(harness.log("publish.log") == "published\n")
+        #expect(harness.log("publish.log").isEmpty && harness.log("selected.log").isEmpty)
+        #expect(harness.monitor.confirmationStates[.init(projectID: 1, iid: 2)] == .changed)
+        let index = try #require(harness.settings.assistantHandoffs.firstIndex { $0.id == job.id })
+        harness.settings.assistantHandoffs[index].execution?.state = .succeeded
+        await harness.monitor.publishDrafts(of: .init(projectID: 1, iid: 2))
+        #expect(!harness.log("selected.log").isEmpty)
     }
 
     @Test func aVerifiedAuthorReplyIsEligibleAndPublishesWhileAnUnverifiedSiblingStaysPrivate() async throws {
@@ -3835,7 +4001,7 @@ import MergeTetherRemote
         try harness.recordVerdict("objections", head: head)
         try await harness.poll()
         await harness.monitor.publishDrafts(of: .init(projectID: 1, iid: 2))
-        #expect(harness.log("publish.log") == "published\n")
+        #expect(harness.log("publish.log").isEmpty && !harness.log("selected.log").isEmpty)
         #expect(harness.monitor.currentItems.first?.drafts.isEmpty != false)
     }
 

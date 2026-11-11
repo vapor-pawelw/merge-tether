@@ -187,18 +187,6 @@ extension GlabService {
         try await fetchOwnDraftNotes(projectID: projectID, iid: iid, host: host, userID: userID).count
     }
 
-    /// Publishes all of the current user's draft notes on the merge request.
-    func publishDraftNotes(projectID: Int, iid: Int, host: String, shouldProceed: @escaping @MainActor @Sendable () -> Bool) async throws {
-        struct NoContent: Decodable {}
-        let _: NoContent = try await mergeRequestWriteAPI(
-            "/projects/\(projectID)/merge_requests/\(iid)/draft_notes/bulk_publish",
-            host: host,
-            arguments: ["--method", "POST"],
-            timeout: 30, shouldProceed: shouldProceed,
-            decode: { _ in NoContent() }
-        )
-    }
-
     /// Selective publication avoids sending unrelated human replies in the same review.
     func publishDraftNote(projectID: Int, iid: Int, draftID: Int, host: String, shouldProceed: @escaping @MainActor @Sendable () -> Bool) async throws {
         struct NoContent: Decodable {}

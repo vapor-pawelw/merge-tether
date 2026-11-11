@@ -254,6 +254,14 @@ final class MergeRequestAttentionMonitor {
     private var previousDrafts: [Item.ID: [GitLabDraftNote]] = [:]
     /// Drafts already published; a poll that started earlier may still report them.
     private var publishedDrafts: [Item.ID: [GitLabDraftNote]] = [:]
+    /// Continuations may exclude only publications tied to this exact reviewed context and account session.
+    private struct ManualPublicationProgress {
+        let request: GitLabMergeRequest
+        let snapshot: CommentReviewSnapshot
+        let accountRevision: UInt64
+        var publicDrafts: [GitLabDraftNote]
+    }
+    private var manualPublicationProgress: [Item.ID: ManualPublicationProgress] = [:]
     /// Heads approved here, until GitLab's reviewer state catches up.
     private var approvedHeads: [Item.ID: String] = [:]
     /// Commits GitLab refused to auto-approve; retried only after a new commit or a manual approval.
@@ -565,6 +573,7 @@ final class MergeRequestAttentionMonitor {
             confirmationStates = [:]
             previousDrafts = [:]
             publishedDrafts = [:]
+            manualPublicationProgress = [:]
             approvedHeads = [:]
             failedApprovalHeads = [:]
             approvalReadFailures = [:]
@@ -1499,29 +1508,11 @@ final class MergeRequestAttentionMonitor {
                 guard latest.contains(draft), let draftID = draft.id, qualifies(draft, in: liveDiscussions),
                       isCurrent(account), settings.automation.publishAIRepliesWithoutConfirmation,
                       permitsAutomaticPublication(of: request, account: account) else { continue }
-                let configuration = settings.automation
-                guard await permitsAssistantAutomation(for: account),
-                      await permitsAutomaticPublication(draft, id: id, account: account),
-                      isCurrent(account), settings.automation == configuration,
-                      settings.automation.publishAIRepliesWithoutConfirmation,
-                      permitsAutomaticPublication(of: request, account: account),
-                      !hasActiveWorker(for: id, account: account) else { continue }
-                let proofVerdict = ReviewVerdictStore.verdict(host: account.host, projectID: id.projectID, iid: id.iid, in: verdictDirectory)
-                let proofReceipts = publicationReceipts(projectID: id.projectID, iid: id.iid, host: account.host, username: account.username)
-                let reviewRevision = settings.commentReviewRevision(for: commentReviewTarget(id, account: account))
+                guard let admitted = await automaticPublicationAdmission(draft, id: id, account: account,
+                    request: request, aiRepliesOnly: true, generation: generation, revision: revision) else { continue }
                 attemptedPublish = true
-                try await glab.publishDraftNote(projectID: id.projectID, iid: id.iid, draftID: draftID, host: account.host) {
-                    !Task.isCancelled && generation == self.accountGeneration && revision == self.glab.accountRevision
-                        && self.isCurrent(account) && settings.automaticPublicWritesAllowed
-                        && settings.automation == configuration && settings.automation.publishAIRepliesWithoutConfirmation
-                        && self.openItems.first(where: { $0.id == id })?.mergeRequest?.sha == request.sha
-                        && self.openItems.first(where: { $0.id == id })?.mergeRequest?.semanticContextFingerprint == request.semanticContextFingerprint
-                        && ReviewVerdictStore.verdict(host: account.host, projectID: id.projectID, iid: id.iid, in: self.verdictDirectory) == proofVerdict
-                        && self.publicationReceipts(projectID: id.projectID, iid: id.iid, host: account.host, username: account.username) == proofReceipts
-                        && settings.commentReviewRevision(for: self.commentReviewTarget(id, account: account)) == reviewRevision
-                        && self.permitsAutomaticPublication(of: request, account: account)
-                        && !self.hasActiveWorker(for: id, account: account)
-                }
+                try await glab.publishDraftNote(projectID: id.projectID, iid: id.iid, draftID: draftID,
+                    host: account.host, shouldProceed: admitted)
                 attemptedPublish = false
                 guard isCurrent(account) else { return }
                 published = true
@@ -1679,7 +1670,7 @@ final class MergeRequestAttentionMonitor {
         }
     }
 
-    /// Explicit publication binds the reviewed bodies and account, independently of automation policy.
+    /// Explicit consent binds the reviewed IDs and bodies, independently of automation policy.
     func publishDrafts(_ selected: [GitLabDraftNote], for target: MRDiscussionTarget) async {
         let id = Item.ID(projectID: target.projectID, iid: target.iid)
         guard let account, isCurrent(account), let user, user.id > 0,
@@ -1688,9 +1679,11 @@ final class MergeRequestAttentionMonitor {
               target.url.isGitLabMergeRequest(host: target.host, iid: target.iid),
               let item = items.first(where: { $0.id == id }) ?? openItems.first(where: { $0.id == id }),
               item.url == target.url, !isConfirming(id) else { return }
-        guard !selected.isEmpty, selected.allSatisfy({
-            ($0.id ?? 0) > 0 && $0.authorID == user.id && !($0.note ?? "").trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
-        }), Set(selected.compactMap(\.id)).count == selected.count,
+        guard !hasActiveWorker(for: id, account: account), let reviewedRequest = item.mergeRequest,
+              let snapshot = item.commentReviewSnapshot,
+              !selected.isEmpty, selected.allSatisfy({
+                  ($0.id ?? 0) > 0 && $0.authorID == user.id && !($0.note ?? "").trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+              }), Set(selected.compactMap(\.id)).count == selected.count,
               selected.allSatisfy({ draft in item.drafts.filter { $0.id == draft.id } == [draft] }) else {
             confirmationStates[id] = .changed
             return
@@ -1698,6 +1691,10 @@ final class MergeRequestAttentionMonitor {
         let generation = accountGeneration, revision = glab.accountRevision
         let currentContext: @MainActor @Sendable () -> Bool = {
             generation == self.accountGeneration && revision == self.glab.accountRevision && self.isCurrent(account)
+        }
+        let ready: @MainActor @Sendable () -> Bool = {
+            currentContext() && !self.hasActiveWorker(for: id, account: account)
+                && MRAttentionRecord.sameContext(reviewedRequest, self.openItems.first(where: { $0.id == id })?.mergeRequest)
         }
         func display(_ drafts: [GitLabDraftNote]) {
             let visible = drafts.filter { publishedDrafts[id]?.contains($0) != true }
@@ -1710,56 +1707,120 @@ final class MergeRequestAttentionMonitor {
             signalAutomaticActionIdle()
         }
         var remaining = selected
-        var publishedAny = false
+        var publicDrafts: [GitLabDraftNote] = []
+        if let previous = manualPublicationProgress[id], previous.accountRevision == revision,
+           previous.snapshot == snapshot, MRAttentionRecord.sameContext(previous.request, reviewedRequest) {
+            publicDrafts = previous.publicDrafts
+        }
+        func rememberPublicDraft(_ draft: GitLabDraftNote) {
+            if !publicDrafts.contains(draft) { publicDrafts.append(draft) }
+            manualPublicationProgress[id] = .init(request: reviewedRequest, snapshot: snapshot,
+                accountRevision: revision, publicDrafts: publicDrafts)
+        }
+        var publishedNow: [GitLabDraftNote] = []
         var attemptedWrite = false
+        var uncertainDraft: GitLabDraftNote?
+        var uncertainBeforeIDs: Set<Int> = []
         do {
             for draft in selected {
                 try Task.checkCancellation()
+                guard currentContext() else { return }
+                guard ready() else { confirmationStates[id] = .changed; break }
+                // Origin labels are optional; the mandatory live checks below authorize publication.
+                let origin = await captureGeneratedPublication([draft], id: id, account: account, user: user)
+                guard currentContext() else { return }
+                guard ready() else { confirmationStates[id] = .changed; break }
                 async let liveUser = glab.fetchAuthenticatedUser(host: account.host, expectedUsername: account.username)
                 async let liveMR = glab.fetchMergeRequest(projectID: id.projectID, iid: id.iid, host: account.host)
-                let (authenticated, request) = try await (liveUser, liveMR)
+                async let liveDiscussions = glab.fetchMergeRequestDiscussions(projectID: id.projectID, iid: id.iid, host: account.host)
+                let (authenticated, request, discussions) = try await (liveUser, liveMR, liveDiscussions)
                 guard currentContext() else { return }
                 guard authenticated == user else { throw GlabError.notAuthenticated }
-                guard request.projectID == target.projectID, request.iid == target.iid, request.webURL == target.url else {
+                guard ready(), MRAttentionRecord.sameContext(reviewedRequest, request),
+                      request.projectID == target.projectID, request.iid == target.iid, request.webURL == target.url,
+                      snapshot.matches(request, discussions: discussions, publishedDrafts: publicDrafts, userID: user.id),
+                      let checkedFingerprint = ReviewVerdict.fingerprint(discussions) else {
+                    updateItem(id) {
+                        $0.invalidateChangedDiscussionSnapshot(head: request.sha, fingerprint: ReviewVerdict.fingerprint(discussions),
+                            semanticContextFingerprint: request.semanticContextFingerprint)
+                    }
                     confirmationStates[id] = .changed
                     break
                 }
-                let origin = await captureGeneratedPublication([draft], id: id, account: account, user: user)
+                // Read drafts last. New IDs never broaden the explicit selection.
                 let current = try await glab.fetchOwnDraftNotes(projectID: id.projectID, iid: id.iid,
                     host: account.host, userID: user.id)
                 guard currentContext() else { return }
                 display(current)
+                let admitted: @MainActor @Sendable () -> Bool = {
+                    guard !Task.isCancelled, ready(),
+                          let observed = self.openItems.first(where: { $0.id == id })?.observedDiscussionFingerprint else { return false }
+                    return observed == snapshot.discussionFingerprint || observed == checkedFingerprint
+                }
                 // A changed later selection must stop the first write too. Unselected changes are unrelated.
-                guard remaining.allSatisfy({ expected in current.filter { $0.id == expected.id } == [expected] }),
+                guard admitted(), remaining.allSatisfy({ expected in current.filter { $0.id == expected.id } == [expected] }),
                       let draftID = draft.id else {
                     confirmationStates[id] = .changed
                     break
                 }
                 try Task.checkCancellation()
                 attemptedWrite = true
-                try await glab.publishDraftNote(projectID: id.projectID, iid: id.iid, draftID: draftID, host: account.host) { !Task.isCancelled && currentContext() }
+                uncertainDraft = draft
+                uncertainBeforeIDs = Set(discussions.flatMap(\.notes).compactMap(\.id))
+                try await glab.publishDraftNote(projectID: id.projectID, iid: id.iid, draftID: draftID,
+                    host: account.host, shouldProceed: admitted)
                 attemptedWrite = false
+                uncertainDraft = nil
                 guard currentContext() else { return }
-                publishedAny = true
+                publishedNow.append(draft)
+                rememberPublicDraft(draft)
                 remaining.removeAll { $0.id == draftID }
                 publishedDrafts[id, default: []].append(draft)
                 display(current)
                 await recordGeneratedPublication(origin, id: id, account: account, user: user)
             }
         } catch {
-            if currentContext() { confirmationStates[id] = .failed }
+            if currentContext() {
+                confirmationStates[id] = !ready() || (error is CancellationError && !Task.isCancelled) ? .changed : .failed
+            }
             Log.monitor.error("Could not publish selected drafts: \(String(describing: error), privacy: .private)")
         }
-        guard currentContext(), publishedAny || attemptedWrite else { return }
+        guard currentContext(), !publishedNow.isEmpty || attemptedWrite else { return }
         var authenticatedForRefresh = false
         do {
             let authenticated = try await glab.fetchAuthenticatedUser(host: account.host, expectedUsername: account.username)
             guard currentContext() else { return }
             guard authenticated == user else { throw GlabError.notAuthenticated }
             authenticatedForRefresh = true
+            // A missing draft alone is only a tombstone. An ambiguous PUT needs a unique
+            // newly observed own public note, with unchanged surrounding context, for continuation.
+            let uncertainRequest: GitLabMergeRequest?
+            let uncertainDiscussions: [GitLabMergeRequestDiscussion]?
+            if uncertainDraft != nil {
+                uncertainRequest = try? await glab.fetchMergeRequest(projectID: id.projectID, iid: id.iid, host: account.host)
+                uncertainDiscussions = try? await glab.fetchMergeRequestDiscussions(projectID: id.projectID, iid: id.iid, host: account.host)
+            } else {
+                uncertainRequest = nil
+                uncertainDiscussions = nil
+            }
             let current = try await glab.fetchOwnDraftNotes(projectID: id.projectID, iid: id.iid,
                 host: account.host, userID: user.id)
             guard currentContext() else { return }
+            if let uncertainDraft, !current.contains(where: { $0.id == uncertainDraft.id }) {
+                publishedDrafts[id, default: []].append(uncertainDraft)
+                if let request = uncertainRequest, let discussions = uncertainDiscussions,
+                   MRAttentionRecord.sameContext(reviewedRequest, request),
+                   snapshot.matches(request, discussions: discussions, publishedDrafts: publicDrafts + [uncertainDraft], userID: user.id) {
+                    let matches = discussions.flatMap { thread in thread.notes.filter { note in
+                        note.system != true && note.author?.id == user.id && note.author?.username == account.username
+                            && note.id.map { $0 > 0 && !uncertainBeforeIDs.contains($0) } == true
+                            && note.body == uncertainDraft.note
+                            && (uncertainDraft.discussionID == nil || uncertainDraft.discussionID == thread.id)
+                            && (uncertainDraft.position == nil || uncertainDraft.position == note.position)
+                    } }
+                    if matches.count == 1 { rememberPublicDraft(uncertainDraft) }
+                }
+            }
             display(current)
         } catch {
             if currentContext(), confirmationStates[id] == .publishing { confirmationStates[id] = .failed }
@@ -1767,20 +1828,28 @@ final class MergeRequestAttentionMonitor {
         }
         guard currentContext() else { return }
         previousDrafts[id] = nil
-        if publishedAny, authenticatedForRefresh {
-            if selected.count == item.drafts.count {
-                await completeCommentReviewAfterPublication(id, snapshot: item.commentReviewSnapshot, published: selected, account: account, user: user)
+        if !publishedNow.isEmpty, authenticatedForRefresh {
+            if publishedNow.count == item.drafts.count {
+                await completeCommentReviewAfterPublication(id, snapshot: snapshot, published: publicDrafts, account: account, user: user)
             }
-            await refreshReReviewAfterPublication(id, account: account, user: user)
+            // A partial publication keeps the reviewed preview for continuation. A live
+            // context mismatch above already invalidated stale feedback; re-review needs no drafts.
+            if openItems.first(where: { $0.id == id })?.drafts.isEmpty == true {
+                await refreshReReviewAfterPublication(id, account: account, user: user)
+            }
         }
     }
 
     func publishDrafts(of id: Item.ID, automatic: Bool = false, checkedDraftIDs: Set<Int> = []) async {
-        guard !automatic || !checkedDraftIDs.isEmpty else { return }
         guard let account, isCurrent(account), let user,
               let displayed = items.first(where: { $0.id == id }), !displayed.drafts.isEmpty,
               !isConfirming(id) else { return }
-        guard !automatic || !hasActiveWorker(for: id, account: account) else { return }
+        if !automatic {
+            await publishDrafts(displayed.drafts, for: .init(host: account.host, username: account.username,
+                projectID: id.projectID, iid: id.iid, url: displayed.url))
+            return
+        }
+        guard !checkedDraftIDs.isEmpty, !hasActiveWorker(for: id, account: account) else { return }
         let expected = displayed.drafts
         let generation = accountGeneration, revision = glab.accountRevision
         confirmationStates[id] = .publishing
@@ -1788,108 +1857,94 @@ final class MergeRequestAttentionMonitor {
             if generation == accountGeneration, confirmationStates[id] == .publishing { confirmationStates[id] = nil }
             signalAutomaticActionIdle()
         }
-        var publishedAny = false
         var publishedNow: [GitLabDraftNote] = []
         var attemptedPublish = false
         var publicationChecked = false
         do {
-            let bulkOrigin: AICommentProvenanceStore.Publication?
-            if automatic { bulkOrigin = nil }
-            else { bulkOrigin = await captureGeneratedPublication(expected, id: id, account: account, user: user) }
-            let current = try await glab.fetchOwnDraftNotes(
-                projectID: id.projectID, iid: id.iid, host: account.host, userID: user.id
-            )
+            let current = try await glab.fetchOwnDraftNotes(projectID: id.projectID, iid: id.iid, host: account.host, userID: user.id)
             guard isCurrent(account) else { return }
             guard current == expected else {
-                updateItem(id) {
-                    $0.drafts = current
-                    $0.draftCount = current.count
-                }
-                confirmationStates[id] = automatic ? nil : .changed
+                updateItem(id) { $0.drafts = current; $0.draftCount = current.count }
+                confirmationStates[id] = nil
                 return
             }
-            if automatic {
-                guard let settings, settings.automation.publishDraftsWithoutConfirmation,
-                      let request = openItems.first(where: { $0.id == id })?.mergeRequest,
-                      permitsAutomaticPublication(of: request, account: account) else {
-                    confirmationStates[id] = nil
-                    return
-                }
+            guard let settings, settings.automation.publishDraftsWithoutConfirmation,
+                  let request = openItems.first(where: { $0.id == id })?.mergeRequest,
+                  permitsAutomaticPublication(of: request, account: account) else {
+                confirmationStates[id] = nil
+                return
             }
-            if automatic {
-                // Live evidence may narrow this frozen preview, never add an ID.
-                for draft in current where draft.id.map(checkedDraftIDs.contains) == true {
-                    let origin = await captureGeneratedPublication([draft], id: id, account: account, user: user)
-                    let latest = try await glab.fetchOwnDraftNotes(projectID: id.projectID, iid: id.iid, host: account.host, userID: user.id)
-                    guard latest.contains(draft), let draftID = draft.id, isCurrent(account),
-                          let settings, settings.automation.publishDraftsWithoutConfirmation,
-                          let request = openItems.first(where: { $0.id == id })?.mergeRequest,
-                          permitsAutomaticPublication(of: request, account: account),
-                          AICommentAssessmentStore.safeForAutomaticPublication(draft) else { continue }
-                    let configuration = settings.automation
-                    guard await permitsAssistantAutomation(for: account),
-                          await permitsAutomaticPublication(draft, id: id, account: account),
-                          isCurrent(account), settings.automation == configuration,
-                          settings.automation.publishDraftsWithoutConfirmation,
-                          permitsAutomaticPublication(of: request, account: account),
-                          !hasActiveWorker(for: id, account: account) else { continue }
-                    let proofVerdict = ReviewVerdictStore.verdict(host: account.host, projectID: id.projectID, iid: id.iid, in: verdictDirectory)
-                    let proofReceipts = publicationReceipts(projectID: id.projectID, iid: id.iid, host: account.host, username: account.username)
-                    let reviewRevision = settings.commentReviewRevision(for: commentReviewTarget(id, account: account))
-                    attemptedPublish = true
-                    try await glab.publishDraftNote(projectID: id.projectID, iid: id.iid, draftID: draftID, host: account.host) {
-                        !Task.isCancelled && generation == self.accountGeneration && revision == self.glab.accountRevision
-                            && self.isCurrent(account) && settings.automaticPublicWritesAllowed
-                            && settings.automation == configuration && settings.automation.publishDraftsWithoutConfirmation
-                            && self.openItems.first(where: { $0.id == id })?.mergeRequest?.sha == request.sha
-                            && self.openItems.first(where: { $0.id == id })?.mergeRequest?.semanticContextFingerprint == request.semanticContextFingerprint
-                            && ReviewVerdictStore.verdict(host: account.host, projectID: id.projectID, iid: id.iid, in: self.verdictDirectory) == proofVerdict
-                            && self.publicationReceipts(projectID: id.projectID, iid: id.iid, host: account.host, username: account.username) == proofReceipts
-                            && settings.commentReviewRevision(for: self.commentReviewTarget(id, account: account)) == reviewRevision
-                            && self.permitsAutomaticPublication(of: request, account: account)
-                            && !self.hasActiveWorker(for: id, account: account)
-                    }
-                    attemptedPublish = false
-                    guard isCurrent(account) else { return }
-                    publishedAny = true
-                    publishedDrafts[id, default: []].append(draft)
-                    publishedNow.append(draft)
-                    self.settings?.recordAutomaticCommentPublication([draft], for: commentReviewTarget(id, account: account))
-                    updateItem(id) { $0.drafts.removeAll { $0 == draft }; $0.draftCount = $0.drafts.count }
-                    await recordGeneratedPublication(origin, id: id, account: account, user: user)
-                }
-                let remaining = try await glab.fetchOwnDraftNotes(projectID: id.projectID, iid: id.iid, host: account.host, userID: user.id)
-                guard isCurrent(account) else { return }
-                updateItem(id) { $0.drafts = remaining; $0.draftCount = remaining.count }
-            } else {
+            // Live evidence may narrow this frozen preview, never add an ID.
+            for draft in current where draft.id.map(checkedDraftIDs.contains) == true {
+                let origin = await captureGeneratedPublication([draft], id: id, account: account, user: user)
+                let latest = try await glab.fetchOwnDraftNotes(projectID: id.projectID, iid: id.iid, host: account.host, userID: user.id)
+                guard latest.contains(draft), let draftID = draft.id, isCurrent(account),
+                      settings.automation.publishDraftsWithoutConfirmation,
+                      let request = openItems.first(where: { $0.id == id })?.mergeRequest,
+                      permitsAutomaticPublication(of: request, account: account),
+                      AICommentAssessmentStore.safeForAutomaticPublication(draft),
+                      let admitted = await automaticPublicationAdmission(draft, id: id, account: account,
+                        request: request, aiRepliesOnly: false, generation: generation, revision: revision) else { continue }
                 attemptedPublish = true
-                try await glab.publishDraftNotes(projectID: id.projectID, iid: id.iid, host: account.host) {
-                    !Task.isCancelled && generation == self.accountGeneration && revision == self.glab.accountRevision
-                        && self.isCurrent(account)
-                }
+                try await glab.publishDraftNote(projectID: id.projectID, iid: id.iid, draftID: draftID,
+                    host: account.host, shouldProceed: admitted)
                 attemptedPublish = false
                 guard isCurrent(account) else { return }
-                publishedAny = true
-                publishedDrafts[id, default: []].append(contentsOf: current)
-                publishedNow.append(contentsOf: current)
-                updateItem(id) { $0.drafts = []; $0.draftCount = 0 }
-                await recordGeneratedPublication(bulkOrigin, id: id, account: account, user: user)
+                publishedDrafts[id, default: []].append(draft)
+                publishedNow.append(draft)
+                settings.recordAutomaticCommentPublication([draft], for: commentReviewTarget(id, account: account))
+                updateItem(id) { $0.drafts.removeAll { $0 == draft }; $0.draftCount = $0.drafts.count }
+                await recordGeneratedPublication(origin, id: id, account: account, user: user)
             }
-            guard publishedAny else { return }
+            let remaining = try await glab.fetchOwnDraftNotes(projectID: id.projectID, iid: id.iid, host: account.host, userID: user.id)
+            guard isCurrent(account) else { return }
+            updateItem(id) { $0.drafts = remaining; $0.draftCount = remaining.count }
+            guard !publishedNow.isEmpty else { return }
             publicationChecked = true
             confirmationStates[id] = nil
         } catch {
-            if isCurrent(account) { confirmationStates[id] = !automatic || attemptedPublish ? .failed : nil }
+            if isCurrent(account) { confirmationStates[id] = attemptedPublish ? .failed : nil }
             Log.monitor.error("Could not publish drafts: \(String(describing: error), privacy: .private)")
         }
         // A later read or PUT can fail after an earlier draft was successfully published.
-        if publishedAny, isCurrent(account) {
+        if !publishedNow.isEmpty, isCurrent(account) {
             previousDrafts[id] = nil
             if publicationChecked, publishedNow.count == expected.count {
-                await completeCommentReviewAfterPublication(id, snapshot: displayed.commentReviewSnapshot, published: publishedNow, account: account, user: user, automatic: automatic)
+                await completeCommentReviewAfterPublication(id, snapshot: displayed.commentReviewSnapshot, published: publishedNow, account: account, user: user, automatic: true)
             }
             await refreshReReviewAfterPublication(id, account: account, user: user)
         }
+    }
+
+    /// Bind every mutable authorization input after the live proof checks, then recheck
+    /// the same envelope when the transport is ready to launch the individual PUT.
+    private func automaticPublicationAdmission(_ draft: GitLabDraftNote, id: Item.ID, account: Account,
+        request: GitLabMergeRequest, aiRepliesOnly: Bool, generation: Int, revision: UInt64) async -> (@MainActor @Sendable () -> Bool)? {
+        guard let settings else { return nil }
+        let configuration = settings.automation
+        guard await permitsAssistantAutomation(for: account),
+              await permitsAutomaticPublication(draft, id: id, account: account),
+              isCurrent(account), settings.automation == configuration,
+              aiRepliesOnly ? settings.automation.publishAIRepliesWithoutConfirmation : settings.automation.publishDraftsWithoutConfirmation,
+              permitsAutomaticPublication(of: request, account: account),
+              !hasActiveWorker(for: id, account: account) else { return nil }
+        let proofVerdict = ReviewVerdictStore.verdict(host: account.host, projectID: id.projectID, iid: id.iid, in: verdictDirectory)
+        let proofReceipts = publicationReceipts(projectID: id.projectID, iid: id.iid, host: account.host, username: account.username)
+        let reviewRevision = settings.commentReviewRevision(for: commentReviewTarget(id, account: account))
+        let admitted: @MainActor @Sendable () -> Bool = {
+            !Task.isCancelled && generation == self.accountGeneration && revision == self.glab.accountRevision
+                && self.isCurrent(account) && settings.automaticPublicWritesAllowed
+                && settings.automation == configuration
+                && (aiRepliesOnly ? settings.automation.publishAIRepliesWithoutConfirmation : settings.automation.publishDraftsWithoutConfirmation)
+                && self.openItems.first(where: { $0.id == id })?.mergeRequest?.sha == request.sha
+                && self.openItems.first(where: { $0.id == id })?.mergeRequest?.semanticContextFingerprint == request.semanticContextFingerprint
+                && ReviewVerdictStore.verdict(host: account.host, projectID: id.projectID, iid: id.iid, in: self.verdictDirectory) == proofVerdict
+                && self.publicationReceipts(projectID: id.projectID, iid: id.iid, host: account.host, username: account.username) == proofReceipts
+                && settings.commentReviewRevision(for: self.commentReviewTarget(id, account: account)) == reviewRevision
+                && self.permitsAutomaticPublication(of: request, account: account)
+                && !self.hasActiveWorker(for: id, account: account)
+        }
+        return admitted() ? admitted : nil
     }
 
     /// Identity verification and content-bound records supply facts; the pure policy
