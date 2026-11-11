@@ -321,6 +321,7 @@ private struct MRDiscussionOriginBadge: View {
     private var explanation: Text {
         switch origin {
         case .verifiedAssistant: Text(.MRDiscussions.mrDiscussionsAiVerified)
+        case .appGenerated: Text(.MRDiscussions.mrDiscussionsAiAppGenerated)
         case .assessed(let evidence): Text(.MRDiscussions.mrDiscussionsAiAssessed) + Text(verbatim: "\n" + evidence)
         case .uncertain(let evidence): Text(.MRDiscussions.mrDiscussionsAiUncertainHelp) + Text(verbatim: "\n" + evidence)
         case .humanLikely(let evidence): Text(.MRDiscussions.mrDiscussionsHumanHelp) + Text(verbatim: "\n" + evidence)

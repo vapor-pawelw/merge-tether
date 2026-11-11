@@ -6,6 +6,8 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 
 ## Unreleased
 
+- Recognize exactly recorded app-generated comments and their AI-only threads without reclassification, while keeping manual comments and publication permissions separate.
+
 - Restore manual merge actions when GitLab's list omits permissions or pipeline details, using the matching checked MR status and explaining remaining blockers.
 - Keep routine background revalidation from flashing verification warnings, distinguish missing automation consent and link directly to Automation settings.
 - Simplify automation controls with explicit publication modes, preserved advanced filters and clearer independent delivery permissions.

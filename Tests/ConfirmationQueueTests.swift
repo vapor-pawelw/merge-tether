@@ -621,6 +621,7 @@ import Testing
         let monitor = MergeRequestAttentionMonitor(
             glab: glab, settings: settings, verdictDirectory: folder.appending(path: "verdicts"),
             aiAssessmentDirectory: folder.appending(path: "ai-assessments"), followUpDirectory: folder,
+            provenanceDirectory: folder.appending(path: "comment-origins"),
             canAutomate: { _ in
                 duringAutomationCheck?(gitlab)
                 return !gitlab.has("assistant-unavailable")
@@ -933,6 +934,135 @@ import Testing
         #expect(harness.log("approve.log").contains("/approve"))
     }
 
+
+    @Test(arguments: ["selected", "bulk", "remote"], ["current", "captureFailure", "postFailure"])
+    func publicationRecordsOnlyCertainAppOriginsAndDisplayFailuresNeverChangePublication(flow: String, evidence: String) async throws {
+        // given
+        let harness = try makeHarness(assistantWorked: false)
+        defer { harness.cleanUp() }
+        let body = "App generated reply"
+        try harness.write("drafts.json", #"[{"id":11,"author_id":3,"note":"App generated reply","discussion_id":"thread"}]"#)
+        try harness.write("discussions.json", #"[{"id":"thread","notes":[{"id":30,"author":{"id":8,"username":"reviewer"},"body":"Feedback","system":false}]}]"#)
+        try await harness.poll()
+        let item = try #require(harness.monitor.currentItems.first)
+        let draft = try #require(item.drafts.first)
+        let context = AICommentProvenanceStore.Context(host: host, username: "me", userID: 3, projectID: 1, iid: 2)
+        let directory = harness.folder.appending(path: "comment-origins")
+        try AICommentProvenanceStore.recordGenerated([.init(id: 11, bodySHA256: AICommentAssessmentStore.digest(body))],
+            baseline: [], current: [draft], context: context, runID: UUID(), headSHA: head, in: directory)
+        let after = #"[{"id":"thread","notes":[{"id":30,"author":{"id":8,"username":"reviewer"},"body":"Feedback","system":false},{"id":40,"author":{"id":3,"username":"me"},"body":"App generated reply","system":false}]}]"#
+        try harness.write("published-discussions.json", after)
+        let handler = try #require(harness.gitlab.handler)
+        var failedRead = false
+        harness.gitlab.handler = { call in
+            let hasPublished = !harness.log("selected.log").isEmpty || !harness.log("publish.log").isEmpty
+            if call.endpoint.contains("/discussions?"), !failedRead,
+               (evidence == "captureFailure" && !hasPublished) || (evidence == "postFailure" && hasPublished) {
+                failedRead = true
+                return InMemoryGitLab.output(code: 1)
+            }
+            return try await handler(call)
+        }
+        // when
+        if flow == "bulk" { await harness.monitor.publishDrafts(of: item.id) }
+        else if flow == "remote" {
+            let result = await harness.monitor.publishRemoteDrafts(of: item.id, head: head, expectedDrafts: [draft])
+            #expect(result == .completed)
+        } else {
+            await harness.monitor.publishDrafts([draft], for: .init(host: host, username: "me", projectID: 1, iid: 2, url: item.url))
+        }
+        // then
+        let writes = harness.gitlab.requests.filter { $0.method != "GET" && $0.endpoint.contains("draft_notes") }
+        #expect(writes.count == 1)
+        #expect(harness.monitor.confirmationStates[item.id] == nil)
+        let published = try JSONDecoder().decode([GitLabMergeRequestDiscussion].self, from: Data(after.utf8))[0].notes[1]
+        #expect(AICommentProvenanceStore.isGenerated(published, discussionID: "thread", context: context, in: directory) == (evidence == "current"))
+        #expect(failedRead == (evidence != "current"))
+    }
+
+    @Test(arguments: ["all", "aiOnly"], ["current", "captureFailure", "postFailure", "ledgerWriteFailure"])
+    func automaticPublicationRecordsOriginsWithoutLettingDisplayFailuresBlockReplies(mode: String, evidence: String) async throws {
+        // given
+        let harness = try makeHarness(assistantWorked: true)
+        defer { harness.cleanUp() }
+        harness.settings.automation.publishDraftsWithoutConfirmation = mode == "all"
+        harness.settings.automation.publishAIRepliesWithoutConfirmation = mode == "aiOnly"
+        try harness.write("drafts.json", #"[{"id":11,"author_id":3,"note":"Generated automatic reply","discussion_id":"abc"}]"#)
+        try harness.write("discussions.json", duoDiscussion)
+        try harness.recordVerdict("objections", head: head)
+        let drafts = try JSONDecoder().decode([GitLabDraftNote].self, from: harness.gitlab.data("drafts.json"))
+        let draft = try #require(drafts.first)
+        let context = AICommentProvenanceStore.Context(host: host, username: "me", userID: 3, projectID: 1, iid: 2)
+        let directory = harness.folder.appending(path: "comment-origins")
+        try AICommentProvenanceStore.recordGenerated([.init(id: 11, bodySHA256: AICommentAssessmentStore.digest(draft.note!))],
+            baseline: [], current: drafts, context: context, runID: UUID(), headSHA: head, in: directory)
+        if evidence == "ledgerWriteFailure" {
+            let scope = try #require(FileManager.default.contentsOfDirectory(at: directory, includingPropertiesForKeys: nil).first)
+            try Data("blocked".utf8).write(to: scope.appending(path: "notes"))
+        }
+        try await harness.poll()
+        let item = try #require(harness.monitor.currentItems.first)
+        #expect(item.automaticDraftIDs == [11])
+        #expect(harness.log("selected.log").isEmpty)
+        let after = #"[{"id":"abc","notes":[{"id":40,"body":"AI finding","author":{"id":8,"username":"GitLabDuo"},"system":false,"resolvable":true,"resolved":false},{"id":41,"body":"Generated automatic reply","author":{"id":3,"username":"me"},"system":false}]}]"#
+        try harness.write("published-discussions.json", after)
+        let handler = try #require(harness.gitlab.handler)
+        var failedRead = false
+        harness.gitlab.handler = { call in
+            let hasPublished = !harness.log("selected.log").isEmpty
+            if call.endpoint == "/user", harness.monitor.confirmationStates[item.id] == .publishing, !failedRead,
+               (evidence == "captureFailure" && !hasPublished) || (evidence == "postFailure" && hasPublished) {
+                failedRead = true
+                return InMemoryGitLab.output(code: 1)
+            }
+            return try await handler(call)
+        }
+        // when
+        try await harness.poll()
+        // then
+        let writes = harness.gitlab.requests.filter { $0.method != "GET" && $0.endpoint.contains("draft_notes") }
+        #expect(writes.count == 1 && writes.first?.method == "PUT")
+        #expect(harness.log("publish.log").isEmpty)
+        #expect(harness.monitor.currentOpenItems.first?.draftCount == 0)
+        #expect(harness.monitor.confirmationStates[item.id] == nil)
+        let published = try JSONDecoder().decode([GitLabMergeRequestDiscussion].self, from: Data(after.utf8))[0].notes[1]
+        #expect(AICommentProvenanceStore.isGenerated(published, discussionID: "abc", context: context, in: directory) == (evidence == "current"))
+        #expect(failedRead == (evidence == "captureFailure" || evidence == "postFailure"))
+    }
+
+    @Test func existingAuthenticatedFollowUpSealSuppliesDisplayOriginAtManualPublication() async throws {
+        let harness = try makeHarness(assistantWorked: true, authored: true)
+        defer { harness.cleanUp() }
+        try harness.write("drafts.json", #"[{"id":11,"author_id":3,"note":"Sealed AI reply","discussion_id":"thread"}]"#)
+        try harness.write("discussions.json", #"[{"id":"thread","notes":[{"id":30,"author":{"id":8,"username":"reviewer"},"body":"Feedback","system":false}]}]"#)
+        try harness.verifyFollowUpDrafts()
+        try await harness.poll()
+        let item = try #require(harness.monitor.currentItems.first)
+        let draft = try #require(item.drafts.first)
+        let after = #"[{"id":"thread","notes":[{"id":30,"author":{"id":8,"username":"reviewer"},"body":"Feedback","system":false},{"id":40,"author":{"id":3,"username":"me"},"body":"Sealed AI reply","system":false}]}]"#
+        try harness.write("published-discussions.json", after)
+        await harness.monitor.publishDrafts([draft], for: .init(host: host, username: "me", projectID: 1, iid: 2, url: item.url))
+        let note = try JSONDecoder().decode([GitLabMergeRequestDiscussion].self, from: Data(after.utf8))[0].notes[1]
+        #expect(AICommentProvenanceStore.isGenerated(note, discussionID: "thread",
+            context: .init(host: host, username: "me", userID: 3, projectID: 1, iid: 2),
+            in: harness.folder.appending(path: "comment-origins")))
+        #expect(harness.log("selected.log").split(separator: "\n").count == 1)
+    }
+
+    @Test func generatedDraftDisplayEvidenceCannotAuthorizeAutomaticPublication() async throws {
+        let harness = try makeHarness(assistantWorked: false)
+        defer { harness.cleanUp() }
+        try harness.write("drafts.json", #"[{"id":11,"author_id":3,"note":"Generated","discussion_id":"thread"}]"#)
+        try await harness.poll()
+        let item = try #require(harness.monitor.currentItems.first)
+        let draft = try #require(item.drafts.first)
+        try AICommentProvenanceStore.recordGenerated([.init(id: 11, bodySHA256: AICommentAssessmentStore.digest(draft.note!))],
+            baseline: [], current: [draft], context: .init(host: host, username: "me", userID: 3, projectID: 1, iid: 2),
+            runID: UUID(), headSHA: head, in: harness.folder.appending(path: "comment-origins"))
+        harness.settings.automation.publishDraftsWithoutConfirmation = true
+        await harness.monitor.publishDrafts(of: item.id, automatic: true, checkedDraftIDs: [11])
+        #expect(harness.log("selected.log").isEmpty && harness.log("publish.log").isEmpty)
+    }
 
     private let draftJSON = #"""
         [{"id":11,"author_id":3,"note":"Handle nil here.","discussion_id":null,

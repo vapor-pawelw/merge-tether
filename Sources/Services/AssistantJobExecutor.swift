@@ -85,6 +85,8 @@ enum AssistantJobExecutor {
                                                 attributes: [.posixPermissions: 0o700])
         let invocation = AssistantJobInvocation(workspace: folder, evidenceRoot: evidenceDirectory)
         try invocation.prepareEvidenceDirectories()
+        let generationBaseline = try? await glab.fetchOwnDraftNotes(projectID: request.projectID, iid: request.iid,
+            host: handoff.key.work.host, userID: user.id)
         let instructions = handoff.prompt + """
 
             This is a headless MergeTether run. Do not open coding-agent desktop apps, create GUI chats, or request interactive input.
@@ -130,6 +132,11 @@ enum AssistantJobExecutor {
             steps in summary; do not wait for publication or classify that wait as unfinished worker work.
             Return status blocked if assigned code, tests, remote delivery or reply preparation remains unfinished,
             a required tool was denied, or meaningful verification is missing.
+            In generatedDrafts, list only private drafts you actually created or substantially rewrote in THIS run,
+            as {id,bodySHA256}. Re-fetch each exact draft and compute SHA-256 from its exact parsed UTF-8 note body,
+            preserving whitespace and Unicode. Do not list untouched, user-created or merely observed drafts.
+            Return [] when you saved no generated drafts. This declaration records authorship for display only:
+            it grants no publication, approval or verification permission and never replaces a follow-up seal.
             Include the MR link, actions, verification and remaining blockers in summary. Do not claim private drafts were saved unless re-fetched.
             \(AgentExplanation.instructions(for: "blocker"))
             Keep the detailed run evidence and completed actions in summary and the transcript.
@@ -192,10 +199,49 @@ enum AssistantJobExecutor {
         }
         let transcript = GlabService.redactWorkflowEvidence(String(decoding: output.stdout, as: UTF8.self) + "\n" + output.stderr)
         let outcome = AssistantJobCoordinator.Outcome(result: result, output: transcript)
+        await recordGeneratedDrafts(result, baseline: generationBaseline, user: user, request: request,
+            handoff: handoff, settings: settings, glab: glab)
         do { try await AssistantJobJournal.save(outcome, for: handoff) }
         catch { Log.monitor.error("Could not checkpoint worker completion: \(String(describing: error), privacy: .private)") }
         try Task.checkCancellation()
         return outcome
+    }
+
+    @MainActor
+    static func recordGeneratedDrafts(_ result: AssistantJobResult, baseline: [GitLabDraftNote]?,
+        user: GitLabAuthenticatedUser, request: GitLabMergeRequest, handoff: AssistantAutomationRunner.Handoff,
+        settings: SettingsManager, glab: GlabService, directory: URL = AICommentProvenanceStore.directory) async {
+        let work = handoff.key.work
+        let revision = glab.accountRevision
+        func current() -> Bool {
+            !Task.isCancelled && glab.accountRevision == revision && glab.resolvedHost == work.host
+                && glab.currentUsername == handoff.key.username
+                && settings.assistantHandoffs.contains { $0.id == handoff.id && $0.key == handoff.key && $0.expectedHeadSHA == handoff.expectedHeadSHA && $0.execution?.state.isActive == true }
+        }
+        guard let claims = result.generatedDrafts, !claims.isEmpty, let baseline, current(),
+              request.projectID == work.projectID, request.iid == work.iid,
+              let expectedHead = handoff.expectedHeadSHA, expectedHead == request.sha else { return }
+        do {
+            let authenticated = try await glab.fetchAuthenticatedUser(host: work.host, expectedUsername: handoff.key.username)
+            let live = try await glab.fetchMergeRequest(projectID: work.projectID, iid: work.iid, host: work.host)
+            guard current(), authenticated == user, live.projectID == request.projectID, live.iid == request.iid,
+                  live.webURL == request.webURL, live.sourceProjectID == request.sourceProjectID,
+                  live.sourceBranch == request.sourceBranch, live.targetProjectID == request.targetProjectID,
+                  live.targetBranch == request.targetBranch, live.state == "opened", let head = live.sha, !head.isEmpty,
+                  live.sha == request.sha || handoff.followUpPushAllowed == true || handoff.allowsPush else { return }
+            let drafts = try await glab.fetchOwnDraftNotes(projectID: work.projectID, iid: work.iid, host: work.host, userID: user.id)
+            guard current() else { return }
+            let context = AICommentProvenanceStore.Context(host: work.host, username: user.username, userID: user.id,
+                projectID: work.projectID, iid: work.iid)
+            let runID = handoff.id
+            try await Task.detached(priority: .utility) {
+                try AICommentProvenanceStore.recordGenerated(claims, baseline: baseline, current: drafts,
+                    context: context, runID: runID, headSHA: head, in: directory)
+            }.value
+            guard current() else { return }
+        } catch {
+            Log.monitor.error("Could not record generated comment origins: \(String(describing: error), privacy: .private)")
+        }
     }
 
     @MainActor

@@ -12,13 +12,14 @@ struct MRDiscussionTarget: Hashable, Sendable {
 struct MRDiscussionSnapshot {
     enum Origin: Equatable, Sendable {
         case verifiedAssistant
+        case appGenerated
         case assessed(evidence: String)
         case uncertain(evidence: String)
         case humanLikely(evidence: String)
 
         var badge: OriginBadge {
             switch self {
-            case .verifiedAssistant, .assessed: .ai
+            case .verifiedAssistant, .appGenerated, .assessed: .ai
             case .uncertain: .uncertain
             case .humanLikely: .human
             }

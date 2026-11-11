@@ -151,6 +151,73 @@ struct MRDiscussionStoreTests {
         try JSONEncoder().encode(record).write(to: path)
     }
 
+    @Test func provenAppReplyCompletesAnAIThreadWithoutClassifyingManualPostsFromTheSameAccount() async throws {
+        // given
+        let directory = FileManager.default.temporaryDirectory.appending(path: UUID().uuidString)
+        defer { try? FileManager.default.removeItem(at: directory) }
+        let origins = directory.appending(path: "origins")
+        let assessments = directory.appending(path: "assessments")
+        let context = AICommentProvenanceStore.Context(host: target.host, username: target.username, userID: 9, projectID: 1, iid: 2)
+        let before = try JSONDecoder().decode([GitLabMergeRequestDiscussion].self,
+            from: Data(#"[{"id":"thread","notes":[{"id":1,"body":"Source AI","author":{"id":7,"username":"reviewer"}}]}]"#.utf8))
+        var live = try JSONDecoder().decode([GitLabMergeRequestDiscussion].self,
+            from: Data(#"[{"id":"thread","notes":[{"id":1,"body":"Source AI","author":{"id":7,"username":"reviewer"}},{"id":2,"body":"Generated reply","author":{"id":9,"username":"me"}}]}]"#.utf8))
+        let draft = GitLabDraftNote(id: 11, authorID: 9, note: "Generated reply", discussionID: "thread", position: nil)
+        try AICommentProvenanceStore.recordGenerated([.init(id: 11, bodySHA256: AICommentAssessmentStore.digest(draft.note!))],
+            baseline: [], current: [draft], context: context, runID: UUID(), headSHA: String(repeating: "a", count: 40), in: origins)
+        let publication = try #require(AICommentProvenanceStore.capturePublication([draft], context: context, before: before, in: origins))
+        try AICommentProvenanceStore.recordPublished(publication, after: live, in: origins)
+        let record = AICommentAssessment(version: 2, host: target.host, projectID: 1, iid: 2, noteID: 1,
+            bodySHA256: AICommentAssessmentStore.digest("Source AI"), confidence: "high", evidence: "Current source evidence")
+        let path = AICommentAssessmentStore.fileURL(host: target.host, projectID: 1, iid: 2, noteID: 1, in: assessments)
+        try FileManager.default.createDirectory(at: path.deletingLastPathComponent(), withIntermediateDirectories: true)
+        try JSONEncoder().encode(record).write(to: path)
+        let gitlab = InMemoryGitLab()
+        defer { gitlab.close() }
+        let glab = gitlab.service(host: target.host, username: target.username)
+        var authenticatedID = 9
+        gitlab.handler = { call in
+            if call.endpoint == "/user" { return InMemoryGitLab.output("{\"id\":\(authenticatedID),\"username\":\"me\"}") }
+            if call.endpoint.contains("/discussions?") { return InMemoryGitLab.output(String(decoding: try JSONEncoder().encode(live), as: UTF8.self)) }
+            return try gitlab.unexpected(call)
+        }
+        let store = MRDiscussionStore(assessmentDirectory: assessments, provenanceDirectory: origins)
+        // when
+        await store.refresh(target: target, glab: glab)
+        // then
+        #expect(store.origins[2] == .appGenerated)
+        #expect(MRDiscussionSnapshot(discussions: store.discussions, drafts: [], origins: store.origins).threads.first?.originBadge == .ai)
+        #expect(!AICommentAssessmentStore.isAI(live[0].notes[1], host: target.host, projectID: 1, iid: 2, in: assessments))
+        let manual = GitLabMergeRequestDiscussion.Note(id: 3, author: .init(id: 9, username: "me", name: nil), system: false,
+            resolvable: nil, resolved: nil, resolvedBy: nil, body: "Manual GitLab reply")
+        live = [.init(id: "thread", notes: live[0].notes + [manual])]
+        await store.refresh(target: target, glab: glab)
+        #expect(store.origins[3] == nil)
+        #expect(MRDiscussionSnapshot(discussions: store.discussions, drafts: [], origins: store.origins).threads.first?.originBadge == nil)
+        var edited = live[0].notes[1]; edited.body = "Manual edit"
+        live = [.init(id: "thread", notes: [live[0].notes[0], edited])]
+        await store.refresh(target: target, glab: glab)
+        #expect(store.origins[2] == nil)
+        edited.body = "Generated reply"; live = [.init(id: "thread", notes: [edited])]
+        authenticatedID = 99
+        await store.refresh(target: target, glab: glab)
+        #expect(store.origins[2] == nil)
+        #expect(gitlab.requests.allSatisfy { $0.method == "GET" })
+    }
+
+    @Test func accountRoundTripInvalidatesAnInflightDiscussionResponse() async throws {
+        var continuation: CheckedContinuation<[GitLabMergeRequestDiscussion], Never>?
+        let store = MRDiscussionStore(load: { _ in await withCheckedContinuation { continuation = $0 } })
+        let glab = glab()
+        let task = Task { await store.refresh(target: target, glab: glab) }
+        for _ in 0..<1000 where continuation == nil { await Task.yield() }
+        let resume = try #require(continuation)
+        glab.currentUsername = "other"; glab.currentUsername = target.username
+        resume.resume(returning: try threads())
+        await task.value
+        #expect(store.discussions.isEmpty && store.origins.isEmpty && store.target == nil)
+    }
+
     @Test func liveAccountMismatchClearsPreviouslyCachedDiscussion() async throws {
         let changedAccount = Flag()
         let notes = try threads()

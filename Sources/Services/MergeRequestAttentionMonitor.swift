@@ -297,6 +297,7 @@ final class MergeRequestAttentionMonitor {
     private let verdictDirectory: URL
     private let aiAssessmentDirectory: URL
     private let followUpDirectory: URL
+    private let provenanceDirectory: URL
     private var verifiedRemoteFiles: [String: [FollowUpVerification.FileEvidence]] = [:]
     private var isRefreshingDrafts = false
     @ObservationIgnored private let pendingDraftPolling = PendingDraftPolling()
@@ -332,6 +333,7 @@ final class MergeRequestAttentionMonitor {
         verdictDirectory: URL = ReviewVerdictStore.directory,
         aiAssessmentDirectory: URL = AICommentAssessmentStore.directory,
         followUpDirectory: URL = FollowUpVerificationStore.directory,
+        provenanceDirectory: URL = AICommentProvenanceStore.directory,
         canAutomate: @escaping @MainActor (AutomationAssistant) async -> Bool = {
             await AssistantCLI.detect($0, requireCLI: true).isReady
         },
@@ -353,6 +355,7 @@ final class MergeRequestAttentionMonitor {
         self.verdictDirectory = verdictDirectory
         self.aiAssessmentDirectory = aiAssessmentDirectory
         self.followUpDirectory = followUpDirectory
+        self.provenanceDirectory = provenanceDirectory
         self.canAutomate = canAutomate
         self.approvalReadClock = approvalReadClock
         self.approvalReadWait = approvalReadWait
@@ -1312,6 +1315,64 @@ final class MergeRequestAttentionMonitor {
             username: username, settings: settings, in: followUpDirectory)
     }
 
+    private func captureGeneratedPublication(_ drafts: [GitLabDraftNote], id: Item.ID, account: Account,
+        user: GitLabAuthenticatedUser, before: [GitLabMergeRequestDiscussion]? = nil) async -> AICommentProvenanceStore.Publication? {
+        let context = AICommentProvenanceStore.Context(host: account.host, username: account.username, userID: user.id,
+            projectID: id.projectID, iid: id.iid)
+        let generation = accountGeneration, revision = glab.accountRevision
+        func current() -> Bool {
+            !Task.isCancelled && generation == accountGeneration && revision == glab.accountRevision && isCurrent(account)
+        }
+        guard current() else { return nil }
+        let work = AssistantAutomationRunner.MergeRequestWork(host: account.host, projectID: id.projectID, iid: id.iid)
+        let request = openItems.first(where: { $0.id == id })?.mergeRequest
+        let proofInput = request?.author.id == user.id ? settings.map {
+            FollowUpVerificationStore.receiptReadInput(work: work, username: account.username, settings: $0)
+        } : nil
+        let directory = provenanceDirectory, proofDirectory = followUpDirectory
+        let prepared = await Task.detached(priority: .utility) {
+            let proofs = proofInput.map {
+                FollowUpVerificationStore.contextReceipts(work: work, username: context.username, input: $0, in: proofDirectory)
+            } ?? []
+            return AICommentProvenanceStore.preparePublication(drafts, context: context, request: request, proofs: proofs, in: directory)
+        }.value
+        guard current(), let prepared else { return nil }
+        do {
+            let authenticated = try await glab.fetchAuthenticatedUser(host: account.host, expectedUsername: account.username)
+            let discussions: [GitLabMergeRequestDiscussion]
+            if let before { discussions = before }
+            else { discussions = try await glab.fetchMergeRequestDiscussions(projectID: id.projectID, iid: id.iid, host: account.host) }
+            guard authenticated == user, current() else { return nil }
+            let publication = await Task.detached(priority: .utility) {
+                AICommentProvenanceStore.capturePublication(prepared, before: discussions)
+            }.value
+            guard current() else { return nil }
+            return publication
+        } catch { return nil }
+    }
+
+    private func recordGeneratedPublication(_ publication: AICommentProvenanceStore.Publication?, id: Item.ID,
+        account: Account, user: GitLabAuthenticatedUser) async {
+        guard let publication else { return }
+        let generation = accountGeneration, revision = glab.accountRevision
+        func current() -> Bool {
+            !Task.isCancelled && generation == accountGeneration && revision == glab.accountRevision && isCurrent(account)
+        }
+        guard current() else { return }
+        do {
+            let authenticated = try await glab.fetchAuthenticatedUser(host: account.host, expectedUsername: account.username)
+            let discussions = try await glab.fetchMergeRequestDiscussions(projectID: id.projectID, iid: id.iid, host: account.host)
+            guard authenticated == user, current() else { return }
+            let directory = provenanceDirectory
+            try await Task.detached(priority: .utility) {
+                try AICommentProvenanceStore.recordPublished(publication, after: discussions, in: directory)
+            }.value
+            guard current() else { return }
+        } catch {
+            Log.monitor.error("Could not record published comment origins: \(String(describing: error), privacy: .private)")
+        }
+    }
+
     private func assistantWorks(username: String) -> Set<AssistantAutomationRunner.MergeRequestWork> {
         guard let settings else { return [] }
         let handoffs = settings.assistantHandoffs.filter { $0.key.username == username }.map(\.key.work)
@@ -1431,6 +1492,7 @@ final class MergeRequestAttentionMonitor {
                       permitsAutomaticPublication(of: request, account: account)
                 else { break }
                 let liveDiscussions = try await glab.fetchMergeRequestDiscussions(projectID: id.projectID, iid: id.iid, host: account.host)
+                let origin = await captureGeneratedPublication([draft], id: id, account: account, user: user, before: liveDiscussions)
                 let latest = try await glab.fetchOwnDraftNotes(projectID: id.projectID, iid: id.iid, host: account.host, userID: user.id)
                 guard latest.contains(draft), let draftID = draft.id, qualifies(draft, in: liveDiscussions),
                       isCurrent(account), settings.automation.publishAIRepliesWithoutConfirmation,
@@ -1468,6 +1530,7 @@ final class MergeRequestAttentionMonitor {
                     $0.drafts.removeAll { $0 == draft }
                     $0.draftCount = $0.drafts.count
                 }
+                await recordGeneratedPublication(origin, id: id, account: account, user: user)
             }
             publicationChecked = true
         } catch {
@@ -1659,6 +1722,7 @@ final class MergeRequestAttentionMonitor {
                     confirmationStates[id] = .changed
                     break
                 }
+                let origin = await captureGeneratedPublication([draft], id: id, account: account, user: user)
                 let current = try await glab.fetchOwnDraftNotes(projectID: id.projectID, iid: id.iid,
                     host: account.host, userID: user.id)
                 guard currentContext() else { return }
@@ -1678,6 +1742,7 @@ final class MergeRequestAttentionMonitor {
                 remaining.removeAll { $0.id == draftID }
                 publishedDrafts[id, default: []].append(draft)
                 display(current)
+                await recordGeneratedPublication(origin, id: id, account: account, user: user)
             }
         } catch {
             if currentContext() { confirmationStates[id] = .failed }
@@ -1726,6 +1791,9 @@ final class MergeRequestAttentionMonitor {
         var attemptedPublish = false
         var publicationChecked = false
         do {
+            let bulkOrigin: AICommentProvenanceStore.Publication?
+            if automatic { bulkOrigin = nil }
+            else { bulkOrigin = await captureGeneratedPublication(expected, id: id, account: account, user: user) }
             let current = try await glab.fetchOwnDraftNotes(
                 projectID: id.projectID, iid: id.iid, host: account.host, userID: user.id
             )
@@ -1749,6 +1817,7 @@ final class MergeRequestAttentionMonitor {
             if automatic {
                 // Live evidence may narrow this frozen preview, never add an ID.
                 for draft in current where draft.id.map(checkedDraftIDs.contains) == true {
+                    let origin = await captureGeneratedPublication([draft], id: id, account: account, user: user)
                     let latest = try await glab.fetchOwnDraftNotes(projectID: id.projectID, iid: id.iid, host: account.host, userID: user.id)
                     guard latest.contains(draft), let draftID = draft.id, isCurrent(account),
                           let settings, settings.automation.publishDraftsWithoutConfirmation,
@@ -1785,6 +1854,7 @@ final class MergeRequestAttentionMonitor {
                     publishedNow.append(draft)
                     self.settings?.recordAutomaticCommentPublication([draft], for: commentReviewTarget(id, account: account))
                     updateItem(id) { $0.drafts.removeAll { $0 == draft }; $0.draftCount = $0.drafts.count }
+                    await recordGeneratedPublication(origin, id: id, account: account, user: user)
                 }
                 let remaining = try await glab.fetchOwnDraftNotes(projectID: id.projectID, iid: id.iid, host: account.host, userID: user.id)
                 guard isCurrent(account) else { return }
@@ -1801,6 +1871,7 @@ final class MergeRequestAttentionMonitor {
                 publishedDrafts[id, default: []].append(contentsOf: current)
                 publishedNow.append(contentsOf: current)
                 updateItem(id) { $0.drafts = []; $0.draftCount = 0 }
+                await recordGeneratedPublication(bulkOrigin, id: id, account: account, user: user)
             }
             guard publishedAny else { return }
             publicationChecked = true
@@ -2001,6 +2072,7 @@ final class MergeRequestAttentionMonitor {
                 let (request, liveUser) = try await (live, authenticated)
                 guard currentContext() else { return publishedAny ? .partial : .changed }
                 guard liveUser == user else { throw GlabError.notAuthenticated }
+                let origin = await captureGeneratedPublication([draft], id: id, account: account, user: user)
                 // Read the exact bodies last, after identity checks that can suspend.
                 let drafts = try await glab.fetchOwnDraftNotes(projectID: id.projectID, iid: id.iid, host: account.host, userID: user.id)
                 guard currentContext(), request.state == "opened", request.sha == head,
@@ -2018,6 +2090,7 @@ final class MergeRequestAttentionMonitor {
                 remaining.removeAll { $0 == draft }
                 publishedDrafts[id, default: []].append(draft)
                 updateItem(id) { $0.drafts = remaining; $0.draftCount = remaining.count }
+                await recordGeneratedPublication(origin, id: id, account: account, user: user)
             }
             previousDrafts[id] = nil
             confirmationStates[id] = nil

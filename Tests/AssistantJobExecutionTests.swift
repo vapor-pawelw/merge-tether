@@ -51,6 +51,16 @@ import Testing
         #expect(current.blocker == "The test runner cannot start.")
     }
 
+    @Test func explicitGeneratedDraftDeclarationsDecodeWithoutChangingLegacyWorkerResults() throws {
+        let hash = AICommentAssessmentStore.digest("Generated reply")
+        let result = try AssistantJobResult.codex(Data("{\"status\":\"succeeded\",\"summary\":\"Saved draft\",\"generatedDrafts\":[{\"id\":11,\"bodySHA256\":\"\(hash)\"}]}".utf8))
+        #expect(result.generatedDrafts == [.init(id: 11, bodySHA256: hash)])
+        let legacy = try AssistantJobResult.codex(Data(#"{"status":"succeeded","summary":"Older worker"}"#.utf8))
+        #expect(legacy.generatedDrafts == nil)
+        let claude = try AssistantJobResult.claude(Data("{\"is_error\":false,\"structured_output\":{\"status\":\"succeeded\",\"summary\":\"Saved draft\",\"generatedDrafts\":[{\"id\":11,\"bodySHA256\":\"\(hash)\"}]}}".utf8))
+        #expect(claude.generatedDrafts == result.generatedDrafts)
+    }
+
     @Test func legacyAttentionReasonsRedactCredentials() {
         let execution = AssistantJobExecution(state: .blocked, summary: "Work checked.\n\nCommand failed with token=glpat-synthetic123456789")
         #expect(execution.attentionExplanation?.contains("glpat-synthetic123456789") == false)

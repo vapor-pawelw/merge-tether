@@ -69,11 +69,17 @@ struct AssistantJobResult: Codable, Equatable, Sendable {
     enum Status: String, Codable, Sendable { case succeeded, blocked }
     enum Error: Swift.Error { case invalidResult, assistantFailed }
 
+    struct GeneratedDraft: Codable, Equatable, Sendable {
+        let id: Int
+        let bodySHA256: String
+    }
+
     let status: Status
     let summary: String
     var blocker: String? = nil
+    var generatedDrafts: [GeneratedDraft]? = nil
 
-    static let schema = #"{"type":"object","additionalProperties":false,"properties":{"status":{"type":"string","enum":["succeeded","blocked"]},"summary":{"type":"string"},"blocker":{"type":["string","null"],"maxLength":240}},"required":["status","summary","blocker"]}"#
+    static let schema = #"{"type":"object","additionalProperties":false,"properties":{"status":{"type":"string","enum":["succeeded","blocked"]},"summary":{"type":"string"},"blocker":{"type":["string","null"],"maxLength":240},"generatedDrafts":{"type":"array","maxItems":100,"items":{"type":"object","additionalProperties":false,"properties":{"id":{"type":"integer","minimum":1},"bodySHA256":{"type":"string","pattern":"^[0-9a-f]{64}$"}},"required":["id","bodySHA256"]}}},"required":["status","summary","blocker","generatedDrafts"]}"#
 
     static func codex(_ data: Data) throws -> Self {
         guard let result = try? JSONDecoder().decode(Self.self, from: data),

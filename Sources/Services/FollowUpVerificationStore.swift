@@ -136,19 +136,38 @@ enum FollowUpVerificationStore {
         recoveredReceipts(work: work, username: username, settings: settings, in: directory)
     }
 
+    struct ReceiptReadInput: Sendable {
+        let handoffs: [AssistantAutomationRunner.Handoff]
+        let events: [MRAutomationEvent]
+        let assistant: AutomationAssistant
+    }
+
+    @MainActor
+    static func receiptReadInput(work: AssistantAutomationRunner.MergeRequestWork, username: String,
+                                 settings: SettingsManager) -> ReceiptReadInput {
+        .init(handoffs: settings.assistantHandoffs.filter { $0.key.work == work && $0.key.username == username },
+              events: settings.automationEvents, assistant: settings.automation.assistant)
+    }
+
     @MainActor
     static func contextReceipts(work: AssistantAutomationRunner.MergeRequestWork, username: String,
                                 settings: SettingsManager, in directory: URL = directory) -> [FollowUpVerification] {
-        let runs = settings.assistantHandoffs.filter {
+        contextReceipts(work: work, username: username,
+            input: receiptReadInput(work: work, username: username, settings: settings), in: directory)
+    }
+
+    nonisolated static func contextReceipts(work: AssistantAutomationRunner.MergeRequestWork, username: String,
+                                           input: ReceiptReadInput, in directory: URL) -> [FollowUpVerification] {
+        let runs = input.handoffs.filter {
             $0.key.work == work && $0.key.username == username && $0.followUpPushAllowed != nil
         }
         let origins = runs.filter { origin in
             origin.followUpPushAllowed == true && origin.execution?.state == .succeeded
-                && origin.key.assistant == settings.automation.assistant
+                && origin.key.assistant == input.assistant
                 && !runs.contains { $0.createdAt > origin.createdAt && $0.execution?.state != .succeeded }
         }
         let originIDs = Set(origins.map(\.id))
-        let recovered = recoveredReceipts(work: work, username: username, settings: settings, in: directory)
+        let recovered = recoveryRecords(work: work, username: username, input: input, in: directory).map(\.proof)
         guard !originIDs.isEmpty else { return recovered }
         var candidates: [FollowUpVerification] = []
         let latest = recordURL(kind: "follow-up-verifications", work: work, username: username, in: directory)
@@ -251,7 +270,15 @@ extension FollowUpVerificationStore {
     static func recoveryOrigins(work: AssistantAutomationRunner.MergeRequestWork, username: String,
                                 settings: SettingsManager, in directory: URL = directory,
                                 excludingRunID: UUID? = nil, excludingPredecessorID: UUID? = nil) -> [FollowUpVerification] {
-        let runs = settings.assistantHandoffs.filter {
+        recoveryOrigins(work: work, username: username,
+            input: receiptReadInput(work: work, username: username, settings: settings), in: directory,
+            excludingRunID: excludingRunID, excludingPredecessorID: excludingPredecessorID)
+    }
+
+    nonisolated private static func recoveryOrigins(work: AssistantAutomationRunner.MergeRequestWork, username: String,
+        input: ReceiptReadInput, in directory: URL, excludingRunID: UUID? = nil,
+        excludingPredecessorID: UUID? = nil) -> [FollowUpVerification] {
+        let runs = input.handoffs.filter {
             $0.id != excludingRunID && $0.id != excludingPredecessorID
                 && $0.key.work == work && $0.key.username == username && $0.followUpPushAllowed != nil
         }
@@ -306,7 +333,7 @@ extension FollowUpVerificationStore {
                     && !hasSealedBlockedResult(later, matching: proof, assistant: origin.key.assistant, proofs: sealed)
                     && !hasSuccessfulEnvironmentReplacement(for: later, runs: runs, headSHA: proof.headSHA)
                     && !hasSuccessfulManualReplacement(for: later, runs: runs,
-                        events: settings.automationEvents, headSHA: proof.headSHA)
+                        events: input.events, headSHA: proof.headSHA)
                     && !hasSuccessfulRepairReplacement(for: later, runs: runs)
             }
         }
@@ -433,7 +460,13 @@ extension FollowUpVerificationStore {
     @MainActor
     static func recoveryRecords(work: AssistantAutomationRunner.MergeRequestWork, username: String,
                                 settings: SettingsManager, in directory: URL) -> [RecoveryRecord] {
-        let origins = recoveryOrigins(work: work, username: username, settings: settings, in: directory)
+        recoveryRecords(work: work, username: username,
+            input: receiptReadInput(work: work, username: username, settings: settings), in: directory)
+    }
+
+    nonisolated private static func recoveryRecords(work: AssistantAutomationRunner.MergeRequestWork, username: String,
+                                                    input: ReceiptReadInput, in directory: URL) -> [RecoveryRecord] {
+        let origins = recoveryOrigins(work: work, username: username, input: input, in: directory)
         guard !origins.isEmpty else { return [] }
         let folder = recordURL(kind: "follow-up-proof-recoveries", work: work, username: username, in: directory).deletingPathExtension()
         return ((try? FileManager.default.contentsOfDirectory(at: folder, includingPropertiesForKeys: nil)) ?? []).compactMap { path in
@@ -442,7 +475,7 @@ extension FollowUpVerificationStore {
                   let data = try? Data(contentsOf: path), let record = try? JSONDecoder().decode(RecoveryRecord.self, from: data),
                   [1, 2].contains(record.version), path.deletingPathExtension().lastPathComponent == record.attemptID,
                   isHex(record.attemptID, lengths: [64]), origins.contains(record.origin),
-                  record.assistant == settings.automation.assistant, !record.model.isEmpty,
+                  record.assistant == input.assistant, !record.model.isEmpty,
                   record.assessmentID != record.origin.verificationID,
                   let fingerprint = record.proof.discussionFingerprint, isHex(fingerprint, lengths: [64]),
                   let context = record.proof.semanticContextFingerprint, isHex(context, lengths: [64]),

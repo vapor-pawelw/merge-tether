@@ -194,7 +194,7 @@
         "en": {
           "stringUnit": {
             "state": "translated",
-            "value": "AI means a verified assistant or high-confidence AI-assisted assessment. AI uncertain means an explicitly uncertain assessment. Human means likely manual writing with high confidence, not proven authorship. A thread badge summarizes all published posts; system events and private drafts are excluded. Mixed AI/Human threads or missing current assessments have no thread badge. Badges do not grant publication permission."
+            "value": "AI means recorded app-generated content, a verified assistant or a high-confidence AI-assisted assessment. AI uncertain means an explicitly uncertain assessment. Human means likely manual writing with high confidence, not proven authorship. A thread badge summarizes all published posts; system events and private drafts are excluded. Mixed AI/Human threads or missing current assessments have no thread badge. Badges do not grant publication permission."
           }
         }
       }
@@ -206,6 +206,17 @@
           "stringUnit": {
             "state": "translated",
             "value": "Verified agent identity. The badge does not approve the comment or change publication permissions."
+          }
+        }
+      }
+    },
+    "mrDiscussions.aiAppGenerated": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Created with AI in MergeTether. A recorded app run produced this exact draft, and its publication was matched to this exact comment and account. Changing the comment text invalidates this display evidence. This does not approve its content or grant publication permission."
           }
         }
       }
@@ -271,7 +282,7 @@
         "en": {
           "stringUnit": {
             "state": "translated",
-            "value": "Every published post and reply has a verified assistant identity or a current high-confidence AI-assisted assessment. System events and private drafts are excluded. This does not approve the thread or change publication permissions."
+            "value": "Every published post and reply has recorded app-generation evidence, a verified assistant identity or a current high-confidence AI-assisted assessment. System events and private drafts are excluded. This does not approve the thread or change publication permissions."
           }
         }
       }
@@ -282,7 +293,7 @@
         "en": {
           "stringUnit": {
             "state": "translated",
-            "value": "Every published post has a current assessment or verified assistant identity, at least one assessment is explicitly uncertain, and none is confidently assessed as manual. The thread is not confirmed as entirely AI-assisted. System events and private drafts are excluded."
+            "value": "Every published post has recorded app-generation evidence, a current assessment or a verified assistant identity, at least one assessment is explicitly uncertain, and none is confidently assessed as manual. The thread is not confirmed as entirely AI-assisted. System events and private drafts are excluded."
           }
         }
       }
