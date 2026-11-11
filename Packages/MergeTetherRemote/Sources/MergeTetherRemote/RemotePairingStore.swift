@@ -22,7 +22,7 @@ public struct RemotePairingStore: Sendable {
     public init(service: String) { self.init(service: service, security: .system) }
     init(service: String, security: SecurityClient) { self.service = service; self.security = security }
     private var query: [String: Any] { [kSecClass as String: kSecClassGenericPassword,
-        kSecAttrService as String: service, kSecAttrAccount as String: "pairing-v1"] }
+        kSecAttrService as String: service, kSecAttrAccount as String: "pairing-v2"] }
     public func load() throws -> RemotePairing? {
         var query = query
         query[kSecReturnData as String] = true

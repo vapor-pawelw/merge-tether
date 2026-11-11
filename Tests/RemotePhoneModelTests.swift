@@ -33,7 +33,7 @@ import MergeTetherRemote
         await sending.value
         // then
         #expect(model.state.isConnected(now: fixture.date))
-        #expect(fixture.transports[1].sent.map(\.type) == [.hello])
+        #expect(fixture.transports[1].sent.map(\.type) == [.hello, .receipt])
         #expect(model.state.result?.status == .uncertain)
     }
 
@@ -116,9 +116,10 @@ import MergeTetherRemote
         model.connect(); await model.refresh(); await fixture.reply()
         let previousState = model.state
         fixture.failConnection = true
-        let replacement = try RemotePairing.generate(origin: URL(string: "https://other.example.org")!, access: String(repeating: "B", count: 43))
+        let replacement = try RemotePairing.generate(origin: URL(string: "https://other.example.org")!, access: String(repeating: "B", count: 43), now: fixture.date)
         model.offerPairing(replacement.deepLink.absoluteString)
         // when
+        let candidate = try #require(model.pairingCandidate)
         let oldMessage = fixture.transports[0].onMessage
         let accepted = model.acceptPairing()
         await oldMessage?(.init(type: .unavailable))
@@ -128,7 +129,7 @@ import MergeTetherRemote
         #expect(model.pairingCandidate == nil)
         #expect(model.state !== previousState)
         #expect(model.state.board == nil)
-        #expect(fixture.saved == [replacement])
+        #expect(fixture.saved == [candidate])
         #expect(model.connectionStatus(now: fixture.date) == .failed)
         fixture.failConnection = false
         model.reconnect(); await model.refresh(); await fixture.reply()
@@ -177,7 +178,7 @@ import MergeTetherRemote
         // then
         #expect(model.state.result == .init(id: command.id, status: .uncertain))
         #expect(!model.state.canAct(now: fixture.date))
-        #expect(fixture.transports[1].sent.map(\.type) == [.hello])
+        #expect(fixture.transports[1].sent.map(\.type) == [.hello, .receipt])
         model.state.acknowledgeResult()
         #expect(model.state.canAct(now: fixture.date))
     }
@@ -209,6 +210,106 @@ import MergeTetherRemote
         #expect(!model.state.canAct(now: fixture.date))
     }
 
+    @Test func approvalRequiresAnExplicitSingleUseConfirmationForTheDisplayedRequest() async throws {
+        let fixture = try PhoneFixture(), model = fixture.model
+        model.connect(); await model.refresh()
+        let board = fixture.approvalBoard
+        await fixture.reply(board: board)
+        let card = try #require(board.cards.first), action = try #require(card.actions.first)
+        await model.perform(card: card, action: action)
+        #expect(fixture.transports[0].sent.allSatisfy { $0.type != .command })
+        let id = try #require(model.prepareApproval(card: card, action: action))
+        let transport = fixture.transports[0]
+        transport.onCommand = { command in await transport.onMessage?(.init(type: .result, result: .init(id: command.id, status: .completed))) }
+        await model.perform(card: card, action: action, approvalID: id)
+        model.state.acknowledgeResult()
+        await model.perform(card: card, action: action, approvalID: id)
+        #expect(transport.sent.filter { $0.type == .command }.count == 1)
+    }
+    @Test(arguments: ["head", "account", "session", "action", "target", "title", "expiry", "disconnect", "cancel"])
+    func approvalCannotOutliveOrChangeItsIntendedContext(_ change: String) async throws {
+        let fixture = try PhoneFixture(), model = fixture.model
+        model.connect(); await model.refresh()
+        var board = fixture.approvalBoard
+        await fixture.reply(board: board)
+        let card = try #require(board.cards.first), action = try #require(card.actions.first)
+        let id = try #require(model.prepareApproval(card: card, action: action))
+        switch change {
+        case "head": board.lanes[0].cards[0].head = "new-head"
+        case "account": board.account = "different"
+        case "session": board.hostSession = UUID()
+        case "action": board.lanes[0].cards[0].actions[0].token = "new-token"
+        case "target": board.lanes[0].cards[0].url = URL(string: "https://gitlab.example.org/other/-/merge_requests/2")
+        case "title": board.lanes[0].cards[0].title = "Another request"
+        case "expiry": fixture.date += 31
+        case "disconnect": fixture.transports[0].onStatus?(false, false)
+        case "cancel": model.cancelApproval()
+        default: Issue.record("Unknown context")
+        }
+        await model.refresh(force: true); await fixture.reply(board: board)
+        await model.perform(card: card, action: action, approvalID: id)
+        #expect(fixture.transports[0].sent.allSatisfy { $0.type != .command })
+    }
+    @Test func pairingCandidateIsRecheckedAtAcceptanceAgainstTheInjectedClock() throws {
+        let fixture = try PhoneFixture(), model = fixture.model
+        model.offerPairing(fixture.pairing.deepLink.absoluteString)
+        #expect(model.pairingCandidate != nil)
+        fixture.date = fixture.pairing.expiresAt
+        #expect(!model.acceptPairing())
+        #expect(fixture.saved.isEmpty)
+    }
+
+    @Test func unsupportedInvitationClearsAnyEarlierTrustCandidate() throws {
+        let fixture = try PhoneFixture(), model = fixture.model
+        model.offerPairing(fixture.pairing.deepLink.absoluteString)
+        #expect(model.pairingCandidate != nil)
+        model.offerPairing(fixture.pairing.deepLink.absoluteString.replacingOccurrences(of: "v=2", with: "v=1"))
+        #expect(model.pairingCandidate == nil)
+        #expect(!model.acceptPairing())
+        #expect(fixture.saved.isEmpty)
+    }
+
+    @Test func phoneRestartQueriesTheDurableCommandWithoutSendingItAgainAndRetainsItUntilAcknowledged() async throws {
+        let fixture = try PhoneFixture(), model = fixture.model
+        model.connect(); await model.refresh(); await fixture.reply()
+        let transport = fixture.transports[0], card = try #require(model.state.board?.cards.first)
+        transport.suspendSend = true
+        let sending = Task { await model.perform(card: card, action: card.actions[0]) }
+        while transport.sendBarrier == nil { await Task.yield() }
+        let command = try #require(fixture.pendingRecovery?.command)
+        model.disconnect(); transport.sendBarrier?.resume(); await sending.value
+        let restarted = fixture.makeModel()
+        #expect(restarted.state.result?.status == .uncertain)
+        restarted.connect(); await restarted.refresh(); await fixture.reply()
+        let current = fixture.transports.last!
+        #expect(current.sent.map(\.type) == [.hello, .receipt])
+        #expect(current.sent.last?.command == command)
+        await current.onMessage?(.init(type: .receiptResult, challenge: UUID(), result: .init(id: command.id, status: .completed)))
+        #expect(restarted.state.result?.status == .uncertain)
+        await current.onMessage?(.init(type: .receiptResult, challenge: current.sent.last?.challenge, result: .init(id: command.id, status: .completed)))
+        #expect(restarted.state.result?.status == .completed)
+        #expect(fixture.pendingRecovery?.command == command)
+        fixture.recoveryFailure = "remove"
+        restarted.state.acknowledgeResult()
+        #expect(restarted.state.result?.status == .completed)
+        #expect(fixture.pendingRecovery != nil)
+        fixture.recoveryFailure = nil
+        restarted.state.acknowledgeResult()
+        #expect(restarted.state.result == nil)
+        #expect(fixture.pendingRecovery == nil)
+    }
+    @Test(arguments: ["read", "save"])
+    func phoneRecoveryStorageFailureNeverAllowsAnUnrecordedCommand(_ failure: String) async throws {
+        let fixture = try PhoneFixture()
+        fixture.recoveryFailure = failure
+        let model = fixture.model
+        model.connect(); await model.refresh(); await fixture.reply()
+        let card = try #require(model.state.board?.cards.first)
+        await model.perform(card: card, action: card.actions[0])
+        #expect(fixture.transports[0].sent.allSatisfy { $0.type != .command })
+        #expect(fixture.pendingRecovery == nil)
+    }
+
 }
 
 @MainActor private final class PhoneFixture {
@@ -218,19 +319,33 @@ import MergeTetherRemote
     var failConnection = false
     var saved: [RemotePairing] = []
     let pairing: RemotePairing
-    lazy var model = RemotePhoneModel(loadPairing: { self.pairing }, savePairing: { if self.failSave { throw RemoteProtocolError.invalid }; self.saved.append($0) },
-        makeConnection: { _ in if self.failConnection { throw RemoteProtocolError.invalid }; let value = PhoneTransport(); self.transports.append(value); return value }, now: { self.date })
+    var pendingRecovery: RemoteCommandRecovery?
+    var recoveryFailure: String?
+    lazy var model = makeModel()
+    func makeModel() -> RemotePhoneModel {
+        RemotePhoneModel(loadPairing: { self.pairing }, savePairing: { if self.failSave { throw RemoteProtocolError.invalid }; self.saved.append($0) },
+            loadRecovery: { if self.recoveryFailure == "read" { throw RemoteProtocolError.invalid }; return self.pendingRecovery },
+            saveRecovery: { if self.recoveryFailure == "save" { throw RemoteProtocolError.invalid }; self.pendingRecovery = $0 },
+            removeRecovery: { if self.recoveryFailure == "remove" { throw RemoteProtocolError.invalid }; self.pendingRecovery = nil },
+            makeConnection: { _ in if self.failConnection { throw RemoteProtocolError.invalid }; let value = PhoneTransport(); self.transports.append(value); return value }, now: { self.date })
+    }
     init() throws {
-        pairing = try .generate(origin: URL(string: "https://relay.example.org")!, access: String(repeating: "A", count: 43))
+        let invitation = try RemotePairing.generate(origin: URL(string: "https://relay.example.org")!, access: String(repeating: "A", count: 43), now: date)
+        pairing = try RemotePairing(url: invitation.deepLink, now: date)
     }
     var board: RemoteBoard {
         .init(hostSession: UUID(), account: "fixture", lanes: [.init(id: .own, cards: [
-            .init(id: "card", title: "Fixture", project: "example", url: nil, head: "abc", actions: [.init(id: "approve", kind: .approve, token: "token")])
+            .init(id: "card", title: "Fixture", project: "example", url: nil, head: "abc", actions: [.init(id: "done", kind: .markDone, token: "token")])
         ])])
     }
-    func reply() async {
+    var approvalBoard: RemoteBoard {
+        var board = board
+        board.lanes[0].cards[0].actions = [.init(id: "approve", kind: .approve, token: "approval-token")]
+        return board
+    }
+    func reply(board supplied: RemoteBoard? = nil) async {
         let transport = transports.last!
-        await transport.onMessage?(.init(type: .snapshot, challenge: transport.sent.last?.challenge, board: board))
+        await transport.onMessage?(.init(type: .snapshot, challenge: transport.sent.last?.challenge, board: supplied ?? board))
     }
 }
 
@@ -239,12 +354,14 @@ import MergeTetherRemote
     var onStatus: (@MainActor (Bool, Bool) -> Void)?
     var sent: [RemoteMessage] = []
     var stopped = false
+    var onCommand: ((RemoteCommand) async -> Void)?
     var sendBarrier: CheckedContinuation<Void, any Error>?
     var suspendSend = false
     func start() {}
     func stop() { stopped = true; onStatus?(false, false) }
     func send(_ message: RemoteMessage) async throws {
         sent.append(message)
+        if let command = message.command { await onCommand?(command) }
         if suspendSend { try await withCheckedThrowingContinuation { sendBarrier = $0 } }
     }
 }

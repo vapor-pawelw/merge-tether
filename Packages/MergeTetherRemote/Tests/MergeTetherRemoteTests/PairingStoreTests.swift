@@ -5,7 +5,7 @@ import Testing
 
 @Suite struct PairingStoreTests {
     @Test func pairingPersistsAndReplacementRevokesTheOldRoomLocally() throws {
-        let memory = InMemoryKeychain()
+        let memory = InMemorySecurity()
         let service = "MergeTetherRemoteTests.\(UUID())"
         let store = RemotePairingStore(service: service, security: memory.client)
         let first = try pairing()
@@ -20,7 +20,7 @@ import Testing
     }
 
     @Test func storageUsesOnlyItsOwnServiceAndTheDeviceOnlyAccessibilityPolicy() throws {
-        let memory = InMemoryKeychain()
+        let memory = InMemorySecurity()
         let mine = RemotePairingStore(service: "mine", security: memory.client)
         let other = RemotePairingStore(service: "other", security: memory.client)
         let first = try pairing(), second = try pairing()
@@ -31,7 +31,7 @@ import Testing
         #expect(try other.load() == second)
         let queries = memory.recorded
         #expect(queries.allSatisfy { $0[kSecClass as String] as? String == kSecClassGenericPassword as String })
-        #expect(queries.allSatisfy { $0[kSecAttrAccount as String] as? String == "pairing-v1" })
+        #expect(queries.allSatisfy { $0[kSecAttrAccount as String] as? String == "pairing-v2" })
         let additions = queries.filter { $0[kSecValueData as String] != nil }
         #expect(additions.count == 2)
         #expect(additions.allSatisfy {
@@ -44,7 +44,7 @@ import Testing
 
     @Test(arguments: ["read", "update", "add", "remove"])
     func keychainFailureIsReportedInsteadOfBeingTreatedAsMissingData(_ operation: String) throws {
-        let memory = InMemoryKeychain(failing: operation)
+        let memory = InMemorySecurity(failing: operation)
         let store = RemotePairingStore(service: "failure", security: memory.client)
         let value = try pairing()
         switch operation {
@@ -63,11 +63,11 @@ import Testing
     }
 }
 
-private final class InMemoryKeychain: @unchecked Sendable {
+final class InMemorySecurity: @unchecked Sendable {
     private let lock = NSLock()
     private var values: [String: Data] = [:]
     private var queries: [[String: Any]] = []
-    private let failing: String?
+    var failing: String?
     init(failing: String? = nil) { self.failing = failing }
     var recorded: [[String: Any]] { lock.lock(); defer { lock.unlock() }; return queries }
     var itemCount: Int { lock.lock(); defer { lock.unlock() }; return values.count }

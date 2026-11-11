@@ -4,6 +4,7 @@ import MergeTetherRemote
 
 @MainActor protocol RemoteHostTransport: AnyObject {
     var onMessage: (@MainActor (RemoteMessage) async -> Void)? { get set }
+    var onPairingEstablished: (@MainActor (RemotePairing) throws -> Void)? { get set }
     var onStatus: (@MainActor (Bool, Bool) -> Void)? { get set }
     func start()
     func stop()
@@ -30,7 +31,8 @@ extension RemoteConnection: RemoteHostTransport {}
     private var hostSession = UUID()
     private var account = ""
     private var accountRevision: UInt64?
-    private let gate = RemoteCommandGate()
+    private let gate: RemoteCommandGate
+    private let now: () -> Date
     private var phoneSupportsCommentReview = false
     private var phoneSupportsMergeActions = false
     @ObservationIgnored private var resolutionPreviews: [String: ManualDiscussionResolution.Prepared] = [:]
@@ -40,8 +42,12 @@ extension RemoteConnection: RemoteHostTransport {}
          savePairing: ((RemotePairing) throws -> Void)? = nil,
          removePairing: (() throws -> Void)? = nil,
          connectPairing: ((RemotePairing) -> Void)? = nil,
+         commandGate: RemoteCommandGate? = nil,
+         now: @escaping () -> Date = Date.init,
          makeConnection: @escaping (RemotePairing) throws -> any RemoteHostTransport = { try RemoteConnection(pairing: $0, role: .host) }) {
         self.monitor = monitor
+        self.now = now
+        self.gate = commandGate ?? RemoteCommandGate(store: RemoteCommandReceiptStore(service: (Bundle.main.bundleIdentifier ?? "MergeTether") + ".remote"))
         let store = RemotePairingStore(service: (Bundle.main.bundleIdentifier ?? "MergeTether") + ".remote")
         self.store = store
         self.savePairing = savePairing ?? { try store.save($0) }
@@ -63,6 +69,7 @@ extension RemoteConnection: RemoteHostTransport {}
                 let loaded = try await read.value
                 guard !Task.isCancelled, let self,
                       startupGeneration == generation, origin == initialOrigin, invitation == initialInvitation else { return }
+                guard loaded == nil || loaded?.role == .host else { throw RemoteProtocolError.invalid }
                 pairing = loaded
                 if let loaded {
                     origin = loaded.origin.absoluteString; invitation = loaded.access
@@ -80,16 +87,17 @@ extension RemoteConnection: RemoteHostTransport {}
         startupGeneration = UUID(); startupLoadTask?.cancel()
         do {
             guard let url = URL(string: origin.trimmingCharacters(in: .whitespacesAndNewlines)) else { throw RemoteProtocolError.invalid }
-            let pair = try RemotePairing.generate(origin: url, access: invitation.trimmingCharacters(in: .whitespacesAndNewlines))
+            let pair = try RemotePairing.generate(origin: url, access: invitation.trimmingCharacters(in: .whitespacesAndNewlines), now: now())
             try savePairing(pair)
-            connection?.stop(); connection = nil
+            connection?.stop(); connection = nil; resetConnectionSession()
             pairing = pair; activatePairing(pair)
         } catch { failed = true }
     }
     func disable() {
         startupGeneration = UUID(); startupLoadTask?.cancel()
-        do { try removePairing() } catch { failed = true; return }
         connection?.stop(); connection = nil; pairing = nil; connected = false
+        resetConnectionSession()
+        do { try removePairing(); failed = false } catch { failed = true }
     }
     private func activatePairing(_ pair: RemotePairing) {
         if let connectPairing { connectPairing(pair); failed = false }
@@ -105,6 +113,12 @@ extension RemoteConnection: RemoteHostTransport {}
         do {
             resetConnectionSession()
             let connection = try makeConnection(pair)
+            connection.onPairingEstablished = { [weak self, weak connection] established in
+                guard let self, let connection, self.connection === connection,
+                      self.pairing?.sessionID == established.sessionID else { throw RemoteProtocolError.invalid }
+                try self.savePairing(established)
+                self.pairing = established
+            }
             connection.onStatus = { [weak self, weak connection] connected, fatal in
                 guard let self, let connection, self.connection === connection else { return }
                 self.resetConnectionSession()
@@ -144,14 +158,18 @@ extension RemoteConnection: RemoteHostTransport {}
             if !fresh { board.partial = true }
             do { try await active.send(.init(type: .snapshot, challenge: challenge, board: board)) }
             catch { failed = true; try? await active.send(.init(type: .unavailable)) }
+        case .receipt:
+            guard let command = message.command, let challenge = message.challenge, let pairing else { return }
+            let result = gate.receipt(for: command, account: snapshot().account, pairingSession: pairing.sessionID)
+            try? await active.send(.init(type: .receiptResult, challenge: challenge, result: result))
         case .command:
-            guard let command = message.command else { return }
+            guard let command = message.command, let pairing else { return }
             let fresh = await refreshSource(force: true, deadline: .now + .seconds(35))
             var board = snapshot()
             if !fresh { board.partial = true }
             guard connection === active else { return }
             var acceptanceSent = false
-            let result = await gate.execute(command, board: board, accepted: {
+            let result = await gate.execute(command, board: board, pairingSession: pairing.sessionID, accepted: {
                 do {
                     try await active.send(.init(type: .accepted, result: .init(id: command.id, status: .running)))
                     acceptanceSent = true

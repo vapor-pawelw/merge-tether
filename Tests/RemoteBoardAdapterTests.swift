@@ -103,8 +103,8 @@ import MergeTetherRemote
         let action = try #require(before.actions.first { $0.kind == .prepare })
         let session = UUID()
         let initialBoard = RemoteBoard(hostSession: session, account: "me@host", lanes: [.init(id: .own, cards: [before])])
-        let valid = await RemoteCommandGate().execute(.init(hostSession: session, cardID: before.id, actionID: action.id, token: action.token),
-            board: initialBoard) { _, _ in .completed }
+        let valid = await RemoteCommandGate(store: nil).execute(.init(hostSession: session, account: "me@host", cardID: before.id, actionID: action.id, token: action.token),
+            board: initialBoard, pairingSession: session) { _, _ in .completed }
         #expect(valid.status == .completed)
         switch change {
         case "head", "title":
@@ -122,8 +122,8 @@ import MergeTetherRemote
         }
         let after = RemoteBoardAdapter.card(item, account: "me@host", extraActions: [.prepare])
         let board = RemoteBoard(hostSession: session, account: "me@host", lanes: [.init(id: .own, cards: [after])])
-        let stale = await RemoteCommandGate().execute(.init(hostSession: session, cardID: before.id, actionID: action.id, token: action.token),
-            board: board) { _, _ in Issue.record("Stale action executed"); return .completed }
+        let stale = await RemoteCommandGate(store: nil).execute(.init(hostSession: session, account: "me@host", cardID: before.id, actionID: action.id, token: action.token),
+            board: board, pairingSession: session) { _, _ in Issue.record("Stale action executed"); return .completed }
         #expect(stale.status == .changed)
     }
 

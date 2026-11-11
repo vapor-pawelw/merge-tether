@@ -48,23 +48,32 @@ Reconnect is also offered directly when the Mac is unavailable, and repeated tap
 coalesce while connecting. Returning from the background creates a fresh connection.
 The last board for the same pairing remains visible with an offline notice, but actions
 wait for a fresh authenticated snapshot. Replacing pairing clears that board and its
-open details. Reconnect never repeats a GitLab command: a pending command becomes
-an unconfirmed outcome, since closing the connection cannot cancel work already accepted
-by the Mac. Inspect the actual outcome before deliberately retrying it.
+open details. Reconnect never repeats a GitLab command. The phone keeps its pending
+command in Keychain and asks for its exact stored receipt after a fresh snapshot.
+A missing or interrupted outcome stays uncertain; closing the connection cannot
+cancel work already accepted by the Mac.
 
 The Mac reads saved pairing from Keychain in the background. A system permission
 prompt does not prevent the main window or MR automation from starting. A late
 read cannot override pairing details you edit or an explicit enable/disable action.
 
-The QR contains the relay address, an operator invitation and a random 256-bit
-pairing secret. HKDF derives directional AES-256-GCM keys; the room is a hash of the
-secret. The relay sees IP addresses, timing, room IDs and ciphertext, but cannot
-read tickets or commands. Credentials are stored in the native Keychain and are
-never included in source code, request query strings or application logs. Protect
-the QR like a password. Re-pairing on the Mac creates a different room; disabling
-access deletes the saved pairing and disconnects the host. Pairing has no automatic
-expiry or rotation. A copied QR remains a bearer secret until it is replaced or
-access is disabled; reconnecting does not revoke it.
+Native invitations and encrypted frames require protocol v2. Update both apps and
+scan a fresh Mac code after upgrading from v1; v1 trust is not migrated. The opaque
+relay still uses its independent `/v1/connect` and `mt-v1` transport contract, so
+this native protocol change requires no Worker deployment.
+
+The QR contains the relay address, operator invitation, a random pairing secret
+and the Mac's public device key. Enrollment expires after ten minutes, checked by
+the Mac. Each device keeps its own X25519 private key in Keychain. The Mac saves
+the first authenticated phone key before accepting work and rejects replacement
+keys; an established pairing continues after invitation expiry. Directional
+DH/HKDF keys and AES-GCM authentication bind frames to the origin, protocol,
+pairing session, sender and timestamp. The relay sees IP addresses, timing, room
+IDs and ciphertext, but cannot read tickets or commands. Protect the QR like a
+password and never publish its secrets. Generating a new code rotates device keys,
+secret, room and sessions. Disabling access stops transport before deleting trust;
+a Keychain deletion failure is reported and cannot promise revocation after a
+restart. Already-started GitLab requests can still finish.
 
 The operator invitation gates admission, not access to another user's inbox.
 Sharing it broadly permits others to consume the deployment's free quota. This MVP
@@ -126,8 +135,8 @@ connection failure. Initial catalog sync and GitLab errors disable writes.
 
 The companion shows a notice when the Mac's safety data needs attention and automatic
 actions are paused. Refreshing and manual checks remain available. Manual writes
-still use the Mac's existing guards and required saved receipts. Older phones can
-ignore the additive notice field; it never grants action permission.
+still use the Mac's existing guards and required saved receipts. The notice never
+grants action permission; both native clients must support protocol v2.
 
 Commands bind a host session, authenticated account, card, action and content token.
 The Mac refreshes before checking the token. Approval pins the displayed commit;
@@ -137,15 +146,28 @@ resolution. A server-side edit can still race the final publication HTTP request
 which GitLab does not provide with an atomic content/head precondition.
 
 The phone never automatically retries commands. The host serializes writes and
-retains up to 512 receipts for the current session. Acceptance extends the phone deadline to two minutes; network heartbeats remain independent of GitLab action work. A known partial publication is reported explicitly. A lost acknowledgement is an
-uncertain result: inspect GitLab before explicitly trying again. Reconnecting or restarting the
-host creates a new session, so old commands and their receipts cannot confirm a new
-session. Changing accounts also invalidates the session, even when the account later
-returns to the same username and host. Disconnecting invalidates an action still
-waiting for its acceptance send; an already started write keeps the host write lock
-until it finishes. Prepared thread-resolution IDs must be checked again after a
-reconnect. Pairing trust is retained through ordinary reconnects. The MVP does not promise
-exactly-once delivery across crashes or persist command receipts to disk.
+persists admission before acceptance or side effects, then persists the result
+before delivery. Its Keychain archive retains up to 512 receipts within a 1 MiB
+bound for the cryptographic pairing; it never evicts receipts to admit more work.
+Capacity or storage failure blocks new commands. Completed results survive host
+restart; a recorded running command recovers as uncertain and is not executed
+again. Acceptance extends the phone deadline to two minutes, independently of
+network heartbeats.
+
+Reconnecting, restarting or changing accounts creates a new command session and
+invalidates old execution permission. An authenticated receipt query can recover
+only the exact original command under the current account and pairing, with a
+fresh challenge; it cannot execute anything. The phone retains its pending ID
+until explicit acknowledgement successfully removes it from Keychain. Rotating
+pairing keys revokes the old receipt namespace. An already-started write keeps
+the host write lock until it finishes. Prepared thread-resolution IDs require a
+fresh check after reconnect. Durable receipts do not promise exactly-once GitLab
+effects when an external request has an uncertain outcome.
+
+Phone approval requires an explicit confirmation of the displayed MR, account and
+commit. Its single-use confirmation expires after thirty seconds and is invalid
+after target, action, account, session or connection changes. This consent is not
+restored by a phone restart or receipt recovery.
 
 Supported actions include checked comment publication, SHA-bound approval,
 re-review confirmation, verification, pipeline handoff, marking a raw event done,
@@ -195,8 +217,8 @@ The board fixture delays a manually reconnected snapshot to expose reconnect pro
 its memory transport and clock cover lifecycle, stale callbacks, trust changes and
 pending-command safety without a live relay or GitLab.
 
-### Merge actions compatibility
+### Merge action capabilities
 
-Phones advertising `merge-actions-v1` can explicitly merge owned ready MRs, set supported auto-merge/train requests, and prepare a bounded thread-resolution preview before confirming its exact IDs. Host-side live guards remain authoritative. Queued and in-train results do not claim a finished merge. Older phones receive the same readable board with these action cases filtered out before encoding.
+Within cryptographic protocol v2, `merge-actions-v1` names the independent action capability. Advertising it enables explicit merge, supported auto-merge/train requests and bounded thread-resolution previews. Host-side live guards remain authoritative. Queued and in-train results do not claim a finished merge. A v2 client without this capability receives snapshots with these action cases filtered out; native v1 pairing is unsupported.
 
 Approval metadata keeps the legacy `completed` field bounded for older decoders. The additive `received` field carries every current unique approver, including 5/2, and `requirementsSatisfied` preserves the distinction between total approvals and satisfaction of specific required rules. Updated phones use those fields for text, help and badge state.

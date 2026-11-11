@@ -1,0 +1,41 @@
+{
+  "sourceLanguage" : "en",
+  "strings" : {
+    "remoteDetail.actions" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : { "stringUnit" : { "state" : "translated", "value" : "Actions" } },
+        "pl" : { "stringUnit" : { "state" : "translated", "value" : "Działania" } }
+      }
+    },
+    "remoteDetail.context" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : { "stringUnit" : { "state" : "translated", "value" : "Full context" } },
+        "pl" : { "stringUnit" : { "state" : "translated", "value" : "Pełny kontekst" } }
+      }
+    },
+    "remoteDetail.draft" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : { "stringUnit" : { "state" : "translated", "value" : "Draft" } },
+        "pl" : { "stringUnit" : { "state" : "translated", "value" : "Wersja robocza" } }
+      }
+    },
+    "remoteDetail.pendingDrafts" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : { "stringUnit" : { "state" : "translated", "value" : "Unpublished comments" } },
+        "pl" : { "stringUnit" : { "state" : "translated", "value" : "Nieopublikowane komentarze" } }
+      }
+    },
+    "remoteDetail.pendingDraftsHelp" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : { "stringUnit" : { "state" : "translated", "value" : "These comments are private until they are published." } },
+        "pl" : { "stringUnit" : { "state" : "translated", "value" : "Te komentarze pozostają prywatne do czasu publikacji." } }
+      }
+    }
+  },
+  "version" : "1.0"
+}

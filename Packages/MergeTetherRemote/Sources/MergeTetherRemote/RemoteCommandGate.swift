@@ -1,35 +1,65 @@
 import Foundation
 
 @MainActor public final class RemoteCommandGate {
-    private var receipts: [UUID: (RemoteCommand, RemoteCommandResult)] = [:]
+    private let store: RemoteCommandReceiptStore?
+    private var snapshot: RemoteCommandReceiptStore.Snapshot?
+    private var loaded = false
+    private var storageFailed = false
     private var busy = false
-    private var hostSession: UUID?
-    public init() {}
-    public func execute(_ command: RemoteCommand, board: RemoteBoard,
+    // Pass nil only when deliberately using ephemeral, in-memory receipts.
+    public init(store: RemoteCommandReceiptStore?) { self.store = store }
+    public func execute(_ command: RemoteCommand, board: RemoteBoard, pairingSession: UUID,
                         accepted: @MainActor () async -> Void = {},
                         operation: @MainActor (RemoteCard, RemoteAction) async -> RemoteCommandResult.Status) async -> RemoteCommandResult {
-        if hostSession != board.hostSession {
-            hostSession = board.hostSession
-            receipts.removeAll()
-            // A reconnect does not cancel a write already accepted by GitLab.
-            // Keep the same lock until that operation finishes.
+        guard command.hostSession == board.hostSession, command.account == board.account else { return .init(id: command.id, status: .changed) }
+        if !loaded {
+            do { snapshot = try store?.load(); loaded = true }
+            catch { return .init(id: command.id, status: .uncertain) }
         }
-        guard command.hostSession == board.hostSession else { return .init(id: command.id, status: .changed) }
-        if let (original, result) = receipts[command.id] {
-            return original == command ? result : .init(id: command.id, status: .changed)
+        if snapshot?.pairingSession == pairingSession,
+           let receipt = snapshot?.receipts.first(where: { $0.command.id == command.id }) {
+            return receipt.command == command ? receipt.result : .init(id: command.id, status: .changed)
         }
-        guard receipts.count < 512 else { return .init(id: command.id, status: .limit) }
+        guard !storageFailed else { return .init(id: command.id, status: .uncertain) }
         guard !busy else { return .init(id: command.id, status: .changed) }
-        guard !board.partial, board.hostSession == command.hostSession,
+        if snapshot?.pairingSession != pairingSession {
+            // Only explicit device-key rotation revokes the old trust namespace.
+            // Host reconnects retain results so a phone can recover a lost reply.
+            snapshot = .init(pairingSession: pairingSession)
+        }
+        guard var admission = snapshot else { return .init(id: command.id, status: .uncertain) }
+        guard admission.receipts.count < RemoteCommandReceiptStore.maximumReceipts else { return .init(id: command.id, status: .limit) }
+        guard !board.partial,
               let card = board.cards.first(where: { $0.id == command.cardID }),
               let action = card.actions.first(where: { $0.id == command.actionID && $0.token == command.token })
         else { return .init(id: command.id, status: .changed) }
-        busy = true
-        receipts[command.id] = (command, .init(id: command.id, status: .running))
+        admission.receipts.append(.init(command: command, result: .init(id: command.id, status: .running)))
+        do { try store?.save(admission) }
+        catch { storageFailed = true; return .init(id: command.id, status: .uncertain) }
+        snapshot = admission; busy = true
+        defer { busy = false }
         await accepted()
         let result = RemoteCommandResult(id: command.id, status: await operation(card, action))
-        if hostSession == command.hostSession { receipts[command.id] = (command, result) }
-        busy = false
-        return result
+        guard var completion = snapshot,
+              let index = completion.receipts.firstIndex(where: { $0.command == command }) else { return .init(id: command.id, status: .uncertain) }
+        completion.receipts[index].result = result
+        do { try store?.save(completion); snapshot = completion; return result }
+        catch {
+            snapshot?.receipts[index].result.status = .uncertain
+            storageFailed = true
+            return .init(id: command.id, status: .uncertain)
+        }
     }
+    public func receipt(for command: RemoteCommand, account: String, pairingSession: UUID) -> RemoteCommandResult {
+        guard command.account == account else { return .init(id: command.id, status: .changed) }
+        if !loaded {
+            do { snapshot = try store?.load(); loaded = true }
+            catch { return .init(id: command.id, status: .uncertain) }
+        }
+        guard let snapshot else { return .init(id: command.id, status: .uncertain) }
+        guard snapshot.pairingSession == pairingSession else { return .init(id: command.id, status: .changed) }
+        guard let receipt = snapshot.receipts.first(where: { $0.command.id == command.id }) else { return .init(id: command.id, status: .uncertain) }
+        return receipt.command == command ? receipt.result : .init(id: command.id, status: .changed)
+    }
+
 }

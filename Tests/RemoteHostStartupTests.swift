@@ -1,6 +1,7 @@
 import Foundation
 import Testing
-import MergeTetherRemote
+@testable import MergeTetherRemote
+import Security
 @testable import GitLabTodos
 
 @MainActor
@@ -142,7 +143,7 @@ struct RemoteHostStartupTests {
                 }, removePairing: { [self] in
                     removals += 1
                     if removeFails { throw ProbeError.failed }
-                }, connectPairing: { [self] in connections.append($0) })
+                }, connectPairing: { [self] in connections.append($0) }, commandGate: RemoteCommandGate(store: nil))
         }
         func clean() { defaults.removePersistentDomain(forName: suite) }
     }
@@ -156,8 +157,8 @@ struct RemoteHostSessionTests {
         await f.host.startupLoadTask?.value
         let before = try await f.board()
         let command = try f.command(before)
-        let phone = try RemoteCipher(pairing: f.pair, role: .phone)
-        let hostCipher = try RemoteCipher(pairing: f.pair, role: .host)
+        let phone = try RemoteCipher(pairing: RemotePairing(url: f.pair.deepLink), role: .phone, saveEstablishedPairing: { _ in })
+        let hostCipher = try RemoteCipher(pairing: f.pair, role: .host, saveEstablishedPairing: { _ in })
         let wire = try phone.seal(RemoteMessage(type: .command, command: command))
 
         f.transport.onStatus?(false, false)
@@ -251,7 +252,81 @@ struct RemoteHostSessionTests {
         #expect(f.monitor.lifecycleCompletions.count == 1)
     }
 
+    @Test func newPairingRotatesKeysAndSessionAndOldCommandsCannotReturnCachedSuccess() async throws {
+        let f = try Fixture()
+        defer { f.clean() }
+        await f.host.startupLoadTask?.value
+        let before = try await f.board(), command = try f.command(before)
+        await f.transport.onMessage?(.init(type: .command, command: command))
+        #expect(f.transport.messages.last?.result?.status == .completed)
+        f.host.enable()
+        let replacement = try #require(f.host.pairing)
+        #expect(replacement.sessionID != f.pair.sessionID)
+        #expect(replacement.publicKey != f.pair.publicKey)
+        let after = try await f.board(requireCards: false)
+        #expect(after.hostSession != before.hostSession)
+        await f.transport.onMessage?(.init(type: .command, command: command))
+        #expect(f.transport.messages.last?.result?.status == .changed)
+    }
+
+    @Test func enrollmentPinIsSavedBeforeTheControllerExposesItAndFailureKeepsOldTrust() async throws {
+        let f = try Fixture()
+        defer { f.clean() }
+        await f.host.startupLoadTask?.value
+        let phone = try RemoteCipher(pairing: RemotePairing(url: f.pair.deepLink), role: .phone, saveEstablishedPairing: { _ in })
+        var established: RemotePairing?
+        let cipher = try RemoteCipher(pairing: f.pair, role: .host, saveEstablishedPairing: { established = $0 })
+        _ = try cipher.open(phone.seal(["type": "hello"]), as: [String: String].self)
+        let bound = try #require(established)
+        f.saveFails = true
+        #expect(throws: (any Error).self) { try f.transport.onPairingEstablished?(bound) }
+        #expect(f.host.pairing == f.pair)
+        f.saveFails = false
+        try f.transport.onPairingEstablished?(bound)
+        #expect(f.saved == [bound])
+        #expect(f.host.pairing == bound)
+        f.host.enable()
+        #expect(throws: (any Error).self) { try f.transport.onPairingEstablished?(bound) }
+    }
+
+    @Test(arguments: [false, true])
+    func controllerRecreationRecoversStoredResultsWithoutReexecutingAnOldSession(_ crashedActive: Bool) async throws {
+        let memory = InMemoryRemoteSecurity()
+        let store = RemoteCommandReceiptStore(service: "controller-recovery", security: memory.client)
+        let f = try Fixture(receiptStore: store)
+        defer { f.clean() }
+        await f.host.startupLoadTask?.value
+        let before = try await f.board(), command = try f.command(before)
+        if crashedActive {
+            try store.save(.init(pairingSession: f.pair.sessionID, receipts: [.init(command: command, result: .init(id: command.id, status: .running))]))
+        } else {
+            await f.transport.onMessage?(.init(type: .command, command: command))
+            #expect(f.transport.messages.last?.result?.status == .completed)
+        }
+        f.host.disable()
+        let transport = Transport(), pair = f.pair
+        let restarted = RemoteHostController(monitor: f.monitor, loadPairing: { pair }, savePairing: { _ in }, removePairing: {},
+            commandGate: RemoteCommandGate(store: store), makeConnection: { _ in transport })
+        defer { restarted.disable() }
+        await restarted.startupLoadTask?.value
+        await transport.onMessage?(.init(type: .hello, challenge: UUID()))
+        let current = try #require(transport.messages.last(where: { $0.type == .snapshot })?.board)
+        #expect(current.hostSession != before.hostSession)
+        await transport.onMessage?(.init(type: .command, command: command))
+        #expect(transport.messages.last?.result?.status == .changed)
+        let challenge = UUID()
+        await transport.onMessage?(.init(type: .receipt, challenge: challenge, command: command))
+        #expect(transport.messages.last?.type == .receiptResult)
+        #expect(transport.messages.last?.challenge == challenge)
+        #expect(transport.messages.last?.result?.status == (crashedActive ? .uncertain : .completed))
+        #expect(f.monitor.lifecycleCompletions.count == (crashedActive ? 1 : 0))
+        f.monitor.glab.currentUsername = "other"
+        await transport.onMessage?(.init(type: .receipt, challenge: UUID(), command: command))
+        #expect(transport.messages.last?.result?.status == .changed)
+    }
+
     @MainActor private final class Transport: RemoteHostTransport {
+        var onPairingEstablished: (@MainActor (RemotePairing) throws -> Void)?
         var onMessage: (@MainActor (RemoteMessage) async -> Void)?
         var onStatus: (@MainActor (Bool, Bool) -> Void)?
         var onSend: ((RemoteMessage) async -> Void)?
@@ -272,7 +347,11 @@ struct RemoteHostSessionTests {
         let transport = Transport()
         let pair: RemotePairing
         let host: RemoteHostController
-        init() throws {
+        final class SaveState { var fails = false; var saved: [RemotePairing] = [] }
+        let saveState = SaveState()
+        var saveFails: Bool { get { saveState.fails } set { saveState.fails = newValue } }
+        var saved: [RemotePairing] { saveState.saved }
+        init(receiptStore: RemoteCommandReceiptStore? = nil) throws {
             defaults = try #require(UserDefaults(suiteName: suite))
             let settings = SettingsManager(defaults: defaults)
             settings.onboardingCompleted = false
@@ -300,20 +379,22 @@ struct RemoteHostSessionTests {
             request = try JSONDecoder().decode(GitLabMergeRequest.self, from: Data(raw.replacingOccurrences(of: "opened", with: "closed").utf8))
             settings.mrLifecycleLedger.record(request, for: target)
             pair = try .generate(origin: #require(URL(string: "https://relay.example.test")), access: String(repeating: "a", count: 43))
-            let pair = self.pair, transport = self.transport
-            host = RemoteHostController(monitor: monitor, loadPairing: { pair }, savePairing: { _ in }, removePairing: {}, makeConnection: { _ in transport })
+            let pair = self.pair, transport = self.transport, saveState = self.saveState
+            host = RemoteHostController(monitor: monitor, loadPairing: { pair }, savePairing: {
+                if saveState.fails { throw RemoteProtocolError.invalid }; saveState.saved.append($0)
+            }, removePairing: {}, commandGate: RemoteCommandGate(store: receiptStore), makeConnection: { _ in transport })
         }
-        func board() async throws -> RemoteBoard {
+        func board(requireCards: Bool = true) async throws -> RemoteBoard {
             await transport.onMessage?(.init(type: .hello, challenge: UUID(), capabilities: [RemoteMessage.mergeActionsCapability]))
             let board = try #require(transport.messages.last(where: { $0.type == .snapshot })?.board)
             try #require(!board.partial, "refresh=\(monitor.boardRefreshState) error=\(String(describing: monitor.lastError)) attention=\(monitor.attention.hasError)/\(monitor.attention.isLoading) authored=\(monitor.authoredMergeRequests.hasError)/\(monitor.authoredMergeRequests.isLoading) loading=\(monitor.isLoading)")
-            try #require(!board.cards.isEmpty)
+            if requireCards { try #require(!board.cards.isEmpty) }
             return board
         }
         func command(_ board: RemoteBoard, cardID: String? = nil) throws -> RemoteCommand {
             let card = try #require(board.cards.first { cardID == nil || $0.id == cardID })
             let action = try #require(card.actions.first)
-            return .init(hostSession: board.hostSession, cardID: card.id, actionID: action.id, token: action.token)
+            return .init(hostSession: board.hostSession, account: board.account, cardID: card.id, actionID: action.id, token: action.token)
         }
         func clean() {
             host.disable()
@@ -324,5 +405,32 @@ struct RemoteHostSessionTests {
             gitlab.close()
             defaults.removePersistentDomain(forName: suite)
         }
+    }
+}
+
+private final class InMemoryRemoteSecurity: @unchecked Sendable {
+    private let lock = NSLock()
+    private var values: [String: Data] = [:]
+    var client: RemotePairingStore.SecurityClient {
+        .init(read: { [self] query in
+            lock.lock(); defer { lock.unlock() }
+            let data = values[key(query)]
+            return (data == nil ? errSecItemNotFound : errSecSuccess, data)
+        }, update: { [self] query, attributes in
+            lock.lock(); defer { lock.unlock() }
+            guard values[key(query)] != nil else { return errSecItemNotFound }
+            values[key(query)] = attributes[kSecValueData as String] as? Data
+            return errSecSuccess
+        }, add: { [self] query in
+            lock.lock(); defer { lock.unlock() }
+            values[key(query)] = query[kSecValueData as String] as? Data
+            return errSecSuccess
+        }, remove: { [self] query in
+            lock.lock(); defer { lock.unlock() }
+            return values.removeValue(forKey: key(query)) == nil ? errSecItemNotFound : errSecSuccess
+        })
+    }
+    private func key(_ query: [String: Any]) -> String {
+        (query[kSecAttrService as String] as? String ?? "") + "|" + (query[kSecAttrAccount as String] as? String ?? "")
     }
 }

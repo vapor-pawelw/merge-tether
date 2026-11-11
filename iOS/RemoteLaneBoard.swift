@@ -38,16 +38,19 @@ private struct RemoteLaneView: View {
     var canAct: ((Date) -> Bool)? = nil
 
     var body: some View {
-        VStack(alignment: .leading, spacing: 12) {
-            HStack {
+        VStack(alignment: .leading, spacing: 16) {
+            HStack(alignment: .firstTextBaseline, spacing: 8) {
                 Text(lane.id.title).font(.headline)
                 Spacer()
-                Text(lane.cards.count, format: .number).foregroundStyle(.secondary)
+                Text(lane.cards.count, format: .number)
+                    .font(.caption.weight(.medium).monospacedDigit()).foregroundStyle(.secondary)
+                    .padding(.horizontal, 8).padding(.vertical, 4)
+                    .background(.secondary.opacity(0.08), in: Capsule())
             }
             .accessibilityElement(children: .combine)
             .accessibilityIdentifier("remote.lane.header.\(lane.id.rawValue)")
             ScrollView(showsIndicators: false) {
-                LazyVStack(spacing: 10) {
+                LazyVStack(spacing: 12) {
                     if lane.cards.isEmpty {
                         Text(.Remote.remoteEmpty).foregroundStyle(.secondary).padding(.top, 30)
                     }
@@ -60,7 +63,7 @@ private struct RemoteLaneView: View {
             }
         }
         .padding(14)
-        .background(Color.secondary.opacity(0.06), in: RoundedRectangle(cornerRadius: 22))
+        .background(Color.secondary.opacity(0.045), in: RoundedRectangle(cornerRadius: 22))
         .accessibilityIdentifier("remote.lane.\(lane.id.rawValue)")
     }
 }

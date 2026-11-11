@@ -2,10 +2,11 @@ import Foundation
 
 @MainActor public final class RemoteConnection {
     public var onMessage: (@MainActor (RemoteMessage) async -> Void)?
+    public var onPairingEstablished: (@MainActor (RemotePairing) throws -> Void)?
     public var onStatus: (@MainActor (Bool, Bool) -> Void)?
     private let pairing: RemotePairing
     private let role: RemoteCipher.Role
-    private let cipher: RemoteCipher
+    private var cipher: RemoteCipher!
     private let session = URLSession(configuration: .ephemeral)
     private var socket: URLSessionWebSocketTask?
     private var loop: Task<Void, Never>?
@@ -17,7 +18,11 @@ import Foundation
 
     public init(pairing: RemotePairing, role: RemoteCipher.Role, heartbeatInterval: Duration = .seconds(25), heartbeatTimeout: Duration = .seconds(10)) throws {
         self.heartbeatInterval = heartbeatInterval; self.heartbeatTimeout = heartbeatTimeout
-        self.pairing = pairing; self.role = role; cipher = try RemoteCipher(pairing: pairing, role: role)
+        self.pairing = pairing; self.role = role
+        cipher = try RemoteCipher(pairing: pairing, role: role, saveEstablishedPairing: { [weak self] established in
+            guard let save = self?.onPairingEstablished else { throw RemoteProtocolError.invalid }
+            try save(established)
+        })
     }
     public func start() {
         stop()
@@ -52,6 +57,8 @@ import Foundation
         var delay: Double = 1
         while !Task.isCancelled && self.generation == generation {
             var parts = URLComponents(url: pairing.origin, resolvingAgainstBaseURL: false)!
+            // This is the opaque relay's transport version. Native cryptographic
+            // invitations and frames independently require protocol v2.
             parts.scheme = parts.scheme == "https" ? "wss" : "ws"; parts.path = "/v1/connect"
             let task = session.webSocketTask(with: parts.url!, protocols: [
                 "mt-v1", "access-\(pairing.access)", "room-\(pairing.room)", "role-\(role.rawValue)",

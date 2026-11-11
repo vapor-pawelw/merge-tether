@@ -294,7 +294,7 @@ New train attempts save the last observed note ID before writing. A newer, exact
 
 The executor works through the confirmed IDs individually. Before each write it rechecks account, source/target, MR text, the full thread topology/edit revisions, draft absence and active work. New or edited threads stop the remaining operation. Resolution-only updates from a confirmed response preserve the remaining selection, including GitLab updates to resolution timestamps. Results report resolved, selected and still-held counts, including partial failures. A later invocation starts with a fresh preview; unseen IDs cannot join an earlier confirmation.
 
-The iOS companion negotiates `merge-actions-v1`. Older phones receive snapshots without new action cases. New phones first **Check threads to resolve**, then confirm the concrete prepared IDs; merge submissions report queued/in-train outcomes separately. Status, flow and error messages appear above the card's action row.
+The updated iOS companion uses cryptographic protocol v2 and negotiates the independent `merge-actions-v1` action capability. Both native apps must be updated and paired again after v1. Phones first **Check threads to resolve**, then confirm the concrete prepared IDs; merge submissions report queued/in-train outcomes separately. Status, flow and error messages appear above the card's action row. See [remote trust and command recovery](remote.md).
 
 ## Automatic approval
 

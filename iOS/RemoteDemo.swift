@@ -10,9 +10,11 @@ import MergeTetherRemote
         let offline = arguments.contains("--remote-preview-offline")
         let failed = arguments.contains("--remote-preview-failed")
         guard boardPreview || connecting || offline || failed else { return nil }
-        let pairing = try! RemotePairing.generate(origin: URL(string: "https://relay.example.org")!, access: String(repeating: "A", count: 43))
+        let invitation = try! RemotePairing.generate(origin: URL(string: "https://relay.example.org")!, access: String(repeating: "A", count: 43))
+        let pairing = try! RemotePairing(url: invitation.deepLink)
         var connections = 0
-        let model = RemotePhoneModel(loadPairing: { pairing }, savePairing: { _ in }, makeConnection: { _ in
+        let model = RemotePhoneModel(loadPairing: { pairing }, savePairing: { _ in },
+            loadRecovery: { nil }, saveRecovery: { _ in }, removeRecovery: {}, makeConnection: { _ in
             connections += 1
             return PreviewTransport(board: boardPreview ? board : nil, delay: connections > 1, failed: failed)
         }, now: { Date().addingTimeInterval(offline ? -46 : 0) })

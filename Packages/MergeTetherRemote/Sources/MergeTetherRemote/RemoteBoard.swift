@@ -154,11 +154,12 @@ public struct RemoteBoard: Codable, Equatable, Sendable {
 public struct RemoteCommand: Codable, Equatable, Sendable {
     public var id: UUID
     public var hostSession: UUID
+    public var account: String
     public var cardID: String
     public var actionID: String
     public var token: String
-    public init(id: UUID = UUID(), hostSession: UUID, cardID: String, actionID: String, token: String) {
-        self.id = id; self.hostSession = hostSession; self.cardID = cardID; self.actionID = actionID; self.token = token
+    public init(id: UUID = UUID(), hostSession: UUID, account: String, cardID: String, actionID: String, token: String) {
+        self.id = id; self.hostSession = hostSession; self.account = account; self.cardID = cardID; self.actionID = actionID; self.token = token
     }
 }
 
@@ -172,7 +173,7 @@ public struct RemoteCommandResult: Codable, Equatable, Sendable {
 public struct RemoteMessage: Codable, Sendable {
     public static let mergeActionsCapability = "merge-actions-v1"
     public static let commentReviewCapability = "comment-review-v1"
-    public enum Kind: String, Codable, Sendable { case hello, snapshot, command, accepted, result, unavailable, hostReady = "host-ready" }
+    public enum Kind: String, Codable, Sendable { case hello, snapshot, command, accepted, result, receipt, receiptResult = "receipt-result", unavailable, hostReady = "host-ready" }
     public var type: Kind
     public var challenge: UUID?
     public var board: RemoteBoard?

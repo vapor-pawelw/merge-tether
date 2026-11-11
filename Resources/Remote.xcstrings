@@ -1252,6 +1252,57 @@
           }
         }
       }
+    },
+    "remote.mac.invitationExpires": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "This code expires at"
+          }
+        },
+        "pl": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Ten kod wygasa o"
+          }
+        }
+      }
+    },
+    "remote.mac.invitationExpired": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "This pairing code has expired. Create a new code to pair a phone."
+          }
+        },
+        "pl": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Kod parowania wygasł. Utwórz nowy kod, aby sparować telefon."
+          }
+        }
+      }
+    },
+    "remote.mac.devicePaired": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Your phone is paired. Creating a new code revokes its access and requires pairing again."
+          }
+        },
+        "pl": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Telefon jest sparowany. Utworzenie nowego kodu odbierze mu dostęp i wymaga ponownego parowania."
+          }
+        }
+      }
     }
   },
   "version": "1.0"

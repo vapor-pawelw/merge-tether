@@ -5,6 +5,7 @@ import Observation
     public private(set) var board: RemoteBoard?
     public private(set) var pending: RemoteCommand?
     public private(set) var result: RemoteCommandResult?
+    @ObservationIgnored public var onResultAcknowledgement: (@MainActor (RemoteCommandResult) throws -> Void)?
     private var expected: UUID?
     private var pendingUntil: Date = .distantPast
     private var challengeUntil: Date = .distantPast
@@ -63,10 +64,19 @@ import Observation
     }
     public func command(card: RemoteCard, action: RemoteAction, now: Date = Date()) -> RemoteCommand? {
         guard canAct(now: now), let board,
-              board.cards.contains(where: { $0.id == card.id && $0.actions.contains(action) }) else { return nil }
-        let command = RemoteCommand(hostSession: board.hostSession, cardID: card.id, actionID: action.id, token: action.token)
+              board.cards.contains(where: { $0 == card && $0.actions.contains(action) }) else { return nil }
+        let command = RemoteCommand(hostSession: board.hostSession, account: board.account, cardID: card.id, actionID: action.id, token: action.token)
         pending = command; pendingUntil = now.addingTimeInterval(45)
         return command
     }
-    public func acknowledgeResult() { result = nil }
+    public func recoverResult(_ result: RemoteCommandResult) {
+        guard pending == nil || pending?.id == result.id else { return }
+        self.result = result
+        if result.status != .running { pending = nil }
+    }
+    public func acknowledgeResult() {
+        guard let result else { return }
+        do { try onResultAcknowledgement?(result) } catch { return }
+        self.result = nil
+    }
 }

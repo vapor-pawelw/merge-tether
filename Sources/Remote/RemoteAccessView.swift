@@ -8,16 +8,27 @@ struct RemoteAccessView: View {
             Label(.Remote.remoteMacPairPhone, systemImage: "iphone").font(.title2.bold())
             if let pairing = remote.pairing {
                 Text(.Remote.remoteMacHelp).font(.callout).foregroundStyle(.secondary)
-                if let image = qr(pairing.deepLink.absoluteString) {
-                    Image(nsImage: image).interpolation(.none).resizable().scaledToFit()
-                        .frame(maxWidth: .infinity).frame(height: 330).padding(10).background(.white)
-                        .accessibilityLabel(Text(.Remote.remoteScan))
+                TimelineView(.periodic(from: .now, by: 1)) { context in
+                    if pairing.peerPublicKey != nil {
+                        Text(.Remote.remoteMacDevicePaired).foregroundStyle(.secondary)
+                    } else if pairing.invitationIsValid(now: context.date) {
+                        if let image = qr(pairing.deepLink.absoluteString) {
+                            Image(nsImage: image).interpolation(.none).resizable().scaledToFit()
+                                .frame(maxWidth: .infinity).frame(height: 330).padding(10).background(.white)
+                                .accessibilityLabel(Text(.Remote.remoteScan))
+                        }
+                        HStack { Text(.Remote.remoteMacInvitationExpires); Text(pairing.expiresAt, style: .time) }
+                            .font(.caption).foregroundStyle(.secondary)
+                        Button(.Remote.remoteCopyLink) {
+                            guard pairing.invitationIsValid(), remote.pairing == pairing else { return }
+                            NSPasteboard.general.clearContents()
+                            NSPasteboard.general.setString(pairing.deepLink.absoluteString, forType: .string)
+                        }
+                    } else {
+                        Text(.Remote.remoteMacInvitationExpired).foregroundStyle(.secondary)
+                    }
                 }
                 Text(verbatim: pairing.origin.absoluteString).font(.caption).foregroundStyle(.secondary)
-                Button(.Remote.remoteCopyLink) {
-                    NSPasteboard.general.clearContents()
-                    NSPasteboard.general.setString(pairing.deepLink.absoluteString, forType: .string)
-                }
                 Button(.Remote.remoteNewCode) { remote.enable() }
                 Button(.Remote.remoteDisable, role: .destructive) { remote.disable() }
             } else {
