@@ -231,12 +231,48 @@ identifier to keep that installation's preferences and permissions.
 
 ## Release builds
 
-A release build script lives at `scripts/build-release.sh`. Run it through the pinned toolchain with `mise exec -- bash scripts/build-release.sh [version]`. It generates the project, runs an unsigned Release `clean build`, and packages the `.app` into a DMG and ZIP with SHA-256 files under `release/`. Without a version argument it reads `CFBundleShortVersionString` from `Project.swift`. It replaces and then removes the repository’s scratch `build/` directory.
+`Project.swift` supplies shared `MARKETING_VERSION` (`1.2.0`) and `CURRENT_PROJECT_VERSION` (`1`) defaults. Both app targets bind their Info.plist version fields to these settings. The release script passes the selected version and build number to every build/archive without rewriting source files or signed bundles. Regenerate the project deliberately when integrating this project configuration. The local `sync-version-from-tag.sh` helper updates these shared defaults while preserving both plist bindings; it does not commit or tag.
 
-The script writes and checks the chosen version in the staged app's `Info.plist` before either archive is created. It preserves `CFBundleVersion` and leaves `Project.swift` unchanged. CI also injects the tag version and workflow build number before project generation; local packaging does not require that CI-only step.
+`scripts/build-release.sh --help` lists the options. Run it through the pinned toolchain. Its default is a signed, notarized **macOS** release; `--platform all` additionally exports a separate iOS distribution IPA. Distribution credentials must already be installed and valid. The script does not issue certificates or create a notary credential profile.
 
-These artifacts do not have a certificate-backed distribution signature or notarization. An automatic linker ad hoc signature does not provide either. Distribution signing and notarization remain release blockers; a local Apple Development identity used for pairing is not the distribution setup.
+```bash
+mise exec -- bash scripts/build-release.sh 1.2.0 --build-number 1 --platform all \
+  --signing-identity 'Developer ID Application: Example (TEAMID)' \
+  --ios-signing-identity 'Apple Distribution: Example (TEAMID)' \
+  --team-id TEAMID --notary-profile existing-notary-profile \
+  --ios-export-options /absolute/path/ExportOptions.plist
+```
 
-Releases are tag-driven: pushing a `v*` tag triggers the Release workflow. `scripts/release-interactive.sh` promotes Unreleased notes and pushes their commit and an annotated tag; it is a publication command, not a local build helper. Only publish or tag a release when explicitly requested. Legacy `GitLabTodos` artifact names remain in use.
+The signed macOS path **uploads the ZIP and DMG to Apple for notarization**. Run it only after that upload is authorized. It checks the available Developer ID identity and notary credentials before building, enables hardened runtime and a secure timestamp, verifies bundle metadata and signatures, requires an Accepted notarization result, staples and validates tickets, and checks Gatekeeper. A local Apple Development identity supports development and stable pairing; it cannot replace Developer ID distribution signing. Missing identities, rejected notarization, invalid signatures or Gatekeeper failures exit nonzero before new artifacts are copied to the release directory.
 
-If the workflow API is unavailable, there are no workflows, or the Release workflow is missing after a tag push, the script exits nonzero and reports an incomplete release. A pushed tag alone is not success. Inspect the existing workflow run and release assets using the printed commands before any further action; do not restart publication by pushing the tag again.
+The iOS path requires an existing Apple Distribution identity and installed distribution provisioning profile for `com.vaporpw.MergeTether.iOS`. Supply a real `ExportOptions.plist` with matching `teamID`, `signingStyle=manual`, a `provisioningProfiles` entry for that bundle, and an explicit method: `app-store-connect`, `release-testing`, or `enterprise`. These methods require the corresponding Apple program and provisioning eligibility; an App Store Connect IPA is for upload, and release-testing/enterprise eligibility determines who can install the export. The script checks metadata in both the archive and exported IPA, verifies their team and distribution signature, and rejects zero or multiple exported IPAs. Xcode export supplies the provisioning validation; the script never downloads or creates profiles automatically.
+
+The selected artifact inventory is exactly two macOS archives, one iOS archive, or three for `--platform all`:
+
+| Platform | Distribution artifacts |
+| --- | --- |
+| macOS | `GitLabTodos-<version>.dmg`, `GitLabTodos-<version>.zip` |
+| iOS | `MergeTetheriOS-<version>.ipa` |
+
+Each artifact has a `.sha256` file. `release/release-manifest.json` records the version, build, platform inventory and SHA-256 hashes after every selected platform passes. Legacy macOS artifact names and bundle identifiers remain unchanged. The script uses and removes an owned `.release-build.*` scratch directory, preserving other build directories and previous artifacts. Read the command exit status and manifest version/build before using outputs; preserved artifacts from an earlier run are not evidence that a failed run succeeded.
+
+For local inspection without distribution credentials or network notarization, opt in explicitly:
+
+```bash
+mise exec -- bash scripts/build-release.sh 1.2.0 --build-number 1 --platform all --unsigned
+```
+
+These outputs go under `release/unsigned`, with `distributable=false` in their manifest. The iOS output is `MergeTetheriOS-<version>-unsigned-device.zip`, **not an installable IPA**. Unsigned macOS outputs are also inspection artifacts. This mode cannot be combined with distribution identities or export options and is not used by the publication workflow.
+
+### Release workflow configuration
+
+Releases are tag-driven: pushing a `v*` tag triggers the Release workflow. Configure these GitHub secrets before an authorized publication:
+
+- `APPLE_CERTIFICATES_P12_BASE64`: an exported PKCS#12 containing the existing Developer ID Application and Apple Distribution identities and their private keys.
+- `APPLE_CERTIFICATES_PASSWORD`: that PKCS#12 password.
+- `IOS_PROFILE_BASE64`: the existing distribution `.mobileprovision` for the iOS bundle.
+- `NOTARY_API_PRIVATE_KEY`, `NOTARY_KEY_ID`, `NOTARY_ISSUER_ID`: an eligible App Store Connect notarization API key and its identifiers.
+
+Configure repository variables `APPLE_TEAM_ID`, `MACOS_RELEASE_IDENTITY`, `IOS_RELEASE_IDENTITY` (exact certificate names or SHA-1 fingerprints), and `IOS_EXPORT_METHOD` (one of the supported distribution methods). The workflow fails with the missing configuration name without printing its value. It imports only into its temporary runner keychain, derives export options from the configured profile, injects the tag version and workflow run number through build settings, verifies the three-artifact inventory and hashes, and removes temporary credential files/keychain on exit. It retains `GitLabTodos.dmg`/`.zip` names on GitHub for the existing Homebrew cask; the published manifest and checksums use those same names. The iOS IPA remains a separate versioned asset. Relay deployment is separate from both app artifacts.
+
+`scripts/release-interactive.sh` is a **publication command**: it promotes Unreleased notes, commits and pushes them, and pushes an annotated tag. Run it only when publication is explicitly requested. Noninteractive invocation requires both `--version X.Y.Z` and `--yes`; `--platform all` is the default release inventory, while `--platform macos` supports an explicitly macOS-only release. It waits for the workflow and verifies a matching, published release record, its repository/tag URL, exactly one nonempty required asset per platform, and a matching distributable `release-manifest.json` with the selected version, successful workflow run number, artifact inventory and SHA-256 evidence. A draft release, missing IPA, missing release or pushed tag alone is incomplete and exits nonzero with a release URL and inspection command. Inspect the existing tag/run before retrying; do not restart publication by pushing the tag again. Optional Homebrew verification remains controlled by `GITLABTODOS_HOMEBREW_TAP_REPO`.

@@ -39,22 +39,114 @@ jobs:
           echo "tag=v$VERSION" >> "$GITHUB_OUTPUT"
           echo "Building ${APP_NAME} ${VERSION}"
 
-      - name: Inject version into Project.swift
+      - name: Check distribution configuration
+        env:
+          APPLE_CERTIFICATES_P12_BASE64: ${{ secrets.APPLE_CERTIFICATES_P12_BASE64 }}
+          APPLE_CERTIFICATES_PASSWORD: ${{ secrets.APPLE_CERTIFICATES_PASSWORD }}
+          IOS_PROFILE_BASE64: ${{ secrets.IOS_PROFILE_BASE64 }}
+          NOTARY_API_PRIVATE_KEY: ${{ secrets.NOTARY_API_PRIVATE_KEY }}
+          NOTARY_KEY_ID: ${{ secrets.NOTARY_KEY_ID }}
+          NOTARY_ISSUER_ID: ${{ secrets.NOTARY_ISSUER_ID }}
+          APPLE_TEAM_ID: ${{ vars.APPLE_TEAM_ID }}
+          MACOS_RELEASE_IDENTITY: ${{ vars.MACOS_RELEASE_IDENTITY }}
+          IOS_RELEASE_IDENTITY: ${{ vars.IOS_RELEASE_IDENTITY }}
+          IOS_EXPORT_METHOD: ${{ vars.IOS_EXPORT_METHOD }}
         run: |
-          VERSION="${{ steps.version.outputs.version }}"
-          BUILD="${{ github.run_number }}"
-          sed -i '' -E 's|("CFBundleShortVersionString": \.string\()"[^"]+"(\))|\1"'"$VERSION"'"\2|' Project.swift
-          sed -i '' -E 's|("CFBundleVersion": \.string\()"[^"]+"(\))|\1"'"$BUILD"'"\2|' Project.swift
-          grep CFBundle Project.swift
+          for name in APPLE_CERTIFICATES_P12_BASE64 APPLE_CERTIFICATES_PASSWORD IOS_PROFILE_BASE64 NOTARY_API_PRIVATE_KEY NOTARY_KEY_ID NOTARY_ISSUER_ID APPLE_TEAM_ID MACOS_RELEASE_IDENTITY IOS_RELEASE_IDENTITY IOS_EXPORT_METHOD; do
+            if [[ -z "${!name:-}" ]]; then
+              echo "::error::Missing distribution configuration: ${name}. Configure existing distribution credentials before publishing; Apple Development is insufficient."
+              exit 1
+            fi
+          done
 
-      - name: Build release artifacts
-        run: mise x -- bash scripts/build-release.sh "${{ steps.version.outputs.version }}"
-
-      - name: Rename artifacts to stable names
+      - name: Prepare temporary distribution keychain and provisioning
+        env:
+          APPLE_CERTIFICATES_P12_BASE64: ${{ secrets.APPLE_CERTIFICATES_P12_BASE64 }}
+          APPLE_CERTIFICATES_PASSWORD: ${{ secrets.APPLE_CERTIFICATES_PASSWORD }}
+          IOS_PROFILE_BASE64: ${{ secrets.IOS_PROFILE_BASE64 }}
+          NOTARY_API_PRIVATE_KEY: ${{ secrets.NOTARY_API_PRIVATE_KEY }}
+          NOTARY_KEY_ID: ${{ secrets.NOTARY_KEY_ID }}
+          NOTARY_ISSUER_ID: ${{ secrets.NOTARY_ISSUER_ID }}
+          APPLE_TEAM_ID: ${{ vars.APPLE_TEAM_ID }}
+          IOS_EXPORT_METHOD: ${{ vars.IOS_EXPORT_METHOD }}
         run: |
-          VERSION="${{ steps.version.outputs.version }}"
-          cp "release/${APP_NAME}-${VERSION}.dmg" "${APP_NAME}.dmg"
-          cp "release/${APP_NAME}-${VERSION}.zip" "${APP_NAME}.zip"
+          umask 077
+          KEYCHAIN_PATH="$RUNNER_TEMP/release-signing.keychain-db"
+          KEYCHAIN_PASSWORD="$(openssl rand -hex 32)"
+          echo "::add-mask::$KEYCHAIN_PASSWORD"
+          printf '%s' "$APPLE_CERTIFICATES_P12_BASE64" | base64 --decode > "$RUNNER_TEMP/distribution.p12"
+          printf '%s' "$IOS_PROFILE_BASE64" | base64 --decode > "$RUNNER_TEMP/distribution.mobileprovision"
+          printf '%s' "$NOTARY_API_PRIVATE_KEY" > "$RUNNER_TEMP/notary-key.p8"
+          security create-keychain -p "$KEYCHAIN_PASSWORD" "$KEYCHAIN_PATH"
+          security set-keychain-settings -lut 21600 "$KEYCHAIN_PATH"
+          security unlock-keychain -p "$KEYCHAIN_PASSWORD" "$KEYCHAIN_PATH"
+          security import "$RUNNER_TEMP/distribution.p12" -P "$APPLE_CERTIFICATES_PASSWORD" -k "$KEYCHAIN_PATH" -T /usr/bin/codesign >/dev/null
+          security set-key-partition-list -S apple-tool:,apple:,codesign: -s -k "$KEYCHAIN_PASSWORD" "$KEYCHAIN_PATH" >/dev/null
+          security list-keychains -d user -s "$KEYCHAIN_PATH"
+          security cms -D -i "$RUNNER_TEMP/distribution.mobileprovision" > "$RUNNER_TEMP/profile.plist"
+          python3 - <<'PYTHON'
+          import os, pathlib, plistlib, shutil
+          root = pathlib.Path(os.environ['RUNNER_TEMP'])
+          with (root / 'profile.plist').open('rb') as source:
+              profile = plistlib.load(source)
+          team = os.environ['APPLE_TEAM_ID']
+          if team not in profile.get('TeamIdentifier', []):
+              raise SystemExit('Distribution provisioning profile belongs to another team')
+          profiles = pathlib.Path.home() / 'Library/MobileDevice/Provisioning Profiles'
+          profiles.mkdir(parents=True, exist_ok=True)
+          shutil.copyfile(root / 'distribution.mobileprovision', profiles / (profile['UUID'] + '.mobileprovision'))
+          options = {'method': os.environ['IOS_EXPORT_METHOD'], 'teamID': team, 'signingStyle': 'manual',
+                     'signingCertificate': 'Apple Distribution', 'destination': 'export',
+                     'provisioningProfiles': {'com.vaporpw.MergeTether.iOS': profile['Name']}}
+          with (root / 'ExportOptions.plist').open('wb') as target:
+              plistlib.dump(options, target)
+          PYTHON
+          if ! xcrun notarytool store-credentials mergetether-release --key "$RUNNER_TEMP/notary-key.p8" --key-id "$NOTARY_KEY_ID" --issuer "$NOTARY_ISSUER_ID" --keychain "$KEYCHAIN_PATH" >/dev/null 2>&1; then
+            echo "::error::Could not validate the configured notarization API credentials."
+            exit 1
+          fi
+          rm -f "$RUNNER_TEMP/distribution.p12" "$RUNNER_TEMP/notary-key.p8"
+
+      - name: Build separate macOS and iOS distribution artifacts
+        env:
+          RELEASE_VERSION: ${{ steps.version.outputs.version }}
+          RELEASE_BUILD_NUMBER: ${{ github.run_number }}
+          APPLE_TEAM_ID: ${{ vars.APPLE_TEAM_ID }}
+          MACOS_RELEASE_IDENTITY: ${{ vars.MACOS_RELEASE_IDENTITY }}
+          IOS_RELEASE_IDENTITY: ${{ vars.IOS_RELEASE_IDENTITY }}
+        run: |
+          mise exec -- bash scripts/build-release.sh "$RELEASE_VERSION" --build-number "$RELEASE_BUILD_NUMBER" --platform all \
+            --signing-identity "$MACOS_RELEASE_IDENTITY" --ios-signing-identity "$IOS_RELEASE_IDENTITY" \
+            --team-id "$APPLE_TEAM_ID" --notary-profile mergetether-release --ios-export-options "$RUNNER_TEMP/ExportOptions.plist"
+
+      - name: Verify distribution inventory and retain stable macOS names
+        env:
+          RELEASE_VERSION: ${{ steps.version.outputs.version }}
+          RELEASE_BUILD_NUMBER: ${{ github.run_number }}
+        run: |
+          python3 - <<'PYTHON'
+          import hashlib, json, os, pathlib
+          root = pathlib.Path('release')
+          manifest = json.loads((root / 'release-manifest.json').read_text())
+          version = os.environ['RELEASE_VERSION']
+          expected = {f'GitLabTodos-{version}.dmg', f'GitLabTodos-{version}.zip', f'MergeTetheriOS-{version}.ipa'}
+          assert manifest['distributable'] is True
+          assert manifest['version'] == version and manifest['build'] == os.environ['RELEASE_BUILD_NUMBER']
+          assert len(manifest['artifacts']) == 3 and {item['name'] for item in manifest['artifacts']} == expected
+          for item in manifest['artifacts']:
+              with (root / item['name']).open('rb') as source:
+                  hasher = hashlib.sha256()
+                  for chunk in iter(lambda: source.read(1024 * 1024), b''):
+                      hasher.update(chunk)
+                  digest = hasher.hexdigest()
+              assert digest == item['sha256'], 'Artifact digest mismatch'
+              if item['platform'] == 'macos':
+                  item['name'] = 'GitLabTodos' + pathlib.Path(item['name']).suffix
+              (root / (item['name'] + '.sha256')).write_text(digest + '  ' + item['name'] + '\n')
+          (root / 'release-manifest.json').write_text(json.dumps(manifest, indent=2) + '\n')
+          PYTHON
+          cp "release/${APP_NAME}-${RELEASE_VERSION}.dmg" "${APP_NAME}.dmg"
+          cp "release/${APP_NAME}-${RELEASE_VERSION}.zip" "${APP_NAME}.zip"
 
       - name: Create GitHub Release
         env:
@@ -113,20 +205,30 @@ jobs:
             if [ "$HAS_NOTES" = "true" ]; then
               gh release edit "$TAG" --repo "$RELEASE_REPO" --notes-file "$NOTES_FILE"
             fi
-            gh release upload "$TAG" --repo "$RELEASE_REPO" --clobber "${APP_NAME}.dmg" "${APP_NAME}.zip"
+            gh release upload "$TAG" --repo "$RELEASE_REPO" --clobber "${APP_NAME}.dmg" "${APP_NAME}.zip" "release/MergeTetheriOS-${VERSION}.ipa" release/release-manifest.json release/GitLabTodos.dmg.sha256 release/GitLabTodos.zip.sha256 "release/MergeTetheriOS-${VERSION}.ipa.sha256"
           elif [ "$HAS_NOTES" = "true" ]; then
             gh release create "$TAG" \
               --repo "$RELEASE_REPO" \
               --title "$TAG" \
               --notes-file "$NOTES_FILE" \
-              "${APP_NAME}.dmg" "${APP_NAME}.zip"
+              "${APP_NAME}.dmg" "${APP_NAME}.zip" "release/MergeTetheriOS-${VERSION}.ipa" release/release-manifest.json release/GitLabTodos.dmg.sha256 release/GitLabTodos.zip.sha256 "release/MergeTetheriOS-${VERSION}.ipa.sha256"
           else
             gh release create "$TAG" \
               --repo "$RELEASE_REPO" \
               --title "$TAG" \
               --generate-notes \
-              "${APP_NAME}.dmg" "${APP_NAME}.zip"
+              "${APP_NAME}.dmg" "${APP_NAME}.zip" "release/MergeTetheriOS-${VERSION}.ipa" release/release-manifest.json release/GitLabTodos.dmg.sha256 release/GitLabTodos.zip.sha256 "release/MergeTetheriOS-${VERSION}.ipa.sha256"
           fi
+
+      - name: Remove temporary distribution credentials
+        if: always()
+        run: |
+          security delete-keychain "$RUNNER_TEMP/release-signing.keychain-db" >/dev/null 2>&1 || true
+          if [[ -f "$RUNNER_TEMP/profile.plist" ]]; then
+            PROFILE_UUID="$(/usr/libexec/PlistBuddy -c 'Print :UUID' "$RUNNER_TEMP/profile.plist")"
+            rm -f "$HOME/Library/MobileDevice/Provisioning Profiles/${PROFILE_UUID}.mobileprovision"
+          fi
+          rm -f "$RUNNER_TEMP/distribution.p12" "$RUNNER_TEMP/distribution.mobileprovision" "$RUNNER_TEMP/profile.plist" "$RUNNER_TEMP/notary-key.p8" "$RUNNER_TEMP/ExportOptions.plist"
 
   # Updates the Homebrew tap only if HOMEBREW_TAP_TOKEN is configured.
   # Without the token this job fails on checkout, so guard on the secret being

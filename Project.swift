@@ -9,6 +9,8 @@ let project = Project(
     settings: .settings(
         base: [
             "SWIFT_VERSION": "6.0",
+            "MARKETING_VERSION": "1.2.0",
+            "CURRENT_PROJECT_VERSION": "1",
             "LOCALIZATION_PREFERS_STRING_CATALOGS": "YES",
             "STRING_CATALOG_GENERATE_SYMBOLS": "YES",
             "ENABLE_USER_SCRIPT_SANDBOXING": "NO",
@@ -31,6 +33,8 @@ let project = Project(
             deploymentTargets: .iOS("17.0"),
             infoPlist: .extendingDefault(with: [
                 "CFBundleDisplayName": .string("MergeTether"),
+                "CFBundleShortVersionString": .string("$(MARKETING_VERSION)"),
+                "CFBundleVersion": .string("$(CURRENT_PROJECT_VERSION)"),
                 "CFBundleURLTypes": .array([.dictionary([
                     "CFBundleURLName": .string("com.vaporpw.MergeTether.pair"),
                     "CFBundleURLSchemes": .array([.string("mergetether")]),
@@ -41,7 +45,11 @@ let project = Project(
             sources: ["iOS/**/*.swift"],
             resources: ["Resources/MergeActions.xcstrings", "Resources/Remote.xcstrings", "Resources/Board.xcstrings", "Resources/MRHumanAction.xcstrings", "Resources/AuthorFeedback.xcstrings", "Resources/MRDependencies.xcstrings", "Resources/CommentReview.xcstrings", "iOS/Resources/**"],
             dependencies: [.target(name: "MergeTetherRemote")],
-            settings: .settings(base: ["TARGETED_DEVICE_FAMILY": "1,2", "ASSETCATALOG_COMPILER_APPICON_NAME": "AppIcon"])
+            settings: .settings(base: [
+                "TARGETED_DEVICE_FAMILY": "1,2",
+                "ASSETCATALOG_COMPILER_APPICON_NAME": "AppIcon",
+                "PROVISIONING_PROFILE_SPECIFIER": "$(MERGETETHER_IOS_PROVISIONING_PROFILE)",
+            ])
         ),
         .target(
             name: "GitLabTodos",
@@ -53,8 +61,8 @@ let project = Project(
                 "LSUIElement": .boolean(false),
                 "CFBundleDisplayName": .string("MergeTether"),
                 "CFBundleName": .string("MergeTether"),
-                "CFBundleShortVersionString": .string("0.1.0"),
-                "CFBundleVersion": .string("1"),
+                "CFBundleShortVersionString": .string("$(MARKETING_VERSION)"),
+                "CFBundleVersion": .string("$(CURRENT_PROJECT_VERSION)"),
                 "NSHumanReadableCopyright": .string("Copyright © 2026 vaporpw. MIT License."),
             ]),
             sources: ["Sources/**"],

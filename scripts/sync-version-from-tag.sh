@@ -1,12 +1,12 @@
 #!/usr/bin/env bash
-# Syncs Project.swift's CFBundleShortVersionString and CFBundleVersion from a
+# Syncs Project.swift's shared marketing version and build settings from a
 # git tag and renames the CHANGELOG's Unreleased section to the tagged version.
 #
 # Usage:
 #   scripts/sync-version-from-tag.sh v0.2.0
 #
-# - CFBundleShortVersionString: stripped-v semver (e.g. "0.2.0")
-# - CFBundleVersion: incremented monotonically by walking existing tags
+# - MARKETING_VERSION: stripped-v semver (e.g. "0.2.0")
+# - CURRENT_PROJECT_VERSION: reachable semver tag count + 1
 # - CHANGELOG.md: `## Unreleased` renamed to `## 0.2.0 - <today>` and a fresh
 #   `## Unreleased` stub opened above it.
 #
@@ -14,13 +14,18 @@
 
 set -euo pipefail
 
-if [[ $# -lt 1 ]]; then
+if [[ "${1:-}" == --help || "${1:-}" == -h ]]; then
+    echo "Usage: $0 vX.Y.Z (updates shared project defaults and changelog locally; no commits/tags)"
+    exit 0
+fi
+
+if [[ $# -ne 1 ]]; then
     echo "usage: $0 vX.Y.Z" >&2
     exit 1
 fi
 
 TAG="$1"
-if [[ ! "${TAG}" =~ ^v[0-9]+\.[0-9]+\.[0-9]+ ]]; then
+if [[ ! "${TAG}" =~ ^v[0-9]+\.[0-9]+\.[0-9]+$ ]]; then
     echo "error: tag must match vX.Y.Z (got: ${TAG})" >&2
     exit 1
 fi
@@ -42,15 +47,18 @@ fi
 TAG_COUNT="$(git tag --list 'v[0-9]*.[0-9]*.[0-9]*' | wc -l | tr -d ' ')"
 BUILD_NUMBER="$((TAG_COUNT + 1))"
 
-echo "==> Setting CFBundleShortVersionString to ${VERSION}"
-/usr/bin/sed -i '' -E \
-    "s|(\"CFBundleShortVersionString\": \.string\()\"[^\"]+\"(\))|\1\"${VERSION}\"\2|" \
-    "${PROJECT_FILE}"
-
-echo "==> Setting CFBundleVersion to ${BUILD_NUMBER}"
-/usr/bin/sed -i '' -E \
-    "s|(\"CFBundleVersion\": \.string\()\"[^\"]+\"(\))|\1\"${BUILD_NUMBER}\"\2|" \
-    "${PROJECT_FILE}"
+echo "==> Setting shared version ${VERSION} and build ${BUILD_NUMBER}"
+python3 - "${PROJECT_FILE}" "${VERSION}" "${BUILD_NUMBER}" <<'PYTHON'
+from pathlib import Path
+import re, sys
+path = Path(sys.argv[1])
+source = path.read_text()
+for key, value in zip(('MARKETING_VERSION', 'CURRENT_PROJECT_VERSION'), sys.argv[2:]):
+    source, count = re.subn(r'("' + key + r'": ")[^"]+("),', lambda match: match[1] + value + match[2] + ',', source)
+    if count != 1:
+        sys.exit('error: expected one shared ' + key + ' setting; project left unchanged')
+path.write_text(source)
+PYTHON
 
 echo "==> Renaming CHANGELOG Unreleased section to ${VERSION}"
 TODAY="$(date -u +%Y-%m-%d)"

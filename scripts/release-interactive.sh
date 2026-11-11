@@ -13,6 +13,7 @@
 # Args:
 #   --version X.Y.Z  Skip the interactive prompt.
 #   --yes, -y        Non-interactive; assume yes to confirmations.
+#   --platform all|macos  Required release inventory (default: all).
 
 set -euo pipefail
 
@@ -263,28 +264,61 @@ wait_for_release_run_id() {
   return 1
 }
 
-# Accepts either versioned assets (GitLabTodos-<version>.{dmg,zip}) emitted by
-# scripts/build-release.sh, or unversioned ones (GitLabTodos.{dmg,zip}) if the
-# release workflow publishes under stable names.
+# Verify the release record itself, then the required per-platform inventory.
 verify_release_asset() {
-  local owner_repo="$1"
-  local tag="$2"
-  local version="$3"
-  local assets
-
-  assets="$(gh release view "$tag" --repo "$owner_repo" --json assets --jq '.assets[].name')"
-
-  if ! printf '%s\n' "$assets" | grep -qxE "GitLabTodos(-${version})?\.dmg"; then
-    echo "Release exists but no GitLabTodos .dmg asset was found on $tag." >&2
-    echo "Expected 'GitLabTodos-${version}.dmg' or 'GitLabTodos.dmg'." >&2
+  local owner_repo="$1" tag="$2" version="$3" platform="$4" expected_build="$5" evidence
+  evidence="$(mktemp -d)"
+  if ! gh release view "$tag" --repo "$owner_repo" --json tagName,isDraft,url,assets >"$evidence/release.json"; then
+    rm -rf "$evidence"
+    echo "Could not read the published release record." >&2
     return 1
   fi
-
-  if ! printf '%s\n' "$assets" | grep -qxE "GitLabTodos(-${version})?\.zip"; then
-    echo "Release exists but no GitLabTodos .zip asset was found on $tag." >&2
-    echo "Expected 'GitLabTodos-${version}.zip' or 'GitLabTodos.zip'." >&2
+  if ! gh release download "$tag" --repo "$owner_repo" --pattern release-manifest.json --dir "$evidence" >/dev/null; then
+    rm -rf "$evidence"
+    echo "Could not read release-manifest.json; version/build evidence is required." >&2
     return 1
   fi
+  local result=0
+  python3 - "$evidence" "$owner_repo" "$tag" "$version" "$platform" "$expected_build" <<'PYTHON' || result=$?
+import json, pathlib, re, sys
+root = pathlib.Path(sys.argv[1])
+with (root / 'release.json').open() as source:
+    release = json.load(source)
+with (root / 'release-manifest.json').open() as source:
+    manifest = json.load(source)
+repo, tag, version, platform, expected_build = sys.argv[2:]
+expected_url = 'https://github.com/' + repo + '/releases/tag/' + tag
+if release.get('tagName') != tag or release.get('isDraft') is not False or release.get('url') != expected_url:
+    sys.exit('Release is missing, still a draft, or does not match the requested repository/tag URL.')
+if manifest.get('version') != version or manifest.get('distributable') is not True or manifest.get('build') != expected_build:
+    sys.exit('Release manifest does not describe a distributable artifact set for the requested version/build.')
+assets = release.get('assets', [])
+required = [(['GitLabTodos-' + version + '.dmg', 'GitLabTodos.dmg']),
+            (['GitLabTodos-' + version + '.zip', 'GitLabTodos.zip'])]
+if platform == 'all':
+    required.append(['MergeTetheriOS-' + version + '.ipa'])
+selected = []
+for alternatives in required:
+    matches = [asset for asset in assets if asset.get('name') in alternatives]
+    if len(matches) != 1 or not isinstance(matches[0].get('size'), int) or matches[0]['size'] <= 0:
+        sys.exit('Expected exactly one nonempty release asset: ' + ' or '.join(alternatives))
+    selected.append(matches[0]['name'])
+entries = manifest.get('artifacts', [])
+if len(entries) != len(selected) or {entry.get('name') for entry in entries} != set(selected):
+    sys.exit('Release manifest artifact count/names do not match the required platform inventory.')
+if any(not re.fullmatch(r'[a-f0-9]{64}', entry.get('sha256', '')) for entry in entries):
+    sys.exit('Release manifest is missing artifact SHA-256 evidence.')
+print(expected_url)
+PYTHON
+  rm -rf "$evidence"
+  return "$result"
+}
+
+report_incomplete_release() {
+  echo "Release incomplete: tag ${tag} was pushed, but release verification did not finish." >&2
+  echo "Inspect https://github.com/${release_repo}/releases/tag/${tag}" >&2
+  echo "Check with: gh release view ${tag} --repo ${release_repo}" >&2
+  echo "Inspect the existing tag and workflow; do not push the tag again." >&2
 }
 
 read_homebrew_cask() {
@@ -340,15 +374,34 @@ wait_for_homebrew_update() {
 }
 
 main() {
-  local version_arg=""
+  local version_arg="" platform="all"
   while [[ $# -gt 0 ]]; do
     case "$1" in
-      --version) version_arg="${2#v}"; shift 2 ;;
+      --version|--platform)
+        if [[ $# -lt 2 || -z "$2" || "$2" == --* ]]; then
+          echo "Missing value for $1; use --help." >&2; exit 1
+        fi
+        if [[ "$1" == --version ]]; then version_arg="${2#v}"; else platform="$2"; fi
+        shift 2 ;;
+      --help|-h)
+        echo "Usage: $0 --version X.Y.Z [--platform all|macos] [--yes]"
+        echo "Publishes a changelog commit and tag; requires prior authorization. Default verifies macOS and iOS assets."
+        return 0 ;;
       --yes|-y) NON_INTERACTIVE=1; shift ;;
       *) echo "Unknown argument: $1" >&2; echo "Usage: $0 [--version X.Y.Z] [--yes]" >&2; exit 1 ;;
     esac
   done
 
+  if [[ "$platform" != all && "$platform" != macos ]]; then
+    echo "--platform must be all or macos." >&2; exit 1
+  fi
+  if [[ -z "$version_arg" && ( "$NON_INTERACTIVE" -eq 1 || ! -t 0 ) ]]; then
+    echo "--version X.Y.Z is required without an interactive terminal." >&2; exit 1
+  fi
+  if [[ "$NON_INTERACTIVE" -eq 0 && ! -t 0 ]]; then
+    echo "Use --yes with --version for explicitly authorized non-interactive publication." >&2; exit 1
+  fi
+  require_cmd python3
   require_cmd git
   require_cmd gh
   require_cmd sed
@@ -486,7 +539,8 @@ main() {
   echo "- Create and push annotated tag: $tag"
   echo "- Current source commit: $commit"
   echo "- Watch workflow in ${source_repo}: $RELEASE_WORKFLOW_NAME"
-  echo "- Verify GitHub release in ${release_repo} contains GitLabTodos .dmg and .zip"
+  echo "- Verify published release in ${release_repo} contains macOS .dmg/.zip (platform: ${platform})"
+  [[ "$platform" != all ]] || echo "- Verify separate MergeTetheriOS-${version}.ipa distribution artifact"
   if [[ -n "$tap_repo" ]]; then
     echo "- Verify Homebrew tap ${tap_repo} points to version ${version}"
   fi
@@ -544,8 +598,7 @@ main() {
         echo "Workflow '${RELEASE_WORKFLOW_NAME}' is not configured in ${source_repo}." >&2
         ;;
     esac
-    echo "Release incomplete: tag ${tag} was pushed, but workflow/release/Homebrew verification did not finish." >&2
-    echo "Inspect the existing tag and workflow; do not push the tag again." >&2
+    report_incomplete_release
     echo "Check with: gh run list --workflow \"${RELEASE_WORKFLOW_NAME}\" --repo ${source_repo}" >&2
     echo "Check with: gh release view ${tag} --repo ${release_repo}" >&2
     exit 1
@@ -557,17 +610,32 @@ main() {
   if [[ -z "$run_id" ]]; then
     echo "Could not find the '${RELEASE_WORKFLOW_NAME}' run for tag ${tag}." >&2
     echo "Check manually with: gh run list --workflow \"${RELEASE_WORKFLOW_NAME}\" --repo ${source_repo}" >&2
+    report_incomplete_release
     exit 1
   fi
 
   echo "Watching workflow run $run_id..."
-  gh run watch "$run_id" --repo "$source_repo" --exit-status
+  if ! gh run watch "$run_id" --repo "$source_repo" --exit-status; then
+    report_incomplete_release
+    exit 1
+  fi
 
+  local expected_build
+  expected_build="$(gh run view "$run_id" --repo "$source_repo" --json number --jq '.number')" || {
+    report_incomplete_release
+    exit 1
+  }
+  if [[ ! "$expected_build" =~ ^[1-9][0-9]*$ ]]; then
+    echo "Could not read the successful workflow's build number." >&2
+    report_incomplete_release
+    exit 1
+  fi
   echo "Verifying GitHub release assets in ${release_repo}..."
-  verify_release_asset "$release_repo" "$tag" "$version"
-
   local release_url
-  release_url="$(gh release view "$tag" --repo "$release_repo" --json url --jq '.url')"
+  if ! release_url="$(verify_release_asset "$release_repo" "$tag" "$version" "$platform" "$expected_build")"; then
+    report_incomplete_release
+    exit 1
+  fi
 
   if [[ -z "$tap_repo" ]]; then
     echo

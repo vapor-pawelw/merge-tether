@@ -6,6 +6,15 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 
 ## Unreleased
 
+- Restore manual merge actions when GitLab's list omits permissions or pipeline details, using the matching checked MR status and explaining remaining blockers.
+- Keep routine background revalidation from flashing verification warnings, distinguish missing automation consent and link directly to Automation settings.
+- Simplify automation controls with explicit publication modes, preserved advanced filters and clearer independent delivery permissions.
+- Show consistent AI, AI uncertain and Human badges on comments and fully classified threads; keep mixed or unclassified thread origins unstated.
+- Share pending-draft polling between Board and Inbox, decode its responses off the main actor, avoid unchanged evidence updates and lazily build list rows.
+- Reduce repeated discussion indexing and timestamp parsing, and give iOS cards, Details and private drafts a clearer visual hierarchy.
+- Require remote cryptographic protocol v2 and a fresh pairing on both apps, with expiring invitations, device-key trust, durable command recovery and explicit phone approval confirmation.
+- Use consistent 1.2.0 version metadata and separate platform artifacts, with explicit distribution signing, notarization and release verification.
+
 - Recognize source- and target-bound merge train rebase failures even when GitLab reports a mergeable MR; show the server cause, hold repeat submissions and route separately authorized conflict preparation without losing uncertain-attempt protection.
 
 - Give MR Details a clearer hierarchy, more readable conversation text and a grouped discussion list, with quieter section surfaces and dependency information above header actions.
