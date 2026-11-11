@@ -8,9 +8,10 @@ struct AutomationSettingsTab: View {
     @State private var draft: AutomationSettings
     @State private var trigger: Trigger = .reviewRequested
     @State private var page: Page = .checkpoints
-    @State private var packageChoice: AutomationPackageChoice?
     @State private var isChoosingWorkspace = false
     @State private var setupAction: SetupAction?
+    @State private var sessionCustom: AutomationProfileSnapshot?
+    @State private var saveState: AutomationSettingsSaveState
     private enum SetupAction: String, Identifiable {
         case enableVerification, apply
         var id: String { rawValue }
@@ -19,8 +20,10 @@ struct AutomationSettingsTab: View {
     init(monitor: TodoMonitorService, initialPage: Page = .checkpoints) {
         self.monitor = monitor
         _page = State(initialValue: initialPage)
-        _draft = State(initialValue: monitor.settings.automation)
-        _packageChoice = State(initialValue: monitor.settings.automation.matchingPreset)
+        let accepted = monitor.settings.acceptedAutomation
+        _draft = State(initialValue: accepted)
+        _saveState = State(initialValue: .init(accepted: accepted, runtimeSavePending: accepted != monitor.settings.automation))
+        _sessionCustom = State(initialValue: monitor.settings.automationProfileHistory.available(for: accepted))
     }
 
     var body: some View {
@@ -41,6 +44,10 @@ struct AutomationSettingsTab: View {
         }
         .onChange(of: settings.automation.scope) { _, current in
             draft.scope = current
+            saveState.updateSavedScope(settings.acceptedAutomation.scope)
+        }
+        .onChange(of: draft) { _, current in
+            if let custom = AutomationProfileSnapshot.custom(from: current) { sessionCustom = custom }
         }
         .onChange(of: settings.automation.hasEnabledAutomation) { _, enabled in
             if !enabled, page == .scope { page = .checkpoints }
@@ -81,7 +88,9 @@ struct AutomationSettingsTab: View {
                 Divider()
 
                 HStack(alignment: .center, spacing: 16) {
-                    if hasIncompleteRule {
+                    if saveState.failed {
+                        Text(.AutomationProfiles.saveFailed).foregroundStyle(.red).font(.caption)
+                    } else if hasIncompleteRule {
                         Text(.Settings.settingsAutomationIncomplete)
                             .foregroundStyle(.red)
                             .font(.caption)
@@ -94,14 +103,21 @@ struct AutomationSettingsTab: View {
                     Spacer(minLength: 0)
 
                     Button {
-                        if draft.usesAssistant || draft.autoReReviewEnabled || draft.autoMergeEnabled
+                        draft = saveState.revert()
+                        sessionCustom = settings.automationProfileHistory.available(for: draft)
+                    } label: { Text(.AutomationProfiles.revert) }
+                    .disabled(draft == saveState.accepted && sessionCustom == settings.automationProfileHistory.available(for: saveState.accepted) && !saveState.failed)
+
+                    Button {
+                        if draft != settings.automation && (draft.usesAssistant || draft.autoReReviewEnabled || draft.autoMergeEnabled
                             || draft.autoApproveEnabled || draft.publishDraftsWithoutConfirmation
-                            || draft.publishAIRepliesWithoutConfirmation { setupAction = .apply }
+                            || draft.publishAIRepliesWithoutConfirmation) { setupAction = .apply }
                         else { applyDraft() }
                     } label: {
                         Text(.Settings.settingsAutomationApply)
                     }
-                    .disabled((draft == settings.automation) || hasIncompleteRule)
+                    .disabled(!saveState.canApply(draft: draft, custom: sessionCustom,
+                        savedCustom: settings.automationProfileHistory.lastGood) || hasIncompleteRule)
                 }
                 .padding(.horizontal, 20)
                 .padding(.vertical, 12)
@@ -118,8 +134,17 @@ struct AutomationSettingsTab: View {
     }
 
     private func applyDraft() {
+        let custom = AutomationProfileSnapshot.custom(from: draft) ?? sessionCustom
+        saveState.begin()
         settings.automation = draft.preservingScope(from: settings.automation)
-        monitor.applySettings()
+        let saved = monitor.applySettings()
+        saveState.runtimeSaved(settings.automation, succeeded: saved)
+        guard saved else { return }
+        if let custom {
+            let historySaved = settings.automationProfileHistory.save(custom)
+            saveState.historySaved(succeeded: historySaved)
+            if historySaved { sessionCustom = custom }
+        } else { saveState.historySaved(succeeded: true) }
     }
 
     private var hasIncompleteRule: Bool {
@@ -129,14 +154,26 @@ struct AutomationSettingsTab: View {
     private var checkpointFields: some View {
         Group {
             preparationFields
+            MergeWorkflowPermissionSettingsSection(rules: $draft.workflowRules)
             publicationFields
             deliveryFields
             completionFields
         }
+        .disabled(!draft.hasAutomaticActionConsent)
     }
 
     private var preparationFields: some View {
         Section {
+            Toggle(isOn: $draft.reviewRequested.isEnabled) { Text(.Settings.settingsAutomationReviewRequested) }
+                .toggleStyle(.checkbox).disabled(draft.reviewRequested.runner == .shell)
+            Toggle(isOn: $draft.authorFeedback.isEnabled) { Text(.Settings.settingsAutomationAuthorFeedback) }
+                .toggleStyle(.checkbox).disabled(draft.authorFeedback.runner == .shell)
+            Toggle(isOn: Binding(get: { draft.autoVerifyReReview }, set: { enabled in
+                if enabled { setupAction = .enableVerification }
+                else { draft.autoVerifyReReview = false }
+            })) { Text(.Settings.settingsVerificationEnabled) }
+                .toggleStyle(.checkbox)
+            Text(.Settings.settingsVerificationHelp).font(.caption).foregroundStyle(.secondary)
             checkpointToggle($draft.autoClaimPipelineFailures, .Settings.settingsAutomationPipelineOwnership,
                              help: .Settings.settingsAutomationPipelineOwnershipHelp, reset: .pipelineOwnership)
             VStack(alignment: .leading, spacing: 4) {
@@ -253,6 +290,14 @@ struct AutomationSettingsTab: View {
                 }
             }
 
+            DisclosureGroup {
+                Toggle(isOn: $draft.reviewRequested.markDoneOnSuccess) { Text(.AutomationProfiles.reviewHandlerAcknowledgement) }
+                    .toggleStyle(.checkbox)
+                Toggle(isOn: $draft.authorFeedback.markDoneOnSuccess) { Text(.AutomationProfiles.feedbackHandlerAcknowledgement) }
+                    .toggleStyle(.checkbox)
+                Text(.AutomationProfiles.handlerAcknowledgementHelp).font(.caption).foregroundStyle(.secondary)
+            } label: { Text(.AutomationProfiles.handlerAcknowledgements) }
+
         } header: { Text(.EffectivePolicy.settingsCompletion) }
         footer: {
             VStack(alignment: .leading, spacing: 4) {
@@ -283,34 +328,41 @@ struct AutomationSettingsTab: View {
     @ViewBuilder
     private var packageFields: some View {
         Section {
-            if draft.matchingPreset == nil {
-                Text(.AutomationProfiles.customizedTitle).font(.caption.weight(.semibold))
-                Text(draft.baselinePreset == .checkpoints ? .AutomationProfiles.legacyHelp : .AutomationProfiles.customizedHelp)
-                    .font(.caption).foregroundStyle(.secondary)
+            VStack(alignment: .leading, spacing: 12) {
+                Text(.Settings.settingsAutomationPackageTitle).font(.headline)
+                AutomationSettingsProfilePicker(draft: $draft, lastCustom: $sessionCustom,
+                    canUseAutomatic: monitor.availableAssistants.contains(draft.assistant))
+                    .controlSize(.large)
+                if let preset = draft.matchingPreset {
+                    AutomationPresetDescription(preset: preset)
+                } else if draft.packageDecision == .undecided {
+                    Text(.AutomationProfiles.chooseHelp).font(.caption).foregroundStyle(.secondary)
+                } else {
+                    Text(.AutomationProfiles.customizedTitle).font(.caption.weight(.semibold))
+                    AutomationCustomProfileDescription(configuration: draft)
+                    Text(draft.baselinePreset == .checkpoints ? .AutomationProfiles.legacyHelp : .AutomationProfiles.customizedHelp)
+                        .font(.caption).foregroundStyle(.secondary)
+                }
+                if settings.automationProfileHistory.failure == .read {
+                    Text(.AutomationProfiles.historyReadFailed).font(.caption).foregroundStyle(.secondary)
+                }
             }
-            if let packageChoice {
-                Text(.AutomationProfiles.previewTitle).font(.caption.weight(.semibold))
-                AutomationPresetDescription(preset: packageChoice)
+            .padding(12).frame(maxWidth: .infinity, alignment: .leading)
+            .background(Color.accentColor.opacity(0.06), in: RoundedRectangle(cornerRadius: 8))
+            PersistenceDegradedBanner(settings: settings)
+            Toggle(isOn: Binding(get: { draft.packageDecision == .enabled }, set: { draft.packageDecision = $0 ? .enabled : .disabled })) {
+                Text(.AutomationProfiles.automationEnabled)
+            }
+            .toggleStyle(.checkbox)
+            if !draft.hasAutomaticActionConsent {
+                Text(.AutomationProfiles.enableFirst).font(.caption).foregroundStyle(.secondary)
             }
             Toggle(isOn: Binding(get: { !draft.allowAutomaticPublicActions }, set: { draft.allowAutomaticPublicActions = !$0 })) {
                 Text(.AutomationProfiles.privateToggle)
             }
             .toggleStyle(.checkbox)
+            .disabled(!draft.hasAutomaticActionConsent)
             Text(.AutomationProfiles.privateHelp).font(.caption).foregroundStyle(.secondary)
-            HStack {
-                AutomationPackagePicker(
-                    selection: $packageChoice, canUseAutomatic: monitor.availableAssistants.contains(draft.assistant)
-                )
-                .help(Text(packageChoice?.explanation ?? .Settings.settingsAutomationPackageHelp))
-                Button {
-                    if let packageChoice {
-                        let assistant = draft.assistant
-                        packageChoice.apply(to: &draft, assistant: assistant)
-                    }
-                } label: { Text(.Settings.settingsAutomationPackageUseSelection) }
-                    .disabled(packageChoice == nil || (packageChoice?.requiresCLI == true
-                        && !monitor.availableAssistants.contains(draft.assistant)))
-            }
         }
     }
 
@@ -333,11 +385,6 @@ struct AutomationSettingsTab: View {
         }
 
         Section {
-            Toggle(isOn: Binding(get: { draft.autoVerifyReReview }, set: { enabled in
-                if enabled { setupAction = .enableVerification }
-                else { draft.autoVerifyReReview = false }
-            })) { Text(.Settings.settingsVerificationEnabled) }
-                .toggleStyle(.checkbox)
             Text(.Settings.settingsVerificationHelp).font(.caption).foregroundStyle(.secondary)
             if draft.assistant == .codex {
                 Picker(selection: $draft.codexVerificationModel) {
@@ -427,11 +474,7 @@ struct AutomationSettingsTab: View {
                 Text(.Settings.settingsAutomationTrigger)
             }
 
-            Toggle(isOn: rule.isEnabled) {
-                Text(.Settings.settingsAutomationEnable)
-            }
-            .toggleStyle(.checkbox)
-            .disabled(rule.wrappedValue.runner == .shell)
+            Text(.AutomationProfiles.permissionsLocation).font(.caption).foregroundStyle(.secondary)
 
             Picker(selection: rule.runner) {
                 Text(.Settings.settingsAutomationRunnerAssistant)

@@ -46,6 +46,38 @@ struct AutomationPresetDescription: View {
     }
 }
 
+struct AutomationCustomProfileDescription: View {
+    let configuration: AutomationSettings
+
+    var publicSummary: LocalizedStringResource? {
+        guard configuration.hasAutomaticPublicActionConsent else { return nil }
+        func status(_ enabled: Bool) -> String {
+            String(localized: enabled ? .AutomationProfiles.automatic : .AutomationProfiles.manualAction)
+        }
+        return .AutomationProfiles.customPublicSummary(status(configuration.autoApproveEnabled),
+            status(configuration.allowFollowUpPush),
+            status(configuration.allowConflictPush && configuration.conflictTasksEnabled && configuration.allowAssistantTools),
+            status(configuration.autoMergeEnabled))
+    }
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 6) {
+            if !configuration.hasAutomaticActionConsent {
+                Text(.AutomationProfiles.manualHelp)
+            } else if let publicSummary {
+                Text(configuration.publicationMode == .all ? .PublicationPolicy.publicationAutomaticAllHelp
+                    : configuration.publicationMode == .filtered && !configuration.publicationRestrictions.hasConditions
+                        ? .PublicationPolicy.publicationNoConditions : configuration.publicationMode.explanation)
+                Text(publicSummary)
+            } else {
+                Text(.AutomationProfiles.customPrivateHelp)
+            }
+        }
+        .font(.caption).foregroundStyle(.secondary)
+        .fixedSize(horizontal: false, vertical: true)
+    }
+}
+
 extension AutomationPublicationMode {
     var title: LocalizedStringResource {
         switch self {
@@ -81,6 +113,46 @@ struct AutomationPackagePicker: View {
         } label: {
             Text(.Settings.settingsAutomationPackageTitle)
         }
+    }
+}
+
+struct AutomationSettingsProfilePicker: View {
+    enum Selection: Hashable { case preset(AutomationPreset), custom }
+    @Binding var draft: AutomationSettings
+    @Binding var lastCustom: AutomationProfileSnapshot?
+    let canUseAutomatic: Bool
+    var hasCustomOption: Bool { lastCustom != nil || AutomationProfileSnapshot.custom(from: draft) != nil }
+
+    static func selection(for draft: Binding<AutomationSettings>, lastCustom: Binding<AutomationProfileSnapshot?>) -> Binding<Selection?> {
+        Binding(get: {
+            if let preset = draft.wrappedValue.matchingPreset { return .preset(preset) }
+            return AutomationProfileSnapshot.custom(from: draft.wrappedValue) == nil ? nil : .custom
+        }, set: { selection in
+            guard let selection else { return }
+            var updated = draft.wrappedValue
+            switch selection {
+            case .preset(let preset):
+                lastCustom.wrappedValue = AutomationProfileSnapshot.custom(from: updated) ?? lastCustom.wrappedValue
+                updated.applyPreset(preset, for: updated.assistant)
+            case .custom:
+                guard let snapshot = lastCustom.wrappedValue ?? AutomationProfileSnapshot.custom(from: updated) else { return }
+                snapshot.apply(to: &updated)
+            }
+            draft.wrappedValue = updated
+        })
+    }
+
+    var body: some View {
+        Picker(selection: Self.selection(for: $draft, lastCustom: $lastCustom)) {
+            Text(.Settings.settingsAutomationPackageChoose).tag(nil as Selection?).disabled(true)
+            ForEach(AutomationPreset.allCases, id: \.self) { preset in
+                Text(preset.title).tag(Selection.preset(preset) as Selection?)
+                    .disabled(preset.requiresCLI && !canUseAutomatic)
+            }
+            if hasCustomOption {
+                Text(.AutomationProfiles.customizedTitle).tag(Selection.custom as Selection?)
+            }
+        } label: { Text(.Settings.settingsAutomationPackageTitle) }
     }
 }
 

@@ -9,6 +9,8 @@ final class SettingsManager {
     @ObservationIgnored var commentReviewRevisions: [MRAutomationScope.Target: UInt64] = [:]
     private let defaults: UserDefaults
     let persistenceStore: DurableSettingsStore
+    let automationProfileHistory: AutomationProfileHistoryStore
+    private(set) var acceptedAutomation: AutomationSettings
     /// Convenience caches are preserved and diagnosed without stopping MR actions.
     var persistenceDegraded: Set<String> {
         Set(persistenceStore.failures.keys).subtracting(Self.conveniencePersistenceKeys)
@@ -67,11 +69,14 @@ final class SettingsManager {
         self.defaults = defaults
         let store = DurableSettingsStore(defaults: defaults)
         persistenceStore = store
+        automationProfileHistory = AutomationProfileHistoryStore(defaults: defaults)
         Self.registerDefaults(in: defaults)
         conversationDestination = defaults.string(forKey: Key.conversationDestination)
             .flatMap(AssistantContextLauncher.Destination.init(rawValue:)) ?? .codexApp
 
-        automation = store.load(Key.automation, fallback: AutomationSettings())
+        let loadedAutomation = store.load(Key.automation, fallback: AutomationSettings())
+        automation = loadedAutomation
+        acceptedAutomation = loadedAutomation
         mergeSubmissions = store.load(Key.mergeSubmissions, fallback: [])
         automationReceipts = store.load(Key.automationReceipts, fallback: [])
         automationAttemptReceipts = store.load(Key.automationAttemptReceipts, fallback: [])
@@ -134,7 +139,8 @@ final class SettingsManager {
         mrLifecycleLedger.prepareFinishedRemoval()
     }
 
-    func save() {
+    @discardableResult
+    func save() -> Bool {
         persistenceStore.preserveCorruptValues()
         persistenceStore.save(pendingCommentReviews, forKey: Key.pendingCommentReviews)
         persistenceStore.save(commentReviewProgress, forKey: Key.commentReviewProgress)
@@ -192,10 +198,13 @@ final class SettingsManager {
         persistenceStore.save(mergeSubmissions, forKey: Key.mergeSubmissions)
         persistenceStore.save(autoMergeOptOuts, forKey: Key.autoMergeOptOuts)
         let synchronized = persistenceStore.synchronize()
+        let accepted = automationSaved && synchronized
+        if accepted { acceptedAutomation = automation }
         if automationSaved && synchronized {
             lastSavedAutomation = automation
             if previousAutomation != automation { onAutomationChanged?(previousAutomation) }
         }
+        return accepted
     }
 
     func saveMergeSubmission(_ receipt: MergeSubmissionReceipt) -> Bool {

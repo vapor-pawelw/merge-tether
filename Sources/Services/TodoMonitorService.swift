@@ -1158,12 +1158,14 @@ final class TodoMonitorService {
         boardAttentionPresenter.updateAttention(pendingUserAttention)
     }
 
-    func applySettings() {
+    @discardableResult
+    func applySettings() -> Bool {
         if let host = glab.resolvedHost, let username = glab.currentUsername {
             settings.mrLifecycleLedger.prepareFinishedRemoval(host: host, username: username)
         }
-        settings.save()
+        let saved = settings.save()
         boardAttentionPresenter.updateAttention(pendingUserAttention)
+        return saved
     }
 
     var lifecycleCompletions: [MergeRequestLifecycleLedger.CompletionReceipt] {

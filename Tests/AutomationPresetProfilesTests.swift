@@ -1,8 +1,107 @@
 import Foundation
+import SwiftUI
 import Testing
 @testable import GitLabTodos
 
 struct AutomationPresetProfilesTests {
+    @MainActor @Test func choosingASettingsProfileFillsOnlyTheDraftAndReadingMatchingStateNeverReappliesIt() throws {
+        let suite = "DraftProfileSelection.\(UUID())"
+        let defaults = try #require(UserDefaults(suiteName: suite))
+        defer { defaults.removePersistentDomain(forName: suite) }
+        let live = SettingsManager(defaults: defaults)
+        live.automation.applyPreset(.manual, for: .codex)
+        live.automation.codexReviewModel = .terra
+        live.automation.authorFeedback.promptTemplate = "Keep custom instructions"
+        live.automation.scope.mode = .selected
+        live.save()
+        let saved = live.automation
+        let persisted = defaults.data(forKey: "automation")
+        var draft = saved
+        var custom: AutomationProfileSnapshot?
+        var draftWrites = 0
+        let selection = AutomationSettingsProfilePicker.selection(for: Binding(get: { draft }, set: {
+            draft = $0
+            draftWrites += 1
+        }), lastCustom: Binding(get: { custom }, set: { custom = $0 }))
+        selection.wrappedValue = .preset(.trusted)
+        #expect(draft.autoApproveEnabled && draft.allowFollowUpPush && !draft.autoMergeEnabled)
+        #expect(draft.publicationMode == .aiReplies && selection.wrappedValue == .preset(.trusted))
+        #expect(draftWrites == 1 && live.automation == saved && defaults.data(forKey: "automation") == persisted)
+        draft.autoMergeEnabled = true
+        #expect(selection.wrappedValue == .custom)
+        draft.publicationMode = .all
+        #expect(selection.wrappedValue == .preset(.full) && draft.baselinePreset == .trusted)
+        for _ in 0..<5 { _ = selection.wrappedValue }
+        #expect(draftWrites == 1)
+        selection.wrappedValue = nil
+        #expect(draftWrites == 1)
+        #expect(draft.codexReviewModel == .terra && draft.authorFeedback.promptTemplate == "Keep custom instructions")
+        #expect(draft.scope.mode == .selected && live.automation == saved)
+        #expect(defaults.data(forKey: "automation") == persisted)
+    }
+    @Test(arguments: [AutomationPreset.manual, .safe, .trusted, .full])
+    func profileMatchingUsesEffectiveSettingsWithoutRewritingTheBaseline(_ preset: AutomationPreset) throws {
+        var settings = AutomationSettings()
+        settings.applyPreset(preset, for: .codex)
+        for baseline in [AutomationPreset.checkpoints, .full] {
+            settings.baselinePreset = baseline
+            let before = settings
+            #expect(settings.matchingPreset == preset)
+            #expect(settings == before && settings.baselinePreset == baseline)
+        }
+        settings.baselinePreset = nil
+        #expect(settings.matchingPreset == preset && settings.baselinePreset == nil)
+        let restored = try JSONDecoder().decode(AutomationSettings.self, from: JSONEncoder().encode(settings))
+        #expect(restored.matchingPreset == preset && restored.baselinePreset == nil)
+    }
+
+    @Test func noConsentHasNoProfileAndCannotBeMistakenForManual() {
+        var settings = AutomationSettings()
+        #expect(settings.packageDecision == .undecided && settings.matchingPreset == nil)
+        settings.baselinePreset = .manual
+        #expect(settings.matchingPreset == nil)
+        #expect(AutomationPreset(rawValue: "custom") == nil)
+    }
+
+    @MainActor @Test func freshSettingsAndPublicProfilesDoNotInventACustomOption() {
+        var draft = AutomationSettings()
+        let binding = Binding(get: { draft }, set: { draft = $0 })
+        let settings = AutomationSettingsProfilePicker(draft: binding, lastCustom: .constant(nil), canUseAutomatic: true)
+        #expect(!settings.hasCustomOption)
+        for preset in AutomationPreset.allCases {
+            draft.applyPreset(preset, for: .codex)
+            #expect(!settings.hasCustomOption)
+        }
+        draft.applyPreset(.trusted, for: .codex)
+        draft.allowFollowUpPush = false
+        #expect(settings.hasCustomOption)
+        #expect(AutomationPreset.allCases.count == 4)
+    }
+
+    @MainActor @Test func customSummaryDoesNotDescribeDormantPublicFlagsAsAutomaticPermissions() {
+        var configuration = AutomationSettings()
+        configuration.applyPreset(.full, for: .codex)
+        configuration.allowAutomaticPublicActions = false
+        #expect(AutomationCustomProfileDescription(configuration: configuration).publicSummary == nil)
+        configuration.allowAutomaticPublicActions = true
+        configuration.packageDecision = .disabled
+        #expect(AutomationCustomProfileDescription(configuration: configuration).publicSummary == nil)
+        configuration.packageDecision = .enabled
+        #expect(AutomationCustomProfileDescription(configuration: configuration).publicSummary != nil)
+    }
+
+    @MainActor @Test(arguments: [false, true], [false, true])
+    func customConflictPushSummaryRequiresBothPreparationAndToolPermission(_ preparation: Bool, _ tools: Bool) throws {
+        var configuration = AutomationSettings()
+        configuration.applyPreset(.full, for: .codex)
+        configuration.conflictTasksEnabled = preparation
+        configuration.allowAssistantTools = tools
+        let summary = try #require(AutomationCustomProfileDescription(configuration: configuration).publicSummary)
+        let automatic = String(localized: .AutomationProfiles.automatic)
+        let conflict = String(localized: preparation && tools ? .AutomationProfiles.automatic : .AutomationProfiles.manualAction)
+        let expected = String(localized: .AutomationProfiles.customPublicSummary(automatic, automatic, conflict, automatic))
+        #expect(String(localized: summary) == expected)
+    }
     @Test func fourPublicChoicesKeepTheLegacyProfileOutOfThePicker() {
         #expect(AutomationPreset.allCases == [.manual, .safe, .trusted, .full])
         #expect(AutomationPreset.onboardingDefault(for: .undecided) == .full)

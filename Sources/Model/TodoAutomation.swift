@@ -420,19 +420,24 @@ struct AutomationSettings: Codable, Equatable, Sendable {
     }
 
     var matchingPreset: AutomationPreset? {
-        guard let baselinePreset, AutomationPreset.allCases.contains(baselinePreset) else { return nil }
-        if baselinePreset == .manual, packageDecision == .disabled { return .manual }
-        if baselinePreset != .manual, reviewRequested.runner != .assistant || authorFeedback.runner != .assistant { return nil }
+        guard packageDecision != .undecided else { return nil }
+        if packageDecision == .disabled { return .manual }
+        guard reviewRequested.runner == .assistant, authorFeedback.runner == .assistant else { return nil }
+        return AutomationPreset.allCases.first { matchesPreset($0) }
+    }
+
+    private func matchesPreset(_ preset: AutomationPreset) -> Bool {
         var actual = self
         var expected = self
-        expected.applyPreset(baselinePreset, for: assistant)
+        expected.applyPreset(preset, for: assistant)
+        expected.baselinePreset = baselinePreset
         expected.publicationRestrictions = publicationRestrictions
         actual.publicationMode = publicationMode
         if !hasAutomaticPublicActionConsent && !expected.hasAutomaticPublicActionConsent {
             actual.removePublicPermissions()
             expected.removePublicPermissions()
         }
-        return expected == actual ? baselinePreset : nil
+        return expected == actual
     }
 
     private mutating func removePublicPermissions() {
