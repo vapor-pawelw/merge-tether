@@ -4,7 +4,7 @@ import Foundation
 /// Supplied evidence is supplementary; absent proof must produce `uncertain`.
 enum ReReviewVerifier {
     enum VerificationError: Error, Equatable { case unavailable, failed, incompleteEvidence }
-    static let policyVersion = "covered-review-summaries-7"
+    static let policyVersion = "covered-review-summaries-8"
 
     static let schema = #"{"type":"object","additionalProperties":false,"properties":{"notes":{"type":"array","items":{"type":"object","additionalProperties":false,"properties":{"noteID":{"type":"integer"},"state":{"type":"string","enum":["addressed","informational","blocking","uncertain"]},"reason":{"type":"string"},"summary":{"type":"string","minLength":1,"maxLength":200},"acceptanceNoteID":{"type":["integer","null"]},"publishedReplyNoteID":{"type":["integer","null"]},"informationalAcknowledgementSafe":{"type":"boolean"},"informationalPurpose":{"type":"string","enum":["concreteCodeReviewFeedback","reviewSummary","automatedReviewReport","other"]}},"required":["noteID","state","reason","summary","acceptanceNoteID","publishedReplyNoteID","informationalAcknowledgementSafe","informationalPurpose"]}}},"required":["notes"]}"#
 
@@ -240,7 +240,8 @@ enum ReReviewVerifier {
             informational thread; it never approves a reviewer or accepts their other findings.
             Other threads do not prevent acknowledging this independently pure informational one.
             Do not add reactions or resolve threads yourself. When unsure, return false.
-            Separately classify informationalPurpose from the note's content, without inferring the
+            Classify informationalPurpose independently of state, including addressed, informational,
+            blocking and uncertain. Use the note's content, without inferring the
             posting account's identity or whether a human used AI to write it. Return
             concreteCodeReviewFeedback for specific, concrete feedback about code behavior, a finding,
             or its verified correction; code references alone do not qualify a general summary.
@@ -253,7 +254,7 @@ enum ReReviewVerifier {
             Merely mentioning AI assistance,
             polished prose, tables or an AI-authorship assessment is not automated-process provenance.
             Concrete feedback remains concreteCodeReviewFeedback even when an automated process posted
-            it. Return other for unrelated purposes, non-informational states or unclear purpose.
+            it. Return other for unrelated purposes or unclear purpose.
             Purpose never makes an unsafe thread safe and never grants reviewer acceptance.
             addressed: the current diff, title or description proves the requested correction in that
             artifact, or a substantive reply explains

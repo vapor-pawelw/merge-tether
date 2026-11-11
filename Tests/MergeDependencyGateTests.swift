@@ -4,6 +4,31 @@ import Testing
 
 @MainActor
 struct MergeDependencyGateTests {
+    @Test(arguments: ["hidden", "failed", "opened", "merged"])
+    func skippedChecksStayNeutralUntilAnEligibleMRRequiresFreshDependencyEvidence(_ state: String) async throws {
+        let fixture = try Fixture()
+        defer { fixture.close() }
+        fixture.mergeStatus = "not_approved"
+        fixture.dependencyState = state
+        try await fixture.poll()
+        let skipped = try #require(fixture.monitor.requests.first)
+        #expect(skipped.dependencyReadiness == .notChecked)
+        #expect(skipped.dependencyReadiness.holdReason == nil && !skipped.blockers.contains(.dependencyEvidence))
+        #expect(skipped.blockers.contains(.approvals) && !skipped.mayAutoMerge && !skipped.mayMergeManually)
+        #expect(!fixture.gitlab.requests.contains { $0.endpoint.contains("/blocks?") })
+        #expect(fixture.merged.isEmpty)
+
+        fixture.mergeStatus = "mergeable"
+        try await fixture.poll()
+        #expect(fixture.gitlab.requests.contains { $0.endpoint.contains("/blocks?") })
+        #expect(fixture.merged == (state == "merged" ? [2] : []))
+        if state != "merged" {
+            let checked = try #require(fixture.monitor.requests.first)
+            #expect(checked.dependencyReadiness.holdReason != nil)
+            #expect(checked.blockers.contains(state == "opened" ? .dependencies : .dependencyEvidence))
+        }
+    }
+
     @Test(arguments: ["opened", "closed", "locked", "unknown", "merged", "hidden", "failed", "laterPage"])
     func mergeBoundaryRequiresEveryDependencyToBeVerifiablyMerged(_ state: String) async throws {
         let fixture = try Fixture()
@@ -151,6 +176,7 @@ struct MergeDependencyGateTests {
         var includeParent = false
         var childTarget = "main"
         var childHead = String(repeating: "a", count: 40)
+        var mergeStatus = "mergeable"
         var stackUnavailable = false
         var defaultBranchUnavailable = false
         var stackContextStale = false
@@ -223,7 +249,7 @@ struct MergeDependencyGateTests {
              "source_project_id": 1, "target_project_id": 1, "source_branch": iid == 1 ? "base" : "part-\(iid)",
              "target_branch": iid == 2 ? childTarget : "main", "state": iid == 1 ? parentState ?? "opened" : "opened",
              "sha": iid == 2 ? childHead : String(repeating: "a", count: 40), "draft": false,
-             "detailed_merge_status": "mergeable", "has_conflicts": false, "user": ["can_merge": true]]
+             "detailed_merge_status": mergeStatus, "has_conflicts": false, "user": ["can_merge": true]]
         }
 
         func merge() async throws {

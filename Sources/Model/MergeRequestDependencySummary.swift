@@ -43,11 +43,11 @@ struct MergeRequestDependencySummary: Equatable, Sendable {
     let issues: Set<Issue>
 
     enum MergeReadiness: Sendable {
-        case ready, waitingForDependencies, reviewStackTarget, unavailable
+        case notChecked, ready, waitingForDependencies, reviewStackTarget, unavailable
 
         var holdReason: LocalizedStringResource? {
             switch self {
-            case .ready: nil
+            case .notChecked, .ready: nil
             case .waitingForDependencies: .MRDependencies.mrDependenciesMergeWaiting
             case .reviewStackTarget: .MRDependencies.mrDependenciesMergeTarget
             case .unavailable: .MRDependencies.mrDependenciesMergeUnavailable

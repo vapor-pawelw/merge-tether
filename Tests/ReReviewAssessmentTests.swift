@@ -4,6 +4,27 @@ import Testing
 
 @Suite("Re-review assessment")
 struct ReReviewAssessmentTests {
+    @Test(arguments: [ReReviewAssessment.Note.State.addressed, .blocking, .uncertain])
+    func aGeneralReviewWithAnIndependentExpectationRetainsItsReplyOrWorkObligation(_ state: ReReviewAssessment.Note.State) throws {
+        let threads = try JSONDecoder().decode([GitLabMergeRequestDiscussion].self, from: Data(#"[{"id":"finding","notes":[{"id":10,"author":{"id":7},"system":false,"resolvable":true,"resolved":true,"body":"Correct the retry path."},{"id":30,"author":{"id":3},"system":false,"body":"The correction and regression are verified."}]},{"id":"report","notes":[{"id":20,"author":{"id":7},"system":false,"resolvable":false,"body":"The review raised retries. Please also explain the chosen limit in this thread."}]}]"#.utf8))
+        let assessment = ReReviewAssessment(notes: [
+            .init(noteID: 10, state: .addressed, reason: "The correction and answer are verified."),
+            .init(noteID: 20, state: state, reason: "The general report includes an independent expectation.",
+                informationalPurpose: .reviewSummary, publishedReplyNoteID: state == .addressed ? 30 : nil)
+        ])
+        let normalized = try assessment.normalizingCoveredReviewSummaries(in: threads, authorID: 3)
+        #expect(normalized.notes.last?.state == state)
+        #expect(normalized.notes.last?.informationalPurpose == .reviewSummary)
+        #expect(!normalized.hasNoRemainingAuthorWork(in: threads, authorID: 3))
+        if state == .addressed {
+            #expect(normalized.missingPublishedReplyNoteIDs(in: threads, authorID: 3) == [20])
+            #expect(AuthorFeedbackPolicy.evaluate(discussions: threads, assessment: normalized, authorID: 3,
+                approvedReviewerIDs: [7]).contains { $0.id == 20 && $0.state == .needsReply })
+        } else {
+            #expect(normalized.readinessBlockers.contains { $0.noteID == 20 })
+        }
+    }
+
     @Test(arguments: [false, true])
     func aVerifiedCoveredReviewSummaryDoesNotInventAnotherAuthorReply(_ acknowledgement: Bool) throws {
         let threads = try summaryDiscussions()

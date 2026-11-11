@@ -6,6 +6,8 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 
 ## Unreleased
 
+- Distinguish dependency checks skipped behind earlier merge blockers from failed checks, while requiring fresh dependency evidence before submission.
+- Classify review-summary purpose independently of whether its feedback is addressed, preserving verified cross-thread coverage without waiving independent requests.
 - Bind automatic review approval to the current account and app-authenticated completed run, and authenticate fresh follow-up verification records before publication.
 - Separate runtime storage by installation identity, retain read-only legacy history and recover only provably stopped, precisely owned pipeline reservations.
 - Configure coding-worker time limits with exact repository overrides while retaining the 30-minute default.

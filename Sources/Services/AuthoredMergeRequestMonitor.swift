@@ -544,7 +544,7 @@ final class AuthoredMergeRequestMonitor {
         // Do not block that path with merge-only evidence for an ineligible MR.
         let dependencyReadiness: MergeRequestDependencySummary.MergeReadiness
         if canSubmit { dependencyReadiness = (try? await glab.fetchMergeDependencyReadiness(for: request, host: host)) ?? .unavailable }
-        else { dependencyReadiness = .unavailable }
+        else { dependencyReadiness = .notChecked }
         var state = submissionState(for: request, account: account)
         if policy?.action == .enqueue, state != .uncertain, state != .changed {
             state = (try? await glab.observedMergeSubmission(request, action: .enqueue, host: host, usesMergeTrain: policy?.usesMergeTrain == true)) ?? .uncertain

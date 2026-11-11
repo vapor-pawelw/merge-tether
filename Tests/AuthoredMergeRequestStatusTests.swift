@@ -3,6 +3,26 @@ import Testing
 @testable import GitLabTodos
 
 struct AuthoredMergeRequestStatusTests {
+    @Test func skippedDependencyChecksDoNotInventWarningsOrPermitSubmission() throws {
+        let request = try makeRequest(mergeStatus: "not_approved")
+        let state = try approvals(required: 2, approved: false)
+        let status = AuthoredMergeRequestStatus(request: request, approvals: state, discussionsResolved: false,
+            projectRequiresResolvedDiscussions: true, autoMergeEnabled: true, dependencyReadiness: .notChecked)
+        #expect(status.blockers.contains(.approvals) && status.blockers.contains(.discussions))
+        #expect(!status.blockers.contains(.dependencyEvidence))
+        #expect(status.dependencyReadiness.holdReason == nil)
+        #expect(!status.mayAutoMerge && !status.mayMergeManually)
+    }
+
+    @Test func otherwiseReadyMergeStillRequiresCheckedDependencyEvidence() throws {
+        let request = try makeRequest()
+        let state = try approvals(required: 2, approved: true)
+        let status = AuthoredMergeRequestStatus(request: request, approvals: state, discussionsResolved: true,
+            projectRequiresResolvedDiscussions: true, autoMergeEnabled: true, dependencyReadiness: .notChecked)
+        #expect(status.blockers.isEmpty && status.dependencyReadiness.holdReason == nil)
+        #expect(!status.mayAutoMerge && !status.mayMergeManually)
+    }
+
     @Test(arguments: [0, 1, 3, nil])
     func draftsOrUnknownDraftsBlockMergeReadiness(count: Int?) throws {
         let request = try makeRequest()

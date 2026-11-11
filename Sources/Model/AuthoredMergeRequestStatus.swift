@@ -117,17 +117,19 @@ struct AuthoredMergeRequestStatus: Identifiable {
             blockers.append(.unknown)
         }
 
+        var dependenciesReady = false
         do {
             switch dependencyReadiness {
-            case .ready: break
+            case .notChecked: break
+            case .ready: dependenciesReady = true
             case .waitingForDependencies: blockers.append(.dependencies)
             case .reviewStackTarget: blockers.append(.stackTarget)
             case .unavailable: blockers.append(.dependencyEvidence)
             }
         }
         let ready = action.map { request.isReadyForMergeSubmission($0) } == true && submissionState == .none
-        self.mayMergeManually = blockers.isEmpty && ready && approvals?.allRequiredRulesApproved == true && discussionsResolved == true
-        let eligibleForAutoMerge = autoMergeEnabled && blockers.isEmpty && ready
+        self.mayMergeManually = dependenciesReady && blockers.isEmpty && ready && approvals?.allRequiredRulesApproved == true && discussionsResolved == true
+        let eligibleForAutoMerge = autoMergeEnabled && dependenciesReady && blockers.isEmpty && ready
             && approvals?.hasRequiredRules == true && approvals?.allRequiredRulesApproved == true
             && discussionsResolved == true
         if eligibleForAutoMerge && projectRequiresResolvedDiscussions != true {
