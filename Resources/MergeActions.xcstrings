@@ -275,6 +275,182 @@
           }
         }
       }
+    },
+    "mergeActions.contextChanged": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Merge checks belong to a different MR version. Refresh to check the current source and target."
+          }
+        }
+      }
+    },
+    "mergeActions.checking": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Merge readiness has not been checked for this MR yet. Refresh from GitLab."
+          }
+        }
+      }
+    },
+    "mergeActions.feedback": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Feedback still needs work, publication or current verification before merging."
+          }
+        }
+      }
+    },
+    "mergeActions.pipelineHandoff": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Pipeline work still needs your attention before merging."
+          }
+        }
+      }
+    },
+    "mergeActions.draft": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Mark this merge request ready before merging."
+          }
+        }
+      }
+    },
+    "mergeActions.commentReview": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Review unpublished comments and finish comment review before merging."
+          }
+        }
+      }
+    },
+    "mergeActions.approvals": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Required approvals are still missing."
+          }
+        }
+      }
+    },
+    "mergeActions.changesRequested": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "A reviewer has requested changes."
+          }
+        }
+      }
+    },
+    "mergeActions.discussions": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Resolve the outstanding discussions before merging."
+          }
+        }
+      }
+    },
+    "mergeActions.dependencies": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Required merge requests must merge first."
+          }
+        }
+      }
+    },
+    "mergeActions.stackTarget": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Review this merge request’s target branch before merging."
+          }
+        }
+      }
+    },
+    "mergeActions.dependencyEvidence": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Dependencies and the target branch could not be verified. Refresh to check again."
+          }
+        }
+      }
+    },
+    "mergeActions.conflicts": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Resolve the merge conflict before merging."
+          }
+        }
+      }
+    },
+    "mergeActions.pipeline": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "The pipeline must pass before this merge can proceed."
+          }
+        }
+      }
+    },
+    "mergeActions.permissions": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "GitLab reports that you do not have permission to merge this request."
+          }
+        }
+      }
+    },
+    "mergeActions.evidenceUnavailable": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Merge requirements could not be fully verified. Refresh or check GitLab."
+          }
+        }
+      }
     }
   },
   "version": "1.0"

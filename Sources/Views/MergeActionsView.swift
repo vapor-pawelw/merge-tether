@@ -21,6 +21,15 @@ struct MergeActionsView<AdditionalActions: View>: View {
     private var owned: Bool {
         item.isAuthored && item.mergeRequest?.state == "opened" && item.mergeRequest?.author.username == monitor.glab.currentUsername
     }
+    private var blocker: ManualMergeBlocker? {
+        guard evidenceMatchesCatalogContext else { return .context }
+        guard monitor.authoredMergeRequests.hasSyncedCurrentCatalog else { return .checking }
+        if status == nil, let request = item.mergeRequest,
+           monitor.authoredMergeRequests.requests.contains(where: {
+               $0.request.projectID == request.projectID && $0.request.iid == request.iid
+           }) { return .context }
+        return item.manualMergeBlocker(using: status)
+    }
     private var state: MergeSubmissionState { result ?? status?.submissionState ?? .none }
     private var hasDiscussionBlock: Bool { status?.blockers.contains(.discussions) == true || item.mergeRequest?.blockingDiscussionsResolved == false }
     private var needsGitLabCheck: Bool { state == .uncertain || state == .changed || status?.action == nil && status != nil }
@@ -37,16 +46,18 @@ struct MergeActionsView<AdditionalActions: View>: View {
                 } else if let title = state.title {
                     Label { Text(title) } icon: { Image(systemName: state.isDelegated ? "clock" : "exclamationmark.circle") }
                         .foregroundStyle(state.isDelegated ? Color.secondary : .orange)
-                } else if let status, status.action == nil {
-                    Text(.MergeActions.mergeActionsUnavailable).foregroundStyle(.secondary)
+                } else if let blocker {
+                    Text(blocker.title).foregroundStyle(.secondary)
                 }
-                if hasDiscussionBlock { Text(.Menu.menuAuthoredBlockerDiscussions).foregroundStyle(.orange) }
+                if hasDiscussionBlock, blocker != .prerequisite(.discussions) {
+                    Text(.Menu.menuAuthoredBlockerDiscussions).foregroundStyle(.orange)
+                }
                 if let resolutionMessage { Text(verbatim: resolutionMessage).foregroundStyle(.secondary).textSelection(.enabled) }
                 if result == .changed, status?.request.mergeTrainConflict == nil { Text(.MergeActions.mergeActionsBlocked).foregroundStyle(.orange) }
             }
             HStack(spacing: 8) {
                 if owned {
-                    if evidenceMatchesCatalogContext, state == .none, let status, item.canOfferManualMerge(using: status), let action = status.action {
+                    if state == .none, blocker == nil, let action = status?.action {
                         Button { prepared = nil; showingConfirmation = true } label: {
                             if working { ProgressView().controlSize(.small) }
                             else { Text(action.title) }
