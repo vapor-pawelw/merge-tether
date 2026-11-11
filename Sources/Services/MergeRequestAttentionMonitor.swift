@@ -299,21 +299,11 @@ final class MergeRequestAttentionMonitor {
     private let followUpDirectory: URL
     private var verifiedRemoteFiles: [String: [FollowUpVerification.FileEvidence]] = [:]
     private var isRefreshingDrafts = false
-    private struct ReReviewCheck {
-        let key: String
-        let fingerprint: String
-        var state: ReReviewReadiness
-        var assessment: ReReviewAssessment?
-    }
-    private var reReviewChecks: [Item.ID: ReReviewCheck] = [:]
-    private var reReviewTasks: [Item.ID: Task<Void, Never>] = [:]
-    private var runtimeScope: (account: Account, revision: UInt64, scope: MRAutomationScope)?
-    private var manualReReviewApprovals: [Item.ID: String] = [:]
+    @ObservationIgnored private let pendingDraftPolling = PendingDraftPolling()
+    private let reReviewCoordinator: ReReviewCoordinator?
     private let canAutomate: @MainActor (AutomationAssistant) async -> Bool
     private let approvalReadClock: ReadOnlyAssessmentRetry.Clock
     private let approvalReadWait: ReadOnlyAssessmentRetry.Wait
-    private let verifyReReview: @MainActor (ReReviewVerifier.Input, AutomationAssistant, String) async throws -> ReReviewAssessment
-    private var reReviewsInProgress: Set<MRAutomationScope.Target> = []
     /// Called after MergeTether approved a merge request on its own.
     var onRefreshed: (() -> Void)?
     var onCommentReviewFinished: ((Item.ID) -> Void)?
@@ -363,7 +353,6 @@ final class MergeRequestAttentionMonitor {
         self.verdictDirectory = verdictDirectory
         self.aiAssessmentDirectory = aiAssessmentDirectory
         self.followUpDirectory = followUpDirectory
-        self.verifyReReview = verifyReReview
         self.canAutomate = canAutomate
         self.approvalReadClock = approvalReadClock
         self.approvalReadWait = approvalReadWait
@@ -410,6 +399,24 @@ final class MergeRequestAttentionMonitor {
         }
         self.authorFeedbackCoordinator = settings.map { AuthorFeedbackCoordinator(settings: $0, glab: glab,
             canAutomate: canAutomate, verify: verifyReReview) }
+        let feedbackCoordinator = self.authorFeedbackCoordinator
+        self.reReviewCoordinator = settings.map { ReReviewCoordinator(settings: $0, glab: glab,
+            canAutomate: canAutomate, verify: verifyReReview,
+            authorFeedbackStatus: { request in
+                feedbackCoordinator?.status(projectID: request.projectID, iid: request.iid)
+            }, authorFeedbackAssessment: { request, fingerprint in
+                feedbackCoordinator?.assessment(for: request, fingerprint: fingerprint)
+            }) }
+        reReviewCoordinator?.onChange = { [weak self] context, unanswered in
+            guard let self, let account, isCurrent(account), account.host == context.host,
+                  account.username == context.username, glab.accountRevision == context.revision else { return }
+            updateReReviewPresentation(.init(projectID: context.projectID, iid: context.iid), unanswered: unanswered)
+        }
+        reReviewCoordinator?.onRefreshRequested = { [weak self] context, user in
+            guard let self, let account, isCurrent(account), account.host == context.host,
+                  account.username == context.username, glab.accountRevision == context.revision else { return }
+            await refreshReReviewAfterPublication(.init(projectID: context.projectID, iid: context.iid), account: account, user: user)
+        }
         draftProofRecoveryCoordinator?.onNeedsRepair = { snapshot, origin, assessment in
             guard let settings else { return nil }
             return try await DraftReplyRepair.launch(snapshot: snapshot, origin: origin, assessment: assessment,
@@ -444,7 +451,7 @@ final class MergeRequestAttentionMonitor {
             && generation == accountGeneration && isCurrent(account) && settings.automation == configuration
     }
 
-    var isVerifyingReReview: Bool { !reReviewTasks.isEmpty }
+    var isVerifyingReReview: Bool { reReviewCoordinator?.isVerifying == true }
     var isAssessingAIOrigins: Bool {
         guard let account, isCurrent(account) else { return false }
         return (items + openItems).contains {
@@ -559,10 +566,7 @@ final class MergeRequestAttentionMonitor {
             verifiedRemoteFiles = [:]
             user = nil
             self.account = account
-            reReviewTasks.values.forEach { $0.cancel() }
-            reReviewTasks = [:]
-            reReviewChecks = [:]
-            manualReReviewApprovals = [:]
+            reReviewCoordinator?.reset()
             if let reportDirectory { CodexDesktopRelay.clearMergeRequestStatus(in: reportDirectory) }
         }
         refreshGeneration += 1
@@ -1091,16 +1095,7 @@ final class MergeRequestAttentionMonitor {
                     }
                     if item.isAuthored {
                         authoredUnansweredFeedback[item.id] = feedback?.hasUnansweredFeedback != false
-                        let receipts = settings?.reReviewReceipts.filter {
-                            $0.key.host == host && $0.key.authorID == user.id && $0.key.projectID == item.id.projectID
-                                && $0.key.iid == item.id.iid
-                        }.values
-                        item.reReviewUnconfirmed = receipts?.contains { $0.unconfirmed } ?? false
-                        item.reReviewRequested = receipts?.contains { $0.requested == true } ?? false
-                        item.reReviewReadiness = reReviewChecks[item.id]?.state
-                        item.reReviewFingerprint = reReviewChecks[item.id]?.fingerprint
-                        item.canConfirmReReview = item.reReviewReadiness?.canConfirm == true
-                            && feedback?.hasUnansweredFeedback == false && item.draftCount == 0 && !item.requiresCommentReview
+                        applyReReviewPresentation(&item, unanswered: feedback?.hasUnansweredFeedback != false)
                     }
                     results.append(item)
                     failed = failed || !success
@@ -2149,7 +2144,8 @@ final class MergeRequestAttentionMonitor {
         confirmationStates[id]?.isBusy == true
     }
 
-    private func updateItem(_ id: Item.ID, introducesAttention: Bool = true, _ change: (inout Item) -> Void) {
+    private func updateItem(_ id: Item.ID, introducesAttention: Bool = true,
+                            skipUnchangedPendingDraftEvidence: Bool = false, _ change: (inout Item) -> Void) {
         guard attentionRecordsRevision == glab.accountRevision, var record = attentionRecords[id] else { return }
         var item = record.evidence
         change(&item)
@@ -2177,27 +2173,37 @@ final class MergeRequestAttentionMonitor {
                         })
             }
         }
-        record.replaceEvidence(item)
-        attentionRecords[id] = record
-        if introducesAttention, item.needsAttention { attentionCandidateIDs.insert(id) }
+        if !skipUnchangedPendingDraftEvidence || !item.hasSamePendingDraftEvidence(as: record.evidence) {
+            record.replaceEvidence(item)
+            attentionRecords[id] = record
+        }
+        if introducesAttention, item.needsAttention, !attentionCandidateIDs.contains(id) { attentionCandidateIDs.insert(id) }
+    }
+
+    func observePendingDrafts() async {
+        await pendingDraftPolling.observe { [weak self] in await self?.refreshPendingDrafts() }
     }
 
     /// Recheck visible confirmations against live discussions, including unchanged drafts.
     func refreshPendingDrafts() async {
-        guard !isLoading, !isRefreshingDrafts, let account, isCurrent(account), let user else { return }
+        guard !Task.isCancelled, !isLoading, !isRefreshingDrafts, let account, isCurrent(account), let user else { return }
         let generation = refreshGeneration
+        let revision = glab.accountRevision
         isRefreshingDrafts = true
         defer { isRefreshingDrafts = false; signalAutomaticActionIdle() }
         for item in items where item.needsConfirmation && !isConfirming(item.id) {
             let target = commentReviewTarget(item.id, account: account)
             let reviewRevision = settings?.commentReviewRevision(for: target) ?? 0
-            let fetched = try? await glab.fetchOwnDraftNotes(
-                projectID: item.id.projectID, iid: item.id.iid, host: account.host, userID: user.id
-            )
-            guard generation == refreshGeneration, isCurrent(account), !isLoading, !isConfirming(item.id),
-                  items.first(where: { $0.id == item.id })?.drafts == item.drafts else { continue }
-            guard var current = fetched else {
-                updateItem(item.id) {
+            guard !Task.isCancelled, generation == refreshGeneration, revision == glab.accountRevision else { return }
+            let read = await glab.fetchPendingDraftRead(projectID: item.id.projectID, iid: item.id.iid,
+                host: account.host, userID: user.id)
+            guard !Task.isCancelled, generation == refreshGeneration, revision == glab.accountRevision,
+                  isCurrent(account), !isLoading, !isConfirming(item.id),
+                  let latest = items.first(where: { $0.id == item.id }), latest.drafts == item.drafts,
+                  MRAttentionRecord.sameContext(latest.mergeRequest, item.mergeRequest),
+                  (settings?.commentReviewRevision(for: target) ?? 0) == reviewRevision else { continue }
+            guard var current = read.drafts else {
+                updateItem(item.id, skipUnchangedPendingDraftEvidence: true) {
                     $0.requiresDiscussionRecheck = !$0.drafts.isEmpty
                     $0.canApprove = false
                     $0.canConfirmReReview = false
@@ -2207,27 +2213,26 @@ final class MergeRequestAttentionMonitor {
             }
             current.removeAll { publishedDrafts[item.id]?.contains($0) == true }
             settings?.observeCommentReview(current, for: target, revision: reviewRevision)
-            let request = try? await glab.fetchMergeRequest(projectID: item.id.projectID, iid: item.id.iid, host: account.host)
-            let discussions = try? await glab.fetchMergeRequestDiscussions(projectID: item.id.projectID, iid: item.id.iid, host: account.host)
-            guard generation == refreshGeneration, isCurrent(account), !isLoading, !isConfirming(item.id),
-                  items.first(where: { $0.id == item.id })?.drafts == item.drafts else { continue }
-            let contextCurrent = Self.draftContextIsCurrent(request: request, drafts: current, discussions: discussions,
+            let request = read.request
+            let discussions = read.discussions
+            let contextMatches = MRAttentionRecord.sameContext(request, item.mergeRequest)
+            let contextCurrent = contextMatches && Self.draftContextIsCurrent(request: request, drafts: current, discussions: discussions,
                 host: account.host, user: user, verdictDirectory: verdictDirectory,
                 followUpReceipts: contextReceipts(projectID: item.id.projectID, iid: item.id.iid,
                     host: account.host, username: user.username))
-            let approvalCurrent = request.flatMap { request in
+            let approvalCurrent = contextMatches && (request.flatMap { request in
                 discussions.map { discussions in
                     ReviewVerdictStore.verdict(host: account.host, projectID: item.id.projectID, iid: item.id.iid, in: verdictDirectory)?
                         .approves(head: request.sha ?? "", discussions: discussions, reviewerID: user.id,
                             publishedDrafts: ReviewVerdictStore.seenDrafts(host: account.host, projectID: item.id.projectID,
                                 iid: item.id.iid, in: verdictDirectory)) == true && request.state == "opened"
                 }
-            } ?? false
-            updateItem(item.id) {
+            } ?? false)
+            updateItem(item.id, skipUnchangedPendingDraftEvidence: true) {
                 $0.drafts = current; $0.draftCount = current.count
                 $0.commentReviewSnapshot = CommentReviewSnapshot(request: request, discussions: discussions)
-                $0.reviewingProgress = Self.reviewingProgress(for: item, request: request,
-                    discussions: discussions, host: account.host, user: user, verdictDirectory: verdictDirectory)
+                $0.reviewingProgress = contextMatches ? Self.reviewingProgress(for: item, request: request,
+                    discussions: discussions, host: account.host, user: user, verdictDirectory: verdictDirectory) : nil
                 if !$0.isAuthored, let request {
                     $0.reviewingActivity = discussions.map {
                         ReviewingActivity(discussions: $0, reviewerID: user.id, authorID: request.author.id)
@@ -2238,7 +2243,7 @@ final class MergeRequestAttentionMonitor {
                     semanticContextFingerprint: request?.semanticContextFingerprint)
                 $0.requiresDiscussionRecheck = !current.isEmpty && !contextCurrent
                 if !approvalCurrent { $0.canApprove = false }
-                if request == nil || discussions == nil || request?.sha != item.mergeRequest?.sha
+                if !contextMatches || request == nil || discussions == nil || request?.sha != item.mergeRequest?.sha
                     || request?.semanticContextFingerprint != item.mergeRequest?.semanticContextFingerprint
                     || ReviewVerdict.fingerprint(discussions ?? []) != item.reReviewFingerprint {
                     $0.canConfirmReReview = false
@@ -2253,12 +2258,13 @@ final class MergeRequestAttentionMonitor {
     }
 
     private func refreshReReviewAfterPublication(_ id: Item.ID, account: Account, user: GitLabAuthenticatedUser) async {
+        let revision = glab.accountRevision
         guard openItems.first(where: { $0.id == id })?.isAuthored == true,
               let request = try? await glab.fetchMergeRequest(projectID: id.projectID, iid: id.iid, host: account.host),
               request.author.id == user.id,
               let drafts = try? await glab.fetchOwnDraftNotes(projectID: id.projectID, iid: id.iid, host: account.host, userID: user.id),
               let discussions = try? await glab.fetchMergeRequestDiscussions(projectID: id.projectID, iid: id.iid, host: account.host),
-              isCurrent(account) else { return }
+              isCurrent(account), glab.accountRevision == revision else { return }
         updateItem(id) {
             $0.invalidateChangedDiscussionSnapshot(head: request.sha, fingerprint: ReviewVerdict.fingerprint(discussions),
                 semanticContextFingerprint: request.semanticContextFingerprint)
@@ -2267,68 +2273,35 @@ final class MergeRequestAttentionMonitor {
                                       draftCount: drafts.count, account: account, user: user)
     }
 
-    private func reReviewKey(_ request: GitLabMergeRequest, fingerprint: String, account: Account) -> String {
-        guard let settings else { return "" }
-        let configuration = settings.automation
-        return [ReReviewVerifier.policyVersion, account.host, account.username, String(request.projectID), String(request.iid), request.sha ?? "",
-            fingerprint, request.semanticContextFingerprint, configuration.assistant.rawValue, configuration.autoVerifyReReview.description,
-            configuration.assistant == .codex ? configuration.codexVerificationModel.rawValue : configuration.claudeVerificationModel.rawValue,
-            configuration.verificationThinking.rawValue,
-            settings.feedbackSuggestionDecisions.revision(for: .init(host: account.host, username: account.username,
-                projectID: request.projectID, iid: request.iid))]
-            .joined(separator: "|")
+    private func reReviewContext(_ id: Item.ID, account: Account) -> ReReviewCoordinator.Context {
+        .init(host: account.host, username: account.username, revision: glab.accountRevision,
+            projectID: id.projectID, iid: id.iid)
     }
 
     private func applyReReviewPresentation(_ item: inout Item, unanswered: Bool) {
-        let id = item.id
-        if let account {
-            item.requiresCommentReview = commentReviewPending(id, account: account)
-            if item.requiresCommentReview { item.canApprove = false; item.autoApproveReady = false }
-        }
-        let check = reReviewChecks[id]
-        let receipts = settings?.reReviewReceipts.filter {
-            $0.key.host == account?.host && $0.key.authorID == user?.id
-                && $0.key.projectID == id.projectID && $0.key.iid == id.iid
-        }.values
-        item.reReviewReadiness = check?.state
-        item.reReviewFingerprint = check?.fingerprint
-        item.canConfirmReReview = check?.state.canConfirm == true && !unanswered && item.draftCount == 0 && !item.requiresCommentReview
-        item.reReviewRequested = receipts?.contains { $0.requested == true } ?? false
-        item.reReviewUnconfirmed = receipts?.contains { $0.unconfirmed } ?? false
+        guard let account else { return }
+        item.requiresCommentReview = commentReviewPending(item.id, account: account)
+        if item.requiresCommentReview { item.canApprove = false; item.autoApproveReady = false }
+        let status = reReviewCoordinator?.status(for: reReviewContext(item.id, account: account), authorID: user?.id)
+        item.reReviewReadiness = status?.state
+        item.reReviewFingerprint = status?.fingerprint
+        item.canConfirmReReview = status?.state?.canConfirm == true && !unanswered && item.draftCount == 0 && !item.requiresCommentReview
+        item.reReviewRequested = status?.requested ?? false
+        item.reReviewUnconfirmed = status?.unconfirmed ?? false
     }
 
     private func updateReReviewPresentation(_ id: Item.ID, unanswered: Bool = false) {
-        // A background presentation update can surface a current evaluated candidate,
-        // but cannot admit an otherwise retained-only catalog row.
+        // A background presentation update cannot admit a retained-only catalog row.
         updateItem(id, introducesAttention: false) { applyReReviewPresentation(&$0, unanswered: unanswered) }
     }
 
     func retryReReview(_ id: Item.ID) async {
         guard let account, let user, isCurrent(account) else { return }
-        reReviewTasks.removeValue(forKey: id)?.cancel()
-        reReviewChecks.removeValue(forKey: id)
-        await refreshReReviewAfterPublication(id, account: account, user: user)
+        await reReviewCoordinator?.retry(reReviewContext(id, account: account), user: user)
     }
 
     func cancelRuntimePreparation(outsideScope scope: MRAutomationScope) {
-        if let host = glab.resolvedHost, let username = glab.currentUsername {
-            runtimeScope = (Account(host: host, username: username), glab.accountRevision, scope)
-        } else { runtimeScope = nil }
-        for id in Array(reReviewTasks.keys) {
-            guard manualReReviewApprovals[id] == nil else { continue }
-            if let runtimeScope, let account, runtimeScope.account == account,
-               runtimeScope.revision == glab.accountRevision, runtimePermitsReReview(id, account: account) { continue }
-            reReviewTasks.removeValue(forKey: id)?.cancel()
-            reReviewChecks.removeValue(forKey: id)
-            updateReReviewPresentation(id)
-        }
-    }
-
-    private func runtimePermitsReReview(_ id: Item.ID, account: Account) -> Bool {
-        if manualReReviewApprovals[id] != nil { return true }
-        guard let runtimeScope, runtimeScope.account == account, runtimeScope.revision == glab.accountRevision else { return true }
-        return runtimeScope.scope.resolve(.init(host: account.host, username: account.username,
-            projectID: id.projectID, iid: id.iid)).active
+        reReviewCoordinator?.cancelRuntimePreparation(outsideScope: scope)
     }
 
     func automationConfigurationChanged(outsideScope scope: MRAutomationScope? = nil) {
@@ -2336,354 +2309,36 @@ final class MergeRequestAttentionMonitor {
         draftProofRecoveryCoordinator?.cancel(outsideScope: scope)
         aiOriginCoordinator.cancel(outsideScope: scope)
         feedbackNeedsRefresh = false
-        let affected = Set(reReviewTasks.keys).union(reReviewChecks.keys)
-        for id in affected {
-            if let scope, let account {
-                let target = MRAutomationScope.Target(host: account.host, username: account.username,
-                    projectID: id.projectID, iid: id.iid)
-                guard !scope.resolve(target).active else { continue }
-            }
-            reReviewTasks.removeValue(forKey: id)?.cancel()
-            reReviewChecks.removeValue(forKey: id)
-            manualReReviewApprovals.removeValue(forKey: id)
-            updateReReviewPresentation(id)
-        }
+        reReviewCoordinator?.cancel(outsideScope: scope)
     }
 
     func retryFailedReReviews() async {
-        let failed = reReviewChecks.filter { $0.value.state == .unavailable || $0.value.state == .failed }.map(\.key)
-        for id in failed { await retryReReview(id) }
+        guard let user else { return }
+        await reReviewCoordinator?.retryFailed(user: user)
     }
 
-    /// This is an explicit, one-shot human decision bound to the displayed head and text.
-    /// It never clears GitLab threads or overrides pending drafts or account/scope checks.
     func confirmReReview(_ id: Item.ID, head: String, fingerprint: String) async {
-        guard let account, let user, isCurrent(account),
-              reReviewChecks[id]?.state.canConfirm == true,
-              reReviewChecks[id]?.fingerprint == fingerprint,
-              let displayedKey = reReviewChecks[id]?.key else { return }
-        do {
-            async let current = glab.fetchMergeRequest(projectID: id.projectID, iid: id.iid, host: account.host)
-            async let threads = glab.fetchMergeRequestDiscussions(projectID: id.projectID, iid: id.iid, host: account.host)
-            async let pending = glab.fetchOwnDraftNoteCount(projectID: id.projectID, iid: id.iid, host: account.host, userID: user.id)
-            let (request, discussions, draftCount) = try await (current, threads, pending)
-            guard isCurrent(account), request.sha == head, request.author.id == user.id, draftCount == 0,
-                  reReviewChecks[id]?.key == displayedKey,
-                  reReviewKey(request, fingerprint: fingerprint, account: account) == displayedKey,
-                  ReviewVerdict.fingerprint(discussions) == fingerprint else {
-                confirmationStates[id] = .changed
-                refresh(host: account.host, username: account.username, todos: [])
-                return
-            }
-            let feedback = ReReviewFeedback(discussions: discussions, authorID: user.id)
-            guard !feedback.hasUnansweredFeedback else { confirmationStates[id] = .changed; return }
-            manualReReviewApprovals[id] = reReviewKey(request, fingerprint: fingerprint, account: account)
-            defer { manualReReviewApprovals.removeValue(forKey: id) }
-            await requestReReviewsIfReady(for: request, feedback: feedback, draftCount: 0, account: account,
-                                         user: user, discussions: discussions)
-            updateReReviewPresentation(id)
-        } catch { confirmationStates[id] = .failed }
+        guard let account, let user, isCurrent(account), let reReviewCoordinator else { return }
+        let context = reReviewContext(id, account: account)
+        let result = await reReviewCoordinator.confirm(context, user: user, head: head, fingerprint: fingerprint)
+        guard isCurrent(account), glab.accountRevision == context.revision else { return }
+        switch result {
+        case .changed:
+            confirmationStates[id] = .changed
+            refresh(host: account.host, username: account.username, todos: [])
+        case .unansweredFeedback: confirmationStates[id] = .changed
+        case .failed: confirmationStates[id] = .failed
+        case .ignored, .confirmed: break
+        }
     }
 
     private func requestReReviewsIfReady(
         for request: GitLabMergeRequest, feedback: ReReviewFeedback, draftCount: Int,
-        account: Account, user: GitLabAuthenticatedUser, discussions suppliedDiscussions: [GitLabMergeRequestDiscussion]? = nil
+        account: Account, user: GitLabAuthenticatedUser, discussions: [GitLabMergeRequestDiscussion]? = nil
     ) async {
-        let id = Item.ID(projectID: request.projectID, iid: request.iid)
-        guard runtimePermitsReReview(id, account: account) else { return }
-        guard let settings, settings.automation.hasAutomaticActionConsent, settings.automation.autoReReviewEnabled,
-              isCurrent(account), request.state == "opened", request.author.id == user.id,
-              settings.automation.scope.permits(request, host: account.host, username: account.username) else {
-            reReviewTasks.removeValue(forKey: id)?.cancel()
-            reReviewChecks.removeValue(forKey: id)
-            updateReReviewPresentation(id)
-            return
-        }
-        let host = account.host
-        let target = MRAutomationScope.Target(host: host, username: account.username, projectID: request.projectID, iid: request.iid)
-        guard reReviewsInProgress.insert(target).inserted else { return }
-        defer { reReviewsInProgress.remove(target) }
-        let baseline = settings.reReviewDraftBaselines[target]
-        if draftCount > 0 {
-            reReviewChecks.removeValue(forKey: id)
-            reReviewTasks.removeValue(forKey: id)?.cancel()
-            if baseline == nil {
-                settings.reReviewDraftBaselines[target] = feedback.latestPublishedReplyID
-                settings.save()
-            }
-            return
-        }
-        let observedPublication = baseline.map { feedback.latestPublishedReplyID > $0 } == true
-        if baseline != nil, !observedPublication {
-            settings.reReviewDraftBaselines.removeValue(forKey: target)
-            settings.save()
-        }
-        guard let head = request.sha else { return }
-        let authorProgress = authorFeedbackCoordinator?.status(projectID: request.projectID, iid: request.iid)
-        let work = AssistantAutomationRunner.MergeRequestWork(host: host, projectID: request.projectID, iid: request.iid)
-        let usedAssistant = settings.assistantHandoffs.contains {
-            $0.key.work == work && $0.key.username == user.username
-                && $0.execution?.state == .succeeded
-                && !feedback.addressedNotes.isDisjoint(with: $0.feedbackNoteIDs ?? [])
-        }
-        let discussions: [GitLabMergeRequestDiscussion]
-        if let suppliedDiscussions { discussions = suppliedDiscussions }
-        else {
-            guard let fresh = try? await glab.fetchMergeRequestDiscussions(projectID: request.projectID, iid: request.iid, host: host) else { return }
-            discussions = fresh
-        }
-        guard !Task.isCancelled, isCurrent(account), runtimePermitsReReview(id, account: account),
-              settings.automation.scope.permits(request, host: host, username: account.username) else { return }
-        guard let fingerprint = ReviewVerdict.fingerprint(discussions) else { return }
-        let activeIgnored = settings.feedbackSuggestionDecisions.applicable(in: discussions, for: target)
-        let sharedAssessment = authorFeedbackCoordinator?.assessment(for: request, fingerprint: fingerprint)
-        let key = reReviewKey(request, fingerprint: fingerprint, account: account)
-        let reviewers: [GitLabMergeRequestReviewer]
-        let approvers: Set<Int>
-        do {
-            async let states = glab.fetchMergeRequestReviewers(projectID: request.projectID, iid: request.iid, host: host)
-            async let approved = glab.fetchMergeRequestApproverIDs(projectID: request.projectID, iid: request.iid, host: host)
-            (reviewers, approvers) = try await (states, approved)
-        } catch {
-            reReviewChecks[id] = .init(key: key, fingerprint: fingerprint, state: .failed)
-            updateReReviewPresentation(id, unanswered: feedback.hasUnansweredFeedback)
-            return
-        }
-        guard !Task.isCancelled, isCurrent(account), runtimePermitsReReview(id, account: account),
-              settings.automation.scope.permits(request, host: host, username: account.username),
-              usedAssistant || observedPublication || manualReReviewApprovals[id] != nil
-                || sharedAssessment != nil || reviewers.contains(where: { $0.state == "unapproved" }) else { return }
-        let history = MergeRequestReviewHistory(reviewers: reviewers, discussions: discussions, authorID: user.id)
-        let earlierReviewers = Set(reviewers.filter {
-            $0.state == "reviewed" || $0.state == "unapproved"
-                || history.activities[$0.user.id]?.previouslyApproved == true
-                || history.activities[$0.user.id]?.commented == true
-        }.map(\.user.id))
-        var candidates = feedback.addressedByReviewer
-        for reviewerID in earlierReviewers {
-            candidates[reviewerID] = max(candidates[reviewerID] ?? 0, history.activities[reviewerID]?.noteID ?? 1, 1)
-        }
-        let existingCheck = reReviewChecks[id]
-        let failedWithoutAssessment = existingCheck?.assessment == nil
-            && (existingCheck?.state == .failed || existingCheck?.state == .unavailable)
-        if let assessment = sharedAssessment, existingCheck?.key != key || failedWithoutAssessment {
-            reReviewChecks[id] = .init(key: key, fingerprint: fingerprint, state: .checking, assessment: assessment)
-        }
-        var pendingReviewers: [Int: Int] = [:]
-        for (reviewerID, noteID) in candidates {
-            guard reviewerID != user.id, !approvers.contains(reviewerID),
-                  !reviewers.contains(where: { $0.user.id == reviewerID && $0.state == "approved" }) else { continue }
-            if !reviewers.contains(where: { $0.user.id == reviewerID && $0.state == "unapproved" }),
-               authorProgress?.phase == .complete, authorProgress?.head == head, authorProgress?.fingerprint == fingerprint,
-               authorProgress?.semanticContextFingerprint == request.semanticContextFingerprint,
-               authorProgress?.acceptedReviewerIDs.contains(reviewerID) == true { continue }
-            let receiptKey = ReReviewReceipt.Key(host: host, authorID: user.id, projectID: request.projectID, iid: request.iid, reviewerID: reviewerID)
-            guard settings.reReviewReceipts[receiptKey]?.covers(noteID: noteID, headSHA: head) != true else { continue }
-            // Bot summaries never need a human review request, nor an expensive assessment.
-            do {
-                if try await glab.activeHumanReviewerUsername(userID: reviewerID, host: host) != nil {
-                    pendingReviewers[reviewerID] = noteID
-                }
-                guard !Task.isCancelled, isCurrent(account), runtimePermitsReReview(id, account: account),
-                      settings.automation.scope.permits(request, host: host, username: account.username) else { return }
-            } catch {
-                reReviewChecks[id] = ReReviewCheck(key: key, fingerprint: fingerprint, state: .failed)
-                updateReReviewPresentation(id, unanswered: feedback.hasUnansweredFeedback)
-                return
-            }
-        }
-        guard !pendingReviewers.isEmpty else {
-            reReviewChecks.removeValue(forKey: id)
-            updateReReviewPresentation(id, unanswered: feedback.hasUnansweredFeedback)
-            return
-        }
-        let manual = manualReReviewApprovals[id] == key
-        var recipients = pendingReviewers
-        if !manual {
-            if !settings.automation.autoVerifyReReview {
-                reReviewTasks.removeValue(forKey: id)?.cancel()
-                reReviewChecks[id] = ReReviewCheck(key: key, fingerprint: fingerprint, state: .manual)
-                updateReReviewPresentation(id, unanswered: feedback.hasUnansweredFeedback)
-                return
-            }
-            if reReviewChecks[id]?.key != key {
-                reReviewTasks.removeValue(forKey: id)?.cancel()
-                reReviewChecks[id] = ReReviewCheck(key: key, fingerprint: fingerprint, state: .checking)
-                let assistant = settings.automation.assistant
-                let model = assistant == .codex ? settings.automation.codexVerificationModel.rawValue : settings.automation.claudeVerificationModel.rawValue
-                let thinking = settings.automation.verificationThinking
-                reReviewTasks[id] = Task { [weak self] in
-                    guard let self else { return }
-                    do {
-                        let diff: Data = try await glab.mergeRequestAPI("/projects/\(request.projectID)/merge_requests/\(request.iid)/raw_diffs", host: host, decode: { $0 })
-                        guard !Task.isCancelled, isCurrent(account), reReviewChecks[id]?.key == key,
-                              runtimePermitsReReview(id, account: account),
-                              settings.automation.scope.permits(request, host: host, username: account.username) else { return }
-                        let input = ReReviewVerifier.Input(authorID: user.id, headSHA: head, title: request.title,
-                                                          description: request.description,
-                                                          diff: String(decoding: diff, as: UTF8.self), discussions: discussions,
-                                                          target: .init(host: host, projectID: request.projectID, iid: request.iid,
-                                                              url: request.webURL, expectedUsername: account.username),
-                                                          semanticContextFingerprint: request.semanticContextFingerprint,
-                                                          thinking: thinking, ignoredSuggestions: activeIgnored)
-                        let assessment = try await verifyReReview(input, assistant, model)
-                        _ = try assessment.reviewers(in: discussions, authorID: user.id, ignoredSuggestions: activeIgnored)
-                        guard !Task.isCancelled, isCurrent(account), reReviewChecks[id]?.key == key,
-                              runtimePermitsReReview(id, account: account) else { return }
-                        reReviewChecks[id]?.assessment = assessment
-                    } catch {
-                        guard !Task.isCancelled, isCurrent(account), reReviewChecks[id]?.key == key else { return }
-                        reReviewChecks[id]?.state = error as? ReReviewVerifier.VerificationError == .unavailable ? .unavailable : .failed
-                    }
-                    updateReReviewPresentation(id, unanswered: feedback.hasUnansweredFeedback)
-                    await refreshReReviewAfterPublication(id, account: account, user: user)
-                    if !Task.isCancelled { reReviewTasks[id] = nil }
-                }
-                updateReReviewPresentation(id, unanswered: feedback.hasUnansweredFeedback)
-                return
-            }
-            guard let assessment = reReviewChecks[id]?.assessment,
-                  let assessed = try? assessment.reviewers(in: discussions, authorID: user.id, ignoredSuggestions: activeIgnored) else {
-                updateReReviewPresentation(id, unanswered: feedback.hasUnansweredFeedback)
-                return
-            }
-            let allFeedbackReady = assessment.hasNoRemainingAuthorWork(in: discussions, authorID: user.id, ignoredSuggestions: activeIgnored)
-                && assessment.missingPublishedReplyNoteIDs(in: discussions, authorID: user.id).isEmpty
-            recipients = pendingReviewers.filter {
-                feedback.addressedByReviewer[$0.key] != nil && assessed[$0.key] != nil
-                    || allFeedbackReady && earlierReviewers.contains($0.key)
-            }
-            let blockers = assessment.readinessBlockers
-            reReviewChecks[id]?.state = assessment.notes.contains { $0.state == .blocking } ? .blocked(blockers) : .uncertain(blockers)
-            let informationalReviewers = pendingReviewers.keys.filter { reviewerID in
-                let theirNotes = discussions.flatMap(\.notes).filter { $0.author?.id == reviewerID && $0.system != true }
-                return !theirNotes.isEmpty && history.activities[reviewerID]?.previouslyApproved != true && theirNotes.allSatisfy { note in
-                    assessment.notes.first { $0.noteID == note.id }?.state == .informational
-                }
-            }
-            let ignoredOnlyReviewers = pendingReviewers.keys.filter { reviewerID in
-                let theirIDs = Set(discussions.flatMap(\.notes).filter { $0.author?.id == reviewerID && $0.system != true }.compactMap(\.id))
-                let verdicts = assessment.notes.filter { theirIDs.contains($0.noteID) }
-                return history.activities[reviewerID]?.previouslyApproved != true && verdicts.contains { $0.state == .ignoredByUser }
-                    && verdicts.allSatisfy { $0.state == .ignoredByUser || $0.state == .informational }
-            }
-            for reviewerID in ignoredOnlyReviewers {
-                pendingReviewers.removeValue(forKey: reviewerID)
-                recipients.removeValue(forKey: reviewerID)
-            }
-            for reviewerID in informationalReviewers {
-                recipients.removeValue(forKey: reviewerID)
-                let receipt = ReReviewReceipt.Key(host: host, authorID: user.id, projectID: request.projectID, iid: request.iid, reviewerID: reviewerID)
-                if let noteID = pendingReviewers.removeValue(forKey: reviewerID) {
-                    settings.reReviewReceipts[receipt] = ReReviewReceipt(noteID: noteID, headSHA: head)
-                }
-            }
-            if !informationalReviewers.isEmpty { settings.save() }
-            updateReReviewPresentation(id, unanswered: feedback.hasUnansweredFeedback)
-        }
-        var finished = true
-        for (reviewerID, noteID) in recipients.sorted(by: { $0.key < $1.key }) {
-            guard settings.automaticWritesAllowed else {
-                reReviewChecks[id]?.state = .unavailable
-                updateReReviewPresentation(id, unanswered: feedback.hasUnansweredFeedback)
-                return
-            }
-            let receiptKey = ReReviewReceipt.Key(host: host, authorID: user.id, projectID: request.projectID,
-                                                 iid: request.iid, reviewerID: reviewerID)
-            guard settings.reReviewReceipts[receiptKey]?.covers(noteID: noteID, headSHA: head) != true else { continue }
-            do {
-                guard let username = try await glab.activeHumanReviewerUsername(userID: reviewerID, host: host) else { continue }
-                let reviewers = try await glab.fetchMergeRequestReviewers(projectID: request.projectID, iid: request.iid, host: host)
-                let reviewer = reviewers.first { $0.user.id == reviewerID }
-                async let fresh = glab.fetchMergeRequest(projectID: request.projectID, iid: request.iid, host: host)
-                async let threads = glab.fetchMergeRequestDiscussions(projectID: request.projectID, iid: request.iid, host: host)
-                async let drafts = glab.fetchOwnDraftNoteCount(projectID: request.projectID, iid: request.iid, host: host, userID: user.id)
-                let (current, liveDiscussions, liveDraftCount) = try await (fresh, threads, drafts)
-                guard liveDraftCount == 0, !settings.pendingCommentReviews.contains(target), current.state == "opened", current.sha == head,
-                      current.author.id == user.id, current.webURL.isGitLabMergeRequest(host: host, iid: current.iid),
-                      ReviewVerdict.fingerprint(liveDiscussions) == fingerprint,
-                      reReviewKey(current, fingerprint: fingerprint, account: account) == key,
-                      try await glab.fetchAuthenticatedUser(host: host, expectedUsername: account.username) == user,
-                      isCurrent(account), settings.automation.autoReReviewEnabled,
-                      runtimePermitsReReview(id, account: account),
-                      settings.automation.scope.permits(current, host: host, username: account.username) else { return }
-                if reviewer?.state == "unreviewed" || reviewer?.state == "review_started" {
-                    settings.reReviewReceipts[receiptKey] = ReReviewReceipt(noteID: noteID, requested: true, headSHA: head)
-                    settings.save()
-                    continue
-                }
-                guard settings.reReviewReceipts[receiptKey]?.covers(noteID: noteID, headSHA: head) != true else { continue }
-                if !manual {
-                    guard await permitsAssistantAutomation(for: account),
-                          reReviewKey(current, fingerprint: fingerprint, account: account) == key,
-                          settings.automation.autoReReviewEnabled,
-                          settings.automation.scope.permits(current, host: host, username: account.username) else {
-                        if isCurrent(account) { reReviewChecks[id]?.state = .unavailable }
-                        updateReReviewPresentation(id, unanswered: feedback.hasUnansweredFeedback)
-                        return
-                    }
-                }
-                // Dependency and identity checks may await slow processes. Read the
-                // semantic source last; reusing `current` here would miss edits made
-                // while checking the CLI, even when the source SHA is unchanged.
-                let finalConfiguration = settings.automation
-                let finalUser = try await glab.fetchAuthenticatedUser(host: host, expectedUsername: account.username)
-                async let finalMR = glab.fetchMergeRequest(projectID: request.projectID, iid: request.iid, host: host)
-                async let finalThreads = glab.fetchMergeRequestDiscussions(projectID: request.projectID, iid: request.iid, host: host)
-                async let finalReviewers = glab.fetchMergeRequestReviewers(projectID: request.projectID, iid: request.iid, host: host)
-                async let finalApprovers = glab.fetchMergeRequestApproverIDs(projectID: request.projectID, iid: request.iid, host: host)
-                async let finalDrafts = glab.fetchOwnDraftNoteCount(projectID: request.projectID, iid: request.iid, host: host, userID: user.id)
-                let (checkedMR, checkedThreads, checkedDraftCount, checkedReviewers, checkedApprovers) = try await
-                    (finalMR, finalThreads, finalDrafts, finalReviewers, finalApprovers)
-                guard settings.automaticWritesAllowed, !Task.isCancelled, finalUser == user, isCurrent(account),
-                      runtimePermitsReReview(id, account: account),
-                      settings.automation == finalConfiguration, settings.automation.autoReReviewEnabled,
-                      checkedDraftCount == 0, !settings.pendingCommentReviews.contains(target), checkedMR.state == "opened",
-                      checkedMR.sha == head, checkedMR.author.id == user.id,
-                      checkedMR.webURL.isGitLabMergeRequest(host: host, iid: request.iid),
-                      ReviewVerdict.fingerprint(checkedThreads) == fingerprint,
-                      reReviewKey(checkedMR, fingerprint: fingerprint, account: account) == key,
-                      reReviewChecks[id]?.key == key,
-                      settings.automation.scope.permits(checkedMR, host: host, username: account.username) else { return }
-                guard settings.reReviewReceipts[receiptKey]?.covers(noteID: noteID, headSHA: head) != true else { continue }
-                let checkedReviewer = checkedReviewers.first { $0.user.id == reviewerID }
-                guard !checkedApprovers.contains(reviewerID), checkedReviewer?.state != "approved",
-                      checkedReviewer != nil || feedback.addressedByReviewer[reviewerID] != nil else { continue }
-                if checkedReviewer?.state == "unreviewed" || checkedReviewer?.state == "review_started" {
-                    settings.reReviewReceipts[receiptKey] = ReReviewReceipt(noteID: noteID, requested: true, headSHA: head)
-                    settings.save()
-                    continue
-                }
-                settings.reReviewReceipts[receiptKey] = ReReviewReceipt(noteID: noteID, unconfirmed: true, headSHA: head)
-                settings.save()
-                guard settings.automaticWritesAllowed else { throw CancellationError() }
-                try await glab.requestReview(of: checkedMR, userID: reviewerID, username: username,
-                                             alreadyAssigned: checkedReviewer != nil, host: host) {
-                    !Task.isCancelled && self.isCurrent(account) && settings.automaticWritesAllowed
-                        && settings.automation == finalConfiguration && settings.automation.autoReReviewEnabled
-                        && self.runtimePermitsReReview(id, account: account)
-                        && self.reReviewChecks[id]?.key == key
-                        && self.reReviewKey(checkedMR, fingerprint: fingerprint, account: account) == key
-                        && !settings.pendingCommentReviews.contains(target)
-                        && settings.automation.scope.permits(checkedMR, host: host, username: account.username)
-                }
-                settings.reReviewReceipts[receiptKey]?.unconfirmed = false
-                settings.reReviewReceipts[receiptKey]?.requested = true
-                settings.save()
-            } catch {
-                finished = false
-                reReviewChecks[id]?.state = .failed
-                Log.monitor.error("Could not confirm automatic re-review: \(String(describing: error), privacy: .private)")
-            }
-        }
-        if finished, recipients.count == pendingReviewers.count {
-            reReviewChecks.removeValue(forKey: id)
-        }
-        updateReReviewPresentation(id, unanswered: feedback.hasUnansweredFeedback)
-        if observedPublication, finished, recipients.count == pendingReviewers.count {
-            settings.reReviewDraftBaselines.removeValue(forKey: target)
-            settings.save()
-        }
+        await reReviewCoordinator?.refresh(for: request, feedback: feedback, draftCount: draftCount,
+            context: reReviewContext(.init(projectID: request.projectID, iid: request.iid), account: account),
+            user: user, discussions: discussions)
     }
 }
 

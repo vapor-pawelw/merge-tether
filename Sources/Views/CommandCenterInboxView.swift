@@ -14,10 +14,7 @@ struct CommandCenterInboxView: View {
         .frame(width: 760, height: 700)
         .background(Color(nsColor: .windowBackgroundColor))
         .task {
-            while !Task.isCancelled {
-                await monitor.attention.refreshPendingDrafts()
-                do { try await Task.sleep(for: .seconds(5)) } catch { return }
-            }
+            await monitor.attention.observePendingDrafts()
         }
 
     }
@@ -48,7 +45,7 @@ struct CommandCenterInboxView: View {
             emptyState
         } else {
             ScrollView {
-                VStack(alignment: .leading, spacing: 24) {
+                LazyVStack(alignment: .leading, spacing: 24) {
                     itemSection(.Board.boardInboxTriage, symbol: "tray.2", items: inbox.triage)
                     itemSection(.Board.boardInboxAssistantJobs, symbol: "cpu", items: inbox.jobs)
                     itemSection(.Board.boardInboxUpdates, symbol: "clock.arrow.circlepath", items: inbox.updates)
@@ -82,7 +79,7 @@ struct CommandCenterInboxView: View {
         items: [MergeRequestBoardSnapshot.OtherCard]
     ) -> some View {
         if !items.isEmpty {
-            VStack(alignment: .leading, spacing: 10) {
+            LazyVStack(alignment: .leading, spacing: 10) {
                 HStack(spacing: 8) {
                     Image(systemName: symbol).foregroundStyle(.secondary)
                     Text(title).font(.headline)

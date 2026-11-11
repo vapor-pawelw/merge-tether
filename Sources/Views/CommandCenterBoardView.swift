@@ -62,10 +62,7 @@ struct CommandCenterBoardView: View {
             if (notification.object as? NSWindow)?.identifier?.rawValue == "main" { selected = nil }
         }
         .task {
-            while !Task.isCancelled {
-                await monitor.attention.refreshPendingDrafts()
-                do { try await Task.sleep(for: .seconds(5)) } catch { return }
-            }
+            await monitor.attention.observePendingDrafts()
         }
     }
 
@@ -121,7 +118,7 @@ struct CommandCenterBoardView: View {
             .padding(.horizontal, 6).padding(.vertical, 10)
             Divider()
             ScrollView {
-                VStack(alignment: .leading, spacing: 10, content: content)
+                LazyVStack(alignment: .leading, spacing: 10, content: content)
                     .frame(maxWidth: .infinity, alignment: .leading)
                     .padding(.vertical, 10).padding(.horizontal, 1)
                     .opacity(dimUnverifiedContent && !cardIDs.isEmpty ? 0.55 : 1)

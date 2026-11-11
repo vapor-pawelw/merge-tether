@@ -1,4 +1,5 @@
 import Foundation
+import Observation
 import Testing
 @testable import GitLabTodos
 
@@ -1409,6 +1410,125 @@ import Testing
         #expect(harness.monitor.currentOpenItems.first?.section == .open)
     }
 
+    @Test func identicalQuickChecksDoNotNotifyBoardEvidenceButChangedCommentsDo() async throws {
+        let harness = try makeHarness(assistantWorked: true)
+        defer { harness.cleanUp() }
+        try harness.write("drafts.json", draftJSON)
+        try harness.recordVerdict("objections", head: head)
+        try await harness.poll()
+        await harness.monitor.refreshPendingDrafts()
+        let changes = PendingDraftObservationChanges()
+        withObservationTracking { _ = harness.monitor.currentOpenItems } onChange: { changes.record() }
+        await harness.monitor.refreshPendingDrafts()
+        #expect(changes.count == 0)
+        try harness.write("discussions.json", othersThread)
+        await harness.monitor.refreshPendingDrafts()
+        #expect(changes.count == 1)
+        #expect(harness.monitor.currentItems.first?.requiresDiscussionRecheck == true)
+    }
+
+    @Test(arguments: ["cancel", "account-round-trip"])
+    func interruptedQuickCheckCannotReplaceConfirmedEvidence(_ interruption: String) async throws {
+        let harness = try makeHarness(assistantWorked: true)
+        defer { harness.cleanUp() }
+        try harness.write("drafts.json", draftJSON)
+        try harness.recordVerdict("objections", head: head)
+        try await harness.poll()
+        let original = try #require(harness.gitlab.handler)
+        harness.gitlab.handler = { call in
+            if call.endpoint.contains("/discussions") {
+                harness.gitlab.write("poll-entered")
+                try await harness.gitlab.waitFor("release-poll")
+                return InMemoryGitLab.output(othersThread)
+            }
+            return try await original(call)
+        }
+        let check = Task { await harness.monitor.refreshPendingDrafts() }
+        defer { check.cancel(); harness.gitlab.write("release-poll") }
+        try await harness.gitlab.waitFor("poll-entered")
+        if interruption == "cancel" { check.cancel() }
+        else { harness.glab.currentUsername = "other"; harness.glab.currentUsername = "me" }
+        harness.gitlab.write("release-poll")
+        await check.value
+        if interruption == "cancel" {
+            #expect(harness.monitor.currentItems.first?.section == .unpublishedComments)
+        } else {
+            #expect(harness.monitor.currentItems.isEmpty)
+        }
+        #expect(harness.gitlab.requests.allSatisfy { $0.method == "GET" })
+    }
+
+    @Test(arguments: ["head", "title", "description", "source_branch", "target_branch", "source_project_id", "target_project_id", "author", "discussion-body", "discussion-author", "draft-body", "draft-count", "draft-failure", "discussion-failure"])
+    func changedQuickCheckEvidenceStillNotifiesAndRetainsTheMRLink(_ change: String) async throws {
+        let harness = try makeHarness(assistantWorked: true)
+        defer { harness.cleanUp() }
+        try harness.write("drafts.json", draftJSON)
+        try harness.write("discussions.json", othersThread)
+        try harness.recordVerdict("objections", head: head)
+        try await harness.poll()
+        await harness.monitor.refreshPendingDrafts()
+        let previous = try #require(harness.monitor.currentOpenItems.first)
+        let changes = PendingDraftObservationChanges()
+        withObservationTracking { _ = harness.monitor.currentOpenItems } onChange: { changes.record() }
+        switch change {
+        case "head":
+            try harness.write("request.json", harness.log("request.json").replacingOccurrences(of: head, with: String(repeating: "b", count: 40)))
+        case "title", "description", "source_branch", "target_branch", "source_project_id", "target_project_id", "author":
+            var json = try #require(JSONSerialization.jsonObject(with: harness.gitlab.data("request.json")) as? [String: Any])
+            if change.hasSuffix("_project_id") { json[change] = 77 }
+            else if change == "author" { json[change] = ["id": 18, "username": "other-author", "name": "Other author"] }
+            else { json[change] = "Edited requirements" }
+            try JSONSerialization.data(withJSONObject: json).store(in: harness.gitlab, as: "request.json")
+        case "discussion-body":
+            try harness.write("discussions.json", othersThread.replacingOccurrences(of: "Please check this", with: "Edited request"))
+        case "discussion-author":
+            try harness.write("discussions.json", othersThread.replacingOccurrences(of: "\"id\":8", with: "\"id\":9"))
+        case "draft-body":
+            try harness.gitlab.editArray("drafts.json") { $0[0]["note"] = "Edited draft" }
+        case "draft-count":
+            try harness.gitlab.editArray("drafts.json") { $0.removeFirst() }
+        case "draft-failure": try harness.write("fail-next-draft-read", "yes")
+        default: try harness.write("fail-discussion-read", "yes")
+        }
+        await harness.monitor.refreshPendingDrafts()
+        #expect(changes.count == 1)
+        let current = try #require(harness.monitor.currentOpenItems.first)
+        #expect(current.url == previous.url)
+        #expect(current.draftCount > 0)
+        let changedRequest = ["head", "title", "description", "source_branch", "target_branch", "source_project_id", "target_project_id", "author"].contains(change)
+        if changedRequest || change.hasSuffix("failure") { #expect(current.requiresDiscussionRecheck) }
+        if changedRequest {
+            #expect(!current.canApprove && !current.canConfirmReReview)
+            #expect(current.reviewingProgress == nil)
+            #expect(current.mergeRequest?.sourceBranch == previous.mergeRequest?.sourceBranch)
+            #expect(current.mergeRequest?.targetBranch == previous.mergeRequest?.targetBranch)
+        }
+    }
+
+    @Test(arguments: ["fail-next-draft-read", "fail-discussion-read"])
+    func repeatedQuickReadFailureDoesNotChurnButRecoveryPublishesFreshEvidence(_ failure: String) async throws {
+        let harness = try makeHarness(assistantWorked: true)
+        defer { harness.cleanUp() }
+        try harness.write("drafts.json", draftJSON)
+        try harness.recordVerdict("objections", head: head)
+        try await harness.poll()
+        let link = try #require(harness.monitor.currentItems.first?.url)
+        try harness.write(failure, "yes")
+        await harness.monitor.refreshPendingDrafts()
+        try #require(harness.monitor.currentItems.first?.requiresDiscussionRecheck == true)
+        let changes = PendingDraftObservationChanges()
+        withObservationTracking { _ = harness.monitor.currentOpenItems } onChange: { changes.record() }
+        try harness.write(failure, "yes")
+        await harness.monitor.refreshPendingDrafts()
+        #expect(changes.count == 0)
+        #expect(harness.monitor.currentItems.first?.url == link)
+        harness.gitlab.remove(failure)
+        await harness.monitor.refreshPendingDrafts()
+        #expect(changes.count == 1)
+        #expect(harness.monitor.currentItems.first?.requiresDiscussionRecheck == false)
+        #expect(harness.monitor.currentItems.first?.url == link)
+    }
+
     @Test(arguments: [false, true])
     func draftsWithoutCurrentDiscussionEvidenceRemainAvailableOutsideReady(authored: Bool) async throws {
         let harness = try makeHarness(assistantWorked: true, authored: authored)
@@ -2147,6 +2267,48 @@ import Testing
         try await harness.poll()
         #expect(harness.log("selected.log").isEmpty)
         #expect(harness.monitor.currentItems.first?.draftCount == 2)
+    }
+
+    @Test func aVerifierCompletionCannotRequestReviewAfterItsAuthoredRowWasRemoved() async throws {
+        // given
+        let gate = InMemoryGitLab()
+        let harness = try makeHarness(assistantWorked: true, authored: true, reReviewGate: {
+            gate.write("verifier-entered")
+            try await gate.waitFor("release-verifier")
+        })
+        defer {
+            gate.close()
+            harness.monitor.automationConfigurationChanged()
+            harness.cleanUp()
+        }
+        try prepareAuthoredFeedback(harness)
+        harness.settings.automation.authorFeedback.isEnabled = false
+        harness.settings.automation.workflowRules[.newDiscussion].mode = .off
+        try harness.write("drafts.json", "[]")
+        try harness.write("discussions.json", harness.log("published-discussions.json"))
+        try harness.write("reviewers.json", #"[{"user":{"id":8},"state":"unapproved"}]"#)
+        harness.monitor.refresh(host: host, username: "me", todos: [])
+        try await gate.waitFor("verifier-entered")
+        let initialDeadline = ContinuousClock.now + .seconds(5)
+        while harness.monitor.isLoading, ContinuousClock.now < initialDeadline { await Task.yield() }
+        try #require(!harness.monitor.isLoading && harness.monitor.isVerifyingReReview)
+        try #require(harness.monitor.currentOpenItems.first?.isAuthored == true)
+
+        // when
+        harness.settings.ignoredMergeRequests.insert(.init(host: host, username: "me", projectID: 1, iid: 2))
+        try harness.write("authored.json", "[]")
+        harness.monitor.onRefreshed = { gate.write("row-removal-observed") }
+        harness.monitor.refresh(host: host, username: "me", todos: [])
+        try await gate.waitFor("row-removal-observed")
+        try #require(harness.monitor.currentOpenItems.isEmpty)
+        gate.write("release-verifier")
+        let completionDeadline = ContinuousClock.now + .seconds(5)
+        while harness.monitor.isVerifyingReReview, ContinuousClock.now < completionDeadline { await Task.yield() }
+
+        // then
+        #expect(!harness.monitor.isVerifyingReReview)
+        #expect(harness.log("re-review.log").isEmpty && harness.settings.reReviewReceipts.isEmpty)
+        #expect(harness.monitor.currentOpenItems.isEmpty)
     }
 
     @Test(arguments: ["draft", "closed"])
@@ -3618,4 +3780,11 @@ import Testing
         #expect(harness.monitor.confirmationStates[item.id] == .failed)
     }
 
+}
+
+private final class PendingDraftObservationChanges: @unchecked Sendable {
+    private let lock = NSLock()
+    private var value = 0
+    var count: Int { lock.withLock { value } }
+    func record() { lock.withLock { value += 1 } }
 }
