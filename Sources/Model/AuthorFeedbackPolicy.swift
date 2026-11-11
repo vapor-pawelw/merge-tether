@@ -52,7 +52,8 @@ struct AuthorFeedbackPolicy {
                                               pendingDraftCount: Int = 0,
                                               ignoredSuggestions: [IgnoredFeedbackSuggestion] = []) -> [InformationalAcknowledgement] {
         guard enabled, pendingDraftCount == 0,
-              (try? assessment.reviewers(in: discussions, authorID: authorID, ignoredSuggestions: ignoredSuggestions)) != nil else { return [] }
+              let assessment = try? assessment.normalizingCoveredReviewSummaries(in: discussions,
+                authorID: authorID, ignoredSuggestions: ignoredSuggestions) else { return [] }
         let verdicts = Dictionary(uniqueKeysWithValues: assessment.notes.map { ($0.noteID, $0) })
         return discussions.compactMap { discussion in
             let relevant = discussion.notes.filter { $0.system != true }
@@ -91,7 +92,8 @@ struct AuthorFeedbackPolicy {
                          approvedReviewerIDs: Set<Int>, enabled: Bool = true, pendingDraftCount: Int = 0,
                          ignoredSuggestions: [IgnoredFeedbackSuggestion] = []) -> [Finding] {
         let gate: State? = !enabled ? .disabled : pendingDraftCount > 0 ? .waitingPublication : nil
-        let verified = assessment.flatMap { (try? $0.reviewers(in: discussions, authorID: authorID, ignoredSuggestions: ignoredSuggestions)) == nil ? nil : $0 }
+        let verified = assessment.flatMap { try? $0.normalizingCoveredReviewSummaries(in: discussions,
+            authorID: authorID, ignoredSuggestions: ignoredSuggestions) }
         let verdicts = Dictionary(uniqueKeysWithValues: (verified?.notes ?? []).map { ($0.noteID, $0) })
         let missingReplies = verified?.missingPublishedReplyNoteIDs(in: discussions, authorID: authorID) ?? []
         let informationalThreads = Set(verified.map {
@@ -181,7 +183,8 @@ struct AuthorFeedbackPolicy {
     static func acceptedReviewers(discussions: [GitLabMergeRequestDiscussion], assessment: ReReviewAssessment,
                                   authorID: Int, approvedReviewerIDs: Set<Int>,
                                   ignoredSuggestions: [IgnoredFeedbackSuggestion] = []) -> Set<Int> {
-        guard (try? assessment.reviewers(in: discussions, authorID: authorID, ignoredSuggestions: ignoredSuggestions)) != nil else { return [] }
+        guard let assessment = try? assessment.normalizingCoveredReviewSummaries(in: discussions,
+            authorID: authorID, ignoredSuggestions: ignoredSuggestions) else { return [] }
         let verdicts = Dictionary(uniqueKeysWithValues: assessment.notes.map { ($0.noteID, $0) })
         let external = discussions.flatMap(\.notes).filter { $0.system == false && $0.author?.id != authorID }
         let byID = Dictionary(uniqueKeysWithValues: external.compactMap { note in note.id.map { ($0, note) } })

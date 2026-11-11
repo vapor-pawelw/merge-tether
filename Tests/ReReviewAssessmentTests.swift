@@ -4,6 +4,56 @@ import Testing
 
 @Suite("Re-review assessment")
 struct ReReviewAssessmentTests {
+    @Test(arguments: [false, true])
+    func aVerifiedCoveredReviewSummaryDoesNotInventAnotherAuthorReply(_ acknowledgement: Bool) throws {
+        let threads = try summaryDiscussions()
+        let assessment = ReReviewAssessment(notes: [
+            .init(noteID: 10, state: .addressed, reason: "The correction and published answer are verified."),
+            .init(noteID: 20, state: .addressed, reason: "This summary only repeats that corrected finding.",
+                informationalAcknowledgementSafe: acknowledgement, informationalPurpose: .reviewSummary,
+                reviewSummaryCoverage: .init(referencedNoteIDs: [10], noIndependentExpectation: true))
+        ])
+        #expect(try assessment.reviewers(in: threads, authorID: 3) == [7: 10])
+        #expect(assessment.missingPublishedReplyNoteIDs(in: threads, authorID: 3).isEmpty)
+        #expect(assessment.hasNoRemainingAuthorWork(in: threads, authorID: 3))
+        #expect(assessment.notes.last?.informationalAcknowledgementSafe == acknowledgement)
+        let normalized = try assessment.normalizingCoveredReviewSummaries(in: threads, authorID: 3)
+        #expect(normalized.notes.last?.state == .informational)
+        #expect(AuthorFeedbackPolicy.evaluate(discussions: threads, assessment: assessment, authorID: 3,
+            approvedReviewerIDs: [7]).allSatisfy { $0.state != .needsReply })
+    }
+
+    @Test(arguments: ["legacy", "unknown", "duplicate", "self", "independent", "concrete", "blocked", "uncertain", "reply", "question", "cycle", "summaryReference"])
+    func summaryCoverageCannotWaiveAnIndependentOrUnverifiedObligation(_ change: String) throws {
+        let threads = try summaryDiscussions(withReply: change != "reply")
+        var original = ReReviewAssessment.Note(noteID: 10,
+            state: change == "blocked" ? .blocking : change == "uncertain" ? .uncertain : .addressed,
+            reason: "The concrete finding retains its own outcome.")
+        if change == "cycle" {
+            original.informationalPurpose = .reviewSummary
+            original.reviewSummaryCoverage = .init(referencedNoteIDs: [20], noIndependentExpectation: true)
+        }
+        if change == "summaryReference" { original.informationalPurpose = .reviewSummary }
+        let refs = change == "unknown" ? [99] : change == "duplicate" ? [10, 10] : change == "self" ? [20] : [10]
+        let summary = ReReviewAssessment.Note(noteID: 20, state: .addressed, reason: "Claimed summary coverage.",
+            informationalPurpose: change == "concrete" ? .concreteCodeReviewFeedback : .reviewSummary,
+            reviewSummaryCoverage: change == "legacy" ? nil
+                : .init(referencedNoteIDs: refs, noIndependentExpectation: change != "independent"))
+        let question = ReReviewAssessment.CodeReviewRequest(sourceNoteID: 10, sourceQuote: "Please cover retries",
+            kind: .potentialDefect, summary: "Check the retry path", question: "Does the retry preserve the request identity?")
+        let assessment = ReReviewAssessment(notes: [original, summary], codeReviewRequests: change == "question" ? [question] : nil)
+        #expect(assessment.missingPublishedReplyNoteIDs(in: threads, authorID: 3).contains(20))
+        #expect(!assessment.hasNoRemainingAuthorWork(in: threads, authorID: 3))
+        if change != "legacy" {
+            #expect(throws: ReReviewAssessment.ValidationError.self) { try assessment.reviewers(in: threads, authorID: 3) }
+        }
+    }
+
+    private func summaryDiscussions(withReply: Bool = true) throws -> [GitLabMergeRequestDiscussion] {
+        let reply = withReply ? #",{"id":11,"author":{"id":3},"system":false,"body":"The retry now preserves the request identity; the regression verifies it."}"# : ""
+        return try JSONDecoder().decode([GitLabMergeRequestDiscussion].self, from: Data(#"[{"id":"finding","notes":[{"id":10,"author":{"id":7},"system":false,"resolvable":true,"resolved":false,"body":"Please cover retries"}\#(reply)]},{"id":"summary","notes":[{"id":20,"author":{"id":7},"system":false,"resolvable":false,"body":"The earlier review raised the retry coverage issue."}]}]"#.utf8))
+    }
+
     @Test func anIncidentalPrivateQuestionDoesNotRewriteTheOriginalCommentButHoldsReadiness() throws {
         let threads = try discussions()
         let assessment = try JSONDecoder().decode(ReReviewAssessment.self, from: Data(#"{"notes":[{"noteID":10,"state":"addressed","reason":"A is corrected."},{"noteID":12,"state":"informational","reason":"Summary."},{"noteID":13,"state":"addressed","reason":"B is corrected."}],"codeReviewRequests":[{"sourceNoteID":10,"sourceQuote":"Fix A","kind":"potentialDefect","summary":"Check a related error path.","question":"Can the related error path leak caller data?"}]}"#.utf8))

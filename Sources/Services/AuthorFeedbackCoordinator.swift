@@ -162,17 +162,22 @@ final class AuthorFeedbackCoordinator {
             && status.semanticContextFingerprint == request.semanticContextFingerprint
     }
 
+    static func permitsBackgroundCheck(for request: GitLabMergeRequest, configuration: AutomationSettings,
+                                       host: String, username: String) -> Bool {
+        let workflow = configuration.workflowRules[.newDiscussion]
+        let followsFeedback = configuration.authorFeedback.isEnabled
+            || (workflow.mode == .assistant && workflow.includes(request))
+        return (configuration.autoResolveAcceptedFeedback || configuration.autoMergeEnabled || followsFeedback)
+            && configuration.hasAutomaticActionConsent
+            && configuration.scope.permits(request, host: host, username: username)
+    }
+
     func refresh(request: GitLabMergeRequest, discussions: [GitLabMergeRequestDiscussion], drafts: Int,
                  host: String, user: GitLabAuthenticatedUser) {
         let target = MRAutomationScope.Target(host: host, username: user.username, projectID: request.projectID, iid: request.iid)
         let configuration = settings.automation
-        let workflow = configuration.workflowRules[.newDiscussion]
-        let followsFeedback = configuration.authorFeedback.isEnabled
-            || (workflow.mode == .assistant && workflow.includes(request))
         guard request.author.id == user.id, request.state == "opened", request.draft != nil,
-              configuration.autoResolveAcceptedFeedback || configuration.autoMergeEnabled || followsFeedback,
-              settings.automation.hasAutomaticActionConsent,
-              settings.automation.scope.permits(request, host: host, username: user.username),
+              Self.permitsBackgroundCheck(for: request, configuration: configuration, host: host, username: user.username),
               let fingerprint = ReviewVerdict.fingerprint(discussions), let head = request.sha else { return }
         let hasFeedback = discussions.contains { $0.notes.contains { $0.system == false && $0.author?.id != user.id } }
         guard hasFeedback else { statuses.removeValue(forKey: target); return }

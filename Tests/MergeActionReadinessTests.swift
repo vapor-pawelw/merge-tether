@@ -140,6 +140,166 @@ struct MergeActionReadinessTests {
         #expect(try listed.manualMergeBlocker(using: status(blocker: "unknown")) == .prerequisite(.dependencyEvidence))
     }
 
+    @Test(arguments: ["addressed", "ignored", "uncovered", "reply", "head", "conversation", "semantic", "checking", "failed"])
+    func feedbackReadinessUsesTheExactVerifiedNotesAndExplainsItsRemainingGate(_ scenario: String) throws {
+        let checked = try status()
+        var listed = try item(checked, removing: ["user"])
+        listed.feedback = [try feedbackNote()]
+        listed.needsDiscussion = true
+        listed.observedDiscussionFingerprint = "conversation"
+        listed.authorFeedbackStatus = .init(head: scenario == "head" ? "old" : checked.request.sha!,
+            fingerprint: scenario == "conversation" ? "old" : "conversation",
+            semanticContextFingerprint: scenario == "semantic" ? "old" : checked.request.semanticContextFingerprint,
+            phase: scenario == "checking" ? .checking : scenario == "failed" ? .failed : .complete,
+            replyNoteIDs: scenario == "reply" ? [5] : [],
+            addressedNoteIDs: scenario == "uncovered" ? [6] : scenario == "ignored" ? [] : [5],
+            ignoredNoteIDs: scenario == "ignored" ? [5] : [])
+        let expected: ManualMergeFeedbackBlocker? = switch scenario {
+        case "uncovered": .unverifiedComments
+        case "reply": .reply
+        case "head": .sourceChanged
+        case "conversation": .discussionChanged
+        case "semantic": .descriptionChanged
+        case "checking": .checking
+        case "failed": .verificationFailed
+        default: nil
+        }
+        #expect(listed.manualMergeBlocker(using: checked) == expected.map(ManualMergeBlocker.feedback))
+        #expect(listed.canOfferManualMerge(using: checked) == (expected == nil))
+        #expect(listed.feedback.count == 1 && listed.needsDiscussion)
+    }
+
+    @Test(arguments: ["changes", "verification", "publication", "reply", "question", "followUp", "unverified"])
+    func eachRemainingFeedbackObligationKeepsAnActionableMergeHold(_ obligation: String) throws {
+        let checked = try status()
+        var listed = try item(checked)
+        listed.observedDiscussionFingerprint = "conversation"
+        var feedback = AuthorFeedbackStatus(head: checked.request.sha!, fingerprint: "conversation",
+            semanticContextFingerprint: checked.request.semanticContextFingerprint, phase: .complete)
+        switch obligation {
+        case "changes", "verification": feedback.findings = [.init(id: 5, discussionID: "thread", reviewerID: 7,
+            reviewerUsername: "reviewer", state: obligation == "changes" ? .needsChanges : .needsVerification,
+            reason: "A specific remaining requirement", waitingForReviewers: [])]
+        case "publication": feedback.pendingDraftCount = 1
+        case "reply": feedback.replyNoteIDs = [5]
+        case "question": feedback.codeReviewRequests = [.init(sourceNoteID: 5, sourceQuote: "Please check",
+            kind: .feedbackVerification, summary: "Verify the fallback", question: "Does the fallback handle retries?")]
+        case "followUp": feedback.followUpNoteIDs = [5]
+        default: listed.feedback = [try feedbackNote()]
+        }
+        listed.authorFeedbackStatus = feedback
+        let blocker = try #require(listed.manualMergeBlocker(using: checked))
+        #expect(!listed.canOfferManualMerge(using: checked))
+        #expect(blocker.recoveryAction == .reviewFeedback)
+        #expect(blocker != .feedback(.checking))
+    }
+
+    @Test func unavailableFeedbackEvidenceHasAReadOnlyRecoveryInsteadOfADeadEnd() throws {
+        let checked = try status()
+        var listed = try item(checked)
+        listed.observedDiscussionFingerprint = "conversation"
+        listed.authorFeedbackStatus = .init(head: checked.request.sha!, fingerprint: "conversation",
+            semanticContextFingerprint: checked.request.semanticContextFingerprint, phase: .failed)
+        #expect(listed.manualMergeBlocker(using: checked)?.recoveryAction == .verifyFeedback)
+        listed.authorFeedbackStatus?.phase = .checking
+        #expect(listed.manualMergeBlocker(using: checked)?.recoveryAction == nil)
+        listed.authorFeedbackStatus?.phase = .complete
+        listed.observedDiscussionFingerprint = "new-conversation"
+        #expect(listed.manualMergeBlocker(using: checked)?.recoveryAction == .refresh)
+        listed.observedDiscussionFingerprint = nil
+        #expect(listed.manualMergeBlocker(using: checked) == .feedback(.conversationUnavailable))
+        listed.observedDiscussionFingerprint = "conversation"
+        listed.authorFeedbackStatus?.semanticContextFingerprint = nil
+        #expect(listed.manualMergeBlocker(using: checked) == .feedback(.assessmentMissing))
+    }
+
+    @MainActor @Test(arguments: ["manual", "undecided", "disabled", "paused", "featuresOff", "automatic"])
+    func feedbackRecheckExecutesReviewInsteadOfANoopWhenBackgroundChecksCannotRun(_ profile: String) throws {
+        let request = try status().request
+        let target = MRAutomationScope.Target(host: "gitlab.example.test", username: "me", projectID: 1, iid: 2)
+        var configuration = AutomationSettings()
+        configuration.applyPreset(.full, for: .codex)
+        switch profile {
+        case "manual": configuration.applyPreset(.manual, for: .codex)
+        case "undecided": configuration.packageDecision = .undecided
+        case "disabled": configuration.packageDecision = .disabled
+        case "paused": configuration.scope[target] = .paused
+        case "featuresOff":
+            configuration.autoResolveAcceptedFeedback = false
+            configuration.autoMergeEnabled = false
+            configuration.authorFeedback.isEnabled = false
+            configuration.workflowRules[.newDiscussion].mode = .off
+        default: break
+        }
+        let before = configuration
+        let permitted = AuthorFeedbackCoordinator.permitsBackgroundCheck(for: request, configuration: configuration,
+            host: target.host, username: target.username)
+        let route = ManualFeedbackRecheckRoute(backgroundCheckAllowed: permitted)
+        let displayed = try item(status())
+        var executed: [String] = []
+        var destination: ManualFeedbackReviewDestination?
+        route.perform(verify: { executed.append("verify") }, review: {
+            executed.append("review")
+            destination = .init(item: displayed)
+        })
+        #expect(executed == [profile == "automatic" ? "verify" : "review"])
+        #expect(route.recoveryAction == (profile == "automatic" ? .verifyFeedback : .reviewFeedback))
+        #expect(displayed.authorFeedbackStatus == nil)
+        #expect(destination == (profile == "automatic" ? nil : .gitLab(displayed.url)))
+        #expect(configuration == before)
+    }
+
+    private func feedbackNote() throws -> GitLabMergeRequestDiscussion.Note {
+        try JSONDecoder().decode(GitLabMergeRequestDiscussion.Note.self,
+            from: Data(#"{"id":5,"author":{"id":7,"username":"reviewer"},"body":"Please check","system":false,"resolvable":true,"resolved":true}"#.utf8))
+    }
+
+    @MainActor @Test(arguments: ["current", "head", "title", "description", "discussion"])
+    func acceptedCorrectionsAndACoveredSummaryOfferMergeOnCardAndDetailsOnlyForTheirCheckedContext(_ change: String) throws {
+        let checked = try status()
+        let threads = try JSONDecoder().decode([GitLabMergeRequestDiscussion].self, from: Data(#"[{"id":"finding","notes":[{"id":10,"author":{"id":7},"system":false,"resolvable":true,"resolved":true,"body":"Cover the retry path","created_at":"2026-01-01T10:00:00Z"},{"id":11,"author":{"id":3},"system":false,"body":"The correction is present and the regression verifies it.","created_at":"2026-01-01T10:01:00Z"},{"id":12,"author":{"id":7},"system":false,"body":"The correction is accepted.","created_at":"2026-01-01T10:02:00Z"}]},{"id":"summary","notes":[{"id":20,"author":{"id":7},"system":false,"resolvable":false,"body":"The earlier retry finding is fixed."}]}]"#.utf8))
+        let assessment = try ReReviewAssessment(notes: [
+            .init(noteID: 10, state: .addressed, reason: "The correction and published reply are verified.", acceptanceNoteID: 12),
+            .init(noteID: 12, state: .informational, reason: "The reviewer explicitly accepted the correction."),
+            .init(noteID: 20, state: .addressed, reason: "The summary adds no independent expectation.",
+                informationalPurpose: .reviewSummary,
+                reviewSummaryCoverage: .init(referencedNoteIDs: [10], noIndependentExpectation: true))
+        ]).normalizingCoveredReviewSummaries(in: threads, authorID: 3)
+        let fingerprint = try #require(ReviewVerdict.fingerprint(threads))
+        var observedThreads = threads
+        if change == "discussion" {
+            let encoded = String(decoding: try JSONEncoder().encode(threads), as: UTF8.self)
+                .replacingOccurrences(of: "The earlier retry finding is fixed.",
+                    with: "The earlier retry finding is fixed. Also document rollback before merging.")
+            observedThreads = try JSONDecoder().decode([GitLabMergeRequestDiscussion].self, from: Data(encoded.utf8))
+        }
+        let changes: [String: Any] = change == "head" ? ["sha": String(repeating: "b", count: 40)]
+            : change == "title" ? ["title": "Changed requirements"]
+            : change == "description" ? ["description": "A new prerequisite before merge"] : [:]
+        var listed = try item(checked, removing: ["user"], changes: changes)
+        listed.feedback = [try #require(threads.first?.notes.first)]
+        listed.needsDiscussion = true
+        listed.observedDiscussionFingerprint = ReviewVerdict.fingerprint(observedThreads)
+        listed.authorFeedbackStatus = .init(head: checked.request.sha!, fingerprint: fingerprint,
+            semanticContextFingerprint: checked.request.semanticContextFingerprint, phase: .complete,
+            replyNoteIDs: Set(assessment.missingPublishedRepliesByThread(in: threads, authorID: 3).keys),
+            addressedNoteIDs: Set(assessment.notes.map(\.noteID)))
+        var input = MRBoardProjector.Input(account: .init(host: "gitlab.example.test", username: "me", revision: 1))
+        input.attention = .init(host: "gitlab.example.test", username: "me", revision: 1,
+            evidence: [listed], attention: [], catalog: [listed])
+        input.authored = [checked]
+        input.automation.applyPreset(.manual, for: .codex)
+        let projector = MRBoardProjector(input: input)
+        let board = projector.board()
+        let card = try #require(board.own.first)
+        let detail = CommandCenterDisplayFrame.Detail(item: listed, board: board, host: "gitlab.example.test", username: "me")
+        #expect(card.item.canOfferManualMerge(using: checked) == (change == "current"))
+        #expect(detail.item.canOfferManualMerge(using: checked) == (change == "current"))
+        #expect((projector.attentionItems.first?.needsMerge == true) == (change == "current"))
+        #expect(AuthorFeedbackPolicy.acceptedReviewers(discussions: threads, assessment: assessment, authorID: 3,
+            approvedReviewerIDs: []) == [7])
+    }
+
     @MainActor @Test(arguments: [MergeSubmissionAction.mergeNow, .enqueue])
     func sparseCatalogOffersTheSameMergeOnCardAndDetails(_ action: MergeSubmissionAction) throws {
         let checked = try status(action: action)

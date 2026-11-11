@@ -24,6 +24,10 @@ struct ReReviewAssessment: Codable, Sendable {
     }
 
     struct Note: Codable, Sendable {
+        struct ReviewSummaryCoverage: Codable, Sendable {
+            let referencedNoteIDs: [Int]
+            let noIndependentExpectation: Bool
+        }
         enum State: String, Codable, Sendable { case addressed, informational, blocking, uncertain, ignoredByUser }
         enum InformationalPurpose: String, Codable, Sendable {
             case concreteCodeReviewFeedback, reviewSummary, automatedReviewReport, other
@@ -41,12 +45,26 @@ struct ReReviewAssessment: Codable, Sendable {
         /// A semantically verified, published author reply covering this exact concern,
         /// including supporting evidence in another discussion. Never waives this thread's reply.
         var publishedReplyNoteID: Int? = nil
+        /// Within the enclosing head/text/discussion-bound assessment, this summary adds no obligation beyond the named findings.
+        var reviewSummaryCoverage: ReviewSummaryCoverage? = nil
     }
     let notes: [Note]
     var completedBlockedRunIDs: [UUID]? = nil
     var codeReviewRequests: [CodeReviewRequest]? = nil
 
     var reviewRequests: [CodeReviewRequest] { codeReviewRequests ?? [] }
+
+    func normalizingCoveredReviewSummaries(in discussions: [GitLabMergeRequestDiscussion], authorID: Int,
+                                          ignoredSuggestions: [IgnoredFeedbackSuggestion] = []) throws -> Self {
+        _ = try reviewers(in: discussions, authorID: authorID, ignoredSuggestions: ignoredSuggestions)
+        let summaries = coveredReviewSummaryIDs(in: discussions, authorID: authorID)
+        return .init(notes: notes.map { note in
+            guard summaries.contains(note.noteID) else { return note }
+            return .init(noteID: note.noteID, state: .informational, reason: note.reason, summary: note.summary,
+                informationalAcknowledgementSafe: note.informationalAcknowledgementSafe,
+                informationalPurpose: note.informationalPurpose, reviewSummaryCoverage: note.reviewSummaryCoverage)
+        }, completedBlockedRunIDs: completedBlockedRunIDs, codeReviewRequests: codeReviewRequests)
+    }
 
     var readinessBlockers: [ReReviewReadiness.Blocker] {
         let concerns = notes.filter { $0.state == .blocking } + notes.filter { $0.state == .uncertain }
@@ -64,6 +82,11 @@ struct ReReviewAssessment: Codable, Sendable {
     /// Addressed code or an explanation elsewhere does not replace this thread's reply.
     /// Includes actionable general comments; private drafts never prove publication.
     func missingPublishedReplyNoteIDs(in discussions: [GitLabMergeRequestDiscussion], authorID: Int) -> Set<Int> {
+        repliesOwedByAddressedNotes(in: discussions, authorID: authorID)
+            .subtracting(coveredReviewSummaryIDs(in: discussions, authorID: authorID))
+    }
+
+    private func repliesOwedByAddressedNotes(in discussions: [GitLabMergeRequestDiscussion], authorID: Int) -> Set<Int> {
         let addressed = Set(notes.filter { $0.state == .addressed }.map(\.noteID))
         return Set(discussions.flatMap { thread in
             thread.notes.compactMap { note -> Int? in
@@ -74,6 +97,34 @@ struct ReReviewAssessment: Codable, Sendable {
                       }) else { return nil }
                 return id
             }
+        })
+    }
+
+    private func coveredReviewSummaryIDs(in discussions: [GitLabMergeRequestDiscussion], authorID: Int) -> Set<Int> {
+        let externalIDs = Set(discussions.flatMap(\.notes).filter {
+            $0.system == false && $0.author?.id != authorID
+        }.compactMap(\.id))
+        guard notes.count == externalIDs.count, Set(notes.map(\.noteID)) == externalIDs else { return [] }
+        let byID = Dictionary(uniqueKeysWithValues: notes.map { ($0.noteID, $0) })
+        let owed = repliesOwedByAddressedNotes(in: discussions, authorID: authorID)
+        let questions = Set(reviewRequests.map(\.sourceNoteID))
+        return Set(notes.compactMap { summary in
+            guard let proof = summary.reviewSummaryCoverage, proof.noIndependentExpectation,
+                  summary.informationalPurpose == .reviewSummary,
+                  [.addressed, .informational].contains(summary.state),
+                  (summary.ignoredDecisionIDs ?? []).isEmpty, !questions.contains(summary.noteID),
+                  externalIDs.contains(summary.noteID),
+                  !proof.referencedNoteIDs.isEmpty, proof.referencedNoteIDs.count <= 12,
+                  Set(proof.referencedNoteIDs).count == proof.referencedNoteIDs.count,
+                  !proof.referencedNoteIDs.contains(summary.noteID),
+                  proof.referencedNoteIDs.allSatisfy({ id in
+                      guard externalIDs.contains(id), let reference = byID[id] else { return false }
+                      return [.addressed, .informational].contains(reference.state)
+                          && reference.informationalPurpose != .reviewSummary && reference.reviewSummaryCoverage == nil
+                          && (reference.ignoredDecisionIDs ?? []).isEmpty
+                          && !owed.contains(id) && !questions.contains(id)
+                  }) else { return nil }
+            return summary.noteID
         })
     }
 
@@ -116,6 +167,10 @@ struct ReReviewAssessment: Codable, Sendable {
               notes.allSatisfy({ !$0.reason.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty && $0.reason.count <= 600 })
         else { throw ValidationError.incompleteEvidence }
         let byID = Dictionary(uniqueKeysWithValues: notes.map { ($0.noteID, $0) })
+        let coveredSummaries = coveredReviewSummaryIDs(in: discussions, authorID: authorID)
+        guard notes.allSatisfy({ $0.reviewSummaryCoverage == nil || coveredSummaries.contains($0.noteID) }) else {
+            throw ValidationError.incompleteEvidence
+        }
         guard reviewRequests.count <= 12, Set(reviewRequests.map(\.id)).count == reviewRequests.count,
               reviewRequests.allSatisfy({ request in
                   guard let source = external.first(where: { $0.id == request.sourceNoteID }),
@@ -143,7 +198,8 @@ struct ReReviewAssessment: Codable, Sendable {
                   ignoredSuggestions.filter({ ignoredIDs.contains($0.id) }).allSatisfy({ $0.matches(note) })
             else { throw ValidationError.incompleteEvidence }
             switch assessment.state {
-            case .addressed: ready[reviewer] = max(ready[reviewer] ?? 0, id)
+            case .addressed:
+                if !coveredSummaries.contains(id) { ready[reviewer] = max(ready[reviewer] ?? 0, id) }
             case .blocking, .uncertain: blocked.insert(reviewer)
             case .informational, .ignoredByUser: break
             }

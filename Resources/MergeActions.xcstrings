@@ -451,6 +451,149 @@
           }
         }
       }
+    },
+    "mergeActions.feedbackChecking": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Checking whether the current feedback is addressed before merging."
+          }
+        }
+      }
+    },
+    "mergeActions.feedbackFailed": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Feedback verification failed. Recheck feedback before merging."
+          }
+        }
+      }
+    },
+    "mergeActions.feedbackSourceChanged": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Feedback was checked for an earlier source commit. Refresh to verify the current changes."
+          }
+        }
+      }
+    },
+    "mergeActions.feedbackDiscussionChanged": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "The conversation has changed since feedback was checked. Refresh to check the current comments."
+          }
+        }
+      }
+    },
+    "mergeActions.feedbackDescriptionChanged": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "The merge request’s title or description changed since feedback was checked. Refresh to verify its current requirements."
+          }
+        }
+      }
+    },
+    "mergeActions.feedbackUnverified": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Some feedback has no current verified outcome. Review it before merging."
+          }
+        }
+      }
+    },
+    "mergeActions.feedbackChanges": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Verified feedback still requires correction work before merging."
+          }
+        }
+      }
+    },
+    "mergeActions.feedbackVerificationNeeded": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "A specific feedback requirement still needs verification. Review the feedback for details."
+          }
+        }
+      }
+    },
+    "mergeActions.feedbackPublication": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "The feedback check is waiting for unpublished comments. Review comments before merging."
+          }
+        }
+      }
+    },
+    "mergeActions.feedbackReply": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "A required reply has not been published in its discussion. Review the feedback before merging."
+          }
+        }
+      }
+    },
+    "mergeActions.feedbackCodeReview": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "A question raised during feedback verification still needs review before merging."
+          }
+        }
+      }
+    },
+    "mergeActions.feedbackConversationUnavailable": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "The current conversation has not been read. Refresh from GitLab before checking feedback."
+          }
+        }
+      }
+    },
+    "mergeActions.feedbackChecksPaused": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Automatic feedback checks are off or paused for this MR. Review its discussions and current evidence."
+          }
+        }
+      }
     }
   },
   "version": "1.0"

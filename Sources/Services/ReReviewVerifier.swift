@@ -4,7 +4,7 @@ import Foundation
 /// Supplied evidence is supplementary; absent proof must produce `uncertain`.
 enum ReReviewVerifier {
     enum VerificationError: Error, Equatable { case unavailable, failed, incompleteEvidence }
-    static let policyVersion = "per-thread-feedback-replies-6"
+    static let policyVersion = "covered-review-summaries-7"
 
     static let schema = #"{"type":"object","additionalProperties":false,"properties":{"notes":{"type":"array","items":{"type":"object","additionalProperties":false,"properties":{"noteID":{"type":"integer"},"state":{"type":"string","enum":["addressed","informational","blocking","uncertain"]},"reason":{"type":"string"},"summary":{"type":"string","minLength":1,"maxLength":200},"acceptanceNoteID":{"type":["integer","null"]},"publishedReplyNoteID":{"type":["integer","null"]},"informationalAcknowledgementSafe":{"type":"boolean"},"informationalPurpose":{"type":"string","enum":["concreteCodeReviewFeedback","reviewSummary","automatedReviewReport","other"]}},"required":["noteID","state","reason","summary","acceptanceNoteID","publishedReplyNoteID","informationalAcknowledgementSafe","informationalPurpose"]}}},"required":["notes"]}"#
 
@@ -20,7 +20,12 @@ enum ReReviewVerifier {
         var decisionIdentity: [String: Any] = ["type": "string"]
         if !decisionIDs.isEmpty { decisionIdentity["enum"] = decisionIDs.map(\.uuidString) }
         fields["ignoredDecisionIDs"] = ["type": ["array", "null"], "items": decisionIdentity, "maxItems": decisionIDs.count]
-        item["required"] = (item["required"] as? [String] ?? []) + ["ignoredDecisionIDs"]
+        fields["reviewSummaryCoverage"] = ["type": ["object", "null"], "additionalProperties": false,
+            "properties": [
+                "referencedNoteIDs": ["type": "array", "items": identity, "minItems": 1, "maxItems": 12],
+                "noIndependentExpectation": ["type": "boolean"]
+            ], "required": ["referencedNoteIDs", "noIndependentExpectation"]]
+        item["required"] = (item["required"] as? [String] ?? []) + ["ignoredDecisionIDs", "reviewSummaryCoverage"]
         notes["minItems"] = noteIDs.count
         notes["maxItems"] = noteIDs.count
         item["properties"] = fields
@@ -300,6 +305,23 @@ enum ReReviewVerifier {
             Referenced findings awaiting reviewer acceptance make informationalAcknowledgementSafe false.
             An informational summary classification does not accept the referenced corrections or
             authorize closing their original threads.
+            Return reviewSummaryCoverage only for a report or acknowledgement that repeats named
+            concrete findings and adds NO independent request, answer, changed expectation or condition.
+            Set referencedNoteIDs to the exact original incoming finding IDs from this MR and
+            noIndependentExpectation to true only after checking the whole summary thread and
+            verifying every referenced finding against current code or a supported explanation.
+            Every referenced finding must be addressed or informational, have its own required
+            published author reply, and have no remaining private code question or author obligation.
+            Another summary cannot be its evidence, and summaries cannot refer to themselves.
+            This source-bound coverage means no duplicate author reply is owed to the report itself,
+            including when you classified its verified contents as addressed. For such a covered
+            report, set informationalPurpose to reviewSummary even if state is addressed.
+            An actual actionable duplicate finding still requires its own thread reply. A summary
+            with any distinct request or remaining condition gets null reviewSummaryCoverage and
+            follows its ordinary addressed, blocking or uncertain workflow. Never derive coverage
+            from an account name, resolution, approval or another summary's positive tone alone.
+            Return null for legacy/uncertain coverage and for every non-summary note. Coverage
+            neither proves reviewer acceptance nor grants publication, resolution or merge permission.
             For each addressed note, set publishedReplyNoteID to the exact ID of a later, substantive,
             published MR-author reply that answers ALL remaining expectations in that note. Read its
             full body and verify the correction or explanation against current evidence. The reply
@@ -386,14 +408,17 @@ enum ReReviewVerifier {
             }
             let envelope = try JSONDecoder().decode(Envelope.self, from: output.stdout)
             guard envelope.is_error != true, let assessment = envelope.structured_output else { throw VerificationError.failed }
-            _ = try assessment.reviewers(in: input.discussions, authorID: input.authorID, ignoredSuggestions: input.ignoredSuggestions)
-            try validateBlockedRunProof(assessment, input: input)
-            return redactingReasons(in: assessment)
+            return try validatedAssessment(assessment, input: input)
         }
         let assessment = try JSONDecoder().decode(ReReviewAssessment.self, from: result)
-        _ = try assessment.reviewers(in: input.discussions, authorID: input.authorID, ignoredSuggestions: input.ignoredSuggestions)
-        try validateBlockedRunProof(assessment, input: input)
-        return redactingReasons(in: assessment)
+        return try validatedAssessment(assessment, input: input)
+    }
+
+    private static func validatedAssessment(_ assessment: ReReviewAssessment, input: Input) throws -> ReReviewAssessment {
+        let normalized = try assessment.normalizingCoveredReviewSummaries(in: input.discussions,
+            authorID: input.authorID, ignoredSuggestions: input.ignoredSuggestions)
+        try validateBlockedRunProof(normalized, input: input)
+        return redactingReasons(in: normalized)
     }
 
     private static func validateBlockedRunProof(_ assessment: ReReviewAssessment, input: Input) throws {
@@ -417,7 +442,7 @@ enum ReReviewVerifier {
                 summary: note.summary.map(GlabService.redactWorkflowEvidence), acceptanceNoteID: note.acceptanceNoteID,
                 informationalAcknowledgementSafe: note.informationalAcknowledgementSafe,
                 informationalPurpose: note.informationalPurpose, ignoredDecisionIDs: note.ignoredDecisionIDs,
-                publishedReplyNoteID: note.publishedReplyNoteID)
+                publishedReplyNoteID: note.publishedReplyNoteID, reviewSummaryCoverage: note.reviewSummaryCoverage)
         }, completedBlockedRunIDs: assessment.completedBlockedRunIDs,
            codeReviewRequests: assessment.codeReviewRequests.map { requests in requests.map { request in
                .init(sourceNoteID: request.sourceNoteID, sourceQuote: GlabService.redactWorkflowEvidence(request.sourceQuote),

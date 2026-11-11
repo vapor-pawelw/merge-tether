@@ -107,7 +107,8 @@ private struct CommandCenterMRCardContent: View {
                 }
                 MREffectivePolicySummary(row: row, monitor: monitor,
                     excluding: [presentation.message, presentation.nextStep ?? ""])
-                MergeActionsView(item: item, monitor: monitor, evidenceMatchesCatalogContext: row.evidenceMatchesCatalogContext, actionsBlocked: presentation.actionsBlocked) {
+                MergeActionsView(item: item, monitor: monitor, evidenceMatchesCatalogContext: row.evidenceMatchesCatalogContext,
+                    actionsBlocked: presentation.actionsBlocked, onReviewFeedback: { openAttention(.feedback) }) {
                     if humanAction?.action == .retryRun {
                         Button { openAttention(.assistantRuns) } label: { Text(.MRHumanAction.mrHumanActionActionReviewRun) }
                             .buttonStyle(.plain)

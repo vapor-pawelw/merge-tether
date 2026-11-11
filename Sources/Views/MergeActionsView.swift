@@ -6,7 +6,9 @@ struct MergeActionsView<AdditionalActions: View>: View {
     let monitor: TodoMonitorService
     var evidenceMatchesCatalogContext = true
     var actionsBlocked = false
+    var onReviewFeedback: (() -> Void)? = nil
     @ViewBuilder var additionalActions: () -> AdditionalActions
+    @Environment(\.openURL) private var openURL
     @State private var showingConfirmation = false
     @State private var working = false
     @State private var result: MergeSubmissionState?
@@ -33,6 +35,12 @@ struct MergeActionsView<AdditionalActions: View>: View {
     private var state: MergeSubmissionState { result ?? status?.submissionState ?? .none }
     private var hasDiscussionBlock: Bool { status?.blockers.contains(.discussions) == true || item.mergeRequest?.blockingDiscussionsResolved == false }
     private var needsGitLabCheck: Bool { state == .uncertain || state == .changed || status?.action == nil && status != nil }
+    private var feedbackRecheckRoute: ManualFeedbackRecheckRoute {
+        guard let request = item.mergeRequest, let host = monitor.glab.resolvedHost,
+              let username = monitor.glab.currentUsername else { return .review }
+        return .init(backgroundCheckAllowed: AuthorFeedbackCoordinator.permitsBackgroundCheck(for: request,
+            configuration: monitor.settings.automation, host: host, username: username))
+    }
 
     var body: some View {
         VStack(alignment: .leading, spacing: 6) {
@@ -48,6 +56,9 @@ struct MergeActionsView<AdditionalActions: View>: View {
                         .foregroundStyle(state.isDelegated ? Color.secondary : .orange)
                 } else if let blocker {
                     Text(blocker.title).foregroundStyle(.secondary)
+                    if blocker.recoveryAction == .verifyFeedback, feedbackRecheckRoute == .review {
+                        Text(.MergeActions.mergeActionsFeedbackChecksPaused).foregroundStyle(.secondary)
+                    }
                 }
                 if hasDiscussionBlock, blocker != .prerequisite(.discussions) {
                     Text(.Menu.menuAuthoredBlockerDiscussions).foregroundStyle(.orange)
@@ -71,6 +82,7 @@ struct MergeActionsView<AdditionalActions: View>: View {
                         }
                         .buttonStyle(.bordered).disabled(working || actionsBlocked)
                     }
+                    feedbackRecoveryAction
                     if needsGitLabCheck { Link(destination: item.url) { Text(.MergeActions.mergeActionsCheckGitLab) } }
                 }
                 additionalActions()
@@ -96,6 +108,48 @@ struct MergeActionsView<AdditionalActions: View>: View {
         }
         .onChange(of: item.mergeRequest?.sha) { _, _ in result = nil; prepared = nil; showingConfirmation = false }
         .onChange(of: monitor.authoredMergeRequests.lastRefresh) { _, _ in result = nil }
+    }
+
+    @ViewBuilder
+    private var feedbackRecoveryAction: some View {
+        let route = blocker?.recoveryAction == .verifyFeedback ? feedbackRecheckRoute : nil
+        if state == .none, let recovery = route?.recoveryAction ?? blocker?.recoveryAction {
+            switch recovery {
+            case .refresh:
+                GitLabRefreshButton(monitor: monitor, itemID: item.id).buttonStyle(.bordered)
+            case .verifyFeedback:
+                Button {
+                    feedbackRecheckRoute.perform(verify: { monitor.attention.retryAuthorFeedback(item.id) },
+                        review: reviewFeedback)
+                } label: {
+                    Text(.AuthorFeedback.authorFeedbackRecheck)
+                }
+                .buttonStyle(.bordered).disabled(working || actionsBlocked)
+            case .reviewFeedback:
+                switch ManualFeedbackReviewDestination(item: item) {
+                case .gitLab(let url):
+                    Link(destination: url) { Text(.MRHumanAction.mrHumanActionActionReviewFeedback) }
+                case .verification:
+                    if let onReviewFeedback {
+                        Button {
+                            (route ?? .review).perform(verify: { monitor.attention.retryAuthorFeedback(item.id) }, review: onReviewFeedback)
+                        } label: { Text(.MRHumanAction.mrHumanActionActionReviewFeedback) }
+                            .buttonStyle(.bordered)
+                    } else {
+                        Link(destination: item.url) { Text(.MRHumanAction.mrHumanActionActionReviewFeedback) }
+                    }
+                }
+            }
+        }
+    }
+
+    private func reviewFeedback() {
+        switch ManualFeedbackReviewDestination(item: item) {
+        case .gitLab(let url): openURL(url)
+        case .verification:
+            if let onReviewFeedback { onReviewFeedback() }
+            else { openURL(item.url) }
+        }
     }
 
     private func merge() {
@@ -131,9 +185,11 @@ struct MergeActionsView<AdditionalActions: View>: View {
 
 extension MergeActionsView where AdditionalActions == EmptyView {
     init(item: MergeRequestAttentionMonitor.Item, monitor: TodoMonitorService,
-         evidenceMatchesCatalogContext: Bool = true, actionsBlocked: Bool = false) {
+         evidenceMatchesCatalogContext: Bool = true, actionsBlocked: Bool = false,
+         onReviewFeedback: (() -> Void)? = nil) {
         self.item = item; self.monitor = monitor; self.actionsBlocked = actionsBlocked
         self.evidenceMatchesCatalogContext = evidenceMatchesCatalogContext
+        self.onReviewFeedback = onReviewFeedback
         self.additionalActions = { EmptyView() }
     }
 }

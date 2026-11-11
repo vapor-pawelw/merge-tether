@@ -140,7 +140,11 @@ private struct CommandCenterMRDetailContent: View {
                     if finishedState == nil {
                         MREffectivePolicySummary(row: presentationRow, monitor: monitor,
                             excluding: [presentation.humanAction?.explanation ?? ""])
-                        MergeActionsView(item: item, monitor: monitor, evidenceMatchesCatalogContext: presentationRow.evidenceMatchesCatalogContext, actionsBlocked: isStartingReview || isRetrying)
+                        MergeActionsView(item: item, monitor: monitor, evidenceMatchesCatalogContext: presentationRow.evidenceMatchesCatalogContext,
+                            actionsBlocked: isStartingReview || isRetrying, onReviewFeedback: {
+                                feedbackExpanded = true
+                                Task { await scroll(to: item.authorFeedbackStatus == nil ? .comments : .feedbackStatus, proxy: proxy) }
+                            })
                     }
                     if showsDecisions {
                         nextStep(proxy: proxy, citationContext: citationContext, discussions: discussions,

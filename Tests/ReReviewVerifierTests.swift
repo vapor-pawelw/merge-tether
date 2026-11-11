@@ -5,6 +5,48 @@ import Testing
 @Suite("Headless re-review verification")
 struct ReReviewVerifierTests {
     @Test(arguments: AutomationAssistant.allCases)
+    func coveredSummaryProofSurvivesProviderDecodingAndRemainsSeparateFromPublicationPermission(_ assistant: AutomationAssistant) async throws {
+        let folder = FileManager.default.temporaryDirectory.appending(path: UUID().uuidString)
+        try FileManager.default.createDirectory(at: folder, withIntermediateDirectories: false)
+        defer { try? FileManager.default.removeItem(at: folder) }
+        let script = folder.appending(path: "cli")
+        try Data("""
+            #!/usr/bin/python3
+            import json,pathlib,sys
+            args=sys.argv[1:]
+            incoming=sys.stdin.read()
+            codex=args[0]=='exec'
+            instructions=incoming[:incoming.index('{')] if codex else args[args.index('-p')+1]
+            schema=json.load(open(args[args.index('--output-schema')+1])) if codex else json.loads(args[args.index('--json-schema')+1])
+            pathlib.Path(__file__+'.capture').write_text(json.dumps({'instructions':instructions,'schema':schema}))
+            result={'notes':[{'noteID':10,'state':'addressed','reason':'The current correction and its answer are verified.'},
+                {'noteID':20,'state':'addressed','reason':'This report only repeats the verified finding.',
+                 'informationalAcknowledgementSafe':False,'informationalPurpose':'reviewSummary',
+                 'reviewSummaryCoverage':{'referencedNoteIDs':[10],'noIndependentExpectation':True}}]}
+            if codex: json.dump(result,open(args[args.index('-o')+1],'w'))
+            else: print(json.dumps({'is_error':False,'structured_output':result}))
+            """.utf8).write(to: script)
+        try FileManager.default.setAttributes([.posixPermissions: 0o700], ofItemAtPath: script.path)
+        let threads = try JSONDecoder().decode([GitLabMergeRequestDiscussion].self, from: Data(#"[{"id":"finding","notes":[{"id":10,"author":{"id":7},"system":false,"resolvable":true,"resolved":false,"body":"Correct the retry path."},{"id":11,"author":{"id":3},"system":false,"body":"The retry correction is present and the regression verifies it."}]},{"id":"summary","notes":[{"id":20,"author":{"id":7},"system":false,"resolvable":false,"body":"The earlier review raised the retry-path issue."}]}]"#.utf8))
+        let input = ReReviewVerifier.Input(authorID: 3, headSHA: String(repeating: "a", count: 40),
+            title: "Synthetic retry correction", diff: "Verified correction", discussions: threads)
+        let result = try await ReReviewVerifier.run(input, assistant: assistant, model: "fixture", executable: script, retryWait: { _ in })
+        #expect(result.notes.last?.reviewSummaryCoverage?.referencedNoteIDs == [10])
+        #expect(result.notes.last?.state == .informational)
+        #expect(result.hasNoRemainingAuthorWork(in: threads, authorID: 3))
+        #expect(result.notes.last?.informationalAcknowledgementSafe == false)
+        let captured = try #require(JSONSerialization.jsonObject(with: Data(contentsOf: URL(fileURLWithPath: script.path + ".capture"))) as? [String: Any])
+        let instructions = try #require(captured["instructions"] as? String).split(whereSeparator: \.isWhitespace).joined(separator: " ")
+        #expect(instructions.contains("An actual actionable duplicate finding still requires its own thread reply"))
+        #expect(instructions.contains("Coverage neither proves reviewer acceptance nor grants publication, resolution or merge permission"))
+        let schema = try #require(captured["schema"] as? [String: Any])
+        let properties = try #require(schema["properties"] as? [String: Any])
+        let notes = try #require(properties["notes"] as? [String: Any])
+        let fields = try #require(notes["items"] as? [String: Any])
+        #expect((fields["required"] as? [String])?.contains("reviewSummaryCoverage") == true)
+    }
+
+    @Test(arguments: AutomationAssistant.allCases)
     func aPrivateCodeQuestionSurvivesProviderDecodingWithoutStartingAnotherCLI(_ assistant: AutomationAssistant) async throws {
         // given
         let folder = FileManager.default.temporaryDirectory.appending(path: UUID().uuidString)

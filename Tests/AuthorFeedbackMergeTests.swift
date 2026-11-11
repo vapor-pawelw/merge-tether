@@ -4,6 +4,30 @@ import Testing
 
 @MainActor
 struct AuthorFeedbackMergeTests {
+    @Test(arguments: ["covered", "independentRequest", "missingOriginalReply", "legacy"])
+    func aCoveredSummaryDoesNotBlockMergeButItsOriginalAndIndependentObligationsStillDo(_ scenario: String) async throws {
+        try await withFixture { monitor, gitlab, _ in
+            let reply = scenario == "missingOriginalReply" ? "" : #",{"id":11,"author":{"id":3},"system":false,"resolvable":false,"body":"The retry correction is present; the focused regression verifies it."}"#
+            let summaryBody = scenario == "independentRequest" ? "The retry finding is fixed. Document rollback before merging."
+                : "The earlier review raised the retry finding, which is corrected."
+            gitlab.write("discussions.json", #"[{"id":"finding","notes":[{"id":10,"author":{"id":7},"system":false,"resolvable":false,"body":"Correct retry handling."}\#(reply),{"id":12,"author":{"id":7},"system":false,"resolvable":false,"body":"The correction and regression are accepted."}]},{"id":"summary","notes":[{"id":20,"author":{"id":7},"system":false,"resolvable":false,"body":"\#(summaryBody)"}]}]"#)
+            let assessment = ReReviewAssessment(notes: [
+                .init(noteID: 10, state: .addressed, reason: "The correction is verified against current source.", acceptanceNoteID: 12),
+                .init(noteID: 12, state: .informational, reason: "The reviewer explicitly accepts the correction."),
+                .init(noteID: 20, state: scenario == "independentRequest" ? .blocking : .addressed,
+                    reason: "The summary's independent expectations are checked separately.", informationalPurpose: .reviewSummary,
+                    reviewSummaryCoverage: ["legacy", "independentRequest"].contains(scenario) ? nil
+                        : .init(referencedNoteIDs: [10], noIndependentExpectation: true))
+            ])
+            monitor.authorFeedbackAllowsMerge = { _, discussions, authorID in
+                assessment.hasNoRemainingAuthorWork(in: discussions, authorID: authorID)
+            }
+            try await refresh(monitor)
+            #expect(!monitor.hasError)
+            #expect(gitlab.has("merged") == (scenario == "covered"))
+        }
+    }
+
     @Test(arguments: ["missing", "sharedReply", "ownReply"])
     func automaticMergeWaitsForTheReplyInEachActionableGeneralThread(_ scenario: String) async throws {
         try await withFixture { monitor, gitlab, _ in
