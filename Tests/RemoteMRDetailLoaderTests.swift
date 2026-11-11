@@ -4,6 +4,22 @@ import MergeTetherRemote
 @testable import GitLabTodos
 
 @MainActor @Suite struct RemoteMRDetailLoaderTests {
+    @Test func currentFeedbackProjectionKeepsAssessmentSeparateFromRepliesAndResolution() throws {
+        let note = RemoteDetailNote(id: "11", author: "Reviewer", body: "Concern", origin: .human, authorID: 7)
+        let reply = RemoteDetailNote(id: "12", author: "Owner", body: "Done", origin: .ai, authorID: 3)
+        var details = RemoteMRDetails(checkedAt: .now, threads: [.init(id: "thread", state: .resolved,
+            notes: [note, reply], reply: .published, draftCount: 1)])
+        RemoteMRDetailSupplement.applyFeedback(to: &details, assessment: nil, authorID: 3)
+        #expect(details.threads?.first?.feedback == .needsVerification)
+        let assessment = ReReviewAssessment(notes: [.init(noteID: 11, state: .addressed, reason: "Verified current source")])
+        RemoteMRDetailSupplement.applyFeedback(to: &details, assessment: assessment, authorID: 3)
+        #expect(details.threads?.first?.feedback == .addressed)
+        #expect(details.threads?.first?.reply == .published && details.threads?.first?.draftCount == 1)
+        #expect(details.threads?.first?.origin == nil)
+        RemoteMRDetailSupplement.applyFeedback(to: &details, assessment: nil, authorID: 3)
+        #expect(details.threads?.first?.feedback == .needsVerification)
+    }
+
     private let raw = #"{"project_id":1,"iid":2,"author":{"id":3,"username":"owner","name":"Owner"},"title":"Feature","description":"Complete MR description","labels":[],"web_url":"https://gitlab.example.test/g/p/-/merge_requests/2","state":"opened","draft":false,"sha":"aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa","source_project_id":1,"target_project_id":1,"source_branch":"feature","target_branch":"main","detailed_merge_status":"mergeable","has_conflicts":false,"reviewers":[{"id":8,"username":"assigned","name":"Assigned"}]}"#
 
     @Test func detailsIncludeMetadataAllUniqueApproversRulesAndOrderedDiscussionsUsingOnlyReads() async throws {
@@ -26,6 +42,7 @@ import MergeTetherRemote
         }
         let details = try await RemoteMRDetailLoader.load(source: source, drafts: [], glab: glab)
         #expect(details.description == "Complete MR description")
+        #expect(details.branches == .init(source: "feature", target: "main"))
         #expect(details.metadata.contains { $0.value == "feature" })
         #expect(details.metadata.contains { $0.value == "main" })
         #expect(details.approvals?.progress?.received == 3)

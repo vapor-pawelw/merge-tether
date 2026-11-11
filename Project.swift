@@ -68,7 +68,7 @@ let project = Project(
                 "NSCameraUsageDescription": .string("Scan the pairing code shown by MergeTether on your Mac."),
                 "UILaunchScreen": .dictionary([:]),
             ]),
-            sources: ["iOS/**/*.swift"],
+            sources: ["iOS/**/*.swift", "Sources/Views/StatusFlowLayout.swift"],
             resources: ["Resources/MergeActions.xcstrings", "Resources/Remote.xcstrings", "Resources/Board.xcstrings", "Resources/MRHumanAction.xcstrings", "Resources/AuthorFeedback.xcstrings", "Resources/MRDependencies.xcstrings", "Resources/CommentReview.xcstrings", "iOS/Resources/**"],
             dependencies: [.target(name: "MergeTetherRemote")],
             settings: .settings(base: [

@@ -67,6 +67,39 @@
           }
         }
       }
+    },
+    "draftPublication.quickActions.%lld": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Draft #%lld contains potential GitLab quick actions. Publishing may run commands that change the merge request."
+          }
+        }
+      }
+    },
+    "draftPublication.resolvesDiscussion.%lld": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Draft #%lld is marked to resolve its discussion when published."
+          }
+        }
+      }
+    },
+    "draftPublication.thread.%@": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Thread: %@"
+          }
+        }
+      }
     }
   },
   "version": "1.0"

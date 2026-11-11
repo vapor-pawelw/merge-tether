@@ -3,6 +3,42 @@ import Testing
 @testable import MergeTetherRemote
 
 @Suite struct RemoteDetailsTests {
+    @Test func threadAssessmentAndBranchesAreOptionalAndRoundTripWithoutChangingReplyOrOrigin() throws {
+        let legacy = try JSONDecoder().decode(RemoteDetailThread.self,
+            from: Data(#"{"id":"thread","state":"resolved","notes":[],"reply":"none","draftCount":0,"truncated":false}"#.utf8))
+        #expect(legacy.feedback == nil && legacy.origin == nil)
+        let note = RemoteDetailNote(id: "11", author: "Reviewer", body: "Concern", origin: .ai, authorID: 7)
+        let thread = RemoteDetailThread(id: "thread", state: .open, notes: [note], reply: .published,
+            draftCount: 1, feedback: .addressed)
+        #expect(thread.origin == .ai)
+        let details = RemoteMRDetails(checkedAt: date, threads: [thread], branches: .init(source: "feature/very-long-name", target: "release/current"))
+        let decoded = try JSONDecoder().decode(RemoteMRDetails.self, from: JSONEncoder().encode(details))
+        #expect(decoded == details)
+        #expect(decoded.threads?.first?.reply == .published && decoded.threads?.first?.draftCount == 1)
+        #expect(decoded.threads?.first?.notes.first?.authorID == 7)
+        #expect(decoded.branches?.source == "feature/very-long-name" && decoded.branches?.target == "release/current")
+        let oldDetails = RemoteMRDetails(checkedAt: date)
+        #expect(try JSONDecoder().decode(RemoteMRDetails.self, from: JSONEncoder().encode(oldDetails)).branches == nil)
+    }
+
+    @Test func threadOriginDoesNotTurnMissingOrMixedEvidenceIntoAIOrHuman() {
+        func thread(_ origins: [RemoteDetailNote.Origin?]) -> RemoteDetailThread {
+            .init(id: "thread", state: .general, notes: origins.enumerated().map {
+                RemoteDetailNote(id: String($0.offset), body: "Note", origin: $0.element)
+            })
+        }
+        #expect(thread([.ai, .ai]).origin == .ai)
+        #expect(thread([.ai, .uncertain]).origin == .uncertain)
+        #expect(thread([.human, .human]).origin == .human)
+        #expect(thread([.ai, .human]).origin == nil)
+        #expect(thread([.ai, nil]).origin == nil)
+        #expect(thread([nil]).origin == nil)
+        #expect(thread([]).origin == nil)
+        var truncated = thread([.ai])
+        truncated.truncated = true
+        #expect(truncated.origin == nil)
+    }
+
     private let date = Date(timeIntervalSince1970: 100)
     private func board() -> RemoteBoard {
         .init(hostSession: UUID(), account: "me@host", lanes: [.init(id: .own, cards: [

@@ -83,11 +83,13 @@ import MergeTetherRemote
                         return RemoteDetailNote(id: note.id.map(String.init) ?? "unidentified/\(index)",
                             author: note.author?.name, username: note.author?.username, body: note.body ?? "",
                             location: MRDiscussionLocation(position: note.position)?.full,
-                            createdAt: MergeRequestReviewHistory.date(note.createdAt), url: components?.url, origin: origin)
+                            createdAt: MergeRequestReviewHistory.date(note.createdAt), url: components?.url, origin: origin,
+                            authorID: note.author?.id)
                     }, reply: .init(rawValue: String(describing: summary.publishedReply)) ?? .unavailable, draftCount: summary.draftCount)
             }
         }
-        var details = RemoteMRDetails(checkedAt: .now, metadata: metadata, description: request.description, approvals: approvals, threads: threads)
+        var details = RemoteMRDetails(checkedAt: .now, metadata: metadata, description: request.description, approvals: approvals, threads: threads,
+            branches: .init(source: request.sourceBranch, target: request.targetBranch))
         details.discussionFingerprint = discussions.flatMap { ReviewVerdict.fingerprint($0) }
         return details
     }

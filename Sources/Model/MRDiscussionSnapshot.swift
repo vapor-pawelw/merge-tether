@@ -27,6 +27,27 @@ struct MRDiscussionSnapshot {
     }
     enum OriginBadge: Equatable { case ai, uncertain, human }
     enum State: Equatable { case open, resolved, general }
+    enum Feedback: String, Equatable, Sendable {
+        case addressed, pending, needsVerification, informational, ignored, partlyIgnored, notApplicable
+
+        /// The caller supplies an assessment already bound to the current head, context and discussion text.
+        static func summarize(notes: [(id: Int?, authorID: Int?)], assessment: ReReviewAssessment?, authorID: Int?) -> Self {
+            guard let authorID, authorID > 0, notes.allSatisfy({ ($0.authorID ?? 0) > 0 }) else { return .needsVerification }
+            let external = notes.filter { $0.authorID != authorID }
+            guard !external.isEmpty else { return .notApplicable }
+            guard let assessment else { return .needsVerification }
+            let ids = external.compactMap(\.id)
+            guard ids.count == external.count, ids.allSatisfy({ $0 > 0 }), Set(ids).count == ids.count else { return .needsVerification }
+            let verdicts = Dictionary(grouping: assessment.notes, by: \.noteID)
+            let states = ids.compactMap { id in verdicts[id]?.count == 1 ? verdicts[id]?.first?.state : nil }
+            if states.contains(.blocking) { return .pending }
+            guard states.count == ids.count, !states.contains(.uncertain) else { return .needsVerification }
+            if states.allSatisfy({ $0 == .ignoredByUser }) { return .ignored }
+            if states.contains(.ignoredByUser) { return .partlyIgnored }
+            if states.allSatisfy({ $0 == .informational }) { return .informational }
+            return .addressed
+        }
+    }
     struct Thread: Identifiable {
         let id: String
         let discussionID: String?
@@ -35,6 +56,7 @@ struct MRDiscussionSnapshot {
         let state: State
         let location: String?
         let origins: [Int: Origin]
+        let feedback: Feedback
 
         var originBadge: OriginBadge? {
             var aggregate: OriginBadge?
@@ -88,7 +110,8 @@ struct MRDiscussionSnapshot {
         return snapshot
     }
 
-    init(discussions: [GitLabMergeRequestDiscussion], drafts: [GitLabDraftNote], origins: [Int: Origin]) {
+    init(discussions: [GitLabMergeRequestDiscussion], drafts: [GitLabDraftNote], origins: [Int: Origin],
+         assessment: ReReviewAssessment? = nil, authorID: Int? = nil) {
         var draftsByDiscussion: [String: [(offset: Int, element: GitLabDraftNote)]] = [:]
         for entry in drafts.enumerated() {
             guard let id = entry.element.discussionID, !id.isEmpty else { continue }
@@ -111,7 +134,8 @@ struct MRDiscussionSnapshot {
             }
             threads.append(.init(id: discussion.id.map { "discussion/\($0)" } ?? "unidentified/\(index)",
                 discussionID: discussion.id, notes: notes, drafts: pending.map(\.element), state: state,
-                location: location, origins: threadOrigins))
+                location: location, origins: threadOrigins,
+                feedback: Feedback.summarize(notes: notes.map { ($0.id, $0.author?.id) }, assessment: assessment, authorID: authorID)))
         }
         // Group by GitLab state without changing server order within a group.
         threads = [State.open, .resolved, .general].flatMap { state in

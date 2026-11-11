@@ -4,6 +4,22 @@ import MergeTetherRemote
 @testable import GitLabTodos
 
 @MainActor @Suite struct RemoteBoardAdapterTests {
+    @Test(arguments: ["command", "resolve", "both", "ordinary"])
+    func phonePreviewCarriesDraftWarningsWithoutGrantingUnsafePublication(_ scenario: String) throws {
+        var item = try item()
+        item.mergeRequest = try MRDependencyPresentationTests().request(2, project: 1)
+        item.drafts = [.init(id: 11, authorID: 3,
+            note: scenario == "command" || scenario == "both" ? "Reply\n/merge" : "Reviewed reply",
+            discussionID: "current-thread", resolveDiscussion: scenario == "resolve" || scenario == "both", position: nil)]
+        let card = RemoteBoardAdapter.card(item, account: "me@host")
+        let remote = try #require(card.drafts.first)
+        let expected = DraftPublicationRisk(draft: item.drafts[0])?.messages.map { String(localized: $0) }
+        #expect(remote.publicationWarnings == expected)
+        #expect(remote.id == 11 && remote.context == "current-thread")
+        #expect(card.actions.contains { $0.kind == .publish } == (scenario == "ordinary"))
+        #expect(try JSONDecoder().decode(RemoteCard.self, from: JSONEncoder().encode(card)).drafts == card.drafts)
+    }
+
     @Test(arguments: ["target", "description", "head", "author"])
     func readOnlyDetailsBindEveryRelevantDisplayedContextEvenWithoutActions(_ change: String) throws {
         let source = try MRDependencyPresentationTests().request(2, project: 1)

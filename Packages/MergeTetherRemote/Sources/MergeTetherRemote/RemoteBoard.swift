@@ -18,7 +18,10 @@ public struct RemoteDraft: Codable, Equatable, Identifiable, Sendable {
     public var id: Int
     public var body: String
     public var context: String?
-    public init(id: Int, body: String, context: String? = nil) { self.id = id; self.body = body; self.context = context }
+    public var publicationWarnings: [String]?
+    public init(id: Int, body: String, context: String? = nil, publicationWarnings: [String]? = nil) {
+        self.id = id; self.body = body; self.context = context; self.publicationWarnings = publicationWarnings
+    }
 }
 
 /// A read-only destination, separate from the host-authorized write actions.

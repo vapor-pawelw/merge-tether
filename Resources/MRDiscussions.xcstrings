@@ -371,7 +371,7 @@
         "en": {
           "stringUnit": {
             "state": "translated",
-            "value": "No reply from you"
+            "value": "No published reply from you"
           }
         }
       }
@@ -471,6 +471,105 @@
           "stringUnit": {
             "state": "translated",
             "value": "The current account username is unavailable, so published replies cannot be attributed. Private drafts are shown separately."
+          }
+        }
+      }
+    },
+    "mrDiscussions.feedbackAddressed": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Feedback addressed"
+          }
+        }
+      }
+    },
+    "mrDiscussions.feedbackPending": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Feedback pending"
+          }
+        }
+      }
+    },
+    "mrDiscussions.feedbackNeedsVerification": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Needs verification"
+          }
+        }
+      }
+    },
+    "mrDiscussions.feedbackInformational": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Informational feedback"
+          }
+        }
+      }
+    },
+    "mrDiscussions.feedbackIgnored": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Feedback ignored"
+          }
+        }
+      }
+    },
+    "mrDiscussions.feedbackPartlyIgnored": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Includes ignored feedback"
+          }
+        }
+      }
+    },
+    "mrDiscussions.feedbackNotApplicable": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "No external feedback"
+          }
+        }
+      }
+    },
+    "mrDiscussions.feedbackHelp": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Feedback status comes from the current code and discussion assessment. Replies and GitLab resolution are shown separately."
+          }
+        }
+      }
+    },
+    "mrDiscussions.branches.%@.%@": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Branches: %1$@ → %2$@"
           }
         }
       }

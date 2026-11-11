@@ -969,6 +969,105 @@
           }
         }
       }
+    },
+    "remoteDetail.feedbackAddressed": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Feedback addressed"
+          }
+        }
+      }
+    },
+    "remoteDetail.feedbackPending": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Feedback pending"
+          }
+        }
+      }
+    },
+    "remoteDetail.feedbackNeedsVerification": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Needs verification"
+          }
+        }
+      }
+    },
+    "remoteDetail.feedbackInformational": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Informational feedback"
+          }
+        }
+      }
+    },
+    "remoteDetail.feedbackIgnored": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Feedback ignored"
+          }
+        }
+      }
+    },
+    "remoteDetail.feedbackPartlyIgnored": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Includes ignored feedback"
+          }
+        }
+      }
+    },
+    "remoteDetail.feedbackNotApplicable": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "No external feedback"
+          }
+        }
+      }
+    },
+    "remoteDetail.feedbackHelp": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Feedback status comes from the current code and discussion assessment. Replies and GitLab resolution are shown separately."
+          }
+        }
+      }
+    },
+    "remoteDetail.branches.%@.%@": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Branches: %1$@ → %2$@"
+          }
+        }
+      }
     }
   },
   "version": "1.0"

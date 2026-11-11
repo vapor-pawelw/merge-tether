@@ -61,6 +61,7 @@ struct MergeWorkflowSettingsSection: View {
 
 struct MergeWorkflowPermissionSettingsSection: View {
     @Binding var rules: MergeWorkflowRules
+    let infrastructureRetryAvailable: Bool
 
     var body: some View {
         Section {
@@ -74,6 +75,10 @@ struct MergeWorkflowPermissionSettingsSection: View {
                 Text(.Settings.settingsAutomationWorkflowRetry)
             }
             .toggleStyle(.checkbox)
+            .disabled(!infrastructureRetryAvailable)
+            if !infrastructureRetryAvailable {
+                Text(.AutomationProfiles.pipelineRetryInactive).font(.caption).foregroundStyle(.orange)
+            }
             Text(.AutomationProfiles.pipelineRetryHelp).font(.caption).foregroundStyle(.secondary)
         } header: { Text(.Settings.settingsAutomationWorkflowSection) }
         footer: { Text(.AutomationProfiles.eventFiltersLocation).font(.caption).foregroundStyle(.secondary) }

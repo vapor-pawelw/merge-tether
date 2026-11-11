@@ -57,9 +57,10 @@ import MergeTetherRemote
              .init(id: 7, name: "Comment Author", username: "commenter", status: .commented),
              .init(id: 8, name: "Assigned Reviewer", username: "assigned", status: .assigned)]
         let location = "Sources/Payments/Checkout/Confirmation/PaymentConfirmationCoordinator.swift:142"
+        let sourceBranch = "feature/payment-confirmation-with-long-branch-name"
         let url = card.url
         return .init(checkedAt: .now, metadata: [
-            .init(label: String(localized: .RemoteDetail.remoteDetailSourceBranch), value: "feature/payment-confirmation-with-long-branch-name"),
+            .init(label: String(localized: .RemoteDetail.remoteDetailSourceBranch), value: sourceBranch),
             .init(label: String(localized: .RemoteDetail.remoteDetailTargetBranch), value: "main"),
             .init(label: String(localized: .RemoteSecurity.remoteSecurityCommit), value: card.head ?? ""),
             .init(label: String(localized: .RemoteDetail.remoteDetailPipeline), value: "success"),
@@ -72,20 +73,27 @@ import MergeTetherRemote
             .init(id: "open", state: .open, location: location, notes: [
                 .init(id: "1", author: "Alexandra Example With A Long Display Name", username: "reviewer1",
                     body: "Please preserve the previous confirmation when the retry fails. A duplicate server response should not replace it with an empty state.",
-                    location: location, createdAt: .now.addingTimeInterval(-3600), url: url, origin: .ai),
+                    location: location, createdAt: .now.addingTimeInterval(-3600), url: url, origin: .ai, authorID: 1),
                 .init(id: "2", author: "Alex Example", username: "alex", body: "The previous confirmation stays visible. The duplicate-response path now has a regression test.",
-                    createdAt: .now.addingTimeInterval(-1800), url: url)
-            ], reply: .published, draftCount: card.drafts.count),
+                    createdAt: .now.addingTimeInterval(-1800), url: url, origin: .ai, authorID: 9)
+            ], reply: .published, draftCount: card.drafts.count, feedback: .addressed),
             .init(id: "resolved", state: .resolved, notes: [
-                .init(id: "3", author: "Earlier Reviewer", username: "earlier", body: "The longer translated button title now wraps correctly.", createdAt: .now, url: url, origin: .human)
-            ], reply: .earlier),
+                .init(id: "3", author: "Earlier Reviewer", username: "earlier", body: "The longer translated button title now wraps correctly.",
+                    createdAt: .now.addingTimeInterval(-2400), url: url, origin: .human, authorID: 6),
+                .init(id: "5", author: "Alex Example", username: "alex", body: "Confirmed the long-title example on the compact layout.",
+                    createdAt: .now.addingTimeInterval(-1200), url: url, origin: .human, authorID: 9),
+                .init(id: "6", author: "Earlier Reviewer", username: "earlier", body: "Thanks. This is informational; no further code change is needed.",
+                    createdAt: .now, url: url, origin: .human, authorID: 6)
+            ], reply: .earlier, feedback: .informational),
             .init(id: "general", state: .general, notes: [
-                .init(id: "4", author: "Comment Author", username: "commenter", body: "Please check the offline recovery example before publishing the final review.", createdAt: .now, url: url, origin: .uncertain)
-            ], reply: .none),
+                .init(id: "4", author: "Comment Author", username: "commenter", body: "Please check the offline recovery example before publishing the final review.",
+                    createdAt: .now, url: url, origin: .uncertain, authorID: 7)
+            ], reply: .none, feedback: .needsVerification),
         ], reasons: ["One approval rule is still pending."], policy: ["Comment publication waits for review. Merge readiness is checked independently."],
         feedback: [.init(label: "@reviewer1", value: "The reply is prepared. Check the discussion and pending draft before publishing.")],
         activity: [.init(id: "run1", title: "Handle payment confirmation feedback", status: "Completed", summary: "Preserved the cached confirmation and added duplicate-response coverage.", createdAt: .now.addingTimeInterval(-900), head: card.head)],
-        usage: [.init(label: "Reviewer / work agent", value: "$0.1420 · 2 agent requests"), .init(label: "Verifier", value: "$0.0081 · 4 agent requests")])
+        usage: [.init(label: "Reviewer / work agent", value: "$0.1420 · 2 agent requests"), .init(label: "Verifier", value: "$0.0081 · 4 agent requests")],
+        branches: .init(source: sourceBranch, target: "main"))
     }
 }
 @MainActor private final class PreviewTransport: RemotePhoneTransport {

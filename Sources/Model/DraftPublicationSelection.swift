@@ -1,5 +1,33 @@
 import Foundation
 
+struct DraftPublicationRisk: Identifiable, Equatable, Sendable {
+    let id: Int
+    let discussionID: String?
+    let hasPotentialQuickActions: Bool
+    let resolvesDiscussion: Bool
+
+    init?(draft: GitLabDraftNote) {
+        guard let id = draft.id, id > 0 else { return nil }
+        let hasPotentialQuickActions = (draft.note ?? "").split(whereSeparator: \.isNewline).contains {
+            $0.trimmingCharacters(in: .whitespaces).hasPrefix("/")
+        }
+        let resolvesDiscussion = draft.resolveDiscussion == true
+        guard hasPotentialQuickActions || resolvesDiscussion else { return nil }
+        self.id = id
+        discussionID = draft.discussionID
+        self.hasPotentialQuickActions = hasPotentialQuickActions
+        self.resolvesDiscussion = resolvesDiscussion
+    }
+
+    var messages: [LocalizedStringResource] {
+        var result: [LocalizedStringResource] = []
+        if hasPotentialQuickActions { result.append(.DraftPublication.draftPublicationQuickActions(id)) }
+        if resolvesDiscussion { result.append(.DraftPublication.draftPublicationResolvesDiscussion(id)) }
+        if let discussionID, !discussionID.isEmpty { result.append(.DraftPublication.draftPublicationThread(discussionID)) }
+        return result
+    }
+}
+
 /// Holds the exact draft snapshots chosen by the user, not just reusable note IDs.
 struct DraftPublicationSelection {
     private var selected: [Int: GitLabDraftNote] = [:]

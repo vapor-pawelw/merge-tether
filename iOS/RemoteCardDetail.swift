@@ -30,6 +30,15 @@ struct RemoteCardDetail: View {
                 ScrollView(showsIndicators: false) {
                     VStack(alignment: .leading, spacing: 24) {
                         RemoteCardView(card: headerCard, expanded: true).id(RemoteCardCTA.Destination.overview)
+                        if let branches = loadedDetails?.branches {
+                            Label { Text(verbatim: branches.source + " → " + branches.target) } icon: {
+                                Image(systemName: "arrow.triangle.branch")
+                            }
+                            .font(.callout.monospaced()).foregroundStyle(.secondary).textSelection(.enabled)
+                            .frame(maxWidth: .infinity, alignment: .leading)
+                            .fixedSize(horizontal: false, vertical: true)
+                            .accessibilityLabel(Text(.RemoteDetail.remoteDetailBranches(branches.source, branches.target)))
+                        }
                         Menu {
                             Button(.RemoteDetail.remoteDetailOverview) { proxy.scrollTo(RemoteCardCTA.Destination.overview, anchor: .top) }
                             Button(.RemoteDetail.remoteDetailPendingDrafts) { proxy.scrollTo(RemoteCardCTA.Destination.drafts, anchor: .top) }

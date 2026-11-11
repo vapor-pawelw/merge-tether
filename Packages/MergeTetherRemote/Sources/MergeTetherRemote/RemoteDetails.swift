@@ -73,26 +73,53 @@ public struct RemoteDetailNote: Codable, Equatable, Identifiable, Sendable {
     public let createdAt: Date?
     public let url: URL?
     public let origin: Origin?
+    public let authorID: Int?
     public init(id: String, author: String? = nil, username: String? = nil, body: String, location: String? = nil,
-                createdAt: Date? = nil, url: URL? = nil, origin: Origin? = nil) {
+                createdAt: Date? = nil, url: URL? = nil, origin: Origin? = nil, authorID: Int? = nil) {
         self.id = id; self.author = author; self.username = username; self.body = body; self.location = location
         self.createdAt = createdAt; self.url = url; self.origin = origin
+        self.authorID = authorID
     }
 }
 
 public struct RemoteDetailThread: Codable, Equatable, Identifiable, Sendable {
     public enum State: String, Codable, Sendable { case open, resolved, general }
     public enum Reply: String, Codable, Sendable { case none, published, earlier, unknown, unavailable }
+    public enum Feedback: String, Codable, Sendable {
+        case addressed, pending, needsVerification, informational, ignored, partlyIgnored, notApplicable
+    }
     public let id: String
     public let state: State
     public var location: String?
     public var notes: [RemoteDetailNote]
     public let reply: Reply
     public let draftCount: Int
+    public var feedback: Feedback?
     public var truncated = false
-    public init(id: String, state: State, location: String? = nil, notes: [RemoteDetailNote], reply: Reply = .unavailable, draftCount: Int = 0) {
+    public init(id: String, state: State, location: String? = nil, notes: [RemoteDetailNote], reply: Reply = .unavailable,
+                draftCount: Int = 0, feedback: Feedback? = nil) {
         self.id = id; self.state = state; self.location = location; self.notes = notes; self.reply = reply; self.draftCount = draftCount
+        self.feedback = feedback
     }
+
+    public var origin: RemoteDetailNote.Origin? {
+        guard !truncated else { return nil }
+        var aggregate: RemoteDetailNote.Origin?
+        for note in notes {
+            guard let origin = note.origin else { return nil }
+            if let previous = aggregate, previous != origin {
+                guard previous != .human, origin != .human else { return nil }
+                aggregate = .uncertain
+            } else { aggregate = origin }
+        }
+        return aggregate
+    }
+}
+
+public struct RemoteDetailBranches: Codable, Equatable, Sendable {
+    public var source: String
+    public var target: String
+    public init(source: String, target: String) { self.source = source; self.target = target }
 }
 
 public struct RemoteDetailActivity: Codable, Equatable, Identifiable, Sendable {
@@ -120,13 +147,16 @@ public struct RemoteMRDetails: Codable, Equatable, Sendable {
     public var usage: [RemoteDetailField]?
     public var truncated: Bool
     public var discussionFingerprint: String?
+    public var branches: RemoteDetailBranches?
     public init(checkedAt: Date, metadata: [RemoteDetailField] = [], description: String? = nil,
                 approvals: RemoteApprovalDetails? = nil, threads: [RemoteDetailThread]? = nil,
                 reasons: [String] = [], policy: [String] = [], feedback: [RemoteDetailField] = [],
-                activity: [RemoteDetailActivity] = [], usage: [RemoteDetailField]? = nil, truncated: Bool = false) {
+                activity: [RemoteDetailActivity] = [], usage: [RemoteDetailField]? = nil, truncated: Bool = false,
+                branches: RemoteDetailBranches? = nil) {
         self.checkedAt = checkedAt; self.metadata = metadata; self.description = description; self.approvals = approvals
         self.threads = threads; self.reasons = reasons; self.policy = policy; self.feedback = feedback
         self.activity = activity; self.usage = usage; self.truncated = truncated
+        self.branches = branches
     }
 }
 
@@ -154,6 +184,9 @@ public struct RemoteDetailResponse: Codable, Equatable, Sendable {
                 return Array(value.prefix(maximum))
             }
             details.description = details.description.map { text($0, 16_000) }
+            if let branches = details.branches {
+                details.branches = .init(source: text(branches.source, 4_000), target: text(branches.target, 4_000))
+            }
             details.metadata = list(details.metadata, 30).map { .init(label: text($0.label, 256), value: text($0.value, 4_000), url: $0.url) }
             details.feedback = list(details.feedback, 40).map { .init(label: text($0.label, 256), value: text($0.value, 4_000), url: $0.url) }
             details.policy = list(details.policy, 20).map { text($0, 2_000) }

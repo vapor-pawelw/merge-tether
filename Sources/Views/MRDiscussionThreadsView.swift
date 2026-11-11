@@ -99,9 +99,9 @@ private struct MRDiscussionThreadView: View {
     }
     private var stateColor: Color {
         switch thread.state {
-        case .open: .primary
-        case .resolved: .secondary
-        case .general: .purple
+        case .open: .orange
+        case .resolved: .green
+        case .general: .secondary
         }
     }
 
@@ -117,7 +117,8 @@ private struct MRDiscussionThreadView: View {
                         ForEach(Array(comments.enumerated()), id: \.offset) { index, note in
                             if index > 0 { Divider().padding(.vertical, 2) }
                             MRDiscussionNoteView(note: note, origin: note.id.flatMap { thread.origins[$0] },
-                                                 mergeRequestURL: mergeRequestURL, threadLocation: thread.location)
+                                                 mergeRequestURL: mergeRequestURL, threadLocation: thread.location,
+                                                 showsAuthor: index > 0)
                         }
                         if !draftsFirst { draftRows }
                     }
@@ -137,7 +138,7 @@ private struct MRDiscussionThreadView: View {
                               summary: MRDiscussionSnapshot.Thread.ReplySummary,
                               originBadge: MRDiscussionSnapshot.OriginBadge?) -> some View {
         VStack(alignment: .leading, spacing: 7) {
-            HStack(alignment: .firstTextBaseline, spacing: 8) {
+            StatusFlowLayout {
                 HStack(spacing: 4) {
                     if thread.state == .resolved { Image(systemName: "checkmark") }
                     Text(stateLabel)
@@ -146,40 +147,27 @@ private struct MRDiscussionThreadView: View {
                 .fixedSize(horizontal: true, vertical: false)
                 .padding(.horizontal, 7).padding(.vertical, 3)
                 .background(stateColor.opacity(thread.state == .open ? 0.055 : 0.08), in: Capsule())
+                MRDiscussionFeedbackBadge(state: thread.feedback)
+                replyStatus(summary)
+                if let originBadge { MRDiscussionOriginBadge(badge: originBadge) }
+            }
+            StatusFlowLayout {
                 if let location = thread.location {
                     MRDiscussionLocationLabel(location: .init(full: location))
-                        .layoutPriority(1)
                 }
-                Spacer(minLength: 4)
                 if let posted = firstComment?.createdAt {
                     Text(verbatim: MRDiscussionTimestamp.display(posted))
                         .font(.caption).foregroundStyle(.secondary).help(posted)
                         .lineLimit(1)
                 }
             }
-            ViewThatFits(in: .horizontal) {
-                HStack(alignment: .firstTextBaseline, spacing: 10) {
-                    threadAuthor(firstComment?.author, badge: originBadge)
-                    replyStatus(summary)
-                }
-                VStack(alignment: .leading, spacing: 5) {
-                    threadAuthor(firstComment?.author, badge: originBadge)
-                    replyStatus(summary)
-                }
-            }
+            MRDiscussionAuthorView(author: firstComment?.author)
+                .foregroundStyle(thread.state == .resolved ? Color.secondary : Color.primary)
             if !isExpanded, let body = firstComment?.body {
                 Text(verbatim: body).font(.callout)
                     .foregroundStyle(thread.state == .resolved ? Color.secondary : Color.primary).lineLimit(2)
                     .padding(.top, 1)
             }
-        }
-    }
-
-    private func threadAuthor(_ author: GitLabWorkflowUser?, badge: MRDiscussionSnapshot.OriginBadge?) -> some View {
-        HStack(alignment: .firstTextBaseline, spacing: 6) {
-            MRDiscussionAuthorView(author: author)
-                .foregroundStyle(thread.state == .resolved ? Color.secondary : Color.primary)
-            if let badge { MRDiscussionOriginBadge(badge: badge) }
         }
     }
 
@@ -233,14 +221,15 @@ private struct MRDiscussionNoteView: View {
     let origin: MRDiscussionSnapshot.Origin?
     let mergeRequestURL: URL
     let threadLocation: String?
+    var showsAuthor = true
 
     var body: some View {
         VStack(alignment: .leading, spacing: 7) {
             HStack(alignment: .firstTextBaseline, spacing: 8) {
-                MRDiscussionAuthorView(author: note.author)
+                if showsAuthor { MRDiscussionAuthorView(author: note.author) }
                 if let origin { MRDiscussionOriginBadge(badge: origin.badge, origin: origin) }
                 Spacer(minLength: 4)
-                if let posted = note.createdAt {
+                if showsAuthor, let posted = note.createdAt {
                     Text(verbatim: MRDiscussionTimestamp.display(posted)).font(.caption).foregroundStyle(.secondary).help(posted)
                 }
                 if let id = note.id, id > 0, let url = discussionNoteURL(mergeRequestURL, id: id) {
@@ -285,6 +274,7 @@ private struct MRDiscussionDraftView: View {
                 MRDiscussionLocationLabel(location: location).textSelection(.enabled)
             }
             MRDiscussionBody(source: draft.note)
+            DraftPublicationWarnings(drafts: [draft])
         }
         .padding(12)
         .frame(maxWidth: .infinity, alignment: .leading)
@@ -406,6 +396,46 @@ private struct MRDiscussionAuthorView: View {
     }
 }
 
+private struct MRDiscussionFeedbackBadge: View {
+    let state: MRDiscussionSnapshot.Feedback
+
+    private var title: LocalizedStringResource {
+        switch state {
+        case .addressed: .MRDiscussions.mrDiscussionsFeedbackAddressed
+        case .pending: .MRDiscussions.mrDiscussionsFeedbackPending
+        case .needsVerification: .MRDiscussions.mrDiscussionsFeedbackNeedsVerification
+        case .informational: .MRDiscussions.mrDiscussionsFeedbackInformational
+        case .ignored: .MRDiscussions.mrDiscussionsFeedbackIgnored
+        case .partlyIgnored: .MRDiscussions.mrDiscussionsFeedbackPartlyIgnored
+        case .notApplicable: .MRDiscussions.mrDiscussionsFeedbackNotApplicable
+        }
+    }
+    private var color: Color {
+        switch state {
+        case .addressed: .green
+        case .pending, .needsVerification: .orange
+        case .informational, .ignored, .partlyIgnored, .notApplicable: .secondary
+        }
+    }
+    private var symbol: String {
+        switch state {
+        case .addressed: "checkmark.seal"
+        case .pending: "exclamationmark.bubble"
+        case .needsVerification: "questionmark.circle"
+        case .informational, .notApplicable: "info.circle"
+        case .ignored, .partlyIgnored: "minus.circle"
+        }
+    }
+    var body: some View {
+        Label { Text(title) } icon: { Image(systemName: symbol) }
+            .font(.caption.weight(.medium)).foregroundStyle(color)
+            .padding(.horizontal, 7).padding(.vertical, 3)
+            .background(color.opacity(0.08), in: Capsule())
+            .help(Text(.MRDiscussions.mrDiscussionsFeedbackHelp))
+            .accessibilityHint(Text(.MRDiscussions.mrDiscussionsFeedbackHelp))
+    }
+}
+
 private struct MRDiscussionReplyBadge: View {
     let state: MRDiscussionSnapshot.Thread.ReplySummary.PublishedReply
 
@@ -437,7 +467,7 @@ private struct MRDiscussionReplyBadge: View {
 
     var body: some View {
         Label { Text(label) } icon: { Image(systemName: symbol) }
-            .font(.caption).foregroundStyle(.secondary)
+            .font(.caption).foregroundStyle(state == .published || state == .earlier ? Color.blue : Color.secondary)
             .help(Text(explanation)).accessibilityHint(Text(explanation))
     }
 }

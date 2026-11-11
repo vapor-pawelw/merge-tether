@@ -82,3 +82,10 @@ struct MergeWorkflowRules: Codable, Equatable, Sendable {
 extension MergeWorkflowTrigger {
     var allowedModes: [MergeWorkflowMode] { self == .reviewWaiting ? [.off, .notify] : MergeWorkflowMode.allCases }
 }
+
+extension AutomationSettings {
+    var canConfigureInfrastructureRetry: Bool {
+        hasAutomaticPublicActionConsent && workflowRules[.pipelineFailure].mode == .assistant
+            && !MergeWorkflowRule.projectPaths(workflowRules[.pipelineFailure].projects).isEmpty
+    }
+}

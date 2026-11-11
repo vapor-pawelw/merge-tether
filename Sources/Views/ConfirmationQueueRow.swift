@@ -81,6 +81,8 @@ struct ConfirmationQueueRow<AdditionalActions: View>: View {
                     .foregroundStyle(.orange)
             }
             statusLine
+            DraftPublicationWarnings(drafts: requiresSelection
+                ? draftSelection.wrappedValue.selectedDrafts(from: item.drafts) : item.drafts)
 
             HStack(spacing: 8) {
                 if !item.drafts.isEmpty {

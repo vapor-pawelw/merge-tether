@@ -286,6 +286,14 @@ private struct CommandCenterMRDetailContent: View {
             .font(.callout).foregroundStyle(.secondary)
             Text(verbatim: presentationRow.displayTitle).font(.title2.weight(.semibold))
                 .lineLimit(3).textSelection(.enabled).padding(.top, 2)
+            if let request = presentationRow.displayRequest {
+                Label { Text(verbatim: request.sourceBranch + " → " + request.targetBranch) } icon: {
+                    Image(systemName: "arrow.triangle.branch")
+                }
+                .font(.callout.monospaced()).foregroundStyle(.secondary).textSelection(.enabled)
+                .fixedSize(horizontal: false, vertical: true)
+                .accessibilityLabel(Text(.MRDiscussions.mrDiscussionsBranches(request.sourceBranch, request.targetBranch)))
+            }
             HStack {
                 VStack(alignment: .leading, spacing: 4) {
                     if let finishedState {
@@ -460,19 +468,22 @@ private struct CommandCenterMRDetailContent: View {
         if !selected.isEmpty, let target = discussionTarget {
             let state = monitor.attention.confirmationStates[item.id]
             let busy = state?.isBusy == true
-            HStack(spacing: 12) {
-                Button { publicationSession.clearSelection() } label: {
-                    Text(.DraftPublication.draftPublicationClearSelection)
+            VStack(alignment: .leading, spacing: 8) {
+                DraftPublicationWarnings(drafts: selected)
+                HStack(spacing: 12) {
+                    Button { publicationSession.clearSelection() } label: {
+                        Text(.DraftPublication.draftPublicationClearSelection)
+                    }
+                    .buttonStyle(.borderless)
+                    Spacer()
+                    if busy { ProgressView().controlSize(.small) }
+                    Button { Task { await monitor.attention.publishDrafts(selected, for: target) } } label: {
+                        Text(selected.count == item.drafts.count ? .CommentReview.commentReviewPublishSelected(selected.count)
+                             : .DraftPublication.draftPublicationPublishSelected(selected.count))
+                    }
+                    .help(Text(.CommentReview.commentReviewPublishSelectedHelp))
+                    .buttonStyle(.borderedProminent)
                 }
-                .buttonStyle(.borderless)
-                Spacer()
-                if busy { ProgressView().controlSize(.small) }
-                Button { Task { await monitor.attention.publishDrafts(selected, for: target) } } label: {
-                    Text(selected.count == item.drafts.count ? .CommentReview.commentReviewPublishSelected(selected.count)
-                         : .DraftPublication.draftPublicationPublishSelected(selected.count))
-                }
-                .help(Text(.CommentReview.commentReviewPublishSelectedHelp))
-                .buttonStyle(.borderedProminent)
             }
             .controlSize(.small)
             .padding(.horizontal, 24).padding(.vertical, 12)
@@ -736,8 +747,16 @@ private struct CommandCenterMRDetailContent: View {
 
     private var discussionSnapshot: MRDiscussionSnapshot {
         let current = discussionTarget != nil && discussionStore.target == discussionTarget
-        return MRDiscussionSnapshot(discussions: current ? discussionStore.discussions : [], drafts: item.drafts,
-            origins: current ? discussionStore.origins : [:])
+        let discussions = current ? discussionStore.discussions : []
+        let request = presentationRow.displayRequest
+        let assessment = current && discussionStore.hasLoaded && !discussionStore.hasError
+            ? request.flatMap { request in
+                ReviewVerdict.fingerprint(discussions).flatMap {
+                    monitor.attention.authorFeedbackCoordinator?.assessment(for: request, fingerprint: $0)
+                }
+            } : nil
+        return MRDiscussionSnapshot(discussions: discussions, drafts: item.drafts,
+            origins: current ? discussionStore.origins : [:], assessment: assessment, authorID: request?.author.id)
     }
 
     private func publicationThreads(_ snapshot: MRDiscussionSnapshot) -> some View {

@@ -3,6 +3,46 @@ import Testing
 @testable import GitLabTodos
 
 struct MRDiscussionSnapshotTests {
+    @Test(arguments: ["addressed", "informational", "blocking", "uncertain", "ignoredByUser"])
+    func feedbackStatusUsesAssessmentRatherThanResolutionReplyOrOrigin(_ state: String) throws {
+        let assessment = try JSONDecoder().decode(ReReviewAssessment.self,
+            from: Data("{\"notes\":[{\"noteID\":1,\"state\":\"\(state)\",\"reason\":\"Current evidence\"}]}".utf8))
+        let expected: MRDiscussionSnapshot.Feedback = switch state {
+        case "addressed": .addressed
+        case "informational": .informational
+        case "blocking": .pending
+        case "ignoredByUser": .ignored
+        default: .needsVerification
+        }
+        for resolved in [false, true] {
+            let thread = try presentationThread(notes: "[{\"id\":1,\"author\":{\"id\":7},\"resolvable\":true,\"resolved\":\(resolved)},{\"id\":2,\"author\":{\"id\":9,\"username\":\"me\"}}]",
+                origins: [1: .verifiedAssistant], assessment: assessment, authorID: 9)
+            #expect(thread.feedback == expected)
+            #expect(thread.replySummary(currentUsername: "me").publishedReply == .published)
+        }
+    }
+
+    @Test func missingOrPartialAssessmentsNeverClaimFeedbackAddressed() throws {
+        let notes = #"[{"id":1,"author":{"id":7},"resolvable":true,"resolved":true},{"id":2,"author":{"id":8}},{"id":3,"author":{"id":9,"username":"me"}}]"#
+        let partial = ReReviewAssessment(notes: [.init(noteID: 1, state: .addressed, reason: "Checked")])
+        #expect(try presentationThread(notes: notes, authorID: 9).feedback == .needsVerification)
+        #expect(try presentationThread(notes: notes, assessment: partial, authorID: 9).feedback == .needsVerification)
+        #expect(try presentationThread(notes: notes, assessment: partial).feedback == .needsVerification)
+        #expect(MRDiscussionSnapshot.Feedback.summarize(notes: [(nil, 7)], assessment: partial, authorID: 9) == .needsVerification)
+        #expect(MRDiscussionSnapshot.Feedback.summarize(notes: [(1, nil)], assessment: partial, authorID: 9) == .needsVerification)
+    }
+
+    @Test func informationalAndIgnoredFeedbackNeverBecomeCodeFixClaims() {
+        let notes: [(Int?, Int?)] = [(1, 7), (2, 8), (3, 9)]
+        let assessment = ReReviewAssessment(notes: [.init(noteID: 1, state: .addressed, reason: "Checked"),
+            .init(noteID: 2, state: .ignoredByUser, reason: "Ignored")])
+        #expect(MRDiscussionSnapshot.Feedback.summarize(notes: notes, assessment: assessment, authorID: 9) == .partlyIgnored)
+        #expect(MRDiscussionSnapshot.Feedback.summarize(notes: [(3, 9)], assessment: nil, authorID: 9) == .notApplicable)
+        let duplicate = ReReviewAssessment(notes: [.init(noteID: 1, state: .addressed, reason: "Checked"),
+            .init(noteID: 1, state: .addressed, reason: "Duplicate")])
+        #expect(MRDiscussionSnapshot.Feedback.summarize(notes: [(1, 7)], assessment: duplicate, authorID: 9) == .needsVerification)
+    }
+
     @Test(arguments: [
         (#"{"new_path":"Sources/Views/File.swift","new_line":12}"#, "Sources/Views/File.swift:12", "File.swift:12"),
         (#"{"old_path":"Deleted/Old.swift","old_line":8}"#, "Deleted/Old.swift:8", "Old.swift:8"),
@@ -124,7 +164,7 @@ struct MRDiscussionSnapshotTests {
         let thread = try presentationThread(notes: notes, drafts: drafts, origins: [1: .verifiedAssistant, 2: .humanLikely(evidence: "System event")])
         #expect(thread.originBadge == .ai)
         #expect(thread.drafts.count == 1)
-        let noPosts = MRDiscussionSnapshot.Thread(id: "system", discussionID: "system", notes: [], drafts: [], state: .general, location: nil, origins: [:])
+        let noPosts = MRDiscussionSnapshot.Thread(id: "system", discussionID: "system", notes: [], drafts: [], state: .general, location: nil, origins: [:], feedback: .notApplicable)
         #expect(noPosts.originBadge == nil)
     }
 
@@ -233,10 +273,12 @@ struct MRDiscussionSnapshotTests {
         #expect(MRDiscussionTimestamp.display(raw) == raw)
     }
 
-    private func presentationThread(notes: String, drafts: String = "[]", origins: [Int: MRDiscussionSnapshot.Origin] = [:]) throws -> MRDiscussionSnapshot.Thread {
+    private func presentationThread(notes: String, drafts: String = "[]", origins: [Int: MRDiscussionSnapshot.Origin] = [:],
+                                    assessment: ReReviewAssessment? = nil, authorID: Int? = nil) throws -> MRDiscussionSnapshot.Thread {
         let discussions = try JSONDecoder().decode([GitLabMergeRequestDiscussion].self, from: Data("[{\"id\":\"thread\",\"notes\":\(notes)}]".utf8))
         let pending = try JSONDecoder().decode([GitLabDraftNote].self, from: Data(drafts.utf8))
-        return try #require(MRDiscussionSnapshot(discussions: discussions, drafts: pending, origins: origins).threads.first)
+        return try #require(MRDiscussionSnapshot(discussions: discussions, drafts: pending, origins: origins,
+            assessment: assessment, authorID: authorID).threads.first)
     }
 
     @Test func groupsOpenResolvedAndGeneralWhilePreservingServerOrderWithinEachState() throws {

@@ -154,7 +154,7 @@ private struct RemoteDiscussionCard: View {
     let mergeRequestURL: URL?
     @State private var expanded = false
     private var color: Color {
-        switch thread.state { case .open: .primary; case .resolved: .secondary; case .general: .purple }
+        switch thread.state { case .open: .orange; case .resolved: .green; case .general: .secondary }
     }
     private var state: LocalizedStringResource {
         switch thread.state {
@@ -167,17 +167,14 @@ private struct RemoteDiscussionCard: View {
         DisclosureGroup(isExpanded: $expanded) {
             VStack(alignment: .leading, spacing: 18) {
                 if thread.truncated { Text(.RemoteDetail.remoteDetailTruncated).font(.caption).foregroundStyle(.orange) }
-                if let location = thread.location { RemoteFullContextLabel(full: location) }
-                ForEach(thread.notes) { note in
+                ForEach(Array(thread.notes.enumerated()), id: \.offset) { index, note in
                     VStack(alignment: .leading, spacing: 10) {
                         VStack(alignment: .leading, spacing: 5) {
-                            Text(verbatim: note.author ?? note.username ?? String(localized: .RemoteDetail.remoteDetailUnknownAuthor))
-                                .font(.callout.weight(.medium))
-                            if let username = note.username {
-                                Text(verbatim: "@" + username).font(.caption).foregroundStyle(.secondary)
+                            if index > 0 {
+                                noteAuthor(note)
                             }
-                            if let origin = note.origin { originBadge(origin) }
-                            if let date = note.createdAt {
+                            if let origin = note.origin, index > 0 || origin != thread.origin { originBadge(origin) }
+                            if index > 0, let date = note.createdAt {
                                 Text(date, format: .dateTime.year().month().day().hour().minute()).font(.caption).foregroundStyle(.secondary)
                             }
                         }
@@ -194,26 +191,32 @@ private struct RemoteDiscussionCard: View {
             }.padding(.top, 12)
         } label: {
             VStack(alignment: .leading, spacing: 8) {
-                Label(state, systemImage: thread.state == .resolved ? "checkmark.bubble" : "bubble.left")
-                    .font(.caption.weight(.medium)).foregroundStyle(color)
-                    .padding(.horizontal, 8).padding(.vertical, 4)
-                    .background(color.opacity(0.07), in: Capsule())
-                if let location = thread.location {
-                    Text(verbatim: location.split(separator: "/").last.map(String.init) ?? location)
-                        .font(.caption.monospaced()).foregroundStyle(.secondary)
-                        .lineLimit(2).truncationMode(.middle)
+                StatusFlowLayout {
+                    Label(state, systemImage: thread.state == .resolved ? "checkmark.bubble" : "bubble.left")
+                        .font(.caption.weight(.medium)).foregroundStyle(color)
+                        .padding(.horizontal, 8).padding(.vertical, 4)
+                        .background(color.opacity(0.07), in: Capsule())
+                    feedbackBadge
+                    Text(replyTitle).font(.caption)
+                        .foregroundStyle(thread.reply == .published || thread.reply == .earlier ? Color.blue : Color.secondary)
+                    if thread.draftCount > 0 {
+                        HStack(spacing: 5) {
+                            Label(.RemoteDetail.remoteDetailDraft, systemImage: "square.and.pencil")
+                            Text(thread.draftCount, format: .number)
+                        }.font(.caption).foregroundStyle(.tint)
+                    }
+                    if let origin = thread.origin { originBadge(origin) }
+                }
+                StatusFlowLayout {
+                    if let location = thread.location { RemoteFullContextLabel(full: location) }
+                    if let date = thread.notes.first?.createdAt {
+                        Text(date, format: .dateTime.year().month().day().hour().minute())
+                            .font(.caption).foregroundStyle(.secondary)
+                    }
                 }
                 if let first = thread.notes.first {
-                    Text(verbatim: first.author ?? first.username ?? String(localized: .RemoteDetail.remoteDetailUnknownAuthor))
-                        .font(.subheadline.weight(.medium))
+                    noteAuthor(first)
                     if !expanded { Text(verbatim: first.body).font(.callout).lineLimit(3).foregroundStyle(.secondary) }
-                }
-                Text(replyTitle).font(.caption).foregroundStyle(.secondary)
-                if thread.draftCount > 0 {
-                    HStack(spacing: 5) {
-                        Label(.RemoteDetail.remoteDetailDraft, systemImage: "square.and.pencil")
-                        Text(thread.draftCount, format: .number)
-                    }.font(.caption).foregroundStyle(.tint)
                 }
             }.frame(maxWidth: .infinity, minHeight: 44, alignment: .leading)
         }
@@ -221,6 +224,42 @@ private struct RemoteDiscussionCard: View {
         .padding(12)
         .background(color.opacity(0.025), in: RoundedRectangle(cornerRadius: 12))
         .overlay { RoundedRectangle(cornerRadius: 12).strokeBorder(color.opacity(0.12), lineWidth: 0.5) }
+    }
+    private func noteAuthor(_ note: RemoteDetailNote) -> some View {
+        VStack(alignment: .leading, spacing: 3) {
+            Text(verbatim: note.author ?? note.username ?? String(localized: .RemoteDetail.remoteDetailUnknownAuthor))
+                .font(.callout.weight(.medium))
+            if let username = note.username, username != note.author {
+                Text(verbatim: "@" + username).font(.caption).foregroundStyle(.secondary)
+            }
+        }
+    }
+    private var feedbackBadge: some View {
+        let feedback = thread.feedback ?? .needsVerification
+        let title: LocalizedStringResource = switch feedback {
+        case .addressed: .RemoteDetail.remoteDetailFeedbackAddressed
+        case .pending: .RemoteDetail.remoteDetailFeedbackPending
+        case .needsVerification: .RemoteDetail.remoteDetailFeedbackNeedsVerification
+        case .informational: .RemoteDetail.remoteDetailFeedbackInformational
+        case .ignored: .RemoteDetail.remoteDetailFeedbackIgnored
+        case .partlyIgnored: .RemoteDetail.remoteDetailFeedbackPartlyIgnored
+        case .notApplicable: .RemoteDetail.remoteDetailFeedbackNotApplicable
+        }
+        let color: Color = switch feedback {
+        case .addressed: .green
+        case .pending, .needsVerification: .orange
+        case .informational, .ignored, .partlyIgnored, .notApplicable: .secondary
+        }
+        let symbol: String = switch feedback {
+        case .addressed: "checkmark.seal"
+        case .pending: "exclamationmark.bubble"
+        case .needsVerification: "questionmark.circle"
+        case .informational, .notApplicable: "info.circle"
+        case .ignored, .partlyIgnored: "minus.circle"
+        }
+        return Label(title, systemImage: symbol).font(.caption.weight(.medium)).foregroundStyle(color)
+            .padding(.horizontal, 7).padding(.vertical, 3).background(color.opacity(0.08), in: Capsule())
+            .accessibilityHint(Text(.RemoteDetail.remoteDetailFeedbackHelp))
     }
     private var replyTitle: LocalizedStringResource {
         switch thread.reply {

@@ -34,7 +34,8 @@ import MergeTetherRemote
             let context: String?
             if case let .line(location) = draft.kind { context = location }
             else { context = draft.discussionID }
-            return RemoteDraft(id: draft.id ?? (-1 - index), body: draft.note ?? "", context: context)
+            return RemoteDraft(id: draft.id ?? (-1 - index), body: draft.note ?? "", context: context,
+                publicationWarnings: DraftPublicationRisk(draft: draft)?.messages.map { String(localized: $0) })
         }
         var card = RemoteCard(id: "mr:\(item.id.projectID):\(item.id.iid)", title: item.title,
             project: item.url.gitLabProjectPath, url: item.url,

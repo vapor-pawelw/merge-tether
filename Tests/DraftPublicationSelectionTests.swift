@@ -3,6 +3,46 @@ import Testing
 @testable import GitLabTodos
 
 struct DraftPublicationSelectionTests {
+    @Test(arguments: ["/merge", "Reply\n  /approve", "```\n/close\n```", "Reply\r\n\t/merge"])
+    func manualPreviewWarnsAboutPotentialCommandsWithoutBlockingSelection(_ body: String) throws {
+        let note = draft(11, text: body)
+        let risk = try #require(DraftPublicationRisk(draft: note))
+        #expect(risk.id == 11 && risk.discussionID == "thread")
+        #expect(risk.hasPotentialQuickActions && !risk.resolvesDiscussion)
+        #expect(!risk.messages.isEmpty)
+        #expect(DraftPublicationSelection(selectingAll: [note]).selectedDrafts(from: [note]) == [note])
+        #expect(!AutomaticPublicationPolicy.safeForAutomaticPublication(note))
+    }
+
+    @Test func selectedWarningsFollowExactDraftContentAndNeverIncludeUnselectedOrNewDrafts() throws {
+        let ordinary = draft(11, text: "See https://example.test/path and /merge documentation")
+        var resolving = draft(12)
+        resolving.resolveDiscussion = true
+        let unselected = draft(14, text: "/close")
+        let unseen = draft(13, text: "/merge")
+        var selection = DraftPublicationSelection(selectingAll: [ordinary, resolving, unselected])
+        selection.setSelected(false, draft: unselected)
+        #expect(DraftPublicationRisk(draft: ordinary) == nil)
+        let risks = selection.selectedDrafts(from: [ordinary, resolving, unselected, unseen]).compactMap(DraftPublicationRisk.init)
+        #expect(risks.map(\.id) == [12])
+        #expect(risks.first?.resolvesDiscussion == true)
+        #expect(risks.first?.hasPotentialQuickActions == false)
+        let edited = draft(12, text: "/close")
+        #expect(selection.selectedDrafts(from: [ordinary, edited, unseen]).compactMap(DraftPublicationRisk.init).isEmpty)
+    }
+
+    @Test func resolvingCommandDraftShowsBothWarningsWithItsCurrentThread() throws {
+        var note = draft(11, text: "/approve", discussion: "current-thread")
+        note.resolveDiscussion = true
+        let risk = try #require(DraftPublicationRisk(draft: note))
+        #expect(risk.hasPotentialQuickActions && risk.resolvesDiscussion)
+        let messages = risk.messages.map { String(localized: $0) }
+        #expect(messages.count == 3)
+        #expect(messages.contains { $0.contains("11") && $0.contains("quick actions") })
+        #expect(messages.contains { $0.contains("11") && $0.contains("resolve") })
+        #expect(messages.contains { $0.contains("current-thread") })
+    }
+
     @Test func anEmptyWindowNeverAutomaticallySelectsLaterDrafts() {
         var session = DraftPublicationSession()
         let later = draft(11)

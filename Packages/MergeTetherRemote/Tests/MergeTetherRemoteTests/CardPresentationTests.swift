@@ -3,6 +3,17 @@ import Testing
 @testable import MergeTetherRemote
 
 @Suite struct CardPresentationTests {
+    @Test func draftWarningsAreAdditiveAndSurviveTheWire() throws {
+        let legacy = try JSONDecoder().decode(RemoteDraft.self, from: Data(#"{"id":11,"body":"Reply"}"#.utf8))
+        #expect(legacy.publicationWarnings == nil)
+        let warned = RemoteDraft(id: 12, body: "/merge", context: "thread",
+            publicationWarnings: ["Draft #12 contains potential GitLab quick actions.", "Thread thread"])
+        #expect(try JSONDecoder().decode(RemoteDraft.self, from: JSONEncoder().encode(warned)) == warned)
+        let board = RemoteBoard(hostSession: UUID(), account: "me@host", lanes: [.init(id: .drafts,
+            cards: [.init(id: "mr:1:2", title: "MR", project: "g/p", url: nil, drafts: [warned])])])
+        #expect(board.forClient(supportsCommentReview: false).cards.first?.drafts == [warned])
+    }
+
     @Test(arguments: [false, true])
     func anAdditiveAutomationPauseSurvivesTheWireAndLegacyClientFiltering(_ paused: Bool) throws {
         let board = RemoteBoard(hostSession: UUID(), account: "me@host", lanes: [])

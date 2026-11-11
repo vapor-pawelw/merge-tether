@@ -8,6 +8,10 @@ import MergeTetherRemote
         guard let request = row.displayRequest, let host = monitor.glab.resolvedHost,
               let username = monitor.glab.currentUsername else { return }
         let target = MRAutomationScope.Target(host: host, username: username, projectID: request.projectID, iid: request.iid)
+        let assessment = details.discussionFingerprint.flatMap {
+            monitor.attention.authorFeedbackCoordinator?.assessment(for: request, fingerprint: $0)
+        }
+        applyFeedback(to: &details, assessment: assessment, authorID: request.author.id)
         let reasons = RemoteBoardAdapter.detail(item)
         if !reasons.isEmpty { details.reasons = [reasons] }
         let status = RemoteBoardAdapter.matchingMergeStatus(for: row, statuses: monitor.authoredMergeRequests.requests)
@@ -91,6 +95,18 @@ import MergeTetherRemote
             }
             return roles + [.init(label: String(localized: .AssistantUsage.assistantUsageMRLifetimeCost),
                 value: amount(overall) + "\n\n" + String(localized: .AssistantUsage.assistantUsageMRHistoryHelp))]
+        }
+    }
+
+    static func applyFeedback(to details: inout RemoteMRDetails, assessment: ReReviewAssessment?, authorID: Int) {
+        details.threads = details.threads.map { threads in
+            threads.map { original in
+                var thread = original
+                let feedback = MRDiscussionSnapshot.Feedback.summarize(
+                    notes: thread.notes.map { (Int($0.id), $0.authorID) }, assessment: assessment, authorID: authorID)
+                thread.feedback = .init(rawValue: feedback.rawValue) ?? .needsVerification
+                return thread
+            }
         }
     }
 

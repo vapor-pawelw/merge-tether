@@ -46,6 +46,13 @@ struct RemoteDraftCard: View {
             }
             Text(verbatim: draft.body).font(.callout).lineSpacing(4)
                 .textSelection(.enabled).fixedSize(horizontal: false, vertical: true)
+            ForEach(Array((draft.publicationWarnings ?? []).enumerated()), id: \.offset) { _, warning in
+                Label { Text(verbatim: warning).textSelection(.enabled) } icon: {
+                    Image(systemName: "exclamationmark.triangle")
+                }
+                .font(.caption).foregroundStyle(.orange)
+                .fixedSize(horizontal: false, vertical: true)
+            }
         }
         .padding(16)
         .frame(maxWidth: .infinity, alignment: .leading)
