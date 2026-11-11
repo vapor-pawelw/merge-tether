@@ -56,7 +56,7 @@ struct AutomaticPublicationPolicy: Equatable, Sendable {
         return !requiresSources || draft.discussionID.map { !$0.isEmpty } == true
     }
 
-    var requiresAI: Bool { mode != .all && (mode == .aiReplies || restrictions.requireAI) }
+    var requiresAI: Bool { mode == .aiReplies || (mode == .filtered && restrictions.requireAI) }
     private var requiresSources: Bool { mode != .all && (requiresAI || !restrictions.sourceCommentAuthors.isEmpty) }
 
     private func matches(_ identities: [PublicationIdentity], host: String, id: Int) -> Bool {

@@ -170,6 +170,68 @@ struct AutomaticPublicationPolicyTests {
         #expect(try !allows(.init(mode: .filtered, restrictions: .init()), notes: [note(40, author: 8)]))
     }
 
+    @Test(arguments: [AutomationPublicationMode.all, .filtered, .aiReplies, .manual], [false, true])
+    func onlyActivePublicationModesRequestAIAnalysis(_ mode: AutomationPublicationMode, _ retainedAI: Bool) throws {
+        var settings = AutomationSettings()
+        settings.publicationMode = mode
+        settings.publicationRestrictions.requireAI = retainedAI
+        let expected = mode == .aiReplies || (mode == .filtered && retainedAI)
+        #expect(settings.needsAIAssessment == expected)
+        let restored = try JSONDecoder().decode(AutomationSettings.self, from: JSONEncoder().encode(settings))
+        #expect(restored.needsAIAssessment == expected)
+        #expect(restored.publicationRestrictions.requireAI == retainedAI && restored.publicationMode == mode)
+        if mode == .manual {
+            #expect(try !allows(restored.automaticPublicationPolicy, notes: [note(40, author: 8)], ai: [40]))
+        }
+    }
+
+    @Test(arguments: [AutomationPackageDecision.undecided, .disabled, .enabled], [false, true])
+    func explicitModeChoicesRetainDormantConditionsAndConsentAcrossReload(_ consent: AutomationPackageDecision, _ ai: Bool) throws {
+        // Given custom restrictions and unrelated delivery settings.
+        var settings = AutomationSettings()
+        settings.packageDecision = consent
+        settings.publicationRestrictions = .init(repositories: [identity(1)], mergeRequestAuthors: [identity(7)],
+            sourceCommentAuthors: [identity(8)], requireAI: ai)
+        settings.allowFollowUpPush = false
+        settings.allowConflictPush = true
+        settings.authorFeedback.promptTemplate = "Custom feedback instructions"
+        let restrictions = settings.publicationRestrictions
+
+        // When the selector visits every explicit mode, including manual with retained filters.
+        for mode in [AutomationPublicationMode.all, .manual, .aiReplies, .filtered, .all] {
+            settings.publicationMode = mode
+            let restored = try JSONDecoder().decode(AutomationSettings.self, from: JSONEncoder().encode(settings))
+
+            // Then mode and future-relevant conditions survive without granting other permissions.
+            #expect(restored.publicationMode == mode && restored.publicationRestrictions == restrictions)
+            #expect(restored.packageDecision == consent && !restored.allowFollowUpPush && restored.allowConflictPush)
+            #expect(restored.authorFeedback.promptTemplate == settings.authorFeedback.promptTemplate)
+            #expect(try allows(restored.automaticPublicationPolicy, notes: [note(40, author: 8)], ai: [40]) == (mode != .manual))
+            #expect(try allows(restored.automaticPublicationPolicy, reply: false) == (mode == .all))
+        }
+    }
+
+    @Test func explicitFilteredModeRemainsFailClosedWhenItsLastConditionIsRemoved() throws {
+        var settings = AutomationSettings()
+        settings.publicationRestrictions.repositories = [identity(1)]
+        settings.publicationMode = .filtered
+        #expect(try allows(settings.automaticPublicationPolicy, reply: false))
+        settings.publicationRestrictions.repositories = []
+        let restored = try JSONDecoder().decode(AutomationSettings.self, from: JSONEncoder().encode(settings))
+        #expect(restored.publicationMode == .filtered)
+        #expect(try !allows(restored.automaticPublicationPolicy, reply: false))
+        #expect(try !allows(restored.automaticPublicationPolicy, notes: [note(40, author: 8)], ai: [40]))
+    }
+
+    @Test func editingDormantFiltersCannotChangeAnExplicitManualDecision() throws {
+        var settings = AutomationSettings()
+        settings.publicationMode = .manual
+        settings.publicationRestrictions = .init(repositories: [identity(1)], requireAI: true)
+        let restored = try JSONDecoder().decode(AutomationSettings.self, from: JSONEncoder().encode(settings))
+        #expect(restored.publicationMode == .manual)
+        #expect(try !allows(restored.automaticPublicationPolicy, notes: [note(40, author: 8)], ai: [40]))
+    }
+
     @Test func presetDefaultsSelectAllForFullAIForCheckpointsAndManualForManual() {
         for preset in AutomationPreset.allCases {
             var settings = AutomationSettings()

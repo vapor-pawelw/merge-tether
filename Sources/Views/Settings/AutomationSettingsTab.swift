@@ -10,7 +10,6 @@ struct AutomationSettingsTab: View {
     @State private var page: Page = .checkpoints
     @State private var packageChoice: AutomationPackageChoice?
     @State private var isChoosingWorkspace = false
-    @State private var showTemplates = false
     @State private var setupAction: SetupAction?
     private enum SetupAction: String, Identifiable {
         case enableVerification, apply
@@ -71,7 +70,6 @@ struct AutomationSettingsTab: View {
                         MergeWorkflowSettingsSection(rules: $draft.workflowRules)
                     case .todos:
                         todoFields
-                        if rule.wrappedValue.runner == .assistant { runnerFields }
                     case .advanced:
                         advancedFields
                     case .scope:
@@ -160,21 +158,20 @@ struct AutomationSettingsTab: View {
             Section {
                 VStack(alignment: .leading, spacing: 4) {
                     HStack(alignment: .top) {
-                        Toggle(isOn: Binding(get: { draft.publishesAllComments },
-                                             set: { draft.setPublishAllComments($0) })) {
-                            Text(.PublicationPolicy.publicationAutomaticAll)
-                        }
-                        .toggleStyle(.checkbox)
+                        Picker(selection: $draft.publicationMode) {
+                            ForEach(AutomationPublicationMode.allCases, id: \.self) { mode in
+                                Text(mode.title).tag(mode)
+                            }
+                        } label: { Text(.Settings.settingsAutomationPublicationTitle) }
                         Spacer()
                         AutomationDefaultsResetButton(preset: draft.baselinePreset) { draft.resetPublication(to: $0) }
                     }
-                    Text(.PublicationPolicy.publicationAutomaticAllHelp).font(.caption).foregroundStyle(.secondary)
+                    Text(draft.publicationMode == .all ? .PublicationPolicy.publicationAutomaticAllHelp : draft.publicationMode.explanation)
+                        .font(.caption).foregroundStyle(.secondary)
                 }
             } header: { Text(.Settings.settingsAutomationPublicationTitle) }
             PublicationRestrictionsSettingsView(restrictions: $draft.publicationRestrictions,
-                automaticAIReplies: Binding(get: { draft.automaticAIReplies }, set: { draft.setAutomaticAIReplies($0) }),
-                publishesAllComments: draft.publishesAllComments, glab: monitor.glab, preset: draft.baselinePreset,
-                onFiltersChanged: { draft.publicationFiltersChanged() })
+                mode: draft.publicationMode, glab: monitor.glab, preset: draft.baselinePreset)
         }
     }
 
@@ -182,36 +179,40 @@ struct AutomationSettingsTab: View {
         Section {
             checkpointToggle($draft.allowFollowUpPush, .Settings.settingsAutomationFollowUpPush,
                              help: .Settings.settingsAutomationFollowUpPushHelp, reset: .followUpPush)
+            Text(.EffectivePolicy.settingsIndependentPush).font(.caption).foregroundStyle(.secondary)
+            Divider()
             Toggle(isOn: $draft.allowAssistantTools) {
                 Text(.Settings.settingsAutomationAssistantTools)
             }
             .toggleStyle(.checkbox)
 
-            if draft.allowAssistantTools {
+            if draft.allowAssistantTools || !draft.assistantToolProjects.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
                 TextField(text: $draft.assistantToolProjects) {
                     Text(.Settings.settingsAutomationToolProjects)
                 }
                 .autocorrectionDisabled()
+                .disabled(!draft.allowAssistantTools)
             }
             Text(.Settings.settingsAutomationAssistantToolsHelp).font(.caption).foregroundStyle(.secondary)
-            if draft.conflictTasksEnabled, draft.allowAssistantTools {
-                Toggle(isOn: $draft.allowConflictPush) {
-                    Text(.Settings.settingsAutomationConflictsAllowPush)
-                }
-                .toggleStyle(.checkbox)
+            Toggle(isOn: $draft.allowConflictPush) {
+                Text(.Settings.settingsAutomationConflictsAllowPush)
+            }
+            .toggleStyle(.checkbox)
+            .disabled(!draft.conflictTasksEnabled || !draft.allowAssistantTools)
 
-                if draft.allowConflictPush {
-                    TextField(text: $draft.conflictPushProjects) {
-                        Text(.Settings.settingsAutomationConflictsPushProjects)
-                    }
-                    .autocorrectionDisabled()
+            if !draft.conflictTasksEnabled || !draft.allowAssistantTools {
+                Text(.EffectivePolicy.settingsConflictPushPrerequisites).font(.caption).foregroundStyle(.secondary)
+            }
+            if draft.allowConflictPush || !draft.conflictPushProjects.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
+                TextField(text: $draft.conflictPushProjects) {
+                    Text(.Settings.settingsAutomationConflictsPushProjects)
                 }
+                .autocorrectionDisabled()
+                .disabled(!draft.conflictTasksEnabled || !draft.allowAssistantTools || !draft.allowConflictPush)
             }
         } header: { Text(.EffectivePolicy.settingsDelivery) }
         footer: {
-            if draft.conflictTasksEnabled && draft.allowAssistantTools && draft.allowConflictPush {
-                Text(.Settings.settingsAutomationAuthoredMergeRequestsProjectsHelp).font(.caption).foregroundStyle(.secondary)
-            }
+            Text(.Settings.settingsAutomationAuthoredMergeRequestsProjectsHelp).font(.caption).foregroundStyle(.secondary)
         }
     }
 
@@ -394,8 +395,11 @@ struct AutomationSettingsTab: View {
                 .font(.caption)
                 .foregroundStyle(.secondary)
         }
-        LegacyAutomationRuleSettings(rule: $draft.reviewRequested, title: .Settings.settingsAutomationReviewRequested)
-        LegacyAutomationRuleSettings(rule: $draft.authorFeedback, title: .Settings.settingsAutomationAuthorFeedback)
+        Section {
+            Text(.EffectivePolicy.settingsAdvancedRulesWarning).font(.caption).foregroundStyle(.secondary)
+        }
+        AutomationRuleTemplateSettings(rule: $draft.reviewRequested, title: .Settings.settingsAutomationReviewRequested)
+        AutomationRuleTemplateSettings(rule: $draft.authorFeedback, title: .Settings.settingsAutomationAuthorFeedback)
     }
 
     private var todoFields: some View {
@@ -434,6 +438,8 @@ struct AutomationSettingsTab: View {
                 Text(.Settings.settingsAutomationRunnerLegacyHelp)
                     .font(.caption).foregroundStyle(.orange)
                 Text(.EffectivePolicy.settingsLegacyLocation).font(.caption).foregroundStyle(.secondary)
+            } else {
+                Text(.EffectivePolicy.settingsTemplatesLocation).font(.caption).foregroundStyle(.secondary)
             }
         } header: {
             Text(.Settings.settingsAutomationTodoSection)
@@ -445,38 +451,6 @@ struct AutomationSettingsTab: View {
             }
             .font(.caption)
             .foregroundStyle(.secondary)
-        }
-    }
-
-    private var runnerFields: some View {
-        Section {
-            DisclosureGroup(isExpanded: $showTemplates) {
-                templateFields
-            } label: {
-                Text(.Settings.settingsAutomationTodoCustomize)
-            }
-        }
-    }
-
-    private var templateFields: some View {
-        Group {
-            TextField(text: rule.titleTemplate) {
-                Text(.Settings.settingsAutomationTitle)
-            }
-            .autocorrectionDisabled()
-
-            if rule.wrappedValue.runner == .assistant {
-                TextField(text: rule.promptTemplate, axis: .vertical) {
-                    Text(.Settings.settingsAutomationPrompt)
-                }
-                .lineLimit(5...8)
-            }
-            VStack(alignment: .leading, spacing: 6) {
-                Text(.Settings.settingsAutomationTemplateHelp)
-            }
-            .font(.caption)
-            .foregroundStyle(.secondary)
-            .textSelection(.enabled)
         }
     }
 
@@ -519,27 +493,35 @@ struct AutomationSettingsTab: View {
     }
 }
 
-/// Stored shell handlers stay inspectable; choosing an agent remains an explicit action in preparation rules.
-struct LegacyAutomationRuleSettings: View {
+/// Editing retained templates never changes the rule's runner or its enablement.
+struct AutomationRuleTemplateSettings: View {
     @Binding var rule: AutomationRule
     let title: LocalizedStringResource
 
     var body: some View {
-        if rule.runner == .shell {
-            Section {
+        Section {
+            if rule.runner == .shell {
                 Text(rule.isEnabled ? .EffectivePolicy.settingsLegacyEnabled : .EffectivePolicy.settingsLegacyDisabled)
                     .font(.caption).foregroundStyle(.orange)
-                TextField(text: $rule.titleTemplate) { Text(.Settings.settingsAutomationTitle) }
-                    .autocorrectionDisabled()
                 Text(.Settings.settingsAutomationCommand).font(.caption.weight(.semibold))
                 Text(verbatim: rule.command)
                     .font(.body.monospaced()).textSelection(.enabled)
                     .frame(maxWidth: .infinity, alignment: .leading)
                 Text(.Settings.settingsAutomationRunnerLegacyHelp).font(.caption).foregroundStyle(.secondary)
-                Text(.Settings.settingsAutomationTemplateHelp).font(.caption).foregroundStyle(.secondary).textSelection(.enabled)
-            } header: {
-                Text(.EffectivePolicy.settingsLegacyTitle) + Text(" · ") + Text(title)
+            } else {
+                Text(rule.isEnabled ? .EffectivePolicy.settingsTemplateActive : .EffectivePolicy.settingsTemplateInactive)
+                    .font(.caption).foregroundStyle(rule.isEnabled ? Color.orange : Color.secondary)
             }
+            TextField(text: $rule.titleTemplate) { Text(.Settings.settingsAutomationTitle) }
+                .autocorrectionDisabled()
+            if rule.runner == .assistant {
+                TextField(text: $rule.promptTemplate, axis: .vertical) { Text(.Settings.settingsAutomationPrompt) }
+                    .lineLimit(5...8)
+            }
+            Text(.Settings.settingsAutomationTemplateHelp).font(.caption).foregroundStyle(.secondary).textSelection(.enabled)
+        } header: {
+            Text(rule.runner == .shell ? .EffectivePolicy.settingsLegacyTitle : .EffectivePolicy.settingsTemplateTitle)
+                + Text(" · ") + Text(title)
         }
     }
 }

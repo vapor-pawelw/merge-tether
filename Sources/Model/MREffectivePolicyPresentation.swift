@@ -2,10 +2,26 @@ import Foundation
 
 /// A description of existing policy, never an authorization to perform an action.
 struct MREffectivePolicyPresentation {
+    enum ReadState {
+        case current, rechecking, unavailable
+
+        init(catalogCurrent: Bool, sameContext: Bool, readFailed: Bool, rechecking: Bool) {
+            guard catalogCurrent, sameContext, !readFailed else { self = .unavailable; return }
+            self = rechecking ? .rechecking : .current
+        }
+
+        @MainActor
+        init(catalogCurrent: Bool, row: MergeRequestBoardSnapshot.Row, input: MRBoardProjector.RowInput) {
+            self.init(catalogCurrent: catalogCurrent, sameContext: row.evidenceMatchesCatalogContext,
+                readFailed: MRBoardProjector.attentionRefreshFailed(for: row, input: input),
+                rechecking: MRBoardProjector.isRecheckingAttention(for: row, input: input))
+        }
+    }
+
     enum Clause: Equatable {
         case publicationAfterChecks(AutomationPublicationMode), publicationManual
         case mergeManual, mergeAfterChecks, approvalManual, approvalAfterChecks, deliveryManual
-        case draftPaused, scopePaused, automationOff, savedDataHold, requiresVerification
+        case draftPaused, scopePaused, automationOff, automationDecisionRequired, savedDataHold, requiresVerification
         case assistantUnavailable, loginRequired, rateLimited, finishCommentReview
         case mergeSubmission(MergeSubmissionState)
     }
@@ -14,6 +30,7 @@ struct MREffectivePolicyPresentation {
         let request: GitLabMergeRequest?
         let submission: MergeSubmissionState
         let automaticActionsAllowed: Bool
+        let packageDecision: AutomationPackageDecision
         let enabled: Bool
         let scopeActive: Bool
         let draftPaused: Bool
@@ -26,11 +43,11 @@ struct MREffectivePolicyPresentation {
         let commentReview: Bool
         let assistantReady: Bool
         let cliHold: AssistantCLIHealthIssue.Kind?
-        let readUnavailable: Bool
+        let readState: ReadState
 
         @MainActor
         init(request: GitLabMergeRequest?, target: MRAutomationScope.Target?, settings: SettingsManager,
-             assistantReady: Bool, readUnavailable: Bool = false, submission: MergeSubmissionState = .none,
+             assistantReady: Bool, readState: ReadState = .current, submission: MergeSubmissionState = .none,
              cliHold: AssistantCLIHealthIssue.Kind? = nil) {
             let bound = request.flatMap { request in
                 target.flatMap { target in
@@ -42,6 +59,7 @@ struct MREffectivePolicyPresentation {
             self.submission = bound == nil ? .none : submission
             automaticActionsAllowed = settings.automaticActionsAllowed
             let automation = settings.automation
+            packageDecision = automation.packageDecision
             enabled = automation.hasEnabledAutomation
             let scope = target.map { automation.scope.resolve($0, isDraft: bound?.draft == true || bound?.detailedMergeStatus == "draft_status") }
             scopeActive = scope?.active == true
@@ -63,17 +81,20 @@ struct MREffectivePolicyPresentation {
             commentReview = target.map { settings.pendingCommentReviews.contains($0) } == true
             self.assistantReady = assistantReady
             self.cliHold = cliHold
-            self.readUnavailable = readUnavailable
+            self.readState = readState
         }
     }
 
     let clauses: [Clause]
+    enum SettingsAction { case chooseAutomationSettings }
+    var settingsAction: SettingsAction? { clauses.contains(.automationDecisionRequired) ? .chooseAutomationSettings : nil }
 
     init(input: Input) {
         guard let request = input.request else { clauses = [.requiresVerification]; return }
         guard request.state == "opened", input.submission != .merged else { clauses = []; return }
         if input.submission != .none { clauses = [.mergeSubmission(input.submission)]; return }
         if !input.automaticActionsAllowed { clauses = [.savedDataHold]; return }
+        if input.packageDecision == .undecided { clauses = [.automationDecisionRequired]; return }
         if !input.enabled { clauses = [.automationOff]; return }
         guard request.draft != nil else { clauses = [.requiresVerification]; return }
         if !input.scopeActive { clauses = [input.draftPaused ? .draftPaused : .scopePaused]; return }
@@ -81,7 +102,7 @@ struct MREffectivePolicyPresentation {
             clauses = [hold == .loginRequired ? .loginRequired : .rateLimited]; return
         }
         if !input.assistantReady { clauses = [.assistantUnavailable]; return }
-        if input.readUnavailable { clauses = [.requiresVerification]; return }
+        if input.readState == .unavailable { clauses = [.requiresVerification]; return }
         let publication: Clause = input.publicationAllowed ? .publicationAfterChecks(input.publicationMode) : .publicationManual
         let completion: Clause
         if input.commentReview { completion = .finishCommentReview }

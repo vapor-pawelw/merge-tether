@@ -3,33 +3,43 @@ import SwiftUI
 /// Draft settings only. Applying the enclosing Settings form persists the change.
 struct PublicationRestrictionsSettingsView: View {
     @Binding var restrictions: AutomaticPublicationRestrictions
-    @Binding var automaticAIReplies: Bool
-    let publishesAllComments: Bool
+    let mode: AutomationPublicationMode
     let glab: GlabService
     let preset: AutomationPreset?
-    let onFiltersChanged: () -> Void
+
+    private var filtersActive: Bool { mode == .filtered || mode == .aiReplies }
+    private var requiresAI: Bool { mode == .aiReplies || restrictions.requireAI }
 
     var body: some View {
         Section {
-            if publishesAllComments {
-                Text(.PublicationPolicy.publicationFiltersIgnored).font(.caption).foregroundStyle(.secondary)
+            if !filtersActive {
+                Text(mode == .all ? .PublicationPolicy.publicationFiltersIgnored : .PublicationPolicy.publicationFiltersManual)
+                    .font(.caption).foregroundStyle(.secondary)
+            } else if mode == .filtered && !restrictions.hasConditions {
+                Text(.PublicationPolicy.publicationNoConditions).font(.caption).foregroundStyle(.secondary)
             }
             DisclosureGroup {
                 VStack(alignment: .leading, spacing: 16) {
                     VStack(alignment: .leading, spacing: 6) {
                         HStack(alignment: .top) {
-                            Toggle(isOn: $automaticAIReplies) { Text(.PublicationPolicy.publicationOnlyAiReplies) }
+                            Toggle(isOn: Binding(get: { requiresAI }, set: { restrictions.requireAI = $0 })) {
+                                Text(.PublicationPolicy.publicationRequireAI)
+                            }
                                 .toggleStyle(.checkbox)
+                                .disabled(mode == .aiReplies)
                             Spacer(minLength: 8)
-                            Button { automaticAIReplies = defaults.requireAI } label: {
+                            Button { restrictions.requireAI = defaults.requireAI } label: {
                                 Image(systemName: "arrow.counterclockwise")
                             }
                             .buttonStyle(.borderless)
-                            .disabled(automaticAIReplies == defaults.requireAI)
+                            .disabled(mode == .aiReplies || restrictions.requireAI == defaults.requireAI)
                             .accessibilityLabel(Text(.PublicationPolicy.publicationReset))
                             .help(Text(.PublicationPolicy.publicationResetFilterHelp))
                         }
                         Text(.PublicationPolicy.publicationAiRepliesHelp).font(.caption).foregroundStyle(.secondary)
+                        if mode == .aiReplies {
+                            Text(.PublicationPolicy.publicationAiRequiredByMode).font(.caption).foregroundStyle(.secondary)
+                        }
                     }
                     Divider()
                     PublicationIdentityFilterEditor(identities: $restrictions.repositories,
@@ -42,7 +52,6 @@ struct PublicationRestrictionsSettingsView: View {
                     HStack {
                         Button {
                             restrictions = defaults
-                            automaticAIReplies = defaults.requireAI
                         } label: { Text(.PublicationPolicy.publicationResetFilters) }
                             .disabled(restrictions == defaults)
                         Spacer(minLength: 0)
@@ -51,7 +60,7 @@ struct PublicationRestrictionsSettingsView: View {
                 }
                 .padding(.top, 10)
                 .frame(maxWidth: .infinity, alignment: .leading)
-                .disabled(publishesAllComments)
+                .disabled(!filtersActive)
             } label: {
                 HStack {
                     Text(.PublicationPolicy.publicationAdvanced)
@@ -61,19 +70,18 @@ struct PublicationRestrictionsSettingsView: View {
             }
             Text(.PublicationPolicy.publicationAutomationOnlyHelp).font(.caption).foregroundStyle(.secondary)
         }
-        .onChange(of: restrictions) { _, _ in onFiltersChanged() }
     }
 
     private var defaults: AutomaticPublicationRestrictions { .defaults(for: preset) }
 
     private var summary: String {
-        if publishesAllComments { return String(localized: .PublicationPolicy.publicationFiltersInactive) }
+        if !filtersActive { return String(localized: .PublicationPolicy.publicationFiltersInactive) }
         var parts: [String] = []
         if !restrictions.repositories.isEmpty { parts.append(String(localized: .PublicationPolicy.publicationRepositories)) }
         if !restrictions.mergeRequestAuthors.isEmpty { parts.append(String(localized: .PublicationPolicy.publicationMrAuthors)) }
         if !restrictions.sourceCommentAuthors.isEmpty { parts.append(String(localized: .PublicationPolicy.publicationCommentAuthors)) }
-        if automaticAIReplies { parts.append(String(localized: .PublicationPolicy.publicationAiOnly)) }
-        return parts.isEmpty ? String(localized: .PublicationPolicy.publicationUnrestrictedShort) : parts.joined(separator: " · ")
+        if requiresAI { parts.append(String(localized: .PublicationPolicy.publicationAiOnly)) }
+        return parts.isEmpty ? String(localized: .PublicationPolicy.publicationNoConditionsShort) : parts.joined(separator: " · ")
     }
 }
 

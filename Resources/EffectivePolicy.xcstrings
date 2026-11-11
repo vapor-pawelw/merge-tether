@@ -1,6 +1,34 @@
 {
   "sourceLanguage": "en",
   "strings": {
+    "settings.advancedRulesWarning": {
+      "extractionState": "manual",
+      "localizations": { "en": { "stringUnit": { "state": "translated", "value": "Review & feedback rules and MR event rules are independent. Both can start work under your saved policy. Inspect their enablement and filters on those pages; editing templates here does not change either route." } } }
+    },
+    "settings.independentPush": {
+      "extractionState": "manual",
+      "localizations": { "en": { "stringUnit": { "state": "translated", "value": "Follow-up pushes and conflict pushes are separate permissions. Tool access alone does not authorize either push." } } }
+    },
+    "settings.conflictPushPrerequisites": {
+      "extractionState": "manual",
+      "localizations": { "en": { "stringUnit": { "state": "translated", "value": "Conflict pushes need both conflict preparation under Preparation and tool access above. Saved push permission and repository restrictions remain inactive until both are enabled." } } }
+    },
+    "settings.templatesLocation": {
+      "extractionState": "manual",
+      "localizations": { "en": { "stringUnit": { "state": "translated", "value": "Custom titles and task instructions are in Advanced. This rule and its repository filter still control when work starts." } } }
+    },
+    "settings.templateTitle": {
+      "extractionState": "manual",
+      "localizations": { "en": { "stringUnit": { "state": "translated", "value": "Custom task instructions" } } }
+    },
+    "settings.templateActive": {
+      "extractionState": "manual",
+      "localizations": { "en": { "stringUnit": { "state": "translated", "value": "These instructions belong to an enabled rule. Consent, scope, repository filters and current checks still apply. Change the rule in Review & feedback." } } }
+    },
+    "settings.templateInactive": {
+      "extractionState": "manual",
+      "localizations": { "en": { "stringUnit": { "state": "translated", "value": "This rule is off. Its custom instructions are retained; editing them does not enable it. Independent MR event rules can still start work. Change this rule in Review & feedback." } } }
+    },
     "policy.publicationAll": {
       "extractionState": "manual",
       "localizations": {
@@ -129,6 +157,28 @@
           "stringUnit": {
             "state": "translated",
             "value": "Automatic work is off"
+          }
+        }
+      }
+    },
+    "policy.automationDecision": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Automation needs your decision"
+          }
+        }
+      }
+    },
+    "policy.chooseAutomationSettings": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Choose automation settings…"
           }
         }
       }

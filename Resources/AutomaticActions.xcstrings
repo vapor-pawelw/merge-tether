@@ -3,19 +3,19 @@
   "strings": {
     "automaticActions.publication": {
       "extractionState": "manual",
-      "localizations": { "en": { "stringUnit": { "state": "translated", "value": "Automatic comment publication" } } }
+      "localizations": { "en": { "stringUnit": { "state": "translated", "value": "Comment publication: follow global rules" } } }
     },
     "automaticActions.merge": {
       "extractionState": "manual",
-      "localizations": { "en": { "stringUnit": { "state": "translated", "value": "Automatic merge" } } }
+      "localizations": { "en": { "stringUnit": { "state": "translated", "value": "Merge: follow global rules" } } }
     },
     "automaticActions.approval": {
       "extractionState": "manual",
-      "localizations": { "en": { "stringUnit": { "state": "translated", "value": "Automatic approval" } } }
+      "localizations": { "en": { "stringUnit": { "state": "translated", "value": "Approval: follow global rules" } } }
     },
     "automaticActions.inheritHelp": {
       "extractionState": "manual",
-      "localizations": { "en": { "stringUnit": { "state": "translated", "value": "Checked: Auto, following your global permissions and MR automation scope. Unchecked: off for this MR. Globally disabled actions stay off; manual actions remain available." } } }
+      "localizations": { "en": { "stringUnit": { "state": "translated", "value": "Checked: follow global permissions and this MR’s automation scope. Unchecked: automatic action paused for this MR. Globally disabled actions stay off; manual actions remain available." } } }
     },
     "automaticActions.exceptionsHelp": {
       "extractionState": "manual",

@@ -18,6 +18,51 @@ struct MREffectivePolicyPresentationTests {
         }
     }
 
+    @Test(arguments: ["new", "legacy", "completed"])
+    func undecidedConsentExplainsTheDecisionAndOffersAutomationSettings(_ installation: String) throws {
+        try fixture { settings, defaults, _ in
+            // Given a new install or saved settings that have never granted automation consent.
+            if installation == "legacy" {
+                defaults.set(Data(#"{"autoMergeEnabled":true,"publishDraftsWithoutConfirmation":true}"#.utf8), forKey: "automation")
+            } else if installation == "completed" {
+                settings.onboardingCompleted = true
+                settings.automation.autoMergeEnabled = true
+                settings.automation.publicationMode = .all
+                settings.save()
+            }
+            let restored = installation == "new" ? settings : SettingsManager(defaults: defaults)
+            let before = restored.automation
+
+            // When the user follows the explanation's settings action.
+            let policy = presentation(restored)
+            let navigation = SettingsNavigation()
+            var opened: SettingsNavigation.Tab?
+            let action = try #require(policy.settingsAction)
+            navigation.perform(action) { opened = navigation.selection }
+
+            // Then the existing automation tab opens, without granting consent or changing toggles.
+            #expect(policy.clauses == [.automationDecisionRequired])
+            #expect(action == .chooseAutomationSettings && opened == .automation)
+            #expect(restored.automation == before && restored.automation.packageDecision == .undecided)
+            #expect(!restored.automaticWritesAllowed)
+            let request = try request()
+            #expect(MRAutomaticAction.allCases.allSatisfy { !restored.permitsAutomaticAction($0, for: request, target: target) })
+        }
+    }
+
+    @Test(arguments: [AutomationPackageDecision.disabled, .enabled])
+    func decidedConsentDoesNotOfferTheUndecidedSetupAction(_ decision: AutomationPackageDecision) throws {
+        try fixture { settings, _, _ in
+            settings.onboardingCompleted = true
+            settings.automation.applyPreset(.full, for: .codex)
+            settings.automation.packageDecision = decision
+            let policy = presentation(settings)
+            #expect(policy.settingsAction == nil)
+            #expect(policy.clauses == (decision == .disabled ? [.automationOff] : [.publicationAfterChecks(.all), .mergeAfterChecks]))
+            #expect(settings.automaticWritesAllowed == (decision == .enabled))
+        }
+    }
+
     @Test(arguments: [AutomationPublicationMode.all, .aiReplies, .filtered, .manual])
     func publicationExplainsTheSavedModeWithoutInventingVerifiedCounts(_ mode: AutomationPublicationMode) throws {
         try fixture { settings, _, _ in
@@ -77,6 +122,126 @@ struct MREffectivePolicyPresentationTests {
             #expect(presentation(settings, current: false).clauses == [.requiresVerification])
             #expect(presentation(settings, readUnavailable: true).clauses == [.requiresVerification])
             #expect(presentation(settings, draft: nil).clauses == [.requiresVerification])
+        }
+    }
+
+    @Test(arguments: ["provider", "catalog", "discussions"])
+    func sameContextRevalidationKeepsPolicyWhileActionsRemainBlocked(_ source: String) throws {
+        try fixture { settings, _, _ in
+            // Given a checked row and a routine read in the same account and MR context.
+            settings.automation.applyPreset(.full, for: .codex)
+            let request = try request()
+            var item = MergeRequestAttentionMonitor.Item(id: .init(projectID: 1, iid: 2),
+                title: request.title, url: request.webURL, mergeRequest: request, isAuthored: true)
+            if source == "discussions" { item.reReviewReadiness = .checking }
+            let row = MergeRequestBoardSnapshot.Row(item: item, latestJob: nil, intents: [])
+            let input = MRBoardProjector.RowInput(account: .init(host: target.host, username: target.username, revision: 2),
+                automation: settings.automation, workflowEntries: [], assistantReady: true,
+                assistantChecking: source == "provider", catalogLoading: source == "catalog")
+            let checking = MRBoardProjector.isRecheckingAttention(for: row, input: input)
+
+            // When the policy description reads the same refresh facts as the card.
+            let state = MREffectivePolicyPresentation.ReadState(catalogCurrent: true, row: row, input: input)
+            let policy = MREffectivePolicyPresentation(input: .init(request: request, target: target,
+                settings: settings, assistantReady: true, readState: state))
+            let card = MRCardPresentation(row: row, reviewingContext: MRBoardProjector.reviewingContext(for: row, input: input),
+                allowsRemoval: false, assistantReady: true, isRefreshingAttention: checking, showsReadProgress: false)
+
+            // Then the saved policy stays useful without restoring action authorization.
+            #expect(checking && state == .rechecking)
+            #expect(policy.clauses == [.publicationAfterChecks(.all), .mergeAfterChecks])
+            #expect(card.actionsBlocked)
+        }
+    }
+
+    @Test(arguments: ["initial", "account", "context", "error"])
+    func unavailableEvidenceCannotBePresentedAsRoutineRevalidation(_ reason: String) throws {
+        try fixture { settings, _, _ in
+            settings.automation.applyPreset(.full, for: .codex)
+            let state = MREffectivePolicyPresentation.ReadState(
+                catalogCurrent: reason != "initial" && reason != "account",
+                sameContext: reason != "context", readFailed: reason == "error", rechecking: true)
+            let policy = MREffectivePolicyPresentation(input: .init(request: try request(), target: target,
+                settings: settings, assistantReady: true, readState: state))
+            #expect(state == .unavailable)
+            #expect(policy.clauses == [.requiresVerification])
+        }
+    }
+
+    @Test func foregroundProviderProbeKeepsPolicyButAReadFailureStillBlocksIt() async throws {
+        // Given a previously ready provider and the saved full automation policy.
+        let name = "MREffectivePolicyPresentationTests.\(UUID())"
+        let defaults = try #require(UserDefaults(suiteName: name))
+        defer { defaults.removePersistentDomain(forName: name) }
+        let settings = SettingsManager(defaults: defaults)
+        settings.automation.applyPreset(.full, for: .codex)
+        let providers = AssistantDependencyMonitor(probe: { _, _ in .ready(URL(fileURLWithPath: "/in-memory/assistant")) })
+        providers.refresh(force: true)
+        for _ in 0..<1000 where providers.isChecking { await Task.yield() }
+        try #require(!providers.isChecking && providers.available.contains(.codex))
+        let request = try request()
+        let row = MergeRequestBoardSnapshot.Row(item: .init(id: .init(projectID: 1, iid: 2),
+            title: request.title, url: request.webURL, mergeRequest: request, isAuthored: true), latestJob: nil, intents: [])
+
+        // When focus forces another provider check, the production projector reports checking.
+        providers.refresh(force: true)
+        var facts = MRBoardProjector.RowInput(account: .init(host: target.host, username: target.username, revision: 2),
+            automation: settings.automation, workflowEntries: [],
+            assistantReady: providers.available.contains(.codex), assistantChecking: providers.isChecking)
+        func policy() -> MREffectivePolicyPresentation {
+            let state = MREffectivePolicyPresentation.ReadState(catalogCurrent: true, row: row, input: facts)
+            return .init(input: .init(request: request, target: target, settings: settings,
+                assistantReady: facts.assistantReady, readState: state))
+        }
+
+        // Then probing preserves useful policy text, but a real failed read takes precedence.
+        #expect(facts.assistantChecking)
+        #expect(policy().clauses == [.publicationAfterChecks(.all), .mergeAfterChecks])
+        let card = MRCardPresentation(row: row, reviewingContext: MRBoardProjector.reviewingContext(for: row, input: facts),
+            allowsRemoval: false, assistantReady: facts.assistantReady,
+            isRefreshingAttention: MRBoardProjector.isRecheckingAttention(for: row, input: facts), showsReadProgress: false)
+        let gitlab = InMemoryGitLab()
+        defer { gitlab.close() }
+        let glab = gitlab.service(host: target.host, username: target.username)
+        do {
+            try await glab.publishDraftNote(projectID: 1, iid: 2, draftID: 7, host: target.host,
+                shouldProceed: { !card.actionsBlocked })
+            Issue.record("Revalidation restored stale write permission")
+        } catch is CancellationError {}
+        #expect(gitlab.requests.isEmpty)
+        facts.catalogReadFailed = true
+        #expect(policy().clauses == [.requiresVerification])
+        for _ in 0..<1000 where providers.isChecking { await Task.yield() }
+        #expect(!providers.isChecking)
+    }
+
+    @Test(arguments: ["sha", "source_branch", "target_branch", "description"])
+    func changedCatalogContentInvalidatesPolicyAndCheckedActionsDuringRefresh(_ field: String) throws {
+        try fixture { settings, _, _ in
+            // Given an old checked envelope and genuinely different catalog content.
+            settings.automation.applyPreset(.full, for: .codex)
+            let checked = try request()
+            var data = try #require(JSONSerialization.jsonObject(with: JSONEncoder().encode(checked)) as? [String: Any])
+            data[field] = "changed"
+            let current = try JSONDecoder().decode(GitLabMergeRequest.self, from: JSONSerialization.data(withJSONObject: data))
+            let evidence = MergeRequestAttentionMonitor.Item(id: .init(projectID: 1, iid: 2), title: checked.title,
+                url: checked.webURL, automaticDraftIDs: [7], canApprove: true, autoApproveReady: true,
+                needsMerge: true, canConfirmReReview: true, mergeRequest: checked, isAuthored: true)
+            let catalog = MergeRequestAttentionMonitor.Item(id: evidence.id, title: current.title,
+                url: current.webURL, mergeRequest: current, isAuthored: true)
+            let projection = MRCurrentRowProjection(evidence: evidence, catalog: catalog, username: target.username)
+
+            // When a background read is also in progress.
+            let state = MREffectivePolicyPresentation.ReadState(catalogCurrent: true,
+                sameContext: projection.evidenceMatchesCatalogContext, readFailed: false, rechecking: true)
+            let policy = MREffectivePolicyPresentation(input: .init(request: current, target: target,
+                settings: settings, assistantReady: true, readState: state))
+
+            // Then new facts cannot inherit old approval, merge or publication evidence.
+            #expect(policy.clauses == [.requiresVerification])
+            #expect(!projection.item.canApprove && !projection.item.autoApproveReady)
+            #expect(!projection.item.needsMerge && !projection.item.canConfirmReReview)
+            #expect(projection.item.automaticDraftIDs.isEmpty)
         }
     }
 
@@ -149,6 +314,73 @@ struct MREffectivePolicyPresentationTests {
             if let path = ProcessInfo.processInfo.environment["WS8_SETTINGS_PROOF_PATH"] {
                 try renderSettingsProof(settings, path: path)
             }
+        }
+    }
+
+    @Test(arguments: [AutomationPublicationMode.all, .filtered, .aiReplies, .manual])
+    func renderingExplicitPublicationFiltersPreservesDormantValuesAndMakesNoRequests(_ mode: AutomationPublicationMode) throws {
+        var restrictions = AutomaticPublicationRestrictions(repositories: [
+            .init(host: target.host, entityID: 1, label: "Custom repository")
+        ], requireAI: false)
+        let before = restrictions
+        let gitlab = InMemoryGitLab()
+        defer { gitlab.close() }
+        let glab = gitlab.service(host: target.host, username: target.username)
+        let view = NSHostingView(rootView: Form {
+            PublicationRestrictionsSettingsView(restrictions: Binding(get: { restrictions }, set: { restrictions = $0 }),
+                mode: mode, glab: glab, preset: .full)
+        }.frame(width: 650))
+        #expect(view.fittingSize.height > 0)
+        #expect(restrictions == before && gitlab.requests.isEmpty)
+    }
+
+    @Test(arguments: [AutomationRunner.shell, .assistant])
+    func renderingAdvancedTemplatesNeverMigratesOrRewritesStoredHandlers(_ runner: AutomationRunner) throws {
+        var rule = AutomationRule(promptTemplate: "Custom prompt {url}")
+        rule.runner = runner
+        rule.isEnabled = true
+        rule.command = "saved-handler {url}"
+        rule.titleTemplate = "Custom title {repo}"
+        rule.promptTemplate = "Custom prompt {url}"
+        rule.projects = "group/repository"
+        let before = rule
+        let view = NSHostingView(rootView: Form {
+            AutomationRuleTemplateSettings(rule: Binding(get: { rule }, set: { rule = $0 }),
+                title: .Settings.settingsAutomationAuthorFeedback)
+        }.frame(width: 650))
+        #expect(view.fittingSize.height > 0)
+        #expect(rule == before)
+    }
+
+    @Test(arguments: [(false, false, false), (false, false, true), (false, true, false), (false, true, true),
+                      (true, false, false), (true, false, true), (true, true, false), (true, true, true)])
+    func renderingDeliveryKeepsPushConsentsAndInactivePrerequisitesIndependent(_ preparation: Bool, _ tools: Bool, _ followUpPush: Bool) throws {
+        try fixture { settings, defaults, domain in
+            // Given a saved conflict-push choice with independently configured prerequisites.
+            settings.automation.applyPreset(.full, for: .codex)
+            settings.automation.conflictTasksEnabled = preparation
+            settings.automation.allowAssistantTools = tools
+            settings.automation.allowConflictPush = true
+            settings.automation.allowFollowUpPush = followUpPush
+            settings.automation.assistantToolProjects = "group/repository"
+            settings.automation.conflictPushProjects = "group/repository"
+            let before = settings.automation
+            let stored = (defaults.persistentDomain(forName: domain) ?? [:]) as NSDictionary
+            let gitlab = InMemoryGitLab()
+            defer { gitlab.close() }
+            let monitor = TodoMonitorService(settings: settings, glab: gitlab.service(host: target.host, username: target.username))
+            defer { monitor.stopTimer() }
+
+            // When the reorganized settings form displays inactive saved controls.
+            let view = NSHostingView(rootView: AutomationSettingsTab(monitor: monitor).frame(width: 850))
+            #expect(view.fittingSize.height > 0)
+
+            // Then rendering grants nothing; each existing permission still controls its own action.
+            #expect(settings.automation == before && settings.automation.allowFollowUpPush == followUpPush)
+            #expect(settings.automation.permitsConflictPush(project: "group/repository") == (preparation && tools))
+            #expect(!settings.automation.permitsConflictPush(project: "group/other"))
+            #expect(gitlab.requests.isEmpty)
+            #expect((defaults.persistentDomain(forName: domain) ?? [:]) as NSDictionary == stored)
         }
     }
 
@@ -238,7 +470,7 @@ struct MREffectivePolicyPresentationTests {
                               submission: MergeSubmissionState = .none) -> MREffectivePolicyPresentation {
         let request = try! request(draft: draft)
         return .init(input: .init(request: current ? request : nil, target: target, settings: settings,
-            assistantReady: assistantReady, readUnavailable: readUnavailable, submission: submission))
+            assistantReady: assistantReady, readState: readUnavailable ? .unavailable : .current, submission: submission))
     }
 
     private func request(draft: Bool? = false) throws -> GitLabMergeRequest {

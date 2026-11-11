@@ -2,6 +2,26 @@
   "sourceLanguage": "en",
   "version": "1.0",
   "strings": {
+    "publication.filtersManual": {
+      "extractionState": "manual",
+      "localizations": { "en": { "stringUnit": { "state": "translated", "value": "Automatic publication is off. Saved filters are inactive and will be available when you choose a filtered mode." } } }
+    },
+    "publication.requireAI": {
+      "extractionState": "manual",
+      "localizations": { "en": { "stringUnit": { "state": "translated", "value": "Require AI-assisted source comments" } } }
+    },
+    "publication.aiRequiredByMode": {
+      "extractionState": "manual",
+      "localizations": { "en": { "stringUnit": { "state": "translated", "value": "Replies to AI feedback always requires this check. Choose Matching filters to configure the AI requirement independently." } } }
+    },
+    "publication.noConditions": {
+      "extractionState": "manual",
+      "localizations": { "en": { "stringUnit": { "state": "translated", "value": "No conditions are selected. Automatic publication stays blocked until you add a condition or choose another mode." } } }
+    },
+    "publication.noConditionsShort": {
+      "extractionState": "manual",
+      "localizations": { "en": { "stringUnit": { "state": "translated", "value": "No conditions selected" } } }
+    },
     "publication.advanced": {
       "extractionState": "manual",
       "localizations": {
@@ -272,7 +292,7 @@
         "en": {
           "stringUnit": {
             "state": "translated",
-            "value": "All comments are published automatically. The filters below are inactive."
+            "value": "All eligible checked comments can publish automatically. Saved filters are inactive in this mode."
           }
         }
       }

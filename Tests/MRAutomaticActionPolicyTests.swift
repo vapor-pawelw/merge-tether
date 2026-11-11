@@ -15,7 +15,9 @@ struct MRAutomaticActionPolicyTests {
             #expect(settings.automation.hasEnabledAutomation == (decision == .enabled))
             let presentation = MREffectivePolicyPresentation(input: .init(request: ready, target: target,
                 settings: settings, assistantReady: true))
-            if decision != .enabled { #expect(presentation.clauses == [.automationOff]) }
+            if decision != .enabled {
+                #expect(presentation.clauses == [decision == .undecided ? .automationDecisionRequired : .automationOff])
+            }
         }
     }
 

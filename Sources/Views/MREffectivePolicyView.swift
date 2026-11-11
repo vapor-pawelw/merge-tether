@@ -23,7 +23,7 @@ struct MREffectivePolicySummary: View {
         let submission = status?.submissionState ?? (catalogCurrent && request?.hasQueuedMerge == true ? .queued : .none)
         let input = MREffectivePolicyPresentation.Input(request: request, target: target, settings: monitor.settings,
             assistantReady: monitor.assistantDependencies.available.contains(monitor.settings.automation.assistant),
-            readUnavailable: !catalogCurrent || !sameContext || monitor.attentionRefreshFailed(for: row) || monitor.isRecheckingAttention(for: row),
+            readState: .init(catalogCurrent: catalogCurrent, row: row, input: monitor.boardRowInput(for: row)),
             submission: submission,
             cliHold: monitor.cliHealth.hold(for: monitor.settings.automation.assistant)?.issue.kind)
         MREffectivePolicyView(presentation: .init(input: input),
@@ -34,13 +34,22 @@ struct MREffectivePolicySummary: View {
 struct MREffectivePolicyView: View {
     let presentation: MREffectivePolicyPresentation
     var excluding: [String] = []
+    @Environment(\.openSettings) private var openSettings
 
     var body: some View {
         let messages = presentation.clauses.map { String(localized: $0.message) }.filter { !excluding.contains($0) }
-        if !messages.isEmpty {
-            Text(verbatim: messages.joined(separator: " · "))
-                .font(.caption).foregroundStyle(.secondary)
-                .fixedSize(horizontal: false, vertical: true)
+        VStack(alignment: .leading, spacing: 4) {
+            if !messages.isEmpty {
+                Text(verbatim: messages.joined(separator: " · "))
+                    .font(.caption).foregroundStyle(.secondary)
+                    .fixedSize(horizontal: false, vertical: true)
+            }
+            if let action = presentation.settingsAction {
+                Button { SettingsNavigation.shared.perform(action) { openSettings() } } label: {
+                    Text(.EffectivePolicy.policyChooseAutomationSettings)
+                }
+                .font(.caption).buttonStyle(.link)
+            }
         }
     }
 }
@@ -64,6 +73,7 @@ private extension MREffectivePolicyPresentation.Clause {
         case .draftPaused: .EffectivePolicy.policyDraftPaused
         case .scopePaused: .EffectivePolicy.policyScopePaused
         case .automationOff: .EffectivePolicy.policyOff
+        case .automationDecisionRequired: .EffectivePolicy.policyAutomationDecision
         case .savedDataHold: .EffectivePolicy.policySavedData
         case .requiresVerification: .EffectivePolicy.policyVerification
         case .assistantUnavailable: .EffectivePolicy.policyAssistant
