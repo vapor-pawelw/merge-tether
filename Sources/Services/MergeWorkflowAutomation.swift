@@ -477,7 +477,7 @@ final class MergeWorkflowAutomation {
                 assessmentTargetSHA = try await glab.fetchBranchHeadSHA(projectID: targetProject, branch: latest.targetBranch, host: entry.host)
                 guard mayAssessClaim(entry, current: latest, configuration: assessmentConfiguration),
                       glab.accountRevision == assessmentAccountRevision else { throw CancellationError() }
-            } else if settings.automation.autoClaimPipelineFailures {
+            } else if settings.automation.autoClaimPipelineFailures && settings.automaticPublicWritesAllowed {
                 if try await glab.refreshStaleFailedPipeline(for: latest, host: entry.host, expectedUser: entry.user,
                     settings: settings, detector: detector, shouldProceed: { self.shouldProceed(entry) }) {
                     update(entry.id, .completed)
@@ -499,7 +499,7 @@ final class MergeWorkflowAutomation {
             if let handoff { try? detector.finishHandoff(for: handoff) }
         }
 
-        if entry.pipelineClaimAssessment == nil, event.isInfrastructureFailure, let handoff, let jobID = event.jobID,
+        if settings.automaticPublicWritesAllowed, entry.pipelineClaimAssessment == nil, event.isInfrastructureFailure, let handoff, let jobID = event.jobID,
            let pipelineProjectID = event.pipelineProjectID,
            latest.headPipeline?.projectID == pipelineProjectID,
            mayRetryInfrastructure(for: event) {
@@ -518,7 +518,7 @@ final class MergeWorkflowAutomation {
                           self.settings.automation.scope.permits(current, host: entry.host, username: entry.user.username),
                           self.configuredRule(for: event)?.includes(current) == true else { throw CancellationError() }
                 },
-                shouldProceed: { self.shouldProceed(entry) && self.mayRetryInfrastructure(for: event) }
+                shouldProceed: { self.settings.automaticPublicWritesAllowed && self.shouldProceed(entry) && self.mayRetryInfrastructure(for: event) }
             )
             update(entry.id, .completed)
             return

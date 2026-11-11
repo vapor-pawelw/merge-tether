@@ -19,8 +19,8 @@ struct AutomationPackageStep: View {
             if monitor.settings.automation.packageDecision == .undecided {
                 Text(.Onboarding.onboardingAutomationBody)
                     .foregroundStyle(.secondary)
-                Text(selection?.explanation ?? .Settings.settingsAutomationPackageHelp)
-                    .foregroundStyle(.secondary)
+                if let selection { AutomationPresetDescription(preset: selection) }
+                else { Text(.Settings.settingsAutomationPackageHelp).foregroundStyle(.secondary) }
                 AutomationAssistantPicker(
                     assistant: $assistant, available: monitor.availableAssistants,
                     onRefresh: monitor.refreshAvailableAssistants, requireCLI: true,

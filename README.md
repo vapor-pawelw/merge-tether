@@ -67,14 +67,23 @@ Choose a profile, coding agent and scope in **Settings → Automation**. Install
 | --- | --- |
 | Review and re-review | Recheck new commits or author replies, verify earlier findings, resolve only your own addressed threads when enabled, and draft replies for anything still wrong. |
 | Follow up on your MR | Implement justified fixes, test, commit, push when enabled, verify the remote HEAD and file content, then save response drafts. |
-| Accepted feedback on your MR | Verify all reviewer expectations, then close addressed threads after that reviewer approves or explicitly confirms acceptance. Advance approval never overrides remaining conditions. Enabled by Full automation; configurable separately. |
-| Failed pipeline | Full automation checks ownership and diagnoses unclaimed failures. If a merged-result pipeline tested an older target commit, request fresh MR CI before attempting a code fix. Other profiles retain the ownership checkpoint. |
+| Accepted feedback on your MR | Verify all reviewer expectations, then close addressed threads after that reviewer approves or explicitly confirms acceptance. Advance approval never overrides remaining conditions. Enabled by Trusted and Max; configurable separately. |
+| Failed pipeline | Trusted and Max check ownership and diagnose unclaimed failures. If a merged-result pipeline tested an older target commit, request fresh MR CI before attempting a code fix. Safe keeps external CI actions manual. |
 | Conflict resolution | Prepare an isolated resolution; pushing it has a separate permission from ordinary follow-ups. |
 | Re-review requests | Request another review after feedback is addressed and no unpublished replies remain. |
 | Approval | Approve a reviewed commit only after a no-objections verdict, no pending drafts and resolved discussions. |
-| Merge | Full automation enables it; checks ownership, approvals, threads, pipeline and the source commit. |
+| Merge | Max enables it; checks ownership, approvals, threads, pipeline and the source commit. |
 
-**Choose how much to automate.** **Full automation** runs reviews and follow-ups, publishes eligible comments, approves, resolves verified findings, pushes fixes and merges within the active scope. **With checkpoints** reviews and prepares local proposals automatically, publishes eligible replies to AI feedback, and waits for your other publication and delivery decisions. **Manual only** disables automatic work; you can still start a review yourself. Existing settings are preserved until you choose a profile, and individual permissions remain adjustable. Publication can be set to all eligible comments, eligible replies to AI feedback, or **Private drafts only** for manual confirmation. Saved legacy shell rules remain available for reference; choose the coding agent CLI to migrate them.
+**Choose how much to automate.** Each profile explains what it handles and what remains yours:
+
+| Profile | Behavior |
+| --- | --- |
+| **Manual** | Start each task and GitLab action yourself. Automatic work is off. |
+| **Safe** | Analyze, review and prepare private drafts and local proposals automatically. Publishing, approvals, pushes, thread resolution, review requests, to-do acknowledgements, CI mutations and merging stay manual. |
+| **Trusted** | Enable supported preparation and delivery, including approvals, pushes and verified thread resolution. Publish only eligible replies to AI-assisted feedback; other comments and every merge wait for you. |
+| **Max** | Enable all supported automation, including eligible comment publication and merging, within the selected scope and existing safety checks. |
+
+Choosing a profile is explicit. Upgrades preserve saved permissions, including the older **With checkpoints** configuration, which appears as customized rather than silently gaining Trusted permissions. Individual permissions remain adjustable; the summary reflects effective settings. Saved legacy shell rules remain available for reference; choose the coding agent CLI to migrate them.
 
 When the full feedback check is ready and replies are published, re-review requests also bring back earlier participating reviewers and people whose approvals were reset. Current approvals and outstanding review requests are respected. Hover over the approval counter to see current approvals, earlier approvals and comment-only participation, in that order, with the most recent activity first within each group.
 

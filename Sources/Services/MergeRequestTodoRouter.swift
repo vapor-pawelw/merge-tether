@@ -227,7 +227,7 @@ final class MergeRequestTodoRouter {
                 }
                 return
             }
-            if original.kind == .pipeline {
+            if original.kind == .pipeline, settings.automaticPublicWritesAllowed {
                 let user = try await glab.fetchAuthenticatedUser(host: original.target.host, expectedUsername: original.target.username)
                 let originalJob = original.jobID.flatMap { id in settings.assistantHandoffs.first { $0.id == id } }
                 let refreshed = try await glab.refreshStaleFailedPipeline(for: request, host: original.target.host,
@@ -400,18 +400,18 @@ final class MergeRequestTodoRouter {
     }
 
     private func acknowledge(_ todo: Todo, target: MRAutomationScope.Target, intentID: UUID?, automatically: Bool) async -> Bool {
-        guard settings.automaticActionsAllowed, (!automatically || settings.automaticWritesAllowed), isCurrent(target.host, target.username) else { return false }
+        guard settings.automaticActionsAllowed, (!automatically || settings.automaticPublicWritesAllowed), isCurrent(target.host, target.username) else { return false }
         let revision = glab.accountRevision
         // Persist acceptance before the remote write. A failed acknowledgement
         // retries only this receipt, even if the worker finishes in the meantime.
         settings.routedMRTodoReceipts.insert(.init(target: target, event: todo.feedbackIdentity, intentID: intentID))
         settings.save()
         // Durable acceptance is required for both automatic routing and manual Add/handle.
-        guard settings.automaticActionsAllowed, (!automatically || settings.automaticWritesAllowed), isCurrent(target.host, target.username),
+        guard settings.automaticActionsAllowed, (!automatically || settings.automaticPublicWritesAllowed), isCurrent(target.host, target.username),
               glab.accountRevision == revision else { return false }
         switch await glab.markAsDone(id: todo.id, host: target.host, shouldProceed: {
             !Task.isCancelled && self.settings.automaticActionsAllowed
-                && (!automatically || self.settings.automaticWritesAllowed)
+                && (!automatically || self.settings.automaticPublicWritesAllowed)
                 && self.isCurrent(target.host, target.username) && self.glab.accountRevision == revision
         }) {
         case .success:

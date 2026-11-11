@@ -21,7 +21,7 @@ struct MREffectivePolicyPresentation {
     enum Clause: Equatable {
         case publicationAfterChecks(AutomationPublicationMode), publicationManual
         case mergeManual, mergeAfterChecks, approvalManual, approvalAfterChecks, deliveryManual
-        case draftPaused, scopePaused, automationOff, automationDecisionRequired, savedDataHold, requiresVerification
+        case draftPaused, scopePaused, automationOff, automationDecisionRequired, privateWork, savedDataHold, requiresVerification
         case assistantUnavailable, loginRequired, rateLimited, finishCommentReview
         case mergeSubmission(MergeSubmissionState)
     }
@@ -31,6 +31,7 @@ struct MREffectivePolicyPresentation {
         let submission: MergeSubmissionState
         let automaticActionsAllowed: Bool
         let packageDecision: AutomationPackageDecision
+        let publicActionsAllowed: Bool
         let enabled: Bool
         let scopeActive: Bool
         let draftPaused: Bool
@@ -60,6 +61,7 @@ struct MREffectivePolicyPresentation {
             automaticActionsAllowed = settings.automaticActionsAllowed
             let automation = settings.automation
             packageDecision = automation.packageDecision
+            publicActionsAllowed = automation.allowAutomaticPublicActions
             enabled = automation.hasEnabledAutomation
             let scope = target.map { automation.scope.resolve($0, isDraft: bound?.draft == true || bound?.detailedMergeStatus == "draft_status") }
             scopeActive = scope?.active == true
@@ -103,6 +105,7 @@ struct MREffectivePolicyPresentation {
         }
         if !input.assistantReady { clauses = [.assistantUnavailable]; return }
         if input.readState == .unavailable { clauses = [.requiresVerification]; return }
+        if !input.publicActionsAllowed { clauses = [.privateWork]; return }
         let publication: Clause = input.publicationAllowed ? .publicationAfterChecks(input.publicationMode) : .publicationManual
         let completion: Clause
         if input.commentReview { completion = .finishCommentReview }

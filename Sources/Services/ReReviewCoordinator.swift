@@ -400,7 +400,7 @@ final class ReReviewCoordinator {
         }
         var finished = true
         for (reviewerID, noteID) in recipients.sorted(by: { $0.key < $1.key }) {
-            guard settings.automaticWritesAllowed else {
+            guard settings.automaticPublicWritesAllowed else {
                 reReviewChecks[context]?.state = .unavailable
                 notify(context, unanswered: feedback.hasUnansweredFeedback)
                 return
@@ -452,7 +452,7 @@ final class ReReviewCoordinator {
                 async let finalDrafts = glab.fetchOwnDraftNoteCount(projectID: request.projectID, iid: request.iid, host: host, userID: user.id)
                 let (checkedMR, checkedThreads, checkedDraftCount, checkedReviewers, checkedApprovers) = try await
                     (finalMR, finalThreads, finalDrafts, finalReviewers, finalApprovers)
-                guard settings.automaticWritesAllowed, !Task.isCancelled, finalUser == user, isCurrent(context),
+                guard settings.automaticPublicWritesAllowed, !Task.isCancelled, finalUser == user, isCurrent(context),
                       runtimePermitsReReview(context),
                       settings.automation == finalConfiguration, settings.automation.autoReReviewEnabled,
                       checkedDraftCount == 0, !settings.pendingCommentReviews.contains(target), checkedMR.state == "opened",
@@ -473,10 +473,10 @@ final class ReReviewCoordinator {
                 }
                 settings.reReviewReceipts[receiptKey] = ReReviewReceipt(noteID: noteID, unconfirmed: true, headSHA: head)
                 settings.save()
-                guard settings.automaticWritesAllowed else { throw CancellationError() }
+                guard settings.automaticPublicWritesAllowed else { throw CancellationError() }
                 try await glab.requestReview(of: checkedMR, userID: reviewerID, username: username,
                                              alreadyAssigned: checkedReviewer != nil, host: host) {
-                    !Task.isCancelled && self.isCurrent(context) && self.settings.automaticWritesAllowed
+                    !Task.isCancelled && self.isCurrent(context) && self.settings.automaticPublicWritesAllowed
                         && self.settings.automation == finalConfiguration && self.settings.automation.autoReReviewEnabled
                         && self.runtimePermitsReReview(context)
                         && self.reReviewChecks[context]?.key == key

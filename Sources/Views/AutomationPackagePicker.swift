@@ -6,20 +6,43 @@ extension AutomationPreset {
     var requiresCLI: Bool { self != .manual }
     var title: LocalizedStringResource {
         switch self {
-        case .full: .Settings.settingsAutomationPackageFull
+        case .full: .AutomationProfiles.maxTitle
         case .checkpoints: .Settings.settingsAutomationPackageRecommended
-        case .manual: .Settings.settingsAutomationPackageOff
+        case .manual: .AutomationProfiles.manualTitle
+        case .safe: .AutomationProfiles.safeTitle
+        case .trusted: .AutomationProfiles.trustedTitle
         }
     }
     var explanation: LocalizedStringResource {
         switch self {
-        case .full: .Settings.settingsAutomationPackageFullHelp
+        case .full: .AutomationProfiles.maxHelp
         case .checkpoints: .Settings.settingsAutomationPackageCheckpointsHelp
-        case .manual: .Settings.settingsAutomationPackageManualHelp
+        case .manual: .AutomationProfiles.manualHelp
+        case .safe: .AutomationProfiles.safeDoes
+        case .trusted: .AutomationProfiles.trustedDoes
         }
     }
     func apply(to settings: inout AutomationSettings, assistant: AutomationAssistant) {
         settings.applyPreset(self, for: assistant)
+    }
+}
+
+struct AutomationPresetDescription: View {
+    let preset: AutomationPreset
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 6) {
+            if preset == .safe || preset == .trusted {
+                Label { Text(preset == .safe ? .AutomationProfiles.safeDoes : .AutomationProfiles.trustedDoes) }
+                    icon: { Image(systemName: "checkmark") }
+                Label { Text(preset == .safe ? .AutomationProfiles.safeDoesNot : .AutomationProfiles.trustedDoesNot) }
+                    icon: { Image(systemName: "hand.raised") }
+            } else {
+                Text(preset.explanation)
+            }
+        }
+        .font(.caption).foregroundStyle(.secondary)
+        .fixedSize(horizontal: false, vertical: true)
     }
 }
 

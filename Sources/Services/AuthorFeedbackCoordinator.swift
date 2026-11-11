@@ -487,10 +487,10 @@ final class AuthorFeedbackCoordinator {
         let informationalThreads = Set(AuthorFeedbackPolicy.informationalAcknowledgements(discussions: threads,
             assessment: assessment, authorID: input.user.id, ignoredSuggestions: input.ignoredSuggestions).filter(\.canResolve).compactMap(\.discussionID))
         for finding in initial where finding.canResolve && !informationalThreads.contains(finding.discussionID ?? "") {
-            guard settings.automaticWritesAllowed else { break }
+            guard settings.automaticPublicWritesAllowed else { break }
             guard isCurrent(input) else { throw CancellationError() }
             guard await canAutomate(input.configuration.assistant) else { throw ReReviewVerifier.VerificationError.unavailable }
-            guard settings.automaticWritesAllowed else { break }
+            guard settings.automaticPublicWritesAllowed else { break }
             guard isCurrent(input), let discussionID = finding.discussionID else { throw CancellationError() }
             async let currentMR = glab.fetchMergeRequest(projectID: request.projectID, iid: request.iid, host: host)
             async let currentThreads = glab.fetchMergeRequestDiscussions(projectID: request.projectID, iid: request.iid, host: host)
@@ -499,7 +499,7 @@ final class AuthorFeedbackCoordinator {
             async let approvals = glab.fetchMergeRequestApproverIDs(projectID: request.projectID, iid: request.iid, host: host)
             let (live, discussions, user, count, liveApproved) = try await (currentMR, currentThreads, currentUser, drafts, approvals)
             approved = liveApproved
-            guard settings.automaticWritesAllowed else { break }
+            guard settings.automaticPublicWritesAllowed else { break }
             guard isCurrent(input), live.sha == request.sha, live.state == "opened",
                   live.semanticContextFingerprint == request.semanticContextFingerprint,
                   live.author.id == input.user.id, user == input.user, count == 0,
@@ -510,7 +510,7 @@ final class AuthorFeedbackCoordinator {
                 approvedReviewerIDs: liveApproved, ignoredSuggestions: input.ignoredSuggestions).contains { $0.discussionID == discussionID && $0.canResolve }
             guard permitted, !settings.pendingCommentReviews.contains(input.target) else { continue }
             try await glab.resolveAcceptedDiscussion(projectID: request.projectID, iid: request.iid, discussionID: discussionID, host: host) {
-                self.settings.automaticWritesAllowed && self.isCurrent(input) && !input.readOnly
+                self.settings.automaticPublicWritesAllowed && self.isCurrent(input) && !input.readOnly
                     && input.configuration.autoResolveAcceptedFeedback
                     && !self.settings.pendingCommentReviews.contains(input.target)
             }
@@ -603,7 +603,7 @@ final class AuthorFeedbackCoordinator {
     }
 
     private func liveInformationalDiscussions(_ input: Input) async throws -> [GitLabMergeRequestDiscussion] {
-        guard settings.automaticWritesAllowed, isCurrent(input), !input.readOnly,
+        guard settings.automaticPublicWritesAllowed, isCurrent(input), !input.readOnly,
               input.configuration.autoResolveAcceptedFeedback else { throw CancellationError() }
         let request = input.request
         let host = input.target.host
@@ -612,7 +612,7 @@ final class AuthorFeedbackCoordinator {
         async let currentUser = glab.fetchAuthenticatedUser(host: host, expectedUsername: input.user.username)
         async let currentDrafts = glab.fetchOwnDraftNoteCount(projectID: request.projectID, iid: request.iid, host: host, userID: input.user.id)
         let (live, discussions, user, count) = try await (currentMR, currentThreads, currentUser, currentDrafts)
-        guard settings.automaticWritesAllowed, isCurrent(input), live.sha == request.sha, live.state == "opened",
+        guard settings.automaticPublicWritesAllowed, isCurrent(input), live.sha == request.sha, live.state == "opened",
               live.semanticContextFingerprint == request.semanticContextFingerprint,
               live.author.id == input.user.id, user == input.user, count == 0, live.webURL == request.webURL,
               settings.automation.scope.permits(live, host: host, username: user.username),
@@ -623,7 +623,7 @@ final class AuthorFeedbackCoordinator {
     private func acknowledgeInformational(_ input: Input, assessment: ReReviewAssessment,
                                           discussions: [GitLabMergeRequestDiscussion]) async throws
         -> (threads: [GitLabMergeRequestDiscussion], changed: Bool) {
-        guard settings.automaticWritesAllowed, input.configuration.autoResolveAcceptedFeedback else { return (discussions, false) }
+        guard settings.automaticPublicWritesAllowed, input.configuration.autoResolveAcceptedFeedback else { return (discussions, false) }
         let candidates = AuthorFeedbackPolicy.informationalAcknowledgements(discussions: discussions,
             assessment: assessment, authorID: input.user.id, ignoredSuggestions: input.ignoredSuggestions)
         if acknowledgementAttempts[input.target]?.userID != input.user.id {
@@ -687,7 +687,7 @@ final class AuthorFeedbackCoordinator {
                             guard currentCandidate(threads) != nil else { throw CancellationError() }
                             try await glab.addOwnThumbsUp(projectID: input.request.projectID, iid: input.request.iid,
                                 noteID: noteID, host: input.target.host, userID: input.user.id) {
-                                self.settings.automaticWritesAllowed && self.isCurrent(input) && !input.readOnly
+                                self.settings.automaticPublicWritesAllowed && self.isCurrent(input) && !input.readOnly
                                     && input.configuration.autoResolveAcceptedFeedback
                                     && self.acknowledgementAttempts[input.target]?.threadRevisions[rootID] == threadRevision
                             }
@@ -717,7 +717,7 @@ final class AuthorFeedbackCoordinator {
                 do {
                     let resolved = try await glab.resolveAcceptedDiscussion(projectID: input.request.projectID, iid: input.request.iid,
                         discussionID: discussionID, host: input.target.host) {
-                        self.settings.automaticWritesAllowed && self.isCurrent(input) && !input.readOnly
+                        self.settings.automaticPublicWritesAllowed && self.isCurrent(input) && !input.readOnly
                             && input.configuration.autoResolveAcceptedFeedback
                             && self.acknowledgementAttempts[input.target]?.threadRevisions[rootID] == threadRevision
                             && !self.settings.pendingCommentReviews.contains(input.target)

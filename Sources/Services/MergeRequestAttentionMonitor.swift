@@ -81,7 +81,7 @@ final class MergeRequestAttentionMonitor {
 
         func draftIDsHandledAutomatically(automation: AutomationSettings, target: MRAutomationScope.Target,
                                           assistantPreparing: Bool, publicationAutomatic: Bool = true) -> Set<Int> {
-            guard publicationAutomatic, assistantPreparing, automation.publicationMode != .manual, let request = mergeRequest,
+            guard automation.hasAutomaticPublicActionConsent, publicationAutomatic, assistantPreparing, automation.publicationMode != .manual, let request = mergeRequest,
                   automaticPublicationPolicy == automation.automaticPublicationPolicy,
                   automation.scope.permits(request, host: target.host, username: target.username),
                   !isAuthored || automation.allowFollowUpPush else { return [] }
@@ -1512,7 +1512,7 @@ final class MergeRequestAttentionMonitor {
                 attemptedPublish = true
                 try await glab.publishDraftNote(projectID: id.projectID, iid: id.iid, draftID: draftID, host: account.host) {
                     !Task.isCancelled && generation == self.accountGeneration && revision == self.glab.accountRevision
-                        && self.isCurrent(account) && settings.automaticWritesAllowed
+                        && self.isCurrent(account) && settings.automaticPublicWritesAllowed
                         && settings.automation == configuration && settings.automation.publishAIRepliesWithoutConfirmation
                         && self.openItems.first(where: { $0.id == id })?.mergeRequest?.sha == request.sha
                         && self.openItems.first(where: { $0.id == id })?.mergeRequest?.semanticContextFingerprint == request.semanticContextFingerprint
@@ -1839,7 +1839,7 @@ final class MergeRequestAttentionMonitor {
                     attemptedPublish = true
                     try await glab.publishDraftNote(projectID: id.projectID, iid: id.iid, draftID: draftID, host: account.host) {
                         !Task.isCancelled && generation == self.accountGeneration && revision == self.glab.accountRevision
-                            && self.isCurrent(account) && settings.automaticWritesAllowed
+                            && self.isCurrent(account) && settings.automaticPublicWritesAllowed
                             && settings.automation == configuration && settings.automation.publishDraftsWithoutConfirmation
                             && self.openItems.first(where: { $0.id == id })?.mergeRequest?.sha == request.sha
                             && self.openItems.first(where: { $0.id == id })?.mergeRequest?.semanticContextFingerprint == request.semanticContextFingerprint

@@ -9,6 +9,42 @@ struct InboxTodoStoreTests {
     private let host = "gitlab.example.test"
     private let todoJSON = #"[{"id":401,"action_name":"assigned","target_type":"Issue","target_url":"https://gitlab.example.test/group/repo/-/issues/42","body":"Unread issue","state":"pending","created_at":"2026-11-06T10:00:00Z","project":{"id":1,"name_with_namespace":"Group / Repo","path_with_namespace":"group/repo"},"author":{"id":9,"username":"reviewer","name":"Reviewer"},"target":{"id":42,"iid":42,"title":"Unread issue","state":"opened"}}]"#
 
+    @Test func safeKeepsPrivateAutomationButOnlyAnExplicitManualActionAcknowledgesTheTodo() async throws {
+        try await fixture { store, gitlab, settings in
+            settings.automation.applyPreset(.safe, for: .codex)
+            try await fetch(store)
+            let todo = try #require(store.visibleTodos.first)
+            #expect(settings.automaticWritesAllowed && !settings.automaticPublicWritesAllowed)
+            await store.markDone(todo, automatically: true)
+            #expect(store.visibleTodos.map(\.id) == [401])
+            #expect(gitlab.requests.allSatisfy { $0.method == "GET" })
+            await store.markDone(todo, automatically: false)
+            #expect(store.visibleTodos.isEmpty)
+            #expect(gitlab.requests.filter { $0.method == "POST" }.count == 1)
+        }
+    }
+
+    @Test func switchingToPrivateWorkWhileAnAcknowledgementWaitsRevokesItsCommandAdmission() async throws {
+        try await fixture { store, gitlab, settings in
+            settings.automation.applyPreset(.trusted, for: .codex)
+            try await fetch(store)
+            let todo = try #require(store.visibleTodos.first)
+            gitlab.beforeCommand = { request in
+                if request.method == "POST" {
+                    gitlab.write("ack-queued")
+                    try await gitlab.waitFor("release-ack")
+                }
+            }
+            let pending = Task { await store.markDone(todo, automatically: true) }
+            try await gitlab.waitFor("ack-queued")
+            settings.automation.allowAutomaticPublicActions = false
+            gitlab.write("release-ack")
+            await pending.value
+            #expect(store.visibleTodos.map(\.id) == [401])
+            #expect(gitlab.requests.filter { $0.method == "POST" }.isEmpty)
+        }
+    }
+
     private func fixture(_ body: (InboxTodoStore, InMemoryGitLab, SettingsManager) async throws -> Void) async throws {
         let name = "InboxTodoStoreTests-\(UUID())"
         let defaults = try #require(UserDefaults(suiteName: name))

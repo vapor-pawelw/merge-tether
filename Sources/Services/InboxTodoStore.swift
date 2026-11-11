@@ -119,7 +119,7 @@ final class InboxTodoStore {
     }
 
     private func performMarkDone(_ todo: Todo, automatically: Bool) async {
-        guard !automatically || settings.automaticWritesAllowed else {
+        guard !automatically || settings.automaticPublicWritesAllowed else {
             optimisticallyDone.remove(todo.id)
             return
         }
@@ -129,7 +129,7 @@ final class InboxTodoStore {
         let result = await glab.markAsDone(id: todo.id, host: host) {
             !Task.isCancelled && self.host == host && self.username == username
                 && self.glab.currentUsername == username && self.accountRevision == revision
-                && self.glab.accountRevision == revision && (!automatically || self.settings.automaticWritesAllowed)
+                && self.glab.accountRevision == revision && (!automatically || self.settings.automaticPublicWritesAllowed)
         }
         optimisticallyDone.remove(todo.id)
         guard self.host == host, glab.currentUsername == username else { return }

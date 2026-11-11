@@ -20,7 +20,7 @@ struct AutomationSettingsTab: View {
         self.monitor = monitor
         _page = State(initialValue: initialPage)
         _draft = State(initialValue: monitor.settings.automation)
-        _packageChoice = State(initialValue: monitor.settings.automation.baselinePreset)
+        _packageChoice = State(initialValue: monitor.settings.automation.matchingPreset)
     }
 
     var body: some View {
@@ -283,6 +283,20 @@ struct AutomationSettingsTab: View {
     @ViewBuilder
     private var packageFields: some View {
         Section {
+            if draft.matchingPreset == nil {
+                Text(.AutomationProfiles.customizedTitle).font(.caption.weight(.semibold))
+                Text(draft.baselinePreset == .checkpoints ? .AutomationProfiles.legacyHelp : .AutomationProfiles.customizedHelp)
+                    .font(.caption).foregroundStyle(.secondary)
+            }
+            if let packageChoice {
+                Text(.AutomationProfiles.previewTitle).font(.caption.weight(.semibold))
+                AutomationPresetDescription(preset: packageChoice)
+            }
+            Toggle(isOn: Binding(get: { !draft.allowAutomaticPublicActions }, set: { draft.allowAutomaticPublicActions = !$0 })) {
+                Text(.AutomationProfiles.privateToggle)
+            }
+            .toggleStyle(.checkbox)
+            Text(.AutomationProfiles.privateHelp).font(.caption).foregroundStyle(.secondary)
             HStack {
                 AutomationPackagePicker(
                     selection: $packageChoice, canUseAutomatic: monitor.availableAssistants.contains(draft.assistant)

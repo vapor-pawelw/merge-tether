@@ -105,7 +105,7 @@ struct AssistantDependenciesTests {
     }
 
     @Test(arguments: AutomationAssistant.allCases)
-    func verifierThinkingDefaultsAndLegacySettingsUseHigh(_ assistant: AutomationAssistant) throws {
+    func verifierThinkingDefaultsToHighButPresetsPreserveExplicitSelection(_ assistant: AutomationAssistant) throws {
         func thinking(_ settings: AutomationSettings) throws -> String? {
             let object = try #require(JSONSerialization.jsonObject(with: JSONEncoder().encode(settings)) as? [String: Any])
             return object["verificationThinking"] as? String
@@ -119,11 +119,13 @@ struct AssistantDependenciesTests {
             from: Data(#"{"verificationThinking":"low"}"#.utf8))
         configured.applyRecommended(for: assistant)
         #expect(try thinking(configured) == "high")
-        for preset in [AutomationPreset.full, .checkpoints] {
+        for preset in AutomationPreset.allCases + [.checkpoints] {
             configured = try JSONDecoder().decode(AutomationSettings.self,
                 from: Data(#"{"verificationThinking":"low"}"#.utf8))
             configured.applyPreset(preset, for: assistant)
-            #expect(try thinking(configured) == "high")
+            #expect(try thinking(configured) == "low")
+            let restored = try JSONDecoder().decode(AutomationSettings.self, from: JSONEncoder().encode(configured))
+            #expect(try thinking(restored) == "low")
         }
     }
 

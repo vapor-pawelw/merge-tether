@@ -1,0 +1,23 @@
+{
+  "sourceLanguage": "en",
+  "strings": {
+    "previewTitle": { "extractionState": "manual", "localizations": { "en": { "stringUnit": { "state": "translated", "value": "Selected profile preview" } } } },
+    "manualTitle": { "extractionState": "manual", "localizations": { "en": { "stringUnit": { "state": "translated", "value": "Manual" } } } },
+    "safeTitle": { "extractionState": "manual", "localizations": { "en": { "stringUnit": { "state": "translated", "value": "Safe" } } } },
+    "trustedTitle": { "extractionState": "manual", "localizations": { "en": { "stringUnit": { "state": "translated", "value": "Trusted" } } } },
+    "maxTitle": { "extractionState": "manual", "localizations": { "en": { "stringUnit": { "state": "translated", "value": "Max" } } } },
+    "manualHelp": { "extractionState": "manual", "localizations": { "en": { "stringUnit": { "state": "translated", "value": "You choose when to analyze, review and act. Automatic work is off; explicit manual actions remain available." } } } },
+    "maxHelp": { "extractionState": "manual", "localizations": { "en": { "stringUnit": { "state": "translated", "value": "Handle all supported work automatically, including eligible comment publication and merging. Your scope, ownership, permissions and current verification checks still apply." } } } },
+    "safeDoes": { "extractionState": "manual", "localizations": { "en": { "stringUnit": { "state": "translated", "value": "Does: analyze, review, verify feedback, save private review drafts and prepare local code, conflict and pipeline proposals using full tools." } } } },
+    "safeDoesNot": { "extractionState": "manual", "localizations": { "en": { "stringUnit": { "state": "translated", "value": "Does not: publish, approve, merge, push, resolve discussions, request reviews, add reactions, mark GitLab to-dos read or change CI automatically. Local follow-up proposals stay in the run result until delivered and verified. Explicit manual actions remain available." } } } },
+    "trustedDoes": { "extractionState": "manual", "localizations": { "en": { "stringUnit": { "state": "translated", "value": "Does: automatic analysis, review and fixes; verified follow-up and conflict pushes; approvals, eligible discussion resolution, re-review requests and pipeline work. Publishes only checked replies to verified or high-confidence AI-assisted feedback, subject to saved filters." } } } },
+    "trustedDoesNot": { "extractionState": "manual", "localizations": { "en": { "stringUnit": { "state": "translated", "value": "Does not: merge automatically or publish general findings and replies to manual, uncertain or unassessed feedback. Those remain private for your decision. All current safety and scope checks still apply." } } } },
+    "customizedTitle": { "extractionState": "manual", "localizations": { "en": { "stringUnit": { "state": "translated", "value": "Customized" } } } },
+    "customizedHelp": { "extractionState": "manual", "localizations": { "en": { "stringUnit": { "state": "translated", "value": "The controls below show your actual permissions. Choosing a profile changes only this form until you apply it." } } } },
+    "legacyHelp": { "extractionState": "manual", "localizations": { "en": { "stringUnit": { "state": "translated", "value": "Your previous With checkpoints settings are retained. They do not grant Trusted’s additional permissions. Review the actual controls below or explicitly choose a new profile." } } } },
+    "privateToggle": { "extractionState": "manual", "localizations": { "en": { "stringUnit": { "state": "translated", "value": "Keep automatic work private" } } } },
+    "privateHelp": { "extractionState": "manual", "localizations": { "en": { "stringUnit": { "state": "translated", "value": "Allow private drafts and local preparation while blocking every automatic public GitLab action, including pushes, CI changes, reactions and to-do acknowledgements. Other saved permissions remain visible and can apply when this restriction is turned off. Manual actions remain separate." } } } },
+    "privateWork": { "extractionState": "manual", "localizations": { "en": { "stringUnit": { "state": "translated", "value": "Automatic work stays private; public actions wait for you" } } } }
+  },
+  "version": "1.0"
+}

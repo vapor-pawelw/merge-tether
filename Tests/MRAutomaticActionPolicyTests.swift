@@ -4,6 +4,17 @@ import Testing
 
 @MainActor
 struct MRAutomaticActionPolicyTests {
+    @Test(arguments: MRAutomaticAction.allCases)
+    func privateWorkBoundaryCannotBeOverriddenByPermissiveIndividualFlags(_ action: MRAutomaticAction) async throws {
+        try await fixture { settings, _ in
+            settings.automation.applyPreset(.full, for: .codex)
+            settings.automation.allowAutomaticPublicActions = false
+            let ready = try request()
+            #expect(settings.automaticWritesAllowed)
+            #expect(!settings.automaticPublicWritesAllowed)
+            #expect(!settings.permitsAutomaticAction(action, for: ready, target: target))
+        }
+    }
     @Test(arguments: [AutomationPackageDecision.undecided, .disabled, .enabled], MRAutomaticAction.allCases)
     func automaticActionsRequireExplicitConsentEvenWithPermissiveFlags(_ decision: AutomationPackageDecision, _ action: MRAutomaticAction) async throws {
         try await fixture { settings, _ in

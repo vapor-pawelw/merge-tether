@@ -72,7 +72,8 @@ enum FollowUpVerificationStore {
     @MainActor
     static func canPush(_ handoff: AssistantAutomationRunner.Handoff, configuration: AutomationSettings) -> Bool {
         guard handoff.execution?.state.isActive == true, handoff.followUpPushAllowed == true,
-              configuration.allowFollowUpPush, handoff.key.assistant == configuration.assistant else { return false }
+              configuration.allowAutomaticPublicActions, configuration.allowFollowUpPush,
+              handoff.key.assistant == configuration.assistant else { return false }
         let work = handoff.key.work
         let target = MRAutomationScope.Target(host: work.host, username: handoff.key.username,
                                              projectID: work.projectID, iid: work.iid)
@@ -123,7 +124,7 @@ enum FollowUpVerificationStore {
     @MainActor
     static func publicationReceipts(work: AssistantAutomationRunner.MergeRequestWork, username: String,
                                     settings: SettingsManager, in directory: URL = directory) -> [FollowUpVerification] {
-        guard settings.automation.allowFollowUpPush,
+        guard settings.automation.allowAutomaticPublicActions, settings.automation.allowFollowUpPush,
               settings.automation.scope.resolve(.init(host: work.host, username: username,
                   projectID: work.projectID, iid: work.iid)).active else { return [] }
         return claimReceipts(work: work, username: username, settings: settings, in: directory)

@@ -237,8 +237,8 @@ struct AutomaticPublicationPolicyTests {
             var settings = AutomationSettings()
             settings.applyPreset(preset, for: .codex)
             #expect(settings.publishesAllComments == (preset == .full))
-            #expect(settings.automaticAIReplies == (preset != .manual))
-            #expect(settings.publicationMode == (preset == .full ? .all : preset == .checkpoints ? .aiReplies : .manual))
+            #expect(settings.automaticAIReplies == (preset == .full || preset == .trusted))
+            #expect(settings.publicationMode == preset.defaultPublicationMode)
             #expect(settings.publicationRestrictions == .defaults(for: preset))
         }
         #expect(AutomaticPublicationRestrictions.defaults(for: .full) == .init(requireAI: true))

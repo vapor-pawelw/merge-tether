@@ -63,7 +63,7 @@ extension GlabService {
         let target = MRAutomationScope.Target(host: host, username: expectedUser.username,
                                              projectID: request.projectID, iid: request.iid)
         let permitted: @MainActor @Sendable () -> Bool = {
-            configuration == settings.automation && configuration.autoClaimPipelineFailures
+            settings.automaticPublicWritesAllowed && configuration == settings.automation && configuration.autoClaimPipelineFailures
                 && configuration.workflowRules[.pipelineFailure].mode == .assistant
                 && configuration.workflowRules[.pipelineFailure].includes(request)
                 && configuration.scope.permits(request, host: host, username: expectedUser.username)

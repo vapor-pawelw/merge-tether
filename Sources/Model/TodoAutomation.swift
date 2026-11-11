@@ -124,7 +124,17 @@ struct AutomationRule: Codable, Equatable, Sendable {
 }
 
 enum AutomationPreset: String, CaseIterable, Codable, Hashable, Sendable {
-    case full, checkpoints, manual
+    case full, checkpoints, manual, safe, trusted
+
+    static let allCases: [Self] = [.manual, .safe, .trusted, .full]
+
+    var defaultPublicationMode: AutomationPublicationMode {
+        switch self {
+        case .full: .all
+        case .checkpoints, .trusted: .aiReplies
+        case .manual, .safe: .manual
+        }
+    }
 
     static func onboardingDefault(for decision: AutomationPackageDecision) -> Self? {
         decision == .undecided ? .full : nil
@@ -188,7 +198,7 @@ struct AutomationSettings: Codable, Equatable, Sendable {
     /// Whether any of these drafts could be published without the user's confirmation.
     /// The AI-feedback rule only ever covers replies in existing threads.
     func publishesAutomatically(any drafts: [GitLabDraftNote]) -> Bool {
-        guard hasAutomaticActionConsent else { return false }
+        guard hasAutomaticPublicActionConsent else { return false }
         return switch publicationMode {
         case .all: true
         case .filtered:
@@ -219,6 +229,8 @@ struct AutomationSettings: Codable, Equatable, Sendable {
     var assistantToolProjects = ""
     var packageDecision: AutomationPackageDecision = .undecided
     var hasAutomaticActionConsent: Bool { packageDecision == .enabled }
+    var allowAutomaticPublicActions = true
+    var hasAutomaticPublicActionConsent: Bool { hasAutomaticActionConsent && allowAutomaticPublicActions }
     var workflowRules = MergeWorkflowRules()
     var scope = MRAutomationScope()
     private var assistantDefaultsVersion = 1
@@ -303,6 +315,7 @@ struct AutomationSettings: Codable, Equatable, Sendable {
         allowAssistantTools = try values.decodeIfPresent(Bool.self, forKey: .allowAssistantTools) ?? false
         assistantToolProjects = try values.decodeIfPresent(String.self, forKey: .assistantToolProjects) ?? ""
         packageDecision = try values.decodeIfPresent(AutomationPackageDecision.self, forKey: .packageDecision) ?? .undecided
+        allowAutomaticPublicActions = try values.decodeIfPresent(Bool.self, forKey: .allowAutomaticPublicActions) ?? true
         publishAIRepliesWithoutConfirmation = try values.decodeIfPresent(Bool.self, forKey: .publishAIRepliesWithoutConfirmation)
             ?? (packageDecision != .disabled)
         if packageDecision == .disabled {
@@ -359,7 +372,7 @@ struct AutomationSettings: Codable, Equatable, Sendable {
 
     private enum CodingKeys: String, CodingKey {
         case assistant, assistantWorkspace, reuseAssistantChats, codexRelayEnabled, codexUseTemplate, autoMergeEnabled, conflictTasksEnabled, reviewRequested, authorFeedback
-        case allowAssistantTools, assistantToolProjects, packageDecision, workflowRules
+        case allowAssistantTools, assistantToolProjects, packageDecision, workflowRules, allowAutomaticPublicActions
         case autoMergeProjects, allowConflictPush, allowFollowUpPush, conflictPushProjects, autoReReviewEnabled, publishDraftsWithoutConfirmation, publishAIRepliesWithoutConfirmation, autoApproveEnabled, autoResolveOwnReviewThreads
         case codexReviewModel, codexReviewThinking, assistantDefaultsVersion, scope
         case autoVerifyReReview, codexVerificationModel, claudeVerificationModel, verificationThinking
@@ -373,30 +386,67 @@ struct AutomationSettings: Codable, Equatable, Sendable {
     }
 
     mutating func applyPreset(_ preset: AutomationPreset, for assistant: AutomationAssistant) {
-        switch preset {
-        case .full:
-            applyRecommended(for: assistant)
-            publicationMode = .all
-            autoMergeEnabled = true
-            allowAssistantTools = true
-            allowConflictPush = true
-            autoClaimPipelineFailures = true
-            for trigger in MergeWorkflowTrigger.allCases {
-                workflowRules[trigger].mode = trigger == .reviewWaiting ? .notify : .assistant
-            }
-        case .checkpoints:
-            applyRecommended(for: assistant)
-            publicationMode = .aiReplies
-            autoApproveEnabled = false
-            allowFollowUpPush = false
-            autoResolveOwnReviewThreads = false
-            autoResolveAcceptedFeedback = false
-        case .manual:
-            self.assistant = assistant
+        self.assistant = assistant
+        if preset == .manual {
             disableAssistantPackage()
+        } else {
+            let delivers = preset == .full || preset == .trusted
+            packageDecision = .enabled
+            allowAutomaticPublicActions = preset != .safe
+            autoVerifyReReview = true
+            autoReReviewEnabled = preset != .safe
+            autoApproveEnabled = delivers
+            autoMergeEnabled = preset == .full
+            allowFollowUpPush = delivers
+            autoResolveOwnReviewThreads = delivers
+            autoResolveAcceptedFeedback = delivers
+            conflictTasksEnabled = true
+            allowAssistantTools = preset != .checkpoints
+            allowConflictPush = delivers
+            autoClaimPipelineFailures = preset != .checkpoints
+            workflowRules[.pipelineFailure].retryInfrastructureFailure = delivers
+            reviewRequested.isEnabled = true
+            authorFeedback.isEnabled = true
+            reviewRequested.markDoneOnSuccess = preset != .safe
+            authorFeedback.markDoneOnSuccess = preset != .safe
+            for trigger in MergeWorkflowTrigger.allCases {
+                let passive = trigger == .reviewWaiting || (preset == .checkpoints && trigger == .blockerChange)
+                workflowRules[trigger].mode = passive ? .notify : .assistant
+            }
         }
+        publicationMode = preset.defaultPublicationMode
         baselinePreset = preset
-        publicationRestrictions = .defaults(for: preset)
+        publicationRestrictions.requireAI = AutomaticPublicationRestrictions.defaults(for: preset).requireAI
+    }
+
+    var matchingPreset: AutomationPreset? {
+        guard let baselinePreset, AutomationPreset.allCases.contains(baselinePreset) else { return nil }
+        if baselinePreset == .manual, packageDecision == .disabled { return .manual }
+        if baselinePreset != .manual, reviewRequested.runner != .assistant || authorFeedback.runner != .assistant { return nil }
+        var actual = self
+        var expected = self
+        expected.applyPreset(baselinePreset, for: assistant)
+        expected.publicationRestrictions = publicationRestrictions
+        actual.publicationMode = publicationMode
+        if !hasAutomaticPublicActionConsent && !expected.hasAutomaticPublicActionConsent {
+            actual.removePublicPermissions()
+            expected.removePublicPermissions()
+        }
+        return expected == actual ? baselinePreset : nil
+    }
+
+    private mutating func removePublicPermissions() {
+        publicationMode = .manual
+        autoMergeEnabled = false
+        autoApproveEnabled = false
+        autoReReviewEnabled = false
+        allowFollowUpPush = false
+        allowConflictPush = false
+        autoResolveOwnReviewThreads = false
+        autoResolveAcceptedFeedback = false
+        reviewRequested.markDoneOnSuccess = false
+        authorFeedback.markDoneOnSuccess = false
+        workflowRules[.pipelineFailure].retryInfrastructureFailure = false
     }
 
     mutating func applyRecommended(for assistant: AutomationAssistant) {
@@ -439,6 +489,7 @@ struct AutomationSettings: Codable, Equatable, Sendable {
 
     mutating func disableAssistantPackage() {
         packageDecision = .disabled
+        allowAutomaticPublicActions = false
         codexRelayEnabled = false
         allowAssistantTools = false
         autoMergeEnabled = false
@@ -480,7 +531,7 @@ struct AutomationSettings: Codable, Equatable, Sendable {
     }
 
     func permitsAutoMerge(project: String) -> Bool {
-        hasAutomaticActionConsent && autoMergeEnabled && matchesOptionalProjectRestriction(project, paths: autoMergeProjects)
+        hasAutomaticPublicActionConsent && autoMergeEnabled && matchesOptionalProjectRestriction(project, paths: autoMergeProjects)
     }
 
     func permitsAssistantTools(project: String) -> Bool {
@@ -488,7 +539,7 @@ struct AutomationSettings: Codable, Equatable, Sendable {
     }
 
     func permitsConflictPush(project: String) -> Bool {
-        hasAutomaticActionConsent && conflictTasksEnabled && permitsAssistantTools(project: project) && allowConflictPush
+        hasAutomaticPublicActionConsent && conflictTasksEnabled && permitsAssistantTools(project: project) && allowConflictPush
             && matchesOptionalProjectRestriction(project, paths: conflictPushProjects)
     }
 

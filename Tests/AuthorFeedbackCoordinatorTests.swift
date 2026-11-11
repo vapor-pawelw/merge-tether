@@ -4,6 +4,16 @@ import Testing
 
 @MainActor
 struct AuthorFeedbackCoordinatorTests {
+    @Test func privateWorkStillVerifiesFeedbackButCannotReactOrResolveWithOtherwisePermissiveFlags() async throws {
+        try await withFixture { fixture in
+            fixture.settings.automation.allowAutomaticPublicActions = false
+            let coordinator = fixture.coordinator()
+            try await fixture.run(coordinator)
+            #expect(fixture.verified)
+            #expect(!fixture.resolved && fixture.resolutionPosts == 0 && fixture.reactionPosts == 0)
+            #expect(fixture.settings.automaticWritesAllowed && !fixture.settings.automaticPublicWritesAllowed)
+        }
+    }
     @Test(arguments: ["before", "duringVerification"])
     func persistenceHoldKeepsSemanticReadsButCannotResolveAcceptedFeedback(_ phase: String) async throws {
         try await withFixture { fixture in

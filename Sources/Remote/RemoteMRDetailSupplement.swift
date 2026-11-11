@@ -174,6 +174,7 @@ import MergeTetherRemote
         case .scopePaused: .EffectivePolicy.policyScopePaused
         case .automationOff: .EffectivePolicy.policyOff
         case .automationDecisionRequired: .EffectivePolicy.policyAutomationDecision
+        case .privateWork: .AutomationProfiles.privateWork
         case .savedDataHold: .EffectivePolicy.policySavedData
         case .requiresVerification: .EffectivePolicy.policyVerification
         case .assistantUnavailable: .EffectivePolicy.policyAssistant

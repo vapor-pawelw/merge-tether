@@ -72,7 +72,7 @@ extension SettingsManager {
     /// Policy admission only. Action executors retain their current fresh evidence checks.
     func permitsAutomaticAction(_ action: MRAutomaticAction, for request: GitLabMergeRequest,
                                 target: MRAutomationScope.Target) -> Bool {
-        guard automaticWritesAllowed else { return false }
+        guard automaticPublicWritesAllowed else { return false }
         if action != .commentPublication, pendingCommentReviews.contains(target) { return false }
         guard request.projectID == target.projectID, request.iid == target.iid,
               request.webURL.isGitLabMergeRequest(host: target.host, iid: request.iid),

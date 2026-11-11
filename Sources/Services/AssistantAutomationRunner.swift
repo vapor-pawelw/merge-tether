@@ -279,8 +279,8 @@ enum AssistantAutomationRunner {
         let prefixedTitle = title.hasPrefix("[MT] ") ? title : "[MT] " + title
         let name = MergeRequestStackSnapshot.title(prefixedTitle, iid: work.iid, position: stackPosition)
         let id = UUID()
-        let followUpPush = settings.automation.hasAutomaticActionConsent && settings.automation.allowFollowUpPush
-        let resolveOwnThreads = settings.automation.hasAutomaticActionConsent && settings.automation.autoResolveOwnReviewThreads
+        let followUpPush = settings.automation.hasAutomaticPublicActionConsent && settings.automation.allowFollowUpPush
+        let resolveOwnThreads = settings.automation.hasAutomaticPublicActionConsent && settings.automation.autoResolveOwnReviewThreads
         let eventPushPolicy = allowsPush
             ? "This event authorizes only a tested conflict-fix push to the exact verified MR source repository and branch, under its configured project permission. It does not grant author-follow-up response-draft permission."
             : "This event does not authorize a push. Leave remote branches and the MR target unchanged."
@@ -310,15 +310,18 @@ enum AssistantAutomationRunner {
         let publicationPolicy: String
         if mrWorkflow == .followUp && !followUpPush {
             publicationPolicy = "This unfinished author-follow-up run saves no response drafts and publishes nothing, regardless of publication settings."
-        } else if settings.automation.hasAutomaticActionConsent && settings.automation.publishDraftsWithoutConfirmation {
+        } else if settings.automation.hasAutomaticPublicActionConsent && settings.automation.publishDraftsWithoutConfirmation {
             publicationPolicy = "Publish comments without confirmation is ON. Save and re-fetch private drafts; MergeTether publishes eligible drafts automatically after its checks. Do not ask for routine publication approval or publish directly yourself."
-        } else if settings.automation.hasAutomaticActionConsent && settings.automation.publishAIRepliesWithoutConfirmation {
+        } else if settings.automation.hasAutomaticPublicActionConsent && settings.automation.publishAIRepliesWithoutConfirmation {
             publicationPolicy = "AI-only reply publication is ON. Save and re-fetch warranted private reply drafts. MergeTether may publish eligible replies to feedback assessed as AI-assisted, including comments posted by a person. Account identity alone does not establish how a comment was written. For likely manual, unclassified or uncertain source comments, leave drafts private and ask for approval on the MR card and describe that pending decision in the run result. Do not publish directly yourself."
         } else {
             publicationPolicy = "Automatic comment publication is OFF. Save warranted private drafts and ask for approval on the MR card and describe that pending decision in the run result. Do not publish directly yourself."
         }
         let followUpProof = mrWorkflow == .followUp && followUpPush
             ? "\n\n" + FollowUpVerificationStore.recordingInstructions(work: work, runID: id) : ""
+        let privateWork = settings.automation.hasAutomaticPublicActionConsent ? "" : """
+            Automatic work is private only. Inspect, analyze, review and prepare local changes with full tools, and save warranted private review drafts. Do not publish comments, approve, merge, push, resolve discussions, request reviews, add reactions, mark GitLab to-dos read, retry jobs or create pipelines. Leave those public GitLab actions to explicit user actions. Author-follow-up completion drafts still require delivered and verified remote changes; report local-only proposals in the run result.
+            """
         let useReviewModel = assistant == .codex && isReview
         let decisionContext = feedbackDecisionRevision(work: work, username: username, settings: settings)
         let handoff = Handoff(
@@ -329,6 +332,7 @@ enum AssistantAutomationRunner {
                 \(name)
 
                 \(safety)
+                \(privateWork)
 
                 Within those permissions, load and follow the applicable installed MR skills and repository instructions before working. Apply their scope, verification, language and draft rules. Use the fallback below only where no applicable skill or explicit workflow covers the step. Keep the requested task and any note IDs as the scope.
 

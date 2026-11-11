@@ -15,6 +15,7 @@ final class SettingsManager {
     }
     var automaticActionsAllowed: Bool { persistenceDegraded.isEmpty }
     var automaticWritesAllowed: Bool { automaticActionsAllowed && automation.hasAutomaticActionConsent }
+    var automaticPublicWritesAllowed: Bool { automaticActionsAllowed && automation.hasAutomaticPublicActionConsent }
     private static let conveniencePersistenceKeys: Set<String> = [
         "assistantChats", "automationEvents", "boardPins", "lastSeenTodoIDs"
     ]

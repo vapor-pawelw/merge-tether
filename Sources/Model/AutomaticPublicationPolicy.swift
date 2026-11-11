@@ -21,7 +21,7 @@ struct AutomaticPublicationRestrictions: Codable, Equatable, Sendable {
     var hasConditions: Bool { requireAI || hasIdentityConditions }
 
     static func defaults(for preset: AutomationPreset?) -> Self {
-        .init(requireAI: preset == .full || preset == .checkpoints)
+        .init(requireAI: preset == .full || preset == .checkpoints || preset == .trusted)
     }
 }
 
@@ -130,7 +130,8 @@ extension AutomationSettings {
     }
 
     mutating func resetPublication(to preset: AutomationPreset) {
-        setPublishAllComments(preset == .full)
+        if preset == .checkpoints { setPublishAllComments(false) }
+        else { publicationMode = preset.defaultPublicationMode }
     }
 
     mutating func resetPublicationRestrictions() {

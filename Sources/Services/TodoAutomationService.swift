@@ -107,6 +107,7 @@ final class TodoAutomationService {
         let rule = settings.automation[event]
         let project = todo.project.pathWithNamespace
         guard settings.automaticActionsAllowed, (manual || settings.automaticWritesAllowed),
+              manual || rule.runner != .shell || settings.automaticPublicWritesAllowed,
               (manual || rule.isEnabled), isPending(), rule.isConfigured, rule.includes(project: project),
               let iid = todo.target.iid, iid > 0,
               todo.targetURL.isGitLabMergeRequest(host: host, iid: iid)
@@ -517,7 +518,8 @@ final class TodoAutomationService {
                 try AssistantJobExecutor.validatePersistence(settings)
                 return try await ProcessRunner.run(
                     URL(fileURLWithPath: "/bin/zsh"), arguments: ["-c", rule.command],
-                    environment: scriptEnvironment, timeout: 300
+                    environment: scriptEnvironment, timeout: 300,
+                    authorizeLaunch: { manual || settings.automaticPublicWritesAllowed }
                 )
             }
             scriptTasks[id] = RunningScript(task: task, work: work, username: username, manual: manual)

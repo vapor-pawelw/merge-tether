@@ -4,6 +4,27 @@ import Testing
 
 @Suite("To-do automation")
 struct TodoAutomationTests {
+    @MainActor @Test func safeRetainsALegacyShellCommandButNeverStartsItAutomatically() async throws {
+        let suite = "SafeShell.\(UUID())"
+        let defaults = try #require(UserDefaults(suiteName: suite))
+        defer { defaults.removePersistentDomain(forName: suite) }
+        let folder = FileManager.default.temporaryDirectory.appending(path: UUID().uuidString)
+        try FileManager.default.createDirectory(at: folder, withIntermediateDirectories: true)
+        defer { try? FileManager.default.removeItem(at: folder) }
+        let marker = folder.appending(path: "unexpected-shell-launch")
+        let settings = SettingsManager(defaults: defaults)
+        settings.automation.reviewRequested.runner = .shell
+        settings.automation.reviewRequested.command = "touch '\(marker.path)'"
+        let command = settings.automation.reviewRequested.command
+        settings.automation.applyPreset(.safe, for: .codex)
+        let todo = try makeTodo(action: "review_requested", author: "anna")
+        let service = TodoAutomationService(canAutomate: { _ in true })
+        let acknowledged = try await service.prepareToAcknowledge(todo, event: .reviewRequested,
+            host: "gitlab.example.org", username: "me", settings: settings, glab: GlabService(), isPending: { true })
+        #expect(!acknowledged && !FileManager.default.fileExists(atPath: marker.path))
+        #expect(settings.automationAttemptReceipts.isEmpty && settings.automationReceipts.isEmpty)
+        #expect(settings.automation.reviewRequested.runner == .shell && settings.automation.reviewRequested.command == command)
+    }
     @Test("review request titles identify the MR author rather than the event actor")
     func reviewRequest() throws {
         let todo = try makeTodo(action: "review_requested", author: "anna")
