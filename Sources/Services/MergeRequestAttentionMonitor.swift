@@ -326,6 +326,7 @@ final class MergeRequestAttentionMonitor {
     private var latestTodoSnapshot: (account: Account, revision: UInt64, todos: [Todo])?
     let authorFeedbackCoordinator: AuthorFeedbackCoordinator?
     let aiOriginCoordinator: AICommentOriginCoordinator
+    let displayAIOriginCoordinator: AICommentDisplayCoordinator?
     let draftProofRecoveryCoordinator: DraftProofRecoveryCoordinator?
     private var feedbackNeedsRefresh = false
     var onAuthorFeedbackNeedsWork: ((GitLabMergeRequest, Set<Int>, String, AuthorFeedbackResidual?) async -> Void)?
@@ -367,7 +368,7 @@ final class MergeRequestAttentionMonitor {
         self.canAutomate = canAutomate
         self.approvalReadClock = approvalReadClock
         self.approvalReadWait = approvalReadWait
-        self.aiOriginCoordinator = AICommentOriginCoordinator(directory: aiAssessmentDirectory, assess: assessAIOrigin,
+        let publicationOrigins = AICommentOriginCoordinator(directory: aiAssessmentDirectory, assess: assessAIOrigin,
             fetchCurrent: { target in
                 guard let iid = target.iid, glab.resolvedHost == target.host,
                       glab.currentUsername == target.username else { throw CancellationError() }
@@ -387,6 +388,11 @@ final class MergeRequestAttentionMonitor {
                     : settings.automation.claudeVerificationModel.rawValue
                 return model == configured && settings.automation.verificationThinking == thinking
             })
+        self.aiOriginCoordinator = publicationOrigins
+        self.displayAIOriginCoordinator = settings.map {
+            AICommentDisplayCoordinator(glab: glab, settings: $0, assessmentDirectory: aiAssessmentDirectory,
+                canAutomate: canAutomate, publicationIsChecking: { publicationOrigins.isChecking(work: $0) }, assess: assessAIOrigin)
+        }
         self.draftProofRecoveryCoordinator = settings.map { settings in
             DraftProofRecoveryCoordinator(settings: settings, directory: followUpDirectory, verdictDirectory: verdictDirectory, canAutomate: canAutomate,
                 fetch: { snapshot in
@@ -449,6 +455,7 @@ final class MergeRequestAttentionMonitor {
         }
         aiOriginCoordinator.onChange = { [weak self] in
             guard let self, let account, isCurrent(account) else { return }
+            displayAIOriginCoordinator?.resume()
             if isLoading { feedbackNeedsRefresh = true }
             else { refresh(host: account.host, username: account.username, todos: []) }
         }
@@ -580,6 +587,7 @@ final class MergeRequestAttentionMonitor {
             verifiedRemoteFiles = [:]
             user = nil
             self.account = account
+            displayAIOriginCoordinator?.cancel()
             reReviewCoordinator?.reset()
             if let reportDirectory { CodexDesktopRelay.clearMergeRequestStatus(in: reportDirectory) }
         }
@@ -2481,6 +2489,7 @@ final class MergeRequestAttentionMonitor {
         authorFeedbackCoordinator?.cancel(outsideScope: scope)
         draftProofRecoveryCoordinator?.cancel(outsideScope: scope)
         aiOriginCoordinator.cancel(outsideScope: scope)
+        displayAIOriginCoordinator?.cancel(outsideScope: scope)
         feedbackNeedsRefresh = false
         reReviewCoordinator?.cancel(outsideScope: scope)
     }

@@ -17,6 +17,7 @@ final class AICommentOriginCoordinator {
         var signature: String { notes.map { "\($0.id ?? 0):\($0.author?.id ?? 0):\(AICommentAssessmentStore.digest($0.body ?? ""))" }.sorted().joined(separator: "/") }
     }
     private let directory: URL
+    private let purpose: AICommentAssessment.Purpose?
     private let assess: Assess
     private let fetchCurrent: FetchCurrent
     private let isCurrent: IsCurrent
@@ -28,6 +29,7 @@ final class AICommentOriginCoordinator {
     private var checking: Set<MRAutomationScope.Target> = []
     private struct Failure {
         let target: MRAutomationScope.Target
+        let noteID: Int
         let reason: String
         let assistant: AutomationAssistant
         let model: String
@@ -41,12 +43,13 @@ final class AICommentOriginCoordinator {
     @ObservationIgnored private var validated: [String: ValidatedAssessment] = [:]
     var onChange: (() -> Void)?
 
-    init(directory: URL = AICommentAssessmentStore.directory,
+    init(directory: URL = AICommentAssessmentStore.directory, purpose: AICommentAssessment.Purpose? = nil,
          assess: @escaping Assess = { try await AICommentOriginAssessor.verify(target: $0, notes: $1, assistant: $2, model: $3, thinking: $4) },
          fetchCurrent: @escaping FetchCurrent, isCurrent: @escaping IsCurrent,
          retryWait: @escaping ReadOnlyAssessmentRetry.Wait = ReadOnlyAssessmentRetry.wait,
          now: @escaping ReadOnlyAssessmentRetry.Clock = { Date() }) {
         self.directory = directory; self.assess = assess; self.fetchCurrent = fetchCurrent; self.isCurrent = isCurrent
+        self.purpose = purpose
         self.retryWait = retryWait
         self.now = now
     }
@@ -61,11 +64,14 @@ final class AICommentOriginCoordinator {
               Set(notes.compactMap(\.id)).count == notes.count else { return }
         let candidate = Request(target: target, notes: notes, assistant: assistant, model: model, thinking: thinking)
         let incomingKeys = Set(notes.map { key(candidate, $0) })
-        for stale in failures.filter({ $0.value.target == target && !incomingKeys.contains($0.key) }).keys {
+        let incomingIDs = Set(notes.compactMap(\.id))
+        for stale in failures.filter({ $0.value.target == target && !incomingKeys.contains($0.key)
+            && (purpose != .display || incomingIDs.contains($0.value.noteID)) }).keys {
             failures.removeValue(forKey: stale)
             attempted.removeValue(forKey: stale)
         }
-        for stale in validated.filter({ $0.value.target == target && !incomingKeys.contains($0.key) }).keys {
+        for stale in validated.filter({ $0.value.target == target && !incomingKeys.contains($0.key)
+            && (purpose != .display || incomingIDs.contains($0.value.note.noteID)) }).keys {
             validated.removeValue(forKey: stale)
         }
         let uncovered = notes.filter { note in
@@ -75,11 +81,11 @@ final class AICommentOriginCoordinator {
                       now().timeIntervalSince(attemptedAt) >= ReadOnlyAssessmentRetry.cooldown else { return false }
             }
             if let record = AICommentAssessmentStore.result(for: note, host: target.host, projectID: target.projectID, iid: target.iid!, in: directory) {
-                if record.qualifiesAsAI { return false }
+                if record.qualifiesAsAI && (purpose == .display || record.purpose != .display) { return false }
                 if record.provider == assistant.rawValue && record.model == model
                     && record.criteriaVersion == AICommentOriginAssessor.criteriaVersion
                     && record.username == target.username && record.authorID == note.author?.id
-                    && record.thinking == thinking { return false }
+                    && record.thinking == thinking && record.purpose == purpose { return false }
             }
             return true
         }
@@ -143,7 +149,7 @@ final class AICommentOriginCoordinator {
                     }, wait: retryWait) {
                         for note in request.notes where self.validated[self.key(request, note)] == nil {
                             if let restored = try AICommentAssessmentStore.pendingVerdict(for: note, target: target,
-                                assistant: request.assistant, model: request.model, thinking: request.thinking, in: self.directory) {
+                                assistant: request.assistant, model: request.model, thinking: request.thinking, purpose: self.purpose, in: self.directory) {
                                 self.validated[self.key(request, note)] = .init(target: target, note: restored)
                             }
                         }
@@ -165,7 +171,7 @@ final class AICommentOriginCoordinator {
                                 throw AICommentOriginAssessor.AssessmentError.invalidEvidence
                             }
                             let preserved = try AICommentAssessmentStore.preservePendingVerdict(assessment, for: note,
-                                target: target, assistant: request.assistant, model: request.model, thinking: request.thinking, in: self.directory)
+                                target: target, assistant: request.assistant, model: request.model, thinking: request.thinking, purpose: self.purpose, in: self.directory)
                             self.validated[self.key(request, note)] = .init(target: target, note: preserved)
                         }
                         let result = AICommentOriginAssessment(notes: request.notes.compactMap { self.validated[self.key(request, $0)]?.note })
@@ -178,11 +184,11 @@ final class AICommentOriginCoordinator {
                             return matches.count == 1 && matches[0].body == original.body && matches[0].author?.id == original.author?.id
                         }) else { throw CancellationError() }
                         try AICommentAssessmentStore.persist(result, target: target, notes: request.notes,
-                            assistant: request.assistant, model: request.model, thinking: request.thinking, in: self.directory)
+                            assistant: request.assistant, model: request.model, thinking: request.thinking, purpose: self.purpose, in: self.directory)
                         for note in request.notes {
                             // The ordinary record is authoritative now; leftover pending data cannot qualify on its own.
                             try? AICommentAssessmentStore.removePendingVerdict(for: note, target: target,
-                                assistant: request.assistant, model: request.model, thinking: request.thinking, in: self.directory)
+                                assistant: request.assistant, model: request.model, thinking: request.thinking, purpose: self.purpose, in: self.directory)
                         }
                     }
                     for note in request.notes {
@@ -193,7 +199,7 @@ final class AICommentOriginCoordinator {
                 catch {
                     // A failed assessment never establishes either AI or handwritten origin.
                     for note in request.notes {
-                        failures[key(request, note)] = .init(target: target,
+                        failures[key(request, note)] = .init(target: target, noteID: note.id!,
                             reason: String(GlabService.redactWorkflowEvidence(String(describing: error)).prefix(600)),
                             assistant: request.assistant, model: request.model, thinking: request.thinking)
                     }

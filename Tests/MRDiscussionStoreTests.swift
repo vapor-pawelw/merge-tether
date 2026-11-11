@@ -4,6 +4,114 @@ import Testing
 
 @MainActor
 struct MRDiscussionStoreTests {
+    @Test func freshDisplayAssessmentCanReplaceAStaleActionSlotUsingOnlyCachedConversationMetadata() async throws {
+        let root = FileManager.default.temporaryDirectory.appending(path: UUID().uuidString)
+        defer { try? FileManager.default.removeItem(at: root) }
+        let action = root.appending(path: "action"), display = root.appending(path: "display"), legacy = root.appending(path: "legacy")
+        let notes = try threads(), note = try #require(notes.first?.notes.first)
+        let previous = try threads("Previous body")
+        let previousNote = try #require(previous.first?.notes.first)
+        var stale = assessment(note: previousNote, classification: "ai_assisted", confidence: "high")
+        stale.provider = AutomationAssistant.codex.rawValue; stale.model = "cheap"
+        try save(stale, in: action)
+        var older = assessment(note: note, classification: "ai_assisted", confidence: "high")
+        older.provider = AutomationAssistant.codex.rawValue; older.model = "cheap"
+        try save(older, in: legacy)
+        var reads = 0
+        let store = MRDiscussionStore(load: { _ in reads += 1; return notes }, assessmentDirectory: action,
+            legacyAssessmentDirectory: legacy, displayAssessmentDirectory: display)
+        let glab = glab()
+        await store.refresh(target: target, glab: glab)
+        #expect(store.origins.isEmpty)
+        try AICommentAssessmentStore.persist(.init(notes: [.init(noteID: 3, classification: .manualLikely,
+            confidence: .high, evidence: "Current displayed source")]),
+            target: .init(host: target.host, username: target.username, projectID: 1, iid: 2), notes: [note],
+            assistant: .codex, model: "cheap", purpose: .display, in: display)
+        await store.reloadOrigins(glab: glab)
+        #expect(reads == 1)
+        #expect(store.discussions.flatMap(\.notes).map(\.body) == notes.flatMap(\.notes).map(\.body))
+        #expect(store.origins[3] == .humanLikely(evidence: "Current displayed source"))
+        #expect(!AICommentAssessmentStore.isAI(note, host: target.host, projectID: 1, iid: 2, in: action))
+        #expect(!AICommentAssessmentStore.isAI(note, host: target.host, projectID: 1, iid: 2, in: display))
+    }
+
+    @Test(arguments: [("ai_assisted", "high", "ai"), ("ai_assisted", "uncertain", "uncertain"),
+                      ("manual_likely", "high", "human"), ("manual_likely", "uncertain", "uncertain"),
+                      ("uncertain", "high", "uncertain")])
+    func legacyAssessmentRestoresPerMessageDisplayWithoutBecomingCurrentActionEvidence(
+        classification: String, confidence: String, expected: String) async throws {
+        let root = FileManager.default.temporaryDirectory.appending(path: UUID().uuidString)
+        defer { try? FileManager.default.removeItem(at: root) }
+        let current = root.appending(path: "current"), legacy = root.appending(path: "legacy")
+        let notes = try threads(), note = try #require(notes.first?.notes.first)
+        var record = assessment(note: note, classification: classification, confidence: confidence)
+        record.provider = AutomationAssistant.codex.rawValue
+        record.model = "recorded-model"
+        try save(record, in: legacy)
+        let store = MRDiscussionStore(load: { _ in notes }, assessmentDirectory: current, legacyAssessmentDirectory: legacy)
+        await store.refresh(target: target, glab: glab())
+        let expectedOrigin: MRDiscussionSnapshot.Origin = switch expected {
+        case "ai": .assessed(evidence: record.evidence)
+        case "human": .humanLikely(evidence: record.evidence)
+        default: .uncertain(evidence: record.evidence)
+        }
+        #expect(store.origins[3] == expectedOrigin)
+        #expect(!AICommentAssessmentStore.isAI(note, host: target.host, projectID: 1, iid: 2, in: current))
+        let draft = GitLabDraftNote(id: 4, authorID: 9, note: "Reply", discussionID: "thread", position: nil)
+        #expect(!AICommentAssessmentStore.eligible(draft, discussions: notes, userID: 9,
+            duoUserIDs: [], host: target.host, projectID: 1, iid: 2, in: current))
+        #expect(!FileManager.default.fileExists(atPath: current.path))
+        #expect(FileManager.default.fileExists(atPath: AICommentAssessmentStore.fileURL(
+            host: target.host, projectID: 1, iid: 2, noteID: 3, in: legacy).path))
+        let isolated = MRDiscussionStore(load: { _ in notes }, assessmentDirectory: current)
+        await isolated.refresh(target: target, glab: glab())
+        #expect(isolated.origins.isEmpty)
+    }
+
+    @Test(arguments: ["body", "author", "missingAuthor", "account", "missingAccount", "host", "project", "mr", "note",
+                      "criteria", "missingCriteria", "provider", "missingProvider", "model", "version"])
+    func legacyDisplayFallbackRetainsExactAssessmentBindings(_ mismatch: String) async throws {
+        let root = FileManager.default.temporaryDirectory.appending(path: UUID().uuidString)
+        defer { try? FileManager.default.removeItem(at: root) }
+        let current = root.appending(path: "current"), legacy = root.appending(path: "legacy")
+        let notes = try threads(), note = try #require(notes.first?.notes.first)
+        let record = AICommentAssessment(version: mismatch == "version" ? 1 : 2,
+            host: mismatch == "host" ? "other.test" : target.host, projectID: mismatch == "project" ? 99 : 1,
+            iid: mismatch == "mr" ? 99 : 2, noteID: mismatch == "note" ? 99 : 3,
+            bodySHA256: AICommentAssessmentStore.digest(mismatch == "body" ? "Edited" : note.body!),
+            confidence: "high", evidence: "Recorded per-message evidence", classification: "ai_assisted",
+            provider: mismatch == "missingProvider" ? nil : mismatch == "provider" ? "unsupported" : AutomationAssistant.codex.rawValue,
+            model: mismatch == "model" ? " " : "recorded-model",
+            criteriaVersion: mismatch == "missingCriteria" ? nil : AICommentOriginAssessor.criteriaVersion + (mismatch == "criteria" ? -1 : 0),
+            username: mismatch == "missingAccount" ? nil : mismatch == "account" ? "other" : target.username,
+            authorID: mismatch == "missingAuthor" ? nil : mismatch == "author" ? 99 : note.author?.id)
+        try save(record, in: legacy)
+        let store = MRDiscussionStore(load: { _ in notes }, assessmentDirectory: current, legacyAssessmentDirectory: legacy)
+        await store.refresh(target: target, glab: glab())
+        #expect(store.origins[3] == nil)
+        #expect(!FileManager.default.fileExists(atPath: current.path))
+    }
+
+    @Test(arguments: [false, true])
+    func currentAssessmentSlotTakesPrecedenceOverLegacyDisplay(_ invalid: Bool) async throws {
+        let root = FileManager.default.temporaryDirectory.appending(path: UUID().uuidString)
+        defer { try? FileManager.default.removeItem(at: root) }
+        let current = root.appending(path: "current"), legacy = root.appending(path: "legacy")
+        let notes = try threads(), note = try #require(notes.first?.notes.first)
+        var older = assessment(note: note, classification: "ai_assisted", confidence: "high")
+        older.provider = AutomationAssistant.codex.rawValue; older.model = "recorded-model"
+        try save(older, in: legacy)
+        let replacement = assessment(note: note, classification: "manual_likely", confidence: "high")
+        try save(replacement, in: current)
+        if invalid {
+            try Data("invalid current replacement".utf8).write(to: AICommentAssessmentStore.fileURL(
+                host: target.host, projectID: 1, iid: 2, noteID: 3, in: current))
+        }
+        let store = MRDiscussionStore(load: { _ in notes }, assessmentDirectory: current, legacyAssessmentDirectory: legacy)
+        await store.refresh(target: target, glab: glab())
+        #expect(store.origins[3] == (invalid ? nil : .humanLikely(evidence: replacement.evidence)))
+    }
+
     private final class Flag { var value = false }
     private let target = MRDiscussionTarget(host: "gitlab.example.test", username: "me", projectID: 1, iid: 2,
         url: URL(string: "https://gitlab.example.test/group/repo/-/merge_requests/2")!)

@@ -110,6 +110,56 @@ import MergeTetherRemote
         }
     }
 
+    @discardableResult static func scheduleDisplayOrigins(in details: RemoteMRDetails, request: GitLabMergeRequest,
+        monitor: TodoMonitorService, accountRevision: UInt64) -> Task<Void, Never>? {
+        guard let coordinator = monitor.attention.displayAIOriginCoordinator else { return nil }
+        return scheduleDisplayOrigins(in: details, request: request, glab: monitor.glab,
+            coordinator: coordinator, accountRevision: accountRevision)
+    }
+
+    @discardableResult static func scheduleDisplayOrigins(in details: RemoteMRDetails, request: GitLabMergeRequest,
+        glab: GlabService, coordinator: AICommentDisplayCoordinator, accountRevision: UInt64) -> Task<Void, Never>? {
+        guard coordinator.permitsSourceRead(request: request, accountRevision: accountRevision),
+              let host = glab.resolvedHost, let username = glab.currentUsername,
+              let context = RemoteBoardAdapter.contextRevision(request) else { return nil }
+        if details.truncated || details.threads?.contains(where: \.truncated) == true {
+            return Task {
+                do {
+                    @MainActor func current(_ live: GitLabMergeRequest) -> Bool {
+                        coordinator.permitsSourceRead(request: live, accountRevision: accountRevision)
+                            && glab.resolvedHost == host && glab.currentUsername == username
+                            && RemoteBoardAdapter.contextRevision(live) == context
+                    }
+                    let live = try await glab.fetchMergeRequest(projectID: request.projectID, iid: request.iid, host: host)
+                    guard current(live) else { return }
+                    let action = coordinator.sourceAssessmentDirectory
+                    let store = MRDiscussionStore(assessmentDirectory: action,
+                        provenanceDirectory: action.deletingLastPathComponent().appending(path: "display-comment-origins"),
+                        displayAssessmentDirectory: coordinator.displayDirectory)
+                    await store.refresh(target: .init(host: host, username: username, projectID: request.projectID,
+                        iid: request.iid, url: request.webURL), glab: glab)
+                    guard store.hasLoaded, !store.hasError, current(live) else { return }
+                    let checked = try await glab.fetchMergeRequest(projectID: request.projectID, iid: request.iid, host: host)
+                    guard current(checked) else { return }
+                    await coordinator.schedule(request: checked, notes: store.discussions.flatMap(\.notes),
+                        knownNoteIDs: Set(store.origins.keys))
+                } catch {}
+            }
+        }
+        guard let threads = details.threads else { return nil }
+        let source = threads.flatMap(\.notes)
+        let notes: [GitLabMergeRequestDiscussion.Note] = source.compactMap { note in
+            guard let id = Int(note.id), let authorID = note.authorID else { return nil }
+            return .init(id: id, author: .init(id: authorID, username: note.username, name: note.author), system: false,
+                resolvable: nil, resolved: nil, resolvedBy: nil, body: note.body)
+        }
+        let known = Set(source.filter { $0.origin != nil }.compactMap { Int($0.id) })
+        return Task {
+            guard glab.accountRevision == accountRevision else { return }
+            await coordinator.schedule(request: request, notes: notes, knownNoteIDs: known)
+        }
+    }
+
     private static func amount(_ total: AssistantUsageTotal) -> String {
         guard total.runs > 0 else { return String(localized: .AssistantUsage.assistantUsageNoActivity) }
         guard total.costUnavailable != true, total.estimatedUSD > 0 || total.unknownCostRuns < total.runs else {

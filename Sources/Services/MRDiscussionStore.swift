@@ -9,7 +9,11 @@ final class MRDiscussionStore {
     private let load: Load?
     private let verifyAssistant: VerifyAssistant?
     private let assessmentDirectory: URL
+    private let legacyAssessmentDirectory: URL?
+    private let displayAssessmentDirectory: URL?
     private let provenanceDirectory: URL
+    private var authenticatedUserID: Int?
+    private var loadedRevision: UInt64?
     private var generation = 0
     private(set) var target: MRDiscussionTarget?
     private(set) var discussions: [GitLabMergeRequestDiscussion] = []
@@ -20,10 +24,13 @@ final class MRDiscussionStore {
 
     init(load: Load? = nil, verifyAssistant: VerifyAssistant? = nil,
          assessmentDirectory: URL = AICommentAssessmentStore.directory,
-         provenanceDirectory: URL = AICommentProvenanceStore.directory) {
+         provenanceDirectory: URL = AICommentProvenanceStore.directory, legacyAssessmentDirectory: URL? = nil,
+         displayAssessmentDirectory: URL? = nil) {
         self.load = load
         self.verifyAssistant = verifyAssistant
         self.assessmentDirectory = assessmentDirectory
+        self.legacyAssessmentDirectory = legacyAssessmentDirectory
+        self.displayAssessmentDirectory = displayAssessmentDirectory
         self.provenanceDirectory = provenanceDirectory
     }
 
@@ -51,34 +58,7 @@ final class MRDiscussionStore {
                     iid: requested.iid, host: requested.host)
             }
             guard isCurrent(current, target: requested, glab: glab, revision: revision) else { return }
-            let directory = assessmentDirectory
-            let provenanceDirectory = self.provenanceDirectory
-            var assessed = await Task.detached {
-                let generated = authenticatedUserID.map { userID in
-                    AICommentProvenanceStore.snapshot(context: .init(host: requested.host, username: requested.username,
-                        userID: userID, projectID: requested.projectID, iid: requested.iid), in: provenanceDirectory)
-                }
-                var origins: [Int: MRDiscussionSnapshot.Origin] = [:]
-                for thread in result {
-                    for note in thread.notes where note.system != true {
-                        if let id = note.id, generated?.contains(note, discussionID: thread.id) == true {
-                            origins[id] = .appGenerated
-                            continue
-                        }
-                        if let id = note.id, id > 0, let record = AICommentAssessmentStore.result(for: note,
-                            host: requested.host, projectID: requested.projectID, iid: requested.iid, in: directory),
-                           record.username == nil || record.username == requested.username {
-                            if record.qualifiesAsAI {
-                                origins[id] = .assessed(evidence: record.evidence)
-                            } else if record.criteriaVersion == AICommentOriginAssessor.criteriaVersion {
-                                origins[id] = record.classification == "manual_likely" && record.confidence != "uncertain"
-                                    ? .humanLikely(evidence: record.evidence) : .uncertain(evidence: record.evidence)
-                            }
-                        }
-                    }
-                }
-                return origins
-            }.value
+            var assessed = await cachedOrigins(in: result, target: requested, userID: authenticatedUserID)
             guard isCurrent(current, target: requested, glab: glab, revision: revision) else { return }
             // A username is only a lookup hint. GitLab must confirm this is its assistant account.
             let candidates = Set(result.flatMap(\.notes).compactMap { note -> Int? in
@@ -97,6 +77,8 @@ final class MRDiscussionStore {
                     }
                 }
             }
+            self.authenticatedUserID = authenticatedUserID
+            loadedRevision = revision
             discussions = result
             origins = assessed
             hasLoaded = true
@@ -105,6 +87,8 @@ final class MRDiscussionStore {
             // A 401 cannot prove the account changed. Keep its readable cache;
             // discard it only after the server actually identifies another user.
             if error is IdentityError {
+                self.authenticatedUserID = nil
+                loadedRevision = nil
                 discussions = []
                 origins = [:]
                 hasLoaded = false
@@ -113,11 +97,57 @@ final class MRDiscussionStore {
         }
     }
 
+    func reloadOrigins(glab: GlabService) async {
+        guard let target, hasLoaded, loadedRevision == glab.accountRevision, matchesAccount(target, glab: glab) else { return }
+        let current = generation, revision = glab.accountRevision
+        var updated = await cachedOrigins(in: discussions, target: target, userID: authenticatedUserID)
+        guard isCurrent(current, target: target, glab: glab, revision: revision) else { return }
+        for (id, origin) in origins where origin == .verifiedAssistant { updated[id] = origin }
+        origins = updated
+    }
+
+    private func cachedOrigins(in result: [GitLabMergeRequestDiscussion], target: MRDiscussionTarget,
+                               userID: Int?) async -> [Int: MRDiscussionSnapshot.Origin] {
+        let directory = assessmentDirectory
+        let legacyDirectory = legacyAssessmentDirectory
+        let displayDirectory = displayAssessmentDirectory
+        let provenanceDirectory = self.provenanceDirectory
+        return await Task.detached {
+            let generated = userID.map { userID in
+                AICommentProvenanceStore.snapshot(context: .init(host: target.host, username: target.username,
+                    userID: userID, projectID: target.projectID, iid: target.iid), in: provenanceDirectory)
+            }
+            var origins: [Int: MRDiscussionSnapshot.Origin] = [:]
+            for thread in result {
+                for note in thread.notes where note.system != true {
+                    if let id = note.id, generated?.contains(note, discussionID: thread.id) == true {
+                        origins[id] = .appGenerated
+                        continue
+                    }
+                    if let id = note.id, id > 0, let record = AICommentAssessmentStore.displayResult(for: note,
+                        host: target.host, projectID: target.projectID, iid: target.iid,
+                        username: target.username, in: directory, legacyDirectory: legacyDirectory, displayDirectory: displayDirectory),
+                       record.username == nil || record.username == target.username {
+                        if record.qualifiesAsAI {
+                            origins[id] = .assessed(evidence: record.evidence)
+                        } else if record.criteriaVersion == AICommentOriginAssessor.criteriaVersion {
+                            origins[id] = record.classification == "manual_likely" && record.confidence != "uncertain"
+                                ? .humanLikely(evidence: record.evidence) : .uncertain(evidence: record.evidence)
+                        }
+                    }
+                }
+            }
+            return origins
+        }.value
+    }
+
     func cancel() { generation += 1; isLoading = false }
 
     func clear() {
         cancel()
         target = nil
+        authenticatedUserID = nil
+        loadedRevision = nil
         discussions = []
         origins = [:]
         hasError = false

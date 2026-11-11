@@ -255,7 +255,15 @@ extension RemoteConnection: RemoteHostTransport {}
                   monitor.glab.accountRevision == revision, activeDetailRequest == request else { return }
             var checked = bounded
             if !request.matches(snapshot()) { checked = .init(request: request, status: .changed) }
-            try? await active.send(.init(type: .details, detailResponse: checked))
+            do {
+                try await active.send(.init(type: .details, detailResponse: checked))
+                guard !Task.isCancelled, phoneSupportsDetails, connection === active,
+                      self.pairing?.sessionID == pairingSession, monitor.glab.accountRevision == revision,
+                      activeDetailRequest == request, request.matches(snapshot()) else { return }
+                if checked.status == .current, let details = response.details {
+                    RemoteMRDetailSupplement.scheduleDisplayOrigins(in: details, request: source, monitor: monitor, accountRevision: revision)
+                }
+            } catch {}
         }
     }
     private func refreshSource(force: Bool, deadline: ContinuousClock.Instant) async -> Bool {

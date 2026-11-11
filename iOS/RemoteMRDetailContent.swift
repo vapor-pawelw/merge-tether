@@ -173,7 +173,7 @@ private struct RemoteDiscussionCard: View {
                             if index > 0 {
                                 noteAuthor(note)
                             }
-                            if let origin = note.origin, index > 0 || origin != thread.origin { originBadge(origin) }
+                            if let origin = note.origin { originBadge(origin) }
                             if index > 0, let date = note.createdAt {
                                 Text(date, format: .dateTime.year().month().day().hour().minute()).font(.caption).foregroundStyle(.secondary)
                             }

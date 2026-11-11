@@ -201,7 +201,7 @@ private struct CommandCenterMRDetailContent: View {
                     return
                 }
                 while !Task.isCancelled {
-                    await discussionStore.refresh(target: target, glab: monitor.glab)
+                    await loadDiscussions(target)
                     guard !Task.isCancelled else { return }
                     initialDiscussionAttemptFinished = true
                     do { try await Task.sleep(for: .seconds(30)) } catch { return }
@@ -209,6 +209,9 @@ private struct CommandCenterMRDetailContent: View {
             }
             .onChange(of: monitor.attention.confirmationStates[item.id]) { old, current in
                 if old?.isBusy == true && current?.isBusy != true { refreshDiscussions() }
+            }
+            .onChange(of: monitor.attention.displayAIOriginCoordinator?.revision) { _, _ in
+                Task { await discussionStore.reloadOrigins(glab: monitor.glab) }
             }
             .onChange(of: jobs.first?.id) { _, _ in retryError = nil }
             .onAppear { publicationSession.open(with: item.drafts, accountAvailable: discussionTarget != nil) }
@@ -783,7 +786,15 @@ private struct CommandCenterMRDetailContent: View {
 
     private func refreshDiscussions() {
         guard let target = discussionTarget else { discussionStore.clear(); return }
-        Task { await discussionStore.refresh(target: target, glab: monitor.glab) }
+        Task { await loadDiscussions(target) }
+    }
+
+    private func loadDiscussions(_ target: MRDiscussionTarget) async {
+        await discussionStore.refresh(target: target, glab: monitor.glab)
+        guard !Task.isCancelled, discussionStore.target == target, discussionStore.hasLoaded, !discussionStore.hasError,
+              let request = presentationRow.displayRequest, let coordinator = monitor.attention.displayAIOriginCoordinator else { return }
+        let notes = discussionStore.discussions.flatMap(\.notes), known = Set(discussionStore.origins.keys)
+        Task { await coordinator.schedule(request: request, notes: notes, knownNoteIDs: known) }
     }
 
 

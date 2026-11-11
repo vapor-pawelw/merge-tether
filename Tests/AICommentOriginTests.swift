@@ -4,6 +4,74 @@ import Testing
 
 @MainActor
 struct AICommentOriginTests {
+    @Test func displayBatchesRetainEarlierFailuresForTheExistingRetryBoundary() async throws {
+        let directory = try folder(); defer { try? FileManager.default.removeItem(at: directory) }
+        var calls: [Int] = [], fail = true
+        var retryDelays: [Duration] = []
+        let coordinator = AICommentOriginCoordinator(directory: directory, purpose: .display,
+            assess: { _, notes, _, _, _ in
+                calls += notes.compactMap(\.id)
+                if fail && notes.first?.id == 10 { throw AICommentOriginAssessor.AssessmentError.invalidEvidence }
+                return positive(notes)
+            }, fetchCurrent: { _ in [note(10), note(11)] }, isCurrent: { _, _, _, _ in true },
+            retryWait: { retryDelays.append($0) })
+        @MainActor func waitForIdle() async throws {
+            let deadline = ContinuousClock.now + .seconds(3)
+            while coordinator.isChecking(work: work), ContinuousClock.now < deadline {
+                try await Task.sleep(for: .milliseconds(1))
+            }
+            try #require(!coordinator.isChecking(work: work))
+        }
+        coordinator.schedule(target: target, notes: [note(10)], assistant: .codex, model: "cheap")
+        try await waitForIdle()
+        #expect(calls == [10, 10, 10] && retryDelays == [.seconds(2), .seconds(8)])
+        #expect(coordinator.failure(work: work) != nil)
+        coordinator.schedule(target: target, notes: [note(11)], assistant: .codex, model: "cheap")
+        try await waitForIdle()
+        #expect(coordinator.failure(work: work) != nil)
+        coordinator.schedule(target: target, notes: [note(10)], assistant: .codex, model: "cheap")
+        try await waitForIdle()
+        #expect(calls == [10, 10, 10, 11])
+        fail = false
+        coordinator.retryReadOnlyFailures()
+        coordinator.schedule(target: target, notes: [note(10)], assistant: .codex, model: "cheap")
+        try await waitForIdle()
+        #expect(calls == [10, 10, 10, 11, 10])
+        #expect(coordinator.failure(work: work) == nil)
+    }
+
+    @Test func displayPurposeCannotAuthorizePublicationEvenWhenItsDirectoryIsPassedToActionAPIs() throws {
+        let directory = try folder(); defer { try? FileManager.default.removeItem(at: directory) }
+        let source = note()
+        try AICommentAssessmentStore.persist(positive([source]), target: target, notes: [source],
+            assistant: .codex, model: "cheap", purpose: .display, in: directory)
+        #expect(AICommentAssessmentStore.result(for: source, host: target.host, projectID: 7, iid: 13, in: directory)?.purpose == .display)
+        #expect(!AICommentAssessmentStore.isAI(source, host: target.host, projectID: 7, iid: 13, in: directory))
+        let discussions = [GitLabMergeRequestDiscussion(id: "thread", notes: [source])]
+        let draft = GitLabDraftNote(id: 11, authorID: 5, note: "Reply", discussionID: "thread", position: nil)
+        #expect(!AICommentAssessmentStore.eligible(draft, discussions: discussions, userID: 5, duoUserIDs: [],
+            host: target.host, projectID: 7, iid: 13, in: directory))
+        let path = AICommentAssessmentStore.fileURL(host: target.host, projectID: 7, iid: 13, noteID: 10, in: directory)
+        let storedJSON = try JSONSerialization.jsonObject(with: Data(contentsOf: path))
+        var raw = try #require(storedJSON as? [String: Any])
+        raw["purpose"] = "unrecognized"
+        try JSONSerialization.data(withJSONObject: raw).write(to: path)
+        #expect(AICommentAssessmentStore.result(for: source, host: target.host, projectID: 7, iid: 13, in: directory) == nil)
+    }
+
+    @Test func pendingDisplayOpinionCannotBeRestoredAsAnActionOpinion() throws {
+        let directory = try folder(); defer { try? FileManager.default.removeItem(at: directory) }
+        let verdict = try #require(positive([note()]).notes.first)
+        try AICommentAssessmentStore.preservePendingVerdict(verdict, for: note(), target: target,
+            assistant: .codex, model: "cheap", purpose: .display, in: directory)
+        let pending = try AICommentAssessmentStore.pendingVerdict(for: note(), target: target,
+            assistant: .codex, model: "cheap", purpose: .display, in: directory)
+        let restored = try #require(pending)
+        #expect(restored.noteID == verdict.noteID && restored.classification == verdict.classification)
+        #expect(try AICommentAssessmentStore.pendingVerdict(for: note(), target: target,
+            assistant: .codex, model: "cheap", in: directory) == nil)
+    }
+
     @MainActor private final class ThinkingSelection {
         var value: VerificationThinking = .low
     }

@@ -4,6 +4,59 @@ import MergeTetherRemote
 @testable import GitLabTodos
 
 @MainActor @Suite struct RemoteHostDetailTests {
+    @Test func aCurrentTruncatedDetailsDeliveryReadsTheCompleteOriginSourceAfterSending() async throws {
+        let f = try Fixture(); defer { f.clean() }
+        f.monitor.settings.automation.packageDecision = .enabled
+        f.monitor.settings.automation.scope.mode = .all
+        let board = try await f.board()
+        f.detailsTruncated = true
+        let request = try RemoteDetailRequest(card: board.cards[0], board: board)
+        var readsAtSend: Int?
+        f.transport.beforeSend = { message in
+            if message.detailResponse?.request == request, message.detailResponse?.status == .current {
+                readsAtSend = f.gitlab.requests.count
+            }
+        }
+        await f.transport.onMessage?(.init(type: .detailRequest, detailRequest: request))
+        let pending = try #require(f.host.detailTask)
+        await pending.value
+        let reads = try #require(readsAtSend)
+        let deadline = ContinuousClock.now + .seconds(3)
+        while !f.gitlab.requests.dropFirst(reads).contains(where: { $0.endpoint.contains("/discussions?") }), ContinuousClock.now < deadline {
+            try await Task.sleep(for: .milliseconds(5))
+        }
+        #expect(f.gitlab.requests.dropFirst(reads).filter { $0.endpoint.contains("/discussions?") }.count == 1)
+        #expect(f.gitlab.requests.allSatisfy { $0.method == "GET" })
+    }
+
+    @Test(arguments: ["account", "transport", "cancel"])
+    func aChangeDuringDetailsSendCannotStartDisplayClassification(_ change: String) async throws {
+        let f = try Fixture(); defer { f.clean() }
+        f.monitor.settings.automation.packageDecision = .enabled
+        f.monitor.settings.automation.scope.mode = .all
+        let board = try await f.board()
+        f.detailsTruncated = true
+        let request = try RemoteDetailRequest(card: board.cards[0], board: board)
+        var readsAtSend: Int?
+        f.transport.beforeSend = { message in
+            guard message.detailResponse?.status == .current else { return }
+            readsAtSend = f.gitlab.requests.count
+            switch change {
+            case "account": f.monitor.glab.currentUsername = "other"; f.monitor.glab.currentUsername = "me"
+            case "transport": f.transport.onStatus?(false, false)
+            default: await f.transport.onMessage?(.init(type: .cancelDetails, detailRequest: request))
+            }
+        }
+        await f.transport.onMessage?(.init(type: .detailRequest, detailRequest: request))
+        let pending = try #require(f.host.detailTask)
+        await pending.value
+        let reads = try #require(readsAtSend)
+        let endpoints = f.gitlab.requests.dropFirst(reads).map(\.endpoint)
+        #expect(!endpoints.contains { $0.contains("/discussions?") }, "Post-send endpoints: \(endpoints)")
+        #expect(f.monitor.attention.displayAIOriginCoordinator?.isChecking(work: .init(host: "gitlab.example.test", projectID: 1, iid: 2)) == false,
+            "Post-send endpoints: \(endpoints)")
+    }
+
     @Test func forgedOrRemovedCardsDoNotEnterTheDetailReaderOrStartAGitLabRead() async throws {
         let f = try Fixture(); defer { f.clean() }
         let board = try await f.board()
@@ -86,9 +139,10 @@ import MergeTetherRemote
         var onMessage: (@MainActor (RemoteMessage) async -> Void)?
         var onStatus: (@MainActor (Bool, Bool) -> Void)?
         var messages: [RemoteMessage] = []
+        var beforeSend: ((RemoteMessage) async -> Void)?
         func start() { onStatus?(true, false) }
         func stop() { onStatus?(false, false) }
-        func send(_ message: RemoteMessage) async throws { messages.append(message) }
+        func send(_ message: RemoteMessage) async throws { await beforeSend?(message); messages.append(message) }
     }
 
     @MainActor private final class Fixture {
@@ -101,13 +155,14 @@ import MergeTetherRemote
         var date = Date()
         var readerCount = 0
         var heldReads: Set<Int> = []
+        var detailsTruncated = false
         lazy var host = RemoteHostController(monitor: monitor, relayConfiguration: .init(rawOrigin: pair.origin.absoluteString),
             loadPairing: { [pair] in pair }, savePairing: { _ in }, removePairing: {}, commandGate: RemoteCommandGate(store: nil),
             now: { [unowned self] in date }, detailReader: { [unowned self] _, _, _ in
                 readerCount += 1; let index = readerCount
                 gitlab.write("detail-entered-\(index)")
                 if heldReads.contains(index) { try await gitlab.waitFor("release-\(index)") }
-                return .init(checkedAt: date, description: "Read \(index)")
+                return .init(checkedAt: date, description: "Read \(index)", truncated: detailsTruncated)
             }, makeConnection: { [transport] _ in transport })
 
         init() throws {
@@ -151,6 +206,7 @@ import MergeTetherRemote
         func clean() {
             host.disable(); monitor.stopTimer(); gitlab.close()
             transport.onMessage = nil; transport.onStatus = nil
+            transport.beforeSend = nil
             defaults.removePersistentDomain(forName: suite)
         }
     }
