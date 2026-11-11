@@ -8,12 +8,23 @@ struct MRDiscussionTarget: Hashable, Sendable {
     let url: URL
 }
 
-/// A read-only conversation projection. AI origin belongs to a single current note.
+/// A read-only conversation projection. Origin evidence belongs to a single current note.
 struct MRDiscussionSnapshot {
     enum Origin: Equatable, Sendable {
         case verifiedAssistant
         case assessed(evidence: String)
+        case uncertain(evidence: String)
+        case humanLikely(evidence: String)
+
+        var badge: OriginBadge {
+            switch self {
+            case .verifiedAssistant, .assessed: .ai
+            case .uncertain: .uncertain
+            case .humanLikely: .human
+            }
+        }
     }
+    enum OriginBadge: Equatable { case ai, uncertain, human }
     enum State: Equatable { case open, resolved, general }
     struct Thread: Identifiable {
         let id: String
@@ -23,6 +34,20 @@ struct MRDiscussionSnapshot {
         let state: State
         let location: String?
         let origins: [Int: Origin]
+
+        var originBadge: OriginBadge? {
+            var aggregate: OriginBadge?
+            for note in notes where note.system != true {
+                guard let id = note.id, let badge = origins[id]?.badge else { return nil }
+                if let previous = aggregate, previous != badge {
+                    guard previous != .human, badge != .human else { return nil }
+                    aggregate = .uncertain
+                } else {
+                    aggregate = badge
+                }
+            }
+            return aggregate
+        }
 
         struct ReplySummary {
             enum PublishedReply: Equatable { case none, published, earlier, unknown, unavailable }
@@ -63,24 +88,29 @@ struct MRDiscussionSnapshot {
     }
 
     init(discussions: [GitLabMergeRequestDiscussion], drafts: [GitLabDraftNote], origins: [Int: Origin]) {
+        var draftsByDiscussion: [String: [(offset: Int, element: GitLabDraftNote)]] = [:]
+        for entry in drafts.enumerated() {
+            guard let id = entry.element.discussionID, !id.isEmpty else { continue }
+            draftsByDiscussion[id, default: []].append(entry)
+        }
         var matchedDrafts: Set<Int> = []
         for (index, discussion) in discussions.enumerated() {
             let notes = discussion.notes.filter { $0.system != true }
             guard !notes.isEmpty else { continue }
-            let pending = drafts.enumerated().filter { _, draft in
-                guard let id = discussion.id, !id.isEmpty else { return false }
-                return draft.discussionID == id
-            }
+            let pending = discussion.id.flatMap { draftsByDiscussion[$0] } ?? []
             matchedDrafts.formUnion(pending.map(\.offset))
             let resolvable = notes.filter { $0.resolvable == true }
             let state: State = resolvable.isEmpty ? .general
                 : resolvable.allSatisfy { $0.resolved == true } ? .resolved : .open
             let position = notes.compactMap(\.position).first
             let location = MRDiscussionLocation(position: position)?.full
-            let noteIDs = Set(notes.compactMap(\.id))
+            var threadOrigins: [Int: Origin] = [:]
+            for note in notes {
+                if let id = note.id, let origin = origins[id] { threadOrigins[id] = origin }
+            }
             threads.append(.init(id: discussion.id.map { "discussion/\($0)" } ?? "unidentified/\(index)",
                 discussionID: discussion.id, notes: notes, drafts: pending.map(\.element), state: state,
-                location: location, origins: origins.filter { noteIDs.contains($0.key) }))
+                location: location, origins: threadOrigins))
         }
         // Group by GitLab state without changing server order within a group.
         threads = [State.open, .resolved, .general].flatMap { state in
@@ -104,5 +134,20 @@ struct MRDiscussionLocation: Equatable {
         guard let path = position?.newPath ?? position?.oldPath else { return nil }
         let line = position?.newLine ?? position?.oldLine
         full = line.map { "\(path):\($0)" } ?? path
+    }
+}
+
+@MainActor
+enum MRDiscussionTimestamp {
+    private static let fractional: ISO8601DateFormatter = {
+        let formatter = ISO8601DateFormatter()
+        formatter.formatOptions = [.withInternetDateTime, .withFractionalSeconds]
+        return formatter
+    }()
+    private static let wholeSeconds = ISO8601DateFormatter()
+
+    static func display(_ raw: String) -> String {
+        let date = fractional.date(from: raw) ?? wholeSeconds.date(from: raw)
+        return date?.formatted(date: .abbreviated, time: .shortened) ?? raw
     }
 }

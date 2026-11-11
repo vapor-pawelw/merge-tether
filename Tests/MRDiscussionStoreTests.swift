@@ -88,6 +88,69 @@ struct MRDiscussionStoreTests {
         #expect(store.origins[8] == .verifiedAssistant)
     }
 
+    @Test(arguments: [
+        ("ai_assisted", "high", "ai"), ("ai_assisted", "very_high", "ai"),
+        ("manual_likely", "high", "human"), ("manual_likely", "very_high", "human"),
+        ("uncertain", "high", "uncertain"), ("uncertain", "uncertain", "uncertain"),
+        ("ai_assisted", "uncertain", "uncertain"), ("manual_likely", "uncertain", "uncertain")
+    ])
+    func displaysOnlyTheRecordedClassificationWithoutChangingAIEligibility(classification: String, confidence: String, expected: String) async throws {
+        // given
+        let directory = FileManager.default.temporaryDirectory.appending(path: UUID().uuidString)
+        defer { try? FileManager.default.removeItem(at: directory) }
+        let notes = try threads()
+        let note = try #require(notes.first?.notes.first)
+        let record = assessment(note: note, classification: classification, confidence: confidence)
+        try save(record, in: directory)
+        let store = MRDiscussionStore(load: { _ in notes }, assessmentDirectory: directory)
+        // when
+        await store.refresh(target: target, glab: glab())
+        // then
+        let origin = try #require(store.origins[3])
+        switch expected {
+        case "ai": #expect(origin == .assessed(evidence: record.evidence))
+        case "human": #expect(origin == .humanLikely(evidence: record.evidence))
+        default: #expect(origin == .uncertain(evidence: record.evidence))
+        }
+        #expect(AICommentAssessmentStore.isAI(note, host: target.host, projectID: 1, iid: 2, in: directory)
+            == (classification == "ai_assisted" && confidence != "uncertain"))
+    }
+
+    @Test(arguments: ["body", "author", "account", "host", "project", "mr", "note", "criteria"])
+    func staleOrMismatchedManualEvidenceNeverBecomesAHumanBadge(mismatch: String) async throws {
+        // given
+        let directory = FileManager.default.temporaryDirectory.appending(path: UUID().uuidString)
+        defer { try? FileManager.default.removeItem(at: directory) }
+        let notes = try threads()
+        let note = try #require(notes.first?.notes.first)
+        let record = AICommentAssessment(version: 2, host: mismatch == "host" ? "other.example.test" : target.host,
+            projectID: mismatch == "project" ? 9 : 1, iid: mismatch == "mr" ? 9 : 2, noteID: mismatch == "note" ? 9 : 3,
+            bodySHA256: AICommentAssessmentStore.digest(mismatch == "body" ? "Edited" : note.body!), confidence: "high",
+            evidence: "Spontaneous personal composition", classification: "manual_likely",
+            criteriaVersion: mismatch == "criteria" ? AICommentOriginAssessor.criteriaVersion - 1 : AICommentOriginAssessor.criteriaVersion,
+            username: mismatch == "account" ? "other" : target.username, authorID: mismatch == "author" ? 99 : note.author?.id)
+        try save(record, in: directory)
+        let store = MRDiscussionStore(load: { _ in notes }, assessmentDirectory: directory)
+        // when
+        await store.refresh(target: target, glab: glab())
+        // then
+        #expect(store.hasLoaded)
+        #expect(store.origins.isEmpty)
+    }
+
+    private func assessment(note: GitLabMergeRequestDiscussion.Note, classification: String, confidence: String) -> AICommentAssessment {
+        .init(version: 2, host: target.host, projectID: 1, iid: 2, noteID: 3,
+              bodySHA256: AICommentAssessmentStore.digest(note.body!), confidence: confidence,
+              evidence: "Recorded origin evidence", classification: classification,
+              criteriaVersion: AICommentOriginAssessor.criteriaVersion, username: target.username, authorID: note.author?.id)
+    }
+
+    private func save(_ record: AICommentAssessment, in directory: URL) throws {
+        let path = AICommentAssessmentStore.fileURL(host: target.host, projectID: 1, iid: 2, noteID: 3, in: directory)
+        try FileManager.default.createDirectory(at: path.deletingLastPathComponent(), withIntermediateDirectories: true)
+        try JSONEncoder().encode(record).write(to: path)
+    }
+
     @Test func liveAccountMismatchClearsPreviouslyCachedDiscussion() async throws {
         let changedAccount = Flag()
         let notes = try threads()

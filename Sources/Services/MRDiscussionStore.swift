@@ -49,9 +49,15 @@ final class MRDiscussionStore {
             var assessed = await Task.detached {
                 var origins: [Int: MRDiscussionSnapshot.Origin] = [:]
                 for note in result.flatMap(\.notes) where note.system != true {
-                    if let id = note.id, let record = AICommentAssessmentStore.assessment(for: note,
-                        host: requested.host, projectID: requested.projectID, iid: requested.iid, in: directory) {
-                        origins[id] = .assessed(evidence: record.evidence)
+                    if let id = note.id, id > 0, let record = AICommentAssessmentStore.result(for: note,
+                        host: requested.host, projectID: requested.projectID, iid: requested.iid, in: directory),
+                       record.username == nil || record.username == requested.username {
+                        if record.qualifiesAsAI {
+                            origins[id] = .assessed(evidence: record.evidence)
+                        } else if record.criteriaVersion == AICommentOriginAssessor.criteriaVersion {
+                            origins[id] = record.classification == "manual_likely" && record.confidence != "uncertain"
+                                ? .humanLikely(evidence: record.evidence) : .uncertain(evidence: record.evidence)
+                        }
                     }
                 }
                 return origins

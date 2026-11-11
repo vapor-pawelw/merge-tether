@@ -194,7 +194,7 @@
         "en": {
           "stringUnit": {
             "state": "translated",
-            "value": "An AI badge means a verified agent identity or a high-confidence assessment that this comment was written with AI assistance. A person’s comment can qualify. No badge does not mean it was written manually."
+            "value": "AI means a verified assistant or high-confidence AI-assisted assessment. AI uncertain means an explicitly uncertain assessment. Human means likely manual writing with high confidence, not proven authorship. A thread badge summarizes all published posts; system events and private drafts are excluded. Mixed AI/Human threads or missing current assessments have no thread badge. Badges do not grant publication permission."
           }
         }
       }
@@ -217,6 +217,83 @@
           "stringUnit": {
             "state": "translated",
             "value": "Assessed as written with AI assistance with high or very high confidence for this exact comment. This does not approve its content or independently allow publication."
+          }
+        }
+      }
+    },
+    "mrDiscussions.aiUncertain": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "AI uncertain"
+          }
+        }
+      }
+    },
+    "mrDiscussions.human": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Human"
+          }
+        }
+      }
+    },
+    "mrDiscussions.aiUncertainHelp": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "The assessment has insufficient or mixed evidence, or uncertain confidence, for this exact comment. This is not a confirmed AI origin and does not qualify it for AI-only automatic publication."
+          }
+        }
+      }
+    },
+    "mrDiscussions.humanHelp": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Assessed as likely written manually with high or very high confidence for this exact comment. This is a probabilistic judgment, not proof of human authorship, and does not qualify it for AI-only automatic publication."
+          }
+        }
+      }
+    },
+    "mrDiscussions.threadAiHelp": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Every published post and reply has a verified assistant identity or a current high-confidence AI-assisted assessment. System events and private drafts are excluded. This does not approve the thread or change publication permissions."
+          }
+        }
+      }
+    },
+    "mrDiscussions.threadUncertainHelp": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Every published post has a current assessment or verified assistant identity, at least one assessment is explicitly uncertain, and none is confidently assessed as manual. The thread is not confirmed as entirely AI-assisted. System events and private drafts are excluded."
+          }
+        }
+      }
+    },
+    "mrDiscussions.threadHumanHelp": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Every published post and reply is assessed as likely written manually with high or very high confidence. This is not proof of human authorship. System events and private drafts are excluded."
           }
         }
       }

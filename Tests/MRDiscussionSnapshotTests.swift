@@ -86,6 +86,153 @@ struct MRDiscussionSnapshotTests {
         }
     }
 
+    @Test func wholeThreadAIRequiresCurrentEvidenceForEveryPublishedPost() throws {
+        let notes = #"[{"id":1,"body":"Opening"},{"id":2,"body":"Reply"},{"id":3,"system":true,"body":"Resolved"}]"#
+        let allAI = try presentationThread(notes: notes, origins: [1: .verifiedAssistant, 2: .assessed(evidence: "Current assessment")])
+        #expect(allAI.originBadge == .ai)
+        let nonAIOrigins: [[Int: MRDiscussionSnapshot.Origin]] = [
+            [1: .verifiedAssistant],
+            [1: .verifiedAssistant, 2: .humanLikely(evidence: "Conversational reply")],
+            [1: .verifiedAssistant, 2: .uncertain(evidence: "Mixed signals")]
+        ]
+        for origins in nonAIOrigins {
+            #expect(try presentationThread(notes: notes, origins: origins).originBadge != .ai)
+        }
+        #expect(try presentationThread(notes: notes, origins: [:]).originBadge == nil)
+    }
+
+    @Test func threadHumanRequiresAffirmativeManualEvidenceForEveryPost() throws {
+        let notes = #"[{"id":1,"body":"Opening"},{"id":2,"body":"Reply"}]"#
+        let manual: MRDiscussionSnapshot.Origin = .humanLikely(evidence: "Spontaneous personal exchange")
+        #expect(try presentationThread(notes: notes, origins: [1: manual, 2: manual]).originBadge == .human)
+        #expect(try presentationThread(notes: notes, origins: [1: manual]).originBadge == nil)
+        #expect(try presentationThread(notes: notes, origins: [1: manual, 2: .uncertain(evidence: "Insufficient evidence")]).originBadge == nil)
+    }
+
+    @Test func knownMixturesAndMissingEvidenceHaveNoBadgeWhileExplicitUncertaintyRemainsVisible() throws {
+        let notes = #"[{"id":1,"body":"Opening"},{"id":2,"body":"Reply"}]"#
+        #expect(try presentationThread(notes: notes, origins: [1: .verifiedAssistant, 2: .humanLikely(evidence: "Manual")]).originBadge == nil)
+        #expect(try presentationThread(notes: notes, origins: [1: .uncertain(evidence: "Mixed signals"), 2: .uncertain(evidence: "Insufficient evidence")]).originBadge == .uncertain)
+        #expect(try presentationThread(notes: notes, origins: [1: .verifiedAssistant, 2: .uncertain(evidence: "Insufficient evidence")]).originBadge == .uncertain)
+        #expect(try presentationThread(notes: notes, origins: [1: .uncertain(evidence: "Mixed signals")]).originBadge == nil)
+        #expect(try presentationThread(notes: #"[{"id":1,"body":"Opening"},{"body":"Reply without an ID"}]"#, origins: [1: .verifiedAssistant]).originBadge == nil)
+    }
+
+    @Test func systemEventsAndPrivateDraftsDoNotParticipateInPublishedThreadOrigin() throws {
+        let notes = #"[{"id":1,"body":"Opening"},{"id":2,"system":true,"body":"Pushed"}]"#
+        let drafts = #"[{"id":10,"author_id":9,"note":"Private reply","discussion_id":"thread"}]"#
+        let thread = try presentationThread(notes: notes, drafts: drafts, origins: [1: .verifiedAssistant, 2: .humanLikely(evidence: "System event")])
+        #expect(thread.originBadge == .ai)
+        #expect(thread.drafts.count == 1)
+        let noPosts = MRDiscussionSnapshot.Thread(id: "system", discussionID: "system", notes: [], drafts: [], state: .general, location: nil, origins: [:])
+        #expect(noPosts.originBadge == nil)
+    }
+
+    @Test func indexedDraftMatchingPreservesAmbiguousIDsPositionsAndOrphanOrder() throws {
+        // given
+        let discussions = try JSONDecoder().decode([GitLabMergeRequestDiscussion].self, from: Data(#"""
+        [
+          {"id":"same","notes":[{"id":10,"body":"Open","resolvable":true,"resolved":false},{"id":10,"body":"Repeated ID"}]},
+          {"notes":[{"id":20,"body":"Unidentified"}]},
+          {"id":"","notes":[{"id":30,"body":"Empty ID","resolvable":true,"resolved":true}]},
+          {"id":"system","notes":[{"id":40,"body":"Pushed","system":true}]},
+          {"id":"same","notes":[{"id":50,"body":"Duplicate discussion"}]}
+        ]
+        """#.utf8))
+        let drafts = try JSONDecoder().decode([GitLabDraftNote].self, from: Data(#"""
+        [
+          {"id":11,"author_id":9,"note":"First","discussion_id":"same"},
+          {"id":12,"author_id":9,"note":"General"},
+          {"id":13,"author_id":9,"note":"System-only thread","discussion_id":"system"},
+          {"id":14,"author_id":9,"note":"Empty thread ID","discussion_id":""},
+          {"id":15,"author_id":9,"note":"Missing thread","discussion_id":"missing"},
+          {"id":11,"author_id":9,"note":"Duplicate draft ID","discussion_id":"same"},
+          {"author_id":9,"note":"No draft ID","discussion_id":"same"}
+        ]
+        """#.utf8))
+        let origins: [Int: MRDiscussionSnapshot.Origin] = [10: .verifiedAssistant, 30: .assessed(evidence: "AI"),
+            40: .humanLikely(evidence: "System"), 50: .humanLikely(evidence: "Manual"), 999: .verifiedAssistant]
+        // when
+        let snapshot = MRDiscussionSnapshot(discussions: discussions, drafts: drafts, origins: origins)
+        // then
+        #expect(snapshot.threads.map(\.id) == ["discussion/same", "discussion/", "unidentified/1", "discussion/same"])
+        #expect(snapshot.threads.map(\.state) == [.open, .resolved, .general, .general])
+        #expect(snapshot.threads[0].notes.compactMap(\.id) == [10, 10])
+        #expect(snapshot.threads[0].origins == [10: .verifiedAssistant])
+        #expect(snapshot.threads[1].origins == [30: .assessed(evidence: "AI")])
+        #expect(snapshot.threads[2].origins.isEmpty)
+        #expect(snapshot.threads[3].origins == [50: .humanLikely(evidence: "Manual")])
+        #expect(snapshot.threads[0].drafts == [drafts[0], drafts[5], drafts[6]])
+        #expect(snapshot.threads[3].drafts == snapshot.threads[0].drafts)
+        #expect(snapshot.threads[1].drafts.isEmpty && snapshot.threads[2].drafts.isEmpty)
+        #expect(snapshot.standaloneDrafts == Array(drafts[1...4]))
+    }
+
+    @Test func rebuildingTheSameThreadIDsUsesCurrentDraftVersionsOriginAndServerOrder() throws {
+        // given
+        let original = try presentationThread(notes: #"[{"id":1,"body":"Opening"},{"id":2,"body":"Reply","author":{"id":9,"username":"me"}}]"#,
+            drafts: #"[{"id":10,"author_id":9,"note":"Before","discussion_id":"thread"}]"#,
+            origins: [1: .verifiedAssistant, 2: .assessed(evidence: "Previous body")])
+        var selection = DraftPublicationSelection(selectingAll: original.drafts)
+        // when
+        let edited = try presentationThread(notes: #"[{"id":1,"body":"Edited opening"},{"id":2,"body":"Edited reply","author":{"id":9,"username":"me"}},{"id":3,"body":"New incoming","author":{"id":7,"username":"reviewer"}}]"#,
+            drafts: #"[{"id":11,"author_id":9,"note":"New first","discussion_id":"thread"},{"id":10,"author_id":9,"note":"Edited second","discussion_id":"thread"}]"#,
+            origins: [2: .humanLikely(evidence: "Current body")])
+        selection.reconcile(with: edited.drafts)
+        // then
+        #expect(edited.id == original.id)
+        #expect(edited.notes.compactMap(\.id) == [1, 2, 3])
+        #expect(edited.origins == [2: .humanLikely(evidence: "Current body")])
+        #expect(edited.originBadge == nil && original.originBadge == .ai)
+        #expect(edited.drafts.compactMap(\.id) == [11, 10])
+        #expect(edited.drafts.last?.note == "Edited second")
+        #expect(selection.selectedDrafts(from: edited.drafts).isEmpty)
+        #expect(edited.replySummary(currentUsername: "me").publishedReply == .earlier)
+        #expect(edited.replySummary(currentUsername: "other").publishedReply == .none)
+    }
+
+    @Test(arguments: [
+        ("AAA", MRDiscussionSnapshot.OriginBadge.ai), ("HHH", .human), ("UUU", .uncertain),
+        ("AAU", .uncertain), ("UAA", .uncertain), ("AUA", .uncertain)
+    ])
+    func aggregateOriginRemainsConservativeAcrossPostOrder(sequence: String, expected: MRDiscussionSnapshot.OriginBadge) throws {
+        let origins = originSequence(sequence)
+        let thread = try presentationThread(notes: #"[{"id":1},{"id":2},{"id":3}]"#, origins: origins)
+        #expect(thread.originBadge == expected)
+    }
+
+    @Test(arguments: ["AAH", "HAA", "AHA", "UUH", "HUU", "UHU", "AA?", "?AA", "HH?", "?HH", "UU?", "?UU"])
+    func mixedHumanOrMissingEvidenceNeverGetsAnAggregateBadge(_ sequence: String) throws {
+        let thread = try presentationThread(notes: #"[{"id":1},{"id":2},{"id":3}]"#, origins: originSequence(sequence))
+        #expect(thread.originBadge == nil)
+    }
+
+    private func originSequence(_ sequence: String) -> [Int: MRDiscussionSnapshot.Origin] {
+        var origins: [Int: MRDiscussionSnapshot.Origin] = [:]
+        for (index, value) in sequence.enumerated() {
+            switch value {
+            case "A": origins[index + 1] = .verifiedAssistant
+            case "H": origins[index + 1] = .humanLikely(evidence: "Manual")
+            case "U": origins[index + 1] = .uncertain(evidence: "Mixed signals")
+            default: break
+            }
+        }
+        return origins
+    }
+
+    @MainActor @Test(arguments: [
+        ("1970-01-01T00:00:00Z", 0.0), ("1970-01-01T00:00:00.125Z", 0.125),
+        ("1970-01-01T01:00:00+01:00", 0.0), ("1970-01-01T01:00:00.125+01:00", 0.125)
+    ])
+    func timestampsPreserveBothISOFormatsBeforeCurrentLocaleFormatting(raw: String, epoch: Double) {
+        #expect(MRDiscussionTimestamp.display(raw) == Date(timeIntervalSince1970: epoch).formatted(date: .abbreviated, time: .shortened))
+    }
+
+    @MainActor @Test(arguments: ["", "invalid", "1970-01-01", "  "])
+    func unavailableTimestampsRemainLiteral(_ raw: String) {
+        #expect(MRDiscussionTimestamp.display(raw) == raw)
+    }
+
     private func presentationThread(notes: String, drafts: String = "[]", origins: [Int: MRDiscussionSnapshot.Origin] = [:]) throws -> MRDiscussionSnapshot.Thread {
         let discussions = try JSONDecoder().decode([GitLabMergeRequestDiscussion].self, from: Data("[{\"id\":\"thread\",\"notes\":\(notes)}]".utf8))
         let pending = try JSONDecoder().decode([GitLabDraftNote].self, from: Data(drafts.utf8))

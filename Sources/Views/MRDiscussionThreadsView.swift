@@ -90,7 +90,6 @@ private struct MRDiscussionThreadView: View {
     var onDelete: ((GitLabDraftNote) -> Void)? = nil
     @State private var isExpanded = false
 
-    private var comments: [GitLabMergeRequestDiscussion.Note] { thread.notes.filter { $0.system != true } }
     private var stateLabel: LocalizedStringResource {
         switch thread.state {
         case .open: .MRDiscussions.mrDiscussionsOpen
@@ -107,7 +106,10 @@ private struct MRDiscussionThreadView: View {
     }
 
     var body: some View {
-        VStack(alignment: .leading, spacing: 12) {
+        let comments = thread.notes.filter { $0.system != true }
+        let summary = thread.replySummary(currentUsername: currentUsername)
+        let originBadge = thread.originBadge
+        return VStack(alignment: .leading, spacing: 12) {
             if draftsFirst { draftRows }
             DisclosureGroup(isExpanded: $isExpanded) {
                 if isExpanded {
@@ -122,7 +124,7 @@ private struct MRDiscussionThreadView: View {
                     .padding(.top, 10)
                 }
             } label: {
-                threadHeader
+                threadHeader(firstComment: comments.first, summary: summary, originBadge: originBadge)
             }
             .disclosureGroupStyle(MRDiscussionDisclosureStyle())
         }
@@ -131,9 +133,10 @@ private struct MRDiscussionThreadView: View {
         .onAppear { if initiallyExpanded { isExpanded = true } }
     }
 
-    private var threadHeader: some View {
-        let summary = thread.replySummary(currentUsername: currentUsername)
-        return VStack(alignment: .leading, spacing: 7) {
+    private func threadHeader(firstComment: GitLabMergeRequestDiscussion.Note?,
+                              summary: MRDiscussionSnapshot.Thread.ReplySummary,
+                              originBadge: MRDiscussionSnapshot.OriginBadge?) -> some View {
+        VStack(alignment: .leading, spacing: 7) {
             HStack(alignment: .firstTextBaseline, spacing: 8) {
                 HStack(spacing: 4) {
                     if thread.state == .resolved { Image(systemName: "checkmark") }
@@ -148,29 +151,35 @@ private struct MRDiscussionThreadView: View {
                         .layoutPriority(1)
                 }
                 Spacer(minLength: 4)
-                if let posted = comments.first?.createdAt {
-                    Text(verbatim: discussionTimestamp(posted))
+                if let posted = firstComment?.createdAt {
+                    Text(verbatim: MRDiscussionTimestamp.display(posted))
                         .font(.caption).foregroundStyle(.secondary).help(posted)
                         .lineLimit(1)
                 }
             }
             ViewThatFits(in: .horizontal) {
                 HStack(alignment: .firstTextBaseline, spacing: 10) {
-                    MRDiscussionAuthorView(author: comments.first?.author)
-                        .foregroundStyle(thread.state == .resolved ? Color.secondary : Color.primary)
+                    threadAuthor(firstComment?.author, badge: originBadge)
                     replyStatus(summary)
                 }
                 VStack(alignment: .leading, spacing: 5) {
-                    MRDiscussionAuthorView(author: comments.first?.author)
-                        .foregroundStyle(thread.state == .resolved ? Color.secondary : Color.primary)
+                    threadAuthor(firstComment?.author, badge: originBadge)
                     replyStatus(summary)
                 }
             }
-            if !isExpanded, let body = comments.first?.body {
+            if !isExpanded, let body = firstComment?.body {
                 Text(verbatim: body).font(.callout)
                     .foregroundStyle(thread.state == .resolved ? Color.secondary : Color.primary).lineLimit(2)
                     .padding(.top, 1)
             }
+        }
+    }
+
+    private func threadAuthor(_ author: GitLabWorkflowUser?, badge: MRDiscussionSnapshot.OriginBadge?) -> some View {
+        HStack(alignment: .firstTextBaseline, spacing: 6) {
+            MRDiscussionAuthorView(author: author)
+                .foregroundStyle(thread.state == .resolved ? Color.secondary : Color.primary)
+            if let badge { MRDiscussionOriginBadge(badge: badge) }
         }
     }
 
@@ -229,10 +238,10 @@ private struct MRDiscussionNoteView: View {
         VStack(alignment: .leading, spacing: 7) {
             HStack(alignment: .firstTextBaseline, spacing: 8) {
                 MRDiscussionAuthorView(author: note.author)
-                if let origin { MRDiscussionAIBadge(origin: origin) }
+                if let origin { MRDiscussionOriginBadge(badge: origin.badge, origin: origin) }
                 Spacer(minLength: 4)
                 if let posted = note.createdAt {
-                    Text(verbatim: discussionTimestamp(posted)).font(.caption).foregroundStyle(.secondary).help(posted)
+                    Text(verbatim: MRDiscussionTimestamp.display(posted)).font(.caption).foregroundStyle(.secondary).help(posted)
                 }
                 if let id = note.id, id > 0, let url = discussionNoteURL(mergeRequestURL, id: id) {
                     Link(destination: url) { Image(systemName: "arrow.up.right.square") }
@@ -284,18 +293,55 @@ private struct MRDiscussionDraftView: View {
     }
 }
 
-private struct MRDiscussionAIBadge: View {
-    let origin: MRDiscussionSnapshot.Origin
+private struct MRDiscussionOriginBadge: View {
+    let badge: MRDiscussionSnapshot.OriginBadge
+    var origin: MRDiscussionSnapshot.Origin? = nil
+
+    private var title: LocalizedStringResource {
+        switch badge {
+        case .ai: .MRDiscussions.mrDiscussionsAi
+        case .uncertain: .MRDiscussions.mrDiscussionsAiUncertain
+        case .human: .MRDiscussions.mrDiscussionsHuman
+        }
+    }
+    private var color: Color {
+        switch badge {
+        case .ai: .purple
+        case .uncertain: .orange
+        case .human: .teal
+        }
+    }
+    private var symbol: String {
+        switch badge {
+        case .ai: "sparkles"
+        case .uncertain: "questionmark"
+        case .human: "person.fill"
+        }
+    }
     private var explanation: Text {
         switch origin {
         case .verifiedAssistant: Text(.MRDiscussions.mrDiscussionsAiVerified)
         case .assessed(let evidence): Text(.MRDiscussions.mrDiscussionsAiAssessed) + Text(verbatim: "\n" + evidence)
+        case .uncertain(let evidence): Text(.MRDiscussions.mrDiscussionsAiUncertainHelp) + Text(verbatim: "\n" + evidence)
+        case .humanLikely(let evidence): Text(.MRDiscussions.mrDiscussionsHumanHelp) + Text(verbatim: "\n" + evidence)
+        case nil:
+            switch badge {
+            case .ai: Text(.MRDiscussions.mrDiscussionsThreadAiHelp)
+            case .uncertain: Text(.MRDiscussions.mrDiscussionsThreadUncertainHelp)
+            case .human: Text(.MRDiscussions.mrDiscussionsThreadHumanHelp)
+            }
         }
     }
     var body: some View {
-        Text(.MRDiscussions.mrDiscussionsAi).font(.caption2.weight(.semibold))
-            .foregroundStyle(.blue).padding(.horizontal, 5).padding(.vertical, 2)
-            .background(Color.blue.opacity(0.09), in: Capsule()).help(explanation)
+        Label { Text(title) } icon: { Image(systemName: symbol) }
+            .font(.caption2.weight(.semibold))
+            .foregroundStyle(color).padding(.horizontal, 6).padding(.vertical, 2)
+            .background(color.opacity(0.1), in: Capsule())
+            .fixedSize(horizontal: true, vertical: false)
+            .help(explanation)
+            .accessibilityElement(children: .ignore)
+            .accessibilityLabel(Text(title))
+            .accessibilityHint(explanation)
     }
 }
 
@@ -395,12 +441,6 @@ private struct MRDiscussionReplyBadge: View {
     }
 }
 
-private func discussionTimestamp(_ raw: String) -> String {
-    let formatter = ISO8601DateFormatter()
-    formatter.formatOptions = [.withInternetDateTime, .withFractionalSeconds]
-    let date = formatter.date(from: raw) ?? ISO8601DateFormatter().date(from: raw)
-    return date?.formatted(date: .abbreviated, time: .shortened) ?? raw
-}
 
 private func discussionNoteURL(_ url: URL, id: Int) -> URL? {
     var components = URLComponents(url: url, resolvingAgainstBaseURL: false)
