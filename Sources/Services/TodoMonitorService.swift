@@ -404,6 +404,7 @@ final class TodoMonitorService {
             settings.glabPath = glab.glabPath
         }
         await glab.recheck()
+        guard !Task.isCancelled else { return }
         settings.glabPath = glab.glabPath
         settings.resolvedHost = glab.resolvedHost
         settings.save()
@@ -863,10 +864,10 @@ final class TodoMonitorService {
     }
 
     func refreshNow() async {
+        guard !Task.isCancelled, todoStore.beginRefresh() else { return }
         retireLegacyGUIQueueIfNeeded()
         refreshAvailableAssistants()
         refreshAssistantRelay()
-        guard todoStore.beginRefresh() else { return }
         defer {
             todoStore.finishRefresh()
             boardAttentionPresenter.updateAttention(pendingUserAttention)
@@ -878,6 +879,7 @@ final class TodoMonitorService {
         if glab.currentUsername == nil || lastError == .notAuthenticated {
             if await recheckIntegration() != nil { return }
         }
+        guard !Task.isCancelled else { return }
         authoredMergeRequests.refreshIfNeeded()
         guard let fetched = await todoStore.fetch() else { return }
         let host = fetched.host
@@ -913,8 +915,7 @@ final class TodoMonitorService {
         case .failure(let err):
             Log.monitor.error("Refresh failed: \(String(describing: err), privacy: .public)")
             lastError = err
-            // Intentionally keep allTodos as-is: a stale list is more useful
-            // than an empty one while the user fixes their glab auth.
+            // A transient read failure retains the last account-bound inbox.
         }
     }
 
@@ -1272,7 +1273,9 @@ final class TodoMonitorService {
     /// Refreshes glab authentication and shares the current host with settings.
     @discardableResult
     func recheckIntegration() async -> GlabError? {
-        let error = await glab.recheck()
+        let probeError = await glab.recheck()
+        guard !Task.isCancelled else { return probeError }
+        let error = probeError ?? (glab.currentUsername == nil ? .notAuthenticated : nil)
         lastError = error
         settings.resolvedHost = glab.resolvedHost
         settings.save()

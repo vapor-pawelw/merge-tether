@@ -1,0 +1,26 @@
+{
+  "sourceLanguage": "en",
+  "strings": {
+    "connectionTitle": { "extractionState": "manual", "localizations": { "en": { "stringUnit": { "state": "translated", "value": "Can’t reach GitLab" } } } },
+    "connectionHelp": { "extractionState": "manual", "localizations": { "en": { "stringUnit": { "state": "translated", "value": "Check your connection or VPN, then retry. Your last available data stays visible." } } } },
+    "timeoutTitle": { "extractionState": "manual", "localizations": { "en": { "stringUnit": { "state": "translated", "value": "GitLab took too long to respond" } } } },
+    "timeoutHelp": { "extractionState": "manual", "localizations": { "en": { "stringUnit": { "state": "translated", "value": "Try the refresh again. Your last available data stays visible." } } } },
+    "signInTitle": { "extractionState": "manual", "localizations": { "en": { "stringUnit": { "state": "translated", "value": "GitLab sign-in required" } } } },
+    "signInHelp": { "extractionState": "manual", "localizations": { "en": { "stringUnit": { "state": "translated", "value": "Sign in with glab, then recheck the connection." } } } },
+    "hostTitle": { "extractionState": "manual", "localizations": { "en": { "stringUnit": { "state": "translated", "value": "Check the GitLab host" } } } },
+    "hostHelp": { "extractionState": "manual", "localizations": { "en": { "stringUnit": { "state": "translated", "value": "The default host has no verified sign-in. Review your Integration settings." } } } },
+    "missingTitle": { "extractionState": "manual", "localizations": { "en": { "stringUnit": { "state": "translated", "value": "GitLab CLI is missing" } } } },
+    "missingHelp": { "extractionState": "manual", "localizations": { "en": { "stringUnit": { "state": "translated", "value": "Set up glab to connect this app to GitLab." } } } },
+    "permissionsTitle": { "extractionState": "manual", "localizations": { "en": { "stringUnit": { "state": "translated", "value": "GitLab denied access" } } } },
+    "permissionsHelp": { "extractionState": "manual", "localizations": { "en": { "stringUnit": { "state": "translated", "value": "Review your account’s permissions and token scope in Integration settings." } } } },
+    "responseTitle": { "extractionState": "manual", "localizations": { "en": { "stringUnit": { "state": "translated", "value": "GitLab returned an unreadable response" } } } },
+    "otherTitle": { "extractionState": "manual", "localizations": { "en": { "stringUnit": { "state": "translated", "value": "Couldn’t refresh GitLab" } } } },
+    "retryHelp": { "extractionState": "manual", "localizations": { "en": { "stringUnit": { "state": "translated", "value": "Retry the refresh or inspect the technical details below." } } } },
+    "retry": { "extractionState": "manual", "localizations": { "en": { "stringUnit": { "state": "translated", "value": "Retry" } } } },
+    "signIn": { "extractionState": "manual", "localizations": { "en": { "stringUnit": { "state": "translated", "value": "Sign in…" } } } },
+    "setup": { "extractionState": "manual", "localizations": { "en": { "stringUnit": { "state": "translated", "value": "Set up glab…" } } } },
+    "integrationSettings": { "extractionState": "manual", "localizations": { "en": { "stringUnit": { "state": "translated", "value": "Review connection…" } } } },
+    "details": { "extractionState": "manual", "localizations": { "en": { "stringUnit": { "state": "translated", "value": "Technical details" } } } }
+  },
+  "version": "1.0"
+}

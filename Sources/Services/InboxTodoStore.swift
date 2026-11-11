@@ -57,11 +57,12 @@ final class InboxTodoStore {
 
     /// A stale response must not replace the inbox after any account-epoch transition.
     func fetch() async -> Fetch? {
+        guard !Task.isCancelled else { return nil }
         let username = glab.currentUsername
         let host = username == nil ? nil : glab.resolvedHost
         let revision = glab.accountRevision
         let result = await glab.fetchTodos(host: host)
-        guard glab.accountRevision == revision, glab.currentUsername == username,
+        guard !Task.isCancelled, glab.accountRevision == revision, glab.currentUsername == username,
               username == nil || glab.resolvedHost == host else { return nil }
         return Fetch(host: host, username: username, revision: revision,
             result: result.map { fetched in fetched.filter { !acknowledgedDuringFetch.contains($0.id) } })

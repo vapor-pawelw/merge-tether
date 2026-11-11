@@ -142,7 +142,10 @@ struct CommandCenterView: View {
     private var statusBanners: some View {
         PersistenceDegradedBanner(settings: monitor.settings)
         if let error = monitor.lastError {
-            ErrorBannerView(error: error) { openWindow(id: "onboarding") }
+            ErrorBannerView(error: error, authStatus: monitor.glab.authStatus, isRetrying: monitor.isLoading,
+                onRetry: { Task { await monitor.refreshManually() } },
+                onOpenSetup: { openWindow(id: "onboarding") },
+                onOpenIntegration: { SettingsNavigation.shared.showIntegration { openSettings() } })
         } else if !showActivity, monitor.boardRefreshState == .unavailable {
             HStack {
                 Label { Text(.Board.boardInitialSyncFailed) } icon: { Image(systemName: "exclamationmark.triangle") }

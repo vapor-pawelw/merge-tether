@@ -113,6 +113,22 @@ struct InboxTodoStoreTests {
         }
     }
 
+    @Test func cancelledFetchDoesNotPublishAnErrorOrReplaceThePreviousInbox() async throws {
+        try await fixture { store, gitlab, _ in
+            try await fetch(store)
+            gitlab.beforeCommand = { _ in
+                gitlab.write("fetch-started")
+                try await gitlab.waitFor("release-fetch")
+            }
+            let pending = Task { await store.fetch() }
+            try await gitlab.waitFor("fetch-started")
+            pending.cancel()
+            gitlab.write("release-fetch")
+            #expect(await pending.value == nil)
+            #expect(store.lastError == nil && store.currentAccountTodos.map(\.id) == [401])
+        }
+    }
+
     @Test func undoRestoresVisibleTodoWithoutAcknowledgingIt() async throws {
         try await fixture { store, gitlab, _ in
             try await fetch(store)

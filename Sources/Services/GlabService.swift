@@ -162,8 +162,12 @@ final class GlabService {
             return .glabNotInstalled
         }
 
+        let revision = accountRevision
         let probedHost = await resolveHost(executable: glabPath)
-        switch await probeAuthedHosts(executable: glabPath, defaultHost: probedHost ?? resolvedHost) {
+        guard self.glabPath == glabPath, accountRevision == revision else { return nil }
+        let result = await probeAuthedHosts(executable: glabPath, defaultHost: probedHost ?? resolvedHost)
+        guard self.glabPath == glabPath, accountRevision == revision else { return nil }
+        switch result {
         case .success(let hosts): authedHosts = hosts
         case .failure(let error): return error
         }

@@ -14,6 +14,12 @@ struct OnboardingView: View {
         self.monitor = monitor
         _assistant = State(initialValue: monitor.settings.automation.assistant)
         _automationChoice = State(initialValue: AutomationPreset.onboardingDefault(for: monitor.settings.automation.packageDecision))
+        _step = State(initialValue: Self.startingStep(hasCompletedSetup: monitor.settings.onboardingCompleted,
+            cliAvailable: monitor.glab.glabPath != nil))
+    }
+
+    static func startingStep(hasCompletedSetup: Bool, cliAvailable: Bool) -> Step {
+        hasCompletedSetup && cliAvailable ? .glabAuth : .glabInstall
     }
 
     enum Step: Int, CaseIterable {

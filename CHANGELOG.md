@@ -6,6 +6,7 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 
 ## Unreleased
 
+- Show compact GitLab connection warnings with retry or targeted setup actions and expandable diagnostics, preserving the previous inbox during network failures.
 - Recognize exactly recorded app-generated comments and their AI-only threads without reclassification, while keeping manual comments and publication permissions separate.
 
 - Restore manual merge actions when GitLab's list omits permissions or pipeline details, using the matching checked MR status and explaining remaining blockers.

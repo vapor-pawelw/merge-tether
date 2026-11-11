@@ -7,6 +7,11 @@ final class SettingsNavigation {
     static let shared = SettingsNavigation()
     var selection: Tab = .general
 
+    func showIntegration(openSettings: () -> Void) {
+        selection = .integration
+        openSettings()
+    }
+
     func perform(_ action: MREffectivePolicyPresentation.SettingsAction, openSettings: () -> Void) {
         switch action {
         case .chooseAutomationSettings: selection = .automation
