@@ -206,6 +206,19 @@ import MergeTetherRemote
                 card.primaryCTA = .init(title: String(localized: .Board.boardDetails), destination: .overview)
             }
         }
+        if evidenceMatchesCatalogContext, hasCurrentCatalog,
+           let recovery = item.manualFeedbackRecovery(), recovery.recoveryAction != nil,
+           checked?.submissionState.title == nil {
+            if card.primaryCTA?.destination != .feedback, card.presentation?.secondaryCTA == nil {
+                card.presentation?.secondaryCTA = .init(title: String(localized: .MRHumanAction.mrHumanActionActionReviewFeedback), destination: .feedback)
+            }
+            if !recovery.replySourceIDs.isEmpty {
+                card.detail += "\n\n" + String(localized: .MergeActions.mergeActionsReplySources(recovery.replySourceIDs.count))
+                if checked?.blockers.contains(.discussions) == true || request.blockingDiscussionsResolved == false {
+                    card.detail += "\n\n" + String(localized: .MergeActions.mergeActionsResolveScope)
+                }
+            }
+        }
         return card
     }
 

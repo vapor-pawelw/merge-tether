@@ -6,6 +6,7 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 
 ## Unreleased
 
+- Keep feedback recovery available alongside other merge blockers and explain which open threads the resolution action checks.
 - Clarify that verified review-summary coverage exempts a repeated report from a duplicate reply, while independent feedback still requires its own answer.
 
 - Preserve each message's AI, AI uncertain or Human label in expanded threads and classify published roots and replies in viewed MR details using separate, cached display results.

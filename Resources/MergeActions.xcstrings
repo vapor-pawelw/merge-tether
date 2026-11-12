@@ -594,6 +594,39 @@
           }
         }
       }
+    },
+    "mergeActions.replySources": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Published replies are still required for %lld comments. Review the specific feedback below."
+          }
+        }
+      }
+    },
+    "mergeActions.replySource": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Open comment #%lld"
+          }
+        }
+      }
+    },
+    "mergeActions.resolveScope": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Resolve addressed threads checks open, resolvable discussions. It does not prepare replies or satisfy separate comments awaiting an answer."
+          }
+        }
+      }
     }
   },
   "version": "1.0"

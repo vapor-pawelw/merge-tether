@@ -35,6 +35,10 @@ struct MergeActionsView<AdditionalActions: View>: View {
     private var state: MergeSubmissionState { result ?? status?.submissionState ?? .none }
     private var hasDiscussionBlock: Bool { status?.blockers.contains(.discussions) == true || item.mergeRequest?.blockingDiscussionsResolved == false }
     private var needsGitLabCheck: Bool { state == .uncertain || state == .changed || status?.action == nil && status != nil }
+    private var feedbackRecovery: ManualFeedbackRecovery? {
+        guard evidenceMatchesCatalogContext, monitor.authoredMergeRequests.hasSyncedCurrentCatalog else { return nil }
+        return item.manualFeedbackRecovery()
+    }
     private var feedbackRecheckRoute: ManualFeedbackRecheckRoute {
         guard let request = item.mergeRequest, let host = monitor.glab.resolvedHost,
               let username = monitor.glab.currentUsername else { return .review }
@@ -56,12 +60,23 @@ struct MergeActionsView<AdditionalActions: View>: View {
                         .foregroundStyle(state.isDelegated ? Color.secondary : .orange)
                 } else if let blocker {
                     Text(blocker.title).foregroundStyle(.secondary)
-                    if blocker.recoveryAction == .verifyFeedback, feedbackRecheckRoute == .review {
+                    if feedbackRecovery?.recoveryAction == .verifyFeedback, feedbackRecheckRoute == .review {
                         Text(.MergeActions.mergeActionsFeedbackChecksPaused).foregroundStyle(.secondary)
                     }
                 }
                 if hasDiscussionBlock, blocker != .prerequisite(.discussions) {
                     Text(.Menu.menuAuthoredBlockerDiscussions).foregroundStyle(.orange)
+                }
+                if let feedbackRecovery, !feedbackRecovery.replySourceIDs.isEmpty {
+                    Text(.MergeActions.mergeActionsReplySources(feedbackRecovery.replySourceIDs.count)).foregroundStyle(.secondary)
+                    ForEach(Array(feedbackRecovery.replySourceIDs.prefix(3)), id: \.self) { noteID in
+                        if let url = replySourceURL(noteID) {
+                            Link(destination: url) { Text(.MergeActions.mergeActionsReplySource(noteID)) }
+                        }
+                    }
+                }
+                if hasDiscussionBlock, feedbackRecovery != nil {
+                    Text(.MergeActions.mergeActionsResolveScope).foregroundStyle(.secondary)
                 }
                 if let resolutionMessage { Text(verbatim: resolutionMessage).foregroundStyle(.secondary).textSelection(.enabled) }
                 if result == .changed, status?.request.mergeTrainConflict == nil { Text(.MergeActions.mergeActionsBlocked).foregroundStyle(.orange) }
@@ -81,6 +96,7 @@ struct MergeActionsView<AdditionalActions: View>: View {
                             else { Text(.MergeActions.mergeActionsResolveAll) }
                         }
                         .buttonStyle(.bordered).disabled(working || actionsBlocked)
+                        .help(Text(.MergeActions.mergeActionsResolveScope))
                     }
                     feedbackRecoveryAction
                     if needsGitLabCheck { Link(destination: item.url) { Text(.MergeActions.mergeActionsCheckGitLab) } }
@@ -112,8 +128,9 @@ struct MergeActionsView<AdditionalActions: View>: View {
 
     @ViewBuilder
     private var feedbackRecoveryAction: some View {
-        let route = blocker?.recoveryAction == .verifyFeedback ? feedbackRecheckRoute : nil
-        if state == .none, let recovery = route?.recoveryAction ?? blocker?.recoveryAction {
+        let feedbackAction = feedbackRecovery?.recoveryAction
+        let route = feedbackAction == .verifyFeedback ? feedbackRecheckRoute : nil
+        if state == .none, let recovery = route?.recoveryAction ?? feedbackAction {
             switch recovery {
             case .refresh:
                 GitLabRefreshButton(monitor: monitor, itemID: item.id).buttonStyle(.bordered)
@@ -141,6 +158,12 @@ struct MergeActionsView<AdditionalActions: View>: View {
                 }
             }
         }
+    }
+
+    private func replySourceURL(_ noteID: Int) -> URL? {
+        var components = URLComponents(url: item.url, resolvingAgainstBaseURL: false)
+        components?.fragment = "note_\(noteID)"
+        return components?.url
     }
 
     private func reviewFeedback() {

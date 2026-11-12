@@ -96,7 +96,28 @@ enum ManualFeedbackReviewDestination: Equatable {
     }
 }
 
+struct ManualFeedbackRecovery: Equatable {
+    let blocker: ManualMergeFeedbackBlocker
+    let replySourceIDs: [Int]
+    var recoveryAction: ManualMergeFeedbackBlocker.RecoveryAction? { blocker.recoveryAction }
+}
+
 extension MergeRequestAttentionMonitor.Item {
+    func manualFeedbackRecovery() -> ManualFeedbackRecovery? {
+        guard isAuthored, let request = mergeRequest, request.state == "opened",
+              request.webURL == url, request.projectID == id.projectID, request.iid == id.iid else { return nil }
+        let feedbackBlocker = mergeFeedbackBlocker(for: request)
+            ?? (presentingVerifiedAuthorFeedback().feedback.isEmpty ? nil : .unverifiedComments)
+        guard let blocker = feedbackBlocker else { return nil }
+        let replyIDs: [Int]
+        if blocker == .reply, let status = authorFeedbackStatus {
+            replyIDs = Set(status.replyNoteIDs.map { rootID in
+                status.findings.first(where: { $0.id == rootID })?.sourceNoteID ?? rootID
+            }).filter { $0 > 0 }.sorted()
+        } else { replyIDs = [] }
+        return .init(blocker: blocker, replySourceIDs: replyIDs)
+    }
+
     func canOfferManualMerge(using status: AuthoredMergeRequestStatus) -> Bool {
         manualMergeBlocker(using: status) == nil
     }

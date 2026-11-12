@@ -3,6 +3,29 @@ import Testing
 @testable import GitLabTodos
 
 struct MergeActionReadinessTests {
+    @Test(arguments: ["discussions", "capability"])
+    func independentFeedbackRecoverySurvivesAnotherPrimaryMergeBlocker(_ gate: String) throws {
+        let checked = try status(blocker: gate == "discussions" ? "discussions" : "",
+            action: gate == "capability" ? nil : .mergeNow)
+        var listed = try item(checked, changes: gate == "discussions" ? ["blocking_discussions_resolved": false] : [:])
+        listed.observedDiscussionFingerprint = "current-conversation"
+        listed.authorFeedbackStatus = .init(head: checked.request.sha!, fingerprint: "current-conversation",
+            semanticContextFingerprint: checked.request.semanticContextFingerprint, phase: .complete, replyNoteIDs: [5, 7])
+        #expect(listed.manualMergeBlocker(using: checked) == (gate == "discussions" ? .prerequisite(.discussions) : .capability))
+        #expect(!listed.canOfferManualMerge(using: checked))
+        let recovery = try #require(listed.manualFeedbackRecovery())
+        #expect(recovery.blocker == .reply && recovery.recoveryAction == .reviewFeedback)
+        #expect(recovery.replySourceIDs == [5, 7])
+        listed.authorFeedbackStatus?.findings = [.init(id: 5, discussionID: "thread", reviewerID: 9,
+            reviewerUsername: "reviewer", state: .needsReply, reason: "A later comment in this thread needs a reply.",
+            waitingForReviewers: [], sourceNoteID: 9)]
+        #expect(listed.manualFeedbackRecovery()?.replySourceIDs == [7, 9])
+        listed.observedDiscussionFingerprint = "edited-conversation"
+        let changed = try #require(listed.manualFeedbackRecovery())
+        #expect(changed.blocker == .discussionChanged && changed.recoveryAction == .refresh)
+        #expect(changed.replySourceIDs.isEmpty)
+    }
+
     @Test(arguments: ["same", "target", "description", "title", "draft", "authorID", "username", "host", "head"])
     func displayedMergeStatusRequiresTheExactCurrentRequest(_ change: String) throws {
         let checked = try status()
@@ -165,6 +188,7 @@ struct MergeActionReadinessTests {
         default: nil
         }
         #expect(listed.manualMergeBlocker(using: checked) == expected.map(ManualMergeBlocker.feedback))
+        #expect(listed.manualFeedbackRecovery()?.blocker == expected)
         #expect(listed.canOfferManualMerge(using: checked) == (expected == nil))
         #expect(listed.feedback.count == 1 && listed.needsDiscussion)
     }
