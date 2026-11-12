@@ -115,7 +115,8 @@ import MergeTetherRemote
                         ? matchingMergeStatus(for: row, statuses: monitor.authoredMergeRequests.requests) : nil
                     card = mergePresentation(card, item: item, status: mergeStatus,
                         evidenceMatchesCatalogContext: row.evidenceMatchesCatalogContext,
-                        hasCurrentCatalog: monitor.authoredMergeRequests.hasSyncedCurrentCatalog)
+                        hasCurrentCatalog: monitor.authoredMergeRequests.hasSyncedCurrentCatalog,
+                        waitingStatus: presentation.waitingStatus)
                     let busy = presentation.actionsBlocked
                     if busy { card.actions = [] }
                     else {
@@ -162,7 +163,7 @@ import MergeTetherRemote
 
     static func mergePresentation(_ original: RemoteCard, item: MergeRequestAttentionMonitor.Item,
                                   status: AuthoredMergeRequestStatus?, evidenceMatchesCatalogContext: Bool = true,
-                                  hasCurrentCatalog: Bool = true) -> RemoteCard {
+                                  hasCurrentCatalog: Bool = true, waitingStatus: MRWaitingStatus? = nil) -> RemoteCard {
         guard item.isAuthored, let request = item.mergeRequest, request.state == "opened" else { return original }
         let checked = hasCurrentCatalog && evidenceMatchesCatalogContext && status?.matchesCurrentRequest(request) == true ? status : nil
         let title: LocalizedStringResource
@@ -195,7 +196,25 @@ import MergeTetherRemote
         }
         var card = original
         card.presentation = card.presentation ?? .init(repository: request.webURL.gitLabProjectPath.split(separator: "/").last.map(String.init) ?? "")
-        card.presentation?.status = String(localized: title)
+        let dependencyHold = waitingStatus?.hasCurrentDependencyHold == true
+            && checked?.request.detailedMergeStatus == "merge_request_blocked"
+        let knownMergeFailure = checked?.blockers.contains { reason in
+            switch reason {
+            case .draft, .unpublishedDrafts, .commentReview, .conflictTaskFailed, .conflicts, .pipeline,
+                 .stackTarget, .dependencyEvidence, .checking: true
+            case .other: !dependencyHold
+            default: false
+            }
+        } == true
+        let ordinaryWait: Bool
+        switch blocker {
+        case .checking, .capability, .prerequisite(.approvals), .prerequisite(.discussions),
+             .prerequisite(.changesRequested), .prerequisite(.dependencies): ordinaryWait = true
+        case .prerequisite(.other): ordinaryWait = dependencyHold
+        default: ordinaryWait = false
+        }
+        let showsWaiting = ordinaryWait && !knownMergeFailure && hasCurrentCatalog && evidenceMatchesCatalogContext
+        card.presentation?.status = String(localized: showsWaiting ? waitingStatus?.title ?? title : title)
         if let detail { card.detail = detail }
         else if card.detail.isEmpty { card.detail = String(localized: title) }
         card.actions.removeAll { [.merge, .enqueueMerge].contains($0.kind) }

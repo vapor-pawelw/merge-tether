@@ -221,6 +221,61 @@
           }
         }
       }
+    },
+    "authorFeedback.waitingReviewers.%@": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Awaiting confirmation from %@"
+          }
+        }
+      }
+    },
+    "authorFeedback.waitingReviewersMore.%@.%lld": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Awaiting confirmation from %@ and %lld more"
+          }
+        }
+      }
+    },
+    "authorFeedback.waitingRequiredApprovals.%lld.%lld": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Awaiting required approvals · %lld/%lld"
+          }
+        }
+      }
+    },
+    "authorFeedback.waitingApprovalCount.%lld.%lld": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Required approvals: %lld/%lld"
+          }
+        }
+      }
+    },
+    "authorFeedback.waitingSummary.%@.%@": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "%@ · %@"
+          }
+        }
+      }
     }
   },
   "version": "1.0"

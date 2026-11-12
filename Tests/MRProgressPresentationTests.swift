@@ -105,17 +105,20 @@ struct MRProgressPresentationTests {
         #expect(model.status == (state == "merged" ? "Merged. Automation is off." : "Closed. Automation is off."))
     }
 
-    @Test func waitingForReviewerDoesNotShowWork() {
+    @Test func waitingForReviewerDoesNotShowWork() throws {
+        let request = try MRDependencyPresentationTests().request(2, project: 1)
         var item = MergeRequestAttentionMonitor.Item(id: .init(projectID: 1, iid: 2), title: "Example",
-            url: URL(string: "https://gitlab.example.test/group/repo/-/merge_requests/2")!)
-        item.authorFeedbackStatus = .init(head: "head", fingerprint: "text", phase: .complete,
+            url: request.webURL, mergeRequest: request, isAuthored: true)
+        item.observedDiscussionFingerprint = "text"
+        item.authorFeedbackStatus = .init(head: request.sha!, fingerprint: "text",
+            semanticContextFingerprint: request.semanticContextFingerprint, phase: .complete,
             findings: [.init(id: 3, discussionID: "thread", reviewerID: 4, reviewerUsername: "reviewer",
                 state: .waitingAcceptance, reason: nil, waitingForReviewers: ["reviewer"])])
         let row = MergeRequestBoardSnapshot.Row(item: item, latestJob: nil, intents: [])
         let model = MRCardPresentation(row: row, reviewingContext: ReviewingContext(row: row),
             allowsRemoval: false, assistantReady: true, showsReadProgress: false)
         #expect(!model.working && !model.busy && model.activity == nil)
-        #expect(model.status == String(localized: .AuthorFeedback.authorFeedbackWaitingChip))
+        #expect(model.status == String(localized: .AuthorFeedback.authorFeedbackWaitingReviewers("@reviewer")))
     }
 
     @Test(arguments: [AssistantJobExecution.State.queued, .running])

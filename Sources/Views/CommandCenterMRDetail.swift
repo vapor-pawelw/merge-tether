@@ -274,6 +274,10 @@ private struct CommandCenterMRDetailContent: View {
                     Text(verbatim: author.name.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty ? author.username : author.name).lineLimit(1)
                         .help(Text(verbatim: "@\(author.username)"))
                 }
+                if finishedState == nil {
+                    BoardApprovalProgressBadge(progress: presentationRow.displayItem.approvalProgress,
+                        reviewers: presentationRow.displayRequest?.reviewers ?? [])
+                }
                 Spacer()
                 HStack(spacing: 0) {
                     if finishedState == nil, let target = monitor.scopeTarget(projectID: item.id.projectID, iid: item.id.iid, url: item.url) {
@@ -304,9 +308,9 @@ private struct CommandCenterMRDetailContent: View {
                     } else {
                         if needsHumanAttention || !progress.working {
                             Label {
-                                Text(needsHumanAttention ? .CommandCenter.commandCenterStatusAttention
-                                     : item.section == .draftMergeRequests ? .CommandCenter.commandCenterStatusDraft
-                                     : .CommandCenter.commandCenterStatusMonitoring)
+                                if let status = progress.status, !progress.working {
+                                    Text(verbatim: status)
+                                } else { Text(.CommandCenter.commandCenterStatusAttention) }
                             } icon: { Image(systemName: needsHumanAttention ? "exclamationmark.circle" : "arrow.triangle.pull") }
                             .font(.callout.weight(needsHumanAttention ? .medium : .regular))
                             .foregroundStyle(needsHumanAttention ? .orange : .secondary)

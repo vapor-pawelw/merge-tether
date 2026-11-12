@@ -145,13 +145,18 @@ struct MRCardPresentation {
         finishedState == nil && item.requiresCommentReview && item.draftCount == 0 && item.drafts.isEmpty
             && humanAction?.kind != .commentReview
     }
+    var waitingStatus: MRWaitingStatus? {
+        guard !busy, !working, !waitingOnCLI, !isRefreshingAttention, !refreshFailed,
+              humanAction == nil, confirmationState != .failed, confirmationState != .changed else { return nil }
+        return MRWaitingStatus(row: row)
+    }
     var neutralStatus: LocalizedStringResource? {
         if let finishedState { return finishedState.status }
         if waitingOnCLI {
             return cliHoldKind == .loginRequired ? .AutomationProgress.progressPausedLogin : .AutomationProgress.progressPausedLimit
         }
         if busy || (isRefreshingAttention && showsReadProgress) { return progressTitle }
-        if item.authorFeedbackStatus?.waitingForReviewer == true { return .AuthorFeedback.authorFeedbackWaitingChip }
+        if let waitingStatus { return waitingStatus.title }
         guard allowsRemoval else {
             return row.isDraft ? .AutomationProgress.progressOwnDraft : .AutomationProgress.progressMonitoring
         }
