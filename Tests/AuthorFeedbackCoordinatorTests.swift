@@ -567,12 +567,17 @@ struct AuthorFeedbackCoordinatorTests {
         }
     }
 
-    @Test(arguments: ["cooldown", "dependency"])
-    func exhaustedReadOnlyBudgetStaysBoundedAcrossQueuedRefreshes(_ recovery: String) async throws {
+    @Test(arguments: ["cooldown", "dependency"], [false, true])
+    func exhaustedReadOnlyBudgetStaysBoundedAcrossQueuedRefreshes(_ recovery: String, excludedParticipant: Bool) async throws {
         try await withFixture { fixture in
+            if excludedParticipant {
+                fixture.settings.reviewParticipationPreferences.exclude(
+                    .init(host: Fixture.host, entityID: 99, label: "@observer"), username: "me")
+            }
             let state = RetryState()
             let coordinator = AuthorFeedbackCoordinator(settings: fixture.settings, glab: fixture.glab,
-                canAutomate: { _ in true }, verify: { _, _, _ in
+                canAutomate: { _ in true }, verify: { input, _, _ in
+                    #expect(input.excludedReplyAuthorIDs == (excludedParticipant ? [99] : []))
                     state.calls += 1
                     if state.recovered { return .init(notes: [.init(noteID: 10, state: .addressed, reason: "Current evidence recovered")]) }
                     throw ReReviewVerifier.VerificationError.failed
@@ -590,6 +595,7 @@ struct AuthorFeedbackCoordinatorTests {
             #expect(state.calls == 3)
             let status = try #require(running.status(projectID: 1, iid: 2))
             #expect(status.phase == .failed && status.isReadOnlyFailure)
+            #expect(status.reviewParticipationRevision == fixture.settings.reviewParticipationPreferences.revision(host: Fixture.host, username: "me"))
             #expect(status.failureReason?.isEmpty == false)
             #expect(fixture.resolutionPosts == 0 && fixture.reactionPosts == 0)
             if recovery == "cooldown" { state.now = state.now.addingTimeInterval(ReadOnlyAssessmentRetry.cooldown + 1) }
@@ -599,6 +605,104 @@ struct AuthorFeedbackCoordinatorTests {
             #expect(state.calls == 4)
             #expect(running.status(projectID: 1, iid: 2)?.phase == .complete)
             #expect(fixture.resolutionPosts == 1)
+        }
+    }
+
+    @Test(arguments: [false, true], ["participation", "configuration"])
+    func queuedStaleParticipationInputCannotLeaveCheckingOrEraseANewerSnapshot(_ refreshCurrent: Bool, change: String) async throws {
+        try await withFixture { fixture in
+            fixture.settings.automation.autoResolveAcceptedFeedback = false
+            fixture.settings.automation.authorFeedback.isEnabled = true
+            fixture.settings.reviewParticipationPreferences.exclude(
+                .init(host: Fixture.host, entityID: 99, label: "@observer"), username: "me")
+            let originalRequest = Fixture.request
+            func requestJSON(_ iid: Int) -> String {
+                originalRequest.replacingOccurrences(of: "\"iid\":2", with: "\"iid\":\(iid)")
+                    .replacingOccurrences(of: "/merge_requests/2\"", with: "/merge_requests/\(iid)\"")
+            }
+            let original = try #require(fixture.gitlab.handler)
+            fixture.gitlab.handler = { call in
+                for iid in [3, 4] where call.endpoint == "/projects/1/merge_requests/\(iid)" {
+                    return InMemoryGitLab.output(requestJSON(iid))
+                }
+                return try await original(call)
+            }
+            var calls: [Int: Int] = [:]
+            let coordinator = AuthorFeedbackCoordinator(settings: fixture.settings, glab: fixture.glab,
+                canAutomate: { _ in true }, verify: { input, _, _ in
+                    let iid = try #require(input.target?.iid)
+                    calls[iid, default: 0] += 1
+                    if iid != 4 {
+                        fixture.gitlab.write("entered-\(iid)")
+                        try await fixture.gitlab.waitFor("release-slots")
+                    }
+                    return .init(notes: [.init(noteID: 10, state: .addressed, reason: "Current source and published reply verified")])
+                }, retryWait: { _ in })
+            try fixture.start(coordinator)
+            try await fixture.gitlab.waitFor("entered-2")
+            try fixture.start(coordinator, requestJSON: requestJSON(3))
+            try await fixture.gitlab.waitFor("entered-3")
+            try fixture.start(coordinator, requestJSON: requestJSON(4))
+            #expect(coordinator.status(projectID: 1, iid: 4)?.phase == .checking)
+
+            if change == "participation" {
+                fixture.settings.reviewParticipationPreferences.exclude(
+                    .init(host: Fixture.host, entityID: 100, label: "@another-observer"), username: "me")
+            } else {
+                let thinking = try #require(VerificationThinking.allCases.first { $0 != fixture.settings.automation.verificationThinking })
+                fixture.settings.automation.verificationThinking = thinking
+            }
+            let currentRevision = fixture.settings.reviewParticipationPreferences.revision(host: Fixture.host, username: "me")
+            if refreshCurrent { try fixture.start(coordinator, requestJSON: requestJSON(4)) }
+            fixture.gitlab.write("release-slots")
+            let deadline = ContinuousClock.now + .seconds(3)
+            while [2, 3, 4].contains(where: { coordinator.status(projectID: 1, iid: $0)?.phase == .checking }),
+                  ContinuousClock.now < deadline {
+                try await Task.sleep(for: .milliseconds(10))
+            }
+            #expect([2, 3, 4].allSatisfy { coordinator.status(projectID: 1, iid: $0)?.phase != .checking })
+            #expect((calls[4] ?? 0) == (refreshCurrent ? 1 : 0))
+            if refreshCurrent {
+                let status = try #require(coordinator.status(projectID: 1, iid: 4))
+                #expect(status.phase == .complete && status.reviewParticipationRevision == currentRevision)
+            }
+            #expect(fixture.resolutionPosts == 0 && fixture.reactionPosts == 0)
+        }
+    }
+
+    @Test(arguments: [false, true])
+    func staleVerificationCancellationCannotEraseAReplacementSnapshot(_ invalidate: Bool) async throws {
+        try await withFixture { fixture in
+            fixture.settings.automation.autoResolveAcceptedFeedback = false
+            fixture.settings.automation.authorFeedback.isEnabled = true
+            fixture.settings.reviewParticipationPreferences.exclude(
+                .init(host: Fixture.host, entityID: 99, label: "@observer"), username: "me")
+            var calls = 0
+            let coordinator = AuthorFeedbackCoordinator(settings: fixture.settings, glab: fixture.glab,
+                canAutomate: { _ in true }, verify: { _, _, _ in
+                    calls += 1
+                    if calls == 1 {
+                        fixture.gitlab.write("entered-stale-verification")
+                        try await fixture.gitlab.waitFor("release-stale-verification")
+                        throw CancellationError()
+                    }
+                    return .init(notes: [.init(noteID: 10, state: .addressed, reason: "Current source and reply verified")])
+                }, retryWait: { _ in })
+            try fixture.start(coordinator)
+            try await fixture.gitlab.waitFor("entered-stale-verification")
+            if invalidate { coordinator.invalidate(projectID: 1, iid: 2) }
+            fixture.settings.reviewParticipationPreferences.exclude(
+                .init(host: Fixture.host, entityID: 100, label: "@another-observer"), username: "me")
+            let revision = fixture.settings.reviewParticipationPreferences.revision(host: Fixture.host, username: "me")
+            try fixture.start(coordinator)
+            fixture.gitlab.write("release-stale-verification")
+            let deadline = ContinuousClock.now + .seconds(3)
+            while coordinator.status(projectID: 1, iid: 2)?.phase != .complete, ContinuousClock.now < deadline {
+                try await Task.sleep(for: .milliseconds(10))
+            }
+            let status = try #require(coordinator.status(projectID: 1, iid: 2))
+            #expect(status.phase == .complete && status.reviewParticipationRevision == revision)
+            #expect(calls == 2 && fixture.resolutionPosts == 0 && fixture.reactionPosts == 0)
         }
     }
 

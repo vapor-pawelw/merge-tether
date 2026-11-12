@@ -4,6 +4,81 @@ import Testing
 
 @Suite("Headless re-review verification")
 struct ReReviewVerifierTests {
+    @MainActor
+    @Test(arguments: AutomationAssistant.allCases)
+    func monitorAuthorFeedbackOwnsThreeProviderAttemptsWhileStandaloneReReviewRetainsTwo(_ assistant: AutomationAssistant) async throws {
+        let folder = FileManager.default.temporaryDirectory.appending(path: UUID().uuidString)
+        try FileManager.default.createDirectory(at: folder, withIntermediateDirectories: false)
+        defer { try? FileManager.default.removeItem(at: folder) }
+        let script = folder.appending(path: "cli")
+        let counter = folder.appending(path: "cli.count")
+        try Data("""
+            #!/usr/bin/python3
+            import pathlib,sys
+            counter=pathlib.Path(__file__).with_suffix('.count')
+            counter.write_text(str(int(counter.read_text())+1 if counter.exists() else 1))
+            sys.stdin.read()
+            sys.exit(1)
+            """.utf8).write(to: script)
+        try FileManager.default.setAttributes([.posixPermissions: 0o700], ofItemAtPath: script.path)
+        let suite = "AuthorFeedbackProviderBudget.\(UUID())"
+        let defaults = try #require(UserDefaults(suiteName: suite))
+        defer { defaults.removePersistentDomain(forName: suite) }
+        let settings = SettingsManager(defaults: defaults)
+        settings.automation.packageDecision = .enabled
+        settings.automation.assistant = assistant
+        settings.automation.autoResolveAcceptedFeedback = true
+        settings.reviewParticipationPreferences.exclude(.init(host: "gitlab.example.test", entityID: 99, label: "@observer"), username: "me")
+        let requestJSON = #"{"project_id":1,"iid":2,"author":{"id":3,"username":"me","name":"Author"},"title":"Synthetic correction","web_url":"https://gitlab.example.test/group/repo/-/merge_requests/2","state":"opened","draft":false,"sha":"aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa","source_project_id":1,"source_branch":"fix","target_project_id":1,"target_branch":"main","labels":[]}"#
+        let threadsJSON = #"[{"id":"thread","notes":[{"id":10,"author":{"id":7,"username":"reviewer","name":"Reviewer"},"system":false,"body":"Fix the error path","resolvable":true,"resolved":false}]}]"#
+        let gitlab = InMemoryGitLab()
+        defer { gitlab.close() }
+        let glab = gitlab.service(host: "gitlab.example.test", username: "me")
+        gitlab.handler = { call in
+            switch call.endpoint {
+            case let path where path.hasSuffix("/raw_diffs"): return InMemoryGitLab.output("diff --git a/A b/A")
+            case "/projects/1/merge_requests/2": return InMemoryGitLab.output(requestJSON)
+            case "/user": return InMemoryGitLab.output(#"{"id":3,"username":"me"}"#)
+            case let path where path.contains("/discussions?"): return InMemoryGitLab.output(threadsJSON)
+            case let path where path.contains("/draft_notes?"): return InMemoryGitLab.output("[]")
+            case let path where path.hasSuffix("/approvals"): return InMemoryGitLab.output(#"{"approved_by":[]}"#)
+            default: return try gitlab.unexpected(call)
+            }
+        }
+        let executableResolver: ReReviewVerifier.ExecutableResolver = { provider in
+            #expect(provider == assistant)
+            return script
+        }
+        let monitor = MergeRequestAttentionMonitor(glab: glab, settings: settings, reportDirectory: folder,
+            canAutomate: { _ in true }, verificationExecutableResolver: executableResolver)
+        let coordinator = try #require(monitor.authorFeedbackCoordinator)
+        defer { coordinator.cancel() }
+        let request = try JSONDecoder().decode(GitLabMergeRequest.self, from: Data(requestJSON.utf8))
+        let discussions = try JSONDecoder().decode([GitLabMergeRequestDiscussion].self, from: Data(threadsJSON.utf8))
+        coordinator.refresh(request: request, discussions: discussions, drafts: 0,
+            host: "gitlab.example.test", user: .init(id: 3, username: "me"))
+        let deadline = ContinuousClock.now + .seconds(30)
+        while coordinator.status(projectID: 1, iid: 2)?.phase != .failed, ContinuousClock.now < deadline {
+            try await Task.sleep(for: .milliseconds(20))
+        }
+        #expect(coordinator.status(projectID: 1, iid: 2)?.phase == .failed)
+        let feedbackAttempts = try String(contentsOf: counter, encoding: .utf8)
+        #expect(feedbackAttempts == "3")
+        #expect(gitlab.requests.allSatisfy { $0.method == "GET" })
+
+        try Data("0".utf8).write(to: counter)
+        let head = try #require(request.sha)
+        let input = ReReviewVerifier.Input(authorID: 3, headSHA: head, title: request.title, diff: "Synthetic source",
+            discussions: discussions, target: .init(host: "gitlab.example.test", projectID: 1, iid: 2,
+                url: request.webURL, expectedUsername: "me"))
+        do {
+            _ = try await ReReviewVerifier.verify(input, assistant: assistant, model: "fixture", executableResolver: executableResolver)
+            Issue.record("The synthetic failing provider unexpectedly succeeded")
+        } catch { #expect(error as? ReReviewVerifier.VerificationError == .failed) }
+        let standaloneAttempts = try String(contentsOf: counter, encoding: .utf8)
+        #expect(standaloneAttempts == "2")
+    }
+
     @Test(arguments: AutomationAssistant.allCases)
     func coveredSummaryProofSurvivesProviderDecodingAndRemainsSeparateFromPublicationPermission(_ assistant: AutomationAssistant) async throws {
         let folder = FileManager.default.temporaryDirectory.appending(path: UUID().uuidString)

@@ -101,10 +101,12 @@ final class AuthorFeedbackCoordinator {
         let configuration: AutomationSettings
     }
     @ObservationIgnored private var failedReads: [MRAutomationScope.Target: FailedRead] = [:]
+    @ObservationIgnored private var statusOwners: [MRAutomationScope.Target: Input] = [:]
     var onRemoteChange: (() -> Void)?
     var onNeedsWork: ((GitLabMergeRequest, Set<Int>, String, AuthorFeedbackResidual?) async -> Void)?
 
     private struct Input {
+        let id = UUID()
         let request: GitLabMergeRequest
         let discussions: [GitLabMergeRequestDiscussion]
         let user: GitLabAuthenticatedUser
@@ -133,7 +135,7 @@ final class AuthorFeedbackCoordinator {
     init(settings: SettingsManager, glab: GlabService,
          canAutomate: @escaping @MainActor (AutomationAssistant) async -> Bool = { await AssistantCLI.detect($0, requireCLI: true).isReady },
          verify: @escaping @MainActor (ReReviewVerifier.Input, AutomationAssistant, String) async throws -> ReReviewAssessment = {
-             try await ReReviewVerifier.verify($0, assistant: $1, model: $2)
+             try await ReReviewVerifier.verifySingleAttempt($0, assistant: $1, model: $2)
          }, retryWait: @escaping ReadOnlyAssessmentRetry.Wait = ReadOnlyAssessmentRetry.wait,
          now: @escaping ReadOnlyAssessmentRetry.Clock = { Date() }) {
         self.settings = settings; self.glab = glab; self.canAutomate = canAutomate; self.verify = verify
@@ -183,7 +185,7 @@ final class AuthorFeedbackCoordinator {
               Self.permitsBackgroundCheck(for: request, configuration: configuration, host: host, username: user.username),
               let fingerprint = ReviewVerdict.fingerprint(discussions), let head = request.sha else { return }
         let hasFeedback = discussions.contains { $0.notes.contains { $0.system == false && $0.author?.id != user.id } }
-        guard hasFeedback else { statuses.removeValue(forKey: target); return }
+        guard hasFeedback else { removeStatus(for: target); return }
         let completedJobID = completedFollowUpJob(for: request, target: target)?.id
         let decisionRevision = settings.feedbackSuggestionDecisions.revision(for: target)
         let participationRevision = settings.reviewParticipationPreferences.revision(host: host, username: user.username)
@@ -205,16 +207,10 @@ final class AuthorFeedbackCoordinator {
                           completedFollowUpJobID: completedJobID, decisionRevision: decisionRevision,
                           ignoredSuggestions: settings.feedbackSuggestionDecisions.applicable(in: discussions, for: target),
                           reviewParticipationRevision: participationRevision)
-        if statuses[target]?.head != head || statuses[target]?.fingerprint != fingerprint
-            || statuses[target]?.semanticContextFingerprint != request.semanticContextFingerprint
-            || statuses[target]?.feedbackDecisionRevision != decisionRevision
-            || statuses[target]?.reviewParticipationRevision != participationRevision
-            || statuses[target]?.completedFollowUpJobID != completedJobID {
-            statuses[target] = .init(head: head, fingerprint: fingerprint,
-                semanticContextFingerprint: request.semanticContextFingerprint,
-                readOnlyReconciliation: input.readOnly, phase: .checking, pendingDraftCount: drafts,
-                completedFollowUpJobID: input.completedFollowUpJobID, feedbackDecisionRevision: decisionRevision,
-                reviewParticipationRevision: participationRevision)
+        // An unchanged periodic refresh must not take ownership from the active task.
+        if !sameSnapshot(statusOwners[target], input) {
+            statuses[target] = checkingStatus(input)
+            statusOwners[target] = input
         }
         pending[target] = input
         startNext()
@@ -230,7 +226,7 @@ final class AuthorFeedbackCoordinator {
             } else { permitted = false }
             guard !permitted else { continue }
             pending.removeValue(forKey: target); tasks[target]?.cancel()
-            statuses.removeValue(forKey: target); cache.removeValue(forKey: target)
+            removeStatus(for: target); cache.removeValue(forKey: target)
             failedReads.removeValue(forKey: target)
             acknowledgementAttempts.removeValue(forKey: target)
             acknowledgedReactions.removeValue(forKey: target)
@@ -245,7 +241,7 @@ final class AuthorFeedbackCoordinator {
         cache.removeValue(forKey: target)
         acknowledgementAttempts.removeValue(forKey: target)
         acknowledgedReactions.removeValue(forKey: target)
-        statuses.removeValue(forKey: target)
+        removeStatus(for: target)
         failedReads.removeValue(forKey: target)
     }
 
@@ -260,25 +256,21 @@ final class AuthorFeedbackCoordinator {
     private func startNext() {
         while tasks.count < 2, let (target, input) = pending.first(where: { tasks[$0.key] == nil }) {
             pending.removeValue(forKey: target)
-            if statuses[target]?.head != input.request.sha || statuses[target]?.fingerprint != input.fingerprint
-                || statuses[target]?.semanticContextFingerprint != input.request.semanticContextFingerprint
-                || statuses[target]?.feedbackDecisionRevision != input.decisionRevision
-                || statuses[target]?.completedFollowUpJobID != input.completedFollowUpJobID {
-                statuses[target] = .init(head: input.request.sha ?? "", fingerprint: input.fingerprint,
-                    semanticContextFingerprint: input.request.semanticContextFingerprint,
-                    readOnlyReconciliation: input.readOnly, phase: .checking, pendingDraftCount: input.drafts,
-                    completedFollowUpJobID: input.completedFollowUpJobID, feedbackDecisionRevision: input.decisionRevision)
+            guard statuses[target] != nil, liveContextMatches(input) else {
+                discardOwnedCheckingStatus(input)
+                continue
             }
+            if !sameSnapshot(statusOwners[target], input) {
+                statuses[target] = checkingStatus(input)
+            }
+            statusOwners[target] = input
             activeInputs[target] = input
             tasks[target] = Task { [weak self] in
                 guard let self else { return }
                 defer { tasks.removeValue(forKey: target); activeInputs.removeValue(forKey: target); startNext() }
                 do { try await process(input) }
                 catch is CancellationError {
-                    if !Task.isCancelled, isCurrent(input) {
-                        statuses.removeValue(forKey: target)
-                        onRemoteChange?()
-                    }
+                    discardOwnedCheckingStatus(input)
                 }
                 catch {
                     if !Task.isCancelled, isCurrent(input) {
@@ -286,29 +278,33 @@ final class AuthorFeedbackCoordinator {
                         if readOnly != nil {
                             failedReads[target] = .init(date: now(), accountRevision: input.accountRevision, configuration: input.configuration)
                         } else { failedReads.removeValue(forKey: target) }
-                        statuses[target] = .init(head: input.request.sha ?? "", fingerprint: input.fingerprint,
-                            semanticContextFingerprint: input.request.semanticContextFingerprint, phase: .failed,
-                            failureReason: String(GlabService.redactWorkflowEvidence(String(describing: readOnly?.cause ?? error)).prefix(600)),
-                            isReadOnlyFailure: readOnly != nil, completedFollowUpJobID: input.completedFollowUpJobID,
-                            feedbackDecisionRevision: input.decisionRevision)
+                        var failed = checkingStatus(input)
+                        failed.phase = .failed
+                        failed.failureReason = String(GlabService.redactWorkflowEvidence(String(describing: readOnly?.cause ?? error)).prefix(600))
+                        failed.isReadOnlyFailure = readOnly != nil
+                        statuses[target] = failed
                         // Refreshes queued during backoff cannot restart an exhausted snapshot's budget.
                         pending.removeValue(forKey: target)
                         Log.monitor.error("Author feedback verification failed: \(String(describing: error), privacy: .private)")
-                    }
+                    } else { discardOwnedCheckingStatus(input) }
                 }
             }
         }
     }
 
     private func isCurrent(_ input: Input) -> Bool {
-        !Task.isCancelled && glab.resolvedHost == input.target.host && glab.currentUsername == input.user.username
-            && glab.accountRevision == input.accountRevision
+        !Task.isCancelled && statusOwners[input.target]?.id == input.id && liveContextMatches(input)
             && statuses[input.target]?.head == input.request.sha
             && statuses[input.target]?.fingerprint == input.fingerprint
             && statuses[input.target]?.semanticContextFingerprint == input.request.semanticContextFingerprint
             && statuses[input.target]?.completedFollowUpJobID == input.completedFollowUpJobID
             && statuses[input.target]?.feedbackDecisionRevision == input.decisionRevision
             && statuses[input.target]?.reviewParticipationRevision == input.reviewParticipationRevision
+    }
+
+    private func liveContextMatches(_ input: Input) -> Bool {
+        glab.resolvedHost == input.target.host && glab.currentUsername == input.user.username
+            && glab.accountRevision == input.accountRevision
             && settings.feedbackSuggestionDecisions.revision(for: input.target) == input.decisionRevision
             && settings.reviewParticipationPreferences.revision(host: input.target.host, username: input.user.username) == input.reviewParticipationRevision
             && settings.automation == input.configuration
@@ -316,6 +312,37 @@ final class AuthorFeedbackCoordinator {
             && settings.automation.hasAutomaticActionConsent
             && !settings.ignoredMergeRequests.contains(input.target)
             && settings.automation.scope.permits(input.request, host: input.target.host, username: input.user.username)
+    }
+
+    private func sameSnapshot(_ previous: Input?, _ input: Input) -> Bool {
+        guard let previous else { return false }
+        return previous.target == input.target && previous.user == input.user
+            && previous.accountRevision == input.accountRevision && previous.configuration == input.configuration
+            && previous.request.sha == input.request.sha
+            && previous.request.draftProofRecoveryContextFingerprint == input.request.draftProofRecoveryContextFingerprint
+            && previous.fingerprint == input.fingerprint && previous.drafts == input.drafts
+            && previous.completedFollowUpJobID == input.completedFollowUpJobID
+            && previous.decisionRevision == input.decisionRevision
+            && previous.reviewParticipationRevision == input.reviewParticipationRevision
+    }
+
+    private func checkingStatus(_ input: Input) -> AuthorFeedbackStatus {
+        .init(head: input.request.sha ?? "", fingerprint: input.fingerprint,
+            semanticContextFingerprint: input.request.semanticContextFingerprint,
+            readOnlyReconciliation: input.readOnly, phase: .checking, pendingDraftCount: input.drafts,
+            completedFollowUpJobID: input.completedFollowUpJobID, feedbackDecisionRevision: input.decisionRevision,
+            reviewParticipationRevision: input.reviewParticipationRevision)
+    }
+
+    private func discardOwnedCheckingStatus(_ input: Input) {
+        guard statusOwners[input.target]?.id == input.id, statuses[input.target]?.phase == .checking else { return }
+        removeStatus(for: input.target)
+        onRemoteChange?()
+    }
+
+    private func removeStatus(for target: MRAutomationScope.Target) {
+        statuses.removeValue(forKey: target)
+        statusOwners.removeValue(forKey: target)
     }
 
     /// A successful worker can leave work outstanding. Its prior semantic verdict then

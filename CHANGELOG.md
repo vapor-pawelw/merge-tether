@@ -6,6 +6,8 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 
 ## Unreleased
 
+- Preserve author-feedback cooldown identity and keep its three-attempt retry budget from multiplying inside provider verification or queued refreshes.
+
 - Improve MR card and Details hierarchy with readable status labels, policy pills and feedback citations above action controls.
 
 - Add Copy link to merge request menus on cards, in Details and in Inbox.

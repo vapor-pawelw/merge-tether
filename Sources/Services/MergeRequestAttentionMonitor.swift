@@ -351,9 +351,9 @@ final class MergeRequestAttentionMonitor {
         },
         approvalReadClock: @escaping ReadOnlyAssessmentRetry.Clock = { Date() },
         approvalReadWait: @escaping ReadOnlyAssessmentRetry.Wait = ReadOnlyAssessmentRetry.wait,
-        verifyReReview: @escaping @MainActor (ReReviewVerifier.Input, AutomationAssistant, String) async throws -> ReReviewAssessment = {
-            try await ReReviewVerifier.verify($0, assistant: $1, model: $2)
-        },
+        verifyReReview: ReReviewCoordinator.Verify? = nil,
+        verifyAuthorFeedback: ReReviewCoordinator.Verify? = nil,
+        verificationExecutableResolver: ReReviewVerifier.ExecutableResolver? = nil,
         verifyDraftProofRecovery: @escaping DraftProofRecoveryCoordinator.Verify = {
             try await DraftProofRecoveryVerifier.verify($0, assistant: $1, model: $2)
         },
@@ -423,11 +423,17 @@ final class MergeRequestAttentionMonitor {
                     glab.resolvedHost == $0.host && glab.currentUsername == $0.user.username
                 })
         }
+        let reviewVerifier: ReReviewCoordinator.Verify = verifyReReview ?? {
+            try await ReReviewVerifier.verify($0, assistant: $1, model: $2, executableResolver: verificationExecutableResolver)
+        }
+        let feedbackVerifier: ReReviewCoordinator.Verify = verifyAuthorFeedback ?? verifyReReview ?? {
+            try await ReReviewVerifier.verifySingleAttempt($0, assistant: $1, model: $2, executableResolver: verificationExecutableResolver)
+        }
         self.authorFeedbackCoordinator = settings.map { AuthorFeedbackCoordinator(settings: $0, glab: glab,
-            canAutomate: canAutomate, verify: verifyReReview) }
+            canAutomate: canAutomate, verify: feedbackVerifier) }
         let feedbackCoordinator = self.authorFeedbackCoordinator
         self.reReviewCoordinator = settings.map { ReReviewCoordinator(settings: $0, glab: glab,
-            canAutomate: canAutomate, verify: verifyReReview,
+            canAutomate: canAutomate, verify: reviewVerifier,
             authorFeedbackStatus: { request in
                 feedbackCoordinator?.status(projectID: request.projectID, iid: request.iid)
             }, authorFeedbackAssessment: { request, fingerprint in

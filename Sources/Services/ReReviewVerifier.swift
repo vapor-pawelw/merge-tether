@@ -3,6 +3,7 @@ import Foundation
 /// A bounded headless assessment with a read-only role and live MR tool access.
 /// Supplied evidence is supplementary; absent proof must produce `uncertain`.
 enum ReReviewVerifier {
+    typealias ExecutableResolver = @MainActor (AutomationAssistant) async -> URL?
     enum VerificationError: Error, Equatable { case unavailable, failed, incompleteEvidence }
     static let policyVersion = "review-participation-10"
 
@@ -92,11 +93,30 @@ enum ReReviewVerifier {
     }
 
     @MainActor
-    static func verify(_ input: Input, assistant: AutomationAssistant, model: String) async throws -> ReReviewAssessment {
-        guard case .ready(let executable) = await AssistantCLI.detect(assistant, requireCLI: true) else {
+    static func verify(_ input: Input, assistant: AutomationAssistant, model: String,
+                       executableResolver: ExecutableResolver? = nil) async throws -> ReReviewAssessment {
+        guard let executable = await (executableResolver ?? resolveExecutable)(assistant) else {
             throw VerificationError.unavailable
         }
         return try await run(input, assistant: assistant, model: model, executable: executable)
+    }
+
+    @MainActor
+    static func verifySingleAttempt(_ input: Input, assistant: AutomationAssistant, model: String,
+                                    executableResolver: ExecutableResolver? = nil) async throws -> ReReviewAssessment {
+        guard let executable = await (executableResolver ?? resolveExecutable)(assistant) else {
+            throw VerificationError.unavailable
+        }
+        return try await runSingleAttempt(input, assistant: assistant, model: model, executable: executable)
+    }
+
+    @MainActor private static func resolveExecutable(_ assistant: AutomationAssistant) async -> URL? {
+        guard case .ready(let executable) = await AssistantCLI.detect(assistant, requireCLI: true) else { return nil }
+        return executable
+    }
+
+    static func runSingleAttempt(_ input: Input, assistant: AutomationAssistant, model: String, executable: URL) async throws -> ReReviewAssessment {
+        try await runOnce(input, assistant: assistant, model: model, executable: executable)
     }
 
     static func run(_ input: Input, assistant: AutomationAssistant, model: String, executable: URL,
