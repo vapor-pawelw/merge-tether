@@ -6,6 +6,8 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 
 ## Unreleased
 
+- Clarify that verified review-summary coverage exempts a repeated report from a duplicate reply, while independent feedback still requires its own answer.
+
 - Preserve each message's AI, AI uncertain or Human label in expanded threads and classify published roots and replies in viewed MR details using separate, cached display results.
 - Distinguish dependency checks skipped behind earlier merge blockers from failed checks, while requiring fresh dependency evidence before submission.
 - Classify review-summary purpose independently of whether its feedback is addressed, preserving verified cross-thread coverage without waiving independent requests.

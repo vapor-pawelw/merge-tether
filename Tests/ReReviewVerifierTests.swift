@@ -35,6 +35,7 @@ struct ReReviewVerifierTests {
         #expect(result.notes.last?.state == .informational)
         #expect(result.notes.last?.informationalPurpose == .reviewSummary)
         #expect(result.hasNoRemainingAuthorWork(in: threads, authorID: 3))
+        #expect(result.missingPublishedReplyNoteIDs(in: threads, authorID: 3).isEmpty)
         #expect(result.notes.last?.informationalAcknowledgementSafe == false)
         let object = try JSONSerialization.jsonObject(with: Data(contentsOf: URL(fileURLWithPath: script.path + ".capture")))
         let captured = try #require(object as? [String: Any])
@@ -43,12 +44,45 @@ struct ReReviewVerifierTests {
         #expect(instructions.contains("Coverage neither proves reviewer acceptance nor grants publication, resolution or merge permission"))
         #expect(instructions.contains("Classify informationalPurpose independently of state, including addressed, informational, blocking and uncertain"))
         #expect(instructions.contains("Return other for unrelated purposes or unclear purpose"))
+        #expect(instructions.contains("This own-thread rule does not apply to a review report with valid reviewSummaryCoverage"))
+        #expect(instructions.contains("Do not classify the report itself as a second concrete finding"))
         #expect(!instructions.contains("non-informational states"))
         let schema = try #require(captured["schema"] as? [String: Any])
         let properties = try #require(schema["properties"] as? [String: Any])
         let notes = try #require(properties["notes"] as? [String: Any])
         let fields = try #require(notes["items"] as? [String: Any])
         #expect((fields["required"] as? [String])?.contains("reviewSummaryCoverage") == true)
+    }
+
+    @Test(arguments: AutomationAssistant.allCases)
+    func independentlyActionableReportsAndConcreteDuplicatesRetainTheirOwnReplyThroughProviderDecoding(_ assistant: AutomationAssistant) async throws {
+        let folder = FileManager.default.temporaryDirectory.appending(path: UUID().uuidString)
+        try FileManager.default.createDirectory(at: folder, withIntermediateDirectories: false)
+        defer { try? FileManager.default.removeItem(at: folder) }
+        let script = folder.appending(path: "cli")
+        try Data("""
+            #!/usr/bin/python3
+            import json,sys
+            args=sys.argv[1:]
+            sys.stdin.read()
+            result={'notes':[{'noteID':10,'state':'addressed','reason':'The concrete correction and original reply are verified.'},
+                {'noteID':20,'state':'addressed','reason':'This report also asks for its own explanation.',
+                 'informationalPurpose':'reviewSummary','publishedReplyNoteID':50,'reviewSummaryCoverage':None},
+                {'noteID':40,'state':'addressed','reason':'The duplicate concrete finding still needs its own local response.',
+                 'informationalPurpose':'concreteCodeReviewFeedback','publishedReplyNoteID':50,'reviewSummaryCoverage':None}]}
+            if args[0]=='exec': json.dump(result,open(args[args.index('-o')+1],'w'))
+            else: print(json.dumps({'is_error':False,'structured_output':result}))
+            """.utf8).write(to: script)
+        try FileManager.default.setAttributes([.posixPermissions: 0o700], ofItemAtPath: script.path)
+        let threads = try JSONDecoder().decode([GitLabMergeRequestDiscussion].self, from: Data(#"[{"id":"finding","notes":[{"id":10,"author":{"id":7},"system":false,"resolvable":true,"resolved":true,"body":"Correct the retry path."},{"id":50,"author":{"id":3},"system":false,"body":"The retry correction and its regression are verified."}]},{"id":"report","notes":[{"id":20,"author":{"id":7},"system":false,"resolvable":false,"body":"The earlier review raised retries. Please explain the chosen limit here."}]},{"id":"duplicate","notes":[{"id":40,"author":{"id":7},"system":false,"resolvable":false,"body":"Correct the retry path and respond to this finding."}]}]"#.utf8))
+        let input = ReReviewVerifier.Input(authorID: 3, headSHA: String(repeating: "a", count: 40),
+            title: "Synthetic retry correction", diff: "Verified correction", discussions: threads)
+        let result = try await ReReviewVerifier.run(input, assistant: assistant, model: "fixture", executable: script, retryWait: { _ in })
+        #expect(result.notes.filter { $0.state == .addressed }.count == 3)
+        #expect(result.missingPublishedReplyNoteIDs(in: threads, authorID: 3) == [20, 40])
+        #expect(!result.hasNoRemainingAuthorWork(in: threads, authorID: 3))
+        let findings = AuthorFeedbackPolicy.evaluate(discussions: threads, assessment: result, authorID: 3, approvedReviewerIDs: [7])
+        #expect(Set(findings.filter { $0.state == .needsReply }.map(\.id)) == [20, 40])
     }
 
     @Test(arguments: AutomationAssistant.allCases)

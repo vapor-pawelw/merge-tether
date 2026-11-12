@@ -4,7 +4,7 @@ import Foundation
 /// Supplied evidence is supplementary; absent proof must produce `uncertain`.
 enum ReReviewVerifier {
     enum VerificationError: Error, Equatable { case unavailable, failed, incompleteEvidence }
-    static let policyVersion = "covered-review-summaries-8"
+    static let policyVersion = "covered-review-summaries-9"
 
     static let schema = #"{"type":"object","additionalProperties":false,"properties":{"notes":{"type":"array","items":{"type":"object","additionalProperties":false,"properties":{"noteID":{"type":"integer"},"state":{"type":"string","enum":["addressed","informational","blocking","uncertain"]},"reason":{"type":"string"},"summary":{"type":"string","minLength":1,"maxLength":200},"acceptanceNoteID":{"type":["integer","null"]},"publishedReplyNoteID":{"type":["integer","null"]},"informationalAcknowledgementSafe":{"type":"boolean"},"informationalPurpose":{"type":"string","enum":["concreteCodeReviewFeedback","reviewSummary","automatedReviewReport","other"]}},"required":["noteID","state","reason","summary","acceptanceNoteID","publishedReplyNoteID","informationalAcknowledgementSafe","informationalPurpose"]}}},"required":["notes"]}"#
 
@@ -255,6 +255,9 @@ enum ReReviewVerifier {
             polished prose, tables or an AI-authorship assessment is not automated-process provenance.
             Concrete feedback remains concreteCodeReviewFeedback even when an automated process posted
             it. Return other for unrelated purposes or unclear purpose.
+            A general report that announces findings or questions remains reviewSummary when it names
+            the concrete concern. Do not classify the report itself as a second concrete finding merely
+            because it repeats a finding's question. Verify its coverage or any independent expectation.
             Purpose never makes an unsafe thread safe and never grants reviewer acceptance.
             addressed: the current diff, title or description proves the requested correction in that
             artifact, or a substantive reply explains
@@ -328,7 +331,10 @@ enum ReReviewVerifier {
             full body and verify the correction or explanation against current evidence. The reply
             may be in another discussion as supporting evidence for the verified correction, including
             duplicate concrete findings. Each separate actionable feedback thread still needs its own
-            author response, including general comments; an answer elsewhere does not waive it. Keep
+            author response, including independently actionable general comments; an answer elsewhere
+            does not waive those findings' local replies. This own-thread rule does not apply to a
+            review report with valid reviewSummaryCoverage: its verified referenced findings already
+            carry the author-response obligation, so do not require a duplicate reply to that report. Keep
             a verified correction addressed while its local reply is still owed. The worker can prepare
             a brief reply linking the original feedback or published explanation, without repeating code work.
             Identify the matching concern and reply in reason. A link or claim of completion alone
