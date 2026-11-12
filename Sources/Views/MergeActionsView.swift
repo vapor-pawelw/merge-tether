@@ -1,19 +1,38 @@
 import SwiftUI
 
 /// Status and results precede the shared action row on both cards and Details.
-struct MergeActionsView<AdditionalActions: View>: View {
+struct MergeActionsView<StatusTrailer: View, AdditionalActions: View>: View {
     let item: MergeRequestAttentionMonitor.Item
     let monitor: TodoMonitorService
     var evidenceMatchesCatalogContext = true
     var actionsBlocked = false
     var onReviewFeedback: (() -> Void)? = nil
-    @ViewBuilder var additionalActions: () -> AdditionalActions
+    /// Cards keep the longer scope explanation in the button help; Details shows it inline.
+    var showsExplanations = true
+    /// Details hides reply sources while its feedback check already lists them.
+    var showsReplySources = true
+    var textFont: Font = .subheadline
+    var statusTrailer: () -> StatusTrailer
+    var additionalActions: () -> AdditionalActions
     @Environment(\.openURL) private var openURL
     @State private var showingConfirmation = false
     @State private var working = false
     @State private var result: MergeSubmissionState?
     @State private var prepared: ManualDiscussionResolution.Prepared?
     @State private var resolutionMessage: String?
+
+    init(item: MergeRequestAttentionMonitor.Item, monitor: TodoMonitorService, evidenceMatchesCatalogContext: Bool = true,
+         actionsBlocked: Bool = false, onReviewFeedback: (() -> Void)? = nil, showsExplanations: Bool = true,
+         showsReplySources: Bool = true,
+         textFont: Font = .subheadline, @ViewBuilder statusTrailer: @escaping () -> StatusTrailer,
+         @ViewBuilder additionalActions: @escaping () -> AdditionalActions) {
+        self.item = item; self.monitor = monitor
+        self.evidenceMatchesCatalogContext = evidenceMatchesCatalogContext
+        self.actionsBlocked = actionsBlocked; self.onReviewFeedback = onReviewFeedback
+        self.showsExplanations = showsExplanations; self.showsReplySources = showsReplySources
+        self.textFont = textFont
+        self.statusTrailer = statusTrailer; self.additionalActions = additionalActions
+    }
 
     private var status: AuthoredMergeRequestStatus? {
         guard evidenceMatchesCatalogContext, monitor.authoredMergeRequests.hasSyncedCurrentCatalog,
@@ -47,40 +66,13 @@ struct MergeActionsView<AdditionalActions: View>: View {
     }
 
     var body: some View {
-        VStack(alignment: .leading, spacing: 6) {
-            if owned {
-                if let conflict = status?.request.mergeTrainConflict {
-                    Link(destination: conflict.noteURL) {
-                        Label { Text(.MergeActions.mergeActionsTrainRebaseConflict) } icon: { Image(systemName: "arrow.triangle.branch") }
-                    }.foregroundStyle(.orange)
-                } else if status?.request.mergeTrainEvidenceUnavailable == true {
-                    Text(.MergeActions.mergeActionsTrainEvidenceUnavailable).foregroundStyle(.orange)
-                } else if let title = state.title {
-                    Label { Text(title) } icon: { Image(systemName: state.isDelegated ? "clock" : "exclamationmark.circle") }
-                        .foregroundStyle(state.isDelegated ? Color.secondary : .orange)
-                } else if let blocker {
-                    Text(blocker.title).foregroundStyle(.secondary)
-                    if feedbackRecovery?.recoveryAction == .verifyFeedback, feedbackRecheckRoute == .review {
-                        Text(.MergeActions.mergeActionsFeedbackChecksPaused).foregroundStyle(.secondary)
-                    }
-                }
-                if hasDiscussionBlock, blocker != .prerequisite(.discussions) {
-                    Text(.Menu.menuAuthoredBlockerDiscussions).foregroundStyle(.orange)
-                }
-                if let feedbackRecovery, !feedbackRecovery.replySourceIDs.isEmpty {
-                    Text(.MergeActions.mergeActionsReplySources(feedbackRecovery.replySourceIDs.count)).foregroundStyle(.secondary)
-                    ForEach(Array(feedbackRecovery.replySourceIDs.prefix(3)), id: \.self) { noteID in
-                        if let url = replySourceURL(noteID) {
-                            Link(destination: url) { Text(.MergeActions.mergeActionsReplySource(noteID)) }
-                        }
-                    }
-                }
-                if hasDiscussionBlock, feedbackRecovery != nil {
-                    Text(.MergeActions.mergeActionsResolveScope).foregroundStyle(.secondary)
-                }
-                if let resolutionMessage { Text(verbatim: resolutionMessage).foregroundStyle(.secondary).textSelection(.enabled) }
-                if result == .changed, status?.request.mergeTrainConflict == nil { Text(.MergeActions.mergeActionsBlocked).foregroundStyle(.orange) }
+        VStack(alignment: .leading, spacing: 8) {
+            if owned, hasStatusText {
+                VStack(alignment: .leading, spacing: 5) { statusText }
+                    .font(textFont)
+                    .fixedSize(horizontal: false, vertical: true)
             }
+            statusTrailer()
             HStack(spacing: 8) {
                 if owned {
                     if state == .none, blocker == nil, let action = status?.action {
@@ -124,6 +116,65 @@ struct MergeActionsView<AdditionalActions: View>: View {
         }
         .onChange(of: item.mergeRequest?.sha) { _, _ in result = nil; prepared = nil; showingConfirmation = false }
         .onChange(of: monitor.authoredMergeRequests.lastRefresh) { _, _ in result = nil }
+    }
+
+    private var hasStatusText: Bool {
+        status?.request.mergeTrainConflict != nil || status?.request.mergeTrainEvidenceUnavailable == true
+            || state.title != nil || blocker != nil || hasDiscussionBlock
+            || (showsReplySources && feedbackRecovery?.replySourceIDs.isEmpty == false) || resolutionMessage != nil || result == .changed
+    }
+
+    @ViewBuilder
+    private var statusText: some View {
+        if let conflict = status?.request.mergeTrainConflict {
+            Link(destination: conflict.noteURL) {
+                Label { Text(.MergeActions.mergeActionsTrainRebaseConflict) } icon: { Image(systemName: "arrow.triangle.branch") }
+            }.foregroundStyle(.orange)
+        } else if status?.request.mergeTrainEvidenceUnavailable == true {
+            statusLine(.MergeActions.mergeActionsTrainEvidenceUnavailable, symbol: "exclamationmark.triangle", emphasized: true)
+        } else if let title = state.title {
+            statusLine(title, symbol: state.isDelegated ? "clock" : "exclamationmark.circle", emphasized: !state.isDelegated)
+        } else if let blocker {
+            statusLine(blocker.title, symbol: "lock")
+            if feedbackRecovery?.recoveryAction == .verifyFeedback, feedbackRecheckRoute == .review {
+                statusLine(.MergeActions.mergeActionsFeedbackChecksPaused, symbol: "pause.circle")
+            }
+        }
+        if hasDiscussionBlock, blocker != .prerequisite(.discussions) {
+            statusLine(.Menu.menuAuthoredBlockerDiscussions, symbol: "bubble.left.and.exclamationmark.bubble.right", emphasized: true)
+        }
+        if showsReplySources, let feedbackRecovery, !feedbackRecovery.replySourceIDs.isEmpty {
+            VStack(alignment: .leading, spacing: 3) {
+                statusLine(.MergeActions.mergeActionsReplySources(feedbackRecovery.replySourceIDs.count), symbol: "arrowshape.turn.up.left")
+                ForEach(Array(feedbackRecovery.replySourceIDs.prefix(3)), id: \.self) { noteID in
+                    if let url = replySourceURL(noteID) {
+                        Link(destination: url) { Text(.MergeActions.mergeActionsReplySource(noteID)) }
+                            .padding(.leading, statusIndent)
+                    }
+                }
+            }
+        }
+        if showsExplanations, hasDiscussionBlock, feedbackRecovery != nil {
+            Text(.MergeActions.mergeActionsResolveScope).font(.caption).foregroundStyle(.secondary)
+                .padding(.leading, statusIndent)
+        }
+        if let resolutionMessage {
+            Text(verbatim: resolutionMessage).foregroundStyle(.secondary).textSelection(.enabled)
+        }
+        if result == .changed, status?.request.mergeTrainConflict == nil {
+            statusLine(.MergeActions.mergeActionsBlocked, symbol: "exclamationmark.triangle", emphasized: true)
+        }
+    }
+
+    private var statusIndent: CGFloat { 20 }
+
+    /// The icon carries severity; the sentence stays in a readable text colour.
+    private func statusLine(_ text: LocalizedStringResource, symbol: String, emphasized: Bool = false) -> some View {
+        HStack(alignment: .firstTextBaseline, spacing: 6) {
+            Image(systemName: symbol).foregroundStyle(emphasized ? Color.orange : Color.secondary)
+                .frame(width: 14)
+            Text(text).foregroundStyle(emphasized ? Color.primary : Color.secondary)
+        }
     }
 
     @ViewBuilder
@@ -206,13 +257,22 @@ struct MergeActionsView<AdditionalActions: View>: View {
     }
 }
 
-extension MergeActionsView where AdditionalActions == EmptyView {
-    init(item: MergeRequestAttentionMonitor.Item, monitor: TodoMonitorService,
-         evidenceMatchesCatalogContext: Bool = true, actionsBlocked: Bool = false,
-         onReviewFeedback: (() -> Void)? = nil) {
-        self.item = item; self.monitor = monitor; self.actionsBlocked = actionsBlocked
-        self.evidenceMatchesCatalogContext = evidenceMatchesCatalogContext
-        self.onReviewFeedback = onReviewFeedback
-        self.additionalActions = { EmptyView() }
+extension MergeActionsView where StatusTrailer == EmptyView {
+    init(item: MergeRequestAttentionMonitor.Item, monitor: TodoMonitorService, evidenceMatchesCatalogContext: Bool = true,
+         actionsBlocked: Bool = false, onReviewFeedback: (() -> Void)? = nil, showsExplanations: Bool = true,
+         textFont: Font = .subheadline, @ViewBuilder additionalActions: @escaping () -> AdditionalActions) {
+        self.init(item: item, monitor: monitor, evidenceMatchesCatalogContext: evidenceMatchesCatalogContext,
+            actionsBlocked: actionsBlocked, onReviewFeedback: onReviewFeedback, showsExplanations: showsExplanations,
+            textFont: textFont, statusTrailer: { EmptyView() }, additionalActions: additionalActions)
+    }
+}
+
+extension MergeActionsView where StatusTrailer == EmptyView, AdditionalActions == EmptyView {
+    init(item: MergeRequestAttentionMonitor.Item, monitor: TodoMonitorService, evidenceMatchesCatalogContext: Bool = true,
+         actionsBlocked: Bool = false, onReviewFeedback: (() -> Void)? = nil, showsExplanations: Bool = true,
+         textFont: Font = .subheadline) {
+        self.init(item: item, monitor: monitor, evidenceMatchesCatalogContext: evidenceMatchesCatalogContext,
+            actionsBlocked: actionsBlocked, onReviewFeedback: onReviewFeedback, showsExplanations: showsExplanations,
+            textFont: textFont, statusTrailer: { EmptyView() }, additionalActions: { EmptyView() })
     }
 }

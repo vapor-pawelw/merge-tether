@@ -6,9 +6,11 @@ struct AgentDiagnosticDetails: View {
 
     var body: some View {
         DisclosureGroup {
-            Text(verbatim: reason).textSelection(.enabled)
+            Text(verbatim: reason).font(.callout).foregroundStyle(.primary).lineSpacing(2)
+                .textSelection(.enabled)
                 .fixedSize(horizontal: false, vertical: true)
-        } label: { Text(.AgentExplanation.agentExplanationDiagnostics) }
-        .font(.caption).foregroundStyle(.secondary)
+                .padding(.top, 4)
+        } label: { Text(.AgentExplanation.agentExplanationDiagnostics).foregroundStyle(.secondary) }
+        .font(.subheadline)
     }
 }

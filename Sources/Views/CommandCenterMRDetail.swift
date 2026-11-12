@@ -137,18 +137,22 @@ private struct CommandCenterMRDetailContent: View {
             ScrollView {
                 VStack(alignment: .leading, spacing: 22) {
                     header(presentation).id(Anchor.overview)
+                    // The decision the user has to make leads; merge state and automation rules support it.
+                    if showsDecisions {
+                        nextStep(proxy: proxy, citationContext: citationContext, discussions: discussions,
+                            humanAction: presentation.humanAction).id(Anchor.drafts)
+                    }
                     if finishedState == nil {
-                        MREffectivePolicySummary(row: presentationRow, monitor: monitor,
-                            excluding: [presentation.humanAction?.explanation ?? ""])
                         MergeActionsView(item: item, monitor: monitor, evidenceMatchesCatalogContext: presentationRow.evidenceMatchesCatalogContext,
                             actionsBlocked: isStartingReview || isRetrying, onReviewFeedback: {
                                 feedbackExpanded = true
                                 Task { await scroll(to: item.authorFeedbackStatus == nil ? .comments : .feedbackStatus, proxy: proxy) }
-                            })
-                    }
-                    if showsDecisions {
-                        nextStep(proxy: proxy, citationContext: citationContext, discussions: discussions,
-                            humanAction: presentation.humanAction).id(Anchor.drafts)
+                            }, showsExplanations: false,
+                            showsReplySources: !(showsDecisions && item.authorFeedbackStatus != nil),
+                            textFont: .callout, statusTrailer: {
+                                MREffectivePolicySummary(row: presentationRow, monitor: monitor,
+                                    excluding: [presentation.humanAction?.explanation ?? ""])
+                            }, additionalActions: { EmptyView() })
                     }
                     if finishedState == nil { supplementaryActions(citationContext: citationContext).id(Anchor.actions) }
                     discussionThreads(discussions).id(Anchor.comments)
@@ -306,7 +310,9 @@ private struct CommandCenterMRDetailContent: View {
                     if let finishedState {
                         Text(finishedState.status).font(.callout).foregroundStyle(.secondary)
                     } else {
-                        if needsHumanAttention || !progress.working {
+                        // The Next step box below already states what needs attention.
+                        let genericAttention = needsHumanAttention && (progress.working || progress.status == nil)
+                        if (needsHumanAttention || !progress.working) && !(genericAttention && showsDecisions) {
                             Label {
                                 if let status = progress.status, !progress.working {
                                     Text(verbatim: status)
@@ -370,7 +376,8 @@ private struct CommandCenterMRDetailContent: View {
             VStack(alignment: .leading, spacing: 12) {
                 if let action = humanAction {
                     if !item.needsConfirmation || (action.kind != .publication && action.kind != .approval) {
-                        Text(verbatim: action.explanation).font(.body).foregroundStyle(.primary).textSelection(.enabled)
+                        Text(verbatim: action.explanation).font(.body.weight(.medium)).foregroundStyle(.primary)
+                            .textSelection(.enabled).fixedSize(horizontal: false, vertical: true)
                     }
                     if let detail = action.detail, detail != action.explanation,
                        AgentExplanation.summary(detail) != action.explanation, action.preparedReply == nil {
@@ -440,11 +447,18 @@ private struct CommandCenterMRDetailContent: View {
                 }
                 decisionActions
                 FollowUpAutomationHoldView(row: presentationRow, monitor: monitor)
-                if item.authorFeedbackStatus != nil { feedbackCheck(citationContext: citationContext).id(Anchor.feedbackStatus) }
+                if item.authorFeedbackStatus != nil {
+                    Divider()
+                    feedbackCheck(citationContext: citationContext).id(Anchor.feedbackStatus)
+                }
             }
             .font(.body).padding(14).frame(maxWidth: .infinity, alignment: .leading)
-            .background(Color.secondary.opacity(0.045), in: RoundedRectangle(cornerRadius: 10))
-            .overlay { RoundedRectangle(cornerRadius: 10).strokeBorder(Color.secondary.opacity(0.12), lineWidth: 0.5) }
+            .background((needsHumanAttention ? Color.orange.opacity(0.06) : Color.secondary.opacity(0.06)),
+                in: RoundedRectangle(cornerRadius: 10))
+            .overlay {
+                RoundedRectangle(cornerRadius: 10)
+                    .strokeBorder((needsHumanAttention ? Color.orange : Color.secondary).opacity(0.2), lineWidth: 0.5)
+            }
             .overlay(alignment: .leading) {
                 if needsHumanAttention {
                     RoundedRectangle(cornerRadius: 2).fill(Color.orange.opacity(0.7))
@@ -500,8 +514,9 @@ private struct CommandCenterMRDetailContent: View {
         }
     }
 
+    /// Flattened into the caller's stack so absent controls leave no empty gap.
+    @ViewBuilder
     private var decisionActions: some View {
-        VStack(alignment: .leading, spacing: 12) {
             CommentReviewImpactView(item: item, reReviewEnabled: monitor.settings.automation.autoReReviewEnabled)
             BoardMRIntentActions(row: presentationRow, monitor: monitor)
             ReReviewControls(item: presentationItem, monitor: monitor.attention)
@@ -509,13 +524,13 @@ private struct CommandCenterMRDetailContent: View {
                 onFeedback: { Task { await monitor.runAttentionFeedback(for: item) } },
                 onPipeline: { monitor.confirmPipelineHandoff(for: item.id) },
                 onMerge: { NSWorkspace.shared.open(item.url) })
-        }
     }
 
     private func feedbackCheck(citationContext: MRCommentCitation.Context?) -> some View {
         DisclosureGroup(isExpanded: $feedbackExpanded) {
             if feedbackExpanded {
-                AuthorFeedbackView(item: presentationItem, monitor: monitor, citationContext: citationContext, sourceLoading: feedbackSourceLoading,
+                AuthorFeedbackView(item: presentationItem, monitor: monitor, embedded: true,
+                    citationContext: citationContext, sourceLoading: feedbackSourceLoading,
                     decisionUpdating: isUpdatingFeedbackDecision, onIgnoreSuggestion: presentIgnoreSuggestion).padding(.top, 8)
             }
         } label: { Text(.CommandCenter.commandCenterFeedbackCheck).font(.callout.weight(.medium)) }
@@ -535,10 +550,10 @@ private struct CommandCenterMRDetailContent: View {
                             metadata(.CommandCenter.commandCenterTarget, value: request.targetBranch)
                             if let sha = request.sha { metadata(.CommandCenter.commandCenterCommit, value: sha, monospaced: true) }
                             metadata(.CommandCenter.commandCenterMergeState,
-                                value: request.detailedMergeStatus?.replacingOccurrences(of: "_", with: " ")
+                                value: request.detailedMergeStatus.map(Self.readableStatus)
                                     ?? String(localized: .CommandCenter.commandCenterStatusUnavailable))
                             metadata(.CommandCenter.commandCenterPipeline,
-                                value: request.headPipeline?.status.replacingOccurrences(of: "_", with: " ")
+                                value: request.headPipeline.map { Self.readableStatus($0.status) }
                                     ?? String(localized: .CommandCenter.commandCenterNoPipeline))
                         }
                     }
@@ -561,7 +576,7 @@ private struct CommandCenterMRDetailContent: View {
     private func supplementaryActions(citationContext: MRCommentCitation.Context?) -> some View {
         if !showsDecisions {
             if item.needsConfirmation { confirmationControls }
-            decisionActions
+            VStack(alignment: .leading, spacing: 12) { decisionActions }
             FollowUpAutomationHoldView(row: presentationRow, monitor: monitor)
             if item.authorFeedbackStatus != nil { feedbackCheck(citationContext: citationContext).id(Anchor.feedbackStatus) }
         }
@@ -595,9 +610,15 @@ private struct CommandCenterMRDetailContent: View {
         Task { await scroll(to: .assistantRuns, proxy: proxy) }
     }
 
+    /// GitLab reports raw identifiers such as `not_approved`; show them as plain words.
+    private static func readableStatus(_ raw: String) -> String {
+        let words = raw.replacingOccurrences(of: "_", with: " ")
+        return words.prefix(1).uppercased() + words.dropFirst()
+    }
+
     private func metadata(_ label: LocalizedStringResource, value: String, monospaced: Bool = false) -> some View {
         GridRow(alignment: .firstTextBaseline) {
-            Text(label).foregroundStyle(.secondary)
+            Text(label).foregroundStyle(.secondary).gridColumnAlignment(.trailing)
             Text(verbatim: value).font(monospaced ? .callout.monospaced() : .callout)
                 .textSelection(.enabled).frame(maxWidth: .infinity, alignment: .leading)
         }
@@ -615,7 +636,8 @@ private struct CommandCenterMRDetailContent: View {
     }
 
     private func reason(_ text: LocalizedStringResource) -> some View {
-        Label { Text(text) } icon: { Image(systemName: "info.circle") }.font(.subheadline).foregroundStyle(.secondary)
+        Label { Text(text).foregroundStyle(.primary) } icon: { Image(systemName: "exclamationmark.circle").foregroundStyle(.orange) }
+            .labelStyle(BoardCardStatusLabelStyle()).font(.callout)
     }
 
     @ViewBuilder

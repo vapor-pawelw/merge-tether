@@ -61,18 +61,30 @@ private struct CommandCenterMRCardContent: View {
                 FinishedMergeRequestStatus(item: row.displayItem, monitor: monitor)
             } else {
                 if humanAction != nil {
-                    Text(verbatim: presentation.message).help(Text(verbatim: presentation.message))
-                        .font(.callout).foregroundStyle(isMuted ? Color.secondary : Color.orange)
-                        .lineLimit(2).fixedSize(horizontal: false, vertical: true)
+                    // The orange icon and edge carry urgency; the sentence stays high-contrast.
+                    Label { Text(verbatim: presentation.message).foregroundStyle(isMuted ? Color.secondary : Color.primary) } icon: {
+                        Image(systemName: "exclamationmark.circle.fill").foregroundStyle(isMuted ? Color.secondary : Color.orange)
+                    }
+                    .labelStyle(BoardCardStatusLabelStyle())
+                    .font(.callout.weight(.medium))
+                    .lineLimit(3).fixedSize(horizontal: false, vertical: true)
+                    .help(Text(verbatim: presentation.message))
                 }
                 if let retryError {
-                    Text(verbatim: retryError).font(.caption).foregroundStyle(isMuted ? Color.secondary : Color.red)
-                        .fixedSize(horizontal: false, vertical: true)
+                    Label { Text(verbatim: retryError) } icon: {
+                        Image(systemName: "xmark.octagon").foregroundStyle(isMuted ? Color.secondary : Color.red)
+                    }
+                    .labelStyle(BoardCardStatusLabelStyle())
+                    .font(.subheadline).foregroundStyle(isMuted ? Color.secondary : Color.primary)
+                    .fixedSize(horizontal: false, vertical: true)
                 }
                 if let state = monitor.attention.confirmationStates[item.id], state == .failed || state == .changed {
-                    Text(state == .failed ? .Menu.menuConfirmFailed : .Menu.menuConfirmChanged)
-                        .font(.caption).foregroundStyle(isMuted ? Color.secondary : Color.orange)
-                        .fixedSize(horizontal: false, vertical: true)
+                    Label { Text(state == .failed ? .Menu.menuConfirmFailed : .Menu.menuConfirmChanged) } icon: {
+                        Image(systemName: "exclamationmark.triangle").foregroundStyle(isMuted ? Color.secondary : Color.orange)
+                    }
+                    .labelStyle(BoardCardStatusLabelStyle())
+                    .font(.subheadline).foregroundStyle(isMuted ? Color.secondary : Color.primary)
+                    .fixedSize(horizontal: false, vertical: true)
                 }
                 if let job = row.latestJob { AssistantJobPreflightNotice(jobID: job.id, monitor: monitor) }
                 if presentation.working || presentation.refreshFailed || humanAction != nil || neutralStatus != nil || (isDraft && item.isAuthored) {
@@ -98,17 +110,22 @@ private struct CommandCenterMRCardContent: View {
                         .font(.subheadline).foregroundStyle(.secondary)
                         .fixedSize(horizontal: false, vertical: true)
                 }
-                if !chips.isEmpty {
-                    HStack(spacing: 5) {
-                        ForEach(Array(chips.enumerated()), id: \.offset) { _, chip in
-                            BoardStatusChip(title: chip.title, symbol: chip.symbol)
-                        }
-                    }
-                }
-                MREffectivePolicySummary(row: row, monitor: monitor,
-                    excluding: [presentation.message, presentation.nextStep ?? ""])
                 MergeActionsView(item: item, monitor: monitor, evidenceMatchesCatalogContext: row.evidenceMatchesCatalogContext,
-                    actionsBlocked: presentation.actionsBlocked, onReviewFeedback: { openAttention(.feedback) }) {
+                    actionsBlocked: presentation.actionsBlocked, onReviewFeedback: { openAttention(.feedback) },
+                    showsExplanations: false, statusTrailer: {
+                        // Short state chips and automation rules sit together, above the action row.
+                        VStack(alignment: .leading, spacing: 5) {
+                            if !chips.isEmpty {
+                                HStack(spacing: 5) {
+                                    ForEach(Array(chips.enumerated()), id: \.offset) { _, chip in
+                                        BoardStatusChip(title: chip.title, symbol: chip.symbol)
+                                    }
+                                }
+                            }
+                            MREffectivePolicySummary(row: row, monitor: monitor,
+                                excluding: [presentation.message, presentation.nextStep ?? ""])
+                        }
+                    }) {
                     if humanAction?.action == .retryRun {
                         Button { openAttention(.assistantRuns) } label: { Text(.MRHumanAction.mrHumanActionActionReviewRun) }
                             .buttonStyle(.plain)
@@ -320,6 +337,16 @@ private struct CommandCenterMRCardContent: View {
 
     private var chips: [MRCardPresentation.Chip] { presentation.chips }
 
+}
+
+/// Keeps wrapped status text aligned after a fixed-width leading symbol.
+struct BoardCardStatusLabelStyle: LabelStyle {
+    func makeBody(configuration: Configuration) -> some View {
+        HStack(alignment: .firstTextBaseline, spacing: 6) {
+            configuration.icon.frame(width: 14)
+            configuration.title
+        }
+    }
 }
 
 struct BoardStatusChip: View {

@@ -39,30 +39,38 @@ struct MRCommentCitationView: View {
         return String(localized: .FeedbackSuggestions.feedbackSuggestionsAuthorIdentifier(authorID))
     }
 
+    /// Short comments need no expand control.
+    private var isLong: Bool { quote.count > 220 || quote.filter(\.isNewline).count > 2 }
+
     var body: some View {
-        VStack(alignment: .leading, spacing: 7) {
-            Text(relation).font(.caption.weight(.medium)).foregroundStyle(.secondary)
-            HStack(alignment: .firstTextBaseline) {
-                Text(verbatim: author).font(.caption.weight(.medium))
+        VStack(alignment: .leading, spacing: 5) {
+            // The relation stays available as help and to VoiceOver instead of as a separate heading.
+            HStack(alignment: .firstTextBaseline, spacing: 6) {
+                Image(systemName: "text.bubble").foregroundStyle(.secondary).imageScale(.small)
+                Text(verbatim: author).font(.caption.weight(.semibold)).foregroundStyle(.secondary)
                 Spacer(minLength: 8)
                 if let url {
                     Link(destination: url) { Text(.FeedbackSuggestions.feedbackSuggestionsOpenComment) }
                         .font(.caption)
                 }
             }
-            Text(verbatim: quote).textSelection(.enabled)
-                .lineLimit(isExpanded ? nil : 4).fixedSize(horizontal: false, vertical: true)
-            Button { isExpanded.toggle() } label: {
-                Text(isExpanded ? .FeedbackSuggestions.feedbackSuggestionsCollapseComment
-                    : .FeedbackSuggestions.feedbackSuggestionsExpandComment)
+            .help(Text(relation))
+            .accessibilityElement(children: .combine)
+            .accessibilityHint(Text(relation))
+            Text(verbatim: quote).font(.callout).foregroundStyle(.primary.opacity(0.85)).textSelection(.enabled)
+                .lineLimit(isExpanded || !isLong ? nil : 2).fixedSize(horizontal: false, vertical: true)
+            if isLong || isExpanded {
+                Button { isExpanded.toggle() } label: {
+                    Text(isExpanded ? .FeedbackSuggestions.feedbackSuggestionsCollapseComment
+                        : .FeedbackSuggestions.feedbackSuggestionsExpandComment)
+                }
+                .buttonStyle(.plain).font(.caption).foregroundStyle(.secondary)
+                .accessibilityValue(Text(isExpanded ? .FeedbackSuggestions.feedbackSuggestionsCommentExpanded
+                    : .FeedbackSuggestions.feedbackSuggestionsCommentCollapsed))
             }
-            .buttonStyle(.plain).font(.caption).foregroundStyle(.secondary)
-            .accessibilityValue(Text(isExpanded ? .FeedbackSuggestions.feedbackSuggestionsCommentExpanded
-                : .FeedbackSuggestions.feedbackSuggestionsCommentCollapsed))
         }
-        .padding(.vertical, 8).padding(.horizontal, 12)
+        .padding(.leading, 10).padding(.vertical, 2)
         .frame(maxWidth: .infinity, alignment: .leading)
-        .background(Color.secondary.opacity(0.04), in: RoundedRectangle(cornerRadius: 6))
         .overlay(alignment: .leading) { Rectangle().fill(Color.secondary.opacity(0.35)).frame(width: 2) }
         .onChange(of: quote) { _, _ in isExpanded = false }
         .onChange(of: url) { _, _ in isExpanded = false }

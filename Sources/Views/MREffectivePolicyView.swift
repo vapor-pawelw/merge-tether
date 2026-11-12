@@ -37,12 +37,15 @@ struct MREffectivePolicyView: View {
     @Environment(\.openSettings) private var openSettings
 
     var body: some View {
-        let messages = presentation.clauses.map { String(localized: $0.message) }.filter { !excluding.contains($0) }
-        VStack(alignment: .leading, spacing: 4) {
-            if !messages.isEmpty {
-                Text(verbatim: messages.joined(separator: " · "))
-                    .font(.caption).foregroundStyle(.secondary)
-                    .fixedSize(horizontal: false, vertical: true)
+        let clauses = presentation.clauses.filter { !excluding.contains(String(localized: $0.message)) }
+        VStack(alignment: .leading, spacing: 6) {
+            if !clauses.isEmpty {
+                // Separate pills keep each rule scannable instead of one run-on sentence.
+                StatusFlowLayout(spacing: 5) {
+                    ForEach(Array(clauses.enumerated()), id: \.offset) { _, clause in
+                        MREffectivePolicyPill(message: clause.message, symbol: clause.symbol, isHold: clause.isHold)
+                    }
+                }
             }
             if let action = presentation.settingsAction {
                 Button { SettingsNavigation.shared.perform(action) { openSettings() } } label: {
@@ -54,7 +57,58 @@ struct MREffectivePolicyView: View {
     }
 }
 
+private struct MREffectivePolicyPill: View {
+    let message: LocalizedStringResource
+    let symbol: String
+    let isHold: Bool
+
+    var body: some View {
+        let tint: Color = isHold ? .orange : .secondary
+        Label { Text(message).foregroundStyle(isHold ? Color.primary : Color.secondary) } icon: {
+            Image(systemName: symbol).foregroundStyle(tint)
+        }
+        .font(.caption)
+        .labelStyle(PolicyPillLabelStyle())
+        .padding(.horizontal, 7).padding(.vertical, 3)
+        .background(tint.opacity(isHold ? 0.12 : 0.08), in: RoundedRectangle(cornerRadius: 6))
+        .fixedSize(horizontal: false, vertical: true)
+        .help(Text(message))
+    }
+}
+
+private struct PolicyPillLabelStyle: LabelStyle {
+    func makeBody(configuration: Configuration) -> some View {
+        HStack(alignment: .firstTextBaseline, spacing: 4) {
+            configuration.icon.imageScale(.small)
+            configuration.title
+        }
+    }
+}
+
 private extension MREffectivePolicyPresentation.Clause {
+    var symbol: String {
+        switch self {
+        case .publicationAfterChecks: "text.bubble"
+        case .publicationManual, .approvalManual, .mergeManual, .deliveryManual: "hand.raised"
+        case .mergeAfterChecks, .approvalAfterChecks, .requiresVerification: "checkmark.shield"
+        case .draftPaused, .scopePaused: "pause.circle"
+        case .automationOff: "bolt.slash"
+        case .automationDecisionRequired: "questionmark.circle"
+        case .privateWork: "lock"
+        case .savedDataHold, .assistantUnavailable, .loginRequired, .rateLimited: "exclamationmark.triangle"
+        case .finishCommentReview: "text.bubble"
+        case .mergeSubmission: "arrow.triangle.merge"
+        }
+    }
+
+    /// Conditions that stop automatic work stand out from routine policy facts.
+    var isHold: Bool {
+        switch self {
+        case .savedDataHold, .assistantUnavailable, .loginRequired, .rateLimited, .automationDecisionRequired: true
+        default: false
+        }
+    }
+
     var message: LocalizedStringResource {
         switch self {
         case .publicationAfterChecks(let mode):
