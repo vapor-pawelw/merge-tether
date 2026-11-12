@@ -56,6 +56,7 @@ struct MRDiscussionSnapshot {
         let state: State
         let location: String?
         let origins: [Int: Origin]
+        var authorKinds: [Int: AuthorFeedbackPolicy.AccountKind] = [:]
         let feedback: Feedback
 
         var originBadge: OriginBadge? {
@@ -111,7 +112,8 @@ struct MRDiscussionSnapshot {
     }
 
     init(discussions: [GitLabMergeRequestDiscussion], drafts: [GitLabDraftNote], origins: [Int: Origin],
-         assessment: ReReviewAssessment? = nil, authorID: Int? = nil) {
+         assessment: ReReviewAssessment? = nil, authorID: Int? = nil,
+         authorKinds: [Int: AuthorFeedbackPolicy.AccountKind] = [:]) {
         var draftsByDiscussion: [String: [(offset: Int, element: GitLabDraftNote)]] = [:]
         for entry in drafts.enumerated() {
             guard let id = entry.element.discussionID, !id.isEmpty else { continue }
@@ -135,6 +137,7 @@ struct MRDiscussionSnapshot {
             threads.append(.init(id: discussion.id.map { "discussion/\($0)" } ?? "unidentified/\(index)",
                 discussionID: discussion.id, notes: notes, drafts: pending.map(\.element), state: state,
                 location: location, origins: threadOrigins,
+                authorKinds: authorKinds.filter { id, _ in notes.contains { $0.author?.id == id } },
                 feedback: Feedback.summarize(notes: notes.map { ($0.id, $0.author?.id) }, assessment: assessment, authorID: authorID)))
         }
         // Group by GitLab state without changing server order within a group.

@@ -1,9 +1,235 @@
 import Foundation
 import Testing
+import MergeTetherRemote
 @testable import GitLabTodos
 
 @MainActor
 struct AuthorFeedbackCoordinatorTests {
+    @Test func replacementOwnerSurvivesAnObsoleteOptionalAcknowledgementCompletion() async throws {
+        try await withFixture { f in
+            try f.write("discussions.json", #"[{"id":"thread-a","notes":[{"id":10,"author":{"id":7,"username":"alice"},"system":false,"body":"Review complete, looks good","resolvable":true,"resolved":false}]}]"#)
+            let host = Fixture.host
+            let identity = PublicationIdentity(host: host, entityID: 7, label: "@alice")
+            let originalRevision = f.settings.reviewParticipationPreferences.revision(host: host, username: "me")
+            var verifications = 0
+            var heldOldAcknowledgement = false
+            var oldDependencyReturned = false
+            var release: CheckedContinuation<Bool, Never>?
+            var completedRevisions: [String] = []
+            let coordinator = AuthorFeedbackCoordinator(settings: f.settings, glab: f.glab, canAutomate: { _ in
+                if verifications == 1, !heldOldAcknowledgement {
+                    heldOldAcknowledgement = true
+                    let permitted = await withCheckedContinuation { release = $0 }
+                    oldDependencyReturned = true
+                    return permitted
+                }
+                return true
+            }, verify: { _, _, _ in
+                verifications += 1
+                f.verified = true
+                return .init(notes: [.init(noteID: 10, state: .informational, reason: "No remaining expectation",
+                    informationalAcknowledgementSafe: true, informationalPurpose: .reviewSummary)])
+            }, retryWait: { _ in })
+            defer {
+                if let continuation = release { release = nil; continuation.resume(returning: false) }
+                coordinator.cancel()
+            }
+            coordinator.onRemoteChange = {
+                if let status = coordinator.status(projectID: 1, iid: 2), status.phase == .complete {
+                    completedRevisions.append(status.reviewParticipationRevision)
+                }
+            }
+            try f.start(coordinator)
+            let enteredDeadline = ContinuousClock.now + .seconds(3)
+            while release == nil, ContinuousClock.now < enteredDeadline { try await Task.sleep(for: .milliseconds(1)) }
+            try #require(release != nil)
+            #expect(verifications == 1 && !oldDependencyReturned)
+
+            f.settings.reviewParticipationPreferences.exclude(identity, username: "me")
+            f.settings.save()
+            let currentRevision = f.settings.reviewParticipationPreferences.revision(host: host, username: "me")
+            try #require(currentRevision != originalRevision)
+            coordinator.invalidate(projectID: 1, iid: 2)
+            try f.start(coordinator)
+            let replacement = try #require(coordinator.status(projectID: 1, iid: 2))
+            #expect(replacement.phase == .checking && replacement.reviewParticipationRevision == currentRevision)
+
+            let continuation = release; release = nil; continuation?.resume(returning: false)
+            let completedDeadline = ContinuousClock.now + .seconds(3)
+            while !(verifications == 2 && coordinator.status(projectID: 1, iid: 2)?.phase == .complete
+                && coordinator.status(projectID: 1, iid: 2)?.reviewParticipationRevision == currentRevision),
+                  ContinuousClock.now < completedDeadline { try await Task.sleep(for: .milliseconds(1)) }
+            let current = try #require(coordinator.status(projectID: 1, iid: 2))
+            #expect(oldDependencyReturned && verifications == 2)
+            #expect(current.phase == .complete && current.reviewParticipationRevision == currentRevision)
+            #expect(completedRevisions == [currentRevision])
+            #expect(f.resolutionPosts == 0 && f.reactionPosts == 0)
+        }
+    }
+
+    @Test(arguments: ["bot", "duoType", "service", "humanAIText", "unknown", "failedIdentity", "wrongIdentity"])
+    func addressedFeedbackUsesVerifiedAuthorIdentityRatherThanAITextToDecideAcceptance(_ identity: String) async throws {
+        try await withFixture { f in
+            try f.write("approvals.json", #"{"approved_by":[]}"#)
+            let account: String
+            switch identity {
+            case "bot": account = #"{"id":7,"username":"alice","bot":true}"#
+            case "duoType": account = #"{"id":7,"username":"alice","user_type":"duo_code_review_bot"}"#
+            case "service": account = #"{"id":7,"username":"alice","bot":false,"user_type":"service_account"}"#
+            case "humanAIText": account = #"{"id":7,"username":"alice","bot":false,"user_type":"human"}"#
+            case "wrongIdentity": account = #"{"id":99,"username":"alice","bot":true}"#
+            default: account = #"{"id":7,"username":"alice"}"#
+            }
+            try f.write("reviewer.json", account)
+            if identity == "failedIdentity" { try f.write("fail-reviewer", "yes") }
+            if identity == "humanAIText" {
+                try f.write("discussions.json", "[" + Fixture.thread.replacingOccurrences(of: "Fix A", with: "I used AI to review this: Fix A") + "]")
+            }
+            let coordinator = f.coordinator()
+            try await f.run(coordinator)
+            let automation = ["bot", "duoType", "service"].contains(identity)
+            #expect(f.resolutionPosts == (automation ? 1 : 0))
+            #expect(f.resolved == automation)
+            #expect(f.reactionPosts == 0)
+            let status = try #require(coordinator.status(projectID: 1, iid: 2))
+            #expect(status.phase == .complete && status.replyNoteIDs.isEmpty && status.followUpNoteIDs.isEmpty)
+            #expect(f.inputs.count == 1 && f.retryDelays.isEmpty)
+            if automation { #expect(status.acceptedReviewerIDs.isEmpty) }
+            if !automation { #expect(status.findings.first?.state == .waitingAcceptance) }
+        }
+    }
+
+    @Test(arguments: [false, true], [false, true])
+    func anAddressedBotCannotSupplyAMixedThreadsHumanConsent(_ humanApproved: Bool, _ humanBlocking: Bool) async throws {
+        try await withFixture { f in
+            let thread = #"{"id":"thread-a","notes":[{"id":10,"author":{"id":7,"username":"alice"},"system":false,"body":"Fix A","resolvable":true,"resolved":false,"created_at":"2026-01-01T10:00:00Z"},{"id":11,"author":{"id":3,"username":"me"},"system":false,"body":"Fixed A","created_at":"2026-01-01T11:00:00Z"},{"id":12,"author":{"id":8,"username":"bob"},"system":false,"body":"Cover B","created_at":"2026-01-01T11:30:00Z"},{"id":13,"author":{"id":3,"username":"me"},"system":false,"body":"Covered B","created_at":"2026-01-01T12:00:00Z"}]}"#
+            try f.write("discussions.json", "[" + thread + "]")
+            try f.write("resolved.json", thread.replacingOccurrences(of: #""resolved":false"#, with: #""resolved":true"#))
+            try f.write("reviewer.json", #"{"id":7,"username":"alice","bot":true}"#)
+            try f.write("peer.json", #"{"id":8,"username":"bob","bot":false,"user_type":"human"}"#)
+            try f.write("approvals.json", humanApproved ? #"{"approved_by":[{"user":{"id":8,"username":"bob"}}]}"# : #"{"approved_by":[]}"#)
+            let coordinator = f.coordinator(assessment: .init(notes: [
+                .init(noteID: 10, state: .addressed, reason: "A is verified", publishedReplyNoteID: 11),
+                .init(noteID: 12, state: humanBlocking ? .blocking : .addressed,
+                    reason: humanBlocking ? "B is still incorrect" : "B is verified", publishedReplyNoteID: humanBlocking ? nil : 13)]))
+            try await f.run(coordinator)
+            #expect(f.resolutionPosts == (humanApproved && !humanBlocking ? 1 : 0))
+            let status = try #require(coordinator.status(projectID: 1, iid: 2))
+            if humanBlocking { #expect(status.findings.first?.state == .needsChanges) }
+            else if !humanApproved { #expect(status.findings.first?.waitingForReviewers == ["bob"]) }
+        }
+    }
+
+    @Test(arguments: ["blocked", "uncertain", "missingReply", "draft", "private", "disabled", "excluded", "excludedApproved", "changedSource"])
+    func verifiedBotIdentityDoesNotBypassExistingFeedbackOrWriteGates(_ gate: String) async throws {
+        try await withFixture { f in
+            try f.write("reviewer.json", #"{"id":7,"username":"alice","bot":true}"#)
+            try f.write("approvals.json", #"{"approved_by":[]}"#)
+            if gate == "private" { f.settings.automation.allowAutomaticPublicActions = false }
+            if gate == "disabled" {
+                f.settings.automation.autoResolveAcceptedFeedback = false
+                f.settings.automation.authorFeedback.isEnabled = true
+            }
+            if gate == "excluded" || gate == "excludedApproved" {
+                f.settings.reviewParticipationPreferences.exclude(.init(host: Fixture.host, entityID: 7, label: "@alice"), username: "me")
+            }
+            if gate == "excludedApproved" { try f.write("approvals.json", #"{"approved_by":[{"user":{"id":7,"username":"alice"}}]}"#) }
+            if gate == "draft" { try f.write("drafts.json", #"[{"id":30,"author_id":3,"discussion_id":"thread-a","note":"Private reply"}]"#) }
+            if gate == "missingReply" {
+                try f.write("discussions.json", #"[{"id":"thread-a","notes":[{"id":10,"author":{"id":7,"username":"alice"},"system":false,"body":"Fix A","resolvable":true,"resolved":false}]}]"#)
+            }
+            let state: ReReviewAssessment.Note.State = gate == "blocked" ? .blocking : gate == "uncertain" ? .uncertain : .addressed
+            let changedRequest = Fixture.request.replacingOccurrences(of: Fixture.sha, with: String(repeating: "b", count: 40))
+            let coordinator = f.coordinator(assessment: .init(notes: [.init(noteID: 10, state: state,
+                reason: "Current source evidence", publishedReplyNoteID: gate == "missingReply" ? nil : 11)]), duringVerification: {
+                if gate == "changedSource" {
+                    f.gitlab.write("request.json", changedRequest)
+                }
+            })
+            try await f.run(coordinator, drafts: gate == "draft" ? 1 : 0)
+            #expect(f.resolutionPosts == 0 && f.reactionPosts == 0)
+            #expect(!f.resolved)
+        }
+    }
+
+    @Test(arguments: [false, true])
+    func addressedHumanFeedbackExplainsTheThreadResolutionWaitSeparatelyFromApprovals(_ privateWork: Bool) async throws {
+        try await withFixture { f in
+            if privateWork { f.settings.automation.allowAutomaticPublicActions = false }
+            try f.write("approvals.json", #"{"approved_by":[]}"#)
+            let coordinator = f.coordinator()
+            try await f.run(coordinator)
+            let status = try #require(coordinator.status(projectID: 1, iid: 2))
+            let request = try JSONDecoder().decode(GitLabMergeRequest.self, from: Data(Fixture.request.utf8))
+            var item = MergeRequestAttentionMonitor.Item(id: .init(projectID: 1, iid: 2), title: request.title,
+                url: request.webURL, humanActionRequired: false, approvalProgress: .init(completed: 0, required: 2),
+                mergeRequest: request, isAuthored: true)
+            item.authorFeedbackStatus = status
+            item.observedDiscussionFingerprint = status.fingerprint
+            let row = MergeRequestBoardSnapshot.Row(item: item, latestJob: nil, intents: [])
+            let model = MRCardPresentation(row: row, reviewingContext: ReviewingContext(row: row), allowsRemoval: false, assistantReady: true)
+            #expect(model.status == "Feedback addressed, waiting for @alice to resolve threads · Awaiting required approvals · 0/2")
+            #expect(!model.working && model.humanAction == nil)
+            let phone = RemoteBoardAdapter.presentation(RemoteBoardAdapter.card(item, account: "me@host"), model: model)
+            #expect(phone.presentation?.status == model.status)
+            #expect(f.resolutionPosts == 0 && f.reactionPosts == 0)
+        }
+    }
+
+    @Test(arguments: ["regular", "unknown", "failure"])
+    func botIdentityIsRecheckedBeforeResolutionWithoutRepeatingTheSemanticAssessment(_ replacement: String) async throws {
+        try await withFixture { f in
+            try f.write("approvals.json", #"{"approved_by":[]}"#)
+            let previous = f.gitlab.handler
+            var identityReads = 0
+            f.gitlab.handler = { request in
+                if request.endpoint == "/users/7" {
+                    identityReads += 1
+                    if identityReads == 1 { return InMemoryGitLab.output(#"{"id":7,"bot":true}"#) }
+                    if replacement == "failure" { return InMemoryGitLab.output(error: "Unavailable", code: 1) }
+                    return InMemoryGitLab.output(replacement == "regular" ? #"{"id":7,"bot":false}"# : #"{"id":7}"#)
+                }
+                return try await previous!(request)
+            }
+            let coordinator = f.coordinator()
+            try await f.run(coordinator)
+            #expect(identityReads >= 2)
+            #expect(f.resolutionPosts == 0 && f.inputs.count == 1 && f.retryDelays.isEmpty)
+            #expect(coordinator.status(projectID: 1, iid: 2)?.findings.first?.state == .waitingAcceptance)
+        }
+    }
+
+    @Test(arguments: ["declared", "otherHost", "otherAccount", "removed", "excludedApproved", "revisionChanged"])
+    func explicitAutomationIdentityIsScopedAndCannotOverrideNoContactOrAChangedPreference(_ scope: String) async throws {
+        try await withFixture { f in
+            let host = scope == "otherHost" ? "other.example.test" : Fixture.host
+            let username = scope == "otherAccount" ? "other" : "me"
+            let identity = PublicationIdentity(host: host, entityID: 7, label: "@alice")
+            let marked = f.settings.reviewParticipationPreferences.markAutomationAuthor(identity, host: host,
+                user: .init(id: 3, username: username))
+            #expect(marked)
+            let declaration = try #require(f.settings.reviewParticipationPreferences.localAutomationAuthors.first?.id)
+            if scope == "removed" {
+                let removed = f.settings.reviewParticipationPreferences.unmarkAutomationAuthor(declaration, host: host, username: username)
+                #expect(removed)
+            }
+            if scope == "excludedApproved" { f.settings.reviewParticipationPreferences.exclude(identity, username: username) }
+            f.settings.save()
+            try f.write("approvals.json", scope == "excludedApproved" ? #"{"approved_by":[{"user":{"id":7,"username":"alice"}}]}"# : #"{"approved_by":[]}"#)
+            let coordinator = f.coordinator(duringVerification: {
+                if scope == "revisionChanged" {
+                    _ = f.settings.reviewParticipationPreferences.unmarkAutomationAuthor(declaration, host: host, username: username)
+                    f.settings.save()
+                }
+            })
+            try await f.run(coordinator)
+            #expect(f.resolutionPosts == (scope == "declared" ? 1 : 0))
+            if scope == "declared" || scope == "excludedApproved" {
+                #expect(coordinator.status(projectID: 1, iid: 2)?.acceptedReviewerIDs.isEmpty == true)
+            }
+        }
+    }
+
     @Test func privateWorkStillVerifiesFeedbackButCannotReactOrResolveWithOtherwisePermissiveFlags() async throws {
         try await withFixture { fixture in
             fixture.settings.automation.allowAutomaticPublicActions = false
@@ -1620,6 +1846,10 @@ struct AuthorFeedbackCoordinatorTests {
                 case "/users/7":
                     if gitlab.has("fail-reviewer") { return InMemoryGitLab.output(error: "503 unavailable", code: 1) }
                     return try gitlab.response("reviewer.json")
+                case "/users/8" where gitlab.has("peer.json"): return try gitlab.response("peer.json")
+                case let path where path.hasPrefix("/users/"):
+                    guard let id = Int(path.dropFirst("/users/".count)), id > 0 else { return try gitlab.unexpected(request) }
+                    return InMemoryGitLab.output("{\"id\":\(id),\"username\":\"reviewer\(id)\",\"bot\":false,\"user_type\":\"human\"}")
                 case "/user":
                     gitlab.append("user-reads", "user\n")
                     return try gitlab.response("user.json")

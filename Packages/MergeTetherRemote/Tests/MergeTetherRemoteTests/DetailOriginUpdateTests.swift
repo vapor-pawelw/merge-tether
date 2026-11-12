@@ -3,6 +3,54 @@ import Testing
 @testable import MergeTetherRemote
 
 @MainActor @Suite struct DetailOriginUpdateTests {
+    @Test func authorOnlyCompletionUpdatesAnOpenNoteWithoutChangingOriginDetailsOrLease() throws {
+        let board = board(), state = RemoteDetailState()
+        var initial = details(); initial.threads?[0].notes[0].origin = .ai
+        let request = try #require(state.begin(card: board.cards[0], board: board, now: date))
+        state.receive(.init(request: request, status: .current, details: initial), board: board)
+        let identity = try #require(initial.threads?[0].notes[0].originIdentity(in: "thread"))
+        let update = RemoteDetailOrigins(request: request, changes: [], authorKinds: [
+            .init(threadID: "thread", noteID: "1", identity: identity, authorKind: .automation, revision: 1)])
+        let encoded = try JSONEncoder().encode(RemoteMessage(type: .details, detailOrigins: update))
+        let decoded = try JSONDecoder().decode(RemoteMessage.self, from: encoded)
+        #expect(decoded.detailOrigins == update)
+        #expect(state.receiveOrigins(update, board: board))
+        #expect(state.response?.details?.threads?[0].notes[0].authorKind == .automation)
+        #expect(state.response?.details?.threads?[0].notes[0].origin == .ai)
+        #expect(state.response?.details?.checkedAt == initial.checkedAt && state.response?.details?.description == initial.description)
+        let clear = RemoteDetailOrigins(request: request, changes: [], authorKinds: [
+            .init(threadID: "thread", noteID: "1", identity: identity, authorKind: nil, revision: 2)])
+        #expect(state.receiveOrigins(clear, board: board))
+        #expect(!state.receiveOrigins(update, board: board))
+        #expect(state.response?.details?.threads?[0].notes[0].authorKind == nil)
+        let phone = RemotePhoneState(); let challenge = phone.challenge(now: date)
+        #expect(phone.receive(.init(type: .snapshot, challenge: challenge, board: board), now: date))
+        let expired = date.addingTimeInterval(46)
+        #expect(!phone.receive(decoded, now: expired) && !phone.canAct(now: expired))
+    }
+
+    @Test(arguments: ["close", "account", "head", "request", "body", "author"])
+    func obsoleteAuthorIdentityCannotPaintAnOpenOrCachedDifferentSource(_ mismatch: String) throws {
+        var board = board()
+        let state = RemoteDetailState(), initial = details()
+        let request = try #require(state.begin(card: board.cards[0], board: board, now: date))
+        state.receive(.init(request: request, status: .current, details: initial), board: board)
+        var note = initial.threads![0].notes[0]
+        if mismatch == "body" { note.body = "Edited body" }
+        if mismatch == "author" { note = .init(id: "1", body: note.body, authorID: 99) }
+        let identity = try #require(note.originIdentity(in: "thread"))
+        let bound: RemoteDetailRequest
+        if mismatch == "request" { bound = try RemoteDetailRequest(card: board.cards[0], board: board) }
+        else { bound = request }
+        let update = RemoteDetailOrigins(request: bound, changes: [], authorKinds: [
+            .init(threadID: "thread", noteID: "1", identity: identity, authorKind: .automation)])
+        if mismatch == "close" { state.disconnect() }
+        if mismatch == "account" { board = .init(hostSession: board.hostSession, account: "other@host", lanes: board.lanes) }
+        if mismatch == "head" { board.lanes[0].cards[0].head = "changed-head" }
+        #expect(!state.receiveOrigins(update, board: board))
+        #expect(state.response?.details == initial)
+    }
+
     private let date = Date(timeIntervalSince1970: 100)
 
     private func board() -> RemoteBoard {

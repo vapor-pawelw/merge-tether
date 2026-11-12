@@ -34,7 +34,7 @@ import MergeTetherRemote
             }
             details.feedback.append(.init(label: String(localized: .AuthorFeedback.authorFeedbackTitle), value: String(localized: phase)))
             for finding in feedback.findings {
-                let state: LocalizedStringResource = switch finding.state {
+                let fallback: LocalizedStringResource = switch finding.state {
                 case .waitingAcceptance: .AuthorFeedback.authorFeedbackWaitingAcceptance(finding.waitingForReviewers.map { "@" + $0 }.joined(separator: ", "))
                 case .needsChanges: .AuthorFeedback.authorFeedbackNeedsChanges
                 case .needsVerification: .AuthorFeedback.authorFeedbackNeedsVerification
@@ -43,6 +43,9 @@ import MergeTetherRemote
                 case .waitingPublication: .AuthorFeedback.authorFeedbackWaitingPublication(item.draftCount)
                 case .ready: .AuthorFeedback.authorFeedbackReady
                 }
+                let clean = feedback.phase == .complete && feedback.pendingDraftCount == 0
+                    && feedback.replyNoteIDs.isEmpty && feedback.followUpNoteIDs.isEmpty && feedback.codeReviewRequests.isEmpty
+                let state = clean ? finding.resolutionWaitMessage ?? fallback : fallback
                 var components = URLComponents(url: request.webURL, resolvingAgainstBaseURL: false)
                 components?.fragment = "note_\(finding.sourceNoteID ?? finding.id)"
                 details.feedback.append(.init(label: "@" + finding.reviewerUsername,

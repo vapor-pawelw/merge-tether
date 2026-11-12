@@ -3,6 +3,19 @@ import Testing
 @testable import GitLabTodos
 
 struct MRDiscussionSnapshotTests {
+    @Test func authorIdentityRemainsIndependentOfAITextOrigin() throws {
+        let discussions = try JSONDecoder().decode([GitLabMergeRequestDiscussion].self,
+            from: Data(#"[{"id":"thread","notes":[{"id":1,"author":{"id":7,"username":"reviewer"},"system":false,"body":"AI-assisted human feedback"},{"id":2,"author":{"id":8,"username":"automation"},"system":false,"body":"Deterministic automation output"}]}]"#.utf8))
+        let origins: [Int: MRDiscussionSnapshot.Origin] = [1: .assessed(evidence: "AI-assisted wording"), 2: .humanLikely(evidence: "No AI generation")]
+        let snapshot = MRDiscussionSnapshot(discussions: discussions, drafts: [], origins: origins,
+            authorKinds: [7: .regular, 8: .automation])
+        let thread = try #require(snapshot.threads.first)
+        #expect(thread.authorKinds[7] == .regular && thread.authorKinds[8] == .automation)
+        #expect(thread.origins == origins)
+        let unknown = MRDiscussionSnapshot(discussions: discussions, drafts: [], origins: origins)
+        #expect(unknown.threads.first?.authorKinds.isEmpty == true)
+    }
+
     @Test(arguments: ["addressed", "informational", "blocking", "uncertain", "ignoredByUser"])
     func feedbackStatusUsesAssessmentRatherThanResolutionReplyOrOrigin(_ state: String) throws {
         let assessment = try JSONDecoder().decode(ReReviewAssessment.self,

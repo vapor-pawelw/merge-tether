@@ -1,11 +1,76 @@
 import Foundation
 import Observation
 
+struct FeedbackAccountKindUpdate: Sendable {
+    let host: String
+    let username: String
+    let accountRevision: UInt64
+    let userID: Int
+    let kind: AuthorFeedbackPolicy.AccountKind
+    let revision: UInt64
+}
+
 @MainActor
 @Observable
 final class GlabService {
     typealias CommandRunner = @MainActor (URL, [String], [String: String], TimeInterval, (@MainActor @Sendable () -> Bool)?) async throws -> ProcessRunner.Output
     @ObservationIgnored private let commandRunner: CommandRunner
+    @ObservationIgnored private var feedbackAccountObservers: [UUID: @MainActor (FeedbackAccountKindUpdate) -> Void] = [:]
+    @ObservationIgnored private var feedbackAccountRevision: UInt64 = 0
+    // This bounded cache only restores display after removing a local designation; policy reads remain fresh.
+    @ObservationIgnored private var feedbackAccountCacheKey = ""
+    @ObservationIgnored private var feedbackAccountCacheRevision: UInt64?
+    @ObservationIgnored private var feedbackAccountCache: [Int: AuthorFeedbackPolicy.AccountKind] = [:]
+    @ObservationIgnored private var localAutomationAuthors: [String: Set<Int>] = [:]
+
+    func updateLocalAutomationAuthors(_ ids: Set<Int>, host: String, username: String) {
+        guard !host.isEmpty, !username.isEmpty else { return }
+        let key = host + "\n" + username
+        let previous = localAutomationAuthors[key] ?? []
+        let current = Set(ids.filter { $0 > 0 })
+        localAutomationAuthors[key] = current
+        guard resolvedHost == host, currentUsername == username else { return }
+        for id in previous.symmetricDifference(current).sorted() {
+            let cached = feedbackAccountCacheKey == key && feedbackAccountCacheRevision == accountRevision
+                ? feedbackAccountCache[id] ?? .unknown : .unknown
+            publishFeedbackAccountKind(userID: id, kind: current.contains(id) ? .automation : cached,
+                host: host, username: username, accountRevision: accountRevision)
+        }
+    }
+
+    func feedbackDisplayAccountKind(userID: Int, kind: AuthorFeedbackPolicy.AccountKind,
+                                    host: String, username: String) -> AuthorFeedbackPolicy.AccountKind {
+        localAutomationAuthors[host + "\n" + username]?.contains(userID) == true ? .automation : kind
+    }
+
+    func observeFeedbackAccountKinds(_ observer: @escaping @MainActor (FeedbackAccountKindUpdate) -> Void) -> UUID {
+        let token = UUID(); feedbackAccountObservers[token] = observer; return token
+    }
+
+    func removeFeedbackAccountObserver(_ token: UUID) { feedbackAccountObservers.removeValue(forKey: token) }
+
+    func notifyFeedbackAccountKind(userID: Int, kind: AuthorFeedbackPolicy.AccountKind, host: String,
+                                   username: String, accountRevision: UInt64) {
+        guard !Task.isCancelled, userID > 0, resolvedHost == host, currentUsername == username,
+              self.accountRevision == accountRevision else { return }
+        let key = host + "\n" + username
+        if feedbackAccountCacheKey != key || feedbackAccountCacheRevision != accountRevision {
+            feedbackAccountCacheKey = key; feedbackAccountCacheRevision = accountRevision; feedbackAccountCache = [:]
+        }
+        if feedbackAccountCache.count >= 256, feedbackAccountCache[userID] == nil,
+           let remove = feedbackAccountCache.keys.min() { feedbackAccountCache.removeValue(forKey: remove) }
+        feedbackAccountCache[userID] = kind
+        let displayed = feedbackDisplayAccountKind(userID: userID, kind: kind, host: host, username: username)
+        publishFeedbackAccountKind(userID: userID, kind: displayed, host: host, username: username, accountRevision: accountRevision)
+    }
+
+    private func publishFeedbackAccountKind(userID: Int, kind: AuthorFeedbackPolicy.AccountKind,
+                                           host: String, username: String, accountRevision: UInt64) {
+        feedbackAccountRevision &+= 1
+        let event = FeedbackAccountKindUpdate(host: host, username: username, accountRevision: accountRevision,
+            userID: userID, kind: kind, revision: feedbackAccountRevision)
+        for observer in Array(feedbackAccountObservers.values) { observer(event) }
+    }
 
     // Keep command construction/decoding real in workflow tests while replacing
     // the external process boundary. Adapter tests retain the default runner.

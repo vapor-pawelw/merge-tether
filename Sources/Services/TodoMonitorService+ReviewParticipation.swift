@@ -1,8 +1,41 @@
 import Foundation
 
-enum ReviewParticipationError: Error { case persistence }
+enum ReviewParticipationError: Error { case persistence, ownAccount }
 
 extension TodoMonitorService {
+    func markAutomationAuthor(username: String) async throws {
+        guard let host = glab.resolvedHost, let account = glab.currentUsername,
+              !host.isEmpty, !account.isEmpty else { throw GlabError.notAuthenticated }
+        let revision = glab.accountRevision
+        async let authenticatedUser = glab.fetchAuthenticatedUser(host: host, expectedUsername: account)
+        async let resolvedIdentity = glab.resolvePublicationUser(username: username, host: host)
+        let (user, identity) = try await (authenticatedUser, resolvedIdentity)
+        guard !Task.isCancelled, glab.accountRevision == revision,
+              glab.resolvedHost == host, glab.currentUsername == account,
+              identity.host == host else { throw CancellationError() }
+        guard identity.entityID != user.id else { throw ReviewParticipationError.ownAccount }
+        if settings.reviewParticipationPreferences.isDeclaredAutomation(host: host, username: account, userID: identity.entityID) { return }
+        guard settings.markAutomationAuthor(identity, host: host, user: user) else { throw ReviewParticipationError.persistence }
+        synchronizeLocalAutomationAuthors()
+        for item in attention.currentOpenItems { attention.retryAuthorFeedback(item.id) }
+    }
+
+    func unmarkAutomationAuthor(_ id: UUID) throws {
+        guard let host = glab.resolvedHost, let account = glab.currentUsername,
+              settings.reviewParticipationPreferences.localAutomationAuthors.contains(where: {
+                  $0.id == id && $0.host == host && $0.username == account
+              }) else { return }
+        guard settings.unmarkAutomationAuthor(id, host: host, username: account) else { throw ReviewParticipationError.persistence }
+        synchronizeLocalAutomationAuthors()
+        for item in attention.currentOpenItems { attention.retryAuthorFeedback(item.id) }
+    }
+
+    func synchronizeLocalAutomationAuthors() {
+        guard let host = glab.resolvedHost, let account = glab.currentUsername else { return }
+        glab.updateLocalAutomationAuthors(settings.reviewParticipationPreferences.botIDs(host: host, username: account),
+            host: host, username: account)
+    }
+
     func excludeReviewParticipant(username: String) async throws {
         guard let host = glab.resolvedHost, let account = glab.currentUsername else { throw GlabError.notAuthenticated }
         let revision = glab.accountRevision

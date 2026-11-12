@@ -136,7 +136,14 @@ struct AuthorFeedbackView: View {
     }
 
     private func message(_ finding: AuthorFeedbackPolicy.Finding) -> LocalizedStringResource {
-        switch finding.state {
+        if let status = item.authorFeedbackStatus, status.phase == .complete,
+           status.pendingDraftCount == 0, item.draftCount == 0, item.drafts.isEmpty,
+           status.replyNoteIDs.isEmpty, status.followUpNoteIDs.isEmpty, status.codeReviewRequests.isEmpty,
+           !sourceLoading, citationContext?.finding(finding, status: status) != nil,
+           let message = finding.resolutionWaitMessage {
+            return message
+        }
+        return switch finding.state {
         case .waitingAcceptance: .AuthorFeedback.authorFeedbackWaitingAcceptance(finding.waitingForReviewers.map { "@" + $0 }.joined(separator: ", "))
         case .needsChanges: .AuthorFeedback.authorFeedbackNeedsChanges
         case .needsVerification: .AuthorFeedback.authorFeedbackNeedsVerification

@@ -34,9 +34,10 @@ import MergeTetherRemote
         try check(latest)
         let discussions = store.hasLoaded && !store.hasError ? store.discussions : nil
         let origins = store.origins
+        let authorKinds = store.authorKinds
         let details = await Task.detached(priority: .utility) {
             project(request: latest, progress: progress, rules: ruleState, reviewers: reviewerHistory,
-                discussions: discussions, origins: origins, drafts: drafts, username: username)
+                discussions: discussions, origins: origins, drafts: drafts, username: username, authorKinds: authorKinds)
         }.value
         try check(latest)
         return details
@@ -44,7 +45,8 @@ import MergeTetherRemote
 
     nonisolated static func project(request: GitLabMergeRequest, progress: MergeRequestApprovalProgress?, rules: RemoteApprovalRuleState?,
                         reviewers: [GitLabMergeRequestReviewer]?, discussions: [GitLabMergeRequestDiscussion]?,
-                        origins: [Int: MRDiscussionSnapshot.Origin] = [:], drafts: [GitLabDraftNote], username: String) -> RemoteMRDetails {
+                        origins: [Int: MRDiscussionSnapshot.Origin] = [:], drafts: [GitLabDraftNote], username: String,
+                        authorKinds: [Int: AuthorFeedbackPolicy.AccountKind] = [:]) -> RemoteMRDetails {
         var progress = progress
         let history = MergeRequestReviewHistory(reviewers: reviewers ?? [], discussions: discussions ?? [], authorID: request.author.id)
         progress?.reviewHistory = history
@@ -84,7 +86,13 @@ import MergeTetherRemote
                             author: note.author?.name, username: note.author?.username, body: note.body ?? "",
                             location: MRDiscussionLocation(position: note.position)?.full,
                             createdAt: MergeRequestReviewHistory.date(note.createdAt), url: components?.url, origin: origin,
-                            authorID: note.author?.id)
+                            authorID: note.author?.id, authorKind: (note.author?.id).flatMap { id in
+                                switch authorKinds[id] {
+                                case .regular: .regular
+                                case .automation: .automation
+                                case .unknown, nil: nil
+                                }
+                            })
                     }, reply: .init(rawValue: String(describing: summary.publishedReply)) ?? .unavailable, draftCount: summary.draftCount)
             }
         }

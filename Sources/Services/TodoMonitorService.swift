@@ -319,6 +319,8 @@ final class TodoMonitorService {
             _ = freshUserAttention
             _ = glab.resolvedHost
             _ = glab.currentUsername
+            _ = glab.accountRevision
+            _ = settings.reviewParticipationPreferences
             return input
         } onChange: { [weak self] in
             Task { @MainActor [weak self] in
@@ -326,6 +328,7 @@ final class TodoMonitorService {
                 self?.scheduleUserAttentionNotifications()
             }
         }
+        synchronizeLocalAutomationAuthors()
         boardAttentionPresenter.updateAttention(input)
         boardPolicyOrder.observe(boardOrderingEntries(boardSnapshot))
     }

@@ -5,6 +5,80 @@ import Testing
 @MainActor
 struct ReReviewCoordinatorTests {
     @Test(arguments: [false, true])
+    func localAutomationDesignationSuppressesHumanReReviewUntilRemoved(_ automatic: Bool) async throws {
+        let f = try Fixture()
+        defer { f.close() }
+        f.settings.automation.autoVerifyReReview = automatic
+        try f.declareAutomationAuthor()
+        let assessment = ReReviewAssessment(notes: [.init(noteID: 40, state: .addressed,
+            reason: "The technical correction and substantive author reply are verified.")])
+        let coordinator = f.coordinator(sharedAssessment: assessment)
+        let request = try f.request()
+        let feedback = try f.feedback()
+        let fingerprint = try f.fingerprint()
+
+        await coordinator.refresh(for: request, feedback: feedback, draftCount: 0, context: f.context, user: f.user)
+        _ = await coordinator.confirm(f.context, user: f.user, head: "head", fingerprint: fingerprint)
+
+        #expect(f.gitlab.text("requested").isEmpty)
+        #expect(f.settings.reReviewReceipts.isEmpty)
+        #expect(!f.gitlab.requests.contains { $0.endpoint == "/users/8" })
+        #expect(coordinator.status(for: f.context, authorID: f.user.id).state?.canConfirm != true)
+        f.settings.reviewParticipationPreferences = .init()
+        await coordinator.refresh(for: request, feedback: feedback, draftCount: 0, context: f.context, user: f.user)
+        if !automatic {
+            let result = await coordinator.confirm(f.context, user: f.user, head: "head", fingerprint: fingerprint)
+            #expect(result == .confirmed)
+        }
+        #expect(f.gitlab.text("requested") == "review\n")
+        #expect(coordinator.status(for: f.context, authorID: f.user.id).requested)
+    }
+
+    @Test(arguments: ["host", "account"])
+    func localAutomationDesignationDoesNotSuppressAnotherScope(_ other: String) async throws {
+        let f = try Fixture()
+        defer { f.close() }
+        f.settings.automation.autoVerifyReReview = true
+        try f.declareAutomationAuthor(host: other == "host" ? "other.example.test" : f.context.host,
+            username: other == "account" ? "other" : "me")
+        let assessment = ReReviewAssessment(notes: [.init(noteID: 40, state: .addressed,
+            reason: "The technical correction and substantive author reply are verified.")])
+        let coordinator = f.coordinator(sharedAssessment: assessment)
+        await coordinator.refresh(for: try f.request(), feedback: try f.feedback(), draftCount: 0, context: f.context, user: f.user)
+        #expect(f.gitlab.text("requested") == "review\n")
+    }
+
+    @Test(arguments: [false, true])
+    func localAutomationDesignationDuringIdentityReadStopsReReview(_ automatic: Bool) async throws {
+        let f = try Fixture()
+        defer { f.close() }
+        f.settings.automation.autoVerifyReReview = automatic
+        let assessment = ReReviewAssessment(notes: [.init(noteID: 40, state: .addressed,
+            reason: "The technical correction and substantive author reply are verified.")])
+        let coordinator = f.coordinator(sharedAssessment: assessment)
+        let request = try f.request()
+        let feedback = try f.feedback()
+        let fingerprint = try f.fingerprint()
+        if !automatic {
+            await coordinator.refresh(for: request, feedback: feedback, draftCount: 0, context: f.context, user: f.user)
+        }
+        var changed = false
+        f.gitlab.beforeCommand = { call in
+            guard !changed, call.endpoint == "/users/8" else { return }
+            try f.declareAutomationAuthor()
+            changed = true
+        }
+        if automatic {
+            await coordinator.refresh(for: request, feedback: feedback, draftCount: 0, context: f.context, user: f.user)
+        } else {
+            _ = await coordinator.confirm(f.context, user: f.user, head: "head", fingerprint: fingerprint)
+        }
+        #expect(changed)
+        #expect(f.gitlab.text("requested").isEmpty)
+        #expect(f.settings.reReviewReceipts.isEmpty)
+    }
+
+    @Test(arguments: [false, true])
     func anAbsentCommenterIsNotAReReviewRecipientEvenWhenTheirTechnicalFeedbackIsAddressed(_ automatic: Bool) async throws {
         let f = try Fixture()
         defer { f.close() }
@@ -430,6 +504,15 @@ struct ReReviewCoordinatorTests {
 
         func request() throws -> GitLabMergeRequest {
             try JSONDecoder().decode(GitLabMergeRequest.self, from: gitlab.data("request"))
+        }
+
+        func declareAutomationAuthor(host: String? = nil, username: String = "me") throws {
+            let entry: [String: Any] = [
+                "id": UUID().uuidString, "host": host ?? context.host, "username": username,
+                "reviewerID": 8, "label": "@reviewer"
+            ]
+            let data = try JSONSerialization.data(withJSONObject: ["entries": [], "localAutomationAuthors": [entry]])
+            settings.reviewParticipationPreferences = try JSONDecoder().decode(ReviewParticipationPreferences.self, from: data)
         }
 
         func feedback() throws -> ReReviewFeedback {

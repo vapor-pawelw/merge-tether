@@ -15,6 +15,8 @@ import MergeTetherRemote
     private var sourceDigests: [Int: String] = [:]
     private var pending: [Int: AICommentDisplayCoordinator.PersistedOrigin] = [:]
     private var latest: [Int: UInt64] = [:]
+    private var pendingAuthors: [Int: FeedbackAccountKindUpdate] = [:]
+    private var latestAuthors: [Int: UInt64] = [:]
     private(set) var isDelivered = false
 
     init(request: RemoteDetailRequest, source: GitLabMergeRequest, accountRevision: UInt64) {
@@ -40,10 +42,21 @@ import MergeTetherRemote
         return changed
     }
 
+    func recordAuthorKind(_ event: FeedbackAccountKindUpdate) -> Bool {
+        guard event.accountRevision == accountRevision, event.userID > 0, event.revision > 0,
+              request.account == "\(event.username)@\(event.host)",
+              event.revision > latestAuthors[event.userID, default: 0],
+              !isDelivered || rendered.values.contains(where: { $0.note.authorID == event.userID }),
+              pendingAuthors[event.userID] != nil || pendingAuthors.count < 64 else { return false }
+        pendingAuthors[event.userID] = event; latestAuthors[event.userID] = event.revision
+        return true
+    }
+
     func nextUpdate() -> RemoteDetailOrigins? {
         guard isDelivered else { return nil }
         var changes: [RemoteDetailOriginChange] = []
-        let envelope = RemoteMessage(type: .details, detailOrigins: .init(request: request, changes: []))
+        var authors: [RemoteDetailAuthorKindChange] = []
+        let envelope = RemoteMessage(type: .details, detailOrigins: .init(request: request, changes: [], authorKinds: []))
         guard let base = try? JSONEncoder().encode(envelope).count else { return nil }
         var bytes = base
         for origin in pending.values.sorted(by: { $0.noteID < $1.noteID }) {
@@ -59,7 +72,27 @@ import MergeTetherRemote
             bytes += cost + 1
             if changes.count == 100 { break }
         }
-        return changes.isEmpty ? nil : .init(request: request, changes: changes)
+        for event in pendingAuthors.values.sorted(by: { $0.userID < $1.userID }) {
+            let kind: RemoteDetailNote.AuthorKind? = switch event.kind {
+            case .regular: .regular
+            case .automation: .automation
+            case .unknown: nil
+            }
+            let notes = rendered.filter { $0.value.note.authorID == event.userID }
+            let required = notes.filter { $0.value.note.authorKind != kind }
+            if required.isEmpty { pendingAuthors.removeValue(forKey: event.userID); continue }
+            for (id, visible) in required.sorted(by: { $0.key < $1.key }) {
+                guard changes.count + authors.count < 100 else { break }
+                guard full[id]?.threadID == visible.threadID, full[id]?.note.authorID == event.userID,
+                      let identity = visible.note.originIdentity(in: visible.threadID) else { continue }
+                let change = RemoteDetailAuthorKindChange(threadID: visible.threadID, noteID: visible.note.id,
+                    identity: identity, authorKind: kind, revision: event.revision)
+                guard let cost = try? JSONEncoder().encode(change).count,
+                      bytes + cost + 1 <= RemoteCipher.maximumPayloadBytes else { continue }
+                authors.append(change); bytes += cost + 1
+            }
+        }
+        return changes.isEmpty && authors.isEmpty ? nil : .init(request: request, changes: changes, authorKinds: authors.isEmpty ? nil : authors)
     }
 
     func recordSent(_ update: RemoteDetailOrigins) {
@@ -68,6 +101,10 @@ import MergeTetherRemote
             guard let id = Int(change.noteID), rendered[id]?.note.originIdentity(in: change.threadID) == change.identity else { continue }
             if let origin = pending[id], self.change(for: origin) == change { pending.removeValue(forKey: id) }
             rendered[id]?.note.origin = change.origin
+        }
+        for change in update.authorKinds ?? [] {
+            guard let id = Int(change.noteID), rendered[id]?.note.originIdentity(in: change.threadID) == change.identity else { continue }
+            rendered[id]?.note.authorKind = change.authorKind
         }
     }
 

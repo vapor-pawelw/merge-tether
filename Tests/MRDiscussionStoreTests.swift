@@ -4,6 +4,117 @@ import Testing
 
 @MainActor
 struct MRDiscussionStoreTests {
+    @Test func persistedLocalIdentityIsVisibleBeforeABlockedProfileLookupAndSurvivesItsFailure() async throws {
+        struct LookupFailure: Error {}
+        let gate = InMemoryGitLab(); defer { gate.close() }
+        let notes = try threads(), requested = target, glab = glab()
+        glab.updateLocalAutomationAuthors([7], host: requested.host, username: requested.username)
+        var reads = 0
+        let store = MRDiscussionStore(load: { _ in reads += 1; return notes }, verifyAuthorKind: { _, _ in
+            try await gate.waitFor("release")
+            throw LookupFailure()
+        }, assessmentDirectory: URL(fileURLWithPath: "/nonexistent"))
+        defer { gate.write("release"); store.cancel() }
+        let refreshing = Task { await store.refresh(target: requested, glab: glab) }
+        let deadline = ContinuousClock.now + .seconds(3)
+        while !(store.hasLoaded && !store.isLoading), ContinuousClock.now < deadline {
+            try await Task.sleep(for: .milliseconds(1))
+        }
+        try #require(store.hasLoaded && !store.isLoading)
+        #expect(store.authorKinds[7] == .automation && reads == 1)
+        #expect(store.discussions.first?.notes.first?.body == "Published comment" && store.origins.isEmpty)
+        gate.write("release")
+        await refreshing.value; await store.authorKindTask?.value
+        #expect(store.authorKinds[7] == .automation && !store.hasError && reads == 1)
+    }
+
+    @Test func optionalAuthorLookupDoesNotHoldTheReadableConversation() async throws {
+        let gate = InMemoryGitLab(); defer { gate.close() }
+        let notes = try threads()
+        let store = MRDiscussionStore(load: { _ in notes }, verifyAuthorKind: { _, _ in
+            gate.write("identity-entered")
+            try await gate.waitFor("release")
+            return .automation
+        }, assessmentDirectory: URL(fileURLWithPath: "/nonexistent"))
+        defer { store.cancel() }
+        let glab = glab()
+        let refreshing = Task { await store.refresh(target: target, glab: glab) }
+        let deadline = ContinuousClock.now + .seconds(3)
+        while !gate.has("identity-entered"), ContinuousClock.now < deadline { try await Task.sleep(for: .milliseconds(1)) }
+        try #require(gate.has("identity-entered"))
+        #expect(store.hasLoaded && !store.isLoading && store.discussions.first?.notes.first?.body == "Published comment")
+        gate.write("release")
+        await refreshing.value; await store.authorKindTask?.value
+        #expect(store.authorKinds[7] == .automation)
+    }
+
+    @Test func laterVerifiedAuthorMetadataUpdatesAnOpenDiscussionWithoutReadingItAgain() async throws {
+        let gitlab = InMemoryGitLab(); defer { gitlab.close() }
+        let glab = gitlab.service(host: target.host, username: target.username)
+        let notes = try threads()
+        var sourceReads = 0
+        let store = MRDiscussionStore(load: { _ in sourceReads += 1; return notes },
+            verifyAuthorKind: { _, _ in .unknown }, assessmentDirectory: URL(fileURLWithPath: "/nonexistent"))
+        defer { store.cancel() }
+        await store.refresh(target: target, glab: glab)
+        await store.authorKindTask?.value
+        #expect(store.authorKinds[7] == .unknown)
+        let original = store.discussions.flatMap(\.notes).map(\.body)
+        gitlab.handler = { request in
+            #expect(request.endpoint == "/users/7")
+            return InMemoryGitLab.output(#"{"id":7,"bot":true}"#)
+        }
+        _ = try await glab.feedbackAccountKind(userID: 7, host: target.host)
+        #expect(store.authorKinds[7] == .automation)
+        #expect(sourceReads == 1 && store.discussions.flatMap(\.notes).map(\.body) == original)
+        #expect(store.origins.isEmpty)
+    }
+
+    @Test func authorMetadataIsBoundedAndReusedWithoutOriginReloadLookups() async throws {
+        let notes: [GitLabMergeRequestDiscussion] = [.init(id: "thread", notes: (1...70).map { id in
+            .init(id: id, author: .init(id: id + 100, username: "author\(id)", name: nil), system: false,
+                resolvable: true, resolved: false, resolvedBy: nil, body: "Published note")
+        })]
+        var reads: [Int] = []
+        let store = MRDiscussionStore(load: { _ in notes }, verifyAuthorKind: { id, host in
+            #expect(host == self.target.host)
+            reads.append(id)
+            return .automation
+        }, assessmentDirectory: URL(fileURLWithPath: "/nonexistent"))
+        let glab = glab()
+        await store.refresh(target: target, glab: glab)
+        await store.authorKindTask?.value
+        #expect(store.hasLoaded && !store.hasError)
+        #expect(reads.count == 64 && Set(reads).count == 64 && store.authorKinds.count == 64)
+        await store.reloadOrigins(glab: glab)
+        #expect(reads.count == 64)
+        #expect(store.origins.isEmpty)
+    }
+
+    @Test func failedAuthorMetadataDoesNotFailReadableDiscussionsOrInventABot() async throws {
+        struct Failure: Error {}
+        let notes = try threads()
+        let store = MRDiscussionStore(load: { _ in notes }, verifyAuthorKind: { _, _ in throw Failure() },
+            assessmentDirectory: URL(fileURLWithPath: "/nonexistent"))
+        await store.refresh(target: target, glab: glab())
+        await store.authorKindTask?.value
+        #expect(store.hasLoaded && !store.hasError && store.discussions.count == 1)
+        #expect(store.authorKinds[7] == .unknown)
+        #expect(store.origins.isEmpty)
+    }
+
+    @Test func accountRoundTripDuringAuthorLookupCannotPublishThatIdentity() async throws {
+        let notes = try threads()
+        let glab = glab()
+        let store = MRDiscussionStore(load: { _ in notes }, verifyAuthorKind: { _, _ in
+            glab.currentUsername = "other"; glab.currentUsername = "me"
+            return .automation
+        }, assessmentDirectory: URL(fileURLWithPath: "/nonexistent"))
+        await store.refresh(target: target, glab: glab)
+        await store.authorKindTask?.value
+        #expect(store.authorKinds.isEmpty && store.discussions.isEmpty && !store.hasLoaded)
+    }
+
     @Test func freshDisplayAssessmentCanReplaceAStaleActionSlotUsingOnlyCachedConversationMetadata() async throws {
         let root = FileManager.default.temporaryDirectory.appending(path: UUID().uuidString)
         defer { try? FileManager.default.removeItem(at: root) }

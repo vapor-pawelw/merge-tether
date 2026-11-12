@@ -785,7 +785,8 @@ private struct CommandCenterMRDetailContent: View {
                 }
             } : nil
         return MRDiscussionSnapshot(discussions: discussions, drafts: item.drafts,
-            origins: current ? discussionStore.origins : [:], assessment: assessment, authorID: request?.author.id)
+            origins: current ? discussionStore.origins : [:], assessment: assessment, authorID: request?.author.id,
+            authorKinds: current ? discussionStore.authorKinds : [:])
     }
 
     private func publicationThreads(_ snapshot: MRDiscussionSnapshot) -> some View {

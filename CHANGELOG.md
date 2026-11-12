@@ -6,6 +6,9 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 
 ## Unreleased
 
+- Identify bot authors independently of AI-assisted text, resolve their verified and answered feedback under the existing automation gates, and name the human authors whose threads still await resolution.
+- Add a local bot-account list scoped to the GitLab host and signed-in account, with reversible stable-ID declarations and separate bot badges on Mac and iOS.
+
 - Preserve author-feedback cooldown identity and keep its three-attempt retry budget from multiplying inside provider verification or queued refreshes.
 
 - Improve MR card and Details hierarchy with readable status labels, policy pills and feedback citations above action controls.

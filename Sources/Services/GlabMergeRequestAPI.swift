@@ -213,13 +213,13 @@ extension GlabService {
             enum CodingKeys: String, CodingKey { case id, bot; case userType = "user_type" }
         }
         guard userID > 0 else { return .unknown }
+        let revision = accountRevision, username = currentUsername
         let account: Account = try await mergeRequestAPI("/users/\(userID)", host: host)
-        guard account.id == userID else { return .unknown }
-        if account.bot == true || account.userType.map({ ["service_account", "project_bot", "group_bot"].contains($0) }) == true {
-            return .automation
-        }
-        guard account.bot == false, account.userType == nil || account.userType == "human" else { return .unknown }
-        return .regular
+        guard account.id == userID, let username, resolvedHost == host, currentUsername == username,
+              accountRevision == revision, !Task.isCancelled else { return .unknown }
+        let kind = AuthorFeedbackPolicy.AccountKind.classify(bot: account.bot, userType: account.userType)
+        notifyFeedbackAccountKind(userID: userID, kind: kind, host: host, username: username, accountRevision: revision)
+        return kind
     }
 
     func isGitLabDuo(userID: Int, host: String) async throws -> Bool {
@@ -285,9 +285,15 @@ extension GlabService {
             let username: String
             let bot: Bool?
             let state: String
+            let userType: String?
+            enum CodingKeys: String, CodingKey { case id, username, bot, state; case userType = "user_type" }
         }
+        guard userID > 0, resolvedHost == host, let username = currentUsername else { return nil }
+        let revision = accountRevision
         let user: Reviewer = try await mergeRequestAPI("/users/\(userID)", host: host)
-        guard user.id == userID, user.bot == false, user.state == "active", !user.username.isEmpty else { return nil }
+        guard !Task.isCancelled, resolvedHost == host, currentUsername == username, accountRevision == revision,
+              user.id == userID, AuthorFeedbackPolicy.AccountKind.classify(bot: user.bot, userType: user.userType) == .regular,
+              user.state == "active", !user.username.isEmpty else { return nil }
         return user.username
     }
 

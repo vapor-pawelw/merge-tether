@@ -77,6 +77,72 @@
           }
         }
       }
+    },
+    "reviewParticipationAutomationTitle": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Bot accounts"
+          }
+        }
+      }
+    },
+    "reviewParticipationAutomationMark": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Add bot account"
+          }
+        }
+      }
+    },
+    "reviewParticipationAutomationRestore": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Use GitLab account type"
+          }
+        }
+      }
+    },
+    "reviewParticipationAutomationOwnAccount": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Your signed-in account cannot be marked as an automation author."
+          }
+        }
+      }
+    },
+    "reviewParticipationAutomationSaveFailed": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Could not save this designation. The previous list is unchanged; automatic actions are on hold. Try again."
+          }
+        }
+      }
+    },
+    "reviewParticipationAutomationHelp": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "These accounts are treated as bots for this GitLab host and signed-in account. Verified, answered feedback can be resolved automatically when your automation settings allow it. Other review and merge requirements still apply. Removing an entry restores GitLab’s account type."
+          }
+        }
+      }
     }
   },
   "version": "1.0"

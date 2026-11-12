@@ -46,6 +46,10 @@ A reply that still needs a decision is identified as a **Prepared reply**, with 
 
 Incoming mentions without a known action may receive a read-only semantic assessment using the selected lightweight model. Only a proven informational event is acknowledged automatically, after a fresh account, MR and discussion check. Ambiguous or actionable notices stay available to read. Handled-event banners follow the existing optional banner preference.
 
+Bot authorship is separate from the AI-origin labels on comment text. MergeTether recognizes positive GitLab bot/service-account metadata and explicit entries in **Settings → Automation → Advanced → Bot accounts**. The local list resolves a username to its stable GitLab ID and belongs only to the current host and signed-in account; removing an entry restores GitLab's account classification. Names, comment style and an AI-assisted label do not declare a bot.
+
+When all feedback is verified, required replies are published and the existing automatic-resolution checks permit a write, bot participants do not need a human approval or acceptance reply. Mixed discussions retain every human participant's acceptance requirements, and excluded participants retain their communication restrictions. Bot declarations never satisfy GitLab approval rules or merge prerequisites. Automatic re-review invitations continue to use the current reviewer list and skip bot accounts. Details distinguish addressed feedback waiting for named human authors to resolve their threads from separate outstanding approvals. Bot badges and text-origin labels update as display metadata; they do not renew action permissions.
+
 ## CLI setup and execution
 
 Choose the provider in **Settings → Automation → Coding agent**. Setup verifies the executable, supported headless options and sign-in before accepting a selection. A missing or incompatible CLI can be installed through the provider’s official installer; sign-in opens Terminal. Cancelling or failing setup keeps the previous selection.

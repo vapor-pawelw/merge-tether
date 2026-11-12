@@ -4,6 +4,29 @@ import MergeTetherRemote
 @testable import GitLabTodos
 
 @MainActor struct RemoteDetailOriginSubscriptionTests {
+    @Test func laterAuthorIdentityUsesTheExistingSubscriptionAndPreservesANewerInflightResult() throws {
+        let (source, request, full) = try fixture()
+        let subscription = RemoteDetailOriginSubscription(request: request, source: source, accountRevision: 10)
+        let first = FeedbackAccountKindUpdate(host: "gitlab.example.test", username: "me", accountRevision: 10,
+            userID: 7, kind: .automation, revision: 1)
+        #expect(subscription.recordAuthorKind(first))
+        #expect(subscription.nextUpdate() == nil)
+        subscription.delivered(full: full, rendered: full)
+        let inflight = try #require(subscription.nextUpdate())
+        #expect(inflight.changes.isEmpty && inflight.authorKinds?.first?.authorKind == .automation)
+        #expect(subscription.recordAuthorKind(.init(host: first.host, username: first.username, accountRevision: 10,
+            userID: 7, kind: .regular, revision: 2)))
+        subscription.recordSent(inflight)
+        let newer = try #require(subscription.nextUpdate())
+        #expect(newer.changes.isEmpty && newer.authorKinds?.first?.authorKind == .regular)
+        subscription.recordSent(newer)
+        #expect(!subscription.recordAuthorKind(first) && subscription.nextUpdate() == nil)
+        #expect(!subscription.recordAuthorKind(.init(host: first.host, username: "other", accountRevision: 10,
+            userID: 7, kind: .automation, revision: 3)))
+        #expect(!subscription.recordAuthorKind(.init(host: first.host, username: first.username, accountRevision: 11,
+            userID: 7, kind: .automation, revision: 3)))
+    }
+
     private func fixture() throws -> (GitLabMergeRequest, RemoteDetailRequest, RemoteMRDetails) {
         let source = try MRDependencyPresentationTests().request(2, project: 1, author: 9)
         let board = RemoteBoard(hostSession: UUID(), account: "me@gitlab.example.test", lanes: [.init(id: .own, cards: [

@@ -232,6 +232,11 @@ private struct RemoteDiscussionCard: View {
             if let username = note.username, username != note.author {
                 Text(verbatim: "@" + username).font(.caption).foregroundStyle(.secondary)
             }
+            if note.authorKind == .automation {
+                Label(.AuthorFeedback.authorFeedbackBotAuthor, systemImage: "gearshape")
+                    .font(.caption.weight(.medium)).foregroundStyle(.secondary)
+                    .accessibilityHint(Text(.AuthorFeedback.authorFeedbackBotAuthorHelp))
+            }
         }
     }
     private var feedbackBadge: some View {

@@ -305,6 +305,7 @@ final class ReReviewCoordinator {
                     pendingReviewers[reviewerID] = noteID
                 }
                 guard !Task.isCancelled, isCurrent(context), runtimePermitsReReview(context),
+                      reReviewKey(request, fingerprint: fingerprint, context: context) == key,
                       settings.automation.scope.permits(request, host: host, username: context.username) else { return }
             } catch {
                 reReviewChecks[context] = ReReviewCheck(key: key, fingerprint: fingerprint, state: .failed)
@@ -536,6 +537,7 @@ final class ReReviewCoordinator {
 
     private func excludedReviewers(_ context: Context, key: String, discussions: [GitLabMergeRequestDiscussion], authorID: Int) -> Set<Int> {
         settings.reviewParticipationPreferences.excludedIDs(host: context.host, username: context.username)
+            .union(settings.reviewParticipationPreferences.botIDs(host: context.host, username: context.username))
             .union(reReviewChecks[context]?.key == key
                 ? reReviewChecks[context]?.assessment?.reviewerOptOutIDs(in: discussions, authorID: authorID) ?? [] : [])
     }

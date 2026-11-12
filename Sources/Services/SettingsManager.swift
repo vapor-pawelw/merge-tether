@@ -227,6 +227,35 @@ final class SettingsManager {
         return true
     }
 
+    func markAutomationAuthor(_ identity: PublicationIdentity, host: String, user: GitLabAuthenticatedUser) -> Bool {
+        var candidate = reviewParticipationPreferences
+        guard candidate.markAutomationAuthor(identity, host: host, user: user) else { return false }
+        return commitAutomationAuthorPreferences(candidate)
+    }
+
+    func unmarkAutomationAuthor(_ id: UUID, host: String, username: String) -> Bool {
+        var candidate = reviewParticipationPreferences
+        guard candidate.unmarkAutomationAuthor(id, host: host, username: username) else { return false }
+        return commitAutomationAuthorPreferences(candidate)
+    }
+
+    private func commitAutomationAuthorPreferences(_ candidate: ReviewParticipationPreferences) -> Bool {
+        persistenceStore.preserveCorruptValues()
+        let saved = persistenceStore.save(candidate, forKey: Key.reviewParticipationPreferences)
+        let synchronized = persistenceStore.synchronize()
+        guard saved && synchronized else {
+            if saved {
+                // Restore the prior durable decision if synchronization rejected the new one.
+                _ = persistenceStore.save(reviewParticipationPreferences, forKey: Key.reviewParticipationPreferences)
+                _ = persistenceStore.synchronize()
+            }
+            return false
+        }
+        // Observers may authorize automation, so expose only a successfully saved decision.
+        reviewParticipationPreferences = candidate
+        return true
+    }
+
     func saveMergeSubmission(_ receipt: MergeSubmissionReceipt) -> Bool {
         guard automaticActionsAllowed else { return false }
         mergeSubmissions.removeAll { $0.target == receipt.target }

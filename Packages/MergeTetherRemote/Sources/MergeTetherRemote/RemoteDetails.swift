@@ -65,6 +65,7 @@ public struct RemoteApprovalDetails: Codable, Equatable, Sendable {
 
 public struct RemoteDetailNote: Codable, Equatable, Identifiable, Sendable {
     public enum Origin: String, Codable, Sendable { case ai, uncertain, human }
+    public enum AuthorKind: String, Codable, Sendable { case regular, automation }
     public let id: String
     public var author: String?
     public var username: String?
@@ -74,11 +75,14 @@ public struct RemoteDetailNote: Codable, Equatable, Identifiable, Sendable {
     public let url: URL?
     public var origin: Origin?
     public let authorID: Int?
+    public var authorKind: AuthorKind?
     public init(id: String, author: String? = nil, username: String? = nil, body: String, location: String? = nil,
-                createdAt: Date? = nil, url: URL? = nil, origin: Origin? = nil, authorID: Int? = nil) {
+                createdAt: Date? = nil, url: URL? = nil, origin: Origin? = nil, authorID: Int? = nil,
+                authorKind: AuthorKind? = nil) {
         self.id = id; self.author = author; self.username = username; self.body = body; self.location = location
         self.createdAt = createdAt; self.url = url; self.origin = origin
         self.authorID = authorID
+        self.authorKind = authorKind
     }
 }
 
@@ -277,6 +281,7 @@ public struct RemoteDetailResponse: Codable, Equatable, Sendable {
     public private(set) var failure: RemoteDetailResponse.Status?
     private var deadline = Date.distantPast
     private var originRevisions: [String: UInt64] = [:]
+    private var authorKindRevisions: [String: UInt64] = [:]
     public init() {}
     public func begin(card: RemoteCard, board: RemoteBoard, now: Date = Date(), force: Bool = false) -> RemoteDetailRequest? {
         guard board.cards.contains(card), card.id.hasPrefix("mr:"),
@@ -284,6 +289,7 @@ public struct RemoteDetailResponse: Codable, Equatable, Sendable {
               let request = try? RemoteDetailRequest(card: card, board: board) else { return nil }
         pending = request; openRequest = request; deadline = now.addingTimeInterval(45); failure = nil
         originRevisions = [:]
+        authorKindRevisions = [:]
         return request
     }
     public func receive(_ value: RemoteDetailResponse, board: RemoteBoard) {
@@ -301,16 +307,20 @@ public struct RemoteDetailResponse: Codable, Equatable, Sendable {
         if let response, !response.request.matches(board) { self.response = nil }
         if let pending, !pending.matches(board) { self.pending = nil; failure = .changed }
     }
-    public func disconnect() { pending = nil; openRequest = nil; originRevisions = [:] }
+    public func disconnect() { pending = nil; openRequest = nil; originRevisions = [:]; authorKindRevisions = [:] }
 
     @discardableResult public func receiveOrigins(_ update: RemoteDetailOrigins, board: RemoteBoard) -> Bool {
+        let authors = update.authorKinds ?? []
         guard pending == nil, update.request == openRequest, update.request.matches(board),
               var response, response.request == update.request, response.status == .current,
               var details = response.details, let threads = details.threads,
-              !update.changes.isEmpty, update.changes.count <= 100,
+              !update.changes.isEmpty || !authors.isEmpty, update.changes.count + authors.count <= 100,
               update.changes.allSatisfy({ $0.revision > 0 }),
-              Set(update.changes.map(\.identity)).count == update.changes.count else { return false }
+              authors.allSatisfy({ $0.revision > 0 }),
+              Set(update.changes.map(\.identity)).count == update.changes.count,
+              Set(authors.map(\.identity)).count == authors.count else { return false }
         var edits: [(thread: Int, note: Int, change: RemoteDetailOriginChange)] = []
+        var authorEdits: [(thread: Int, note: Int, change: RemoteDetailAuthorKindChange)] = []
         for change in update.changes {
             let matchingThreads = threads.indices.filter { threads[$0].id == change.threadID }
             guard matchingThreads.count == 1, let thread = matchingThreads.first else { return false }
@@ -319,10 +329,22 @@ public struct RemoteDetailResponse: Codable, Equatable, Sendable {
                   threads[thread].notes[note].originIdentity(in: change.threadID) == change.identity else { return false }
             if change.revision > originRevisions[change.identity, default: 0] { edits.append((thread, note, change)) }
         }
-        guard !edits.isEmpty else { return false }
+        for change in authors {
+            let matchingThreads = threads.indices.filter { threads[$0].id == change.threadID }
+            guard matchingThreads.count == 1, let thread = matchingThreads.first else { return false }
+            let matchingNotes = threads[thread].notes.indices.filter { threads[thread].notes[$0].id == change.noteID }
+            guard matchingNotes.count == 1, let note = matchingNotes.first,
+                  threads[thread].notes[note].originIdentity(in: change.threadID) == change.identity else { return false }
+            if change.revision > authorKindRevisions[change.identity, default: 0] { authorEdits.append((thread, note, change)) }
+        }
+        guard !edits.isEmpty || !authorEdits.isEmpty else { return false }
         for edit in edits {
             details.threads?[edit.thread].notes[edit.note].origin = edit.change.origin
             originRevisions[edit.change.identity] = edit.change.revision
+        }
+        for edit in authorEdits {
+            details.threads?[edit.thread].notes[edit.note].authorKind = edit.change.authorKind
+            authorKindRevisions[edit.change.identity] = edit.change.revision
         }
         response.details = details
         self.response = response

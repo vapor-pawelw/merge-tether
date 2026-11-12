@@ -4,6 +4,37 @@ import MergeTetherRemote
 @testable import GitLabTodos
 
 @MainActor @Suite struct RemoteHostDetailTests {
+    @Test(arguments: [false, true])
+    func lateAuthorIdentityPaintsAnOpenPhoneWithoutAnotherDetailsRead(_ supported: Bool) async throws {
+        let f = try Fixture(); defer { f.clean() }
+        f.detailNotes = [.init(id: "1", body: "Root", origin: .ai, authorID: 7)]
+        let board = try await f.board(originUpdates: supported)
+        let phone = RemoteDetailState()
+        let request = try #require(phone.begin(card: board.cards[0], board: board))
+        await f.transport.onMessage?(.init(type: .detailRequest, detailRequest: request))
+        await f.host.detailTask?.value
+        let response = try #require(f.transport.messages.last(where: { $0.detailResponse?.request == request })?.detailResponse)
+        phone.receive(response, board: board)
+        let reads = f.gitlab.requests.count
+        let previous = f.gitlab.handler
+        f.gitlab.handler = { call in
+            if call.endpoint == "/users/7" { return InMemoryGitLab.output(#"{"id":7,"bot":true}"#) }
+            return try await previous!(call)
+        }
+        _ = try await f.monitor.glab.feedbackAccountKind(userID: 7, host: "gitlab.example.test")
+        if supported {
+            try await waitForOrigins(1, f)
+            let update = try #require(f.transport.messages.last?.detailOrigins)
+            #expect(update.changes.isEmpty && update.authorKinds?.first?.authorKind == .automation)
+            #expect(phone.receiveOrigins(update, board: board))
+            #expect(phone.response?.details?.threads?[0].notes[0].authorKind == .automation)
+            #expect(phone.response?.details?.threads?[0].notes[0].origin == .ai)
+        }
+        #expect(f.readerCount == 1)
+        #expect(f.gitlab.requests.dropFirst(reads).allSatisfy { $0.endpoint == "/users/7" && $0.method == "GET" })
+        #expect(f.transport.messages.compactMap(\.detailOrigins).count == (supported ? 1 : 0))
+    }
+
     private func origins(_ f: Fixture, revision: UInt64 = 1,
                          classification: AICommentOriginAssessment.Classification = .aiAssisted) -> AICommentDisplayCoordinator.PersistedOrigins {
         .init(target: .init(host: "gitlab.example.test", username: "me", projectID: 1, iid: 2), request: f.source,

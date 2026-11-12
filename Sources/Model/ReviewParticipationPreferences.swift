@@ -9,6 +9,27 @@ struct ReviewParticipationPreferences: Codable, Equatable, Sendable {
         let label: String
     }
     private(set) var entries: [Entry] = []
+    private(set) var localAutomationAuthors: [Entry] = []
+
+    private enum CodingKeys: String, CodingKey { case entries, localAutomationAuthors }
+
+    init() {}
+
+    init(from decoder: Decoder) throws {
+        let values = try decoder.container(keyedBy: CodingKeys.self)
+        entries = try values.decode([Entry].self, forKey: .entries)
+        localAutomationAuthors = try values.decodeIfPresent([Entry].self, forKey: .localAutomationAuthors) ?? []
+        let identities = localAutomationAuthors.map { "\($0.host)/\($0.username)/\($0.reviewerID)" }
+        guard localAutomationAuthors.allSatisfy({
+            !$0.host.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+                && !$0.username.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+                && $0.reviewerID > 0 && !$0.label.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+        }), Set(identities).count == identities.count,
+            Set(localAutomationAuthors.map(\.id)).count == localAutomationAuthors.count else {
+            throw DecodingError.dataCorruptedError(forKey: .localAutomationAuthors, in: values,
+                debugDescription: "Invalid local automation author identities")
+        }
+    }
 
     @discardableResult mutating func exclude(_ identity: PublicationIdentity, username: String) -> Bool {
         guard !identity.host.isEmpty, identity.entityID > 0, !username.isEmpty,
@@ -29,7 +50,36 @@ struct ReviewParticipationPreferences: Codable, Equatable, Sendable {
     }
 
     func revision(host: String, username: String) -> String {
-        excludedIDs(host: host, username: username).sorted().map(String.init).joined(separator: ",")
+        let exclusions = excludedIDs(host: host, username: username).sorted().map(String.init).joined(separator: ",")
+        let bots = botIDs(host: host, username: username)
+        guard !bots.isEmpty else { return exclusions }
+        return exclusions + "|bots:" + bots.sorted().map(String.init).joined(separator: ",")
+    }
+
+    @discardableResult mutating func markAutomationAuthor(_ identity: PublicationIdentity, host: String,
+                                                         user: GitLabAuthenticatedUser) -> Bool {
+        guard !host.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty, identity.host == host,
+              user.id > 0, !user.username.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty,
+              identity.entityID > 0, identity.entityID != user.id,
+              !identity.label.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty,
+              !isDeclaredAutomation(host: host, username: user.username, userID: identity.entityID) else { return false }
+        localAutomationAuthors.append(.init(id: UUID(), host: host, username: user.username,
+            reviewerID: identity.entityID, label: identity.label))
+        return true
+    }
+
+    @discardableResult mutating func unmarkAutomationAuthor(_ id: UUID, host: String, username: String) -> Bool {
+        guard localAutomationAuthors.contains(where: { $0.id == id && $0.host == host && $0.username == username }) else { return false }
+        localAutomationAuthors.removeAll { $0.id == id && $0.host == host && $0.username == username }
+        return true
+    }
+
+    func botIDs(host: String, username: String) -> Set<Int> {
+        Set(localAutomationAuthors.filter { $0.host == host && $0.username == username }.map(\.reviewerID))
+    }
+
+    func isDeclaredAutomation(host: String, username: String, userID: Int) -> Bool {
+        userID > 0 && botIDs(host: host, username: username).contains(userID)
     }
 
     func permitsAutomaticReply(_ draft: GitLabDraftNote, discussions: [GitLabMergeRequestDiscussion],

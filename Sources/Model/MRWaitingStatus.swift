@@ -6,6 +6,7 @@ import Foundation
     let approvalProgress: MergeRequestApprovalProgress?
     let hasCurrentDependencyHold: Bool
     private let awaitsReviewer: Bool
+    private let humanResolutionAuthors: [String]
 
     var awaitingRequiredApprovals: Bool {
         guard let progress = approvalProgress, progress.required > 0 else { return false }
@@ -40,8 +41,12 @@ import Foundation
                   let fingerprint = item.observedDiscussionFingerprint, !fingerprint.isEmpty,
                   status.fingerprint == fingerprint, !status.needsAttention, status.pendingDraftCount == 0,
                   status.followUpNoteIDs.isEmpty, status.replyNoteIDs.isEmpty, status.codeReviewRequests.isEmpty,
-                  status.findings.allSatisfy({ [.waitingAcceptance, .ready].contains($0.state) }) else { return nil }
-            awaitsReviewer = status.waitingForReviewer
+                  status.findings.allSatisfy({ [.waitingAcceptance, .ready].contains($0.state)
+                      || $0.state == .disabled && $0.resolutionWaitMessage != nil }) else { return nil }
+            humanResolutionAuthors = AuthorFeedbackPolicy.normalizedHandles(status.findings.filter {
+                $0.resolutionWaitMessage != nil
+            }.flatMap(\.waitingForHumanResolution))
+            awaitsReviewer = status.waitingForReviewer || !humanResolutionAuthors.isEmpty
             var handles: [String: String] = [:]
             for value in status.findings.filter({ $0.state == .waitingAcceptance }).flatMap(\.waitingForReviewers) {
                 let name = value.trimmingCharacters(in: .whitespacesAndNewlines).drop(while: { $0 == "@" })
@@ -52,6 +57,7 @@ import Foundation
         } else {
             awaitsReviewer = false
             reviewers = []
+            humanResolutionAuthors = []
         }
         let verified = item.presentingVerifiedAuthorFeedback()
         guard verified.feedback.isEmpty, !verified.needsDiscussion, !verified.needsChanges,
@@ -65,7 +71,8 @@ import Foundation
         guard awaitsReviewer else { return approvalTitle! }
         let reviewerTitle: LocalizedStringResource
         let names = reviewers.prefix(3).map { "@" + $0 }.joined(separator: ", ")
-        if reviewers.isEmpty { reviewerTitle = .AuthorFeedback.authorFeedbackWaitingChip }
+        if let resolution = AuthorFeedbackPolicy.resolutionWaitMessage(authors: humanResolutionAuthors) { reviewerTitle = resolution }
+        else if reviewers.isEmpty { reviewerTitle = .AuthorFeedback.authorFeedbackWaitingChip }
         else if reviewers.count > 3 {
             reviewerTitle = .AuthorFeedback.authorFeedbackWaitingReviewersMore(names, reviewers.count - 3)
         } else { reviewerTitle = .AuthorFeedback.authorFeedbackWaitingReviewers(names) }

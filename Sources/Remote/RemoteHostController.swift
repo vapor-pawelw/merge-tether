@@ -41,6 +41,7 @@ extension RemoteConnection: RemoteHostTransport {}
     private var phoneSupportsDetails = false
     private var phoneSupportsOriginUpdates = false
     private var originObserver: UUID?
+    private var authorKindObserver: UUID?
     private var originSubscription: RemoteDetailOriginSubscription?
     @ObservationIgnored private var originUpdateTask: Task<Void, Never>?
     @ObservationIgnored private(set) var detailTask: Task<Void, Never>?
@@ -118,6 +119,8 @@ extension RemoteConnection: RemoteHostTransport {}
     func disable() {
         if let originObserver { monitor.attention.displayAIOriginCoordinator?.removeOriginObserver(originObserver) }
         originObserver = nil
+        if let authorKindObserver { monitor.glab.removeFeedbackAccountObserver(authorKindObserver) }
+        authorKindObserver = nil
         startupGeneration = UUID(); startupLoadTask?.cancel()
         connection?.stop(); connection = nil; pairing = nil; connected = false
         resetConnectionSession()
@@ -140,6 +143,11 @@ extension RemoteConnection: RemoteHostTransport {}
     }
     private func start(_ pair: RemotePairing) {
         do {
+            if authorKindObserver == nil {
+                authorKindObserver = monitor.glab.observeFeedbackAccountKinds { [weak self] event in
+                    self?.receiveFeedbackAccountKind(event)
+                }
+            }
             if originObserver == nil, let coordinator = monitor.attention.displayAIOriginCoordinator {
                 originObserver = coordinator.observePersistedOrigins { [weak self] event in
                     self?.receivePersistedOrigins(event)
@@ -297,6 +305,11 @@ extension RemoteConnection: RemoteHostTransport {}
 
     func receivePersistedOrigins(_ event: AICommentDisplayCoordinator.PersistedOrigins) {
         guard let subscription = originSubscription, subscription.record(event) else { return }
+        flushOriginUpdates()
+    }
+
+    func receiveFeedbackAccountKind(_ event: FeedbackAccountKindUpdate) {
+        guard let subscription = originSubscription, subscription.recordAuthorKind(event) else { return }
         flushOriginUpdates()
     }
 

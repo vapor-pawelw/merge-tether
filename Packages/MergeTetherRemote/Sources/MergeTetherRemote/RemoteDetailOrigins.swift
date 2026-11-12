@@ -13,13 +13,27 @@ public struct RemoteDetailOriginChange: Codable, Equatable, Sendable {
     }
 }
 
+public struct RemoteDetailAuthorKindChange: Codable, Equatable, Sendable {
+    public let threadID: String
+    public let noteID: String
+    public let identity: String
+    public let authorKind: RemoteDetailNote.AuthorKind?
+    public let revision: UInt64
+
+    public init(threadID: String, noteID: String, identity: String, authorKind: RemoteDetailNote.AuthorKind?, revision: UInt64 = 1) {
+        self.threadID = threadID; self.noteID = noteID; self.identity = identity
+        self.authorKind = authorKind; self.revision = revision
+    }
+}
+
 /// Metadata for one already delivered conversation; never a board lease or an action grant.
 public struct RemoteDetailOrigins: Codable, Equatable, Sendable {
     public let request: RemoteDetailRequest
     public let changes: [RemoteDetailOriginChange]
+    public let authorKinds: [RemoteDetailAuthorKindChange]?
 
-    public init(request: RemoteDetailRequest, changes: [RemoteDetailOriginChange]) {
-        self.request = request; self.changes = changes
+    public init(request: RemoteDetailRequest, changes: [RemoteDetailOriginChange], authorKinds: [RemoteDetailAuthorKindChange]? = nil) {
+        self.request = request; self.changes = changes; self.authorKinds = authorKinds
     }
 }
 

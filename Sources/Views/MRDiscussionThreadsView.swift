@@ -117,6 +117,7 @@ private struct MRDiscussionThreadView: View {
                         ForEach(Array(comments.enumerated()), id: \.offset) { index, note in
                             if index > 0 { Divider().padding(.vertical, 2) }
                             MRDiscussionNoteView(note: note, origin: note.id.flatMap { thread.origins[$0] },
+                                                 authorKind: (note.author?.id).flatMap { thread.authorKinds[$0] },
                                                  mergeRequestURL: mergeRequestURL, threadLocation: thread.location,
                                                  showsAuthor: index > 0)
                         }
@@ -161,7 +162,8 @@ private struct MRDiscussionThreadView: View {
                         .lineLimit(1)
                 }
             }
-            MRDiscussionAuthorView(author: firstComment?.author)
+            MRDiscussionAuthorView(author: firstComment?.author,
+                accountKind: (firstComment?.author?.id).flatMap { thread.authorKinds[$0] })
                 .foregroundStyle(thread.state == .resolved ? Color.secondary : Color.primary)
             if !isExpanded, let body = firstComment?.body {
                 Text(verbatim: body).font(.callout)
@@ -219,6 +221,7 @@ private struct MRDiscussionDisclosureStyle: DisclosureGroupStyle {
 private struct MRDiscussionNoteView: View {
     let note: GitLabMergeRequestDiscussion.Note
     let origin: MRDiscussionSnapshot.Origin?
+    let authorKind: AuthorFeedbackPolicy.AccountKind?
     let mergeRequestURL: URL
     let threadLocation: String?
     var showsAuthor = true
@@ -226,7 +229,7 @@ private struct MRDiscussionNoteView: View {
     var body: some View {
         VStack(alignment: .leading, spacing: 7) {
             HStack(alignment: .firstTextBaseline, spacing: 8) {
-                if showsAuthor { MRDiscussionAuthorView(author: note.author) }
+                if showsAuthor { MRDiscussionAuthorView(author: note.author, accountKind: authorKind) }
                 if let origin { MRDiscussionOriginBadge(badge: origin.badge, origin: origin) }
                 Spacer(minLength: 4)
                 if showsAuthor, let posted = note.createdAt {
@@ -378,6 +381,7 @@ private struct MRDiscussionLocationLabel: View {
 
 private struct MRDiscussionAuthorView: View {
     let author: GitLabWorkflowUser?
+    var accountKind: AuthorFeedbackPolicy.AccountKind? = nil
 
     var body: some View {
         HStack(alignment: .firstTextBaseline, spacing: 5) {
@@ -390,6 +394,11 @@ private struct MRDiscussionAuthorView: View {
                 Text(verbatim: "@\(username)").fontWeight(.semibold)
             } else {
                 Text(.MRDiscussions.mrDiscussionsUnknownAuthor).foregroundStyle(.secondary)
+            }
+            if accountKind == .automation {
+                Label(.AuthorFeedback.authorFeedbackBotAuthor, systemImage: "gearshape")
+                    .font(.caption.weight(.medium)).foregroundStyle(.secondary)
+                    .help(Text(.AuthorFeedback.authorFeedbackBotAuthorHelp))
             }
         }
         .font(.callout).lineLimit(1).truncationMode(.middle)

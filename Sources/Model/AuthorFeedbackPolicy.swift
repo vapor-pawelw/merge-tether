@@ -37,7 +37,12 @@ struct AuthorFeedbackPolicy {
         /// Exact assessment note whose explanation is displayed; the thread root can differ.
         var sourceNoteID: Int? = nil
         var automaticResolutionSuppressed = false
+        var waitingForHumanResolution: [String] = []
         var canResolve: Bool { state == .ready && discussionID != nil && !automaticResolutionSuppressed }
+        var resolutionWaitMessage: LocalizedStringResource? {
+            guard !automaticResolutionSuppressed, [.waitingAcceptance, .ready, .disabled].contains(state) else { return nil }
+            return AuthorFeedbackPolicy.resolutionWaitMessage(authors: waitingForHumanResolution)
+        }
     }
 
     struct InformationalAcknowledgement: Equatable {
@@ -76,7 +81,37 @@ struct AuthorFeedbackPolicy {
 
     /// GitLab's regular account type does not prove who operated it. Explicit automated-report
     /// provenance therefore remains a separate content classification, independent of AI assistance.
-    enum AccountKind: Sendable { case regular, automation, unknown }
+    enum AccountKind: Equatable, Sendable {
+        case regular, automation, unknown
+
+        static func classify(bot: Bool?, userType: String?) -> Self {
+            if bot == true || userType.map(automatedTypes.contains) == true { return .automation }
+            if bot == false, userType == nil || userType == "human" { return .regular }
+            return .unknown
+        }
+
+        // GitLab's BOT_USER_TYPES, retaining the existing group_bot compatibility alias.
+        private static let automatedTypes: Set<String> = ["alert_bot", "project_bot", "group_bot", "support_bot", "visual_review_bot",
+            "security_bot", "automation_bot", "security_policy_bot", "admin_bot", "service_account", "duo_code_review_bot", "orbit_bot"]
+    }
+
+    static func resolutionWaitMessage(authors: [String]) -> LocalizedStringResource? {
+        let names = normalizedHandles(authors)
+        guard !names.isEmpty else { return nil }
+        let shown = names.prefix(3).map { "@" + $0 }.joined(separator: ", ")
+        return names.count > 3 ? .AuthorFeedback.authorFeedbackWaitingThreadAuthorsMore(shown, names.count - 3)
+            : .AuthorFeedback.authorFeedbackWaitingThreadAuthors(shown)
+    }
+
+    static func normalizedHandles(_ values: [String]) -> [String] {
+        var handles: [String: String] = [:]
+        for value in values {
+            let name = String(value.trimmingCharacters(in: .whitespacesAndNewlines).drop(while: { $0 == "@" }))
+            guard !name.isEmpty else { continue }
+            handles[name.lowercased()] = name
+        }
+        return handles.values.sorted { $0.localizedCaseInsensitiveCompare($1) == .orderedAscending }
+    }
 
     static func permitsInformationalReaction(_ note: ReReviewAssessment.Note, accountKind: AccountKind) -> Bool {
         guard note.state == .informational, note.informationalAcknowledgementSafe == true,
@@ -93,7 +128,8 @@ struct AuthorFeedbackPolicy {
 
     static func evaluate(discussions: [GitLabMergeRequestDiscussion], assessment: ReReviewAssessment?, authorID: Int,
                          approvedReviewerIDs: Set<Int>, enabled: Bool = true, pendingDraftCount: Int = 0,
-                         ignoredSuggestions: [IgnoredFeedbackSuggestion] = [], excludedReplyAuthorIDs: Set<Int> = []) -> [Finding] {
+                         ignoredSuggestions: [IgnoredFeedbackSuggestion] = [], excludedReplyAuthorIDs: Set<Int> = [],
+                         accountKinds: [Int: AccountKind] = [:]) -> [Finding] {
         let gate: State? = !enabled ? .disabled : pendingDraftCount > 0 ? .waitingPublication : nil
         let verified = assessment.flatMap { try? $0.normalizingCoveredReviewSummaries(in: discussions,
             authorID: authorID, ignoredSuggestions: ignoredSuggestions, excludedReplyAuthorIDs: excludedReplyAuthorIDs) }
@@ -147,7 +183,8 @@ struct AuthorFeedbackPolicy {
             // consent nor permission to resolve the original GitLab discussion.
             if blocked.isEmpty, thread.contains(where: { !(verdicts[$0.id ?? 0]?.ignoredDecisionIDs ?? []).isEmpty }) { continue }
             let waiting = purelyInformational ? [] : participants.filter { participant in
-                blockers[participant.id] != nil || !approvedReviewerIDs.contains(participant.id) && !thread.filter {
+                blockers[participant.id] != nil || accountKinds[participant.id] != .automation
+                    && !approvedReviewerIDs.contains(participant.id) && !thread.filter {
                     $0.author?.id == participant.id && ($0.id == rootID || verdicts[$0.id ?? 0]?.state == .addressed)
                 }.allSatisfy(accepted)
             }
@@ -162,10 +199,17 @@ struct AuthorFeedbackPolicy {
                 : !waiting.isEmpty ? .waitingAcceptance : .ready
             let state = pendingDraftCount > 0 ? .waitingPublication
                 : semanticState == .ready ? (gate ?? .ready) : semanticState
-            findings.append(Finding(id: rootID, discussionID: discussionID, reviewerID: owner.id,
+            var finding = Finding(id: rootID, discussionID: discussionID, reviewerID: owner.id,
                                     reviewerUsername: handle(owner), state: state, reason: explanation?.reason,
                                     waitingForReviewers: verified == nil ? [] : waiting.map(handle), summary: explanation?.summary,
-                                    sourceNoteID: explanation?.noteID))
+                                    sourceNoteID: explanation?.noteID)
+            if pendingDraftCount == 0, verified != nil, [.waitingAcceptance, .ready].contains(semanticState),
+               !thread.contains(where: { missingReplies.contains($0.id ?? 0) }) {
+                finding.waitingForHumanResolution = Self.normalizedHandles(participants.filter {
+                    accountKinds[$0.id] == .regular && !excludedReplyAuthorIDs.contains($0.id)
+                }.map(handle))
+            }
+            findings.append(finding)
         }
 
         for (index, discussion) in discussions.enumerated() where !represented.contains(index) {
@@ -199,14 +243,15 @@ struct AuthorFeedbackPolicy {
     /// reviewer to re-review a fix they have already explicitly accepted.
     static func acceptedReviewers(discussions: [GitLabMergeRequestDiscussion], assessment: ReReviewAssessment,
                                   authorID: Int, approvedReviewerIDs: Set<Int>,
-                                  ignoredSuggestions: [IgnoredFeedbackSuggestion] = [], excludedReplyAuthorIDs: Set<Int> = []) -> Set<Int> {
+                                  ignoredSuggestions: [IgnoredFeedbackSuggestion] = [], excludedReplyAuthorIDs: Set<Int> = [],
+                                  accountKinds: [Int: AccountKind] = [:]) -> Set<Int> {
         guard let assessment = try? assessment.normalizingCoveredReviewSummaries(in: discussions,
             authorID: authorID, ignoredSuggestions: ignoredSuggestions, excludedReplyAuthorIDs: excludedReplyAuthorIDs) else { return [] }
         let verdicts = Dictionary(uniqueKeysWithValues: assessment.notes.map { ($0.noteID, $0) })
         let external = discussions.flatMap(\.notes).filter { $0.system == false && $0.author?.id != authorID }
         let byID = Dictionary(uniqueKeysWithValues: external.compactMap { note in note.id.map { ($0, note) } })
         return Set(Dictionary(grouping: external, by: { $0.author!.id }).compactMap { reviewer, notes in
-            guard !notes.contains(where: {
+            guard accountKinds[reviewer] != .automation, !notes.contains(where: {
                 verdicts[$0.id ?? 0].map(isBlocking) == true
             }) else { return nil }
             let actionable = notes.filter { verdicts[$0.id ?? 0]?.state == .addressed }

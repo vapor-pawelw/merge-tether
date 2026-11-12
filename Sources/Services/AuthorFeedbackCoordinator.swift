@@ -25,6 +25,7 @@ struct AuthorFeedbackStatus: Equatable, Sendable {
     var completedFollowUpJobID: UUID? = nil
     var feedbackDecisionRevision = ""
     var reviewParticipationRevision = ""
+    var accountKinds: [Int: AuthorFeedbackPolicy.AccountKind] = [:]
 
     static func canReconcile(_ job: AssistantAutomationRunner.Handoff, request: GitLabMergeRequest) -> Bool {
         guard job.workflow == .followUp, job.pipelineReservation == nil, !job.allowsPush,
@@ -105,7 +106,7 @@ final class AuthorFeedbackCoordinator {
     var onRemoteChange: (() -> Void)?
     var onNeedsWork: ((GitLabMergeRequest, Set<Int>, String, AuthorFeedbackResidual?) async -> Void)?
 
-    private struct Input {
+    private struct Input: Sendable {
         let id = UUID()
         let request: GitLabMergeRequest
         let discussions: [GitLabMergeRequestDiscussion]
@@ -127,6 +128,7 @@ final class AuthorFeedbackCoordinator {
         let threads: [GitLabMergeRequestDiscussion]
         let drafts: [GitLabDraftNote]
         let approvals: Set<Int>
+        let accountKinds: [Int: AuthorFeedbackPolicy.AccountKind]
         var stoppedFollowUps: [AssistantAutomationRunner.Handoff] = []
     }
 
@@ -464,12 +466,51 @@ final class AuthorFeedbackCoordinator {
             let approvals = input.readOnly ? [] : try await glab.fetchMergeRequestApproverIDs(
                 projectID: request.projectID, iid: request.iid, host: host)
             guard isCurrent(input) else { throw CancellationError() }
-            return Preparation(assessment: assessment, threads: threads, drafts: drafts, approvals: approvals,
+            let accountKinds = try await participantAccountKinds(in: threads, input: input)
+            return Preparation(assessment: assessment, threads: threads, drafts: drafts, approvals: approvals, accountKinds: accountKinds,
                 stoppedFollowUps: stoppedFollowUps)
         }
         let approvals = try await glab.fetchMergeRequestApproverIDs(projectID: request.projectID, iid: request.iid, host: host)
         guard isCurrent(input) else { throw CancellationError() }
-        return Preparation(assessment: assessment, threads: input.discussions, drafts: [], approvals: approvals)
+        let accountKinds = try await participantAccountKinds(in: input.discussions, input: input)
+        return Preparation(assessment: assessment, threads: input.discussions, drafts: [], approvals: approvals, accountKinds: accountKinds)
+    }
+
+    private func participantAccountKinds(in discussions: [GitLabMergeRequestDiscussion], input: Input) async throws
+        -> [Int: AuthorFeedbackPolicy.AccountKind] {
+        guard isCurrent(input) else { throw CancellationError() }
+        let relevant = discussions.filter {
+            $0.notes.first?.system == false && $0.notes.first?.resolvable == true && $0.notes.first?.resolved == false
+                && $0.notes.first?.author?.id != input.user.id
+        }
+        let ids = Set(relevant.flatMap(\.notes).compactMap { note -> Int? in
+            guard note.system == false, let id = note.author?.id, id > 0, id != input.user.id else { return nil }
+            return id
+        })
+        var kinds = Dictionary(uniqueKeysWithValues: ids.map { ($0, AuthorFeedbackPolicy.AccountKind.unknown) })
+        let bounded = Array(ids.sorted().prefix(64))
+        for offset in stride(from: 0, to: bounded.count, by: 4) {
+            let batch = Array(bounded[offset..<min(offset + 4, bounded.count)])
+            async let first = participantAccountKind(batch.first, input: input)
+            async let second = participantAccountKind(batch.dropFirst().first, input: input)
+            async let third = participantAccountKind(batch.dropFirst(2).first, input: input)
+            async let fourth = participantAccountKind(batch.dropFirst(3).first, input: input)
+            let values = await (first, second, third, fourth)
+            guard isCurrent(input) else { throw CancellationError() }
+            for (id, kind) in [values.0, values.1, values.2, values.3].compactMap({ $0 }) { kinds[id] = kind }
+        }
+        guard isCurrent(input) else { throw CancellationError() }
+        let declared = settings.reviewParticipationPreferences.botIDs(host: input.target.host, username: input.user.username)
+            .intersection(ids).subtracting(excludedReplyAuthors(input))
+        for id in declared { kinds[id] = .automation }
+        return kinds
+    }
+
+    private func participantAccountKind(_ id: Int?, input: Input) async -> (Int, AuthorFeedbackPolicy.AccountKind)? {
+        guard let id, isCurrent(input) else { return nil }
+        let kind = (try? await glab.feedbackAccountKind(userID: id, host: input.target.host)) ?? .unknown
+        guard isCurrent(input) else { return nil }
+        return (id, kind)
     }
 
     private func process(_ input: Input) async throws {
@@ -511,6 +552,11 @@ final class AuthorFeedbackCoordinator {
                 completedFollowUpJobID: input.completedFollowUpJobID)
             completed.feedbackDecisionRevision = input.decisionRevision
             completed.reviewParticipationRevision = input.reviewParticipationRevision
+            completed.accountKinds = prepared.accountKinds
+            completed.findings = AuthorFeedbackPolicy.evaluate(discussions: threads, assessment: assessment, authorID: input.user.id,
+                approvedReviewerIDs: prepared.approvals, enabled: false, pendingDraftCount: drafts.count,
+                ignoredSuggestions: input.ignoredSuggestions, excludedReplyAuthorIDs: excludedReplyAuthors(input),
+                accountKinds: prepared.accountKinds)
             completed.codeReviewRequests = assessment.reviewRequests
             completed.ignoredNoteIDs = Set(assessment.notes.filter { $0.state == .ignoredByUser }.map(\.noteID))
             bindStoppedFollowUpEvidence(to: &completed, prepared: prepared, input: input, discussions: threads, authorID: input.user.id)
@@ -521,8 +567,10 @@ final class AuthorFeedbackCoordinator {
         }
         var approved = prepared.approvals
         var threads = prepared.threads
+        var accountKinds = prepared.accountKinds
         let initial = AuthorFeedbackPolicy.evaluate(discussions: threads, assessment: assessment, authorID: input.user.id,
-            approvedReviewerIDs: approved, enabled: input.configuration.autoResolveAcceptedFeedback, ignoredSuggestions: input.ignoredSuggestions, excludedReplyAuthorIDs: excludedReplyAuthors(input))
+            approvedReviewerIDs: approved, enabled: input.configuration.autoResolveAcceptedFeedback, ignoredSuggestions: input.ignoredSuggestions,
+            excludedReplyAuthorIDs: excludedReplyAuthors(input), accountKinds: accountKinds)
         var accepted: Set<Int> = []
         var changed = false
         let informationalThreads = Set(AuthorFeedbackPolicy.informationalAcknowledgements(discussions: threads,
@@ -547,8 +595,13 @@ final class AuthorFeedbackCoordinator {
                   settings.automation.scope.permits(live, host: host, username: user.username),
                   live.webURL == request.webURL, ReviewVerdict.fingerprint(discussions) == input.fingerprint else { throw CancellationError() }
             threads = discussions
+            let involved = discussions.filter { $0.id == discussionID }
+            let freshKinds = try await participantAccountKinds(in: involved, input: input)
+            accountKinds.merge(freshKinds, uniquingKeysWith: { _, fresh in fresh })
+            guard settings.automaticPublicWritesAllowed, isCurrent(input) else { throw CancellationError() }
             let permitted = AuthorFeedbackPolicy.evaluate(discussions: discussions, assessment: assessment, authorID: user.id,
-                approvedReviewerIDs: liveApproved, ignoredSuggestions: input.ignoredSuggestions, excludedReplyAuthorIDs: excludedReplyAuthors(input)).contains { $0.discussionID == discussionID && $0.canResolve }
+                approvedReviewerIDs: liveApproved, ignoredSuggestions: input.ignoredSuggestions,
+                excludedReplyAuthorIDs: excludedReplyAuthors(input), accountKinds: accountKinds).contains { $0.discussionID == discussionID && $0.canResolve }
             guard permitted, !settings.pendingCommentReviews.contains(input.target) else { continue }
             try await glab.resolveAcceptedDiscussion(projectID: request.projectID, iid: request.iid, discussionID: discussionID, host: host) {
                 self.settings.automaticPublicWritesAllowed && self.isCurrent(input) && !input.readOnly
@@ -556,7 +609,7 @@ final class AuthorFeedbackCoordinator {
                     && !self.settings.pendingCommentReviews.contains(input.target)
             }
             changed = true
-            accepted.insert(finding.reviewerID)
+            if accountKinds[finding.reviewerID] != .automation { accepted.insert(finding.reviewerID) }
             threads = try await glab.fetchMergeRequestDiscussions(projectID: request.projectID, iid: request.iid, host: host)
             let confirmed = try await glab.fetchMergeRequest(projectID: request.projectID, iid: request.iid, host: host)
             guard isCurrent(input), confirmed.sha == request.sha,
@@ -566,10 +619,11 @@ final class AuthorFeedbackCoordinator {
         }
         guard isCurrent(input) else { throw CancellationError() }
         var findings = AuthorFeedbackPolicy.evaluate(discussions: threads, assessment: assessment, authorID: input.user.id,
-            approvedReviewerIDs: approved, enabled: input.configuration.autoResolveAcceptedFeedback, ignoredSuggestions: input.ignoredSuggestions, excludedReplyAuthorIDs: excludedReplyAuthors(input))
+            approvedReviewerIDs: approved, enabled: input.configuration.autoResolveAcceptedFeedback, ignoredSuggestions: input.ignoredSuggestions,
+            excludedReplyAuthorIDs: excludedReplyAuthors(input), accountKinds: accountKinds)
         accepted.formUnion(AuthorFeedbackPolicy.acceptedReviewers(discussions: threads, assessment: assessment,
             authorID: input.user.id, approvedReviewerIDs: approved, ignoredSuggestions: input.ignoredSuggestions,
-            excludedReplyAuthorIDs: excludedReplyAuthors(input)))
+            excludedReplyAuthorIDs: excludedReplyAuthors(input), accountKinds: accountKinds))
         let allNotes: [GitLabMergeRequestDiscussion.Note] = threads.flatMap(\.notes)
         let outstandingNotes = allNotes.filter {
             $0.system == false && $0.author?.id != input.user.id
@@ -592,16 +646,20 @@ final class AuthorFeedbackCoordinator {
         guard isCurrent(input) else { throw CancellationError() }
         // Courtesy acknowledgement is optional and must never suppress independent correction work.
         let acknowledgement = try await acknowledgeInformational(input, assessment: assessment, discussions: threads)
+        guard isCurrent(input) else { throw CancellationError() }
         threads = acknowledgement.threads
         changed = changed || acknowledgement.changed
         let acknowledgementFailures = acknowledgementAttempts[input.target]?.failures ?? [:]
         findings = AuthorFeedbackPolicy.evaluate(discussions: threads, assessment: assessment, authorID: input.user.id,
-            approvedReviewerIDs: approved, enabled: input.configuration.autoResolveAcceptedFeedback, ignoredSuggestions: input.ignoredSuggestions, excludedReplyAuthorIDs: excludedReplyAuthors(input)).map { finding in
+            approvedReviewerIDs: approved, enabled: input.configuration.autoResolveAcceptedFeedback, ignoredSuggestions: input.ignoredSuggestions,
+            excludedReplyAuthorIDs: excludedReplyAuthors(input), accountKinds: accountKinds).map { finding in
                 guard finding.state == .ready, let reason = acknowledgementFailures[finding.id] else { return finding }
                 return .init(id: finding.id, discussionID: finding.discussionID, reviewerID: finding.reviewerID,
                     reviewerUsername: finding.reviewerUsername, state: .needsVerification, reason: reason,
                     waitingForReviewers: [])
             }
+        accepted.subtract(accountKinds.compactMap { $0.value == .automation ? $0.key : nil })
+        accepted.subtract(settings.reviewParticipationPreferences.botIDs(host: host, username: input.user.username))
         var completed = AuthorFeedbackStatus(head: request.sha ?? "", fingerprint: input.fingerprint,
             semanticContextFingerprint: request.semanticContextFingerprint, phase: .complete,
             findings: findings, codeReviewRequests: assessment.reviewRequests,
@@ -611,6 +669,7 @@ final class AuthorFeedbackCoordinator {
             completedFollowUpJobID: input.completedFollowUpJobID)
         completed.feedbackDecisionRevision = input.decisionRevision
         completed.reviewParticipationRevision = input.reviewParticipationRevision
+        completed.accountKinds = accountKinds
         completed.ignoredNoteIDs = Set(assessment.notes.filter { $0.state == .ignoredByUser }.map(\.noteID))
         bindStoppedFollowUpEvidence(to: &completed, prepared: prepared, input: input, discussions: threads, authorID: input.user.id)
         let updated = statuses[input.target] != completed
@@ -728,7 +787,10 @@ final class AuthorFeedbackCoordinator {
                             kind = try await glab.feedbackAccountKind(userID: reviewerID, host: input.target.host)
                             accountKinds[reviewerID] = kind
                         }
-                        guard AuthorFeedbackPolicy.permitsInformationalReaction(verdict, accountKind: kind) else { continue }
+                        guard isCurrent(input) else { throw CancellationError() }
+                        let effectiveKind: AuthorFeedbackPolicy.AccountKind = settings.reviewParticipationPreferences.isDeclaredAutomation(
+                            host: input.target.host, username: input.user.username, userID: reviewerID) ? .automation : kind
+                        guard AuthorFeedbackPolicy.permitsInformationalReaction(verdict, accountKind: effectiveKind) else { continue }
                         let exists = try await glab.hasOwnThumbsUp(projectID: input.request.projectID, iid: input.request.iid,
                             noteID: noteID, host: input.target.host, userID: input.user.id)
                         if !exists {

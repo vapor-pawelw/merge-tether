@@ -276,6 +276,50 @@
           }
         }
       }
+    },
+    "authorFeedback.waitingThreadAuthors.%@": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Feedback addressed, waiting for %@ to resolve threads"
+          }
+        }
+      }
+    },
+    "authorFeedback.waitingThreadAuthorsMore.%@.%lld": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Feedback addressed, waiting for %@ and %lld more to resolve threads"
+          }
+        }
+      }
+    },
+    "authorFeedback.botAuthor": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Bot"
+          }
+        }
+      }
+    },
+    "authorFeedback.botAuthorHelp": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "This author account is identified as automated by GitLab or a local setting. This is separate from whether the message used AI."
+          }
+        }
+      }
     }
   },
   "version": "1.0"

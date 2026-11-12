@@ -4,6 +4,23 @@ import MergeTetherRemote
 @testable import GitLabTodos
 
 @MainActor @Suite struct RemoteMRDetailLoaderTests {
+    @Test func phoneAuthorIdentityRoundTripsSeparatelyFromTextOrigin() throws {
+        let request = try JSONDecoder().decode(GitLabMergeRequest.self, from: Data(raw.utf8))
+        let discussions = try JSONDecoder().decode([GitLabMergeRequestDiscussion].self,
+            from: Data(#"[{"id":"thread","notes":[{"id":1,"author":{"id":7,"username":"reviewer"},"system":false,"body":"AI-assisted human feedback"},{"id":2,"author":{"id":8,"username":"automation"},"system":false,"body":"Deterministic automation output"}]}]"#.utf8))
+        let details = RemoteMRDetailLoader.project(request: request, progress: nil, rules: nil, reviewers: nil,
+            discussions: discussions, origins: [1: .assessed(evidence: "AI text"), 2: .humanLikely(evidence: "Manual text")],
+            drafts: [], username: "owner", authorKinds: [7: .regular, 8: .automation])
+        let notes = try #require(details.threads?.first?.notes)
+        #expect(notes[0].authorKind == .regular && notes[0].origin == .ai)
+        #expect(notes[1].authorKind == .automation && notes[1].origin == .human)
+        let encoded = try JSONEncoder().encode(notes[1])
+        let decoded = try JSONDecoder().decode(RemoteDetailNote.self, from: encoded)
+        #expect(decoded.authorKind == .automation && decoded.origin == .human)
+        let legacy = try JSONDecoder().decode(RemoteDetailNote.self, from: Data(#"{"id":"1","body":"Earlier client","origin":"ai"}"#.utf8))
+        #expect(legacy.authorKind == nil && legacy.origin == .ai)
+    }
+
     @Test func currentFeedbackProjectionKeepsAssessmentSeparateFromRepliesAndResolution() throws {
         let note = RemoteDetailNote(id: "11", author: "Reviewer", body: "Concern", origin: .human, authorID: 7)
         let reply = RemoteDetailNote(id: "12", author: "Owner", body: "Done", origin: .ai, authorID: 3)
