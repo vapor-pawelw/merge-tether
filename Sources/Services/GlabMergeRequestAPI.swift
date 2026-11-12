@@ -291,8 +291,8 @@ extension GlabService {
         return user.username
     }
 
-    func requestReview(of request: GitLabMergeRequest, userID: Int, username: String,
-                       alreadyAssigned: Bool, host: String, shouldProceed: @escaping @MainActor @Sendable () -> Bool) async throws {
+    func requestReReview(of request: GitLabMergeRequest, userID: Int,
+                         host: String, shouldProceed: @escaping @MainActor @Sendable () -> Bool) async throws {
         struct Response: Decodable {
             struct Payload: Decodable {
                 struct Request: Decodable { let iid: String }
@@ -301,33 +301,25 @@ extension GlabService {
             }
             struct Data: Decodable {
                 let mergeRequestReviewerRereview: Payload?
-                let mergeRequestSetReviewers: Payload?
             }
             struct Failure: Decodable { let message: String }
             let data: Data?
             let errors: [Failure]?
         }
-        let query = alreadyAssigned ? """
+        let query = """
             mutation($projectPath: ID!, $iid: String!, $userId: UserID!) {
               mergeRequestReviewerRereview(input: {projectPath: $projectPath, iid: $iid, userId: $userId}) {
                 mergeRequest { iid } errors
               }
             }
-            """ : """
-            mutation($projectPath: ID!, $iid: String!, $username: String!) {
-              mergeRequestSetReviewers(input: {
-                projectPath: $projectPath, iid: $iid, reviewerUsernames: [$username], operationMode: APPEND
-              }) { mergeRequest { iid } errors }
-            }
             """
-        let reviewer = alreadyAssigned ? "userId=gid://gitlab/User/\(userID)" : "username=\(username)"
         let result: Response = try await mergeRequestWriteAPI(
             "graphql", host: host, arguments: [
                 "--raw-field", "query=\(query)", "--raw-field", "projectPath=\(request.webURL.gitLabProjectPath)",
-                "--raw-field", "iid=\(request.iid)", "--raw-field", reviewer
+                "--raw-field", "iid=\(request.iid)", "--raw-field", "userId=gid://gitlab/User/\(userID)"
             ], shouldProceed: shouldProceed
         )
-        let payload = result.data?.mergeRequestReviewerRereview ?? result.data?.mergeRequestSetReviewers
+        let payload = result.data?.mergeRequestReviewerRereview
         guard result.errors?.isEmpty != false, let payload, payload.errors.isEmpty,
               payload.mergeRequest?.iid == String(request.iid) else {
             throw GlabError.decoding("GitLab did not confirm the review request")

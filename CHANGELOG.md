@@ -6,6 +6,7 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 
 ## Unreleased
 
+- Limit re-review requests to currently assigned GitLab reviewers and recheck membership before sending.
 - Derive reviewer and approval waiting summaries consistently for MR cards, Mac Details and iOS from current feedback and approval evidence.
 - Respect reviewer participation opt-outs and explicit account-scoped exclusions from automatic replies and review invitations without waiving unrelated code feedback.
 - Authenticate resumable follow-up assessments before reusing them as semantic evidence for signed publication proofs.

@@ -39,7 +39,7 @@ struct GlabWriteAuthorizationTests {
     }
 
     enum Write: CaseIterable, Sendable {
-        case publish, delete, resolve, thumbsUp, markDone, rereview, newReviewer
+        case publish, delete, resolve, thumbsUp, markDone, rereview
     }
 
     @MainActor private final class Admission {
@@ -60,10 +60,9 @@ struct GlabWriteAuthorizationTests {
             try await glab.addOwnThumbsUp(projectID: 1, iid: 2, noteID: 3, host: host, userID: 7, shouldProceed: proceed)
         case .markDone:
             try await glab.markAsDone(id: 3, host: host, shouldProceed: proceed).get()
-        case .rereview, .newReviewer:
+        case .rereview:
             let request = try JSONDecoder().decode(GitLabMergeRequest.self, from: Data(#"{"project_id":1,"iid":2,"author":{"id":7,"username":"me","name":"Me"},"title":"Change","web_url":"https://gitlab.example.test/group/project/-/merge_requests/2","state":"opened","source_branch":"topic","target_branch":"main","labels":[]}"#.utf8))
-            try await glab.requestReview(of: request, userID: 8, username: "reviewer",
-                alreadyAssigned: operation == .rereview, host: host, shouldProceed: proceed)
+            try await glab.requestReReview(of: request, userID: 8, host: host, shouldProceed: proceed)
         }
     }
 
@@ -102,8 +101,9 @@ struct GlabWriteAuthorizationTests {
         case .resolve: #expect(first.method == "PUT" && first.command.contains("resolved=true"))
         case .thumbsUp: #expect(first.method == "POST" && first.command.contains("name=thumbsup"))
         case .markDone: #expect(first.method == "POST" && first.endpoint == "/todos/3/mark_as_done")
-        case .rereview: #expect(first.command.contains("mergeRequestReviewerRereview") && first.command.contains("userId=gid://gitlab/User/8"))
-        case .newReviewer: #expect(first.command.contains("operationMode: APPEND") && first.command.contains("username=reviewer"))
+        case .rereview:
+            #expect(first.command.contains("mergeRequestReviewerRereview") && first.command.contains("userId=gid://gitlab/User/8"))
+            #expect(!first.command.contains("mergeRequestSetReviewers") && !first.command.contains("APPEND"))
         }
     }
 

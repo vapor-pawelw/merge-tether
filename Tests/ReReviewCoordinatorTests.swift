@@ -5,6 +5,202 @@ import Testing
 @MainActor
 struct ReReviewCoordinatorTests {
     @Test(arguments: [false, true])
+    func anAbsentCommenterIsNotAReReviewRecipientEvenWhenTheirTechnicalFeedbackIsAddressed(_ automatic: Bool) async throws {
+        let f = try Fixture()
+        defer { f.close() }
+        f.settings.automation.autoVerifyReReview = automatic
+        f.gitlab.write("reviewers", "[]")
+        let assessment = ReReviewAssessment(notes: [.init(noteID: 40, state: .addressed,
+            reason: "The technical correction and substantive author reply are verified.")])
+        let coordinator = f.coordinator(sharedAssessment: assessment)
+        let request = try f.request()
+        let feedback = try f.feedback()
+        let fingerprint = try f.fingerprint()
+        #expect(f.settings.reviewParticipationPreferences.entries.isEmpty)
+
+        await coordinator.refresh(for: request, feedback: feedback, draftCount: 0, context: f.context, user: f.user)
+        let beforeConfirmation = coordinator.status(for: f.context, authorID: f.user.id)
+        #expect(beforeConfirmation.state?.canConfirm != true)
+        let result = await coordinator.confirm(f.context, user: f.user, head: "head", fingerprint: fingerprint)
+
+        #expect(result == .ignored)
+        #expect(f.gitlab.text("requested").isEmpty)
+        #expect(f.gitlab.requests.allSatisfy { $0.endpoint != "graphql" })
+        #expect(f.settings.reReviewReceipts.isEmpty)
+        #expect(!coordinator.status(for: f.context, authorID: f.user.id).requested)
+    }
+
+    @Test(arguments: [false, true])
+    func addingACommenterToTheCurrentReviewerListRestoresOrdinaryReReviewEligibility(_ automatic: Bool) async throws {
+        let f = try Fixture()
+        defer { f.close() }
+        f.settings.automation.autoVerifyReReview = automatic
+        f.gitlab.write("reviewers", "[]")
+        let assessment = ReReviewAssessment(notes: [.init(noteID: 40, state: .addressed,
+            reason: "The technical correction and substantive author reply are verified.")])
+        let coordinator = f.coordinator(sharedAssessment: assessment)
+        let request = try f.request()
+        let feedback = try f.feedback()
+        let fingerprint = try f.fingerprint()
+        await coordinator.refresh(for: request, feedback: feedback, draftCount: 0, context: f.context, user: f.user)
+        #expect(f.gitlab.text("requested").isEmpty)
+
+        f.gitlab.write("reviewers", Fixture.assignedReviewersJSON)
+        await coordinator.refresh(for: request, feedback: feedback, draftCount: 0, context: f.context, user: f.user)
+        if !automatic {
+            #expect(coordinator.status(for: f.context, authorID: f.user.id).state == .manual)
+            let result = await coordinator.confirm(f.context, user: f.user, head: "head", fingerprint: fingerprint)
+            #expect(result == .confirmed)
+        }
+
+        #expect(f.gitlab.text("requested") == "review\n")
+        #expect(f.gitlab.requests.filter { $0.endpoint == "graphql" }.allSatisfy {
+            $0.arguments.contains { $0.contains("mergeRequestReviewerRereview") }
+                && !$0.arguments.contains { $0.contains("mergeRequestSetReviewers") }
+        })
+        #expect(coordinator.status(for: f.context, authorID: f.user.id).requested)
+    }
+
+    @Test(arguments: [false, true], ["unapproved", "unreviewed", "review_started"])
+    func aReviewerRemovedDuringAsynchronousPreparationIsHeldByTheFinalLiveMembershipCheck(_ automatic: Bool, state: String) async throws {
+        let f = try Fixture()
+        defer { f.close() }
+        f.settings.automation.autoVerifyReReview = automatic
+        f.gitlab.write("reviewers", Fixture.assignedReviewersJSON.replacingOccurrences(of: "unapproved", with: state))
+        let assessment = ReReviewAssessment(notes: [.init(noteID: 40, state: .addressed,
+            reason: "The technical correction and substantive author reply are verified.")])
+        let coordinator = f.coordinator(sharedAssessment: assessment)
+        let request = try f.request()
+        let feedback = try f.feedback()
+        let fingerprint = try f.fingerprint()
+        if !automatic {
+            await coordinator.refresh(for: request, feedback: feedback, draftCount: 0, context: f.context, user: f.user)
+            #expect(coordinator.status(for: f.context, authorID: f.user.id).state == .manual)
+        }
+        var removed = false
+        f.gitlab.beforeCommand = { call in
+            if !removed && call.endpoint == "/user" {
+                f.gitlab.write("reviewers", "[]")
+                removed = true
+            }
+        }
+        if automatic {
+            await coordinator.refresh(for: request, feedback: feedback, draftCount: 0, context: f.context, user: f.user)
+        } else {
+            _ = await coordinator.confirm(f.context, user: f.user, head: "head", fingerprint: fingerprint)
+        }
+
+        #expect(removed)
+        #expect(f.gitlab.text("requested").isEmpty)
+        #expect(f.gitlab.requests.allSatisfy { $0.endpoint != "graphql" })
+        #expect(f.settings.reReviewReceipts.isEmpty)
+        #expect(!coordinator.status(for: f.context, authorID: f.user.id).requested)
+    }
+
+    @Test(arguments: ["unreviewed", "review_started"])
+    func removalDuringFinalParallelReadsCannotProduceAnAlreadyRequestedReceipt(_ state: String) async throws {
+        let f = try Fixture()
+        defer { f.close() }
+        f.settings.automation.autoVerifyReReview = true
+        let assessment = ReReviewAssessment(notes: [.init(noteID: 40, state: .addressed, reason: "Verified technical correction and reply.")])
+        let coordinator = f.coordinator(sharedAssessment: assessment)
+        var userReads = 0
+        var draftReads = 0
+        var removed = false
+        f.gitlab.beforeCommand = { call in
+            if call.endpoint == "/user" {
+                userReads += 1
+                if userReads == 2 {
+                    f.gitlab.write("reviewers", Fixture.assignedReviewersJSON.replacingOccurrences(of: "unapproved", with: state))
+                }
+            }
+            if call.endpoint.contains("/draft_notes?") {
+                draftReads += 1
+                if draftReads == 2 {
+                    // Let concurrently launched metadata reads observe the earlier assignment.
+                    for _ in 0..<8 { await Task.yield() }
+                    f.gitlab.write("reviewers", "[]")
+                    removed = true
+                }
+            }
+        }
+        let request = try f.request()
+        let feedback = try f.feedback()
+        await coordinator.refresh(for: request, feedback: feedback, draftCount: 0, context: f.context, user: f.user)
+        #expect(removed)
+        #expect(f.gitlab.text("requested").isEmpty)
+        #expect(f.settings.reReviewReceipts.isEmpty)
+        let status = coordinator.status(for: f.context, authorID: f.user.id)
+        #expect(!status.requested && !status.unconfirmed)
+    }
+
+    @Test(arguments: ["initial", "final"], ["disabled", "paused", "pendingReview"])
+    func receiptShortcutsRecheckAdmissionAfterTheFreshReviewerRead(_ phase: String, change: String) async throws {
+        let f = try Fixture()
+        defer { f.close() }
+        f.settings.automation.autoVerifyReReview = true
+        let assessment = ReReviewAssessment(notes: [.init(noteID: 40, state: .addressed, reason: "Verified technical correction and reply.")])
+        let coordinator = f.coordinator(sharedAssessment: assessment)
+        var reviewerReads = 0
+        var changed = false
+        f.gitlab.beforeCommand = { call in
+            guard call.endpoint.contains("/reviewers?") else { return }
+            reviewerReads += 1
+            guard reviewerReads == (phase == "initial" ? 2 : 3) else { return }
+            f.gitlab.write("reviewers", Fixture.assignedReviewersJSON.replacingOccurrences(of: "unapproved", with: "unreviewed"))
+            switch change {
+            case "disabled": f.settings.automation.autoReReviewEnabled = false
+            case "paused":
+                var scope = f.settings.automation.scope
+                scope[f.context.target] = .paused
+                f.settings.automation.scope = scope
+            default: f.settings.pendingCommentReviews.insert(f.context.target)
+            }
+            changed = true
+        }
+        let request = try f.request()
+        let feedback = try f.feedback()
+        await coordinator.refresh(for: request, feedback: feedback, draftCount: 0, context: f.context, user: f.user)
+        #expect(changed)
+        #expect(f.settings.reReviewReceipts.isEmpty)
+        #expect(f.gitlab.text("requested").isEmpty)
+    }
+
+    @Test(arguments: [false, true])
+    func receiptDisplayUsesCurrentMembershipWithoutDeletingItsJournal(_ unconfirmed: Bool) async throws {
+        let f = try Fixture()
+        defer { f.close() }
+        let key = ReReviewReceipt.Key(host: f.context.host, authorID: f.user.id, projectID: 1, iid: 2, reviewerID: 8)
+        f.settings.reReviewReceipts[key] = .init(noteID: 40, unconfirmed: unconfirmed,
+            requested: unconfirmed ? nil : true, headSHA: "head")
+        let encoder = JSONEncoder()
+        encoder.outputFormatting = [.sortedKeys]
+        let saved = try encoder.encode(f.settings.reReviewReceipts)
+        f.gitlab.write("reviewers", "[]")
+        let assessment = ReReviewAssessment(notes: [.init(noteID: 40, state: .addressed, reason: "Verified technical correction and reply.")])
+        let coordinator = f.coordinator(sharedAssessment: assessment)
+        let request = try f.request()
+        let feedback = try f.feedback()
+        await coordinator.refresh(for: request, feedback: feedback, draftCount: 0, context: f.context, user: f.user)
+        let absent = coordinator.status(for: f.context, authorID: f.user.id)
+        #expect(!absent.requested && !absent.unconfirmed)
+        let afterRemoval = try encoder.encode(f.settings.reReviewReceipts)
+        #expect(afterRemoval == saved)
+
+        f.gitlab.write("reviewers", Fixture.assignedReviewersJSON)
+        await coordinator.refresh(for: request, feedback: feedback, draftCount: 0, context: f.context, user: f.user)
+        let present = coordinator.status(for: f.context, authorID: f.user.id)
+        #expect(present.requested == !unconfirmed && present.unconfirmed == unconfirmed)
+        let afterReaddition = try encoder.encode(f.settings.reReviewReceipts)
+        #expect(afterReaddition == saved && f.gitlab.text("requested").isEmpty)
+        coordinator.reset()
+        let reset = coordinator.status(for: f.context, authorID: f.user.id)
+        #expect(!reset.requested && !reset.unconfirmed)
+        let afterReset = try encoder.encode(f.settings.reReviewReceipts)
+        #expect(afterReset == saved)
+    }
+
+    @Test(arguments: [false, true])
     func personalNoContactPreferenceExcludesAutomaticAndConfirmedReviewRequests(_ automatic: Bool) async throws {
         let f = try Fixture()
         defer { f.close() }
@@ -179,6 +375,7 @@ struct ReReviewCoordinatorTests {
         let user: GitLabAuthenticatedUser
 
         static let requestJSON = #"{"project_id":1,"iid":2,"author":{"id":3,"username":"me","name":"Me"},"title":"Fix","web_url":"https://gitlab.example.org/g/p/-/merge_requests/2","state":"opened","draft":false,"sha":"head","source_project_id":1,"source_branch":"fix","target_project_id":1,"target_branch":"main","labels":[]}"#
+        static let assignedReviewersJSON = #"[{"user":{"id":8,"username":"reviewer"},"state":"unapproved"}]"#
         static let unansweredJSON = #"[{"id":"thread","notes":[{"id":40,"author":{"id":8,"username":"reviewer"},"body":"Please fix","system":false,"resolvable":true,"resolved":false}]}]"#
         static let discussionsJSON = #"[{"id":"thread","notes":[{"id":40,"author":{"id":8,"username":"reviewer"},"body":"Please fix","system":false,"resolvable":true,"resolved":false},{"id":41,"author":{"id":3,"username":"me"},"body":"Fixed and verified","system":false}]}]"#
 
@@ -200,6 +397,7 @@ struct ReReviewCoordinatorTests {
             user = try JSONDecoder().decode(GitLabAuthenticatedUser.self, from: Data(#"{"id":3,"username":"me"}"#.utf8))
             gitlab.write("request", Self.requestJSON)
             gitlab.write("discussions", Self.discussionsJSON)
+            gitlab.write("reviewers", Self.assignedReviewersJSON)
             let boundary = gitlab
             gitlab.handler = { call in
                 switch call.endpoint {
@@ -207,14 +405,16 @@ struct ReReviewCoordinatorTests {
                 case "/projects/1/merge_requests/2": return try boundary.response("request")
                 case let endpoint where endpoint.contains("/discussions?"): return try boundary.response("discussions")
                 case let endpoint where endpoint.contains("/reviewers?"):
-                    return InMemoryGitLab.output(#"[{"user":{"id":8,"username":"reviewer"},"state":"unapproved"}]"#)
+                    return try boundary.response("reviewers")
                 case let endpoint where endpoint.contains("/draft_notes?"): return InMemoryGitLab.output("[]")
                 case "/projects/1/merge_requests/2/approvals": return InMemoryGitLab.output(#"{"approved_by":[]}"#)
                 case "/projects/1/merge_requests/2/raw_diffs": return InMemoryGitLab.output("diff")
                 case "/users/8": return InMemoryGitLab.output(#"{"id":8,"username":"reviewer","bot":false,"state":"active"}"#)
                 case "graphql":
-                    boundary.append("requested", "review\n")
-                    return InMemoryGitLab.output(#"{"data":{"mergeRequestReviewerRereview":{"mergeRequest":{"iid":"2"},"errors":[]}}}"#)
+                    let append = call.arguments.contains { $0.contains("mergeRequestSetReviewers") }
+                    boundary.append("requested", append ? "append\n" : "review\n")
+                    let mutation = append ? "mergeRequestSetReviewers" : "mergeRequestReviewerRereview"
+                    return InMemoryGitLab.output("{\"data\":{\"\(mutation)\":{\"mergeRequest\":{\"iid\":\"2\"},\"errors\":[]}}}")
                 default: return try boundary.unexpected(call)
                 }
             }

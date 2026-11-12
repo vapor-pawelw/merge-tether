@@ -198,7 +198,7 @@ struct AuthoredMergeRequestStatusTests {
                 /users/8) echo '{"id":8,"username":"bob","bot":false,"state":"active"}' ;;
                 /merge_requests?scope=created_by_me*) printf '['; cat request.json; printf ']' ;;
                 /merge_requests?scope=all*) echo '[]' ;;
-                */reviewers*) echo '[{"user":{"id":7},"state":"reviewed"}]' ;;
+                */reviewers*) echo '[{"user":{"id":7},"state":"reviewed"},{"user":{"id":8},"state":"reviewed"}]' ;;
                 */approvals*) echo '{"approved_by":[]}' ;;
                 */draft_notes*) cat drafts.json ;;
                 */discussions*) cat discussions.json ;;
@@ -208,9 +208,9 @@ struct AuthoredMergeRequestStatusTests {
                         *mergeRequestReviewerRereview*userId=gid://gitlab/User/7)
                             echo alice >> sent
                             echo '{"data":{"mergeRequestReviewerRereview":{"mergeRequest":{"iid":"2"},"errors":[]}}}' ;;
-                        *mergeRequestSetReviewers*APPEND*username=bob)
+                        *mergeRequestReviewerRereview*userId=gid://gitlab/User/8)
                             echo bob >> sent
-                            echo '{"data":{"mergeRequestSetReviewers":{"mergeRequest":{"iid":"2"},"errors":[]}}}' ;;
+                            echo '{"data":{"mergeRequestReviewerRereview":{"mergeRequest":{"iid":"2"},"errors":[]}}}' ;;
                         *) exit 101 ;;
                     esac ;;
                 *) exit 100 ;;

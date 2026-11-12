@@ -41,6 +41,7 @@ final class ReReviewCoordinator {
 
     private var reReviewChecks: [Context: ReReviewCheck] = [:]
     private var reReviewTasks: [Context: VerificationTask] = [:]
+    private var currentReviewerIDs: [Context: Set<Int>] = [:]
     @ObservationIgnored private var reReviewsInProgress: Set<Context> = []
     private var manualReReviewApprovals: [Context: String] = [:]
     private var runtimeScope: (host: String, username: String, revision: UInt64, scope: MRAutomationScope)?
@@ -74,6 +75,7 @@ final class ReReviewCoordinator {
         let receipts = settings.reReviewReceipts.filter {
             $0.key.host == context.host && $0.key.authorID == authorID
                 && $0.key.projectID == context.projectID && $0.key.iid == context.iid
+                && currentReviewerIDs[context]?.contains($0.key.reviewerID) == true
         }.values
         return .init(state: check?.state, fingerprint: check?.fingerprint,
             requested: receipts.contains { $0.requested == true }, unconfirmed: receipts.contains { $0.unconfirmed })
@@ -83,6 +85,7 @@ final class ReReviewCoordinator {
         reReviewTasks.values.forEach { $0.task.cancel() }
         reReviewTasks = [:]
         reReviewChecks = [:]
+        currentReviewerIDs = [:]
         manualReReviewApprovals = [:]
     }
 
@@ -145,6 +148,7 @@ final class ReReviewCoordinator {
         if let host = glab.resolvedHost, let username = glab.currentUsername {
             runtimeScope = (host, username, glab.accountRevision, scope)
         } else { runtimeScope = nil }
+        currentReviewerIDs = currentReviewerIDs.filter { isCurrent($0.key) }
         for context in Array(reReviewTasks.keys) {
             guard manualReReviewApprovals[context] == nil else { continue }
             if isCurrent(context), runtimePermitsReReview(context) { continue }
@@ -162,11 +166,12 @@ final class ReReviewCoordinator {
     }
 
     func cancel(outsideScope scope: MRAutomationScope? = nil) {
-        let affected = Set(reReviewTasks.keys).union(reReviewChecks.keys)
+        let affected = Set(reReviewTasks.keys).union(reReviewChecks.keys).union(currentReviewerIDs.keys)
         for context in affected {
             if let scope, scope.resolve(context.target).active { continue }
             reReviewTasks.removeValue(forKey: context)?.task.cancel()
             reReviewChecks.removeValue(forKey: context)
+            currentReviewerIDs.removeValue(forKey: context)
             manualReReviewApprovals.removeValue(forKey: context)
             notify(context)
         }
@@ -256,6 +261,7 @@ final class ReReviewCoordinator {
             async let states = glab.fetchMergeRequestReviewers(projectID: request.projectID, iid: request.iid, host: host)
             async let approved = glab.fetchMergeRequestApproverIDs(projectID: request.projectID, iid: request.iid, host: host)
             (reviewers, approvers) = try await (states, approved)
+            observeCurrentReviewers(reviewers, context: context)
         } catch {
             reReviewChecks[context] = .init(key: key, fingerprint: fingerprint, state: .failed)
             notify(context, unanswered: feedback.hasUnansweredFeedback)
@@ -271,7 +277,8 @@ final class ReReviewCoordinator {
                 || history.activities[$0.user.id]?.previouslyApproved == true
                 || history.activities[$0.user.id]?.commented == true
         }.map(\.user.id))
-        var candidates = feedback.addressedByReviewer
+        let assignedIDs = Set(reviewers.map(\.user.id))
+        var candidates = feedback.addressedByReviewer.filter { assignedIDs.contains($0.key) }
         for reviewerID in earlierReviewers {
             candidates[reviewerID] = max(candidates[reviewerID] ?? 0, history.activities[reviewerID]?.noteID ?? 1, 1)
         }
@@ -418,9 +425,7 @@ final class ReReviewCoordinator {
                                                  iid: request.iid, reviewerID: reviewerID)
             guard settings.reReviewReceipts[receiptKey]?.covers(noteID: noteID, headSHA: head) != true else { continue }
             do {
-                guard let username = try await glab.activeHumanReviewerUsername(userID: reviewerID, host: host) else { continue }
-                let reviewers = try await glab.fetchMergeRequestReviewers(projectID: request.projectID, iid: request.iid, host: host)
-                let reviewer = reviewers.first { $0.user.id == reviewerID }
+                guard try await glab.activeHumanReviewerUsername(userID: reviewerID, host: host) != nil else { continue }
                 async let fresh = glab.fetchMergeRequest(projectID: request.projectID, iid: request.iid, host: host)
                 async let threads = glab.fetchMergeRequestDiscussions(projectID: request.projectID, iid: request.iid, host: host)
                 async let drafts = glab.fetchOwnDraftNoteCount(projectID: request.projectID, iid: request.iid, host: host, userID: user.id)
@@ -433,7 +438,16 @@ final class ReReviewCoordinator {
                       isCurrent(context), settings.automation.autoReReviewEnabled,
                       runtimePermitsReReview(context),
                       settings.automation.scope.permits(current, host: host, username: context.username) else { return }
-                if reviewer?.state == "unreviewed" || reviewer?.state == "review_started" {
+                let liveReviewers = try await glab.fetchMergeRequestReviewers(projectID: request.projectID, iid: request.iid, host: host)
+                observeCurrentReviewers(liveReviewers, context: context)
+                guard settings.automaticPublicWritesAllowed, !Task.isCancelled, isCurrent(context),
+                      settings.automation.autoReReviewEnabled, !settings.pendingCommentReviews.contains(target),
+                      settings.automation.scope.permits(current, host: host, username: context.username),
+                      runtimePermitsReReview(context), reReviewChecks[context]?.key == key,
+                      reReviewKey(current, fingerprint: fingerprint, context: context) == key,
+                      !excludedReviewers(context, key: key, discussions: liveDiscussions, authorID: user.id).contains(reviewerID),
+                      let reviewer = liveReviewers.first(where: { $0.user.id == reviewerID }) else { continue }
+                if reviewer.state == "unreviewed" || reviewer.state == "review_started" {
                     settings.reReviewReceipts[receiptKey] = ReReviewReceipt(noteID: noteID, requested: true, headSHA: head)
                     settings.save()
                     continue
@@ -456,11 +470,10 @@ final class ReReviewCoordinator {
                 let finalUser = try await glab.fetchAuthenticatedUser(host: host, expectedUsername: context.username)
                 async let finalMR = glab.fetchMergeRequest(projectID: request.projectID, iid: request.iid, host: host)
                 async let finalThreads = glab.fetchMergeRequestDiscussions(projectID: request.projectID, iid: request.iid, host: host)
-                async let finalReviewers = glab.fetchMergeRequestReviewers(projectID: request.projectID, iid: request.iid, host: host)
                 async let finalApprovers = glab.fetchMergeRequestApproverIDs(projectID: request.projectID, iid: request.iid, host: host)
                 async let finalDrafts = glab.fetchOwnDraftNoteCount(projectID: request.projectID, iid: request.iid, host: host, userID: user.id)
-                let (checkedMR, checkedThreads, checkedDraftCount, checkedReviewers, checkedApprovers) = try await
-                    (finalMR, finalThreads, finalDrafts, finalReviewers, finalApprovers)
+                let (checkedMR, checkedThreads, checkedDraftCount, checkedApprovers) = try await
+                    (finalMR, finalThreads, finalDrafts, finalApprovers)
                 guard settings.automaticPublicWritesAllowed, !Task.isCancelled, finalUser == user, isCurrent(context),
                       runtimePermitsReReview(context),
                       settings.automation == finalConfiguration, settings.automation.autoReReviewEnabled,
@@ -472,11 +485,18 @@ final class ReReviewCoordinator {
                       reReviewChecks[context]?.key == key,
                       settings.automation.scope.permits(checkedMR, host: host, username: context.username) else { return }
                 guard settings.reReviewReceipts[receiptKey]?.covers(noteID: noteID, headSHA: head) != true else { continue }
-                let checkedReviewer = checkedReviewers.first { $0.user.id == reviewerID }
-                guard !checkedApprovers.contains(reviewerID), checkedReviewer?.state != "approved",
+                let checkedReviewers = try await glab.fetchMergeRequestReviewers(projectID: request.projectID, iid: request.iid, host: host)
+                observeCurrentReviewers(checkedReviewers, context: context)
+                guard settings.automaticPublicWritesAllowed, !Task.isCancelled, isCurrent(context),
+                      settings.automation == finalConfiguration, runtimePermitsReReview(context),
+                      !settings.pendingCommentReviews.contains(target),
+                      reReviewChecks[context]?.key == key,
+                      reReviewKey(checkedMR, fingerprint: fingerprint, context: context) == key,
+                      let checkedReviewer = checkedReviewers.first(where: { $0.user.id == reviewerID }),
+                      !checkedApprovers.contains(reviewerID), checkedReviewer.state != "approved",
                       !excludedReviewers(context, key: key, discussions: checkedThreads, authorID: user.id).contains(reviewerID),
-                      checkedReviewer != nil || feedback.addressedByReviewer[reviewerID] != nil else { continue }
-                if checkedReviewer?.state == "unreviewed" || checkedReviewer?.state == "review_started" {
+                      currentReviewerIDs[context]?.contains(reviewerID) == true else { continue }
+                if checkedReviewer.state == "unreviewed" || checkedReviewer.state == "review_started" {
                     settings.reReviewReceipts[receiptKey] = ReReviewReceipt(noteID: noteID, requested: true, headSHA: head)
                     settings.save()
                     continue
@@ -484,8 +504,7 @@ final class ReReviewCoordinator {
                 settings.reReviewReceipts[receiptKey] = ReReviewReceipt(noteID: noteID, unconfirmed: true, headSHA: head)
                 settings.save()
                 guard settings.automaticPublicWritesAllowed else { throw CancellationError() }
-                try await glab.requestReview(of: checkedMR, userID: reviewerID, username: username,
-                                             alreadyAssigned: checkedReviewer != nil, host: host) {
+                try await glab.requestReReview(of: checkedMR, userID: reviewerID, host: host) {
                     !Task.isCancelled && self.isCurrent(context) && self.settings.automaticPublicWritesAllowed
                         && self.settings.automation == finalConfiguration && self.settings.automation.autoReReviewEnabled
                         && self.runtimePermitsReReview(context)
@@ -493,6 +512,7 @@ final class ReReviewCoordinator {
                         && self.reReviewKey(checkedMR, fingerprint: fingerprint, context: context) == key
                         && !self.settings.pendingCommentReviews.contains(target)
                         && self.settings.automation.scope.permits(checkedMR, host: host, username: context.username)
+                        && self.currentReviewerIDs[context]?.contains(reviewerID) == true
                         && !self.excludedReviewers(context, key: key, discussions: checkedThreads, authorID: user.id).contains(reviewerID)
                 }
                 settings.reReviewReceipts[receiptKey]?.unconfirmed = false
@@ -518,5 +538,13 @@ final class ReReviewCoordinator {
         settings.reviewParticipationPreferences.excludedIDs(host: context.host, username: context.username)
             .union(reReviewChecks[context]?.key == key
                 ? reReviewChecks[context]?.assessment?.reviewerOptOutIDs(in: discussions, authorID: authorID) ?? [] : [])
+    }
+
+    private func observeCurrentReviewers(_ reviewers: [GitLabMergeRequestReviewer], context: Context) {
+        guard isCurrent(context), !Task.isCancelled else { return }
+        let ids = Set(reviewers.map(\.user.id))
+        guard currentReviewerIDs[context] != ids else { return }
+        currentReviewerIDs[context] = ids
+        notify(context)
     }
 }
