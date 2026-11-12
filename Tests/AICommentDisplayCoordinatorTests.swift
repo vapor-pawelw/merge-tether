@@ -96,6 +96,12 @@ import MergeTetherRemote
             request = try MRDependencyPresentationTests().request(13, project: 7, author: 9)
             gitlab.handler = { [self] call in
                 if call.endpoint == "/user" { return InMemoryGitLab.output(#"{"id":9,"username":"me"}"#) }
+                if call.method == "GET", call.endpoint == "/users/7" {
+                    return InMemoryGitLab.output(#"{"id":7,"username":"user7","bot":false,"user_type":"human"}"#)
+                }
+                if call.method == "GET", call.endpoint == "/users/9" {
+                    return InMemoryGitLab.output(#"{"id":9,"username":"me","bot":false,"user_type":"human"}"#)
+                }
                 if call.endpoint.contains("/discussions?") {
                     return InMemoryGitLab.output(String(decoding: try JSONEncoder().encode([
                         GitLabMergeRequestDiscussion(id: "thread", notes: notes)
