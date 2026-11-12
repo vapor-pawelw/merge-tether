@@ -336,6 +336,9 @@ final class MergeRequestAttentionMonitor {
         let host: String
         let username: String
     }
+    @MainActor private final class OriginReadContexts {
+        var values: [MRAutomationScope.Target: (request: GitLabMergeRequest, revision: UInt64)] = [:]
+    }
 
     init(
         glab: GlabService, settings: SettingsManager? = nil, reportDirectory: URL? = nil,
@@ -368,8 +371,10 @@ final class MergeRequestAttentionMonitor {
         self.canAutomate = canAutomate
         self.approvalReadClock = approvalReadClock
         self.approvalReadWait = approvalReadWait
+        let originReadContexts = OriginReadContexts()
         let publicationOrigins = AICommentOriginCoordinator(directory: aiAssessmentDirectory, assess: assessAIOrigin,
             fetchCurrent: { target in
+                let revision = glab.accountRevision
                 guard let iid = target.iid, glab.resolvedHost == target.host,
                       glab.currentUsername == target.username else { throw CancellationError() }
                 _ = try await glab.fetchAuthenticatedUser(host: target.host, expectedUsername: target.username)
@@ -377,7 +382,11 @@ final class MergeRequestAttentionMonitor {
                 guard request.state == "opened", request.webURL.isGitLabMergeRequest(host: target.host, iid: iid),
                       settings?.automation.scope.permits(request, host: target.host, username: target.username) == true
                 else { throw CancellationError() }
-                return try await glab.fetchMergeRequestDiscussions(projectID: target.projectID, iid: iid, host: target.host).flatMap(\.notes)
+                let notes = try await glab.fetchMergeRequestDiscussions(projectID: target.projectID, iid: iid, host: target.host).flatMap(\.notes)
+                if glab.accountRevision == revision, glab.resolvedHost == target.host, glab.currentUsername == target.username {
+                    originReadContexts.values[target] = (request, revision)
+                }
+                return notes
             }, isCurrent: { target, assistant, model, thinking in
                 guard let settings, glab.resolvedHost == target.host, glab.currentUsername == target.username,
                       settings.automation.hasAutomaticActionConsent,
@@ -452,6 +461,11 @@ final class MergeRequestAttentionMonitor {
             guard let self, let account, isCurrent(account) else { return }
             if isLoading { feedbackNeedsRefresh = true }
             else { refresh(host: account.host, username: account.username, todos: []) }
+        }
+        aiOriginCoordinator.onPersisted = { [weak self] target, notes, assessment in
+            guard let context = originReadContexts.values.removeValue(forKey: target) else { return }
+            self?.displayAIOriginCoordinator?.notifyPersistedOrigins(target: target, request: context.request,
+                accountRevision: context.revision, notes: notes, assessment: assessment)
         }
         aiOriginCoordinator.onChange = { [weak self] in
             guard let self, let account, isCurrent(account) else { return }

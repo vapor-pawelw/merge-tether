@@ -19,6 +19,7 @@ enum RemotePhoneConnectionStatus { case unpaired, connecting, connected, offline
     var state = RemotePhoneState()
     let detailState = RemoteDetailState()
     private(set) var supportsDetails = false
+    private(set) var supportsOriginUpdates = false
     var paired = false
     var error = false
     private(set) var pairingRevision = UUID()
@@ -120,7 +121,7 @@ enum RemotePhoneConnectionStatus { case unpaired, connecting, connected, offline
                 guard let self, let connection, self.connection === connection else { return }
                 if !connected {
                     self.connectionRevision = UUID(); self.cancelApproval(); self.state.disconnected()
-                    self.detailState.disconnect(); self.supportsDetails = false
+                    self.detailState.disconnect(); self.supportsDetails = false; self.supportsOriginUpdates = false
                     self.shouldRecoverCommand = self.recovery != nil
                     self.receiptChallenge = nil; self.receiptRevision = nil
                 }
@@ -148,13 +149,20 @@ enum RemotePhoneConnectionStatus { case unpaired, connecting, connected, offline
                     return
                 }
                 if message.type == .details {
-                    guard self.supportsDetails, let response = message.detailResponse, let board = self.state.board else { return }
+                    guard self.supportsDetails, let board = self.state.board else { return }
+                    if let origins = message.detailOrigins {
+                        guard self.supportsOriginUpdates, message.detailResponse == nil else { return }
+                        self.detailState.receiveOrigins(origins, board: board)
+                        return
+                    }
+                    guard let response = message.detailResponse else { return }
                     self.detailState.receive(response, board: board)
                     return
                 }
                 let accepted = self.state.receive(message, now: self.now())
                 if accepted, message.type == .snapshot, self.state.isConnected(now: self.now()) {
                     self.supportsDetails = message.capabilities?.contains(RemoteMessage.detailsCapability) == true
+                    self.supportsOriginUpdates = self.supportsDetails && message.capabilities?.contains(RemoteMessage.detailOriginsCapability) == true
                     if let board = self.state.board { self.detailState.update(board: board) }
                     self.error = self.recoveryUnavailable; self.connectionFailed = false; self.connectingUntil = .distantPast
                     await self.recoverLastCommand()
@@ -172,14 +180,15 @@ enum RemotePhoneConnectionStatus { case unpaired, connecting, connected, offline
     func disconnect() {
         let old = connection; connection = nil; connectionRevision = UUID()
         old?.stop(); cancelApproval(); state.disconnected(); connectingUntil = .distantPast
-        detailState.disconnect(); supportsDetails = false
+        detailState.disconnect(); supportsDetails = false; supportsOriginUpdates = false
         shouldRecoverCommand = recovery != nil; receiptChallenge = nil; receiptRevision = nil
     }
     func refresh(force: Bool = false) async {
         let requestState = state
         guard let connection, let challenge = requestState.beginRefresh(force: force, now: now()) else { return }
         do { try await connection.send(.init(type: .hello, challenge: challenge,
-            capabilities: [RemoteMessage.commentReviewCapability, RemoteMessage.mergeActionsCapability, RemoteMessage.detailsCapability])) }
+            capabilities: [RemoteMessage.commentReviewCapability, RemoteMessage.mergeActionsCapability, RemoteMessage.detailsCapability,
+                           RemoteMessage.detailOriginsCapability])) }
         catch {
             guard !Task.isCancelled, self.connection === connection, self.state === requestState else { return }
             if requestState.refreshFailed(challenge: challenge) { self.error = true; self.connectionFailed = true }
@@ -196,7 +205,7 @@ enum RemotePhoneConnectionStatus { case unpaired, connecting, connected, offline
         }
     }
     func cancelDetails() {
-        let request = detailState.pending
+        let request = detailState.openRequest ?? detailState.pending
         detailState.disconnect()
         guard supportsDetails, let request, let connection else { return }
         Task { try? await connection.send(.init(type: .cancelDetails, detailRequest: request)) }

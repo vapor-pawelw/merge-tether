@@ -4,6 +4,68 @@ import Testing
 
 @MainActor
 struct AICommentOriginTests {
+    @Test func aLateOpinionSkippedByPositiveCachePrecedenceDoesNotEmitPersistence() async throws {
+        let directory = try folder(); defer { try? FileManager.default.removeItem(at: directory) }
+        var events = 0
+        let coordinator = AICommentOriginCoordinator(directory: directory,
+            assess: { _, notes, _, _, _ in
+                try AICommentAssessmentStore.persist(positive(notes), target: target, notes: notes, assistant: .codex, model: "cheap", in: directory)
+                return .init(notes: notes.map { .init(noteID: $0.id!, classification: .uncertain,
+                    confidence: .uncertain, evidence: "A late lightweight opinion") })
+            }, fetchCurrent: { _ in [note()] }, isCurrent: { _, _, _, _ in true })
+        coordinator.onPersisted = { _, _, _ in events += 1 }
+        coordinator.schedule(target: target, notes: [note()], assistant: .codex, model: "cheap")
+        let deadline = ContinuousClock.now + .seconds(3)
+        while coordinator.isChecking(work: work), ContinuousClock.now < deadline { try await Task.sleep(for: .milliseconds(1)) }
+        #expect(events == 0 && coordinator.failure(work: work) == nil)
+        #expect(AICommentAssessmentStore.isAI(note(), host: target.host, projectID: 7, iid: 13, in: directory))
+    }
+
+    @Test func aPersistenceFailureDoesNotEmitAStoredOriginEvent() async throws {
+        let directory = try folder(); defer { try? FileManager.default.removeItem(at: directory) }
+        try Data("Blocked record folder".utf8).write(to: directory.appending(path: target.host))
+        var calls = 0, events = 0
+        let coordinator = AICommentOriginCoordinator(directory: directory, purpose: .display,
+            assess: { _, notes, _, _, _ in calls += 1; return positive(notes) },
+            fetchCurrent: { _ in [note()] }, isCurrent: { _, _, _, _ in true }, retryWait: { _ in })
+        coordinator.onPersisted = { _, _, _ in events += 1 }
+        coordinator.schedule(target: target, notes: [note()], assistant: .codex, model: "cheap")
+        let deadline = ContinuousClock.now + .seconds(3)
+        while coordinator.isChecking(work: work), ContinuousClock.now < deadline { try await Task.sleep(for: .milliseconds(1)) }
+        #expect(!coordinator.isChecking(work: work) && coordinator.failure(work: work) != nil)
+        #expect(calls == 1 && events == 0)
+    }
+
+    @Test func originPersistenceNotificationFiresOnlyForSuccessfullyStoredNewResults() async throws {
+        let directory = try folder(); defer { try? FileManager.default.removeItem(at: directory) }
+        var failed = false, events: [[Int]] = []
+        let coordinator = AICommentOriginCoordinator(directory: directory, purpose: .display,
+            assess: { _, notes, _, _, _ in
+                if failed { throw AICommentOriginAssessor.AssessmentError.invalidEvidence }
+                return positive(notes)
+            }, fetchCurrent: { _ in [note(10), note(11)] }, isCurrent: { _, _, _, _ in true }, retryWait: { _ in })
+        coordinator.onPersisted = { _, notes, assessment in
+            events.append(notes.compactMap(\.id))
+            #expect(assessment.notes.map(\.noteID) == notes.compactMap(\.id))
+            #expect(AICommentAssessmentStore.result(for: notes[0], host: target.host, projectID: 7, iid: 13, in: directory)?.purpose == .display)
+        }
+        @MainActor func finish() async throws {
+            let deadline = ContinuousClock.now + .seconds(3)
+            while coordinator.isChecking(work: work), ContinuousClock.now < deadline { try await Task.sleep(for: .milliseconds(1)) }
+            try #require(!coordinator.isChecking(work: work))
+        }
+        coordinator.schedule(target: target, notes: [note(10)], assistant: .codex, model: "cheap")
+        try await finish()
+        #expect(events == [[10]])
+        coordinator.schedule(target: target, notes: [note(10)], assistant: .codex, model: "cheap")
+        try await finish()
+        #expect(events == [[10]])
+        failed = true
+        coordinator.schedule(target: target, notes: [note(11)], assistant: .codex, model: "cheap")
+        try await finish()
+        #expect(events == [[10]])
+    }
+
     @Test func displayBatchesRetainEarlierFailuresForTheExistingRetryBoundary() async throws {
         let directory = try folder(); defer { try? FileManager.default.removeItem(at: directory) }
         var calls: [Int] = [], fail = true

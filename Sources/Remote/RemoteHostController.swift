@@ -39,6 +39,10 @@ extension RemoteConnection: RemoteHostTransport {}
     private var phoneSupportsCommentReview = false
     private var phoneSupportsMergeActions = false
     private var phoneSupportsDetails = false
+    private var phoneSupportsOriginUpdates = false
+    private var originObserver: UUID?
+    private var originSubscription: RemoteDetailOriginSubscription?
+    @ObservationIgnored private var originUpdateTask: Task<Void, Never>?
     @ObservationIgnored private(set) var detailTask: Task<Void, Never>?
     private let detailReader: DetailReader
     private var activeDetailRequest: RemoteDetailRequest?
@@ -112,6 +116,8 @@ extension RemoteConnection: RemoteHostTransport {}
         } catch { failed = true }
     }
     func disable() {
+        if let originObserver { monitor.attention.displayAIOriginCoordinator?.removeOriginObserver(originObserver) }
+        originObserver = nil
         startupGeneration = UUID(); startupLoadTask?.cancel()
         connection?.stop(); connection = nil; pairing = nil; connected = false
         resetConnectionSession()
@@ -127,11 +133,18 @@ extension RemoteConnection: RemoteHostTransport {}
         phoneSupportsCommentReview = false
         phoneSupportsMergeActions = false
         phoneSupportsDetails = false
+        phoneSupportsOriginUpdates = false
+        clearOriginSubscription()
         detailTask?.cancel(); detailTask = nil; activeDetailRequest = nil
         lastDetailRead = .distantPast
     }
     private func start(_ pair: RemotePairing) {
         do {
+            if originObserver == nil, let coordinator = monitor.attention.displayAIOriginCoordinator {
+                originObserver = coordinator.observePersistedOrigins { [weak self] event in
+                    self?.receivePersistedOrigins(event)
+                }
+            }
             resetConnectionSession()
             let connection = try makeConnection(pair)
             connection.onPairingEstablished = { [weak self, weak connection] established in
@@ -175,12 +188,14 @@ extension RemoteConnection: RemoteHostTransport {}
             phoneSupportsCommentReview = message.capabilities?.contains(RemoteMessage.commentReviewCapability) == true
             phoneSupportsMergeActions = message.capabilities?.contains(RemoteMessage.mergeActionsCapability) == true
             phoneSupportsDetails = message.capabilities?.contains(RemoteMessage.detailsCapability) == true
+            phoneSupportsOriginUpdates = phoneSupportsDetails && message.capabilities?.contains(RemoteMessage.detailOriginsCapability) == true
+            if !phoneSupportsOriginUpdates { clearOriginSubscription() }
             let fresh = await refreshSource(force: false, deadline: .now + .seconds(35))
             guard connection === active else { return }
             var board = snapshot()
             if !fresh { board.partial = true }
             do { try await active.send(.init(type: .snapshot, challenge: challenge, board: board,
-                capabilities: [RemoteMessage.detailsCapability])) }
+                capabilities: [RemoteMessage.detailsCapability, RemoteMessage.detailOriginsCapability])) }
             catch { failed = true; try? await active.send(.init(type: .unavailable)) }
         case .receipt:
             guard let command = message.command, let challenge = message.challenge, let pairing else { return }
@@ -190,6 +205,7 @@ extension RemoteConnection: RemoteHostTransport {}
             guard phoneSupportsDetails, let request = message.detailRequest else { return }
             beginDetails(request, connection: active)
         case .cancelDetails:
+            if message.detailRequest == originSubscription?.request { clearOriginSubscription() }
             if message.detailRequest == activeDetailRequest {
                 detailTask?.cancel(); detailTask = nil; activeDetailRequest = nil
             }
@@ -230,12 +246,16 @@ extension RemoteConnection: RemoteHostTransport {}
             Task { try? await active.send(.init(type: .details, detailResponse: .init(request: request, status: .changed))) }
             return
         }
+        clearOriginSubscription()
         guard now().timeIntervalSince(lastDetailRead) >= 1 else {
             Task { try? await active.send(.init(type: .details, detailResponse: .init(request: request, status: .unavailable))) }
             return
         }
         detailTask?.cancel(); activeDetailRequest = request; lastDetailRead = now()
         let revision = monitor.glab.accountRevision
+        let subscription = phoneSupportsOriginUpdates
+            ? RemoteDetailOriginSubscription(request: request, source: source, accountRevision: revision) : nil
+        originSubscription = subscription
         detailTask = Task { [weak self, weak active] in
             guard let self, let active else { return }
             defer {
@@ -261,9 +281,53 @@ extension RemoteConnection: RemoteHostTransport {}
                       self.pairing?.sessionID == pairingSession, monitor.glab.accountRevision == revision,
                       activeDetailRequest == request, request.matches(snapshot()) else { return }
                 if checked.status == .current, let details = response.details {
+                    if let subscription, originSubscription === subscription, let delivered = checked.details {
+                        subscription.delivered(full: details, rendered: delivered)
+                        flushOriginUpdates()
+                    }
                     RemoteMRDetailSupplement.scheduleDisplayOrigins(in: details, request: source, monitor: monitor, accountRevision: revision)
                 }
             } catch {}
+        }
+    }
+
+    private func clearOriginSubscription() {
+        originUpdateTask?.cancel(); originUpdateTask = nil; originSubscription = nil
+    }
+
+    func receivePersistedOrigins(_ event: AICommentDisplayCoordinator.PersistedOrigins) {
+        guard let subscription = originSubscription, subscription.record(event) else { return }
+        flushOriginUpdates()
+    }
+
+    private func flushOriginUpdates() {
+        guard originUpdateTask == nil, phoneSupportsOriginUpdates, phoneSupportsDetails, connected,
+              let active = connection, let pairingSession = pairing?.sessionID,
+              let subscription = originSubscription, subscription.isDelivered else { return }
+        guard subscription.accountRevision == monitor.glab.accountRevision,
+              subscription.request.matches(snapshot()), originSubscription === subscription else {
+            clearOriginSubscription(); return
+        }
+        guard let update = subscription.nextUpdate() else { return }
+        originUpdateTask = Task { [weak self, weak active] in
+            guard let self, let active else { return }
+            defer {
+                if originSubscription === subscription { originUpdateTask = nil; flushOriginUpdates() }
+            }
+            do {
+                guard !Task.isCancelled, connected, phoneSupportsOriginUpdates, phoneSupportsDetails,
+                      connection === active, pairing?.sessionID == pairingSession,
+                      originSubscription === subscription, subscription.accountRevision == monitor.glab.accountRevision,
+                      subscription.request.matches(snapshot()), originSubscription === subscription else { return }
+                try await active.send(.init(type: .details, detailOrigins: update))
+                guard !Task.isCancelled, connected, phoneSupportsOriginUpdates, phoneSupportsDetails,
+                      connection === active, pairing?.sessionID == pairingSession,
+                      originSubscription === subscription, subscription.accountRevision == monitor.glab.accountRevision,
+                      subscription.request.matches(snapshot()), originSubscription === subscription else { return }
+                subscription.recordSent(update)
+            } catch {
+                if originSubscription === subscription { clearOriginSubscription() }
+            }
         }
     }
     private func refreshSource(force: Bool, deadline: ContinuousClock.Instant) async -> Bool {
@@ -282,6 +346,7 @@ extension RemoteConnection: RemoteHostTransport {}
     private func snapshot() -> RemoteBoard {
         let currentAccount = "\(monitor.glab.currentUsername ?? "")@\(monitor.glab.resolvedHost ?? "")"
         if account != currentAccount || accountRevision != monitor.glab.accountRevision {
+            clearOriginSubscription()
             account = currentAccount; accountRevision = monitor.glab.accountRevision; hostSession = UUID()
             resolutionPreviews.removeAll()
         }

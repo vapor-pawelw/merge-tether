@@ -3,6 +3,41 @@ import Testing
 import MergeTetherRemote
 
 @MainActor @Suite struct RemotePhoneModelTests {
+    @Test(arguments: [false, true])
+    func originOnlyMessagesUpdateAnOpenConversationAutomaticallyAndCloseCancelsTheCompletedSubscription(_ supported: Bool) async throws {
+        let f = try PhoneFixture(), model = f.model
+        model.connect(); await model.refresh()
+        var board = f.board; board.lanes[0].cards[0].id = "mr:1:2"
+        await f.reply(board: board, capabilities: [RemoteMessage.detailsCapability]
+            + (supported ? [RemoteMessage.detailOriginsCapability] : []))
+        let transport = f.transports[0], card = board.cards[0]
+        await model.requestDetails(card: card)
+        let request = try #require(transport.sent.last?.detailRequest)
+        let note = RemoteDetailNote(id: "1", body: "Root body", authorID: 7)
+        let details = RemoteMRDetails(checkedAt: f.date, threads: [.init(id: "thread", state: .open, notes: [note])])
+        await transport.onMessage?(.init(type: .details, detailResponse: .init(request: request, status: .current, details: details)))
+        let identity = try #require(note.originIdentity(in: "thread"))
+        let update = RemoteDetailOrigins(request: request,
+            changes: [.init(threadID: "thread", noteID: "1", identity: identity, origin: .ai)])
+        await transport.onMessage?(.init(type: .details, detailOrigins: update))
+        #expect(model.detailState.response?.details?.threads?.first?.notes.first?.origin == (supported ? .ai : nil))
+        #expect(transport.sent.filter { $0.type == .detailRequest }.count == 1)
+        #expect(transport.sent.allSatisfy { $0.type != .command })
+        model.cancelDetails()
+        let deadline = ContinuousClock.now + .seconds(3)
+        while !transport.sent.contains(where: { $0.type == .cancelDetails }), ContinuousClock.now < deadline {
+            try await Task.sleep(for: .milliseconds(1))
+        }
+        #expect(transport.sent.last?.detailRequest == request && model.detailState.openRequest == nil)
+        let late = RemoteDetailOrigins(request: request,
+            changes: [.init(threadID: "thread", noteID: "1", identity: identity, origin: .human, revision: 2)])
+        await transport.onMessage?(.init(type: .details, detailOrigins: late))
+        #expect(model.detailState.response?.details?.threads?.first?.notes.first?.origin == (supported ? .ai : nil))
+        await model.requestDetails(card: card)
+        let reopened = try #require(transport.sent.last?.detailRequest)
+        #expect(reopened != request && model.detailState.openRequest == reopened)
+    }
+
     @Test(arguments: [nil, "http://insecure.example.org"] as [String?])
     func unavailableRelayNeverReadsTrustOrRecoveryAndNeverConnects(_ origin: String?) throws {
         let model = RemotePhoneModel(relayConfiguration: .init(rawOrigin: origin),

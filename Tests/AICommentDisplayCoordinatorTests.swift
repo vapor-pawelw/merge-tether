@@ -4,6 +4,55 @@ import MergeTetherRemote
 @testable import GitLabTodos
 
 @MainActor struct AICommentDisplayCoordinatorTests {
+    @Test func independentPersistedOriginObserversCoexistAndCanBeRemoved() async throws {
+        let f = try Fixture(); defer { f.close() }
+        f.notes = [note(1)]
+        let coordinator = f.coordinator()
+        var first = 0, second = 0
+        let firstID = coordinator.observePersistedOrigins { _ in first += 1 }
+        let secondID = coordinator.observePersistedOrigins { _ in second += 1 }
+        defer { coordinator.removeOriginObserver(secondID) }
+        await coordinator.schedule(request: f.request, notes: f.notes)
+        try await settle(coordinator, f)
+        let deadline = ContinuousClock.now + .seconds(3)
+        while second < 1, ContinuousClock.now < deadline { try await Task.sleep(for: .milliseconds(1)) }
+        #expect(first == 1 && second == 1)
+        coordinator.removeOriginObserver(firstID)
+        f.notes += [note(2)]
+        await coordinator.schedule(request: f.request, notes: f.notes)
+        try await settle(coordinator, f)
+        let next = ContinuousClock.now + .seconds(3)
+        while second < 2, ContinuousClock.now < next { try await Task.sleep(for: .milliseconds(1)) }
+        #expect(first == 1 && second == 2)
+    }
+
+    @Test func freshDisplayOriginNotificationAndReopenedDetailsIgnoreAStaleNonAIActionClassification() async throws {
+        let f = try Fixture(); defer { f.close() }
+        f.notes = [note(1)]
+        let source = f.notes[0]
+        let old = AICommentAssessment(version: 2, host: "gitlab.example.test", projectID: 7, iid: 13, noteID: 1,
+            bodySHA256: AICommentAssessmentStore.digest(source.body!), confidence: "high", evidence: "Older criteria", classification: "manual_likely",
+            provider: "codex", model: "cheap", criteriaVersion: AICommentOriginAssessor.criteriaVersion - 1, username: "me", authorID: 7)
+        let path = AICommentAssessmentStore.fileURL(host: "gitlab.example.test", projectID: 7, iid: 13, noteID: 1, in: f.actionDirectory)
+        try FileManager.default.createDirectory(at: path.deletingLastPathComponent(), withIntermediateDirectories: true)
+        try JSONEncoder().encode(old).write(to: path)
+        let coordinator = f.coordinator()
+        var events: [AICommentDisplayCoordinator.PersistedOrigins] = []
+        let observer = coordinator.observePersistedOrigins { events.append($0) }
+        defer { coordinator.removeOriginObserver(observer) }
+        await coordinator.schedule(request: f.request, notes: f.notes)
+        try await settle(coordinator, f)
+        let deadline = ContinuousClock.now + .seconds(3)
+        while events.isEmpty, ContinuousClock.now < deadline { try await Task.sleep(for: .milliseconds(1)) }
+        #expect(events.first?.origins.first?.classification == .aiAssisted)
+        let store = MRDiscussionStore(load: { _ in [.init(id: "thread", notes: f.notes)] },
+            assessmentDirectory: f.actionDirectory, displayAssessmentDirectory: f.displayDirectory)
+        await store.refresh(target: .init(host: "gitlab.example.test", username: "me", projectID: 7, iid: 13, url: f.request.webURL), glab: f.glab)
+        #expect(store.origins[1] == .assessed(evidence: "Synthetic source evidence"))
+        #expect(!AICommentAssessmentStore.isAI(source, host: "gitlab.example.test", projectID: 7, iid: 13, in: f.actionDirectory))
+        #expect(!AICommentAssessmentStore.isAI(source, host: "gitlab.example.test", projectID: 7, iid: 13, in: f.displayDirectory))
+    }
+
     private actor CacheGate {
         private var continuation: CheckedContinuation<Void, Never>?
         private let holdCall: Int

@@ -42,6 +42,7 @@ final class AICommentOriginCoordinator {
     }
     @ObservationIgnored private var validated: [String: ValidatedAssessment] = [:]
     var onChange: (() -> Void)?
+    var onPersisted: (@MainActor (MRAutomationScope.Target, [Note], AICommentOriginAssessment) -> Void)?
 
     init(directory: URL = AICommentAssessmentStore.directory, purpose: AICommentAssessment.Purpose? = nil,
          assess: @escaping Assess = { try await AICommentOriginAssessor.verify(target: $0, notes: $1, assistant: $2, model: $3, thinking: $4) },
@@ -144,7 +145,7 @@ final class AICommentOriginCoordinator {
                     updateChecking(); startNext(); onChange?()
                 }
                 do {
-                    try await ReadOnlyAssessmentRetry.run(isCurrent: {
+                    let persisted = try await ReadOnlyAssessmentRetry.run(isCurrent: {
                         self.isCurrent(target, request.assistant, request.model, request.thinking)
                     }, wait: retryWait) {
                         for note in request.notes where self.validated[self.key(request, note)] == nil {
@@ -183,13 +184,23 @@ final class AICommentOriginCoordinator {
                             let matches = live.filter { $0.id == original.id }
                             return matches.count == 1 && matches[0].body == original.body && matches[0].author?.id == original.author?.id
                         }) else { throw CancellationError() }
-                        try AICommentAssessmentStore.persist(result, target: target, notes: request.notes,
+                        let written = try AICommentAssessmentStore.persist(result, target: target, notes: request.notes,
                             assistant: request.assistant, model: request.model, thinking: request.thinking, purpose: self.purpose, in: self.directory)
                         for note in request.notes {
                             // The ordinary record is authoritative now; leftover pending data cannot qualify on its own.
                             try? AICommentAssessmentStore.removePendingVerdict(for: note, target: target,
                                 assistant: request.assistant, model: request.model, thinking: request.thinking, purpose: self.purpose, in: self.directory)
                         }
+                        return written
+                    }
+                    let stored = persisted.compactMap { record -> AICommentOriginAssessment.Note? in
+                        guard let classification = AICommentOriginAssessment.Classification(rawValue: record.classification),
+                              let confidence = AICommentOriginAssessment.Confidence(rawValue: record.confidence) else { return nil }
+                        return .init(noteID: record.noteID, classification: classification, confidence: confidence, evidence: record.evidence)
+                    }
+                    if !stored.isEmpty, stored.count == persisted.count {
+                        let ids = Set(stored.map(\.noteID))
+                        onPersisted?(target, request.notes.filter { $0.id.map(ids.contains) == true }, .init(notes: stored))
                     }
                     for note in request.notes {
                         failures.removeValue(forKey: key(request, note))

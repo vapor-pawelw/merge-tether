@@ -179,6 +179,7 @@ public struct RemoteMessage: Codable, Sendable {
     public static let mergeActionsCapability = "merge-actions-v1"
     public static let commentReviewCapability = "comment-review-v1"
     public static let detailsCapability = "mr-details-v1"
+    public static let detailOriginsCapability = "detail-origins-v1"
     public enum Kind: String, Codable, Sendable { case hello, snapshot, command, accepted, result, receipt, receiptResult = "receipt-result", unavailable, hostReady = "host-ready", detailRequest = "detail-request", details, cancelDetails = "cancel-details" }
     public var type: Kind
     public var challenge: UUID?
@@ -188,12 +189,15 @@ public struct RemoteMessage: Codable, Sendable {
     public var capabilities: [String]?
     public var detailRequest: RemoteDetailRequest?
     public var detailResponse: RemoteDetailResponse?
+    public var detailOrigins: RemoteDetailOrigins?
     public init(type: Kind, challenge: UUID? = nil, board: RemoteBoard? = nil,
                 command: RemoteCommand? = nil, result: RemoteCommandResult? = nil, capabilities: [String]? = nil,
-                detailRequest: RemoteDetailRequest? = nil, detailResponse: RemoteDetailResponse? = nil) {
+                detailRequest: RemoteDetailRequest? = nil, detailResponse: RemoteDetailResponse? = nil,
+                detailOrigins: RemoteDetailOrigins? = nil) {
         self.type = type; self.challenge = challenge; self.board = board; self.command = command; self.result = result
         self.capabilities = capabilities
         self.detailRequest = detailRequest; self.detailResponse = detailResponse
+        self.detailOrigins = detailOrigins
     }
 }
 

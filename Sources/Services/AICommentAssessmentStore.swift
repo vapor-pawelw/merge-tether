@@ -174,7 +174,8 @@ enum AICommentAssessmentStore {
         let currentPath = fileURL(host: host, projectID: projectID, iid: iid, noteID: id, in: directory)
         let currentExists = FileManager.default.fileExists(atPath: currentPath.path)
         if currentExists, let record = result(for: note, host: host, projectID: projectID, iid: iid, in: directory),
-           record.username == nil || record.username == username {
+           record.username == nil || record.username == username,
+           record.qualifiesAsAI || record.criteriaVersion == AICommentOriginAssessor.criteriaVersion {
             return record
         }
         let display = displayDirectory ?? (directory.standardizedFileURL == Self.directory.standardizedFileURL ? Self.displayDirectory : nil)
@@ -236,11 +237,12 @@ enum AICommentAssessmentStore {
         return record
     }
 
-    nonisolated static func persist(_ assessment: AICommentOriginAssessment, target: MRAutomationScope.Target,
+    @discardableResult nonisolated static func persist(_ assessment: AICommentOriginAssessment, target: MRAutomationScope.Target,
         notes: [GitLabMergeRequestDiscussion.Note], assistant: AutomationAssistant, model: String, thinking: VerificationThinking = .high,
-        purpose: AICommentAssessment.Purpose? = nil, in directory: URL) throws {
+        purpose: AICommentAssessment.Purpose? = nil, in directory: URL) throws -> [AICommentAssessment] {
         try AICommentOriginAssessor.validate(assessment, noteIDs: notes.compactMap(\.id))
         guard let iid = target.iid else { throw AICommentOriginAssessor.AssessmentError.invalidEvidence }
+        var written: [AICommentAssessment] = []
         for result in assessment.notes {
             guard let note = notes.first(where: { $0.id == result.noteID }), let body = note.body else { throw AICommentOriginAssessor.AssessmentError.invalidEvidence }
             // A worker can save a current positive while the lightweight pass is still running.
@@ -255,7 +257,9 @@ enum AICommentAssessmentStore {
             try FileManager.default.createDirectory(at: path.deletingLastPathComponent(), withIntermediateDirectories: true, attributes: [.posixPermissions: 0o700])
             try JSONEncoder().encode(record).write(to: path, options: .atomic)
             try FileManager.default.setAttributes([.posixPermissions: 0o600], ofItemAtPath: path.path)
+            written.append(record)
         }
+        return written
     }
 
     nonisolated static func safeForAutomaticPublication(_ draft: GitLabDraftNote) -> Bool {

@@ -72,7 +72,7 @@ public struct RemoteDetailNote: Codable, Equatable, Identifiable, Sendable {
     public var location: String?
     public let createdAt: Date?
     public let url: URL?
-    public let origin: Origin?
+    public var origin: Origin?
     public let authorID: Int?
     public init(id: String, author: String? = nil, username: String? = nil, body: String, location: String? = nil,
                 createdAt: Date? = nil, url: URL? = nil, origin: Origin? = nil, authorID: Int? = nil) {
@@ -272,15 +272,18 @@ public struct RemoteDetailResponse: Codable, Equatable, Sendable {
 
 @MainActor @Observable public final class RemoteDetailState {
     public private(set) var pending: RemoteDetailRequest?
+    public private(set) var openRequest: RemoteDetailRequest?
     public private(set) var response: RemoteDetailResponse?
     public private(set) var failure: RemoteDetailResponse.Status?
     private var deadline = Date.distantPast
+    private var originRevisions: [String: UInt64] = [:]
     public init() {}
     public func begin(card: RemoteCard, board: RemoteBoard, now: Date = Date(), force: Bool = false) -> RemoteDetailRequest? {
         guard board.cards.contains(card), card.id.hasPrefix("mr:"),
               force || pending == nil || !isLoading(now: now),
               let request = try? RemoteDetailRequest(card: card, board: board) else { return nil }
-        pending = request; deadline = now.addingTimeInterval(45); failure = nil
+        pending = request; openRequest = request; deadline = now.addingTimeInterval(45); failure = nil
+        originRevisions = [:]
         return request
     }
     public func receive(_ value: RemoteDetailResponse, board: RemoteBoard) {
@@ -288,15 +291,43 @@ public struct RemoteDetailResponse: Codable, Equatable, Sendable {
         pending = nil
         if value.status == .current, value.details != nil { response = value; failure = nil }
         else {
+            openRequest = nil
             failure = value.status
             if value.status == .changed { response = nil }
         }
     }
     public func update(board: RemoteBoard) {
+        if let openRequest, !openRequest.matches(board) { self.openRequest = nil }
         if let response, !response.request.matches(board) { self.response = nil }
         if let pending, !pending.matches(board) { self.pending = nil; failure = .changed }
     }
-    public func disconnect() { pending = nil }
+    public func disconnect() { pending = nil; openRequest = nil; originRevisions = [:] }
+
+    @discardableResult public func receiveOrigins(_ update: RemoteDetailOrigins, board: RemoteBoard) -> Bool {
+        guard pending == nil, update.request == openRequest, update.request.matches(board),
+              var response, response.request == update.request, response.status == .current,
+              var details = response.details, let threads = details.threads,
+              !update.changes.isEmpty, update.changes.count <= 100,
+              update.changes.allSatisfy({ $0.revision > 0 }),
+              Set(update.changes.map(\.identity)).count == update.changes.count else { return false }
+        var edits: [(thread: Int, note: Int, change: RemoteDetailOriginChange)] = []
+        for change in update.changes {
+            let matchingThreads = threads.indices.filter { threads[$0].id == change.threadID }
+            guard matchingThreads.count == 1, let thread = matchingThreads.first else { return false }
+            let matchingNotes = threads[thread].notes.indices.filter { threads[thread].notes[$0].id == change.noteID }
+            guard matchingNotes.count == 1, let note = matchingNotes.first,
+                  threads[thread].notes[note].originIdentity(in: change.threadID) == change.identity else { return false }
+            if change.revision > originRevisions[change.identity, default: 0] { edits.append((thread, note, change)) }
+        }
+        guard !edits.isEmpty else { return false }
+        for edit in edits {
+            details.threads?[edit.thread].notes[edit.note].origin = edit.change.origin
+            originRevisions[edit.change.identity] = edit.change.revision
+        }
+        response.details = details
+        self.response = response
+        return true
+    }
     public func isLoading(now: Date = Date()) -> Bool { pending != nil && now < deadline }
     public func hasTimedOut(now: Date = Date()) -> Bool { pending != nil && now >= deadline }
     public func details(for card: RemoteCard, board: RemoteBoard) -> RemoteMRDetails? {

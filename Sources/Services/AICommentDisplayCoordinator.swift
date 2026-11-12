@@ -3,6 +3,20 @@ import Observation
 
 /// Evaluates viewed conversation messages without producing action-authorizing origin evidence.
 @MainActor @Observable final class AICommentDisplayCoordinator {
+    struct PersistedOrigin: Equatable, Sendable {
+        let noteID: Int
+        let authorID: Int
+        let bodySHA256: String
+        let classification: AICommentOriginAssessment.Classification
+        let confidence: AICommentOriginAssessment.Confidence
+        let revision: UInt64
+    }
+    struct PersistedOrigins: Sendable {
+        let target: MRAutomationScope.Target
+        let request: GitLabMergeRequest
+        let accountRevision: UInt64
+        let origins: [PersistedOrigin]
+    }
     typealias CacheRead = @Sendable ([GitLabMergeRequestDiscussion.Note], MRAutomationScope.Target, URL, URL) async -> [GitLabMergeRequestDiscussion.Note]
 
     private struct Queue {
@@ -28,6 +42,47 @@ import Observation
     @ObservationIgnored private var scans: [MRAutomationScope.Target: (id: UUID, task: Task<Void, Never>)] = [:]
     private(set) var revision: UInt64 = 0
     @ObservationIgnored private lazy var coordinator = makeCoordinator()
+    @ObservationIgnored private var originObservers: [UUID: @MainActor (PersistedOrigins) -> Void] = [:]
+    private struct OriginKey: Hashable { let target: MRAutomationScope.Target; let noteID: Int }
+    private var originVersions: [OriginKey: UInt64] = [:]
+    private var originRevision: UInt64 = 0
+
+    func observePersistedOrigins(_ observer: @escaping @MainActor (PersistedOrigins) -> Void) -> UUID {
+        let id = UUID(); originObservers[id] = observer; return id
+    }
+
+    func removeOriginObserver(_ id: UUID) { originObservers.removeValue(forKey: id) }
+
+    func notifyPersistedOrigins(target: MRAutomationScope.Target, request: GitLabMergeRequest, accountRevision: UInt64,
+                                notes: [GitLabMergeRequestDiscussion.Note], assessment: AICommentOriginAssessment) {
+        guard permitsSourceRead(request: request, accountRevision: accountRevision),
+              glab.resolvedHost == target.host, glab.currentUsername == target.username,
+              request.projectID == target.projectID, request.iid == target.iid,
+              (try? AICommentOriginAssessor.validate(assessment, noteIDs: notes.compactMap(\.id))) != nil else { return }
+        originRevision &+= 1
+        let serial = originRevision, actionDirectory = assessmentDirectory, displayDirectory = self.displayDirectory
+        for note in notes { if let id = note.id { originVersions[.init(target: target, noteID: id)] = serial } }
+        Task { [weak self] in
+            let origins = await Task.detached {
+                notes.compactMap { note -> PersistedOrigin? in
+                    guard let id = note.id, let authorID = note.author?.id, authorID > 0, let body = note.body,
+                          let iid = target.iid, let record = AICommentAssessmentStore.displayResult(for: note, host: target.host,
+                            projectID: target.projectID, iid: iid, username: target.username, in: actionDirectory,
+                            displayDirectory: displayDirectory),
+                          let classification = AICommentOriginAssessment.Classification(rawValue: record.classification),
+                          let confidence = AICommentOriginAssessment.Confidence(rawValue: record.confidence) else { return nil }
+                    return .init(noteID: id, authorID: authorID, bodySHA256: AICommentAssessmentStore.digest(body),
+                        classification: classification, confidence: confidence, revision: serial)
+                }
+            }.value
+            guard let self, !Task.isCancelled, permitsSourceRead(request: request, accountRevision: accountRevision),
+                  glab.resolvedHost == target.host, glab.currentUsername == target.username else { return }
+            let fresh = origins.filter { originVersions[.init(target: target, noteID: $0.noteID)] == $0.revision }
+            guard !fresh.isEmpty else { return }
+            let event = PersistedOrigins(target: target, request: request, accountRevision: accountRevision, origins: fresh)
+            for observer in Array(originObservers.values) { observer(event) }
+        }
+    }
 
     init(glab: GlabService, settings: SettingsManager,
          assessmentDirectory: URL = AICommentAssessmentStore.directory, displayDirectory: URL? = nil,
@@ -84,9 +139,10 @@ import Observation
 
     func cancel(outsideScope scope: MRAutomationScope? = nil) {
         coordinator.cancel(outsideScope: scope)
-        for target in Set(contexts.keys).union(latest.keys).union(queued.keys) where scope.map({ !$0.resolve(target).active }) ?? true {
+        for target in Set(contexts.keys).union(latest.keys).union(queued.keys).union(originVersions.keys.map(\.target)) where scope.map({ !$0.resolve(target).active }) ?? true {
             contexts.removeValue(forKey: target); queued.removeValue(forKey: target); latest.removeValue(forKey: target)
             scans.removeValue(forKey: target)?.task.cancel()
+            for key in Array(originVersions.keys) where key.target == target { originVersions.removeValue(forKey: key) }
         }
     }
 
@@ -123,6 +179,11 @@ import Observation
             guard let self else { return }
             revision &+= 1
             drain()
+        }
+        worker.onPersisted = { [weak self] target, notes, assessment in
+            guard let self, let context = contexts[target] else { return }
+            notifyPersistedOrigins(target: target, request: context.request, accountRevision: context.revision,
+                                   notes: notes, assessment: assessment)
         }
         return worker
     }
