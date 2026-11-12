@@ -183,6 +183,7 @@ struct BoardMRProposalCard: View {
         Link(destination: proposal.url) {
             Label { Text(.CommandCenter.commandCenterOpenGitLab) } icon: { Image(systemName: "arrow.up.right.square") }
         }
+        CopyMergeRequestLinkButton(url: proposal.url)
         GitLabRefreshButton(monitor: monitor,
             itemID: proposal.target.iid.map { .init(projectID: proposal.target.projectID, iid: $0) }) {
             await authorLoader.load(proposal, force: true)

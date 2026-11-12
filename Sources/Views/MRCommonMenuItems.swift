@@ -1,3 +1,4 @@
+import AppKit
 import SwiftUI
 
 struct GitLabRefreshButton: View {
@@ -25,6 +26,19 @@ struct GitLabRefreshButton: View {
     }
 }
 
+struct CopyMergeRequestLinkButton: View {
+    let url: URL
+
+    var body: some View {
+        Button {
+            NSPasteboard.general.clearContents()
+            NSPasteboard.general.setString(url.absoluteString, forType: .string)
+        } label: {
+            Label { Text(.CommandCenter.commandCenterCopyLink) } icon: { Image(systemName: "doc.on.doc") }
+        }
+    }
+}
+
 /// One set of MR actions for the board card and its Details header.
 struct MRCommonMenuItems: View {
     let item: MergeRequestAttentionMonitor.Item
@@ -37,6 +51,7 @@ struct MRCommonMenuItems: View {
         Link(destination: item.url) {
             Label { Text(.CommandCenter.commandCenterOpenGitLab) } icon: { Image(systemName: "arrow.up.right.square") }
         }
+        CopyMergeRequestLinkButton(url: item.url)
         GitLabRefreshButton(monitor: monitor, itemID: item.id)
         if isFinished {
             Button { monitor.acknowledgeFinishedMergeRequest(item) } label: {

@@ -472,6 +472,7 @@ struct BoardTodoRow: View {
         }
         .disabled(monitor.isAssessingNotice(todo))
         if todo.targetType == .mergeRequest {
+            CopyMergeRequestLinkButton(url: todo.targetURL)
             AssistantContextMenu(mergeRequestURL: todo.targetURL, title: todo.displayTitle,
                 settings: monitor.settings)
         }

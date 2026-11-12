@@ -87,6 +87,7 @@ struct BoardCompactJobCard: View {
             Link(destination: url) {
                 Label { Text(.CommandCenter.commandCenterOpenGitLab) } icon: { Image(systemName: "arrow.up.right.square") }
             }
+            CopyMergeRequestLinkButton(url: url)
             AssistantContextMenu(mergeRequestURL: url, title: handoff.title,
                 settings: monitor.settings)
         }

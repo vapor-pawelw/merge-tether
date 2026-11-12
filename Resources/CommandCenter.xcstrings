@@ -1,6 +1,17 @@
 {
   "sourceLanguage": "en",
   "strings": {
+    "commandCenter.copyLink": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Copy link"
+          }
+        }
+      }
+    },
     "commandCenter.title": {
       "extractionState": "manual",
       "localizations": {
