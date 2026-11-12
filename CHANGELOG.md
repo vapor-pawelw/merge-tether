@@ -6,6 +6,7 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 
 ## Unreleased
 
+- Authenticate resumable follow-up assessments before reusing them as semantic evidence for signed publication proofs.
 - Update message and thread AI-origin labels in open iOS Details after assessments complete, without reloading discussions or renewing action permissions.
 - Keep feedback recovery available alongside other merge blockers and explain which open threads the resolution action checks.
 - Clarify that verified review-summary coverage exempts a repeated report from a duplicate reply, while independent feedback still requires its own answer.

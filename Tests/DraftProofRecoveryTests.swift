@@ -1,3 +1,4 @@
+import CryptoKit
 import Foundation
 import Testing
 @testable import GitLabTodos
@@ -563,6 +564,166 @@ struct DraftProofRecoveryTests {
         #expect(f.assessments == 1 && f.publication().isEmpty)
         #expect(restarted.rejectedDrafts(work: f.work, drafts: f.snapshot.drafts).map(\.state) == [.uncertain])
         #expect(!restarted.isReadOnlyFailure(work: f.work))
+    }
+
+    @Test func restartResumesAnAuthenticatedPositiveAssessmentWithoutAnotherProviderCall() async throws {
+        let f = try Fixture()
+        defer { f.clean() }
+        f.fetchFailuresAfterAssessment = 100
+        let interrupted = f.coordinator()
+        interrupted.schedule(snapshot: f.snapshot, origin: f.proof, configuration: f.settings.automation)
+        try await f.settle(interrupted)
+        #expect(f.assessments == 1 && interrupted.isReadOnlyFailure(work: f.work))
+        #expect(f.publication().isEmpty)
+
+        f.fetchFailuresAfterAssessment = 0
+        f.verifyFails = true
+        f.clock = f.clock.addingTimeInterval(ReadOnlyAssessmentRetry.cooldown + 1)
+        let restarted = f.coordinator()
+        restarted.schedule(snapshot: f.snapshot, origin: f.proof, configuration: f.settings.automation)
+        try await f.settle(restarted)
+        #expect(f.assessments == 1 && f.publication().count == 1)
+    }
+
+    @Test func maximumDraftScopeWithLongLegalReasonsFitsTheJournalAndResumesWithoutAnotherProviderCall() async throws {
+        let f = try Fixture()
+        defer { f.clean() }
+        let drafts = (12..<112).map {
+            GitLabDraftNote(id: $0, authorID: 3, note: "Fixed claim \($0)", discussionID: "thread", position: nil)
+        }
+        let old = f.proof
+        f.proof = .init(version: old.version, sealed: old.sealed, verificationID: old.verificationID, runID: old.runID,
+            host: old.host, projectID: old.projectID, iid: old.iid, username: old.username, userID: old.userID,
+            headSHA: old.headSHA, sourceProjectID: old.sourceProjectID, sourceBranch: old.sourceBranch, files: old.files,
+            drafts: drafts.map { .init(id: $0.id!, bodySHA256: AICommentAssessmentStore.digest($0.note!)) })
+        f.snapshot.drafts = drafts
+        f.live = f.snapshot
+        try f.persist(f.proof)
+        f.claimsOverride = drafts.map { .init(draftID: $0.id!, state: .valid, reason: String(repeating: "x", count: 1000)) }
+        f.fetchFailuresAfterAssessment = 100
+        let interrupted = f.coordinator()
+        interrupted.schedule(snapshot: f.snapshot, origin: f.proof, configuration: f.settings.automation)
+        try await f.settle(interrupted)
+        #expect(f.assessments == 1 && interrupted.isReadOnlyFailure(work: f.work))
+        #expect(f.publication().isEmpty)
+        let pendingData = try Data(contentsOf: f.pendingAttemptPath())
+        #expect(pendingData.count < 250_000)
+        #expect(!f.settings.persistenceDegraded.contains("draftProofRecoveryAttempts"))
+
+        f.fetchFailuresAfterAssessment = 0
+        f.verifyFails = true
+        f.clock = f.clock.addingTimeInterval(ReadOnlyAssessmentRetry.cooldown + 1)
+        let restarted = f.coordinator()
+        restarted.schedule(snapshot: f.snapshot, origin: f.proof, configuration: f.settings.automation)
+        try await f.settle(restarted)
+        #expect(f.assessments == 1 && f.publication().first?.drafts.count == 100)
+        #expect(!f.settings.persistenceDegraded.contains("draftProofRecoveryAttempts"))
+    }
+
+    @Test(arguments: ["unsigned", "edited", "signature", "wrongDomain"])
+    func anUnauthenticatedPendingPositiveRequiresFreshVerification(tampering: String) async throws {
+        let f = try Fixture()
+        defer { f.clean() }
+        f.fetchFailuresAfterAssessment = 100
+        let interrupted = f.coordinator()
+        interrupted.schedule(snapshot: f.snapshot, origin: f.proof, configuration: f.settings.automation)
+        try await f.settle(interrupted)
+        #expect(f.assessments == 1 && f.publication().isEmpty)
+        try f.editPendingAssessment { pending, _ in
+            switch tampering {
+            case "unsigned": pending.removeValue(forKey: "authentication")
+            case "edited":
+                var assessment = try #require(pending["assessment"] as? [String: Any])
+                var drafts = try #require(assessment["drafts"] as? [[String: Any]])
+                drafts[0]["reason"] = "Rewritten positive claim"
+                assessment["drafts"] = drafts
+                pending["assessment"] = assessment
+            default:
+                let base64 = try #require(pending["authentication"] as? String)
+                let sealed = try #require(Data(base64Encoded: base64))
+                if tampering == "signature" {
+                    let object = try JSONSerialization.jsonObject(with: sealed)
+                    var envelope = try #require(object as? [String: Any])
+                    envelope["signature"] = Data(repeating: 0, count: 32).base64EncodedString()
+                    pending["authentication"] = try JSONSerialization.data(withJSONObject: envelope).base64EncodedString()
+                } else {
+                    let payload = try #require(AssistantJobJournal.authenticatedEvidence(sealed,
+                        context: "draft-proof-recovery-pending-assessment-v1"))
+                    pending["authentication"] = try AssistantJobJournal.sealEvidence(payload,
+                        context: "follow-up-proof-recovery").base64EncodedString()
+                }
+            }
+        }
+        // Keep the historical cooldown fence even when its pending positive is untrusted.
+        let restarted = f.coordinator()
+        restarted.schedule(snapshot: f.snapshot, origin: f.proof, configuration: f.settings.automation)
+        try await f.settle(restarted)
+        #expect(f.assessments == 1 && f.publication().isEmpty)
+        f.fetchFailuresAfterAssessment = 0
+        f.claimState = .uncertain
+        f.clock = f.clock.addingTimeInterval(ReadOnlyAssessmentRetry.cooldown + 1)
+        restarted.schedule(snapshot: f.snapshot, origin: f.proof, configuration: f.settings.automation)
+        try await f.settle(restarted)
+        #expect(f.assessments == 2 && f.publication().isEmpty)
+        #expect(restarted.rejectedDrafts(work: f.work, drafts: f.snapshot.drafts).map(\.state) == [.uncertain])
+        #expect(!f.settings.persistenceDegraded.contains("draftProofRecoveryAttempts"))
+    }
+
+    @Test(arguments: ["host", "projectID", "iid", "username", "userID", "attemptID", "origin", "context", "drafts", "headSHA", "files"])
+    func anAuthenticPendingAssessmentCannotResumeInAnotherContext(changedBinding: String) async throws {
+        let f = try Fixture()
+        defer { f.clean() }
+        f.fetchFailuresAfterAssessment = 100
+        let interrupted = f.coordinator()
+        interrupted.schedule(snapshot: f.snapshot, origin: f.proof, configuration: f.settings.automation)
+        try await f.settle(interrupted)
+        #expect(f.assessments == 1 && f.publication().isEmpty)
+        try f.editPendingAssessment { pending, attempt in
+            let base64 = try #require(pending["authentication"] as? String)
+            let sealed = try #require(Data(base64Encoded: base64))
+            let payload = try #require(AssistantJobJournal.authenticatedEvidence(sealed,
+                context: "draft-proof-recovery-pending-assessment-v1"))
+            let origin = try JSONSerialization.jsonObject(with: JSONEncoder().encode(f.proof))
+            var binding: [String: Any] = ["host": f.snapshot.host, "projectID": f.snapshot.request.projectID,
+                "iid": f.snapshot.request.iid, "username": f.snapshot.user.username, "userID": f.snapshot.user.id,
+                "origin": origin, "attemptID": try #require(attempt["id"]), "context": try #require(attempt["context"]),
+                "assessment": try #require(pending["assessment"]), "headSHA": try #require(pending["headSHA"]),
+                "files": try #require(pending["files"])]
+            let original = try JSONSerialization.data(withJSONObject: binding, options: [.sortedKeys])
+            #expect(payload == Data(SHA256.hash(data: original)))
+            switch changedBinding {
+            case "projectID", "iid", "userID": binding[changedBinding] = 99
+            case "origin":
+                var origin = try #require(binding["origin"] as? [String: Any])
+                origin["verificationID"] = UUID().uuidString
+                binding["origin"] = origin
+            case "context", "drafts":
+                var context = try #require(binding["context"] as? [String: Any])
+                if changedBinding == "context" { context["discussionFingerprint"] = "different discussions" }
+                else {
+                    var drafts = try #require(context["drafts"] as? [[String: Any]])
+                    drafts[0]["bodySHA256"] = AICommentAssessmentStore.digest("Another draft body")
+                    context["drafts"] = drafts
+                }
+                binding["context"] = context
+            case "files":
+                var files = try #require(binding["files"] as? [[String: Any]])
+                files[0]["sha256"] = AICommentAssessmentStore.digest("Another file content")
+                binding["files"] = files
+            default: binding[changedBinding] = "another context"
+            }
+            let changed = try JSONSerialization.data(withJSONObject: binding, options: [.sortedKeys])
+            pending["authentication"] = try AssistantJobJournal.sealEvidence(Data(SHA256.hash(data: changed)),
+                context: "draft-proof-recovery-pending-assessment-v1").base64EncodedString()
+        }
+        f.fetchFailuresAfterAssessment = 0
+        f.claimState = .uncertain
+        f.clock = f.clock.addingTimeInterval(ReadOnlyAssessmentRetry.cooldown + 1)
+        let restarted = f.coordinator()
+        restarted.schedule(snapshot: f.snapshot, origin: f.proof, configuration: f.settings.automation)
+        try await f.settle(restarted)
+        #expect(f.assessments == 2 && f.publication().isEmpty)
+        #expect(restarted.rejectedDrafts(work: f.work, drafts: f.snapshot.drafts).map(\.state) == [.uncertain])
     }
 
     @Test func explicitManualRepairRetryPersistsItsExactPredecessorBeforeExecution() async throws {
@@ -1720,6 +1881,22 @@ struct DraftProofRecoveryTests {
         }
         func publication() -> [FollowUpVerification] {
             FollowUpVerificationStore.publicationReceipts(work: work, username: "me", settings: settings, in: folder)
+        }
+        func pendingAttemptPath() throws -> URL {
+            let attempts = FollowUpVerificationStore.recordURL(kind: "follow-up-proof-recovery-attempts",
+                work: work, username: "me", in: folder).deletingPathExtension()
+            let paths = try FileManager.default.contentsOfDirectory(at: attempts, includingPropertiesForKeys: nil)
+            return try #require(paths.first { $0.pathExtension == "json" && $0.lastPathComponent != "retry-generation.json" })
+        }
+        func editPendingAssessment(_ edit: (inout [String: Any], [String: Any]) throws -> Void) throws {
+            let path = try pendingAttemptPath()
+            let data = try Data(contentsOf: path)
+            let object = try JSONSerialization.jsonObject(with: data)
+            var attempt = try #require(object as? [String: Any])
+            var pending = try #require(attempt["pendingAssessment"] as? [String: Any])
+            try edit(&pending, attempt)
+            attempt["pendingAssessment"] = pending
+            try JSONSerialization.data(withJSONObject: attempt).write(to: path, options: .atomic)
         }
         var repairJobs: [AssistantAutomationRunner.Handoff] { settings.assistantHandoffs.filter { $0.draftRepair != nil } }
         func persist(_ proof: FollowUpVerification) throws {

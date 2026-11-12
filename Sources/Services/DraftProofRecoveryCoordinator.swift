@@ -1,3 +1,4 @@
+import CryptoKit
 import Foundation
 import Observation
 
@@ -36,7 +37,22 @@ final class DraftProofRecoveryCoordinator {
         let assessment: DraftProofRecoveryVerifier.Assessment
         let headSHA: String
         let files: [FollowUpVerification.FileEvidence]
+        var authentication: Data? = nil
     }
+    private struct PendingAssessmentBinding: Encodable {
+        let host: String
+        let projectID: Int
+        let iid: Int
+        let username: String
+        let userID: Int
+        let origin: FollowUpVerification
+        let attemptID: String
+        let context: AttemptContext
+        let assessment: DraftProofRecoveryVerifier.Assessment
+        let headSHA: String
+        let files: [FollowUpVerification.FileEvidence]
+    }
+    private static let pendingAssessmentDomain = "draft-proof-recovery-pending-assessment-v1"
     private struct Attempt: Codable {
         enum Phase: String, Codable { case checking, repairing, verified, blocked }
         let id: String
@@ -311,6 +327,7 @@ final class DraftProofRecoveryCoordinator {
     }
 
     private struct Blocked: Error { let reason: String }
+    private struct EvidenceAuthenticationUnavailable: Error {}
     private struct VerifierUnavailable: Error, CustomStringConvertible {
         var description: String { String(localized: .DraftProofRecovery.draftProofRecoveryUnavailable) }
     }
@@ -397,8 +414,13 @@ final class DraftProofRecoveryCoordinator {
         }
         let model = input.configuration.assistant == .codex
             ? input.configuration.codexVerificationModel.rawValue : input.configuration.claudeVerificationModel.rawValue
+        guard await AssistantJobJournal.loadKey() else { throw EvidenceAuthenticationUnavailable() }
+        guard current(input) else { throw CancellationError() }
         let assessment: DraftProofRecoveryVerifier.Assessment
-        if let pending = states[snapshot.work]?.pendingAssessment {
+        if let pending = states[snapshot.work]?.pendingAssessment,
+           let authentication = pending.authentication,
+           AssistantJobJournal.authenticatedEvidence(authentication, context: Self.pendingAssessmentDomain)
+            == (try pendingAssessmentDigest(pending, request: input)) {
             guard pending.headSHA == head, pending.files == files else {
                 throw Blocked(reason: String(localized: .DraftProofRecovery.draftProofRecoverySourceChanged))
             }
@@ -418,7 +440,10 @@ final class DraftProofRecoveryCoordinator {
         }
         guard current(input) else { throw CancellationError() }
         // A verifier response is durable before final I/O, but is not a completed proof or rejection yet.
-        states[snapshot.work]?.pendingAssessment = .init(assessment: assessment, headSHA: head, files: files)
+        var pending = PendingAssessment(assessment: assessment, headSHA: head, files: files)
+        pending.authentication = try AssistantJobJournal.sealEvidence(pendingAssessmentDigest(pending, request: input),
+            context: Self.pendingAssessmentDomain)
+        states[snapshot.work]?.pendingAssessment = pending
         try writeAttempt(states[snapshot.work]!, request: input)
         let final = try await fetch(snapshot)
         guard current(input), sameContext(snapshot, final), matchesOwnership(final, origin: input.origin, draftIDs: input.draftIDs),
@@ -431,6 +456,16 @@ final class DraftProofRecoveryCoordinator {
             }
         }
         return Prepared(snapshot: final, files: files, assessment: assessment, model: model, head: head, fingerprint: fingerprint)
+    }
+
+    private func pendingAssessmentDigest(_ pending: PendingAssessment, request: Request) throws -> Data {
+        let snapshot = request.snapshot
+        let payload = try JSONEncoder.sorted.encode(PendingAssessmentBinding(host: snapshot.host,
+            projectID: snapshot.request.projectID, iid: snapshot.request.iid,
+            username: snapshot.user.username, userID: snapshot.user.id, origin: request.origin,
+            attemptID: request.id, context: request.context, assessment: pending.assessment,
+            headSHA: pending.headSHA, files: pending.files))
+        return Data(SHA256.hash(data: payload))
     }
 
     private func process(_ input: Request) async throws {
