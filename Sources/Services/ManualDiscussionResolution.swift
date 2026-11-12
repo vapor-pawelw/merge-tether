@@ -41,6 +41,7 @@ enum ManualDiscussionResolution {
         let configuration: String
         let plan: Plan
         var reviewFingerprint: String? = nil
+        var reviewParticipationRevision = ""
     }
     struct Result {
         let resolved: Int
@@ -51,12 +52,14 @@ enum ManualDiscussionResolution {
 
     static func plan(discussions: [GitLabMergeRequestDiscussion], assessment: ReReviewAssessment?,
                      authorID: Int, pendingDraftCount: Int,
-                     ignoredSuggestions: [IgnoredFeedbackSuggestion] = []) -> Plan {
+                     ignoredSuggestions: [IgnoredFeedbackSuggestion] = [], excludedReplyAuthorIDs: Set<Int> = []) -> Plan {
         let open = discussions.filter { $0.notes.first?.resolvable == true && $0.notes.first?.resolved == false }
         let valid = assessment.flatMap {
-            (try? $0.reviewers(in: discussions, authorID: authorID, ignoredSuggestions: ignoredSuggestions)) != nil ? $0 : nil
+            (try? $0.reviewers(in: discussions, authorID: authorID, ignoredSuggestions: ignoredSuggestions,
+                excludedReplyAuthorIDs: excludedReplyAuthorIDs)) != nil ? $0 : nil
         }
-        let missingReplies = valid?.missingPublishedReplyNoteIDs(in: discussions, authorID: authorID) ?? []
+        let missingReplies = valid?.missingPublishedReplyNoteIDs(in: discussions, authorID: authorID,
+            excludedReplyAuthorIDs: excludedReplyAuthorIDs) ?? []
         let verdicts = Dictionary((valid?.notes ?? []).map { ($0.noteID, $0) }, uniquingKeysWith: { first, _ in first })
         var eligible: [String] = [], held: [String] = []
         for thread in open {
@@ -112,6 +115,7 @@ enum ManualDiscussionResolution {
         guard let host = glab.resolvedHost, let username = glab.currentUsername else { throw GlabError.notAuthenticated }
         let revision = glab.accountRevision
         let configuration = try MergeSubmissionFingerprint.configuration(settings)
+        let participationRevision = settings.reviewParticipationPreferences.revision(host: host, username: username)
         let user = try await glab.fetchAuthenticatedUser(host: host, expectedUsername: username)
         let request = try await glab.fetchMergeRequest(projectID: expected.projectID, iid: expected.iid, host: host)
         guard request.author.id == user.id, request.state == "opened",
@@ -129,10 +133,13 @@ enum ManualDiscussionResolution {
         }
         let target = MRAutomationScope.Target(host: host, username: username, projectID: request.projectID, iid: request.iid)
         let plan = plan(discussions: threads, assessment: assessment, authorID: user.id, pendingDraftCount: drafts,
-            ignoredSuggestions: settings.feedbackSuggestionDecisions.applicable(in: threads, for: target))
+            ignoredSuggestions: settings.feedbackSuggestionDecisions.applicable(in: threads, for: target),
+            excludedReplyAuthorIDs: settings.reviewParticipationPreferences.excludedIDs(host: host, username: username))
         guard glab.accountRevision == revision, glab.resolvedHost == host, glab.currentUsername == username,
-              try MergeSubmissionFingerprint.configuration(settings) == configuration else { throw CancellationError() }
-        return .init(request: request, user: user, host: host, revision: revision, configuration: configuration, plan: plan, reviewFingerprint: fingerprint)
+              try MergeSubmissionFingerprint.configuration(settings) == configuration,
+              settings.reviewParticipationPreferences.revision(host: host, username: username) == participationRevision else { throw CancellationError() }
+        return .init(request: request, user: user, host: host, revision: revision, configuration: configuration, plan: plan,
+            reviewFingerprint: fingerprint, reviewParticipationRevision: participationRevision)
     }
 
     @MainActor static func resolve(_ prepared: Prepared, glab: GlabService, settings: SettingsManager) async -> Result {
@@ -144,6 +151,7 @@ enum ManualDiscussionResolution {
                 let checkSession: @MainActor @Sendable () throws -> Void = {
                     guard glab.accountRevision == prepared.revision, glab.resolvedHost == prepared.host,
                           glab.currentUsername == prepared.user.username,
+                          settings.reviewParticipationPreferences.revision(host: prepared.host, username: prepared.user.username) == prepared.reviewParticipationRevision,
                           try MergeSubmissionFingerprint.configuration(settings) == prepared.configuration else { throw CancellationError() }
                     let work = AssistantAutomationRunner.MergeRequestWork(host: prepared.host, projectID: request.projectID, iid: request.iid)
                     guard !AssistantAutomationRunner.isWorking(on: work), !settings.assistantHandoffs.contains(where: {

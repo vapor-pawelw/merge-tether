@@ -1,0 +1,83 @@
+{
+  "sourceLanguage": "en",
+  "strings": {
+    "reviewParticipationTitle": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "No automatic replies or review requests"
+          }
+        }
+      }
+    },
+    "reviewParticipationUsername": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "GitLab username"
+          }
+        }
+      }
+    },
+    "reviewParticipationExclude": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Exclude participant"
+          }
+        }
+      }
+    },
+    "reviewParticipationAllow": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Allow again"
+          }
+        }
+      }
+    },
+    "reviewParticipationFailed": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Could not verify this GitLab username. Check the account and try again."
+          }
+        }
+      }
+    },
+    "reviewParticipationHelp": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Saved immediately for the current GitLab account and host. Excluded participants receive no automatic replies, acknowledgements or review invitations. Their technical findings remain actionable. Explicit manual publication is separate. This does not remove existing reviewers or change automation permissions."
+          }
+        }
+      }
+    },
+    "reviewParticipationSaveFailed": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Could not save this preference. The participant remains excluded in this session; automatic actions are on hold. Try again."
+          }
+        }
+      }
+    }
+  },
+  "version": "1.0"
+}

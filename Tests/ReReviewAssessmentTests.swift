@@ -4,6 +4,80 @@ import Testing
 
 @Suite("Re-review assessment")
 struct ReReviewAssessmentTests {
+    @Test func coveredSummaryValidationUsesTheSamePersonalNoReplyPreferenceAsReadiness() throws {
+        let threads = try summaryDiscussions(withReply: false)
+        let assessment = ReReviewAssessment(notes: [
+            .init(noteID: 10, state: .addressed, reason: "The correction is verified."),
+            .init(noteID: 20, state: .addressed, reason: "This summary repeats the corrected finding.",
+                informationalPurpose: .reviewSummary, reviewSummaryCoverage: .init(referencedNoteIDs: [10], noIndependentExpectation: true))])
+        let normalized = try assessment.normalizingCoveredReviewSummaries(in: threads, authorID: 3, excludedReplyAuthorIDs: [7])
+        #expect(normalized.notes.last?.state == .informational)
+        #expect(normalized.hasNoRemainingAuthorWork(in: threads, authorID: 3, excludedReplyAuthorIDs: [7]))
+        #expect(normalized.missingPublishedReplyNoteIDs(in: threads, authorID: 3, excludedReplyAuthorIDs: [7]).isEmpty)
+    }
+
+    @Test(arguments: [ReReviewAssessment.Note.State.addressed, .blocking])
+    func aPersonalNoReplyDecisionIsConsistentAcrossReadinessWithoutWaivingCode(_ state: ReReviewAssessment.Note.State) throws {
+        let threads = [GitLabMergeRequestDiscussion(id: "thread", notes: [
+            .init(id: 10, author: .init(id: 7, username: "reviewer", name: "Reviewer"), system: false,
+                resolvable: true, resolved: false, resolvedBy: nil, body: "Fix overflow")])]
+        let assessment = ReReviewAssessment(notes: [.init(noteID: 10, state: state, reason: "Overflow correction assessed.")])
+        #expect(assessment.missingPublishedReplyNoteIDs(in: threads, authorID: 3, excludedReplyAuthorIDs: [7]).isEmpty)
+        #expect(assessment.hasNoRemainingAuthorWork(in: threads, authorID: 3, excludedReplyAuthorIDs: [7]) == (state == .addressed))
+        let findings = AuthorFeedbackPolicy.evaluate(discussions: threads, assessment: assessment, authorID: 3,
+            approvedReviewerIDs: [], excludedReplyAuthorIDs: [7])
+        #expect(findings.first?.state == (state == .blocking ? .needsChanges : .waitingAcceptance))
+        #expect(findings.allSatisfy { !$0.canResolve })
+    }
+
+    @Test(arguments: ["pure", "mixed", "unknown"])
+    func anOpenResolvableOptOutHasNoReviewerWaitWithoutWaivingOtherConcerns(_ scenario: String) throws {
+        let quote = "Do not invite me to reviews"
+        let threads = [GitLabMergeRequestDiscussion(id: "thread", notes: [
+            .init(id: 10, author: .init(id: 7, username: "reviewer", name: "Reviewer"), system: false,
+                resolvable: true, resolved: false, resolvedBy: nil, body: quote + (scenario == "mixed" ? "; fix overflow" : ""))])]
+        let assessment = ReReviewAssessment(notes: [.init(noteID: 10, state: scenario == "mixed" ? .blocking : .informational,
+            reason: "Current review participation and technical obligations assessed.", informationalAcknowledgementSafe: false,
+            informationalPurpose: .other, reviewerOptOut: scenario == "unknown" ? nil : .init(sourceQuote: quote))])
+        let findings = AuthorFeedbackPolicy.evaluate(discussions: threads, assessment: assessment, authorID: 3, approvedReviewerIDs: [])
+        #expect(findings.isEmpty == (scenario == "pure"))
+        #expect(findings.allSatisfy { !$0.canResolve })
+        if scenario == "mixed" { #expect(findings.first?.state == .needsChanges) }
+        if scenario == "unknown" { #expect(findings.first?.state == .waitingAcceptance) }
+        #expect(AuthorFeedbackPolicy.informationalAcknowledgements(discussions: threads, assessment: assessment, authorID: 3).isEmpty)
+    }
+
+    @Test(arguments: [ReReviewAssessment.Note.State.informational, .addressed, .blocking])
+    func aSourceBoundOptOutNeverCreatesAReplyOrReviewInvitationButPreservesTechnicalWork(_ state: ReReviewAssessment.Note.State) throws {
+        let quote = "Do not invite me to reviews."
+        let threads = [GitLabMergeRequestDiscussion(id: "opt-out", notes: [
+            .init(id: 10, author: .init(id: 7, username: "reviewer", name: "Reviewer"), system: false,
+                resolvable: false, resolved: false, resolvedBy: nil, body: quote + (state == .blocking ? " Also fix overflow." : ""))]),
+            .init(id: "technical", notes: [.init(id: 20, author: .init(id: 8, username: "other", name: "Other"),
+                system: false, resolvable: false, resolved: false, resolvedBy: nil, body: "Fix retry handling")])]
+        let assessment = ReReviewAssessment(notes: [
+            .init(noteID: 10, state: state, reason: "The participant declined reviews.",
+                informationalAcknowledgementSafe: false, informationalPurpose: .other,
+                reviewerOptOut: .init(sourceQuote: quote)),
+            .init(noteID: 20, state: .addressed, reason: "Retry handling was fixed.")])
+        #expect(try assessment.reviewers(in: threads, authorID: 3) == [8: 20])
+        #expect(assessment.missingPublishedReplyNoteIDs(in: threads, authorID: 3) == [20])
+        #expect(assessment.pureReviewerOptOutNoteIDs(in: threads, authorID: 3) == (state == .informational ? [10] : []))
+        #expect(assessment.readinessBlockers.contains { $0.noteID == 10 } == (state == .blocking))
+    }
+
+    @Test func anOptOutRequiresTheExactCurrentSourceAndCannotGrantAcknowledgementOrAcceptance() throws {
+        let source = GitLabMergeRequestDiscussion.Note(id: 10, author: .init(id: 7, username: "reviewer", name: "Reviewer"),
+            system: false, resolvable: false, resolved: false, resolvedBy: nil, body: "Fix overflow")
+        let assessment = ReReviewAssessment(notes: [.init(noteID: 10, state: .informational, reason: "Claimed opt-out",
+            informationalAcknowledgementSafe: false, informationalPurpose: .other,
+            reviewerOptOut: .init(sourceQuote: "Do not invite me"))])
+        #expect(throws: ReReviewAssessment.ValidationError.self) {
+            try assessment.reviewers(in: [.init(id: "thread", notes: [source])], authorID: 3)
+        }
+        #expect(assessment.pureReviewerOptOutNoteIDs(in: [.init(id: "thread", notes: [source])], authorID: 3).isEmpty)
+    }
+
     @Test(arguments: [ReReviewAssessment.Note.State.addressed, .blocking, .uncertain])
     func aGeneralReviewWithAnIndependentExpectationRetainsItsReplyOrWorkObligation(_ state: ReReviewAssessment.Note.State) throws {
         let threads = try JSONDecoder().decode([GitLabMergeRequestDiscussion].self, from: Data(#"[{"id":"finding","notes":[{"id":10,"author":{"id":7},"system":false,"resolvable":true,"resolved":true,"body":"Correct the retry path."},{"id":30,"author":{"id":3},"system":false,"body":"The correction and regression are verified."}]},{"id":"report","notes":[{"id":20,"author":{"id":7},"system":false,"resolvable":false,"body":"The review raised retries. Please also explain the chosen limit in this thread."}]}]"#.utf8))

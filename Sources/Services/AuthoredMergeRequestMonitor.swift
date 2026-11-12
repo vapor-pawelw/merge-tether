@@ -448,9 +448,11 @@ final class AuthoredMergeRequestMonitor {
                                    automatic: Bool) async throws -> MergeSubmissionState {
         let work = AssistantAutomationRunner.MergeRequestWork(host: account.host, projectID: request.projectID, iid: request.iid)
         let configurationID = configurationFingerprint()
+        let participationRevision = settings.reviewParticipationPreferences.revision(host: account.host, username: account.username)
         let permits: @MainActor @Sendable () -> Bool = {
             self.isCurrent(account) && self.glab.accountRevision == revision && self.settings.automation == configuration
                 && self.configurationFingerprint() == configurationID
+                && self.settings.reviewParticipationPreferences.revision(host: account.host, username: account.username) == participationRevision
                 && (!automatic || self.permitsAutomaticMerge(request, account: account))
                 && !AssistantAutomationRunner.isWorking(on: work)
                 && !self.settings.pendingCommentReviews.contains(.init(host: account.host, username: account.username,
@@ -471,7 +473,8 @@ final class AuthoredMergeRequestMonitor {
                 user: user, host: account.host, settings: settings, glab: glab)
             let target = MRAutomationScope.Target(host: account.host, username: user.username, projectID: request.projectID, iid: request.iid)
             guard assessment.hasNoRemainingAuthorWork(in: discussions, authorID: user.id,
-                ignoredSuggestions: settings.feedbackSuggestionDecisions.applicable(in: discussions, for: target)) else { throw CancellationError() }
+                ignoredSuggestions: settings.feedbackSuggestionDecisions.applicable(in: discussions, for: target),
+                excludedReplyAuthorIDs: settings.reviewParticipationPreferences.excludedIDs(host: account.host, username: user.username)) else { throw CancellationError() }
         }
         let policy = try await glab.fetchMergeActionPolicy(projectID: request.projectID, host: account.host, request: request)
         guard let action = policy.action, permits() else { throw CancellationError() }

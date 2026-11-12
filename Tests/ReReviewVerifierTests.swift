@@ -208,6 +208,47 @@ struct ReReviewVerifierTests {
         }
     }
 
+    @Test(arguments: ["pureOptOut", "genericInformational", "mixedTechnical", "wrongQuote"])
+    func onlyAPureSourceBoundOptOutCanRetireABlockedAdministrativeReply(_ scenario: String) async throws {
+        let folder = FileManager.default.temporaryDirectory.appending(path: UUID().uuidString)
+        try FileManager.default.createDirectory(at: folder, withIntermediateDirectories: false)
+        defer { try? FileManager.default.removeItem(at: folder) }
+        let runID = UUID()
+        let script = folder.appending(path: "cli")
+        let state = scenario == "mixedTechnical" ? "blocking" : "informational"
+        let quote = scenario == "wrongQuote" ? "A different source" : "Do not invite me to reviews"
+        let proof = scenario == "genericInformational" ? "None" : "{'sourceQuote':'\(quote)'}"
+        try Data("""
+            #!/usr/bin/python3
+            import json,sys
+            args=sys.argv[1:]
+            sys.stdin.read()
+            result={'notes':[{'noteID':10,'state':'\(state)','reason':'Review participation was declined.','informationalPurpose':'other','informationalAcknowledgementSafe':False,'reviewerOptOut':\(proof)}],'completedBlockedRunIDs':['\(runID.uuidString)']}
+            json.dump(result,open(args[args.index('-o')+1],'w'))
+            """.utf8).write(to: script)
+        try FileManager.default.setAttributes([.posixPermissions: 0o700], ofItemAtPath: script.path)
+        let discussions = try JSONDecoder().decode([GitLabMergeRequestDiscussion].self, from: Data(#"[{"id":"thread","notes":[{"id":10,"author":{"id":7},"system":false,"body":"Do not invite me to reviews"}]}]"#.utf8))
+        let input = ReReviewVerifier.Input(authorID: 3, headSHA: String(repeating: "a", count: 40), title: "Administrative feedback",
+            diff: "No code change needed", discussions: discussions,
+            target: .init(host: "gitlab.example.test", projectID: 1, iid: 2,
+                url: URL(string: "https://gitlab.example.test/group/repo/-/merge_requests/2")!, expectedUsername: "me"),
+            blockedFollowUps: [.init(runID: runID, selectedFeedbackIDs: [10], blocker: "No source/test files for an administrative reply.",
+                summary: "The participant already removed their own review request.")])
+        if scenario == "pureOptOut" {
+            let assessment = try await ReReviewVerifier.run(input, assistant: .codex, model: "fixture", executable: script, retryWait: { _ in })
+            #expect(assessment.completedBlockedRunIDs == [runID])
+            #expect(assessment.reviewerOptOutIDs(in: discussions, authorID: 3) == [7])
+        } else if scenario == "wrongQuote" {
+            await #expect(throws: ReReviewAssessment.ValidationError.self) {
+                _ = try await ReReviewVerifier.run(input, assistant: .codex, model: "fixture", executable: script, retryWait: { _ in })
+            }
+        } else {
+            await #expect(throws: ReReviewVerifier.VerificationError.incompleteEvidence) {
+                _ = try await ReReviewVerifier.run(input, assistant: .codex, model: "fixture", executable: script, retryWait: { _ in })
+            }
+        }
+    }
+
     @Test(arguments: AutomationAssistant.allCases, [false, true])
     func completedBlockedRunProofMustNameAnExactSuppliedAttempt(_ assistant: AutomationAssistant, wrongRun: Bool) async throws {
         let folder = FileManager.default.temporaryDirectory.appending(path: UUID().uuidString)

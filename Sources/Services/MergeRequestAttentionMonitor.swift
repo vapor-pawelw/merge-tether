@@ -1986,6 +1986,7 @@ final class MergeRequestAttentionMonitor {
         let proofVerdict = ReviewVerdictStore.verdict(host: account.host, projectID: id.projectID, iid: id.iid, user: user, in: verdictDirectory)
         let proofReceipts = publicationReceipts(projectID: id.projectID, iid: id.iid, host: account.host, username: account.username)
         let reviewRevision = settings.commentReviewRevision(for: commentReviewTarget(id, account: account))
+        let participationRevision = settings.reviewParticipationPreferences.revision(host: account.host, username: account.username)
         let admitted: @MainActor @Sendable () -> Bool = {
             !Task.isCancelled && generation == self.accountGeneration && revision == self.glab.accountRevision
                 && self.isCurrent(account) && settings.automaticPublicWritesAllowed
@@ -1996,6 +1997,7 @@ final class MergeRequestAttentionMonitor {
                 && ReviewVerdictStore.verdict(host: account.host, projectID: id.projectID, iid: id.iid, user: user, in: self.verdictDirectory) == proofVerdict
                 && self.publicationReceipts(projectID: id.projectID, iid: id.iid, host: account.host, username: account.username) == proofReceipts
                 && settings.commentReviewRevision(for: self.commentReviewTarget(id, account: account)) == reviewRevision
+                && settings.reviewParticipationPreferences.revision(host: account.host, username: account.username) == participationRevision
                 && self.permitsAutomaticPublication(of: request, account: account)
                 && !self.hasActiveWorker(for: id, account: account)
         }
@@ -2054,6 +2056,20 @@ final class MergeRequestAttentionMonitor {
             projectID: request.projectID, iid: request.iid), notes: unknown, assistant: configuration.assistant, model: model, thinking: configuration.verificationThinking)
     }
 
+    private func permitsParticipantReply(_ draft: GitLabDraftNote, request: GitLabMergeRequest,
+                                        discussions: [GitLabMergeRequestDiscussion], account: Account) -> Bool {
+        guard let settings, let user else { return false }
+        let semanticOptOuts = ReviewVerdict.fingerprint(discussions).flatMap {
+            authorFeedbackCoordinator?.assessment(for: request, fingerprint: $0)
+        }?.reviewerOptOutIDs(in: discussions, authorID: request.author.id) ?? []
+        let receipts = publicationReceipts(projectID: request.projectID, iid: request.iid, host: account.host, username: account.username)
+        let runs = Set(receipts.filter { proof in proof.drafts.contains { $0.id == draft.id } }.map(\.runID))
+        let selected = settings.assistantHandoffs.filter { runs.contains($0.id) }.flatMap { $0.feedbackNoteIDs ?? [] }
+        return settings.reviewParticipationPreferences.permitsAutomaticReply(draft, discussions: discussions,
+            requestAuthorID: request.author.id, userID: user.id, host: account.host, username: account.username,
+            selectedFeedbackNoteIDs: selected, semanticOptOutIDs: semanticOptOuts)
+    }
+
     /// Every automatic publication needs current discussion evidence. Author replies
     /// additionally need this run's exact draft and remote source content.
     private func permitsAutomaticPublication(_ draft: GitLabDraftNote, id: Item.ID, account: Account) async -> Bool {
@@ -2076,6 +2092,7 @@ final class MergeRequestAttentionMonitor {
             return false
         }
         guard let live, let discussions, let settings else { return false }
+        guard permitsParticipantReply(draft, request: live, discussions: discussions, account: account) else { return false }
         let policy = settings.automation.automaticPublicationPolicy
         let aiIDs = await aiNoteIDs(in: discussions, policy: policy, host: account.host,
                                    projectID: id.projectID, iid: id.iid)
@@ -2090,6 +2107,7 @@ final class MergeRequestAttentionMonitor {
                 projectID: id.projectID, iid: id.iid, host: account.host, userID: user.id
             ), latest.contains(draft), AICommentAssessmentStore.safeForAutomaticPublication(draft),
                   isCurrent(account), permitsAutomaticPublication(of: live, account: account) else { return false }
+            guard permitsParticipantReply(draft, request: live, discussions: discussions, account: account) else { return false }
             permitted = true
             return true
         }
@@ -2119,6 +2137,7 @@ final class MergeRequestAttentionMonitor {
             async let currentDiscussions = glab.fetchMergeRequestDiscussions(projectID: id.projectID, iid: id.iid, host: account.host)
             let (currentUser, currentMR, currentSource, freshDrafts, freshDiscussions) = try await (freshUser, freshMR, sourceHead, currentDrafts, currentDiscussions)
             guard currentUser == user, currentSource == receipt.headSHA, freshDrafts.contains(draft),
+                  permitsParticipantReply(draft, request: currentMR, discussions: freshDiscussions, account: account),
                   Self.draftContextIsCurrent(request: currentMR, drafts: [draft], discussions: freshDiscussions,
                     host: account.host, user: currentUser, verdictDirectory: verdictDirectory,
                     followUpReceipts: [receipt]),
@@ -2134,6 +2153,7 @@ final class MergeRequestAttentionMonitor {
             let finalDrafts = try await glab.fetchOwnDraftNotes(projectID: id.projectID, iid: id.iid,
                                                                host: account.host, userID: currentUser.id)
             guard finalDrafts.contains(draft), AutomaticPublicationPolicy.safeForAutomaticPublication(draft),
+                  permitsParticipantReply(draft, request: currentMR, discussions: freshDiscussions, account: account),
                   isCurrent(account), settings.automation.automaticPublicationPolicy == policy,
                   settings.automation.allowFollowUpPush,
                   publicationReceipts(projectID: id.projectID, iid: id.iid, host: account.host, username: user.username).contains(receipt),

@@ -24,6 +24,7 @@ struct AuthorFeedbackStatus: Equatable, Sendable {
     /// Binds checking and failed attempts even when no successful assessment was cached.
     var completedFollowUpJobID: UUID? = nil
     var feedbackDecisionRevision = ""
+    var reviewParticipationRevision = ""
 
     static func canReconcile(_ job: AssistantAutomationRunner.Handoff, request: GitLabMergeRequest) -> Bool {
         guard job.workflow == .followUp, job.pipelineReservation == nil, !job.allowsPush,
@@ -115,6 +116,7 @@ final class AuthorFeedbackCoordinator {
         let completedFollowUpJobID: UUID?
         let decisionRevision: String
         let ignoredSuggestions: [IgnoredFeedbackSuggestion]
+        let reviewParticipationRevision: String
         var readOnly: Bool { drafts > 0 }
     }
 
@@ -151,7 +153,8 @@ final class AuthorFeedbackCoordinator {
               state.head == request.sha, state.fingerprint == fingerprint,
               state.semanticContextFingerprint == request.semanticContextFingerprint else { return nil }
         let target = MRAutomationScope.Target(host: host, username: username, projectID: request.projectID, iid: request.iid)
-        guard state.feedbackDecisionRevision == settings.feedbackSuggestionDecisions.revision(for: target) else { return nil }
+        guard state.feedbackDecisionRevision == settings.feedbackSuggestionDecisions.revision(for: target),
+              state.reviewParticipationRevision == settings.reviewParticipationPreferences.revision(host: host, username: username) else { return nil }
         guard let stored = cache[target], stored.2 == completedFollowUpJob(for: request, target: target)?.id else { return nil }
         return stored.1
     }
@@ -183,9 +186,11 @@ final class AuthorFeedbackCoordinator {
         guard hasFeedback else { statuses.removeValue(forKey: target); return }
         let completedJobID = completedFollowUpJob(for: request, target: target)?.id
         let decisionRevision = settings.feedbackSuggestionDecisions.revision(for: target)
+        let participationRevision = settings.reviewParticipationPreferences.revision(host: host, username: user.username)
         if let status = statuses[target], status.head == head, status.fingerprint == fingerprint,
            status.semanticContextFingerprint == request.semanticContextFingerprint,
            status.feedbackDecisionRevision == decisionRevision,
+           status.reviewParticipationRevision == participationRevision,
            status.phase == .failed, status.completedFollowUpJobID == completedJobID {
             guard status.isReadOnlyFailure, let failure = failedReads[target],
                   failure.accountRevision != glab.accountRevision || failure.configuration != configuration
@@ -198,15 +203,18 @@ final class AuthorFeedbackCoordinator {
                           configuration: settings.automation, fingerprint: fingerprint, drafts: drafts,
                           accountRevision: glab.accountRevision,
                           completedFollowUpJobID: completedJobID, decisionRevision: decisionRevision,
-                          ignoredSuggestions: settings.feedbackSuggestionDecisions.applicable(in: discussions, for: target))
+                          ignoredSuggestions: settings.feedbackSuggestionDecisions.applicable(in: discussions, for: target),
+                          reviewParticipationRevision: participationRevision)
         if statuses[target]?.head != head || statuses[target]?.fingerprint != fingerprint
             || statuses[target]?.semanticContextFingerprint != request.semanticContextFingerprint
             || statuses[target]?.feedbackDecisionRevision != decisionRevision
+            || statuses[target]?.reviewParticipationRevision != participationRevision
             || statuses[target]?.completedFollowUpJobID != completedJobID {
             statuses[target] = .init(head: head, fingerprint: fingerprint,
                 semanticContextFingerprint: request.semanticContextFingerprint,
                 readOnlyReconciliation: input.readOnly, phase: .checking, pendingDraftCount: drafts,
-                completedFollowUpJobID: input.completedFollowUpJobID, feedbackDecisionRevision: decisionRevision)
+                completedFollowUpJobID: input.completedFollowUpJobID, feedbackDecisionRevision: decisionRevision,
+                reviewParticipationRevision: participationRevision)
         }
         pending[target] = input
         startNext()
@@ -300,7 +308,9 @@ final class AuthorFeedbackCoordinator {
             && statuses[input.target]?.semanticContextFingerprint == input.request.semanticContextFingerprint
             && statuses[input.target]?.completedFollowUpJobID == input.completedFollowUpJobID
             && statuses[input.target]?.feedbackDecisionRevision == input.decisionRevision
+            && statuses[input.target]?.reviewParticipationRevision == input.reviewParticipationRevision
             && settings.feedbackSuggestionDecisions.revision(for: input.target) == input.decisionRevision
+            && settings.reviewParticipationPreferences.revision(host: input.target.host, username: input.user.username) == input.reviewParticipationRevision
             && settings.automation == input.configuration
             && completedFollowUpJob(for: input.request, target: input.target)?.id == input.completedFollowUpJobID
             && settings.automation.hasAutomaticActionConsent
@@ -390,6 +400,7 @@ final class AuthorFeedbackCoordinator {
             + "|" + String(decoding: try encoder.encode(input.configuration), as: UTF8.self)
             + "|" + UserAttentionSnapshot.digest(String(decoding: try encoder.encode(blockedContexts), as: UTF8.self))
             + "|" + input.decisionRevision
+            + "|" + input.reviewParticipationRevision
             + "|" + String(decoding: try encoder.encode(completedFollowUp), as: UTF8.self)
         let assessment: ReReviewAssessment
         if let stored = cache[input.target], stored.0 == key { assessment = stored.1 }
@@ -403,8 +414,10 @@ final class AuthorFeedbackCoordinator {
                     url: request.webURL, expectedUsername: input.user.username),
                 semanticContextFingerprint: request.semanticContextFingerprint,
                 thinking: input.configuration.verificationThinking, blockedFollowUps: blockedContexts,
-                ignoredSuggestions: input.ignoredSuggestions, completedFollowUp: completedFollowUp), input.configuration.assistant, model)
-            _ = try assessment.reviewers(in: input.discussions, authorID: input.user.id, ignoredSuggestions: input.ignoredSuggestions)
+                ignoredSuggestions: input.ignoredSuggestions, completedFollowUp: completedFollowUp,
+                excludedReplyAuthorIDs: excludedReplyAuthors(input).sorted()), input.configuration.assistant, model)
+            _ = try assessment.reviewers(in: input.discussions, authorID: input.user.id, ignoredSuggestions: input.ignoredSuggestions,
+                excludedReplyAuthorIDs: excludedReplyAuthors(input))
             guard isCurrent(input) else { throw CancellationError() }
             cache[input.target] = (key, assessment, input.completedFollowUpJobID)
         }
@@ -451,7 +464,7 @@ final class AuthorFeedbackCoordinator {
         if input.readOnly {
             let threads = prepared.threads
             let drafts = prepared.drafts
-            let repliesByThread = assessment.missingPublishedRepliesByThread(in: threads, authorID: input.user.id)
+            let repliesByThread = assessment.missingPublishedRepliesByThread(in: threads, authorID: input.user.id, excludedReplyAuthorIDs: excludedReplyAuthors(input))
             let owedNotes = Set(repliesByThread.values.flatMap { $0 })
             let draftedThreads = Set(drafts.compactMap(\.discussionID))
             let draftedNotes = Set(threads.filter { $0.id.map(draftedThreads.contains) == true }.flatMap(\.notes).compactMap(\.id))
@@ -470,9 +483,10 @@ final class AuthorFeedbackCoordinator {
                 addressedNoteIDs: Set(assessment.notes.filter { $0.state == .addressed || $0.state == .informational }.map(\.noteID)).subtracting(owedNotes),
                 completedFollowUpJobID: input.completedFollowUpJobID)
             completed.feedbackDecisionRevision = input.decisionRevision
+            completed.reviewParticipationRevision = input.reviewParticipationRevision
             completed.codeReviewRequests = assessment.reviewRequests
             completed.ignoredNoteIDs = Set(assessment.notes.filter { $0.state == .ignoredByUser }.map(\.noteID))
-            bindStoppedFollowUpEvidence(to: &completed, prepared: prepared, discussions: threads, authorID: input.user.id)
+            bindStoppedFollowUpEvidence(to: &completed, prepared: prepared, input: input, discussions: threads, authorID: input.user.id)
             let changed = statuses[input.target] != completed
             statuses[input.target] = completed
             if changed { onRemoteChange?() }
@@ -481,11 +495,11 @@ final class AuthorFeedbackCoordinator {
         var approved = prepared.approvals
         var threads = prepared.threads
         let initial = AuthorFeedbackPolicy.evaluate(discussions: threads, assessment: assessment, authorID: input.user.id,
-            approvedReviewerIDs: approved, enabled: input.configuration.autoResolveAcceptedFeedback, ignoredSuggestions: input.ignoredSuggestions)
+            approvedReviewerIDs: approved, enabled: input.configuration.autoResolveAcceptedFeedback, ignoredSuggestions: input.ignoredSuggestions, excludedReplyAuthorIDs: excludedReplyAuthors(input))
         var accepted: Set<Int> = []
         var changed = false
         let informationalThreads = Set(AuthorFeedbackPolicy.informationalAcknowledgements(discussions: threads,
-            assessment: assessment, authorID: input.user.id, ignoredSuggestions: input.ignoredSuggestions).filter(\.canResolve).compactMap(\.discussionID))
+            assessment: assessment, authorID: input.user.id, ignoredSuggestions: input.ignoredSuggestions, excludedReplyAuthorIDs: excludedReplyAuthors(input)).filter(\.canResolve).compactMap(\.discussionID))
         for finding in initial where finding.canResolve && !informationalThreads.contains(finding.discussionID ?? "") {
             guard settings.automaticPublicWritesAllowed else { break }
             guard isCurrent(input) else { throw CancellationError() }
@@ -507,7 +521,7 @@ final class AuthorFeedbackCoordinator {
                   live.webURL == request.webURL, ReviewVerdict.fingerprint(discussions) == input.fingerprint else { throw CancellationError() }
             threads = discussions
             let permitted = AuthorFeedbackPolicy.evaluate(discussions: discussions, assessment: assessment, authorID: user.id,
-                approvedReviewerIDs: liveApproved, ignoredSuggestions: input.ignoredSuggestions).contains { $0.discussionID == discussionID && $0.canResolve }
+                approvedReviewerIDs: liveApproved, ignoredSuggestions: input.ignoredSuggestions, excludedReplyAuthorIDs: excludedReplyAuthors(input)).contains { $0.discussionID == discussionID && $0.canResolve }
             guard permitted, !settings.pendingCommentReviews.contains(input.target) else { continue }
             try await glab.resolveAcceptedDiscussion(projectID: request.projectID, iid: request.iid, discussionID: discussionID, host: host) {
                 self.settings.automaticPublicWritesAllowed && self.isCurrent(input) && !input.readOnly
@@ -525,9 +539,10 @@ final class AuthorFeedbackCoordinator {
         }
         guard isCurrent(input) else { throw CancellationError() }
         var findings = AuthorFeedbackPolicy.evaluate(discussions: threads, assessment: assessment, authorID: input.user.id,
-            approvedReviewerIDs: approved, enabled: input.configuration.autoResolveAcceptedFeedback, ignoredSuggestions: input.ignoredSuggestions)
+            approvedReviewerIDs: approved, enabled: input.configuration.autoResolveAcceptedFeedback, ignoredSuggestions: input.ignoredSuggestions, excludedReplyAuthorIDs: excludedReplyAuthors(input))
         accepted.formUnion(AuthorFeedbackPolicy.acceptedReviewers(discussions: threads, assessment: assessment,
-            authorID: input.user.id, approvedReviewerIDs: approved, ignoredSuggestions: input.ignoredSuggestions))
+            authorID: input.user.id, approvedReviewerIDs: approved, ignoredSuggestions: input.ignoredSuggestions,
+            excludedReplyAuthorIDs: excludedReplyAuthors(input)))
         let allNotes: [GitLabMergeRequestDiscussion.Note] = threads.flatMap(\.notes)
         let outstandingNotes = allNotes.filter {
             $0.system == false && $0.author?.id != input.user.id
@@ -537,7 +552,7 @@ final class AuthorFeedbackCoordinator {
             outstanding.contains($0.noteID) && ($0.state == .blocking || $0.state == .uncertain)
         }.map(\.noteID))
         followUp.formUnion(assessment.reviewRequests.map(\.sourceNoteID))
-        let repliesByThread = assessment.missingPublishedRepliesByThread(in: threads, authorID: input.user.id)
+        let repliesByThread = assessment.missingPublishedRepliesByThread(in: threads, authorID: input.user.id, excludedReplyAuthorIDs: excludedReplyAuthors(input))
         // An owed published reply remains work even when approval or a disabled
         // resolution policy changes the finding's presentation state.
         let missingReplies = Set(repliesByThread.keys)
@@ -554,7 +569,7 @@ final class AuthorFeedbackCoordinator {
         changed = changed || acknowledgement.changed
         let acknowledgementFailures = acknowledgementAttempts[input.target]?.failures ?? [:]
         findings = AuthorFeedbackPolicy.evaluate(discussions: threads, assessment: assessment, authorID: input.user.id,
-            approvedReviewerIDs: approved, enabled: input.configuration.autoResolveAcceptedFeedback, ignoredSuggestions: input.ignoredSuggestions).map { finding in
+            approvedReviewerIDs: approved, enabled: input.configuration.autoResolveAcceptedFeedback, ignoredSuggestions: input.ignoredSuggestions, excludedReplyAuthorIDs: excludedReplyAuthors(input)).map { finding in
                 guard finding.state == .ready, let reason = acknowledgementFailures[finding.id] else { return finding }
                 return .init(id: finding.id, discussionID: finding.discussionID, reviewerID: finding.reviewerID,
                     reviewerUsername: finding.reviewerUsername, state: .needsVerification, reason: reason,
@@ -568,16 +583,22 @@ final class AuthorFeedbackCoordinator {
                 .subtracting(owedNotes).subtracting(acknowledgementFailures.keys),
             completedFollowUpJobID: input.completedFollowUpJobID)
         completed.feedbackDecisionRevision = input.decisionRevision
+        completed.reviewParticipationRevision = input.reviewParticipationRevision
         completed.ignoredNoteIDs = Set(assessment.notes.filter { $0.state == .ignoredByUser }.map(\.noteID))
-        bindStoppedFollowUpEvidence(to: &completed, prepared: prepared, discussions: threads, authorID: input.user.id)
+        bindStoppedFollowUpEvidence(to: &completed, prepared: prepared, input: input, discussions: threads, authorID: input.user.id)
         let updated = statuses[input.target] != completed
         statuses[input.target] = completed
         if changed || updated { onRemoteChange?() }
     }
 
-    private func bindStoppedFollowUpEvidence(to status: inout AuthorFeedbackStatus, prepared: Preparation,
+    private func excludedReplyAuthors(_ input: Input) -> Set<Int> {
+        settings.reviewParticipationPreferences.excludedIDs(host: input.target.host, username: input.user.username)
+    }
+
+    private func bindStoppedFollowUpEvidence(to status: inout AuthorFeedbackStatus, prepared: Preparation, input: Input,
                                             discussions: [GitLabMergeRequestDiscussion], authorID: Int) {
-        let missingReplies = prepared.assessment.missingPublishedReplyNoteIDs(in: discussions, authorID: authorID)
+        let missingReplies = prepared.assessment.missingPublishedReplyNoteIDs(in: discussions, authorID: authorID,
+            excludedReplyAuthorIDs: excludedReplyAuthors(input))
         for candidate in prepared.stoppedFollowUps {
             guard let current = settings.assistantHandoffs.first(where: { $0.id == candidate.id }),
                   current.key == candidate.key, current.workflow == candidate.workflow,
@@ -592,6 +613,7 @@ final class AuthorFeedbackCoordinator {
             if !selected.isDisjoint(with: status.ignoredNoteIDs), candidate.execution?.state != .blocked { continue }
             if candidate.execution?.state == .blocked {
                 let addressed = Set(prepared.assessment.notes.filter { $0.state == .addressed || $0.state == .ignoredByUser }.map(\.noteID))
+                    .union(prepared.assessment.pureReviewerOptOutNoteIDs(in: discussions, authorID: authorID))
                 guard prepared.assessment.completedBlockedRunIDs?.contains(candidate.id) == true,
                       let context = AuthorFeedbackStatus.blockedContext(for: candidate),
                       AuthorFeedbackStatus.blockedContext(for: current) == context,
@@ -625,7 +647,7 @@ final class AuthorFeedbackCoordinator {
         -> (threads: [GitLabMergeRequestDiscussion], changed: Bool) {
         guard settings.automaticPublicWritesAllowed, input.configuration.autoResolveAcceptedFeedback else { return (discussions, false) }
         let candidates = AuthorFeedbackPolicy.informationalAcknowledgements(discussions: discussions,
-            assessment: assessment, authorID: input.user.id, ignoredSuggestions: input.ignoredSuggestions)
+            assessment: assessment, authorID: input.user.id, ignoredSuggestions: input.ignoredSuggestions, excludedReplyAuthorIDs: excludedReplyAuthors(input))
         if acknowledgementAttempts[input.target]?.userID != input.user.id {
             acknowledgementAttempts[input.target] = .init(userID: input.user.id)
             acknowledgedReactions.removeValue(forKey: input.target)
@@ -666,7 +688,7 @@ final class AuthorFeedbackCoordinator {
                 guard await canAutomate(input.configuration.assistant) else { throw ReReviewVerifier.VerificationError.unavailable }
                 func currentCandidate(_ current: [GitLabMergeRequestDiscussion]) -> AuthorFeedbackPolicy.InformationalAcknowledgement? {
                     AuthorFeedbackPolicy.informationalAcknowledgements(discussions: current, assessment: assessment,
-                        authorID: input.user.id, ignoredSuggestions: input.ignoredSuggestions).first { $0.discussionID == candidate.discussionID && $0.noteIDs == candidate.noteIDs }
+                        authorID: input.user.id, ignoredSuggestions: input.ignoredSuggestions, excludedReplyAuthorIDs: excludedReplyAuthors(input)).first { $0.discussionID == candidate.discussionID && $0.noteIDs == candidate.noteIDs }
                 }
                 for noteID in pendingReactions {
                     acknowledgementAttempts[input.target]?.reactions.insert(noteID)

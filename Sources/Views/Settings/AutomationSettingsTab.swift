@@ -440,6 +440,7 @@ struct AutomationSettingsTab: View {
 
     @ViewBuilder
     private var advancedFields: some View {
+        ReviewParticipationSettingsSection(monitor: monitor)
         WorkerExecutionTimeoutSettingsView(policy: $draft.workerExecutionTimeout, repositories: timeoutRepositories)
         Section {
             HStack {

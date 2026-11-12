@@ -135,6 +135,9 @@ enum AssistantJobExecutor {
             steps in summary; do not wait for publication or classify that wait as unfinished worker work.
             Return status blocked if assigned code, tests, remote delivery or reply preparation remains unfinished,
             a required tool was denied, or meaningful verification is missing.
+            An explicit participant opt-out from reviews or further contact needs no reply, private draft,
+            reaction, resolution or renewed invitation. Preserve and fix independent technical defects in a
+            mixed note, but report that work in the run result without contacting the opted-out participant.
             In generatedDrafts, list only private drafts you actually created or substantially rewrote in THIS run,
             as {id,bodySHA256}. Re-fetch each exact draft and compute SHA-256 from its exact parsed UTF-8 note body,
             preserving whitespace and Unicode. Do not list untouched, user-created or merely observed drafts.
@@ -147,6 +150,7 @@ enum AssistantJobExecutor {
             step and its actual cause, so the MR card explains why automatic progress stopped.
             Do not use a generic status such as "blocked" as the explanation. For succeeded, set blocker to null.
             """ + ignoredFeedback.instructions
+                + settings.reviewParticipationPreferences.workerInstructions(host: handoff.key.work.host, username: handoff.key.username)
         try AssistantJobJournal.prepare(handoff.id)
         let input = Data(instructions.utf8)
         let instructionsURL = folder.appending(path: "instructions.txt")

@@ -260,7 +260,8 @@ final class TodoMonitorService {
                   let assessment = self.attention.authorFeedbackCoordinator?.assessment(for: request, fingerprint: fingerprint) else { return false }
             let target = MRAutomationScope.Target(host: host, username: username, projectID: request.projectID, iid: request.iid)
             return assessment.hasNoRemainingAuthorWork(in: discussions, authorID: authorID,
-                ignoredSuggestions: self.settings.feedbackSuggestionDecisions.applicable(in: discussions, for: target))
+                ignoredSuggestions: self.settings.feedbackSuggestionDecisions.applicable(in: discussions, for: target),
+                excludedReplyAuthorIDs: self.settings.reviewParticipationPreferences.excludedIDs(host: host, username: username))
         }
         authoredMergeRequests.authorFeedbackStatus = { [weak self] request in
             self?.attention.authorFeedbackCoordinator?.status(projectID: request.projectID, iid: request.iid)

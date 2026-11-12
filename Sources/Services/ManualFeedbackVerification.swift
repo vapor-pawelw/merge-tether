@@ -27,7 +27,8 @@ import Foundation
             description: request.description, diff: String(decoding: diff, as: UTF8.self), discussions: discussions,
             target: .init(host: host, projectID: request.projectID, iid: request.iid, url: request.webURL, expectedUsername: user.username),
             semanticContextFingerprint: request.semanticContextFingerprint, thinking: configuration.verificationThinking,
-            ignoredSuggestions: settings.feedbackSuggestionDecisions.applicable(in: discussions, for: target)),
+            ignoredSuggestions: settings.feedbackSuggestionDecisions.applicable(in: discussions, for: target),
+            excludedReplyAuthorIDs: settings.reviewParticipationPreferences.excludedIDs(host: host, username: user.username).sorted()),
             assistant: configuration.assistant, model: model)
     }
 }

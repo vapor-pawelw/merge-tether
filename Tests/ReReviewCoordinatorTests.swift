@@ -4,6 +4,41 @@ import Testing
 
 @MainActor
 struct ReReviewCoordinatorTests {
+    @Test(arguments: [false, true])
+    func personalNoContactPreferenceExcludesAutomaticAndConfirmedReviewRequests(_ automatic: Bool) async throws {
+        let f = try Fixture()
+        defer { f.close() }
+        f.settings.automation.autoVerifyReReview = automatic
+        f.settings.reviewParticipationPreferences.exclude(.init(host: f.context.host, entityID: 8, label: "@reviewer"), username: "me")
+        let coordinator = f.coordinator()
+        await coordinator.refresh(for: try f.request(), feedback: try f.feedback(), draftCount: 0, context: f.context, user: f.user)
+        _ = await coordinator.confirm(f.context, user: f.user, head: "head", fingerprint: try f.fingerprint())
+        #expect(f.gitlab.text("requested").isEmpty)
+        #expect(f.settings.reReviewReceipts.values.allSatisfy { $0.requested != true && !$0.unconfirmed })
+    }
+
+    @Test(arguments: [false, true])
+    func aSourceBoundOptOutIsNotReinvitedAfterAnAuthorAcknowledgement(_ automatic: Bool) async throws {
+        let f = try Fixture()
+        defer { f.close() }
+        f.settings.automation.autoVerifyReReview = automatic
+        f.gitlab.write("discussions", Fixture.discussionsJSON.replacingOccurrences(of: "Please fix", with: "Do not invite me to reviews"))
+        let assessment = ReReviewAssessment(notes: [.init(noteID: 40, state: .informational, reason: "The participant declined reviews.",
+            informationalAcknowledgementSafe: false, informationalPurpose: .other,
+            reviewerOptOut: .init(sourceQuote: "Do not invite me to reviews"))])
+        let coordinator = f.coordinator(verify: { _, _, _ in
+            #expect(automatic)
+            return assessment
+        }, sharedAssessment: automatic ? nil : assessment)
+        await coordinator.refresh(for: try f.request(), feedback: try f.feedback(), draftCount: 0, context: f.context, user: f.user)
+        let deadline = ContinuousClock.now + .seconds(3)
+        while coordinator.isVerifying, ContinuousClock.now < deadline { try await Task.sleep(for: .milliseconds(10)) }
+        await coordinator.refresh(for: try f.request(), feedback: try f.feedback(), draftCount: 0, context: f.context, user: f.user)
+        _ = await coordinator.confirm(f.context, user: f.user, head: "head", fingerprint: try f.fingerprint())
+        #expect(f.gitlab.text("requested").isEmpty)
+        #expect(f.settings.reReviewReceipts.values.allSatisfy { $0.requested != true && !$0.unconfirmed })
+    }
+
     @Test func confirmedReviewIsDeduplicatedAcrossCoordinatorReplacement() async throws {
         // given
         let fixture = try Fixture()
@@ -188,8 +223,9 @@ struct ReReviewCoordinatorTests {
         func coordinator(verify: @escaping ReReviewCoordinator.Verify = { _, _, _ in
             Issue.record("Manual verification unexpectedly started an assistant")
             throw CancellationError()
-        }) -> ReReviewCoordinator {
-            .init(settings: settings, glab: glab, canAutomate: { _ in true }, verify: verify)
+        }, sharedAssessment: ReReviewAssessment? = nil) -> ReReviewCoordinator {
+            .init(settings: settings, glab: glab, canAutomate: { _ in true }, verify: verify,
+                authorFeedbackAssessment: { _, _ in sharedAssessment })
         }
 
         func request() throws -> GitLabMergeRequest {

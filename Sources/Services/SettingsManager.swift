@@ -49,6 +49,7 @@ final class SettingsManager {
     var automationAttemptReceipts: Set<TodoAutomationReceipt>
     var authorFeedbackAttempts: Set<AuthorFeedbackAttempt>
     var feedbackSuggestionDecisions = FeedbackSuggestionDecisions()
+    var reviewParticipationPreferences = ReviewParticipationPreferences()
     var pipelineRefreshAttempts: Set<PipelineRefreshAttempt>
     var pipelineClaimAssessmentAttempts: [PipelineClaimAssessmentAttempt]
     var pendingTodoAcknowledgements: Set<TodoActionAcknowledgement>
@@ -82,6 +83,7 @@ final class SettingsManager {
         automationAttemptReceipts = store.load(Key.automationAttemptReceipts, fallback: [])
         authorFeedbackAttempts = store.load(Key.authorFeedbackAttempts, fallback: [])
         feedbackSuggestionDecisions = store.load(Key.feedbackSuggestionDecisions, fallback: FeedbackSuggestionDecisions())
+        reviewParticipationPreferences = store.load(Key.reviewParticipationPreferences, fallback: ReviewParticipationPreferences())
         pipelineRefreshAttempts = store.load(Key.pipelineRefreshAttempts, fallback: [])
         pipelineClaimAssessmentAttempts = store.load(Key.pipelineClaimAssessmentAttempts, fallback: [])
         pendingTodoAcknowledgements = store.load(Key.pendingTodoAcknowledgements, fallback: [])
@@ -151,6 +153,7 @@ final class SettingsManager {
         persistenceStore.save(automationAttemptReceipts, forKey: Key.automationAttemptReceipts)
         persistenceStore.save(authorFeedbackAttempts, forKey: Key.authorFeedbackAttempts)
         persistenceStore.save(feedbackSuggestionDecisions, forKey: Key.feedbackSuggestionDecisions)
+        persistenceStore.save(reviewParticipationPreferences, forKey: Key.reviewParticipationPreferences)
         persistenceStore.save(pipelineRefreshAttempts, forKey: Key.pipelineRefreshAttempts)
         persistenceStore.save(pipelineClaimAssessmentAttempts, forKey: Key.pipelineClaimAssessmentAttempts)
         persistenceStore.save(pendingTodoAcknowledgements, forKey: Key.pendingTodoAcknowledgements)
@@ -205,6 +208,23 @@ final class SettingsManager {
             if previousAutomation != automation { onAutomationChanged?(previousAutomation) }
         }
         return accepted
+    }
+
+    func saveReviewParticipationPreferences() -> Bool {
+        persistenceStore.preserveCorruptValues()
+        let saved = persistenceStore.save(reviewParticipationPreferences, forKey: Key.reviewParticipationPreferences)
+        let synchronized = persistenceStore.synchronize()
+        return saved && synchronized
+    }
+
+    func removeReviewParticipationExclusion(_ id: UUID) -> Bool {
+        let previous = reviewParticipationPreferences
+        guard reviewParticipationPreferences.remove(id) else { return false }
+        guard saveReviewParticipationPreferences() else {
+            reviewParticipationPreferences = previous
+            return false
+        }
+        return true
     }
 
     func saveMergeSubmission(_ receipt: MergeSubmissionReceipt) -> Bool {
@@ -310,5 +330,6 @@ final class SettingsManager {
         static let autoMergeOptOuts = "autoMergeOptOuts"
         static let ignoredMergeRequests = "ignoredMergeRequests"
         static let feedbackSuggestionDecisions = "feedbackSuggestionDecisions"
+        static let reviewParticipationPreferences = "reviewParticipationPreferences"
     }
 }

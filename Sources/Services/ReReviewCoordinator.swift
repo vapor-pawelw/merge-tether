@@ -109,7 +109,8 @@ final class ReReviewCoordinator {
             fingerprint, request.semanticContextFingerprint, configuration.assistant.rawValue, configuration.autoVerifyReReview.description,
             configuration.assistant == .codex ? configuration.codexVerificationModel.rawValue : configuration.claudeVerificationModel.rawValue,
             configuration.verificationThinking.rawValue,
-            settings.feedbackSuggestionDecisions.revision(for: context.target)]
+            settings.feedbackSuggestionDecisions.revision(for: context.target),
+            settings.reviewParticipationPreferences.revision(host: context.host, username: context.username)]
             .joined(separator: "|")
     }
 
@@ -277,12 +278,13 @@ final class ReReviewCoordinator {
         let existingCheck = reReviewChecks[context]
         let failedWithoutAssessment = existingCheck?.assessment == nil
             && (existingCheck?.state == .failed || existingCheck?.state == .unavailable)
-        if let assessment = sharedAssessment, existingCheck?.key != key || failedWithoutAssessment {
+        if let assessment = sharedAssessment, existingCheck?.key != key || existingCheck?.assessment == nil || failedWithoutAssessment {
             reReviewChecks[context] = .init(key: key, fingerprint: fingerprint, state: .checking, assessment: assessment)
         }
         var pendingReviewers: [Int: Int] = [:]
         for (reviewerID, noteID) in candidates {
             guard reviewerID != user.id, !approvers.contains(reviewerID),
+                  !excludedReviewers(context, key: key, discussions: discussions, authorID: user.id).contains(reviewerID),
                   !reviewers.contains(where: { $0.user.id == reviewerID && $0.state == "approved" }) else { continue }
             if !reviewers.contains(where: { $0.user.id == reviewerID && $0.state == "unapproved" }),
                authorProgress?.phase == .complete, authorProgress?.head == head, authorProgress?.fingerprint == fingerprint,
@@ -313,7 +315,8 @@ final class ReReviewCoordinator {
         if !manual {
             if !settings.automation.autoVerifyReReview {
                 reReviewTasks.removeValue(forKey: context)?.task.cancel()
-                reReviewChecks[context] = ReReviewCheck(key: key, fingerprint: fingerprint, state: .manual)
+                let assessment = reReviewChecks[context]?.key == key ? reReviewChecks[context]?.assessment : nil
+                reReviewChecks[context] = ReReviewCheck(key: key, fingerprint: fingerprint, state: .manual, assessment: assessment)
                 notify(context, unanswered: feedback.hasUnansweredFeedback)
                 return
             }
@@ -342,9 +345,11 @@ final class ReReviewCoordinator {
                                                           target: .init(host: host, projectID: request.projectID, iid: request.iid,
                                                               url: request.webURL, expectedUsername: context.username),
                                                           semanticContextFingerprint: request.semanticContextFingerprint,
-                                                          thinking: thinking, ignoredSuggestions: activeIgnored)
+                                                          thinking: thinking, ignoredSuggestions: activeIgnored,
+                                                          excludedReplyAuthorIDs: settings.reviewParticipationPreferences.excludedIDs(host: host, username: context.username).sorted())
                         let assessment = try await verifyReReview(input, assistant, model)
-                        _ = try assessment.reviewers(in: discussions, authorID: user.id, ignoredSuggestions: activeIgnored)
+                        _ = try assessment.reviewers(in: discussions, authorID: user.id, ignoredSuggestions: activeIgnored,
+                            excludedReplyAuthorIDs: settings.reviewParticipationPreferences.excludedIDs(host: host, username: context.username))
                         guard !Task.isCancelled, isCurrent(context), reReviewChecks[context]?.key == key,
                               runtimePermitsReReview(context) else { return }
                         reReviewChecks[context]?.assessment = assessment
@@ -360,12 +365,15 @@ final class ReReviewCoordinator {
                 return
             }
             guard let assessment = reReviewChecks[context]?.assessment,
-                  let assessed = try? assessment.reviewers(in: discussions, authorID: user.id, ignoredSuggestions: activeIgnored) else {
+                  let assessed = try? assessment.reviewers(in: discussions, authorID: user.id, ignoredSuggestions: activeIgnored,
+                    excludedReplyAuthorIDs: settings.reviewParticipationPreferences.excludedIDs(host: host, username: context.username)) else {
                 notify(context, unanswered: feedback.hasUnansweredFeedback)
                 return
             }
-            let allFeedbackReady = assessment.hasNoRemainingAuthorWork(in: discussions, authorID: user.id, ignoredSuggestions: activeIgnored)
-                && assessment.missingPublishedReplyNoteIDs(in: discussions, authorID: user.id).isEmpty
+            let noReply = settings.reviewParticipationPreferences.excludedIDs(host: host, username: context.username)
+            let allFeedbackReady = assessment.hasNoRemainingAuthorWork(in: discussions, authorID: user.id,
+                ignoredSuggestions: activeIgnored, excludedReplyAuthorIDs: noReply)
+                && assessment.missingPublishedReplyNoteIDs(in: discussions, authorID: user.id, excludedReplyAuthorIDs: noReply).isEmpty
             recipients = pendingReviewers.filter {
                 feedback.addressedByReviewer[$0.key] != nil && assessed[$0.key] != nil
                     || allFeedbackReady && earlierReviewers.contains($0.key)
@@ -398,6 +406,7 @@ final class ReReviewCoordinator {
             if !informationalReviewers.isEmpty { settings.save() }
             notify(context, unanswered: feedback.hasUnansweredFeedback)
         }
+        recipients = recipients.filter { !excludedReviewers(context, key: key, discussions: discussions, authorID: user.id).contains($0.key) }
         var finished = true
         for (reviewerID, noteID) in recipients.sorted(by: { $0.key < $1.key }) {
             guard settings.automaticPublicWritesAllowed else {
@@ -465,6 +474,7 @@ final class ReReviewCoordinator {
                 guard settings.reReviewReceipts[receiptKey]?.covers(noteID: noteID, headSHA: head) != true else { continue }
                 let checkedReviewer = checkedReviewers.first { $0.user.id == reviewerID }
                 guard !checkedApprovers.contains(reviewerID), checkedReviewer?.state != "approved",
+                      !excludedReviewers(context, key: key, discussions: checkedThreads, authorID: user.id).contains(reviewerID),
                       checkedReviewer != nil || feedback.addressedByReviewer[reviewerID] != nil else { continue }
                 if checkedReviewer?.state == "unreviewed" || checkedReviewer?.state == "review_started" {
                     settings.reReviewReceipts[receiptKey] = ReReviewReceipt(noteID: noteID, requested: true, headSHA: head)
@@ -483,6 +493,7 @@ final class ReReviewCoordinator {
                         && self.reReviewKey(checkedMR, fingerprint: fingerprint, context: context) == key
                         && !self.settings.pendingCommentReviews.contains(target)
                         && self.settings.automation.scope.permits(checkedMR, host: host, username: context.username)
+                        && !self.excludedReviewers(context, key: key, discussions: checkedThreads, authorID: user.id).contains(reviewerID)
                 }
                 settings.reReviewReceipts[receiptKey]?.unconfirmed = false
                 settings.reReviewReceipts[receiptKey]?.requested = true
@@ -501,5 +512,11 @@ final class ReReviewCoordinator {
             settings.reReviewDraftBaselines.removeValue(forKey: target)
             settings.save()
         }
+    }
+
+    private func excludedReviewers(_ context: Context, key: String, discussions: [GitLabMergeRequestDiscussion], authorID: Int) -> Set<Int> {
+        settings.reviewParticipationPreferences.excludedIDs(host: context.host, username: context.username)
+            .union(reReviewChecks[context]?.key == key
+                ? reReviewChecks[context]?.assessment?.reviewerOptOutIDs(in: discussions, authorID: authorID) ?? [] : [])
     }
 }

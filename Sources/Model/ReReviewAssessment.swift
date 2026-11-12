@@ -24,6 +24,9 @@ struct ReReviewAssessment: Codable, Sendable {
     }
 
     struct Note: Codable, Sendable {
+        struct ReviewerOptOut: Codable, Sendable {
+            let sourceQuote: String
+        }
         struct ReviewSummaryCoverage: Codable, Sendable {
             let referencedNoteIDs: [Int]
             let noIndependentExpectation: Bool
@@ -47,6 +50,7 @@ struct ReReviewAssessment: Codable, Sendable {
         var publishedReplyNoteID: Int? = nil
         /// Within the enclosing head/text/discussion-bound assessment, this summary adds no obligation beyond the named findings.
         var reviewSummaryCoverage: ReviewSummaryCoverage? = nil
+        var reviewerOptOut: ReviewerOptOut? = nil
     }
     let notes: [Note]
     var completedBlockedRunIDs: [UUID]? = nil
@@ -54,10 +58,37 @@ struct ReReviewAssessment: Codable, Sendable {
 
     var reviewRequests: [CodeReviewRequest] { codeReviewRequests ?? [] }
 
+    func reviewerOptOutIDs(in discussions: [GitLabMergeRequestDiscussion], authorID: Int) -> Set<Int> {
+        Set(discussions.flatMap(\.notes).compactMap { source -> Int? in
+            guard source.system == false, let id = source.id, let participant = source.author?.id,
+                  participant != authorID, participant > 0,
+                  let proof = notes.first(where: { $0.noteID == id })?.reviewerOptOut,
+                  !proof.sourceQuote.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty,
+                  proof.sourceQuote.count <= 500, source.body?.contains(proof.sourceQuote) == true else { return nil }
+            return participant
+        })
+    }
+
+    func pureReviewerOptOutNoteIDs(in discussions: [GitLabMergeRequestDiscussion], authorID: Int) -> Set<Int> {
+        let excluded = reviewerOptOutIDs(in: discussions, authorID: authorID)
+        return Set(notes.compactMap { note in
+            guard let proof = note.reviewerOptOut, !proof.sourceQuote.isEmpty, proof.sourceQuote.count <= 500,
+                  note.state == .informational,
+                  note.informationalPurpose == .other, note.informationalAcknowledgementSafe != true,
+                  note.acceptanceNoteID == nil, (note.ignoredDecisionIDs ?? []).isEmpty,
+                  !reviewRequests.contains(where: { $0.sourceNoteID == note.noteID }),
+                  discussions.flatMap(\.notes).contains(where: {
+                      $0.id == note.noteID && $0.author.map { excluded.contains($0.id) } == true
+                          && $0.body?.contains(proof.sourceQuote) == true
+                  }) else { return nil }
+            return note.noteID
+        })
+    }
+
     func normalizingCoveredReviewSummaries(in discussions: [GitLabMergeRequestDiscussion], authorID: Int,
-                                          ignoredSuggestions: [IgnoredFeedbackSuggestion] = []) throws -> Self {
-        _ = try reviewers(in: discussions, authorID: authorID, ignoredSuggestions: ignoredSuggestions)
-        let summaries = coveredReviewSummaryIDs(in: discussions, authorID: authorID)
+                                          ignoredSuggestions: [IgnoredFeedbackSuggestion] = [], excludedReplyAuthorIDs: Set<Int> = []) throws -> Self {
+        _ = try reviewers(in: discussions, authorID: authorID, ignoredSuggestions: ignoredSuggestions, excludedReplyAuthorIDs: excludedReplyAuthorIDs)
+        let summaries = coveredReviewSummaryIDs(in: discussions, authorID: authorID, excludedReplyAuthorIDs: excludedReplyAuthorIDs)
         return .init(notes: notes.map { note in
             guard summaries.contains(note.noteID) else { return note }
             return .init(noteID: note.noteID, state: .informational, reason: note.reason, summary: note.summary,
@@ -81,17 +112,21 @@ struct ReReviewAssessment: Codable, Sendable {
 
     /// Addressed code or an explanation elsewhere does not replace this thread's reply.
     /// Includes actionable general comments; private drafts never prove publication.
-    func missingPublishedReplyNoteIDs(in discussions: [GitLabMergeRequestDiscussion], authorID: Int) -> Set<Int> {
-        repliesOwedByAddressedNotes(in: discussions, authorID: authorID)
-            .subtracting(coveredReviewSummaryIDs(in: discussions, authorID: authorID))
+    func missingPublishedReplyNoteIDs(in discussions: [GitLabMergeRequestDiscussion], authorID: Int,
+                                     excludedReplyAuthorIDs: Set<Int> = []) -> Set<Int> {
+        repliesOwedByAddressedNotes(in: discussions, authorID: authorID, excludedReplyAuthorIDs: excludedReplyAuthorIDs)
+            .subtracting(coveredReviewSummaryIDs(in: discussions, authorID: authorID, excludedReplyAuthorIDs: excludedReplyAuthorIDs))
     }
 
-    private func repliesOwedByAddressedNotes(in discussions: [GitLabMergeRequestDiscussion], authorID: Int) -> Set<Int> {
+    private func repliesOwedByAddressedNotes(in discussions: [GitLabMergeRequestDiscussion], authorID: Int,
+                                           excludedReplyAuthorIDs: Set<Int> = []) -> Set<Int> {
         let addressed = Set(notes.filter { $0.state == .addressed }.map(\.noteID))
+        let excluded = excludedReplyAuthorIDs.union(reviewerOptOutIDs(in: discussions, authorID: authorID))
         return Set(discussions.flatMap { thread in
             thread.notes.compactMap { note -> Int? in
                 guard let id = note.id, addressed.contains(id), note.system == false,
                       note.author?.id != authorID, note.resolved != true,
+                      note.author.map({ !excluded.contains($0.id) }) == true,
                       !thread.notes.contains(where: {
                           $0.system == false && $0.author?.id == authorID && ($0.id ?? 0) > id
                       }) else { return nil }
@@ -100,13 +135,14 @@ struct ReReviewAssessment: Codable, Sendable {
         })
     }
 
-    private func coveredReviewSummaryIDs(in discussions: [GitLabMergeRequestDiscussion], authorID: Int) -> Set<Int> {
+    private func coveredReviewSummaryIDs(in discussions: [GitLabMergeRequestDiscussion], authorID: Int,
+                                         excludedReplyAuthorIDs: Set<Int> = []) -> Set<Int> {
         let externalIDs = Set(discussions.flatMap(\.notes).filter {
             $0.system == false && $0.author?.id != authorID
         }.compactMap(\.id))
         guard notes.count == externalIDs.count, Set(notes.map(\.noteID)) == externalIDs else { return [] }
         let byID = Dictionary(uniqueKeysWithValues: notes.map { ($0.noteID, $0) })
-        let owed = repliesOwedByAddressedNotes(in: discussions, authorID: authorID)
+        let owed = repliesOwedByAddressedNotes(in: discussions, authorID: authorID, excludedReplyAuthorIDs: excludedReplyAuthorIDs)
         let questions = Set(reviewRequests.map(\.sourceNoteID))
         return Set(notes.compactMap { summary in
             guard let proof = summary.reviewSummaryCoverage, proof.noIndependentExpectation,
@@ -129,8 +165,9 @@ struct ReReviewAssessment: Codable, Sendable {
     }
 
     /// The thread root anchors presentation, while each owed note remains the worker's scope.
-    func missingPublishedRepliesByThread(in discussions: [GitLabMergeRequestDiscussion], authorID: Int) -> [Int: Set<Int>] {
-        let owed = missingPublishedReplyNoteIDs(in: discussions, authorID: authorID)
+    func missingPublishedRepliesByThread(in discussions: [GitLabMergeRequestDiscussion], authorID: Int,
+                                         excludedReplyAuthorIDs: Set<Int> = []) -> [Int: Set<Int>] {
+        let owed = missingPublishedReplyNoteIDs(in: discussions, authorID: authorID, excludedReplyAuthorIDs: excludedReplyAuthorIDs)
         var threads: [Int: Set<Int>] = [:]
         for discussion in discussions {
             guard let rootID = discussion.notes.first?.id else { continue }
@@ -151,15 +188,15 @@ struct ReReviewAssessment: Codable, Sendable {
     }
 
     func hasNoRemainingAuthorWork(in discussions: [GitLabMergeRequestDiscussion], authorID: Int,
-                                 ignoredSuggestions: [IgnoredFeedbackSuggestion] = []) -> Bool {
+                                 ignoredSuggestions: [IgnoredFeedbackSuggestion] = [], excludedReplyAuthorIDs: Set<Int> = []) -> Bool {
         guard reviewRequests.isEmpty,
-              (try? reviewers(in: discussions, authorID: authorID, ignoredSuggestions: ignoredSuggestions)) != nil else { return false }
+              (try? reviewers(in: discussions, authorID: authorID, ignoredSuggestions: ignoredSuggestions, excludedReplyAuthorIDs: excludedReplyAuthorIDs)) != nil else { return false }
         return notes.allSatisfy { [.addressed, .informational, .ignoredByUser].contains($0.state) }
-            && missingPublishedReplyNoteIDs(in: discussions, authorID: authorID).isEmpty
+            && missingPublishedReplyNoteIDs(in: discussions, authorID: authorID, excludedReplyAuthorIDs: excludedReplyAuthorIDs).isEmpty
     }
 
     func reviewers(in discussions: [GitLabMergeRequestDiscussion], authorID: Int,
-                   ignoredSuggestions: [IgnoredFeedbackSuggestion] = []) throws -> [Int: Int] {
+                   ignoredSuggestions: [IgnoredFeedbackSuggestion] = [], excludedReplyAuthorIDs: Set<Int> = []) throws -> [Int: Int] {
         let external = discussions.flatMap(\.notes).filter { $0.system != true && $0.author?.id != authorID }
         guard external.allSatisfy({ ($0.id ?? 0) > 0 && ($0.author?.id ?? 0) > 0 && $0.body != nil }),
               Set(external.compactMap(\.id)).count == external.count,
@@ -167,7 +204,7 @@ struct ReReviewAssessment: Codable, Sendable {
               notes.allSatisfy({ !$0.reason.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty && $0.reason.count <= 600 })
         else { throw ValidationError.incompleteEvidence }
         let byID = Dictionary(uniqueKeysWithValues: notes.map { ($0.noteID, $0) })
-        let coveredSummaries = coveredReviewSummaryIDs(in: discussions, authorID: authorID)
+        let coveredSummaries = coveredReviewSummaryIDs(in: discussions, authorID: authorID, excludedReplyAuthorIDs: excludedReplyAuthorIDs)
         guard notes.allSatisfy({ $0.reviewSummaryCoverage == nil || coveredSummaries.contains($0.noteID) }) else {
             throw ValidationError.incompleteEvidence
         }
@@ -189,6 +226,16 @@ struct ReReviewAssessment: Codable, Sendable {
                 throw ValidationError.incompleteEvidence
             }
             let ignoredIDs = assessment.ignoredDecisionIDs ?? []
+            if let proof = assessment.reviewerOptOut {
+                guard !proof.sourceQuote.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty,
+                      proof.sourceQuote.count <= 500, note.body?.contains(proof.sourceQuote) == true,
+                      assessment.informationalAcknowledgementSafe != true, assessment.acceptanceNoteID == nil,
+                      assessment.reviewSummaryCoverage == nil,
+                      assessment.state != .ignoredByUser else { throw ValidationError.incompleteEvidence }
+                guard assessment.state != .informational || assessment.informationalPurpose == .other else {
+                    throw ValidationError.incompleteEvidence
+                }
+            }
             guard Set(ignoredIDs).count == ignoredIDs.count,
                   Set(ignoredIDs).isSubset(of: activeIDs),
                   assessment.state != .ignoredByUser || !ignoredIDs.isEmpty,
@@ -207,6 +254,7 @@ struct ReReviewAssessment: Codable, Sendable {
         for request in reviewRequests {
             if let reviewer = external.first(where: { $0.id == request.sourceNoteID })?.author?.id { blocked.insert(reviewer) }
         }
-        return ready.filter { !blocked.contains($0.key) }
+        let optedOut = reviewerOptOutIDs(in: discussions, authorID: authorID)
+        return ready.filter { !blocked.contains($0.key) && !optedOut.contains($0.key) }
     }
 }

@@ -57,6 +57,25 @@ struct AuthorFeedbackCoordinatorTests {
         }
     }
 
+    @Test(arguments: [ReReviewAssessment.Note.State.blocking, .addressed])
+    func personalNoReplyPreferencePreservesTechnicalWorkWithoutPreparingAReply(_ state: ReReviewAssessment.Note.State) async throws {
+        try await withFixture { f in
+            f.settings.automation.authorFeedback.isEnabled = true
+            f.settings.automation.autoResolveAcceptedFeedback = true
+            f.settings.reviewParticipationPreferences.exclude(.init(host: Fixture.host, entityID: 7, label: "@alice"), username: "me")
+            try f.write("discussions.json", #"[{"id":"thread-a","notes":[{"id":10,"author":{"id":7,"username":"alice"},"system":false,"body":"Fix overflow","resolvable":true,"resolved":false}]}]"#)
+            let coordinator = f.coordinator(assessment: .init(notes: [.init(noteID: 10, state: state, reason: "Technical overflow concern.")]))
+            var dispatched: Set<Int> = []
+            coordinator.onNeedsWork = { _, ids, _, _ in dispatched.formUnion(ids) }
+            try await f.run(coordinator)
+            let status = try #require(coordinator.status(projectID: 1, iid: 2))
+            #expect(status.replyNoteIDs.isEmpty)
+            #expect(dispatched == (state == .blocking ? [10] : []))
+            #expect(f.inputs.first?.excludedReplyAuthorIDs == [7])
+            #expect(f.reactionPosts == 0 && f.resolutionPosts == 0)
+        }
+    }
+
     @Test(arguments: [false, true])
     func sharedPublishedReplyStillDispatchesTheReplyOwedInTheOriginalThread(_ approved: Bool) async throws {
         try await withFixture { fixture in
@@ -165,6 +184,37 @@ struct AuthorFeedbackCoordinatorTests {
                 #expect(fixture.inputs.first?.ignoredSuggestions.map(\.id) == [entry.id])
             }
             #expect(!fixture.resolved && fixture.resolutionPosts == 0 && fixture.reactionPosts == 0)
+        }
+    }
+
+    @Test(arguments: [false, true])
+    func onlyASourceBoundPureOptOutCanRetireAnAdministrativeBlockedAttemptWithoutReplying(_ pureOptOut: Bool) async throws {
+        try await withFixture { f in
+            f.settings.automation.autoResolveAcceptedFeedback = true
+            f.settings.automation.authorFeedback.isEnabled = true
+            let quote = "Do not invite me to reviews"
+            try f.write("discussions.json", #"[{"id":"thread-a","notes":[{"id":10,"author":{"id":7,"username":"alice"},"system":false,"body":"\#(quote)","resolvable":false,"resolved":false}]}]"#)
+            let request = try JSONDecoder().decode(GitLabMergeRequest.self, from: Data(Fixture.request.utf8))
+            let job = AssistantAutomationRunner.Handoff(id: UUID(), key: .init(assistant: .codex,
+                work: .init(host: Fixture.host, projectID: 1, iid: 2), username: "me", workspace: "", access: .gitLabRead),
+                title: "Administrative feedback", prompt: "Handle selected feedback", createdAt: Date(timeIntervalSince1970: 1),
+                allowsPush: false, feedbackNoteIDs: [10], followUpPushAllowed: true,
+                execution: .init(state: .blocked, finishedAt: Date(timeIntervalSince1970: 2),
+                    summary: "No code change is needed; participant already removed their review request.",
+                    blocker: "Administrative acknowledgement has no source/test files."),
+                workflow: .followUp, expectedHeadSHA: request.sha)
+            f.settings.assistantHandoffs = [job]
+            let coordinator = f.coordinator(assessment: .init(notes: [.init(noteID: 10, state: .informational,
+                reason: "No technical work remains.", informationalAcknowledgementSafe: false, informationalPurpose: .other,
+                reviewerOptOut: pureOptOut ? .init(sourceQuote: quote) : nil)], completedBlockedRunIDs: [job.id]))
+            var dispatched = false
+            coordinator.onNeedsWork = { _, _, _, _ in dispatched = true }
+            try await f.run(coordinator)
+            let status = try #require(coordinator.status(projectID: 1, iid: 2))
+            #expect(status.reconciles(job, request: request, discussionFingerprint: ReviewVerdict.fingerprint(try f.discussions())) == pureOptOut)
+            #expect(status.replyNoteIDs.isEmpty && !dispatched)
+            #expect(f.settings.assistantHandoffs.first?.execution?.state == .blocked)
+            #expect(f.reactionPosts == 0 && f.resolutionPosts == 0)
         }
     }
 

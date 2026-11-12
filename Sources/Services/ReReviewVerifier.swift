@@ -4,7 +4,7 @@ import Foundation
 /// Supplied evidence is supplementary; absent proof must produce `uncertain`.
 enum ReReviewVerifier {
     enum VerificationError: Error, Equatable { case unavailable, failed, incompleteEvidence }
-    static let policyVersion = "covered-review-summaries-9"
+    static let policyVersion = "review-participation-10"
 
     static let schema = #"{"type":"object","additionalProperties":false,"properties":{"notes":{"type":"array","items":{"type":"object","additionalProperties":false,"properties":{"noteID":{"type":"integer"},"state":{"type":"string","enum":["addressed","informational","blocking","uncertain"]},"reason":{"type":"string"},"summary":{"type":"string","minLength":1,"maxLength":200},"acceptanceNoteID":{"type":["integer","null"]},"publishedReplyNoteID":{"type":["integer","null"]},"informationalAcknowledgementSafe":{"type":"boolean"},"informationalPurpose":{"type":"string","enum":["concreteCodeReviewFeedback","reviewSummary","automatedReviewReport","other"]}},"required":["noteID","state","reason","summary","acceptanceNoteID","publishedReplyNoteID","informationalAcknowledgementSafe","informationalPurpose"]}}},"required":["notes"]}"#
 
@@ -25,7 +25,9 @@ enum ReReviewVerifier {
                 "referencedNoteIDs": ["type": "array", "items": identity, "minItems": 1, "maxItems": 12],
                 "noIndependentExpectation": ["type": "boolean"]
             ], "required": ["referencedNoteIDs", "noIndependentExpectation"]]
-        item["required"] = (item["required"] as? [String] ?? []) + ["ignoredDecisionIDs", "reviewSummaryCoverage"]
+        fields["reviewerOptOut"] = ["type": ["object", "null"], "additionalProperties": false,
+            "properties": ["sourceQuote": ["type": "string", "minLength": 1, "maxLength": 500]], "required": ["sourceQuote"]]
+        item["required"] = (item["required"] as? [String] ?? []) + ["ignoredDecisionIDs", "reviewSummaryCoverage", "reviewerOptOut"]
         notes["minItems"] = noteIDs.count
         notes["maxItems"] = noteIDs.count
         item["properties"] = fields
@@ -86,6 +88,7 @@ enum ReReviewVerifier {
         var blockedFollowUps: [BlockedFollowUp] = []
         var ignoredSuggestions: [IgnoredFeedbackSuggestion] = []
         var completedFollowUp: CompletedFollowUp? = nil
+        var excludedReplyAuthorIDs: [Int] = []
     }
 
     @MainActor
@@ -111,6 +114,9 @@ enum ReReviewVerifier {
 
     private static func runOnce(_ input: Input, assistant: AutomationAssistant, model: String, executable: URL) async throws -> ReReviewAssessment {
         guard input.target == nil || input.target?.isValid == true else { throw VerificationError.incompleteEvidence }
+        guard input.excludedReplyAuthorIDs.allSatisfy({ $0 > 0 }),
+              Set(input.excludedReplyAuthorIDs).count == input.excludedReplyAuthorIDs.count,
+              input.excludedReplyAuthorIDs.isEmpty || input.target != nil else { throw VerificationError.incompleteEvidence }
         guard input.discussions.flatMap(\.notes).allSatisfy({ $0.system == true || $0.body != nil }) else {
             throw VerificationError.incompleteEvidence
         }
@@ -165,14 +171,15 @@ enum ReReviewVerifier {
                                       concernReason: GlabService.redactWorkflowEvidence(decision.concernReason), createdAt: decision.createdAt)
                               }, completedFollowUp: input.completedFollowUp.map { .init(runID: $0.runID,
                                   selectedFeedbackIDs: $0.selectedFeedbackIDs,
-                                  summary: String(GlabService.redactWorkflowEvidence($0.summary).prefix(2_000))) })
+                                  summary: String(GlabService.redactWorkflowEvidence($0.summary).prefix(2_000))) },
+                              excludedReplyAuthorIDs: input.excludedReplyAuthorIDs)
         var encoded = try JSONEncoder().encode(sanitized)
         if encoded.count > 180_000, let target = input.target {
             // Retain exact output scope and identity; fetch large MR content through glab.
             let metadata = Input(authorID: input.authorID, headSHA: input.headSHA, title: sanitized.title,
                 diff: "", discussions: [], target: target, semanticContextFingerprint: input.semanticContextFingerprint,
                 thinking: input.thinking, blockedFollowUps: sanitized.blockedFollowUps, ignoredSuggestions: sanitized.ignoredSuggestions,
-                completedFollowUp: sanitized.completedFollowUp)
+                completedFollowUp: sanitized.completedFollowUp, excludedReplyAuthorIDs: sanitized.excludedReplyAuthorIDs)
             encoded = try JSONEncoder().encode(metadata)
         }
         guard encoded.count <= 180_000 else { throw VerificationError.incompleteEvidence }
@@ -259,6 +266,18 @@ enum ReReviewVerifier {
             the concrete concern. Do not classify the report itself as a second concrete finding merely
             because it repeats a finding's question. Verify its coverage or any independent expectation.
             Purpose never makes an unsafe thread safe and never grants reviewer acceptance.
+            reviewerOptOut is a participant's explicit refusal of review participation or further review
+            contact. Supply an exact sourceQuote from that SAME external note, otherwise null. Never infer
+            this from identity, job title, silence, a resolved thread or somebody else's preference.
+            A pure administrative self-opt-out is informational with purpose other, no acceptanceNoteID,
+            and informationalAcknowledgementSafe false. It requires NO reply, private draft, reaction,
+            code change or re-review invitation. An existing author acknowledgement never invites them back.
+            In a mixed note retain every independent technical defect or before-merge obligation, with
+            blocking/uncertain/addressed as appropriate, while still excluding the participant from contact.
+            excludedReplyAuthorIDs are explicit LOCAL user no-contact preferences. They waive only automatic
+            replies/invitations, never code correctness, tests, acceptance, or merge conditions. Do not create
+            a reply-only task for these authors. A real technical issue remains actionable; report its result
+            without a private/public reply to that participant. Do not invent acceptance or resolve a thread.
             addressed: the current diff, title or description proves the requested correction in that
             artifact, or a substantive reply explains
             why the concern does not apply and is ready for the reviewer to reconsider. An author's
@@ -365,6 +384,10 @@ enum ReReviewVerifier {
             explicitly ignoredByUser through current precise decision evidence, every still-owed author reply is published,
             and the actual stopped step no longer prevents completing THIS assigned MR task. A later rollout
             or organizational prerequisite alone can remain outstanding without inventing its acceptance.
+            A narrow alternative is an entirely fulfilled administrative self-opt-out: all selected notes
+            have a source-quoted reviewerOptOut, are informational/other, and have no independent technical
+            obligation. The unwanted reply is NO ACTION, not missing delivery. Complete only that exact
+            supplied attempt; generic informational comments cannot excuse a failed tool, test or fix.
             Do not complete a run while its required tool, test, remote correction, push, publication or other
             current-task obligation remains unverified or undone. Missing or unclear evidence means omit that
             runID, retaining its stopped state. Never return an ID absent from blockedFollowUps. Without supplied
@@ -423,7 +446,7 @@ enum ReReviewVerifier {
 
     private static func validatedAssessment(_ assessment: ReReviewAssessment, input: Input) throws -> ReReviewAssessment {
         let normalized = try assessment.normalizingCoveredReviewSummaries(in: input.discussions,
-            authorID: input.authorID, ignoredSuggestions: input.ignoredSuggestions)
+            authorID: input.authorID, ignoredSuggestions: input.ignoredSuggestions, excludedReplyAuthorIDs: Set(input.excludedReplyAuthorIDs))
         try validateBlockedRunProof(normalized, input: input)
         return redactingReasons(in: normalized)
     }
@@ -435,8 +458,10 @@ enum ReReviewVerifier {
             throw VerificationError.incompleteEvidence
         }
         let addressed = Set(assessment.notes.filter { $0.state == .addressed || $0.state == .ignoredByUser }.map(\.noteID))
+            .union(assessment.pureReviewerOptOutNoteIDs(in: input.discussions, authorID: input.authorID))
             .subtracting(assessment.reviewRequests.map(\.sourceNoteID))
-        let missingReplies = assessment.missingPublishedReplyNoteIDs(in: input.discussions, authorID: input.authorID)
+        let missingReplies = assessment.missingPublishedReplyNoteIDs(in: input.discussions, authorID: input.authorID,
+            excludedReplyAuthorIDs: Set(input.excludedReplyAuthorIDs))
         guard input.blockedFollowUps.filter({ completed.contains($0.runID) }).allSatisfy({
             Set($0.selectedFeedbackIDs).isSubset(of: addressed) && Set($0.selectedFeedbackIDs).isDisjoint(with: missingReplies)
         }) else { throw VerificationError.incompleteEvidence }
@@ -449,7 +474,8 @@ enum ReReviewVerifier {
                 summary: note.summary.map(GlabService.redactWorkflowEvidence), acceptanceNoteID: note.acceptanceNoteID,
                 informationalAcknowledgementSafe: note.informationalAcknowledgementSafe,
                 informationalPurpose: note.informationalPurpose, ignoredDecisionIDs: note.ignoredDecisionIDs,
-                publishedReplyNoteID: note.publishedReplyNoteID, reviewSummaryCoverage: note.reviewSummaryCoverage)
+                publishedReplyNoteID: note.publishedReplyNoteID, reviewSummaryCoverage: note.reviewSummaryCoverage,
+                reviewerOptOut: note.reviewerOptOut)
         }, completedBlockedRunIDs: assessment.completedBlockedRunIDs,
            codeReviewRequests: assessment.codeReviewRequests.map { requests in requests.map { request in
                .init(sourceNoteID: request.sourceNoteID, sourceQuote: GlabService.redactWorkflowEvidence(request.sourceQuote),

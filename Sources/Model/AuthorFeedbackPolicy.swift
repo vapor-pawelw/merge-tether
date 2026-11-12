@@ -36,7 +36,8 @@ struct AuthorFeedbackPolicy {
         var summary: String? = nil
         /// Exact assessment note whose explanation is displayed; the thread root can differ.
         var sourceNoteID: Int? = nil
-        var canResolve: Bool { state == .ready && discussionID != nil }
+        var automaticResolutionSuppressed = false
+        var canResolve: Bool { state == .ready && discussionID != nil && !automaticResolutionSuppressed }
     }
 
     struct InformationalAcknowledgement: Equatable {
@@ -50,11 +51,12 @@ struct AuthorFeedbackPolicy {
     static func informationalAcknowledgements(discussions: [GitLabMergeRequestDiscussion], assessment: ReReviewAssessment,
                                               authorID: Int, enabled: Bool = true,
                                               pendingDraftCount: Int = 0,
-                                              ignoredSuggestions: [IgnoredFeedbackSuggestion] = []) -> [InformationalAcknowledgement] {
+                                              ignoredSuggestions: [IgnoredFeedbackSuggestion] = [], excludedReplyAuthorIDs: Set<Int> = []) -> [InformationalAcknowledgement] {
         guard enabled, pendingDraftCount == 0,
               let assessment = try? assessment.normalizingCoveredReviewSummaries(in: discussions,
-                authorID: authorID, ignoredSuggestions: ignoredSuggestions) else { return [] }
+                authorID: authorID, ignoredSuggestions: ignoredSuggestions, excludedReplyAuthorIDs: excludedReplyAuthorIDs) else { return [] }
         let verdicts = Dictionary(uniqueKeysWithValues: assessment.notes.map { ($0.noteID, $0) })
+        let excluded = excludedReplyAuthorIDs.union(assessment.reviewerOptOutIDs(in: discussions, authorID: authorID))
         return discussions.compactMap { discussion in
             let relevant = discussion.notes.filter { $0.system != true }
             let external = relevant.filter { $0.author?.id != authorID }
@@ -63,6 +65,7 @@ struct AuthorFeedbackPolicy {
             }), external.allSatisfy({ note in
                 guard let verdict = verdicts[note.id ?? 0] else { return false }
                 return verdict.state == .informational && verdict.informationalAcknowledgementSafe == true
+                    && note.author.map { !excluded.contains($0.id) } == true
             }) else { return nil }
             let root = discussion.notes.first
             let canResolve = discussion.id?.isEmpty == false && root?.system == false
@@ -90,14 +93,17 @@ struct AuthorFeedbackPolicy {
 
     static func evaluate(discussions: [GitLabMergeRequestDiscussion], assessment: ReReviewAssessment?, authorID: Int,
                          approvedReviewerIDs: Set<Int>, enabled: Bool = true, pendingDraftCount: Int = 0,
-                         ignoredSuggestions: [IgnoredFeedbackSuggestion] = []) -> [Finding] {
+                         ignoredSuggestions: [IgnoredFeedbackSuggestion] = [], excludedReplyAuthorIDs: Set<Int> = []) -> [Finding] {
         let gate: State? = !enabled ? .disabled : pendingDraftCount > 0 ? .waitingPublication : nil
         let verified = assessment.flatMap { try? $0.normalizingCoveredReviewSummaries(in: discussions,
-            authorID: authorID, ignoredSuggestions: ignoredSuggestions) }
+            authorID: authorID, ignoredSuggestions: ignoredSuggestions, excludedReplyAuthorIDs: excludedReplyAuthorIDs) }
         let verdicts = Dictionary(uniqueKeysWithValues: (verified?.notes ?? []).map { ($0.noteID, $0) })
-        let missingReplies = verified?.missingPublishedReplyNoteIDs(in: discussions, authorID: authorID) ?? []
+        let pureOptOuts = verified?.pureReviewerOptOutNoteIDs(in: discussions, authorID: authorID) ?? []
+        let missingReplies = verified?.missingPublishedReplyNoteIDs(in: discussions, authorID: authorID,
+            excludedReplyAuthorIDs: excludedReplyAuthorIDs) ?? []
         let informationalThreads = Set(verified.map {
-            informationalAcknowledgements(discussions: discussions, assessment: $0, authorID: authorID, ignoredSuggestions: ignoredSuggestions)
+            informationalAcknowledgements(discussions: discussions, assessment: $0, authorID: authorID,
+                ignoredSuggestions: ignoredSuggestions, excludedReplyAuthorIDs: excludedReplyAuthorIDs)
                 .filter(\.canResolve).compactMap(\.discussionID)
         } ?? [])
         let published = discussions.flatMap(\.notes).filter { $0.system == false }
@@ -125,8 +131,11 @@ struct AuthorFeedbackPolicy {
                   let rootID = root.id, rootID > 0, let owner = root.author, owner.id > 0, owner.id != authorID,
                   root.system == false, root.resolvable == true, root.resolved == false else { continue }
             represented.insert(index)
-            let thread = discussion.notes.filter { $0.system == false && $0.author.map { $0.id != authorID } == true }
-            var participants = [owner]
+            let thread = discussion.notes.filter {
+                $0.system == false && $0.author.map { $0.id != authorID } == true && $0.id.map(pureOptOuts.contains) != true
+            }
+            guard !thread.isEmpty else { continue }
+            var participants = pureOptOuts.contains(rootID) ? [] : [owner]
             for note in thread where note.id != rootID {
                 guard let author = note.author, verdicts[note.id ?? 0]?.state != .informational,
                       !participants.contains(where: { $0.id == author.id }) else { continue }
@@ -171,7 +180,15 @@ struct AuthorFeedbackPolicy {
                                         reason: verdict.reason, waitingForReviewers: [handle(author)], summary: verdict.summary, sourceNoteID: verdict.noteID))
             }
         }
-        return findings
+        let excluded = excludedReplyAuthorIDs.union(verified?.reviewerOptOutIDs(in: discussions, authorID: authorID) ?? [])
+        return findings.map { finding in
+            var result = finding
+            result.automaticResolutionSuppressed = discussions.contains { discussion in
+                (discussion.id == finding.discussionID || discussion.notes.contains { $0.id == finding.id })
+                    && discussion.notes.contains { $0.author.map { excluded.contains($0.id) } == true }
+            }
+            return result
+        }
     }
 
     private static func isBlocking(_ verdict: Verdict) -> Bool {
@@ -182,9 +199,9 @@ struct AuthorFeedbackPolicy {
     /// reviewer to re-review a fix they have already explicitly accepted.
     static func acceptedReviewers(discussions: [GitLabMergeRequestDiscussion], assessment: ReReviewAssessment,
                                   authorID: Int, approvedReviewerIDs: Set<Int>,
-                                  ignoredSuggestions: [IgnoredFeedbackSuggestion] = []) -> Set<Int> {
+                                  ignoredSuggestions: [IgnoredFeedbackSuggestion] = [], excludedReplyAuthorIDs: Set<Int> = []) -> Set<Int> {
         guard let assessment = try? assessment.normalizingCoveredReviewSummaries(in: discussions,
-            authorID: authorID, ignoredSuggestions: ignoredSuggestions) else { return [] }
+            authorID: authorID, ignoredSuggestions: ignoredSuggestions, excludedReplyAuthorIDs: excludedReplyAuthorIDs) else { return [] }
         let verdicts = Dictionary(uniqueKeysWithValues: assessment.notes.map { ($0.noteID, $0) })
         let external = discussions.flatMap(\.notes).filter { $0.system == false && $0.author?.id != authorID }
         let byID = Dictionary(uniqueKeysWithValues: external.compactMap { note in note.id.map { ($0, note) } })
