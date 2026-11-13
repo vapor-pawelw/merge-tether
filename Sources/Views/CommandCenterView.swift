@@ -149,14 +149,15 @@ struct CommandCenterView: View {
         let settings = monitor.settings
         let available = settings.configuredAutomationAvailable
         let active = settings.automationGloballyActive
-        return Toggle(isOn: Binding(get: { active }, set: { monitor.setAutomationGloballyEnabled($0) })) {
+        // A plain toolbar button keeps the standard chrome; the bolt alone shows the state.
+        return Button { monitor.setAutomationGloballyEnabled(!settings.automationGloballyEnabled) } label: {
             Label { Text(.CommandCenter.commandCenterAutomationToggle) } icon: {
                 Image(systemName: active ? "bolt.fill" : "bolt.slash")
                     .foregroundStyle(active ? Color.accentColor : Color.secondary)
             }
         }
-        .toggleStyle(.button)
         .disabled(!available)
+        .accessibilityAddTraits(active ? .isSelected : [])
         .help(Text(!available ? .CommandCenter.commandCenterAutomationHelpManual
             : active ? .CommandCenter.commandCenterAutomationHelpActive : .CommandCenter.commandCenterAutomationHelpSuspended))
     }
