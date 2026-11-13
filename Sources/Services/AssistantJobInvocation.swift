@@ -39,11 +39,15 @@ struct AssistantJobInvocation {
         return arguments + ["-"]
     }
 
-    var claudeArguments: [String] {
-        ["-p", "--dangerously-skip-permissions", "--permission-prompts", "none",
-         "--tools", claudeTools, "--settings", claudeSettings,
-         "--strict-mcp-config", "--mcp-config", #"{"mcpServers":{}}"#,
-         "--no-session-persistence", "--output-format", "json", "--json-schema", AssistantJobResult.schema]
+    /// Legacy handoffs without a recorded model keep the model configured in Claude CLI.
+    func claudeArguments(model: ClaudeCodingModel?, thinking: CodexReviewThinking?) -> [String] {
+        var arguments = ["-p", "--dangerously-skip-permissions", "--permission-prompts", "none",
+                         "--tools", claudeTools, "--settings", claudeSettings,
+                         "--strict-mcp-config", "--mcp-config", #"{"mcpServers":{}}"#,
+                         "--no-session-persistence", "--output-format", "json", "--json-schema", AssistantJobResult.schema]
+        if let model { arguments += ["--model", model.rawValue] }
+        if let thinking { arguments += ["--effort", thinking.rawValue] }
+        return arguments
     }
 
     func prepareEvidenceDirectories() throws {

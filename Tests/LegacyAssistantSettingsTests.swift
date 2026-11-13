@@ -29,6 +29,18 @@ struct LegacyAssistantSettingsTests {
         #expect(try JSONDecoder().decode(AutomationSettings.self, from: JSONEncoder().encode(settings)) == settings)
     }
 
+    @Test func olderSettingsUseClaudeOpusHighAndCodingSelectionPersists() throws {
+        var settings = try JSONDecoder().decode(AutomationSettings.self, from: Data("{}".utf8))
+        #expect(settings.claudeCodingModel.rawValue == "claude-opus-5-5")
+        #expect(settings.claudeCodingThinking.rawValue == "high")
+        settings.claudeCodingModel = .sonnet
+        settings.claudeCodingThinking = .low
+        #expect(try JSONDecoder().decode(AutomationSettings.self, from: JSONEncoder().encode(settings)) == settings)
+        settings.assistant = .claude
+        #expect(settings.codingPolicy == "claude|claude-sonnet-5-5|low")
+        #expect(settings.codingThinking(for: .claude) == .low && settings.codingThinking(for: .codex) == .high)
+    }
+
     private func encodedSettings(_ settings: AutomationSettings) throws -> [String: Any] {
         try #require(JSONSerialization.jsonObject(with: JSONEncoder().encode(settings)) as? [String: Any])
     }

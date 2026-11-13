@@ -98,6 +98,7 @@ enum AssistantAutomationRunner {
         var reviewThinking: CodexReviewThinking?
         var codingModel: CodexReviewModel?
         var codingThinking: CodexReviewThinking?
+        var claudeCodingModel: ClaudeCodingModel?
         var draftRepair: DraftReplyRepair.Context?
         var repository: String?
         var followUpPushAllowed: Bool?
@@ -350,7 +351,9 @@ enum AssistantAutomationRunner {
             reviewModel: useReviewModel ? settings.automation.codexReviewModel : nil,
             reviewThinking: useReviewModel ? settings.automation.codexReviewThinking : nil,
             codingModel: assistant == .codex && !useReviewModel ? settings.automation.codexReviewModel : nil,
-            codingThinking: assistant == .codex && !useReviewModel ? settings.automation.codexReviewThinking : nil,
+            codingThinking: assistant == .claude ? settings.automation.claudeCodingThinking
+                : !useReviewModel ? settings.automation.codexReviewThinking : nil,
+            claudeCodingModel: assistant == .claude ? settings.automation.claudeCodingModel : nil,
             draftRepair: draftRepair,
             repository: mergeRequestURL.gitLabProjectPath.split(separator: "/").last.map(String.init),
             followUpPushAllowed: mrWorkflow == .followUp ? followUpPush : nil,

@@ -6,6 +6,8 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 
 ## Unreleased
 
+- Choose the coding model and reasoning effort for Claude CLI workers in Settings, as already available for Codex.
+
 - Identify bot authors independently of AI-assisted text, resolve their verified and answered feedback under the existing automation gates, and name the human authors whose threads still await resolution.
 - Add a local bot-account list scoped to the GitLab host and signed-in account, with reversible stable-ID declarations and separate bot badges on Mac and iOS.
 

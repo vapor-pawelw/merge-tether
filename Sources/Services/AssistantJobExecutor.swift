@@ -47,8 +47,7 @@ enum AssistantJobExecutor {
         if let repair = handoff.draftRepair {
             guard handoff.workflow == .followUp, handoff.followUpPushAllowed == true,
                   repair.assistant == handoff.key.assistant,
-                  repair.codingModel == settings.automation.codexReviewModel,
-                  repair.codingThinking == settings.automation.codexReviewThinking else { throw ExecutionError.disabledPermission }
+                  repair.matchesCodingPolicy(settings.automation) else { throw ExecutionError.disabledPermission }
             let snapshot = DraftProofRecoveryCoordinator.Snapshot(request: request, discussions: [], drafts: [],
                 user: user, host: handoff.key.work.host, branchHead: request.sha ?? "")
             try await DraftReplyRepair.validate(repair, snapshot: snapshot, settings: settings, glab: glab, excludingRunID: handoff.id)
@@ -183,12 +182,12 @@ enum AssistantJobExecutor {
             guard let data = try? Data(contentsOf: invocation.resultURL) else { throw ExecutionError.missingResult }
             result = try AssistantJobResult.codex(data)
         } else {
-            let arguments = invocation.claudeArguments
+            let arguments = invocation.claudeArguments(model: handoff.claudeCodingModel, thinking: handoff.codingThinking)
             output = try await AssistantUsageRunner.run(executable, arguments: arguments, environment: invocation.childEnvironment(environment),
                                                   currentDirectory: folder, timeout: workerTimeout.seconds, input: input,
                                                   outputDirectory: folder.appendingPathComponent("cli-output"),
                                                   usage: .init(role: .codingAgent, assistant: handoff.key.assistant,
-                                                    model: (handoff.codingModel ?? handoff.reviewModel)?.rawValue,
+                                                    model: handoff.claudeCodingModel?.rawValue,
                                                     mergeRequest: usageMergeRequest),
                                                   beforeLaunch: { @MainActor in
                                                       try validatePersistence(settings)

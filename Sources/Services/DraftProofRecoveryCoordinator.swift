@@ -344,8 +344,7 @@ final class DraftProofRecoveryCoordinator {
         guard settings.automaticWritesAllowed, repairTasks[input.snapshot.work] == nil, onNeedsRepair != nil,
               DraftReplyRepair.preparationAllowed(input.snapshot.request, configuration: input.configuration) else { return }
         let work = input.snapshot.work
-        let policy = input.configuration.assistant.rawValue + "|" + input.configuration.codexReviewModel.rawValue
-            + "|" + input.configuration.codexReviewThinking.rawValue
+        let policy = input.configuration.codingPolicy
         let scope = input.draftIDs.sorted()
         if let previous = states[work], previous.repairCodingPolicy == policy, previous.repairDraftIDs == scope,
            previous.repairTerminal == true || previous.repairRetryAfter.map({ $0 > now() }) == true {

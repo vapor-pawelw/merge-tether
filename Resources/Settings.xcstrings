@@ -194,18 +194,7 @@
         "en": {
           "stringUnit": {
             "state": "translated",
-            "value": "Used by Codex for MR reviews, feedback fixes, pipeline fixes and conflicts. Lightweight checks use the separate verification model."
-          }
-        }
-      }
-    },
-    "settings.automation.claudeReviewModelHelp": {
-      "extractionState": "manual",
-      "localizations": {
-        "en": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "Review tasks use the model configured in Claude CLI."
+            "value": "Used by the selected coding agent for MR reviews, feedback fixes, pipeline fixes and conflicts. Lightweight checks use the separate verification model."
           }
         }
       }

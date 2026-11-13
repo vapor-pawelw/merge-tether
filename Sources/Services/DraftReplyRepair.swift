@@ -14,15 +14,26 @@ enum DraftReplyRepair {
         let assistant: AutomationAssistant
         let codingModel: CodexReviewModel
         let codingThinking: CodexReviewThinking
+        /// Absent for Codex and for repairs recorded before Claude models were selectable.
+        var claudeCodingModel: ClaudeCodingModel?
 
+        private var policy: String {
+            "|\(assistant.rawValue)|\(codingModel.rawValue)|\(codingThinking.rawValue)"
+                + (claudeCodingModel.map { "|\($0.rawValue)" } ?? "")
+        }
         var lineage: String {
             AICommentAssessmentStore.digest("draft-repair|\(origin.host)|\(origin.projectID)|\(origin.iid)|\(origin.userID)|\(origin.username)|\(draftID)"
-                + "|\(assistant.rawValue)|\(codingModel.rawValue)|\(codingThinking.rawValue)")
+                + policy)
         }
         var key: String {
             AICommentAssessmentStore.digest(lineage + "|\(origin.verificationID)|\(headSHA)|\(discussionFingerprint)|\(recoveryContextFingerprint)"
                 + "|\(bodySHA256)|\(rejection.state.rawValue)|" + AICommentAssessmentStore.digest(rejection.reason)
-                + "|\(assistant.rawValue)|\(codingModel.rawValue)|\(codingThinking.rawValue)")
+                + policy)
+        }
+        func matchesCodingPolicy(_ configuration: AutomationSettings) -> Bool {
+            codingModel == configuration.codexReviewModel
+                && codingThinking == configuration.codingThinking(for: assistant)
+                && claudeCodingModel == (assistant == .claude ? configuration.claudeCodingModel : nil)
         }
         func matches(_ snapshot: DraftProofRecoveryCoordinator.Snapshot, configuration: AutomationSettings? = nil) -> Bool {
             snapshot.request.sha == headSHA && snapshot.branchHead == headSHA
@@ -66,7 +77,9 @@ enum DraftReplyRepair {
         let result = Context(origin: origin, headSHA: head, discussionFingerprint: fingerprint,
             recoveryContextFingerprint: snapshot.request.draftProofRecoveryContextFingerprint,
             draftID: rejection.draftID, bodySHA256: AICommentAssessmentStore.digest(draft.note ?? ""), rejection: rejection,
-            assistant: configuration.assistant, codingModel: configuration.codexReviewModel, codingThinking: configuration.codexReviewThinking)
+            assistant: configuration.assistant, codingModel: configuration.codexReviewModel,
+            codingThinking: configuration.codingThinking(for: configuration.assistant),
+            claudeCodingModel: configuration.assistant == .claude ? configuration.claudeCodingModel : nil)
         return result.matches(snapshot, configuration: configuration) ? result : nil
     }
 

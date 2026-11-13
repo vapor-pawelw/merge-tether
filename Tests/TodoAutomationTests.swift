@@ -178,6 +178,37 @@ struct TodoAutomationTests {
     }
 
     @MainActor
+    @Test func claudeFollowUpRecordsTheSelectedCodingModelAndEffort() async throws {
+        let todo = try makeTodo(action: "mentioned", author: "me", fragment: "#note_42")
+        let suite = "GitLabTodosTests-\(UUID())"
+        let defaults = try #require(UserDefaults(suiteName: suite))
+        defer { defaults.removePersistentDomain(forName: suite) }
+        let settings = SettingsManager(defaults: defaults)
+        settings.automation.packageDecision = .enabled
+        settings.automation.assistant = .claude
+        settings.automation.claudeCodingModel = .fable
+        settings.automation.claudeCodingThinking = .max
+        let coordinator = AssistantJobCoordinator(execute: { _, _ in
+            .init(result: .init(status: .blocked, summary: "Fixture has no remote write permission"), output: "")
+        })
+        let automation = TodoAutomationService(canAutomate: { _ in true }, jobCoordinator: coordinator)
+
+        _ = try await automation.prepareToAcknowledge(
+            todo, event: .authorFeedback, host: "gitlab.example.org", username: "me",
+            settings: settings, glab: GlabService(), manual: true, isPending: { true }
+        )
+
+        let handoff = try #require(settings.assistantHandoffs.first)
+        #expect(handoff.key.assistant == .claude)
+        #expect(handoff.claudeCodingModel == .fable && handoff.codingThinking == .max)
+        #expect(handoff.codingModel == nil && handoff.reviewModel == nil)
+        let deadline = ContinuousClock.now + .seconds(5)
+        while coordinator.isWorking(on: handoff.key.work), ContinuousClock.now < deadline {
+            try await Task.sleep(for: .milliseconds(10))
+        }
+    }
+
+    @MainActor
     @Test(arguments: [true, false])
     func reviewAcknowledgementWaitsForSuccessfulExecution(manual: Bool) async throws {
         let todo = try makeTodo(action: "review_requested", author: "anna")

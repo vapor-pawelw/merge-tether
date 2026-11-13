@@ -52,6 +52,21 @@ enum ClaudeVerificationModel: String, CaseIterable, Codable, Sendable {
     var name: String { self == .haiku ? "Claude Haiku 5.5" : "Claude Sonnet 5.5" }
 }
 
+/// Coding-agent models passed to Claude CLI with `--model`; Claude CLI accepts the same effort levels as Codex.
+enum ClaudeCodingModel: String, CaseIterable, Codable, Sendable {
+    case fable = "claude-fable-5-2"
+    case opus = "claude-opus-5-5"
+    case sonnet = "claude-sonnet-5-5"
+
+    var name: String {
+        switch self {
+        case .fable: "Claude Fable 5.2"
+        case .opus: "Claude Opus 5.5"
+        case .sonnet: "Claude Sonnet 5.5"
+        }
+    }
+}
+
 enum VerificationThinking: String, CaseIterable, Codable, Sendable {
     case low, medium, high
 
@@ -155,6 +170,8 @@ struct AutomationSettings: Codable, Equatable, Sendable {
     var assistant: AutomationAssistant = .codex
     var codexReviewModel: CodexReviewModel = .sol
     var codexReviewThinking: CodexReviewThinking = .high
+    var claudeCodingModel: ClaudeCodingModel = .opus
+    var claudeCodingThinking: CodexReviewThinking = .high
     var workerExecutionTimeout = WorkerExecutionTimeout()
     var assistantWorkspace = ""
     var reuseAssistantChats = true
@@ -230,6 +247,18 @@ struct AutomationSettings: Codable, Equatable, Sendable {
     var assistantToolProjects = ""
     var packageDecision: AutomationPackageDecision = .undecided
     var hasAutomaticActionConsent: Bool { packageDecision == .enabled }
+
+    /// Reasoning effort the coding agent uses for review and repair work with the given CLI.
+    func codingThinking(for assistant: AutomationAssistant) -> CodexReviewThinking {
+        assistant == .codex ? codexReviewThinking : claudeCodingThinking
+    }
+
+    /// Identifies the coding policy so a changed model or effort invalidates cached repair outcomes.
+    var codingPolicy: String {
+        assistant == .codex
+            ? "\(assistant.rawValue)|\(codexReviewModel.rawValue)|\(codexReviewThinking.rawValue)"
+            : "\(assistant.rawValue)|\(claudeCodingModel.rawValue)|\(claudeCodingThinking.rawValue)"
+    }
     var allowAutomaticPublicActions = true
     var hasAutomaticPublicActionConsent: Bool { hasAutomaticActionConsent && allowAutomaticPublicActions }
     var workflowRules = MergeWorkflowRules()
@@ -297,6 +326,8 @@ struct AutomationSettings: Codable, Equatable, Sendable {
         assistant = try values.decodeIfPresent(AutomationAssistant.self, forKey: .assistant) ?? assistant
         codexReviewModel = (try? values.decode(CodexReviewModel.self, forKey: .codexReviewModel)) ?? codexReviewModel
         codexReviewThinking = (try? values.decode(CodexReviewThinking.self, forKey: .codexReviewThinking)) ?? codexReviewThinking
+        claudeCodingModel = (try? values.decode(ClaudeCodingModel.self, forKey: .claudeCodingModel)) ?? claudeCodingModel
+        claudeCodingThinking = (try? values.decode(CodexReviewThinking.self, forKey: .claudeCodingThinking)) ?? claudeCodingThinking
         workerExecutionTimeout = (try? values.decode(WorkerExecutionTimeout.self, forKey: .workerExecutionTimeout)) ?? .init()
         assistantWorkspace = try values.decodeIfPresent(String.self, forKey: .assistantWorkspace)
             ?? legacy.decodeIfPresent(String.self, forKey: .codexWorkspace) ?? assistantWorkspace
@@ -376,7 +407,7 @@ struct AutomationSettings: Codable, Equatable, Sendable {
         case assistant, assistantWorkspace, reuseAssistantChats, codexRelayEnabled, codexUseTemplate, autoMergeEnabled, conflictTasksEnabled, reviewRequested, authorFeedback
         case allowAssistantTools, assistantToolProjects, packageDecision, workflowRules, allowAutomaticPublicActions
         case autoMergeProjects, allowConflictPush, allowFollowUpPush, conflictPushProjects, autoReReviewEnabled, publishDraftsWithoutConfirmation, publishAIRepliesWithoutConfirmation, autoApproveEnabled, autoResolveOwnReviewThreads
-        case codexReviewModel, codexReviewThinking, assistantDefaultsVersion, scope
+        case codexReviewModel, codexReviewThinking, claudeCodingModel, claudeCodingThinking, assistantDefaultsVersion, scope
         case workerExecutionTimeout
         case autoVerifyReReview, codexVerificationModel, claudeVerificationModel, verificationThinking
         case autoResolveAcceptedFeedback, publicationRestrictions, publicationPolicyMode, baselinePreset, projectPermissionsVersion, autoClaimPipelineFailures

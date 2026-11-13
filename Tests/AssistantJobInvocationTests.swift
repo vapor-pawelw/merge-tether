@@ -28,6 +28,8 @@ struct AssistantJobInvocationTests {
         settings.automation.applyPreset(.full, for: assistant)
         settings.automation.codexReviewModel = .astra
         settings.automation.codexReviewThinking = .high
+        settings.automation.claudeCodingModel = .sonnet
+        settings.automation.claudeCodingThinking = .xhigh
         let host = "gitlab-\(UUID().uuidString.lowercased()).example.test"
         let sha = String(repeating: "a", count: 40)
         let glab = folder.appending(path: "glab")
@@ -64,7 +66,8 @@ struct AssistantJobInvocationTests {
                 username: "me", workspace: "", access: .gitLabRead),
             title: "Verify assigned code", prompt: "Task: verify assigned code. This task does not authorize GitLab writes.",
             createdAt: Date(), allowsPush: false, codingModel: assistant == .codex ? .astra : nil,
-            codingThinking: assistant == .codex ? .high : nil, followUpPushAllowed: true, workflow: .followUp,
+            codingThinking: assistant == .codex ? .high : .xhigh,
+            claudeCodingModel: assistant == .claude ? .sonnet : nil, followUpPushAllowed: true, workflow: .followUp,
             manual: true, expectedHeadSHA: sha)
         let run = InstallationStorage.current.runs.appending(path: handoff.id.uuidString)
         defer { try? FileManager.default.removeItem(at: run) }
@@ -102,6 +105,8 @@ struct AssistantJobInvocationTests {
         } else {
             #expect(arguments.contains("--dangerously-skip-permissions"))
             #expect(value(after: "--tools", in: arguments) == "default")
+            #expect(value(after: "--model", in: arguments) == ClaudeCodingModel.sonnet.rawValue)
+            #expect(value(after: "--effort", in: arguments) == "xhigh")
         }
     }
 
@@ -285,8 +290,19 @@ struct AssistantJobInvocationTests {
         #expect(arguments.last == "-")
     }
 
+    @Test func claudeWorkerUsesSelectedModelAndEffort() {
+        let arguments = policy.claudeArguments(model: .fable, thinking: .max)
+        #expect(value(after: "--model", in: arguments) == ClaudeCodingModel.fable.rawValue)
+        #expect(value(after: "--effort", in: arguments) == "max")
+    }
+
+    @Test func legacyClaudeHandoffKeepsTheCLIConfiguredModel() {
+        let arguments = policy.claudeArguments(model: nil, thinking: nil)
+        #expect(!arguments.contains("--model") && !arguments.contains("--effort"))
+    }
+
     @Test func claudeWorkerDoesNotRequireApprovalOrRestrictTheToolSet() {
-        let arguments = policy.claudeArguments
+        let arguments = policy.claudeArguments(model: .opus, thinking: .high)
         #expect(arguments.contains("--dangerously-skip-permissions"))
         #expect(!arguments.contains("--safe-mode"))
         #expect(!arguments.contains("--permission-mode"))

@@ -424,14 +424,25 @@ struct AutomationSettingsTab: View {
                 } label: {
                     Text(.Settings.settingsAutomationReviewThinking)
                 }
-                Text(.Settings.settingsAutomationReviewModelHelp)
-                    .font(.caption)
-                    .foregroundStyle(.secondary)
             } else {
-                Text(.Settings.settingsAutomationClaudeReviewModelHelp)
-                    .font(.caption)
-                    .foregroundStyle(.secondary)
+                Picker(selection: $draft.claudeCodingModel) {
+                    ForEach(ClaudeCodingModel.allCases, id: \.self) { model in
+                        Text(verbatim: model.name).tag(model)
+                    }
+                } label: {
+                    Text(.Settings.settingsAutomationReviewModel)
+                }
+                Picker(selection: $draft.claudeCodingThinking) {
+                    ForEach(CodexReviewThinking.allCases, id: \.self) { effort in
+                        Text(effort.name).tag(effort)
+                    }
+                } label: {
+                    Text(.Settings.settingsAutomationReviewThinking)
+                }
             }
+            Text(.Settings.settingsAutomationReviewModelHelp)
+                .font(.caption)
+                .foregroundStyle(.secondary)
         } header: {
             Text(.Settings.settingsAutomationReviewModel)
         }
