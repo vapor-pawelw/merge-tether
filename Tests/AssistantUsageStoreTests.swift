@@ -528,6 +528,40 @@ struct AssistantUsageStoreTests {
         #expect((json["receipts"] as? [Any])?.count == 2)
     }
 
+    @Test("Usage switched between Codex and Claude splits MR, ranking and dashboard totals by agent")
+    func switchedAgentsSplitTotalsByAgent() async throws {
+        // given
+        let file = temporaryFile()
+        defer { try? FileManager.default.removeItem(at: file.deletingLastPathComponent()) }
+        let store = AssistantUsageStore(file: file, receiptLimit: 1)
+        let target = usageMR()
+        try await record(store, at: "2026-10-04T08:05:00Z", role: .codingAgent, cost: 2, assistant: .codex, mergeRequest: target)
+        try await record(store, at: "2026-11-04T08:05:00Z", role: .verifier, cost: 1, assistant: .codex, mergeRequest: target)
+        try await record(store, at: "2026-11-04T09:05:00Z", role: .codingAgent, cost: 4, assistant: .claude, mergeRequest: target)
+        try await record(store, at: "2026-11-04T10:05:00Z", role: .codingAgent, cost: nil, assistant: .claude, mergeRequest: target)
+        try await record(store, at: "2026-11-04T11:05:00Z", role: .verifier, cost: 8, assistant: .claude)
+
+        // when
+        let snapshot = try await AssistantUsageStore(file: file).snapshot()
+        let now = try instant("2026-11-04T12:00:00Z")
+        let codex = snapshot.total(for: target, assistant: .codex)
+        let claude = snapshot.total(for: target, assistant: .claude)
+        let ranking = try #require(snapshot.mergeRequestTotals(interval: nil, now: now).first)
+        let summary = snapshot.summary(now: now)
+
+        // then
+        #expect(codex.runs == 2 && codex.estimatedUSD == 3 && codex.unknownCostRuns == 0)
+        #expect(claude.runs == 2 && claude.estimatedUSD == 4 && claude.unknownCostRuns == 1)
+        #expect(snapshot.total(for: target, role: .codingAgent, assistant: .codex).estimatedUSD == 2)
+        #expect(snapshot.total(for: target).runs == codex.runs + claude.runs)
+        #expect(ranking.byAssistant[.codex] == codex && ranking.byAssistant[.claude] == claude)
+        #expect(summary.byAssistant[.codex]?.estimatedUSD == 3 && summary.byAssistant[.codex]?.runs == 2)
+        #expect(summary.byAssistant[.claude]?.estimatedUSD == 12 && summary.byAssistant[.claude]?.runs == 3)
+        #expect(snapshot.summary(interval: AssistantUsageCalendar.month(containing: now), now: now)
+            .byAssistant[.codex]?.estimatedUSD == 1)
+        #expect(snapshot.total(for: usageMR(iid: 999), assistant: .claude) == AssistantUsageTotal())
+    }
+
     private func temporaryFile() -> URL {
         FileManager.default.temporaryDirectory.appending(path: "UsageTests-\(UUID())/usage.json")
     }

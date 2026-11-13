@@ -4,6 +4,7 @@ struct AssistantUsageMRDetailCost: View {
     let mergeRequest: AssistantUsageMergeRequest?
 
     @State private var totals: [AssistantUsageRole: AssistantUsageTotal]?
+    @State private var agentTotals: [AutomationAssistant: AssistantUsageTotal] = [:]
     @State private var loadedIdentity: String?
     @State private var refreshID = UUID()
     @State private var loadFailed = false
@@ -23,6 +24,12 @@ struct AssistantUsageMRDetailCost: View {
                             detail: .AssistantUsage.assistantUsageVerificationDetail, total: totals[.verifier] ?? .init())
                         roleRow(.AssistantUsage.assistantUsageMRReviewer,
                             detail: .AssistantUsage.assistantUsageCodingAgentDetail, total: totals[.codingAgent] ?? .init())
+                        Text(.AssistantUsage.assistantUsageByAgentTitle).font(.caption.weight(.medium))
+                            .help(Text(.AssistantUsage.assistantUsageByAgentHelp))
+                        ForEach(AutomationAssistant.allCases) { assistant in
+                            roleRow(assistant.usageLabel, detail: .AssistantUsage.assistantUsageByAgentCardDetail,
+                                total: agentTotals[assistant] ?? .init())
+                        }
                     } else if !loadFailed || loadedIdentity != mergeRequest.id {
                         ProgressView().controlSize(.small)
                     }
@@ -96,6 +103,9 @@ struct AssistantUsageMRDetailCost: View {
             guard !Task.isCancelled else { return }
             totals = Dictionary(uniqueKeysWithValues: AssistantUsageRole.allCases.map {
                 ($0, snapshot.total(for: mergeRequest, role: $0))
+            })
+            agentTotals = Dictionary(uniqueKeysWithValues: AutomationAssistant.allCases.map {
+                ($0, snapshot.total(for: mergeRequest, assistant: $0))
             })
             loadFailed = false
         } catch {

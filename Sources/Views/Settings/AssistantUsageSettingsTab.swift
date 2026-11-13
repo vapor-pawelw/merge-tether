@@ -106,6 +106,18 @@ struct AssistantUsageSettingsTab: View {
                     detail: .AssistantUsage.assistantUsageVerificationDetail, total: summary.verifier)
             }
 
+            VStack(alignment: .leading, spacing: 8) {
+                Text(.AssistantUsage.assistantUsageByAgentTitle).font(.headline)
+                Text(.AssistantUsage.assistantUsageByAgentHelp).font(.caption).foregroundStyle(.secondary)
+                HStack(alignment: .top, spacing: 12) {
+                    ForEach(AutomationAssistant.allCases) { assistant in
+                        AssistantUsageTotalCard(title: assistant.usageLabel,
+                            detail: .AssistantUsage.assistantUsageByAgentCardDetail,
+                            total: summary.byAssistant[assistant] ?? .init())
+                    }
+                }
+            }
+
             if !chartData.buckets.isEmpty {
                 AssistantUsageProviderChart(data: chartData, granularity: $granularity)
             }
@@ -498,6 +510,7 @@ private struct AssistantUsageMergeRequestRanking: View {
                                 Text(verbatim: "!\(row.mergeRequest.iid) · \(row.mergeRequest.title ?? row.mergeRequest.id)")
                                     .lineLimit(1)
                             }
+                            AssistantUsageAgentSplit(byAssistant: row.byAssistant)
                             if row.total.unknownCostRuns > 0 {
                                 Text(.AssistantUsage.assistantUsageMRUnknownRuns(row.total.unknownCostRuns))
                                     .font(.caption).foregroundStyle(.secondary)
@@ -514,6 +527,23 @@ private struct AssistantUsageMergeRequestRanking: View {
         .padding(14)
         .frame(maxWidth: .infinity, alignment: .leading)
         .background(Color.secondary.opacity(0.06), in: RoundedRectangle(cornerRadius: 10))
+    }
+}
+
+/// One compact line per agent that ran at least one request.
+private struct AssistantUsageAgentSplit: View {
+    let byAssistant: [AutomationAssistant: AssistantUsageTotal]
+
+    var body: some View {
+        HStack(spacing: 12) {
+            ForEach(AutomationAssistant.allCases.filter { (byAssistant[$0]?.runs ?? 0) > 0 }) { assistant in
+                HStack(spacing: 4) {
+                    Text(assistant.usageLabel)
+                    AssistantUsageTotalAmount(total: byAssistant[assistant] ?? .init(), precise: true)
+                }
+            }
+        }
+        .font(.caption).foregroundStyle(.secondary)
     }
 }
 

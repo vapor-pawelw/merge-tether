@@ -4,6 +4,15 @@ enum AssistantUsageRole: String, Codable, CaseIterable, Sendable {
     case codingAgent, verifier
 }
 
+extension AutomationAssistant {
+    var usageLabel: LocalizedStringResource {
+        switch self {
+        case .codex: .AssistantUsage.assistantUsageCodexCLI
+        case .claude: .AssistantUsage.assistantUsageClaudeCLI
+        }
+    }
+}
+
 struct AssistantUsageMergeRequest: Codable, Hashable, Sendable, Identifiable {
     let host: String
     var username: String?

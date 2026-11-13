@@ -748,6 +748,39 @@
           }
         }
       }
+    },
+    "assistantUsageByAgentTitle": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "By agent"
+          }
+        }
+      }
+    },
+    "assistantUsageByAgentHelp": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Coding agent and verification combined, split by the CLI that ran each request. After switching agents, earlier requests stay with the agent that ran them."
+          }
+        }
+      }
+    },
+    "assistantUsageByAgentCardDetail": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Coding agent and verification requests run with this CLI."
+          }
+        }
+      }
     }
   },
   "version": "1.0"

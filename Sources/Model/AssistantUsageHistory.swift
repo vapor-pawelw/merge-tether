@@ -51,6 +51,7 @@ struct AssistantUsageEntry: Sendable {
 struct AssistantUsageMergeRequestTotal: Identifiable, Sendable {
     let mergeRequest: AssistantUsageMergeRequest
     var total: AssistantUsageTotal
+    var byAssistant: [AutomationAssistant: AssistantUsageTotal] = [:]
     var id: String { mergeRequest.id }
 }
 
@@ -67,9 +68,11 @@ struct AssistantUsageSnapshot: Sendable {
         return result
     }
 
-    func total(for mergeRequest: AssistantUsageMergeRequest, role: AssistantUsageRole? = nil) -> AssistantUsageTotal {
+    func total(for mergeRequest: AssistantUsageMergeRequest, role: AssistantUsageRole? = nil,
+               assistant: AutomationAssistant? = nil) -> AssistantUsageTotal {
         var result = AssistantUsageTotal()
-        for entry in entries where entry.mergeRequest?.id == mergeRequest.id && (role == nil || entry.role == role) {
+        for entry in entries where entry.mergeRequest?.id == mergeRequest.id && (role == nil || entry.role == role)
+            && (assistant == nil || entry.assistant == assistant) {
             result.add(entry.total)
         }
         return result
@@ -82,7 +85,10 @@ struct AssistantUsageSnapshot: Sendable {
             guard let mergeRequest = entry.mergeRequest else { continue }
             var value = totals[mergeRequest.id] ?? .init(mergeRequest: mergeRequest, total: .init())
             value.total.add(entry.total)
-            if mergeRequest.title != nil || mergeRequest.url != nil { value = .init(mergeRequest: mergeRequest, total: value.total) }
+            value.byAssistant[entry.assistant, default: .init()].add(entry.total)
+            if mergeRequest.title != nil || mergeRequest.url != nil {
+                value = .init(mergeRequest: mergeRequest, total: value.total, byAssistant: value.byAssistant)
+            }
             totals[mergeRequest.id] = value
         }
         return totals.values.sorted {
@@ -95,14 +101,15 @@ struct AssistantUsageSnapshot: Sendable {
         guard let range = accountingRange(interval: interval, now: now, through: .day) else { return .init() }
         let calendar = AssistantUsageCalendar.utc
         var byDay: [Date: AssistantUsageDay] = [:]
+        var result = AssistantUsageSummary()
         for entry in entries where Self.contains(entry.date, in: range) {
             let date = calendar.startOfDay(for: entry.date)
             var day = byDay[date] ?? .init(date: date)
             if entry.role == .codingAgent { day.codingAgent.add(entry.total) }
             else { day.verifier.add(entry.total) }
             byDay[date] = day
+            result.byAssistant[entry.assistant, default: .init()].add(entry.total)
         }
-        var result = AssistantUsageSummary()
         var date = calendar.startOfDay(for: range.start)
         while date < range.end {
             let day = byDay[date] ?? .init(date: date)
@@ -148,6 +155,8 @@ struct AssistantUsageDay: Identifiable, Sendable {
 struct AssistantUsageSummary: Sendable {
     var codingAgent = AssistantUsageTotal()
     var verifier = AssistantUsageTotal()
+    /// Both roles combined, split by the CLI that ran each request.
+    var byAssistant: [AutomationAssistant: AssistantUsageTotal] = [:]
     var coveredDays = 0
     var days: [AssistantUsageDay] = []
     var overall: AssistantUsageTotal {

@@ -82,10 +82,7 @@ import MergeTetherRemote
         details.usage = usage.map { snapshot in
             let identity = AssistantUsageMergeRequest(host: host, username: username, projectID: request.projectID, iid: request.iid)
             var overall = AssistantUsageTotal()
-            let roles = AssistantUsageRole.allCases.map { role in
-                let total = snapshot.total(for: identity, role: role)
-                overall.add(total)
-                let title: LocalizedStringResource = role == .verifier ? .AssistantUsage.assistantUsageMRVerifier : .AssistantUsage.assistantUsageMRReviewer
+            let field = { (title: LocalizedStringResource, total: AssistantUsageTotal) -> RemoteDetailField in
                 var lines = [amount(total), String(localized: .AssistantUsage.assistantUsageMRAgentRequests(total.runs))]
                 if total.unknownCostRuns > 0 { lines.append(String(localized: .AssistantUsage.assistantUsageMRUnknownRuns(total.unknownCostRuns))) }
                 if total.runs > 0 {
@@ -96,7 +93,16 @@ import MergeTetherRemote
                 }
                 return RemoteDetailField(label: String(localized: title), value: lines.joined(separator: "\n"))
             }
-            return roles + [.init(label: String(localized: .AssistantUsage.assistantUsageMRLifetimeCost),
+            let roles = AssistantUsageRole.allCases.map { role in
+                let total = snapshot.total(for: identity, role: role)
+                overall.add(total)
+                return field(role == .verifier ? .AssistantUsage.assistantUsageMRVerifier : .AssistantUsage.assistantUsageMRReviewer, total)
+            }
+            let agents = AutomationAssistant.allCases.compactMap { assistant -> RemoteDetailField? in
+                let total = snapshot.total(for: identity, assistant: assistant)
+                return total.runs > 0 ? field(assistant.usageLabel, total) : nil
+            }
+            return roles + agents + [.init(label: String(localized: .AssistantUsage.assistantUsageMRLifetimeCost),
                 value: amount(overall) + "\n\n" + String(localized: .AssistantUsage.assistantUsageMRHistoryHelp))]
         }
     }
