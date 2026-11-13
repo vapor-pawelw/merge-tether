@@ -59,7 +59,7 @@ struct MREffectivePolicyPresentation {
             self.request = bound
             self.submission = bound == nil ? .none : submission
             automaticActionsAllowed = settings.automaticActionsAllowed
-            let automation = settings.automation
+            let automation = settings.configuredAutomation
             packageDecision = automation.packageDecision
             publicActionsAllowed = automation.allowAutomaticPublicActions
             enabled = automation.hasEnabledAutomation
@@ -68,13 +68,13 @@ struct MREffectivePolicyPresentation {
             draftPaused = scope?.source == .draft
             publicationMode = automation.publicationMode
             publicationAllowed = (automation.publicationMode != .filtered || automation.publicationRestrictions.hasConditions) && bound.flatMap { request in
-                target.map { settings.permitsAutomaticAction(.commentPublication, for: request, target: $0) }
+                target.map { settings.permitsAutomaticAction(.commentPublication, for: request, target: $0, ignoringGlobalSuspension: true) }
             } == true
             mergeAllowed = bound.flatMap { request in
-                target.map { settings.permitsAutomaticAction(.merge, for: request, target: $0) }
+                target.map { settings.permitsAutomaticAction(.merge, for: request, target: $0, ignoringGlobalSuspension: true) }
             } == true
             approvalAllowed = bound.flatMap { request in
-                target.map { settings.permitsAutomaticAction(.approval, for: request, target: $0) }
+                target.map { settings.permitsAutomaticAction(.approval, for: request, target: $0, ignoringGlobalSuspension: true) }
             } == true
             owned = bound?.author.username == target?.username && target != nil
             localDelivery = bound.flatMap { request in

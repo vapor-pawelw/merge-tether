@@ -156,7 +156,7 @@ struct AuthorFeedbackView: View {
 
     private var automaticFollowUp: Bool {
         guard let request = item.authoredRequest else { return false }
-        let configuration = monitor.settings.automation
+        let configuration = monitor.settings.configuredAutomation
         let workflow = configuration.workflowRules[.newDiscussion]
         return configuration.authorFeedback.isEnabled || (workflow.mode == .assistant && workflow.includes(request))
     }

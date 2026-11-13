@@ -74,7 +74,7 @@ struct MRCommonMenuItems: View {
         }
         AssistantContextMenu(mergeRequestURL: item.url, title: item.title,
                              settings: monitor.settings)
-        if !isFinished, monitor.settings.automation.hasEnabledAutomation,
+        if !isFinished, monitor.settings.configuredAutomation.hasEnabledAutomation,
            let target = monitor.scopeTarget(projectID: item.id.projectID, iid: item.id.iid, url: item.url) {
             Divider()
             MRAutomationScopeMenu(monitor: monitor, target: target, projectPath: item.url.gitLabProjectPath,

@@ -30,7 +30,7 @@ struct AutomationSettingsTab: View {
         // Keep detailed automation controls readable in the sidebar.
         HStack(spacing: 0) {
             List(selection: $page) {
-                ForEach(Page.allCases.filter { $0 != .scope || settings.automation.hasEnabledAutomation }, id: \.self) { page in
+                ForEach(Page.allCases.filter { $0 != .scope || settings.configuredAutomation.hasEnabledAutomation }, id: \.self) { page in
                     Label { Text(page.title) } icon: { Image(systemName: page.symbol) }
                         .tag(page)
                 }
@@ -52,7 +52,7 @@ struct AutomationSettingsTab: View {
         .onChange(of: draft) { _, current in
             if let custom = AutomationProfileSnapshot.custom(from: current) { sessionCustom = custom }
         }
-        .onChange(of: settings.automation.hasEnabledAutomation) { _, enabled in
+        .onChange(of: settings.configuredAutomation.hasEnabledAutomation) { _, enabled in
             if !enabled, page == .scope { page = .checkpoints }
         }
         .sheet(item: $setupAction) { action in

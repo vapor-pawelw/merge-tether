@@ -8,7 +8,7 @@ struct ManagedMergeRequestsView: View {
     @State private var addFailed = false
 
     var body: some View {
-        let scope = monitor.settings.automation.scope
+        let scope = monitor.settings.configuredAutomation.scope
         let rows = monitor.attention.currentOpenItems.compactMap { item -> Row? in
             guard let target = monitor.scopeTarget(projectID: item.id.projectID, iid: item.id.iid, url: item.url),
                   scope.isManaged(target) || scope.resolve(target).active || scope[target] != .inherit || scope[target.repository] != .inherit

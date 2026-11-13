@@ -21,7 +21,7 @@ struct FollowUpAutomationHoldView: View {
         if row.latestJob?.execution?.state == .queued, let issue = monitor.cliHealth.hold(for: provider)?.issue {
             return issue.kind == .loginRequired ? .loginRequired : .rateLimited
         }
-        if let hold = monitor.settings.automation.followUpAutomationHold(for: request, target: target,
+        if let hold = monitor.settings.configuredAutomation.followUpAutomationHold(for: request, target: target,
             ignored: monitor.settings.ignoredMergeRequests.contains(target),
             requiresTodoRouting: row.attentionIntents.contains(where: { $0.kind == .followUp })) { return hold }
         if let issue = monitor.cliHealth.hold(for: provider)?.issue {

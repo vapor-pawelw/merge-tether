@@ -404,13 +404,13 @@
         "en": {
           "stringUnit": {
             "state": "translated",
-            "value": "Automation is off app-wide and the app works as Manual. Click to resume your configured automation."
+            "value": "Automation is off app-wide: nothing runs automatically, while MRs and settings stay as configured. Click to turn it back on."
           }
         },
         "pl": {
           "stringUnit": {
             "state": "translated",
-            "value": "Automatyzacja jest wyłączona globalnie i aplikacja działa jak Manual. Kliknij, aby przywrócić skonfigurowaną automatyzację."
+            "value": "Automatyzacja jest wyłączona globalnie: nic nie uruchamia się automatycznie, a MR-y i ustawienia pozostają bez zmian. Kliknij, aby włączyć ją z powrotem."
           }
         }
       }
@@ -547,6 +547,40 @@
           "stringUnit": {
             "state": "translated",
             "value": "Zamknij"
+          }
+        }
+      }
+    },
+    "commandCenter.automation.suspendedBanner": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Automation is turned off app-wide. MRs keep their settings but nothing runs automatically."
+          }
+        },
+        "pl": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Automatyzacja jest wyłączona globalnie. MR-y zachowują ustawienia, ale nic nie uruchamia się automatycznie."
+          }
+        }
+      }
+    },
+    "commandCenter.automation.suspendedResume": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Turn automation back on"
+          }
+        },
+        "pl": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Włącz automatyzację z powrotem"
           }
         }
       }

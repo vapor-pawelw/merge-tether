@@ -7,7 +7,7 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 ## Unreleased
 
 - Check author feedback less often: an unchanged, settled merge request is not re-read on every refresh until its head, discussions, drafts, approvals, jobs or settings change (or ten minutes pass), and verified assessments survive app restarts, the global automation switch and settings that do not affect the verifier.
-- Add a global automation switch next to Add and Refresh that turns off all automation app-wide, overriding presets and per-MR choices without changing them, with confirmation banners for the global and per-MR lightning toggles.
+- Add a global automation switch next to Add and Refresh that stops all automatic work app-wide without changing presets, per-MR choices or how MRs look, with a top banner to turn it back on and confirmation banners for the global and per-MR lightning toggles.
 - Choose the coding model and reasoning effort for Claude CLI workers in Settings, as already available for Codex.
 
 - Identify bot authors independently of AI-assisted text, resolve their verified and answered feedback under the existing automation gates, and name the human authors whose threads still await resolution.

@@ -6,7 +6,7 @@ struct AutomationScopeSettingsView: View {
 
     var body: some View {
         VStack(spacing: 10) {
-            if monitor.settings.automation.hasEnabledAutomation {
+            if monitor.settings.configuredAutomation.hasEnabledAutomation {
                 VStack(alignment: .leading, spacing: 8) {
                     Picker(selection: Binding(
                         get: { monitor.settings.automation.scope.mode },
@@ -47,7 +47,7 @@ struct AutomationScopeSettingsView: View {
                 .padding(.horizontal, 20).padding(.top, 12)
             }
             ManagedMergeRequestsView(monitor: monitor)
-            if monitor.settings.automation.hasEnabledAutomation {
+            if monitor.settings.configuredAutomation.hasEnabledAutomation {
                 Text(.Settings.settingsAutomationScopeImmediate)
                     .font(.caption).foregroundStyle(.secondary).padding(.horizontal, 20).padding(.bottom, 12)
             }

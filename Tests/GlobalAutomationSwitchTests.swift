@@ -76,6 +76,37 @@ struct GlobalAutomationSwitchTests {
         #expect(!settings.acceptedAutomation.autoMergeEnabled && !settings.acceptedAutomation.isGloballySuspended)
     }
 
+    @Test func switchingOffKeepsPresentationAsConfiguredWhileBlockingExecution() throws {
+        // given
+        let settings = SettingsManager(defaults: try makeDefaults())
+        settings.automation.applyPreset(.full, for: .codex)
+        settings.automation.scope.pauseDraftsByDefault = false
+        settings.save()
+        let target = MRAutomationScope.Target(host: host, username: "me", projectID: 1, iid: 42)
+        let request = try mergeRequest()
+        func policy() -> MREffectivePolicyPresentation {
+            .init(input: .init(request: request, target: target, settings: settings, assistantReady: true))
+        }
+        let before = (policy: policy().clauses, grouping: settings.effectiveBoardGrouping,
+                      activity: MRBoardActivity(automation: settings.configuredAutomation, target: target,
+                                                isDraft: false, grouping: settings.boardGrouping),
+                      merge: settings.permitsAutomaticAction(.merge, for: request, target: target, ignoringGlobalSuspension: true))
+        #expect(settings.permitsAutomaticAction(.merge, for: request, target: target))
+
+        // when
+        settings.setAutomationGloballyEnabled(false)
+
+        // then
+        #expect(policy().clauses == before.policy)
+        #expect(settings.effectiveBoardGrouping == before.grouping)
+        #expect(MRBoardActivity(automation: settings.configuredAutomation, target: target,
+                                isDraft: false, grouping: settings.boardGrouping) == before.activity)
+        #expect(settings.configuredAutomation.hasEnabledAutomation)
+        #expect(settings.configuredAutomation.scope.resolve(target).active)
+        #expect(settings.permitsAutomaticAction(.merge, for: request, target: target, ignoringGlobalSuspension: true) == before.merge)
+        #expect(!settings.permitsAutomaticAction(.merge, for: request, target: target))
+    }
+
     @Test func manualPresetLeavesNothingToSwitch() throws {
         // given
         let settings = SettingsManager(defaults: try makeDefaults())
@@ -149,6 +180,13 @@ struct GlobalAutomationSwitchTests {
 
         // then
         #expect(center.current == nil)
+    }
+
+    private func mergeRequest() throws -> GitLabMergeRequest {
+        let object: [String: Any] = ["project_id": 1, "iid": 42, "author": ["id": 7, "name": "Example", "username": "me"],
+            "title": "Example", "web_url": "https://\(host)/group/repo/-/merge_requests/42", "state": "opened",
+            "draft": false, "source_branch": "feature", "target_branch": "main", "labels": []]
+        return try JSONDecoder().decode(GitLabMergeRequest.self, from: JSONSerialization.data(withJSONObject: object))
     }
 
     private func makeDefaults() throws -> UserDefaults {

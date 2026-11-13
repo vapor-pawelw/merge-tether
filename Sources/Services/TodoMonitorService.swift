@@ -65,7 +65,7 @@ final class TodoMonitorService {
         let aiFailure = account.map {
             attention.aiOriginCoordinator.failure(work: .init(host: $0.host, projectID: row.id.projectID, iid: row.id.iid)) != nil
         } == true
-        return .init(account: account, automation: settings.automation, workflowEntries: workflowEntries,
+        return .init(account: account, automation: settings.configuredAutomation, workflowEntries: workflowEntries,
             assistantReady: assistantDependencies.available.contains(settings.automation.assistant),
             assistantChecking: assistantDependencies.isChecking,
             confirmationBusy: attention.confirmationStates[row.id]?.isBusy == true,
@@ -480,7 +480,7 @@ final class TodoMonitorService {
                 input.feedbackDecisionRevisions[.init(projectID: request.projectID, iid: request.iid)] =
                     AssistantAutomationRunner.feedbackDecisionRevision(work: work, username: username, settings: settings)
                 return .init(request: request,
-                    mergeAutomatic: settings.permitsAutomaticAction(.merge, for: request, target: target),
+                    mergeAutomatic: settings.permitsAutomaticAction(.merge, for: request, target: target, ignoringGlobalSuspension: true),
                     conflictFailed: authoredMergeRequests.conflictTaskFailed(for: request)
                         || (request.hasMergeConflict && authoredMergeRequests.conflictAutomationState(for: request) == nil),
                     conflictProcessing: automaticConflictIsProcessing(for: request),
@@ -500,7 +500,7 @@ final class TodoMonitorService {
         input.pipelineHandoffs = pipelineHandoffs
         input.handoffs = assistantHandoffs
         input.confirmationStates = attention.confirmationStates
-        input.automation = settings.automation
+        input.automation = settings.configuredAutomation
         input.assistantReady = availableAssistants.contains(settings.automation.assistant)
         input.reviewAssistantReady = assistantDependencies.available.contains(settings.automation.assistant)
         input.assistantChecking = assistantDependencies.isChecking
@@ -653,7 +653,7 @@ final class TodoMonitorService {
     }
 
     func boardActivity(projectID: Int, iid: Int, url: URL, isDraft: Bool, isFinished: Bool = false) -> MRBoardActivity {
-        .init(automation: settings.automation, target: scopeTarget(projectID: projectID, iid: iid, url: url),
+        .init(automation: settings.configuredAutomation, target: scopeTarget(projectID: projectID, iid: iid, url: url),
               isDraft: isDraft, isFinished: isFinished, grouping: settings.boardGrouping)
     }
 
@@ -1075,7 +1075,8 @@ final class TodoMonitorService {
     func automationConfigurationChanged(previous: AutomationSettings) {
         let current = settings.automation
         guard previous != current else { return }
-        boardPolicyOrder.policyChanged(from: previous, to: current, grouping: settings.boardGrouping)
+        boardPolicyOrder.policyChanged(from: previous.ignoringGlobalSuspension, to: current.ignoringGlobalSuspension,
+            grouping: settings.boardGrouping)
         let scopeOnly = previous.preservingScope(from: current) == current
         let host = glab.resolvedHost ?? "", username = glab.currentUsername ?? ""
         let targets = Set(previous.scope.individualTargets(host: host, username: username)

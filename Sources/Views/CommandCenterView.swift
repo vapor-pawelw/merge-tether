@@ -165,6 +165,19 @@ struct CommandCenterView: View {
     @ViewBuilder
     private var statusBanners: some View {
         PersistenceDegradedBanner(settings: monitor.settings)
+        if monitor.settings.configuredAutomationAvailable, !monitor.settings.automationGloballyEnabled {
+            HStack(spacing: 10) {
+                Label { Text(.CommandCenter.commandCenterAutomationSuspendedBanner) } icon: {
+                    Image(systemName: "bolt.slash.fill")
+                }
+                Spacer()
+                Button { monitor.setAutomationGloballyEnabled(true) } label: {
+                    Text(.CommandCenter.commandCenterAutomationSuspendedResume)
+                }
+                .buttonStyle(.link)
+            }
+            .font(.caption).padding(10).background(.orange.opacity(0.1))
+        }
         if let error = monitor.lastError {
             ErrorBannerView(error: error, authStatus: monitor.glab.authStatus, isRetrying: monitor.isLoading,
                 onRetry: { Task { await monitor.refreshManually() } },

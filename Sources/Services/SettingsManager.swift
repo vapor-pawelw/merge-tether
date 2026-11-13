@@ -54,8 +54,11 @@ final class SettingsManager {
     /// The app-wide automation killswitch. It is stored apart from `automation`, so turning it off
     /// overrides presets and per-MR choices at runtime without changing them.
     private(set) var automationGloballyEnabled: Bool
+    /// Automation as configured. Presentation reads this so the killswitch only stops execution
+    /// and never changes how cards, menus or groupings look.
+    var configuredAutomation: AutomationSettings { automation.ignoringGlobalSuspension }
     /// Whether the configured preset has any automation the killswitch can control.
-    var configuredAutomationAvailable: Bool { automation.ignoringGlobalSuspension.hasEnabledAutomation }
+    var configuredAutomationAvailable: Bool { configuredAutomation.hasEnabledAutomation }
     var automationGloballyActive: Bool { automationGloballyEnabled && configuredAutomationAvailable }
     var automationReceipts: Set<TodoAutomationReceipt>
     var automationAttemptReceipts: Set<TodoAutomationReceipt>
@@ -76,7 +79,7 @@ final class SettingsManager {
     var routedMRTodoReceipts: Set<MRTodoRouteReceipt>
     var boardPins: Set<BoardCardPin>
     var boardGrouping: MRBoardGrouping = .withoutAutomation
-    var effectiveBoardGrouping: MRBoardGrouping { boardGrouping.effective(for: automation) }
+    var effectiveBoardGrouping: MRBoardGrouping { boardGrouping.effective(for: configuredAutomation) }
     var mrLifecycleLedger = MergeRequestLifecycleLedger()
     init(defaults: UserDefaults = .standard) {
         self.defaults = defaults

@@ -9,9 +9,9 @@ struct BoardAutomationToggle: View {
     private var settings: SettingsManager { monitor.settings }
 
     var body: some View {
-        if settings.automation.hasEnabledAutomation {
-            let status = settings.automation.scope.resolve(target, isDraft: isDraft)
-            let choice = settings.automation.scope.manualChoice(for: target)
+        if settings.configuredAutomation.hasEnabledAutomation {
+            let status = settings.configuredAutomation.scope.resolve(target, isDraft: isDraft)
+            let choice = settings.configuredAutomation.scope.manualChoice(for: target)
             Button {
                 if isDraft && !status.active {
                     Task {
@@ -49,7 +49,7 @@ struct BoardAutomationToggle: View {
     private func announceChange() {
         guard let iid = target.iid else { return }
         monitor.automationToggleNotices.post(.mergeRequest(iid: iid, projectPath: projectPath,
-            active: settings.automation.scope.resolve(target, isDraft: isDraft).active))
+            active: settings.configuredAutomation.scope.resolve(target, isDraft: isDraft).active))
     }
 }
 
@@ -61,9 +61,9 @@ struct MRAutomationScopeMenu: View {
     private var settings: SettingsManager { monitor.settings }
 
     var body: some View {
-        if settings.automation.hasEnabledAutomation {
-            let status = settings.automation.scope.resolve(target, isDraft: isDraft)
-            let choice = settings.automation.scope.manualChoice(for: target)
+        if settings.configuredAutomation.hasEnabledAutomation {
+            let status = settings.configuredAutomation.scope.resolve(target, isDraft: isDraft)
+            let choice = settings.configuredAutomation.scope.manualChoice(for: target)
             Menu {
                 if target.iid != nil {
                     choiceButton(.inherit)
@@ -83,7 +83,7 @@ struct MRAutomationScopeMenu: View {
                     Divider()
                 }
                 Toggle(isOn: Binding(get: {
-                    settings.automation.scope.resolve(target.repository).active
+                    settings.configuredAutomation.scope.resolve(target.repository).active
                 }, set: { enabled in
                     changeScope(for: target.repository, message: repositoryConfirmationMessage) {
                         $0.setEnabled(enabled, for: target.repository)
@@ -137,12 +137,12 @@ struct MRAutomationScopeMenu: View {
 
     private func changeScope(for key: MRAutomationScope.Target, message: LocalizedStringResource,
                              change: @escaping (inout MRAutomationScope) -> Void) {
-        var proposed = settings.automation.scope
+        var proposed = settings.configuredAutomation.scope
         change(&proposed)
-        let enablesThisDraft = isDraft && !settings.automation.scope.resolve(target, isDraft: true).active
+        let enablesThisDraft = isDraft && !settings.configuredAutomation.scope.resolve(target, isDraft: true).active
             && proposed.resolve(target, isDraft: true).active
         let enablesRepositoryDrafts = key.iid == nil && !proposed.pauseDraftsByDefault
-            && !settings.automation.scope.resolve(key).active && proposed.resolve(key).active
+            && !settings.configuredAutomation.scope.resolve(key).active && proposed.resolve(key).active
         let save = {
             change(&settings.automation.scope)
             if let projectPath { settings.automation.scope.rememberRepository(projectPath, for: key) }
@@ -166,7 +166,7 @@ struct MRAutomationScopeMenu: View {
             }
         } label: {
             Label { Text(scopeChoiceLabel(choice)) } icon: {
-                if settings.automation.scope.manualChoice(for: target) == choice {
+                if settings.configuredAutomation.scope.manualChoice(for: target) == choice {
                     Image(systemName: "checkmark")
                 }
             }
@@ -177,7 +177,7 @@ struct MRAutomationScopeMenu: View {
 @MainActor
 private func scopeEnabledBinding(settings: SettingsManager, target: MRAutomationScope.Target,
                                  projectPath: String?, isDraft: Bool = false) -> Binding<Bool> {
-    Binding(get: { settings.automation.scope.resolve(target, isDraft: isDraft).active }, set: { enabled in
+    Binding(get: { settings.configuredAutomation.scope.resolve(target, isDraft: isDraft).active }, set: { enabled in
         settings.automation.scope.setEnabled(enabled, for: target, isDraft: isDraft)
         if settings.automation.scope[target] != .inherit, let projectPath {
             settings.automation.scope.rememberRepository(projectPath, for: target)
