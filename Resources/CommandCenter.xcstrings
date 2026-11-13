@@ -363,6 +363,193 @@
           }
         }
       }
+    },
+    "commandCenter.automation.toggle": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Automation"
+          }
+        },
+        "pl": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Automatyzacja"
+          }
+        }
+      }
+    },
+    "commandCenter.automation.help.active": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Automation is on. Click to turn off all automation app-wide. Settings, presets and MR choices stay unchanged."
+          }
+        },
+        "pl": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Automatyzacja jest włączona. Kliknij, aby wyłączyć całą automatyzację w aplikacji. Ustawienia, preset i wybory dla MR pozostaną bez zmian."
+          }
+        }
+      }
+    },
+    "commandCenter.automation.help.suspended": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Automation is off app-wide and the app works as Manual. Click to resume your configured automation."
+          }
+        },
+        "pl": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Automatyzacja jest wyłączona globalnie i aplikacja działa jak Manual. Kliknij, aby przywrócić skonfigurowaną automatyzację."
+          }
+        }
+      }
+    },
+    "commandCenter.automation.help.manual": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "The Manual preset has no automation to turn on. Choose another preset in Settings."
+          }
+        },
+        "pl": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Preset Manual nie ma automatyzacji do włączenia. Wybierz inny preset w Ustawieniach."
+          }
+        }
+      }
+    },
+    "commandCenter.automation.banner.globalActive.title": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Automation is active"
+          }
+        },
+        "pl": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Automatyzacja jest aktywna"
+          }
+        }
+      }
+    },
+    "commandCenter.automation.banner.globalActive.message": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "The app follows your automation settings again."
+          }
+        },
+        "pl": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Aplikacja znów działa według ustawień automatyzacji."
+          }
+        }
+      }
+    },
+    "commandCenter.automation.banner.globalSuspended.title": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Automation is inactive"
+          }
+        },
+        "pl": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Automatyzacja jest nieaktywna"
+          }
+        }
+      }
+    },
+    "commandCenter.automation.banner.globalSuspended.message": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "All automation is off app-wide. Settings and presets are unchanged."
+          }
+        },
+        "pl": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Cała automatyzacja jest wyłączona w aplikacji. Ustawienia i preset pozostają bez zmian."
+          }
+        }
+      }
+    },
+    "commandCenter.automation.banner.mergeRequestActive.%@": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Automation activated for MR %@"
+          }
+        },
+        "pl": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Automatyzacja aktywowana dla MR %@"
+          }
+        }
+      }
+    },
+    "commandCenter.automation.banner.mergeRequestPaused.%@": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Automation paused for MR %@"
+          }
+        },
+        "pl": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Automatyzacja wstrzymana dla MR %@"
+          }
+        }
+      }
+    },
+    "commandCenter.automation.banner.dismiss": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Dismiss"
+          }
+        },
+        "pl": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Zamknij"
+          }
+        }
+      }
     }
   },
   "version": "1.0"

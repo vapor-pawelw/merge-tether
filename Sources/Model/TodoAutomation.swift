@@ -246,7 +246,18 @@ struct AutomationSettings: Codable, Equatable, Sendable {
     var allowAssistantTools = false
     var assistantToolProjects = ""
     var packageDecision: AutomationPackageDecision = .undecided
-    var hasAutomaticActionConsent: Bool { packageDecision == .enabled }
+    var hasAutomaticActionConsent: Bool { packageDecision == .enabled && !isGloballySuspended }
+    /// The app-wide killswitch makes the app behave as Manual without changing persisted settings or presets.
+    var isGloballySuspended: Bool {
+        get { scope.isGloballySuspended }
+        set { scope.isGloballySuspended = newValue }
+    }
+    /// The configured automation as it would run with the global killswitch on.
+    var ignoringGlobalSuspension: Self {
+        var configured = self
+        configured.isGloballySuspended = false
+        return configured
+    }
 
     /// Reasoning effort the coding agent uses for review and repair work with the given CLI.
     func codingThinking(for assistant: AutomationAssistant) -> CodexReviewThinking {
@@ -461,13 +472,13 @@ struct AutomationSettings: Codable, Equatable, Sendable {
     }
 
     private func matchesPreset(_ preset: AutomationPreset) -> Bool {
-        var actual = self
-        var expected = self
+        var actual = ignoringGlobalSuspension
+        var expected = actual
         expected.applyPreset(preset, for: assistant)
         expected.baselinePreset = baselinePreset
         expected.publicationRestrictions = publicationRestrictions
         actual.publicationMode = publicationMode
-        if !hasAutomaticPublicActionConsent && !expected.hasAutomaticPublicActionConsent {
+        if !actual.hasAutomaticPublicActionConsent && !expected.hasAutomaticPublicActionConsent {
             actual.removePublicPermissions()
             expected.removePublicPermissions()
         }

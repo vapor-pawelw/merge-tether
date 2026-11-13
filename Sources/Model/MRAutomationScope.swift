@@ -25,6 +25,8 @@ struct MRAutomationScope: Codable, Equatable, Sendable {
     private var managedTargets: Set<Target>?
     private var repositoryLabels: [Target: String]?
     var pauseDraftsByDefault = true
+    /// Runtime-only global killswitch. It is never encoded, so stored overrides and presets stay unchanged.
+    var isGloballySuspended = false
 
     init() {}
 
@@ -60,6 +62,7 @@ struct MRAutomationScope: Codable, Equatable, Sendable {
     }
 
     func resolve(_ target: Target) -> (active: Bool, source: Source) {
+        if isGloballySuspended { return (false, .global) }
         if target.iid != nil, self[target] != .inherit {
             return (self[target] == .active || self[target] == .forceOn, .mergeRequest)
         }

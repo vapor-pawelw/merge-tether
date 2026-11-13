@@ -44,7 +44,19 @@ final class SettingsManager {
     var autoMergeOptOuts: Set<MRAutomationScope.Target> = []
     var mergeSubmissions: [MergeSubmissionReceipt] = []
     var ignoredMergeRequests: Set<MRAutomationScope.Target>
-    var automation: AutomationSettings
+    var automation: AutomationSettings {
+        didSet {
+            if automation.isGloballySuspended == automationGloballyEnabled {
+                automation.isGloballySuspended = !automationGloballyEnabled
+            }
+        }
+    }
+    /// The app-wide automation killswitch. It is stored apart from `automation`, so turning it off
+    /// overrides presets and per-MR choices at runtime without changing them.
+    private(set) var automationGloballyEnabled: Bool
+    /// Whether the configured preset has any automation the killswitch can control.
+    var configuredAutomationAvailable: Bool { automation.ignoringGlobalSuspension.hasEnabledAutomation }
+    var automationGloballyActive: Bool { automationGloballyEnabled && configuredAutomationAvailable }
     var automationReceipts: Set<TodoAutomationReceipt>
     var automationAttemptReceipts: Set<TodoAutomationReceipt>
     var authorFeedbackAttempts: Set<AuthorFeedbackAttempt>
@@ -76,7 +88,11 @@ final class SettingsManager {
             .flatMap(AssistantContextLauncher.Destination.init(rawValue:)) ?? .codexApp
 
         let loadedAutomation = store.load(Key.automation, fallback: AutomationSettings())
-        automation = loadedAutomation
+        let globallyEnabled = defaults.bool(forKey: Key.automationGloballyEnabled)
+        automationGloballyEnabled = globallyEnabled
+        var runtimeAutomation = loadedAutomation
+        runtimeAutomation.isGloballySuspended = !globallyEnabled
+        automation = runtimeAutomation
         acceptedAutomation = loadedAutomation
         mergeSubmissions = store.load(Key.mergeSubmissions, fallback: [])
         automationReceipts = store.load(Key.automationReceipts, fallback: [])
@@ -202,12 +218,26 @@ final class SettingsManager {
         persistenceStore.save(autoMergeOptOuts, forKey: Key.autoMergeOptOuts)
         let synchronized = persistenceStore.synchronize()
         let accepted = automationSaved && synchronized
-        if accepted { acceptedAutomation = automation }
+        if accepted { acceptedAutomation = automation.ignoringGlobalSuspension }
         if automationSaved && synchronized {
             lastSavedAutomation = automation
             if previousAutomation != automation { onAutomationChanged?(previousAutomation) }
         }
         return accepted
+    }
+
+    /// Turns the global automation killswitch on or off and stops or resumes automation accordingly.
+    @discardableResult
+    func setAutomationGloballyEnabled(_ enabled: Bool) -> Bool {
+        guard enabled != automationGloballyEnabled else { return true }
+        let previous = automation
+        automationGloballyEnabled = enabled
+        defaults.set(enabled, forKey: Key.automationGloballyEnabled)
+        automation.isGloballySuspended = !enabled
+        let saved = save()
+        // A degraded store still has to stop or resume runtime work for the override.
+        if !saved { onAutomationChanged?(previous) }
+        return saved
     }
 
     func saveReviewParticipationPreferences() -> Bool {
@@ -308,6 +338,7 @@ final class SettingsManager {
             Key.unreadReminderSound: ReminderSound.off.rawValue,
             Key.notificationsEnabled: true,
             Key.autoHandledEventBannersEnabled: true,
+            Key.automationGloballyEnabled: true,
             Key.boardGrouping: MRBoardGrouping.withoutAutomation.rawValue,
             Key.onboardingCompleted: false,
             Key.launchAtLoginPreference: true,
@@ -318,6 +349,7 @@ final class SettingsManager {
     private enum Key {
         static let conversationDestination = "conversationDestination"
         static let automation = "automation"
+        static let automationGloballyEnabled = "automationGloballyEnabled"
         static let automationReceipts = "automationReceipts"
         static let automationAttemptReceipts = "automationAttemptReceipts"
         static let authorFeedbackAttempts = "authorFeedbackAttempts"

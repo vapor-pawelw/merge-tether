@@ -20,6 +20,15 @@ final class TodoMonitorService {
 
     func dismissAutoHandledEventBanner(_ id: UUID) { autoHandledEventBanners.dismiss(id) }
 
+    let automationToggleNotices = AutomationToggleNoticeCenter()
+
+    /// The global killswitch overrides presets and per-MR choices without changing them.
+    func setAutomationGloballyEnabled(_ enabled: Bool) {
+        guard settings.configuredAutomationAvailable, enabled != settings.automationGloballyEnabled else { return }
+        settings.setAutomationGloballyEnabled(enabled)
+        automationToggleNotices.post(.global(active: enabled))
+    }
+
     private let boardAttentionPresenter = BoardAttentionPresenter()
     private var attentionPresentationAccount: String? {
         guard let host = glab.resolvedHost, let username = glab.currentUsername else { return nil }
@@ -1070,6 +1079,7 @@ final class TodoMonitorService {
             + previous.scope.repositoryOverrides(host: host, username: username)
             + current.scope.repositoryOverrides(host: host, username: username))
         let executionChanged = previous.scope.mode != current.scope.mode
+            || previous.isGloballySuspended != current.isGloballySuspended
             || previous.scope.pauseDraftsByDefault != current.scope.pauseDraftsByDefault
             || targets.contains { target in
                 previous.scope.resolve(target).active != current.scope.resolve(target).active

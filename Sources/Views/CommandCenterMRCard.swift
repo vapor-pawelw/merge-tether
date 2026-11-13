@@ -177,7 +177,7 @@ private struct CommandCenterMRCardContent: View {
             }
             HStack(spacing: 0) {
                 if finishedState == nil, let scopeTarget {
-                    BoardAutomationToggle(settings: monitor.settings, target: scopeTarget,
+                    BoardAutomationToggle(monitor: monitor, target: scopeTarget,
                         projectPath: item.url.gitLabProjectPath, isDraft: isDraft)
                 }
                 BoardPinButton(pin: .mergeRequest(host: monitor.glab.resolvedHost,
@@ -473,7 +473,7 @@ struct BoardTodoRow: View {
             }
             HStack(spacing: 0) {
                 if let scopeTarget {
-                    BoardAutomationToggle(settings: monitor.settings, target: scopeTarget,
+                    BoardAutomationToggle(monitor: monitor, target: scopeTarget,
                         projectPath: todo.project.pathWithNamespace, isDraft: isDraft)
                 }
                 BoardPinButton(pin: .todo(host: monitor.glab.resolvedHost,

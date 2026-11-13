@@ -2,10 +2,11 @@ import AppKit
 import SwiftUI
 
 struct BoardAutomationToggle: View {
-    let settings: SettingsManager
+    let monitor: TodoMonitorService
     let target: MRAutomationScope.Target
     var projectPath: String? = nil
     var isDraft = false
+    private var settings: SettingsManager { monitor.settings }
 
     var body: some View {
         if settings.automation.hasEnabledAutomation {
@@ -17,10 +18,12 @@ struct BoardAutomationToggle: View {
                         guard confirmDraftAutomation(message: draftAutomationMessage(target: target, projectPath: projectPath)) else { return }
                         scopeEnabledBinding(settings: settings, target: target, projectPath: projectPath,
                                             isDraft: isDraft).wrappedValue = true
+                        announceChange()
                     }
                 } else {
                     scopeEnabledBinding(settings: settings, target: target, projectPath: projectPath,
                                         isDraft: isDraft).wrappedValue.toggle()
+                    announceChange()
                 }
             } label: {
                 Image(systemName: status.active ? "bolt.fill" : "bolt.slash")
@@ -41,6 +44,12 @@ struct BoardAutomationToggle: View {
             .accessibilityValue(Text(scopeChoiceLabel(choice)) + Text(", ")
                 + Text(status.active ? .Menu.menuScopeActive : .Menu.menuScopePaused))
         }
+    }
+
+    private func announceChange() {
+        guard let iid = target.iid else { return }
+        monitor.automationToggleNotices.post(.mergeRequest(iid: iid, projectPath: projectPath,
+            active: settings.automation.scope.resolve(target, isDraft: isDraft).active))
     }
 }
 

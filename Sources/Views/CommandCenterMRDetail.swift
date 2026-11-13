@@ -285,7 +285,7 @@ private struct CommandCenterMRDetailContent: View {
                 Spacer()
                 HStack(spacing: 0) {
                     if finishedState == nil, let target = monitor.scopeTarget(projectID: item.id.projectID, iid: item.id.iid, url: item.url) {
-                        BoardAutomationToggle(settings: monitor.settings, target: target, projectPath: item.url.gitLabProjectPath,
+                        BoardAutomationToggle(monitor: monitor, target: target, projectPath: item.url.gitLabProjectPath,
                             isDraft: presentationRow.isDraft)
                     }
                     BoardPinButton(pin: .mergeRequest(host: monitor.glab.resolvedHost,

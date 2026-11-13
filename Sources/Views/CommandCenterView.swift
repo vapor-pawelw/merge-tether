@@ -43,10 +43,15 @@ struct CommandCenterView: View {
         }
         .frame(minWidth: 1040, minHeight: 680)
         .overlay(alignment: .bottomTrailing) {
-            if let event = monitor.autoHandledEventBanner {
-                AutoHandledEventBannerView(event: event) { monitor.dismissAutoHandledEventBanner(event.id) }
-                    .padding(18)
+            VStack(alignment: .trailing, spacing: 10) {
+                if let notice = monitor.automationToggleNotices.current {
+                    AutomationToggleNoticeView(notice: notice) { monitor.automationToggleNotices.dismiss(notice.id) }
+                }
+                if let event = monitor.autoHandledEventBanner {
+                    AutoHandledEventBannerView(event: event) { monitor.dismissAutoHandledEventBanner(event.id) }
+                }
             }
+            .padding(18)
         }
         .navigationTitle(Text(.Board.boardTitle))
         .toolbar {
@@ -66,6 +71,7 @@ struct CommandCenterView: View {
                 ToolbarSpacer(.fixed, placement: .primaryAction)
             }
             ToolbarItemGroup(placement: .primaryAction) {
+                globalAutomationToggle
                 Button { showingAdd = true } label: {
                     Label { Text(.Board.boardAdd) } icon: { Image(systemName: "plus") }
                 }
@@ -136,6 +142,23 @@ struct CommandCenterView: View {
             monitor.markMenuOpened()
         }
         .onDisappear { monitor.authoredMergeRequests.setVisible(false) }
+    }
+
+    /// App-wide killswitch: off overrides presets and per-MR choices without changing them.
+    private var globalAutomationToggle: some View {
+        let settings = monitor.settings
+        let available = settings.configuredAutomationAvailable
+        let active = settings.automationGloballyActive
+        return Toggle(isOn: Binding(get: { active }, set: { monitor.setAutomationGloballyEnabled($0) })) {
+            Label { Text(.CommandCenter.commandCenterAutomationToggle) } icon: {
+                Image(systemName: active ? "bolt.fill" : "bolt.slash")
+                    .foregroundStyle(active ? Color.accentColor : Color.secondary)
+            }
+        }
+        .toggleStyle(.button)
+        .disabled(!available)
+        .help(Text(!available ? .CommandCenter.commandCenterAutomationHelpManual
+            : active ? .CommandCenter.commandCenterAutomationHelpActive : .CommandCenter.commandCenterAutomationHelpSuspended))
     }
 
     @ViewBuilder

@@ -162,7 +162,7 @@ struct BoardMRProposalCard: View {
             }
             HStack(spacing: 0) {
                 if finishedState == nil {
-                    BoardAutomationToggle(settings: monitor.settings, target: proposal.target,
+                    BoardAutomationToggle(monitor: monitor, target: proposal.target,
                         projectPath: proposal.url.gitLabProjectPath, isDraft: isDraft)
                 }
                 BoardPinButton(pin: .mergeRequest(host: proposal.target.host, username: proposal.target.username,

@@ -22,7 +22,7 @@ struct AutomationSettingsTab: View {
         _page = State(initialValue: initialPage)
         let accepted = monitor.settings.acceptedAutomation
         _draft = State(initialValue: accepted)
-        _saveState = State(initialValue: .init(accepted: accepted, runtimeSavePending: accepted != monitor.settings.automation))
+        _saveState = State(initialValue: .init(accepted: accepted, runtimeSavePending: accepted != monitor.settings.automation.ignoringGlobalSuspension))
         _sessionCustom = State(initialValue: monitor.settings.automationProfileHistory.available(for: accepted))
     }
 
@@ -43,7 +43,10 @@ struct AutomationSettingsTab: View {
             pageContent
         }
         .onChange(of: settings.automation.scope) { _, current in
-            draft.scope = current
+            // The global killswitch is a runtime override, never part of the edited configuration.
+            var configured = current
+            configured.isGloballySuspended = false
+            draft.scope = configured
             saveState.updateSavedScope(settings.acceptedAutomation.scope)
         }
         .onChange(of: draft) { _, current in
@@ -111,7 +114,7 @@ struct AutomationSettingsTab: View {
                     .disabled(draft == saveState.accepted && sessionCustom == settings.automationProfileHistory.available(for: saveState.accepted) && !saveState.failed)
 
                     Button {
-                        if draft != settings.automation && (draft.usesAssistant || draft.autoReReviewEnabled || draft.autoMergeEnabled
+                        if draft != settings.automation.ignoringGlobalSuspension && (draft.usesAssistant || draft.autoReReviewEnabled || draft.autoMergeEnabled
                             || draft.autoApproveEnabled || draft.publishDraftsWithoutConfirmation
                             || draft.publishAIRepliesWithoutConfirmation) { setupAction = .apply }
                         else { applyDraft() }
@@ -141,7 +144,7 @@ struct AutomationSettingsTab: View {
         saveState.begin()
         settings.automation = draft.preservingScope(from: settings.automation)
         let saved = monitor.applySettings()
-        saveState.runtimeSaved(settings.automation, succeeded: saved)
+        saveState.runtimeSaved(settings.automation.ignoringGlobalSuspension, succeeded: saved)
         guard saved else { return }
         if let custom {
             let historySaved = settings.automationProfileHistory.save(custom)

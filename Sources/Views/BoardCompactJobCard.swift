@@ -108,7 +108,7 @@ struct BoardCompactJobCard: View {
             else if isDraft { BoardDraftBadge() }
             HStack(spacing: 0) {
                 if finishedState == nil {
-                    BoardAutomationToggle(settings: monitor.settings, target: scopeTarget, projectPath: repositoryPath, isDraft: isDraft)
+                    BoardAutomationToggle(monitor: monitor, target: scopeTarget, projectPath: repositoryPath, isDraft: isDraft)
                 }
                 BoardPinButton(pin: .mergeRequest(host: handoff.key.work.host,
                     username: handoff.key.username, projectID: handoff.key.work.projectID, iid: handoff.key.work.iid),
