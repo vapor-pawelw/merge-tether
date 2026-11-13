@@ -572,6 +572,13 @@ final class MergeRequestAttentionMonitor {
         "\(progress.completed)/\(progress.required):" + Set(progress.approvedBy.map(\.id)).sorted().map(String.init).joined(separator: ",")
     }
 
+    /// Emergency reset: forget earlier feedback passes and verify every comment against the current MR from scratch.
+    func resetAuthorFeedbackAssessment(_ id: Item.ID) {
+        authorFeedbackCoordinator?.resetAssessment(projectID: id.projectID, iid: id.iid)
+        guard let account, isCurrent(account) else { return }
+        refresh(host: account.host, username: account.username, todos: [])
+    }
+
     func retryAuthorFeedback(_ id: Item.ID) {
         authorFeedbackCoordinator?.invalidate(projectID: id.projectID, iid: id.iid)
         guard let account, isCurrent(account) else { return }

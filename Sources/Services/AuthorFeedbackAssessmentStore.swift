@@ -2,7 +2,8 @@ import Foundation
 
 /// The latest semantic author-feedback assessment for one merge request, kept across launches so an
 /// unchanged snapshot does not repeat a verifier run. `keyDigest` binds every verifier input; any
-/// change to the head, diff, discussion text, decisions or verifier model makes the record a miss.
+/// change to the diff, discussion text, decisions or verifier model makes the record a cache miss.
+/// A missed record still serves as the prior pass, so already assessed notes gain no new concerns.
 enum AuthorFeedbackAssessmentStore {
     struct Record: Codable, Sendable {
         let version: Int
@@ -10,6 +11,8 @@ enum AuthorFeedbackAssessmentStore {
         let keyDigest: String
         let completedFollowUpJobID: UUID?
         let assessment: ReReviewAssessment
+        var noteRevisions: [Int: String]? = nil
+        var diffDigest: String? = nil
     }
 
     nonisolated static let version = 1
@@ -25,6 +28,13 @@ enum AuthorFeedbackAssessmentStore {
         guard let data = try? Data(contentsOf: fileURL(target, in: directory)),
               let record = try? JSONDecoder().decode(Record.self, from: data),
               record.version == version, record.target == target, record.keyDigest == keyDigest else { return nil }
+        return record
+    }
+
+    nonisolated static func latest(_ target: MRAutomationScope.Target, in directory: URL) -> Record? {
+        guard let data = try? Data(contentsOf: fileURL(target, in: directory)),
+              let record = try? JSONDecoder().decode(Record.self, from: data),
+              record.version == version, record.target == target else { return nil }
         return record
     }
 

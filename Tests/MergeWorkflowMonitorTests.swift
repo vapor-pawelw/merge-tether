@@ -223,6 +223,52 @@ struct MergeWorkflowMonitorTests {
         #expect(events.count == 2)
     }
 
+    @Test func reReviewAfterAPushNamesTheReviewedHeadAndRecognizesARebase() async throws {
+        let reviewed = String(repeating: "a", count: 40)
+        let fixture = try FreshnessFixture(request: mergeRequest(13, sha: reviewed, author: 2))
+        defer { fixture.cleanUp() }
+        try fixture.recordVerdict(threads: fixture.liveThreads)
+        let monitor = MergeWorkflowMonitor(defaults: fixture.defaults, verdictDirectory: fixture.verdictDirectory)
+        var events: [MergeWorkflowEvent] = []
+        await fixture.poll(monitor) { events.append($0) }
+        #expect(events.isEmpty)
+
+        // A rebase moves blob IDs and hunk offsets but keeps the MR's own changes.
+        let rebased = String(repeating: "b", count: 40)
+        try fixture.write("request", mergeRequest(13, sha: rebased, author: 2))
+        try fixture.write("diff", "diff --git a/A b/A\nindex 3333333..4444444 100644\n@@ -10,2 +10,3 @@\n context\n+added line\n")
+        await fixture.poll(monitor) { events.append($0) }
+        #expect(events.count == 1)
+        let rebaseContext = try #require(events.last?.context)
+        #expect(rebaseContext.contains(reviewed) && rebaseContext.contains("identical"))
+        #expect(rebaseContext.contains("raise no new code findings"))
+
+        // Real code changes are reviewed incrementally against the head the verdict covered.
+        let changed = String(repeating: "c", count: 40)
+        try fixture.write("request", mergeRequest(13, sha: changed, author: 2))
+        try fixture.write("diff", "diff --git a/A b/A\n@@ -1,2 +1,4 @@\n context\n+added line\n+another line\n")
+        await fixture.poll(monitor) { events.append($0) }
+        #expect(events.count == 2)
+        let incremental = try #require(events.last?.context)
+        #expect(incremental.contains("Incremental re-review") && incremental.contains(reviewed) && !incremental.contains("identical"))
+    }
+
+    @Test func discussionOnlyReReviewNamesOnlyTheChangedNotes() async throws {
+        let fixture = try FreshnessFixture(request: mergeRequest(13, sha: String(repeating: "a", count: 40), author: 2))
+        defer { fixture.cleanUp() }
+        try fixture.recordVerdict(threads: fixture.liveThreads)
+        let monitor = MergeWorkflowMonitor(defaults: fixture.defaults, verdictDirectory: fixture.verdictDirectory)
+        var events: [MergeWorkflowEvent] = []
+        await fixture.poll(monitor) { events.append($0) }
+        #expect(events.isEmpty)
+        try fixture.write("threads", fixture.liveThreads.replacingOccurrences(of: "Other reviewer's condition", with: "Additional requirement"))
+        await fixture.poll(monitor) { events.append($0) }
+        #expect(events.count == 1)
+        let context = try #require(events.last?.context)
+        #expect(context.contains("new or edited since your review: 200."))
+        #expect(context.contains("Do not review unchanged code again") && !context.contains("Recheck all current discussions"))
+    }
+
     @Test(arguments: ["our-open-thread", "pending-draft"])
     func freshnessReviewWaitsForOurResolvedFindingsAndNoDrafts(_ blocker: String) async throws {
         let fixture = try FreshnessFixture(request: mergeRequest(13, sha: String(repeating: "a", count: 40), author: 2))
@@ -336,6 +382,7 @@ struct MergeWorkflowMonitorTests {
             try write("request", request)
             try write("threads", liveThreads)
             try write("drafts", "[]")
+            try write("diff", "diff --git a/A b/A\nindex 1111111..2222222 100644\n@@ -1,2 +1,3 @@\n context\n+added line\n")
             try recordVerdict(threads: reviewedThreads)
             let executable = directory.appending(path: "glab")
             try write("glab", """
@@ -345,6 +392,7 @@ struct MergeWorkflowMonitorTests {
                   */reviewers*) printf '%s' '[{"user":{"id":1},"state":"review_started"}]'; exit ;;
                   */discussions*) file=threads ;;
                   */draft_notes*) file=drafts ;;
+                  */raw_diffs*) file=diff ;;
                   */merge_requests/13) file=request ;;
                   *) exit 100 ;;
                 esac

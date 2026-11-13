@@ -6,6 +6,7 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 
 ## Unreleased
 
+- Review each comment and each review pass once: later author-feedback checks may cite earlier comments but raise no new concerns about ones already assessed, re-reviews of others' MRs cover only code changed since the reviewed head and new or edited notes, and a rebase that keeps the MR's changes neither repeats the feedback check nor reopens the code review. A hidden "Reset review state and recheck everything" action at the bottom of Details runs a full check from scratch.
 - Check author feedback less often: an unchanged, settled merge request is not re-read on every refresh until its head, discussions, drafts, approvals, jobs or settings change (or ten minutes pass), and verified assessments survive app restarts, the global automation switch and settings that do not affect the verifier.
 - Add a global automation switch next to Add and Refresh that stops all automatic work app-wide without changing presets, per-MR choices or how MRs look, with a top banner to turn it back on and confirmation banners for the global and per-MR lightning toggles.
 - Choose the coding model and reasoning effort for Claude CLI workers in Settings, as already available for Codex.

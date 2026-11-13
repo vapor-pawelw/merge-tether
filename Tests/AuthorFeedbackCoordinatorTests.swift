@@ -1810,6 +1810,62 @@ struct AuthorFeedbackCoordinatorTests {
         }
     }
 
+    @Test func laterPassesRaiseNoNewConcernsAboutAlreadyAssessedNotes() async throws {
+        try await withFixture { f in
+            try f.write("approvals.json", #"{"approved_by":[]}"#)
+            var passes = 0
+            let coordinator = AuthorFeedbackCoordinator(settings: f.settings, glab: f.glab, canAutomate: { _ in true },
+                verify: { input, _, _ in
+                    passes += 1
+                    f.inputs.append(input)
+                    // The verifier keeps suggesting a defect for the already assessed note.
+                    var requests: [ReReviewAssessment.CodeReviewRequest] = [.init(sourceNoteID: 10, sourceQuote: "Fix A",
+                        kind: .potentialDefect, summary: "Possible gap in A", question: "Is A safe for empty input?")]
+                    if passes >= 2 {
+                        requests.append(.init(sourceNoteID: 30, sourceQuote: "Check B", kind: .potentialDefect,
+                            summary: "Possible gap in B", question: "Is B safe for empty input?"))
+                    }
+                    return .init(notes: [.init(noteID: 10, state: .addressed, reason: "Current diff fixes A")]
+                        + (passes >= 2 ? [.init(noteID: 30, state: .uncertain, reason: "B needs a check")] : []),
+                        codeReviewRequests: passes == 1 ? [] : requests)
+                }, retryWait: { _ in })
+            defer { coordinator.cancel() }
+            try await f.run(coordinator)
+            #expect(f.inputs.first?.priorAssessment == nil)
+
+            // A new comment starts a pass that sees the earlier verdict but cannot reopen it.
+            try f.write("discussions.json", "[\(Fixture.thread),{\"id\":\"thread-b\",\"notes\":[{\"id\":30,\"author\":{\"id\":7,\"username\":\"alice\"},\"system\":false,\"body\":\"Check B\",\"resolvable\":true,\"resolved\":false}]}]")
+            try await f.run(coordinator)
+            let prior = try #require(f.inputs.last?.priorAssessment)
+            #expect(prior.notes.map(\.noteID) == [10] && !prior.codeChangedSincePrior)
+            let status = try #require(coordinator.status(projectID: 1, iid: 2))
+            #expect(status.phase == .complete)
+            #expect(status.codeReviewRequests.map(\.sourceNoteID) == [30])
+
+            // The emergency reset assesses everything from scratch again.
+            coordinator.resetAssessment(projectID: 1, iid: 2)
+            try await f.run(coordinator)
+            #expect(passes == 3 && f.inputs.last?.priorAssessment == nil)
+            #expect(Set(coordinator.status(projectID: 1, iid: 2)?.codeReviewRequests.map(\.sourceNoteID) ?? []) == [10, 30])
+        }
+    }
+
+    @Test func rebaseWithIdenticalChangesReusesTheAssessment() async throws {
+        try await withFixture { f in
+            try f.write("approvals.json", #"{"approved_by":[]}"#)
+            let coordinator = f.coordinator()
+            defer { coordinator.cancel() }
+            try await f.run(coordinator)
+            #expect(f.inputs.count == 1)
+            let rebased = Fixture.request.replacingOccurrences(of: Fixture.sha, with: String(repeating: "b", count: 40))
+            try f.write("request.json", rebased)
+            try await f.run(coordinator, requestJSON: rebased)
+            #expect(coordinator.status(projectID: 1, iid: 2)?.head == String(repeating: "b", count: 40))
+            #expect(coordinator.status(projectID: 1, iid: 2)?.phase == .complete)
+            #expect(f.inputs.count == 1)
+        }
+    }
+
     @Test func persistedAssessmentSurvivesRestartAndUnrelatedSettings() async throws {
         try await withFixture { f in
             try f.write("approvals.json", #"{"approved_by":[]}"#)

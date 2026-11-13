@@ -124,6 +124,13 @@ final class AuthorFeedbackCoordinator {
     /// An unchanged, settled snapshot is rechecked at most this often; any input change rechecks at once.
     static let unchangedRecheckInterval: TimeInterval = 10 * 60
     private let assessmentDirectory: URL?
+    /// The latest finished pass per MR: later passes treat its unchanged notes as already assessed.
+    private struct PriorPass { let assessment: ReReviewAssessment; let noteRevisions: [Int: String]; let diffDigest: String }
+    @ObservationIgnored private var priorPasses: [MRAutomationScope.Target: PriorPass] = [:]
+    /// Retried snapshots must run the verifier again instead of reusing a stored result.
+    @ObservationIgnored private var bypassStoredAssessment: Set<MRAutomationScope.Target> = []
+    /// A user reset discards earlier passes, so the next pass assesses every note from scratch.
+    @ObservationIgnored private var fullReassessment: Set<MRAutomationScope.Target> = []
     var onRemoteChange: (() -> Void)?
     var onNeedsWork: ((GitLabMergeRequest, Set<Int>, String, AuthorFeedbackResidual?) async -> Void)?
 
@@ -269,11 +276,52 @@ final class AuthorFeedbackCoordinator {
         pending.removeValue(forKey: target)
         tasks[target]?.cancel()
         cache.removeValue(forKey: target)
-        if let assessmentDirectory { AuthorFeedbackAssessmentStore.remove(target, in: assessmentDirectory) }
+        bypassStoredAssessment.insert(target)
         acknowledgementAttempts.removeValue(forKey: target)
         acknowledgedReactions.removeValue(forKey: target)
         removeStatus(for: target)
         failedReads.removeValue(forKey: target)
+    }
+
+    /// Emergency reset: forget every earlier pass and verify all feedback against the current MR from scratch.
+    func resetAssessment(projectID: Int, iid: Int) {
+        guard let host = glab.resolvedHost, let username = glab.currentUsername else { return }
+        let target = MRAutomationScope.Target(host: host, username: username, projectID: projectID, iid: iid)
+        invalidate(projectID: projectID, iid: iid)
+        priorPasses.removeValue(forKey: target)
+        if let assessmentDirectory { AuthorFeedbackAssessmentStore.remove(target, in: assessmentDirectory) }
+        fullReassessment.insert(target)
+    }
+
+    private func priorPass(for target: MRAutomationScope.Target) -> PriorPass? {
+        guard !fullReassessment.contains(target) else { return nil }
+        if let prior = priorPasses[target] { return prior }
+        guard let assessmentDirectory, let record = AuthorFeedbackAssessmentStore.latest(target, in: assessmentDirectory),
+              let revisions = record.noteRevisions, let digest = record.diffDigest else { return nil }
+        return .init(assessment: record.assessment, noteRevisions: revisions, diffDigest: digest)
+    }
+
+    /// Earlier notes whose text is unchanged count as assessed; the verifier may cite them but not reopen them.
+    private static func priorInput(_ prior: PriorPass?, revisions: [Int: String], diffDigest: String) -> ReReviewVerifier.Input.PriorAssessment? {
+        guard let prior else { return nil }
+        let unchanged = Set(revisions.filter { prior.noteRevisions[$0.key] == $0.value }.keys)
+        let notes = prior.assessment.notes.filter { unchanged.contains($0.noteID) }
+            .map { ReReviewVerifier.Input.PriorAssessment.Note(noteID: $0.noteID, state: $0.state, reason: $0.reason) }
+        guard !notes.isEmpty else { return nil }
+        return .init(notes: notes, codeReviewRequests: prior.assessment.reviewRequests.filter { unchanged.contains($0.sourceNoteID) },
+            codeChangedSincePrior: prior.diffDigest != diffDigest)
+    }
+
+    /// Already assessed notes gain no new code-review requests; only earlier ones may be repeated.
+    private static func constrained(_ assessment: ReReviewAssessment, prior: ReReviewVerifier.Input.PriorAssessment?) -> ReReviewAssessment {
+        guard let prior, let requests = assessment.codeReviewRequests else { return assessment }
+        let assessed = Set(prior.notes.map(\.noteID))
+        let earlier = Set(prior.codeReviewRequests.map { "\($0.sourceNoteID)/\($0.kind.rawValue)" })
+        var result = assessment
+        result.codeReviewRequests = requests.filter {
+            !assessed.contains($0.sourceNoteID) || earlier.contains("\($0.sourceNoteID)/\($0.kind.rawValue)")
+        }
+        return result
     }
 
     /// Dependency recovery reopens only evidence gathering, never a failed action.
@@ -484,8 +532,11 @@ final class AuthorFeedbackCoordinator {
             return .init(runID: job.id, selectedFeedbackIDs: ids,
                 summary: String(GlabService.redactWorkflowEvidence(summary).prefix(2_000)))
         }
-        let key = ReReviewVerifier.policyVersion + "|" + (request.sha ?? "") + "|" + input.fingerprint + "|" + request.semanticContextFingerprint
-            + "|" + UserAttentionSnapshot.digest(String(decoding: diff, as: UTF8.self))
+        let diffText = String(decoding: diff, as: UTF8.self)
+        let diffDigest = MergeRequestDiffDigest.normalized(diffText)
+        // Content-bound rather than commit-bound: a rebase that keeps the MR's changes reuses the assessment.
+        let key = ReReviewVerifier.policyVersion + "|" + input.fingerprint + "|" + request.semanticContextFingerprint
+            + "|" + diffDigest
             + "|" + (input.completedFollowUpJobID?.uuidString ?? "")
             + "|" + String(decoding: try encoder.encode(VerifierConfiguration(input.configuration)), as: UTF8.self)
             + "|" + UserAttentionSnapshot.digest(String(decoding: try encoder.encode(blockedContexts), as: UTF8.self))
@@ -494,8 +545,10 @@ final class AuthorFeedbackCoordinator {
             + "|" + String(decoding: try encoder.encode(completedFollowUp), as: UTF8.self)
         let assessment: ReReviewAssessment
         let keyDigest = UserAttentionSnapshot.digest(key)
-        if let stored = cache[input.target], stored.0 == key { assessment = stored.1 }
-        else if let assessmentDirectory,
+        let revisions = MergeRequestDiffDigest.noteRevisions(input.discussions)
+        let bypass = bypassStoredAssessment.contains(input.target) || fullReassessment.contains(input.target)
+        if !bypass, let stored = cache[input.target], stored.0 == key { assessment = stored.1 }
+        else if !bypass, let assessmentDirectory,
                 let record = AuthorFeedbackAssessmentStore.load(input.target, keyDigest: keyDigest, in: assessmentDirectory),
                 record.completedFollowUpJobID == input.completedFollowUpJobID,
                 (try? record.assessment.reviewers(in: input.discussions, authorID: input.user.id, ignoredSuggestions: input.ignoredSuggestions,
@@ -505,23 +558,29 @@ final class AuthorFeedbackCoordinator {
         } else {
             let model = input.configuration.assistant == .codex
                 ? input.configuration.codexVerificationModel.rawValue : input.configuration.claudeVerificationModel.rawValue
-            assessment = try await verify(.init(authorID: input.user.id, headSHA: request.sha ?? "", title: request.title,
+            let prior = Self.priorInput(priorPass(for: input.target), revisions: revisions, diffDigest: diffDigest)
+            assessment = Self.constrained(try await verify(.init(authorID: input.user.id, headSHA: request.sha ?? "", title: request.title,
                 description: request.description,
-                diff: String(decoding: diff, as: UTF8.self), discussions: input.discussions,
+                diff: diffText, discussions: input.discussions,
                 target: .init(host: host, projectID: request.projectID, iid: request.iid,
                     url: request.webURL, expectedUsername: input.user.username),
                 semanticContextFingerprint: request.semanticContextFingerprint,
                 thinking: input.configuration.verificationThinking, blockedFollowUps: blockedContexts,
                 ignoredSuggestions: input.ignoredSuggestions, completedFollowUp: completedFollowUp,
-                excludedReplyAuthorIDs: excludedReplyAuthors(input).sorted()), input.configuration.assistant, model)
+                excludedReplyAuthorIDs: excludedReplyAuthors(input).sorted(), priorAssessment: prior),
+                input.configuration.assistant, model), prior: prior)
             _ = try assessment.reviewers(in: input.discussions, authorID: input.user.id, ignoredSuggestions: input.ignoredSuggestions,
                 excludedReplyAuthorIDs: excludedReplyAuthors(input))
             guard isCurrent(input) else { throw CancellationError() }
             cache[input.target] = (key, assessment, input.completedFollowUpJobID)
+            priorPasses[input.target] = .init(assessment: assessment, noteRevisions: revisions, diffDigest: diffDigest)
+            bypassStoredAssessment.remove(input.target)
+            fullReassessment.remove(input.target)
             if let assessmentDirectory {
                 do {
                     try AuthorFeedbackAssessmentStore.save(.init(version: AuthorFeedbackAssessmentStore.version, target: input.target,
-                        keyDigest: keyDigest, completedFollowUpJobID: input.completedFollowUpJobID, assessment: assessment), in: assessmentDirectory)
+                        keyDigest: keyDigest, completedFollowUpJobID: input.completedFollowUpJobID, assessment: assessment,
+                        noteRevisions: revisions, diffDigest: diffDigest), in: assessmentDirectory)
                 } catch {
                     Log.monitor.error("Could not persist author feedback assessment: \(String(describing: error), privacy: .private)")
                 }

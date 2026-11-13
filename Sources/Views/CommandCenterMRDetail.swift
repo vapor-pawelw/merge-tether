@@ -49,6 +49,8 @@ private struct CommandCenterMRDetailContent: View {
     @State private var isRetrying = false
     @State private var retryError: String?
     @State private var confirmRemoval = false
+    @State private var confirmReviewReset = false
+    @State private var isResettingReview = false
     @State private var discussionStore = MRDiscussionStore()
     @State private var publicationSession = DraftPublicationSession()
     @State private var detailsExpanded = false
@@ -248,6 +250,11 @@ private struct CommandCenterMRDetailContent: View {
                          : .FeedbackSuggestions.feedbackSuggestionsIgnoreConfirm)
                 }
             } message: { choice in Text(verbatim: choice.message) }
+            .confirmationDialog(Text(.ReviewReset.reviewResetConfirmTitle), isPresented: $confirmReviewReset, titleVisibility: .visible) {
+                Button(role: .destructive) { resetReviewState() } label: { Text(.ReviewReset.reviewResetConfirm) }
+            } message: {
+                Text(item.isAuthored ? .ReviewReset.reviewResetHelpAuthored : .ReviewReset.reviewResetHelpReviewed)
+            }
             .confirmationDialog(Text(.Board.boardRemove), isPresented: $confirmRemoval, titleVisibility: .visible) {
                 Button(role: .destructive) { monitor.removeReviewedMergeRequest(item) } label: { Text(.Board.boardRemove) }
             } message: { Text(.Board.boardRemoveExplanation) }
@@ -566,10 +573,37 @@ private struct CommandCenterMRDetailContent: View {
                     if let feedbackDecisionError {
                         Text(verbatim: feedbackDecisionError).font(.caption).foregroundStyle(.orange)
                     }
+                    reviewResetButton
                 }
                 .padding(.top, 12)
             }
         } label: { Text(.CommandCenter.commandCenterDetails).font(.headline) }
+    }
+
+    /// Emergency action kept at the bottom of Details: discards incremental review state for a full fresh pass.
+    @ViewBuilder private var reviewResetButton: some View {
+        if item.mergeRequest?.state == "opened" {
+            Button { confirmReviewReset = true } label: {
+                Label { Text(isResettingReview ? .ReviewReset.reviewResetRunning : .ReviewReset.reviewResetButton) }
+                    icon: { Image(systemName: "arrow.counterclockwise") }
+            }
+            .buttonStyle(.link)
+            .font(.caption)
+            .foregroundStyle(.secondary)
+            .disabled(isResettingReview || isStartingReview || !monitor.canResetReviewState(for: item))
+            .help(Text(item.isAuthored ? .ReviewReset.reviewResetHelpAuthored : .ReviewReset.reviewResetHelpReviewed))
+        }
+    }
+
+    private func resetReviewState() {
+        isResettingReview = true
+        reviewStartError = nil
+        let expectedTarget = discussionTarget
+        Task {
+            defer { isResettingReview = false }
+            await monitor.resetReviewState(for: item)
+            if discussionTarget == expectedTarget { reviewStartError = monitor.assistantJobActionError }
+        }
     }
 
     @ViewBuilder

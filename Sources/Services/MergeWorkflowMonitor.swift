@@ -46,6 +46,11 @@ final class MergeWorkflowMonitor {
         var reviewWasCovered: Bool? = nil
         var reviewCoverageEpoch: Int? = nil
         var lastObservedVerdictDigest: String? = nil
+        /// The head, MR diff content and discussion text your last covering verdict assessed.
+        /// Later passes review only what changed since, so unrelated edits never reopen the whole MR.
+        var reviewedHead: String? = nil
+        var reviewedDiffDigest: String? = nil
+        var reviewedNoteRevisions: [Int: String]? = nil
     }
 
     private struct BlockerCheckpoint: Codable, Equatable {
@@ -441,6 +446,16 @@ final class MergeWorkflowMonitor {
             if let covered {
                 previous.reviewWasCovered = covered
             }
+            if covered == true, let discussions {
+                let revisions = MergeRequestDiffDigest.noteRevisions(discussions, excludingAuthor: account.userID)
+                // A failed read leaves no digest, so a later head change is never mistaken for a rebase.
+                if previous.reviewedHead != head || previous.reviewedDiffDigest == nil {
+                    previous.reviewedDiffDigest = try? await glab.fetchMergeRequestDiffDigest(
+                        projectID: request.projectID, iid: request.iid, host: account.host)
+                }
+                previous.reviewedHead = head
+                previous.reviewedNoteRevisions = revisions
+            }
             let epoch = previous.reviewCoverageEpoch ?? 0
             let staleContext = await staleReviewContext(request, discussions: discussions, glab: glab,
                 account: account, verdict: verdict)
@@ -467,9 +482,36 @@ final class MergeWorkflowMonitor {
                 let token = staleUnreported && !changedHead && ids.isEmpty
                     ? head + "-context-" + (staleContext ?? "")
                     : head + (ids.isEmpty ? "" : "-replies-" + ids.map(String.init).joined(separator: ","))
-                let context = (changedHead ? "The MR head changed after your recorded review. " : "")
-                    + (ids.isEmpty ? "" : "The author replied after your review comments. Recheck reply note IDs: " + ids.map(String.init).joined(separator: ", ") + ".")
-                    + (staleUnreported ? " Your recorded review does not cover the current discussion content. Recheck all current discussions and record a fresh verdict." : "")
+                var scope = IncrementalReviewScope(currentHead: head)
+                if changedHead, let reviewed = previous.reviewedHead ?? (previous.head != head ? previous.head : nil) {
+                    scope.reviewedHead = reviewed
+                    if let reviewedDigest = previous.reviewedDiffDigest, previous.reviewedHead == reviewed,
+                       let currentDigest = try? await glab.fetchMergeRequestDiffDigest(projectID: request.projectID,
+                           iid: request.iid, host: account.host) {
+                        scope.diffUnchanged = currentDigest == reviewedDigest
+                    }
+                }
+                if let reviewedNotes = previous.reviewedNoteRevisions, let discussions {
+                    scope.changedNoteIDs = MergeRequestDiffDigest.changedNotes(from: reviewedNotes,
+                        to: MergeRequestDiffDigest.noteRevisions(discussions, excludingAuthor: account.userID))
+                }
+                var parts: [String] = []
+                if changedHead { parts.append("The MR head changed after your recorded review.") }
+                if !ids.isEmpty {
+                    parts.append("The author replied after your review comments. Recheck reply note IDs: "
+                        + ids.map(String.init).joined(separator: ", ") + ".")
+                }
+                if staleUnreported {
+                    parts.append("Your recorded review does not cover the current discussion content. Record a fresh verdict after checking what changed.")
+                }
+                let scoped = scope.instructions
+                if !scoped.isEmpty { parts.append(scoped) }
+                let onlyOwnOrRemoved = staleUnreported && !changedHead && ids.isEmpty && scope.changedNoteIDs.isEmpty
+                    && previous.reviewedNoteRevisions != nil
+                if onlyOwnOrRemoved {
+                    parts.append("No other participant's note was added or edited since your review. Do not review again; confirm your verdict for the current discussions.")
+                }
+                let context = parts.joined(separator: " ")
                 events.append(observation.event(.reviewUpdate, token: token, context: context, noteIDs: ids))
                 if let staleContext {
                     previous.reportedEvidenceContexts = (previous.reportedEvidenceContexts ?? []).union([staleContext])

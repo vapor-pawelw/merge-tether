@@ -1,0 +1,72 @@
+{
+  "sourceLanguage": "en",
+  "strings": {
+    "reviewResetButton": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Reset review state and recheck everything"
+          }
+        }
+      }
+    },
+    "reviewResetRunning": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Resetting review state…"
+          }
+        }
+      }
+    },
+    "reviewResetConfirmTitle": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Recheck this merge request from scratch?"
+          }
+        }
+      }
+    },
+    "reviewResetConfirm": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Reset and Recheck"
+          }
+        }
+      }
+    },
+    "reviewResetHelpAuthored": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Forget earlier feedback checks and verify every comment against the current merge request from scratch. Later checks then cover only new or changed comments again."
+          }
+        }
+      }
+    },
+    "reviewResetHelpReviewed": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Ignore earlier review passes and run a full review of the whole current merge request. Later re-reviews then cover only what changed again."
+          }
+        }
+      }
+    }
+  },
+  "version": "1.0"
+}

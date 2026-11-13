@@ -496,7 +496,8 @@ final class TodoAutomationService {
                 "\n\n\($0)\nThe verifier identified possible remaining expectations or a missing reply. Include general comments and conditions attached to an advance approval. Decide whether each request is justified. Correlate summaries with their underlying findings and substantive author replies across all discussions. A correction delivered for another comment still needs a reply in each actionable feedback thread: verify the remote correction, then save a brief private reply here linking the original feedback or published explanation. Do not repeat delivered code changes or duplicate replies within the same thread. Purely informational summaries without a distinct request need no reply. A summary's distinct unanswered request still requires work or an evidence-based answer. Implement and test warranted corrections; for an unwarranted request, prepare an evidence-based explanation instead of unnecessary code changes. Some indicated concerns may already be fixed and only need a verified response. Follow the existing push and publication permissions."
             } ?? ""
             let questions = try codeReviewInstructions(codeReviewRequests, notes: codeReviewNotes)
-            let prompt = "\(task)\(scope)\(custom)\(isolation)\n\nFallback if needed: \(fallback)\(suppliedEvidence)\(verifiedContext)\(feedbackRecovery?.instructions ?? "")\(questions)"
+            let reviewScope = context.event == .reviewRequested ? Self.reviewScope(work: work, username: username) : ""
+            let prompt = "\(task)\(scope)\(custom)\(isolation)\n\nFallback if needed: \(fallback)\(reviewScope)\(suppliedEvidence)\(verifiedContext)\(feedbackRecovery?.instructions ?? "")\(questions)"
             return try await AssistantAutomationRunner.launch(
                 assistant, title: title, stackPosition: stackPosition, mergeRequestURL: context.url,
                 prompt: prompt,
@@ -533,6 +534,15 @@ final class TodoAutomationService {
             guard output.exitCode == 0 else { throw ScriptError.nonZeroExit(output.exitCode) }
         }
         return nil
+    }
+
+    /// A repeated review request reviews only what changed since this user's recorded review.
+    static func reviewScope(work: AssistantAutomationRunner.MergeRequestWork, username: String,
+                            directory: URL = ReviewVerdictStore.directory) -> String {
+        guard let verdict = ReviewVerdictStore.verdict(host: work.host, projectID: work.projectID, iid: work.iid, in: directory),
+              verdict.username == username else { return "" }
+        let text = IncrementalReviewScope(reviewedHead: verdict.headSHA).instructions
+        return text.isEmpty ? "" : "\n\n" + text
     }
 
     private enum ScriptError: Error {
