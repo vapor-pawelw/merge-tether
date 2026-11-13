@@ -23,6 +23,7 @@ struct GitLabRefreshButton: View {
             }
         }
         .disabled(refreshing)
+        .mrActionHelp(.refreshFromGitLab)
     }
 }
 
@@ -68,9 +69,10 @@ struct MRCommonMenuItems: View {
                     await monitor.runReview(for: item)
                 }
             } label: {
-                Label { Text(.CommandCenter.commandCenterReviewRun) } icon: { Image(systemName: "text.magnifyingglass") }
+                MRActionLabel(title: .CommandCenter.commandCenterReviewRun, cta: .runReview)
             }
             .disabled(startingReview || !monitor.canRunReview(for: item))
+            .mrActionHelp(.runReview)
         }
         AssistantContextMenu(mergeRequestURL: item.url, title: item.title,
                              settings: monitor.settings)

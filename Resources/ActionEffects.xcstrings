@@ -1,0 +1,303 @@
+{
+  "sourceLanguage": "en",
+  "strings": {
+    "addAndHandle": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Adds this merge request to your board, turns its automation on and starts agents for its pending work."
+          }
+        }
+      }
+    },
+    "approve": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Approves this merge request in GitLab."
+          }
+        }
+      }
+    },
+    "confirmPipelineHandoff": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Starts an agent that works on the failed pipeline."
+          }
+        }
+      }
+    },
+    "diagnosePipeline": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Starts an agent that diagnoses the failed pipeline. For your own merge request, a stale pipeline is first retried in GitLab when automatic writes are allowed."
+          }
+        }
+      }
+    },
+    "finishCommentReview": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Ends your comment review in MergeTether. Nothing is sent to GitLab."
+          }
+        }
+      }
+    },
+    "handleFeedback": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Starts an agent that addresses the remaining reviewer feedback. It pushes only when follow-up push is allowed in Settings."
+          }
+        }
+      }
+    },
+    "ignoreSuggestion": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Ignores this suggestion in MergeTether, then checks the feedback again."
+          }
+        }
+      }
+    },
+    "kindAICheck": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Read-only AI check"
+          }
+        }
+      }
+    },
+    "kindAgent": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Agent run (AI)"
+          }
+        }
+      }
+    },
+    "kindGitLab": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "GitLab action (no AI)"
+          }
+        }
+      }
+    },
+    "kindLocal": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "MergeTether only (no AI)"
+          }
+        }
+      }
+    },
+    "markReady": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Marks this draft merge request ready in GitLab."
+          }
+        }
+      }
+    },
+    "merge": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Checks the merge request again, then merges it or sets auto-merge in GitLab."
+          }
+        }
+      }
+    },
+    "publishComments": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Publishes the comments to GitLab."
+          }
+        }
+      }
+    },
+    "refreshFromGitLab": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Reloads this merge request from GitLab."
+          }
+        }
+      }
+    },
+    "requestReReview": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Asks the reviewers for another review in GitLab after checking the merge request again."
+          }
+        }
+      }
+    },
+    "resolveConflicts": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Starts an agent that resolves the conflicts in a separate worktree. It pushes only when conflict push is allowed in Settings."
+          }
+        }
+      }
+    },
+    "resolveThreads": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Checks which threads are addressed, using the selected CLI when no current check exists. You confirm before threads are resolved in GitLab."
+          }
+        }
+      }
+    },
+    "retryDraftVerification": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Checks the prepared drafts again with the selected CLI. Nothing is published."
+          }
+        }
+      }
+    },
+    "retryRun": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Starts the stopped agent run again with the same task."
+          }
+        }
+      }
+    },
+    "runReview": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Starts an agent with the selected CLI to review this merge request. Findings stay private drafts until you publish them."
+          }
+        }
+      }
+    },
+    "thenMayRequestReReview": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Then: if the check is clear and automatic re-review is on, reviewers are asked again."
+          }
+        }
+      }
+    },
+    "thenMayStartAgent": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Then: if work remains and automatic follow-up is on, an agent starts fixing it."
+          }
+        }
+      }
+    },
+    "thenResumesAutomation": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Then: when nothing else is waiting, automation continues under your Settings rules and may start agents, publish, approve or merge."
+          }
+        }
+      }
+    },
+    "thenRunsAllowedAutomation": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Then: automation allowed by your Settings can run right away, including agents and GitLab actions."
+          }
+        }
+      }
+    },
+    "verifyFeedback": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Checks the reviewer feedback again with the selected CLI. The check itself changes nothing."
+          }
+        }
+      }
+    },
+    "verifyReReview": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Checks again with the selected CLI whether the feedback is addressed. The check itself changes nothing."
+          }
+        }
+      }
+    }
+  },
+  "version": "1.0"
+}

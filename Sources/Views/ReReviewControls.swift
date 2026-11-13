@@ -45,12 +45,18 @@ struct ReReviewControls: View {
                     if item.canConfirmReReview {
                         Button { confirm = true } label: { Text(.Menu.menuReReviewConfirm) }
                             .buttonStyle(.borderedProminent)
+                            .mrActionHelp(.requestReReview)
                     }
                     if readiness != .checking {
                         Button {
                             isWorking = true
                             Task { await monitor.retryReReview(item.id); isWorking = false }
-                        } label: { Text(readiness == .manual ? .Settings.settingsAssistantSetupRecheck : .Menu.menuReReviewRetry) }
+                        } label: {
+                            // Manual readiness re-reads GitLab only; the AI verifier is off.
+                            if readiness == .manual { Text(.Settings.settingsAssistantSetupRecheck) }
+                            else { MRActionLabel(title: .Menu.menuReReviewRetry, cta: .verifyReReview) }
+                        }
+                        .mrActionHelp(readiness == .manual ? nil : .verifyReReview)
                     }
                 }
                 .controlSize(.small)

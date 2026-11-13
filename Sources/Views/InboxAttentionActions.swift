@@ -20,12 +20,16 @@ struct InboxAttentionActions: View {
                 HStack { ProgressView().controlSize(.small); Text(.Menu.menuTodoAutomationRunning) }
             } else if feedbackAction == .ready(.assistant) || feedbackAction == .failed {
                 if feedbackAction == .failed { Text(.Menu.menuTodoAutomationFailed).foregroundStyle(.orange) }
-                Button(action: onFeedback) { Text(.Menu.menuTodoAutomationPrepareFollowUp) }
+                Button(action: onFeedback) { MRActionLabel(title: .Menu.menuTodoAutomationPrepareFollowUp, cta: .handleFeedback) }
                     .buttonStyle(.bordered)
+                    .mrActionHelp(.handleFeedback)
             }
             if item.needsPipelineHandoff {
-                Button { confirmsPipeline = true } label: { Text(.Menu.menuWorkflowHandoffButton) }
+                Button { confirmsPipeline = true } label: {
+                    MRActionLabel(title: .Menu.menuWorkflowHandoffButton, cta: .confirmPipelineHandoff)
+                }
                     .buttonStyle(.borderedProminent)
+                    .mrActionHelp(.confirmPipelineHandoff)
                     .confirmationDialog(Text(.Menu.menuWorkflowHandoffTitle), isPresented: $confirmsPipeline, titleVisibility: .visible) {
                         Button(action: onPipeline) { Text(.Menu.menuWorkflowHandoffConfirm) }
                     } message: { Text(.Menu.menuWorkflowHandoffExplanation) }

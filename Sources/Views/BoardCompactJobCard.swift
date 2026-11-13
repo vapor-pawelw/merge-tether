@@ -172,8 +172,9 @@ struct BoardJobStatusActions: View {
                             defer { retrying = false }
                             await monitor.retryAssistantJob(handoff.id)
                         }
-                    } label: { Text(.MRHumanAction.mrHumanActionActionRetryRun) }
+                    } label: { MRActionLabel(title: .MRHumanAction.mrHumanActionActionRetryRun, cta: .retryRun) }
                     .buttonStyle(.bordered)
+                    .mrActionHelp(.retryRun)
                     .disabled(retrying || AssistantAutomationRunner.isWorking(on: handoff.key.work))
                 }
             }

@@ -96,8 +96,8 @@ struct BoardMRProposalCard: View {
                                 } catch { failed = true }
                             }
                         }
-                    } label: { Text(.Board.boardProposalAddAndHandle) }
-                    .buttonStyle(.bordered).help(Text(.Board.boardProposalDescription))
+                    } label: { MRActionLabel(title: .Board.boardProposalAddAndHandle, cta: .addAndHandle) }
+                    .buttonStyle(.bordered).mrActionHelp(.addAndHandle)
                     Button { confirmIgnore = true } label: { Text(.Board.boardProposalIgnore) }
                         .buttonStyle(.plain).foregroundStyle(.secondary)
                     if isWorking { ProgressView().controlSize(.small) }

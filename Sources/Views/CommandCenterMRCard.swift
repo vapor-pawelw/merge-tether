@@ -231,7 +231,7 @@ private struct CommandCenterMRCardContent: View {
                 if needsCLI {
                     primary(.Board.boardCompactSetupCli) { openSettings() }
                 } else {
-                    primary(label, enabled: monitor.canRunReview(for: item)) {
+                    primary(label, cta: .runReview, enabled: monitor.canRunReview(for: item)) {
                         start { await monitor.runReview(for: item) }
                     }
                 }
@@ -251,7 +251,7 @@ private struct CommandCenterMRCardContent: View {
             primary(action.actionLabel) { openAttention(.assistantRuns) }
         case .retryRun:
             if let job = row.latestJob {
-                primary(action.actionLabel,
+                primary(action.actionLabel, cta: .retryRun,
                         enabled: job.execution?.state.isActive == false
                             && monitor.availableAssistants.contains(job.key.assistant)
                             && !AssistantAutomationRunner.isWorking(on: job.key.work)) {
@@ -266,11 +266,11 @@ private struct CommandCenterMRCardContent: View {
             }
         case .reviewDrafts:
             if action.kind == .commentReview {
-                primary(.CommentReview.commentReviewFinish, enabled: item.canFinishCommentReview) {
+                primary(.CommentReview.commentReviewFinish, cta: .finishCommentReview, enabled: item.canFinishCommentReview) {
                     start { await monitor.attention.finishCommentReview(item) }
                 }
             } else if action.showsDirectPublication && !item.drafts.isEmpty {
-                primary(.CommentReview.commentReviewPublishAll, enabled: scopeTarget != nil) {
+                primary(.CommentReview.commentReviewPublishAll, cta: .publishComments, enabled: scopeTarget != nil) {
                     start { await monitor.attention.publishDrafts(of: item.id) }
                 }
             } else {
@@ -279,9 +279,9 @@ private struct CommandCenterMRCardContent: View {
         case .reviewApproval:
             primary(action.actionLabel) { openAttention(.drafts) }
         case .verifyFeedback:
-            primary(action.actionLabel) { monitor.attention.retryAuthorFeedback(item.id) }
+            primary(action.actionLabel, cta: .verifyFeedback) { monitor.attention.retryAuthorFeedback(item.id) }
         case .retryDraftVerification:
-            primary(action.actionLabel) { monitor.attention.retryDraftProofRecovery(item.id) }
+            primary(action.actionLabel, cta: .retryDraftVerification) { monitor.attention.retryDraftProofRecovery(item.id) }
         case .setupAssistant:
             primary(action.actionLabel) { openSettings() }
         case .reviewDecision, .reviewFeedback:
@@ -289,7 +289,7 @@ private struct CommandCenterMRCardContent: View {
         case .reviewHandoff, .reviewMerge, .reviewIssue:
             primary(action.actionLabel) { openAttention(.overview) }
         case .handleFeedback:
-            primary(action.actionLabel) {
+            primary(action.actionLabel, cta: .handleFeedback) {
                 start {
                     if let status = item.authorFeedbackStatus, !status.followUpNoteIDs.isEmpty,
                        let request = item.authoredRequest {
@@ -300,7 +300,9 @@ private struct CommandCenterMRCardContent: View {
             }
         case .retryIntent:
             if let intent = nextIntent {
-                primary(action.actionLabel) { start { await monitor.runMRTodoIntent(id: intent.id) } }
+                primary(action.actionLabel, cta: MRActionCTA(intent: intent.kind)) {
+                    start { await monitor.runMRTodoIntent(id: intent.id) }
+                }
             } else {
                 primary(action.actionLabel) { openAttention(.overview) }
             }
@@ -312,12 +314,19 @@ private struct CommandCenterMRCardContent: View {
         else { onDetails() }
     }
 
-    private func primary(_ title: LocalizedStringResource, enabled: Bool = true, action: @escaping () -> Void) -> some View {
-        Button(action: action) {
-            if isStarting { ProgressView().controlSize(.mini) }
-            else { Text(title).lineLimit(1) }
+    @ViewBuilder
+    private func primary(_ title: LocalizedStringResource, cta: MRActionCTA? = nil, enabled: Bool = true,
+                         action: @escaping () -> Void) -> some View {
+        if let cta {
+            Button(action: action) { MRActionLabel(title: title, cta: cta, working: isStarting) }
+                .buttonStyle(.bordered).disabled(isStarting || !enabled).mrActionHelp(cta)
+        } else {
+            Button(action: action) {
+                if isStarting { ProgressView().controlSize(.mini) }
+                else { Text(title).lineLimit(1) }
+            }
+            .buttonStyle(.bordered).disabled(isStarting || !enabled)
         }
-        .buttonStyle(.bordered).disabled(isStarting || !enabled)
     }
 
     private func start(_ operation: @escaping @MainActor () async -> Void) {

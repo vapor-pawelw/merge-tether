@@ -24,8 +24,13 @@ struct BoardMRIntentActions: View {
                                     defer { starting.remove(intent.id) }
                                     await monitor.runMRTodoIntent(id: intent.id)
                                 }
-                            } label: { Text(intent.state == .failed ? .Board.boardIntentRetry : Self.action(intent.kind)) }
+                            } label: {
+                                let title = intent.state == .failed ? LocalizedStringResource.Board.boardIntentRetry : Self.action(intent.kind)
+                                if let cta = MRActionCTA(intent: intent.kind) { MRActionLabel(title: title, cta: cta) }
+                                else { Text(title) }
+                            }
                             .disabled(starting.contains(intent.id) || !canRun(intent.kind))
+                            .mrActionHelp(MRActionCTA(intent: intent.kind))
                         }
                     }
                     if let error = intent.error {

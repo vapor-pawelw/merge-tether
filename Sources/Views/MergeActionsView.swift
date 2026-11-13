@@ -81,14 +81,15 @@ struct MergeActionsView<StatusTrailer: View, AdditionalActions: View>: View {
                             else { Text(action.title) }
                         }
                         .buttonStyle(.borderedProminent).disabled(actionsBlocked || working)
+                        .mrActionHelp(.merge)
                     }
                     if hasDiscussionBlock {
                         Button { prepareResolution() } label: {
                             if working { ProgressView().controlSize(.small) }
-                            else { Text(.MergeActions.mergeActionsResolveAll) }
+                            else { MRActionLabel(title: .MergeActions.mergeActionsResolveAll, cta: .resolveThreads) }
                         }
                         .buttonStyle(.bordered).disabled(working || actionsBlocked)
-                        .help(Text(.MergeActions.mergeActionsResolveScope))
+                        .mrActionHelp(.resolveThreads, detail: .MergeActions.mergeActionsResolveScope)
                     }
                     feedbackRecoveryAction
                     if needsGitLabCheck { Link(destination: item.url) { Text(.MergeActions.mergeActionsCheckGitLab) } }
@@ -190,9 +191,10 @@ struct MergeActionsView<StatusTrailer: View, AdditionalActions: View>: View {
                     feedbackRecheckRoute.perform(verify: { monitor.attention.retryAuthorFeedback(item.id) },
                         review: reviewFeedback)
                 } label: {
-                    Text(.AuthorFeedback.authorFeedbackRecheck)
+                    MRActionLabel(title: .AuthorFeedback.authorFeedbackRecheck, cta: .verifyFeedback)
                 }
                 .buttonStyle(.bordered).disabled(working || actionsBlocked)
+                .mrActionHelp(.verifyFeedback)
             case .reviewFeedback:
                 switch ManualFeedbackReviewDestination(item: item) {
                 case .gitLab(let url):

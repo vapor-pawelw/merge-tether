@@ -89,24 +89,32 @@ struct ConfirmationQueueRow<AdditionalActions: View>: View {
                     let selected = draftSelection.wrappedValue.selectedDrafts(from: item.drafts)
                     if requiresSelection {
                         Button { onPublishSelected?(selected) } label: {
-                            Text(selected.count == item.drafts.count ? .CommentReview.commentReviewPublishSelected(selected.count)
-                                 : .DraftPublication.draftPublicationPublishSelected(selected.count))
+                            // Only publishing every draft lets the paused workflow continue.
+                            if selected.count == item.drafts.count {
+                                MRActionLabel(title: .CommentReview.commentReviewPublishSelected(selected.count), cta: .publishComments)
+                            } else {
+                                Text(.DraftPublication.draftPublicationPublishSelected(selected.count))
+                            }
                         }
-                        .help(Text(.CommentReview.commentReviewPublishSelectedHelp))
+                        .mrActionHelp(.publishComments, detail: .CommentReview.commentReviewPublishSelectedHelp)
                         .buttonStyle(.borderedProminent)
                         .disabled(selected.isEmpty || onPublishSelected == nil)
                     } else {
-                        Button(action: onPublish) { Text(.CommentReview.commentReviewPublishAll) }
-                            .help(Text(.Menu.menuConfirmPublishHelp))
+                        Button(action: onPublish) { MRActionLabel(title: .CommentReview.commentReviewPublishAll, cta: .publishComments) }
+                            .mrActionHelp(.publishComments, detail: .Menu.menuConfirmPublishHelp)
                             .buttonStyle(.borderedProminent)
                     }
                 } else if item.requiresCommentReview, let onFinishCommentReview {
-                    Button(action: onFinishCommentReview) { Text(.CommentReview.commentReviewFinish) }
+                    Button(action: onFinishCommentReview) {
+                        MRActionLabel(title: .CommentReview.commentReviewFinish, cta: .finishCommentReview)
+                    }
                         .buttonStyle(.borderedProminent)
+                        .mrActionHelp(.finishCommentReview)
                         .disabled(!item.canFinishCommentReview)
                 } else if item.canApprove {
                     Button(action: onApprove) { Text(.Menu.menuConfirmApprove) }
                         .buttonStyle(.borderedProminent)
+                        .mrActionHelp(.approve)
                 }
                 Button(action: onOpen) { Text(.Menu.menuConfirmEdit) }
                     .buttonStyle(.bordered)

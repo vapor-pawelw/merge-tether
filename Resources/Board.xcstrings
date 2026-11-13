@@ -346,17 +346,6 @@
         }
       }
     },
-    "board.proposal.description": {
-      "extractionState": "manual",
-      "localizations": {
-        "en": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "Add this merge request to your board and handle its pending actions, or ignore it."
-          }
-        }
-      }
-    },
     "board.proposal.addAndHandle": {
       "extractionState": "manual",
       "localizations": {

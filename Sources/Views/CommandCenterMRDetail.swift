@@ -404,10 +404,10 @@ private struct CommandCenterMRDetailContent: View {
                                     retryError = monitor.assistantJobActionError
                                 }
                             } label: {
-                                if isRetrying { ProgressView().controlSize(.mini) }
-                                else { Text(action.actionLabel) }
+                                MRActionLabel(title: action.actionLabel, cta: .retryRun, working: isRetrying)
                             }
                             .buttonStyle(.borderedProminent)
+                            .mrActionHelp(.retryRun)
                             .disabled(isRetrying || job.execution?.state.isActive != false
                                       || !monitor.availableAssistants.contains(job.key.assistant)
                                       || AssistantAutomationRunner.isWorking(on: job.key.work))
@@ -426,8 +426,11 @@ private struct CommandCenterMRDetailContent: View {
                         } label: { Text(action.actionLabel) }
                             .buttonStyle(.borderedProminent)
                     } else if action.action == .retryDraftVerification {
-                        Button { monitor.attention.retryDraftProofRecovery(item.id) } label: { Text(action.actionLabel) }
+                        Button { monitor.attention.retryDraftProofRecovery(item.id) } label: {
+                            MRActionLabel(title: action.actionLabel, cta: .retryDraftVerification)
+                        }
                             .buttonStyle(.borderedProminent)
+                            .mrActionHelp(.retryDraftVerification)
                     } else if action.action == .setupAssistant {
                         Button { openSettings() } label: { Text(action.actionLabel) }
                     } else if action.action == .reviewIssue {
@@ -506,10 +509,14 @@ private struct CommandCenterMRDetailContent: View {
                     Spacer()
                     if busy { ProgressView().controlSize(.small) }
                     Button { Task { await monitor.attention.publishDrafts(selected, for: target) } } label: {
-                        Text(selected.count == item.drafts.count ? .CommentReview.commentReviewPublishSelected(selected.count)
-                             : .DraftPublication.draftPublicationPublishSelected(selected.count))
+                        // Only publishing every draft lets the paused workflow continue.
+                        if selected.count == item.drafts.count {
+                            MRActionLabel(title: .CommentReview.commentReviewPublishSelected(selected.count), cta: .publishComments)
+                        } else {
+                            Text(.DraftPublication.draftPublicationPublishSelected(selected.count))
+                        }
                     }
-                    .help(Text(.CommentReview.commentReviewPublishSelectedHelp))
+                    .mrActionHelp(.publishComments, detail: .CommentReview.commentReviewPublishSelectedHelp)
                     .buttonStyle(.borderedProminent)
                 }
             }
@@ -625,12 +632,12 @@ private struct CommandCenterMRDetailContent: View {
                     if discussionTarget == expectedTarget { reviewStartError = monitor.assistantJobActionError }
                 }
             } label: {
-                Label { Text(isStartingReview ? .CommandCenter.commandCenterReviewStarting : .CommandCenter.commandCenterReviewRun) }
-                    icon: { Image(systemName: "text.magnifyingglass") }
+                MRActionLabel(title: isStartingReview ? .CommandCenter.commandCenterReviewStarting : .CommandCenter.commandCenterReviewRun,
+                              cta: .runReview)
             }
             .controlSize(.small)
             .disabled(isStartingReview || !monitor.canRunReview(for: item))
-            .help(Text(.CommandCenter.commandCenterReviewHelp))
+            .mrActionHelp(.runReview)
         }
         if let reviewStartError {
             Text(verbatim: reviewStartError).font(.caption).foregroundStyle(.orange)
@@ -763,6 +770,7 @@ private struct CommandCenterMRDetailContent: View {
             Text(.FeedbackSuggestions.feedbackSuggestionsIgnore)
         }
         .buttonStyle(.plain).foregroundStyle(.orange).disabled(isUpdatingFeedbackDecision)
+        .mrActionHelp(.ignoreSuggestion)
     }
 
     private func presentIgnoreSuggestion(_ source: MRCommentCitation, _ summary: String, _ reason: String) {

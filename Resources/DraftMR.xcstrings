@@ -23,17 +23,6 @@
         }
       }
     },
-    "markReadyHelp": {
-      "extractionState": "manual",
-      "localizations": {
-        "en": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "Mark this draft merge request ready in GitLab. Configured automation can then resume under your existing rules."
-          }
-        }
-      }
-    },
     "failed": {
       "extractionState": "manual",
       "localizations": {

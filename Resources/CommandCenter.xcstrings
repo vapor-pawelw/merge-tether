@@ -265,17 +265,6 @@
         }
       }
     },
-    "commandCenter.review.help": {
-      "extractionState": "manual",
-      "localizations": {
-        "en": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "Review this merge request with the selected CLI and prepare private draft findings."
-          }
-        }
-      }
-    },
     "commandCenter.close": {
       "extractionState": "manual",
       "localizations": {

@@ -75,7 +75,10 @@ struct AuthorFeedbackView: View {
                         }
                     }
                     HStack {
-                        Button { monitor.attention.retryAuthorFeedback(item.id) } label: { Text(.AuthorFeedback.authorFeedbackRecheck) }
+                        Button { monitor.attention.retryAuthorFeedback(item.id) } label: {
+                            MRActionLabel(title: .AuthorFeedback.authorFeedbackRecheck, cta: .verifyFeedback)
+                        }
+                        .mrActionHelp(.verifyFeedback)
                         if !status.followUpNoteIDs.isEmpty, let request = item.authoredRequest {
                             Button {
                                 starting = true
@@ -84,8 +87,9 @@ struct AuthorFeedbackView: View {
                                     await monitor.runVerifiedAuthorFeedback(request: request,
                                         noteIDs: status.followUpNoteIDs, fingerprint: status.fingerprint)
                                 }
-                            } label: { Text(.AuthorFeedback.authorFeedbackHandle) }
+                            } label: { MRActionLabel(title: .AuthorFeedback.authorFeedbackHandle, cta: .handleFeedback) }
                             .disabled(starting)
+                            .mrActionHelp(.handleFeedback)
                         }
                     }
                     if !status.followUpNoteIDs.isEmpty && !automaticFollowUp {
@@ -128,6 +132,7 @@ struct AuthorFeedbackView: View {
                     onIgnoreSuggestion(source, AgentExplanation.summary(finding.summary) ?? reason, reason)
                 } label: { Text(.FeedbackSuggestions.feedbackSuggestionsIgnore) }
                     .buttonStyle(.plain).foregroundStyle(.orange).disabled(decisionUpdating)
+                    .mrActionHelp(.ignoreSuggestion)
             }
         } else {
             Text(sourceLoading ? .FeedbackSuggestions.feedbackSuggestionsSourceLoading : .FeedbackSuggestions.feedbackSuggestionsSourceUnavailable)

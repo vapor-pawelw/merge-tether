@@ -171,21 +171,21 @@ struct AutomationSettingsTab: View {
 
     private var preparationFields: some View {
         Section {
-            Toggle(isOn: $draft.reviewRequested.isEnabled) { Text(.Settings.settingsAutomationReviewRequested) }
+            Toggle(isOn: $draft.reviewRequested.isEnabled) { effectLabel(.Settings.settingsAutomationReviewRequested, .agent) }
                 .toggleStyle(.checkbox).disabled(draft.reviewRequested.runner == .shell)
-            Toggle(isOn: $draft.authorFeedback.isEnabled) { Text(.Settings.settingsAutomationAuthorFeedback) }
+            Toggle(isOn: $draft.authorFeedback.isEnabled) { effectLabel(.Settings.settingsAutomationAuthorFeedback, .agent) }
                 .toggleStyle(.checkbox).disabled(draft.authorFeedback.runner == .shell)
             Toggle(isOn: Binding(get: { draft.autoVerifyReReview }, set: { enabled in
                 if enabled { setupAction = .enableVerification }
                 else { draft.autoVerifyReReview = false }
-            })) { Text(.Settings.settingsVerificationEnabled) }
+            })) { effectLabel(.Settings.settingsVerificationEnabled, .aiCheck) }
                 .toggleStyle(.checkbox)
             Text(.Settings.settingsVerificationHelp).font(.caption).foregroundStyle(.secondary)
             checkpointToggle($draft.autoClaimPipelineFailures, .Settings.settingsAutomationPipelineOwnership,
-                             help: .Settings.settingsAutomationPipelineOwnershipHelp, reset: .pipelineOwnership)
+                             help: .Settings.settingsAutomationPipelineOwnershipHelp, reset: .pipelineOwnership, effect: .agent)
             VStack(alignment: .leading, spacing: 4) {
                 Toggle(isOn: $draft.conflictTasksEnabled) {
-                    Text(.Settings.settingsAutomationConflictsToggle)
+                    effectLabel(.Settings.settingsAutomationConflictsToggle, .agent)
                 }
                 .toggleStyle(.checkbox)
 
@@ -314,13 +314,22 @@ struct AutomationSettingsTab: View {
         }
     }
 
+    /// Settings that start AI work carry the same icon as their call to action.
+    @ViewBuilder
+    private func effectLabel(_ title: LocalizedStringResource, _ effect: MRActionEffect?) -> some View {
+        HStack(spacing: 4) {
+            Text(title)
+            if let effect { MRActionEffectIcon(effect: effect) }
+        }
+    }
+
     private func checkpointToggle(
         _ isOn: Binding<Bool>, _ title: LocalizedStringResource, help: LocalizedStringResource,
-        reset: AutomationCheckpoint? = nil
+        reset: AutomationCheckpoint? = nil, effect: MRActionEffect? = nil
     ) -> some View {
         VStack(alignment: .leading, spacing: 3) {
             HStack {
-                Toggle(isOn: isOn) { Text(title) }.toggleStyle(.checkbox)
+                Toggle(isOn: isOn) { effectLabel(title, effect) }.toggleStyle(.checkbox)
                 if let reset {
                     Spacer()
                     AutomationDefaultsResetButton(preset: draft.baselinePreset) {

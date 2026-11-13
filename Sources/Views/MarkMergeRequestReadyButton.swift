@@ -20,16 +20,10 @@ struct MarkMergeRequestReadyButton: View {
                     }
                 }
             } label: {
-                Label {
-                    if working { Text(.DraftMR.markingReady) }
-                    else { Text(.DraftMR.markReady) }
-                } icon: {
-                    if working { ProgressView().controlSize(.mini) }
-                    else { Image(systemName: "checkmark.circle") }
-                }
+                MRActionLabel(title: working ? .DraftMR.markingReady : .DraftMR.markReady, cta: .markReady, working: working)
             }
             .disabled(working)
-            .help(Text(.DraftMR.markReadyHelp))
+            .mrActionHelp(.markReady)
         }
     }
 
