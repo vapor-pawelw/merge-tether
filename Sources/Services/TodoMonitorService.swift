@@ -233,8 +233,12 @@ final class TodoMonitorService {
         self.attentionNotificationScheduler = AttentionNotificationScheduler(notifications: notifications)
         self.automation = automation
         self.cancelPolicyJob = cancelPolicyJob
+        // Test hosts keep verifier results in memory so suites never share persisted assessments.
+        let feedbackAssessments = ApplicationLaunchMode.resolve(environment: ProcessInfo.processInfo.environment) == .application
+            ? AuthorFeedbackAssessmentStore.directory : nil
         self.attention = MergeRequestAttentionMonitor(glab: glab, settings: settings,
-                                                       reportDirectory: CodexDesktopRelay.directory)
+                                                       reportDirectory: CodexDesktopRelay.directory,
+                                                       authorFeedbackAssessmentDirectory: feedbackAssessments)
         self.authoredMergeRequests = AuthoredMergeRequestMonitor(settings: settings, glab: glab)
         todoStore.onAcknowledged = { [weak self] id in
             if self?.failedAutomationTodoID == id { self?.failedAutomationTodoID = nil }

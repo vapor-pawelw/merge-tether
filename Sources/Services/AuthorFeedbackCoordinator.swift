@@ -73,6 +73,21 @@ struct AuthorFeedbackStatus: Equatable, Sendable {
     var waitingForReviewer: Bool { findings.contains { $0.state == .waitingAcceptance } }
 }
 
+/// The only automation settings that shape a verifier run; unrelated settings, presets and the global
+/// switch must not invalidate an otherwise identical assessment.
+private struct VerifierConfiguration: Encodable {
+    let assistant: AutomationAssistant
+    let model: String
+    let thinking: VerificationThinking
+
+    init(_ configuration: AutomationSettings) {
+        assistant = configuration.assistant
+        model = configuration.assistant == .codex
+            ? configuration.codexVerificationModel.rawValue : configuration.claudeVerificationModel.rawValue
+        thinking = configuration.verificationThinking
+    }
+}
+
 /// Verifier work is bounded, cached by source/text/policy, and independent of GUI chats.
 @MainActor @Observable
 final class AuthorFeedbackCoordinator {
@@ -103,6 +118,12 @@ final class AuthorFeedbackCoordinator {
     }
     @ObservationIgnored private var failedReads: [MRAutomationScope.Target: FailedRead] = [:]
     @ObservationIgnored private var statusOwners: [MRAutomationScope.Target: Input] = [:]
+    private struct StableCheck { let input: Input; let date: Date }
+    /// Snapshots whose last pass reproduced the previous status without any GitLab write.
+    @ObservationIgnored private var stableChecks: [MRAutomationScope.Target: StableCheck] = [:]
+    /// An unchanged, settled snapshot is rechecked at most this often; any input change rechecks at once.
+    static let unchangedRecheckInterval: TimeInterval = 10 * 60
+    private let assessmentDirectory: URL?
     var onRemoteChange: (() -> Void)?
     var onNeedsWork: ((GitLabMergeRequest, Set<Int>, String, AuthorFeedbackResidual?) async -> Void)?
 
@@ -120,6 +141,9 @@ final class AuthorFeedbackCoordinator {
         let decisionRevision: String
         let ignoredSuggestions: [IgnoredFeedbackSuggestion]
         let reviewParticipationRevision: String
+        let approvalRevision: String?
+        let handoffRevision: String
+        let writesAllowed: Bool
         var readOnly: Bool { drafts > 0 }
     }
 
@@ -139,10 +163,11 @@ final class AuthorFeedbackCoordinator {
          verify: @escaping @MainActor (ReReviewVerifier.Input, AutomationAssistant, String) async throws -> ReReviewAssessment = {
              try await ReReviewVerifier.verifySingleAttempt($0, assistant: $1, model: $2)
          }, retryWait: @escaping ReadOnlyAssessmentRetry.Wait = ReadOnlyAssessmentRetry.wait,
-         now: @escaping ReadOnlyAssessmentRetry.Clock = { Date() }) {
+         now: @escaping ReadOnlyAssessmentRetry.Clock = { Date() }, assessmentDirectory: URL? = nil) {
         self.settings = settings; self.glab = glab; self.canAutomate = canAutomate; self.verify = verify
         self.retryWait = retryWait
         self.now = now
+        self.assessmentDirectory = assessmentDirectory
     }
 
     func status(projectID: Int, iid: Int) -> AuthorFeedbackStatus? {
@@ -179,8 +204,9 @@ final class AuthorFeedbackCoordinator {
             && configuration.scope.permits(request, host: host, username: username)
     }
 
+    /// `approvalRevision` identifies the observed approvals; without it an unchanged snapshot is always rechecked.
     func refresh(request: GitLabMergeRequest, discussions: [GitLabMergeRequestDiscussion], drafts: Int,
-                 host: String, user: GitLabAuthenticatedUser) {
+                 host: String, user: GitLabAuthenticatedUser, approvalRevision: String? = nil) {
         let target = MRAutomationScope.Target(host: host, username: user.username, projectID: request.projectID, iid: request.iid)
         let configuration = settings.automation
         guard request.author.id == user.id, request.state == "opened", request.draft != nil,
@@ -208,7 +234,9 @@ final class AuthorFeedbackCoordinator {
                           accountRevision: glab.accountRevision,
                           completedFollowUpJobID: completedJobID, decisionRevision: decisionRevision,
                           ignoredSuggestions: settings.feedbackSuggestionDecisions.applicable(in: discussions, for: target),
-                          reviewParticipationRevision: participationRevision)
+                          reviewParticipationRevision: participationRevision, approvalRevision: approvalRevision,
+                          handoffRevision: handoffRevision(target), writesAllowed: settings.automaticWritesAllowed)
+        if isSettled(input) { return }
         // An unchanged periodic refresh must not take ownership from the active task.
         if !sameSnapshot(statusOwners[target], input) {
             statuses[target] = checkingStatus(input)
@@ -241,6 +269,7 @@ final class AuthorFeedbackCoordinator {
         pending.removeValue(forKey: target)
         tasks[target]?.cancel()
         cache.removeValue(forKey: target)
+        if let assessmentDirectory { AuthorFeedbackAssessmentStore.remove(target, in: assessmentDirectory) }
         acknowledgementAttempts.removeValue(forKey: target)
         acknowledgedReactions.removeValue(forKey: target)
         removeStatus(for: target)
@@ -328,6 +357,37 @@ final class AuthorFeedbackCoordinator {
             && previous.reviewParticipationRevision == input.reviewParticipationRevision
     }
 
+    /// A settled snapshot repeats no GitLab reads, verifier run or launch admission until an input
+    /// changes (head, text, drafts, approvals, jobs, settings, decisions) or the recheck interval passes.
+    private func isSettled(_ input: Input) -> Bool {
+        guard let stable = stableChecks[input.target], tasks[input.target] == nil, pending[input.target] == nil,
+              statusOwners[input.target]?.id == stable.input.id,
+              let phase = statuses[input.target]?.phase, phase == .complete || phase == .waitingPublication,
+              input.approvalRevision != nil, stable.input.approvalRevision == input.approvalRevision,
+              stable.input.handoffRevision == input.handoffRevision, stable.input.writesAllowed == input.writesAllowed,
+              stable.input.request.semanticContextFingerprint == input.request.semanticContextFingerprint,
+              stable.input.request.draft == input.request.draft,
+              sameSnapshot(stable.input, input) else { return false }
+        let elapsed = now().timeIntervalSince(stable.date)
+        return elapsed >= 0 && elapsed < Self.unchangedRecheckInterval
+    }
+
+    private func recordSettlement(_ input: Input, settled: Bool) {
+        if settled, input.approvalRevision != nil { stableChecks[input.target] = .init(input: input, date: now()) }
+        else { stableChecks.removeValue(forKey: input.target) }
+    }
+
+    private func handoffRevision(_ target: MRAutomationScope.Target) -> String {
+        let rows = settings.assistantHandoffs.filter {
+            $0.key.work.host == target.host && $0.key.username == target.username
+                && $0.key.work.projectID == target.projectID && $0.key.work.iid == target.iid
+        }.map {
+            "\($0.id.uuidString):\(String(describing: $0.execution?.state)):\(String(describing: $0.operationalExecution?.state))"
+                + ":\($0.execution?.finishedAt?.timeIntervalSince1970 ?? 0)"
+        }.sorted()
+        return UserAttentionSnapshot.digest(rows.joined(separator: "\n"))
+    }
+
     private func checkingStatus(_ input: Input) -> AuthorFeedbackStatus {
         .init(head: input.request.sha ?? "", fingerprint: input.fingerprint,
             semanticContextFingerprint: input.request.semanticContextFingerprint,
@@ -345,6 +405,7 @@ final class AuthorFeedbackCoordinator {
     private func removeStatus(for target: MRAutomationScope.Target) {
         statuses.removeValue(forKey: target)
         statusOwners.removeValue(forKey: target)
+        stableChecks.removeValue(forKey: target)
     }
 
     /// A successful worker can leave work outstanding. Its prior semantic verdict then
@@ -426,14 +487,22 @@ final class AuthorFeedbackCoordinator {
         let key = ReReviewVerifier.policyVersion + "|" + (request.sha ?? "") + "|" + input.fingerprint + "|" + request.semanticContextFingerprint
             + "|" + UserAttentionSnapshot.digest(String(decoding: diff, as: UTF8.self))
             + "|" + (input.completedFollowUpJobID?.uuidString ?? "")
-            + "|" + String(decoding: try encoder.encode(input.configuration), as: UTF8.self)
+            + "|" + String(decoding: try encoder.encode(VerifierConfiguration(input.configuration)), as: UTF8.self)
             + "|" + UserAttentionSnapshot.digest(String(decoding: try encoder.encode(blockedContexts), as: UTF8.self))
             + "|" + input.decisionRevision
             + "|" + input.reviewParticipationRevision
             + "|" + String(decoding: try encoder.encode(completedFollowUp), as: UTF8.self)
         let assessment: ReReviewAssessment
+        let keyDigest = UserAttentionSnapshot.digest(key)
         if let stored = cache[input.target], stored.0 == key { assessment = stored.1 }
-        else {
+        else if let assessmentDirectory,
+                let record = AuthorFeedbackAssessmentStore.load(input.target, keyDigest: keyDigest, in: assessmentDirectory),
+                record.completedFollowUpJobID == input.completedFollowUpJobID,
+                (try? record.assessment.reviewers(in: input.discussions, authorID: input.user.id, ignoredSuggestions: input.ignoredSuggestions,
+                    excludedReplyAuthorIDs: excludedReplyAuthors(input))) != nil {
+            assessment = record.assessment
+            cache[input.target] = (key, assessment, input.completedFollowUpJobID)
+        } else {
             let model = input.configuration.assistant == .codex
                 ? input.configuration.codexVerificationModel.rawValue : input.configuration.claudeVerificationModel.rawValue
             assessment = try await verify(.init(authorID: input.user.id, headSHA: request.sha ?? "", title: request.title,
@@ -449,6 +518,14 @@ final class AuthorFeedbackCoordinator {
                 excludedReplyAuthorIDs: excludedReplyAuthors(input))
             guard isCurrent(input) else { throw CancellationError() }
             cache[input.target] = (key, assessment, input.completedFollowUpJobID)
+            if let assessmentDirectory {
+                do {
+                    try AuthorFeedbackAssessmentStore.save(.init(version: AuthorFeedbackAssessmentStore.version, target: input.target,
+                        keyDigest: keyDigest, completedFollowUpJobID: input.completedFollowUpJobID, assessment: assessment), in: assessmentDirectory)
+                } catch {
+                    Log.monitor.error("Could not persist author feedback assessment: \(String(describing: error), privacy: .private)")
+                }
+            }
         }
         guard isCurrent(input) else { throw CancellationError() }
         let current = try await glab.fetchMergeRequest(projectID: request.projectID, iid: request.iid, host: host)
@@ -562,6 +639,7 @@ final class AuthorFeedbackCoordinator {
             bindStoppedFollowUpEvidence(to: &completed, prepared: prepared, input: input, discussions: threads, authorID: input.user.id)
             let changed = statuses[input.target] != completed
             statuses[input.target] = completed
+            recordSettlement(input, settled: !changed)
             if changed { onRemoteChange?() }
             return
         }
@@ -674,6 +752,7 @@ final class AuthorFeedbackCoordinator {
         bindStoppedFollowUpEvidence(to: &completed, prepared: prepared, input: input, discussions: threads, authorID: input.user.id)
         let updated = statuses[input.target] != completed
         statuses[input.target] = completed
+        recordSettlement(input, settled: !changed && !updated)
         if changed || updated { onRemoteChange?() }
     }
 

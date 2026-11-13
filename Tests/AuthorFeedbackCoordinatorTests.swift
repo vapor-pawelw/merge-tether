@@ -1771,6 +1771,81 @@ struct AuthorFeedbackCoordinatorTests {
         }
     }
 
+    @Test func settledSnapshotIsNotRecheckedUntilAnInputChanges() async throws {
+        try await withFixture { f in
+            // No approval means no consent, so passes write nothing to GitLab.
+            try f.write("approvals.json", #"{"approved_by":[]}"#)
+            var clock = Date(timeIntervalSince1970: 1_000_000)
+            let coordinator = f.coordinator(now: { clock })
+            defer { coordinator.cancel() }
+            try f.start(coordinator, approvalRevision: "0/0:")
+            try await f.waitForPass(1)
+            #expect(coordinator.status(projectID: 1, iid: 2)?.phase == .complete)
+            // The first repeat confirms the status; only then is the snapshot settled.
+            try f.start(coordinator, approvalRevision: "0/0:")
+            try await f.waitForPass(2)
+            try f.start(coordinator, approvalRevision: "0/0:")
+            try await Task.sleep(for: .milliseconds(200))
+            #expect(f.diffReads == 2)
+            #expect(coordinator.status(projectID: 1, iid: 2)?.phase == .complete)
+
+            // A new approval rechecks at once.
+            try f.start(coordinator, approvalRevision: "1/0:7")
+            try await f.waitForPass(3)
+            // Unknown approvals never settle a snapshot.
+            try f.start(coordinator)
+            try await f.waitForPass(4)
+            try f.start(coordinator)
+            try await f.waitForPass(5)
+
+            try f.start(coordinator, approvalRevision: "1/0:7")
+            try await f.waitForPass(6)
+            try f.start(coordinator, approvalRevision: "1/0:7")
+            try await Task.sleep(for: .milliseconds(200))
+            #expect(f.diffReads == 6)
+            clock = clock.addingTimeInterval(AuthorFeedbackCoordinator.unchangedRecheckInterval)
+            try f.start(coordinator, approvalRevision: "1/0:7")
+            try await f.waitForPass(7)
+            #expect(f.inputs.count == 1)
+        }
+    }
+
+    @Test func persistedAssessmentSurvivesRestartAndUnrelatedSettings() async throws {
+        try await withFixture { f in
+            try f.write("approvals.json", #"{"approved_by":[]}"#)
+            let assessments = f.directory.appending(path: "assessments", directoryHint: .isDirectory)
+            let first = f.coordinator(assessmentDirectory: assessments)
+            try await f.run(first)
+            #expect(first.status(projectID: 1, iid: 2)?.phase == .complete)
+            #expect(f.inputs.count == 1)
+            first.cancel()
+
+            // A new launch reuses the stored assessment for the same snapshot.
+            let second = f.coordinator(assessmentDirectory: assessments)
+            defer { second.cancel() }
+            try await f.run(second)
+            #expect(second.status(projectID: 1, iid: 2)?.phase == .complete)
+            #expect(f.inputs.count == 1)
+
+            // Settings that do not shape the verifier keep the assessment.
+            f.settings.automation.allowFollowUpPush.toggle()
+            f.settings.automation.claudeVerificationModel = .sonnet
+            try await f.run(second)
+            #expect(second.status(projectID: 1, iid: 2)?.phase == .complete)
+            #expect(f.inputs.count == 1)
+
+            // The verifier model is part of the assessment.
+            f.settings.automation.codexVerificationModel = .sol
+            try await f.run(second)
+            #expect(f.inputs.count == 2)
+
+            // An explicit retry discards the stored assessment.
+            second.invalidate(projectID: 1, iid: 2)
+            try await f.run(second)
+            #expect(f.inputs.count == 3)
+        }
+    }
+
     private func withFixture(_ body: (Fixture) async throws -> Void) async throws {
         let fixture = try Fixture()
         defer { fixture.cleanUp() }
@@ -1811,6 +1886,7 @@ struct AuthorFeedbackCoordinatorTests {
         var reactionPosts: Int { count("reaction-posts") }
         var awardReads: Int { count("award-reads") }
         var userReads: Int { count("user-reads") }
+        var diffReads: Int { count("diff-reads") }
         var resolutionPosts: Int { count("resolution-posts") }
         private func count(_ name: String) -> Int {
             gitlab.text(name).split(separator: "\n").count
@@ -1875,6 +1951,7 @@ struct AuthorFeedbackCoordinatorTests {
                     if gitlab.has("change-after-award-read") { try gitlab.copy("changed-discussions.json", "discussions.json") }
                     return result
                 case let path where path.hasSuffix("/raw_diffs"):
+                    gitlab.append("diff-reads", "get\n")
                     return InMemoryGitLab.output("diff --git a/A b/A")
                 case let path where path.hasSuffix("/approvals"):
                     let withdrawn = gitlab.has("approvals-read") && gitlab.has("withdraw-approval")
@@ -1900,20 +1977,30 @@ struct AuthorFeedbackCoordinatorTests {
             }
         }
 
-        func coordinator(assessment: ReReviewAssessment? = nil, duringVerification: (() -> Void)? = nil) -> AuthorFeedbackCoordinator {
+        func coordinator(assessment: ReReviewAssessment? = nil, duringVerification: (() -> Void)? = nil,
+                         now: @escaping ReadOnlyAssessmentRetry.Clock = { Date() },
+                         assessmentDirectory: URL? = nil) -> AuthorFeedbackCoordinator {
             AuthorFeedbackCoordinator(settings: settings, glab: glab, canAutomate: { _ in true }, verify: { [self] input, _, _ in
                 inputs.append(input)
                 duringVerification?()
                 verified = true
                 return assessment ?? .init(notes: [.init(noteID: 10, state: .addressed, reason: "Current diff fixes A")])
-            }, retryWait: { [self] in retryDelays.append($0) })
+            }, retryWait: { [self] in retryDelays.append($0) }, now: now, assessmentDirectory: assessmentDirectory)
+        }
+
+        /// Waits for a pass that reads the diff, then for that pass to publish its status.
+        func waitForPass(_ reads: Int) async throws {
+            let deadline = ContinuousClock.now + .seconds(5)
+            while diffReads < reads, ContinuousClock.now < deadline { try await Task.sleep(for: .milliseconds(10)) }
+            #expect(diffReads == reads)
+            try await Task.sleep(for: .milliseconds(200))
         }
 
         func start(_ coordinator: AuthorFeedbackCoordinator, initialDiscussions: [GitLabMergeRequestDiscussion]? = nil,
-                   requestJSON: String = Fixture.request, drafts: Int = 0) throws {
+                   requestJSON: String = Fixture.request, drafts: Int = 0, approvalRevision: String? = nil) throws {
             let request = try JSONDecoder().decode(GitLabMergeRequest.self, from: Data(requestJSON.utf8))
             coordinator.refresh(request: request, discussions: try initialDiscussions ?? discussions(), drafts: drafts,
-                                host: Self.host, user: .init(id: 3, username: "me"))
+                                host: Self.host, user: .init(id: 3, username: "me"), approvalRevision: approvalRevision)
         }
 
         func run(_ coordinator: AuthorFeedbackCoordinator, initialDiscussions: [GitLabMergeRequestDiscussion]? = nil,

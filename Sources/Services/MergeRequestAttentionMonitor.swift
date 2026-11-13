@@ -346,6 +346,7 @@ final class MergeRequestAttentionMonitor {
         aiAssessmentDirectory: URL = AICommentAssessmentStore.directory,
         followUpDirectory: URL = FollowUpVerificationStore.directory,
         provenanceDirectory: URL = AICommentProvenanceStore.directory,
+        authorFeedbackAssessmentDirectory: URL? = nil,
         canAutomate: @escaping @MainActor (AutomationAssistant) async -> Bool = {
             await AssistantCLI.detect($0, requireCLI: true).isReady
         },
@@ -430,7 +431,7 @@ final class MergeRequestAttentionMonitor {
             try await ReReviewVerifier.verifySingleAttempt($0, assistant: $1, model: $2, executableResolver: verificationExecutableResolver)
         }
         self.authorFeedbackCoordinator = settings.map { AuthorFeedbackCoordinator(settings: $0, glab: glab,
-            canAutomate: canAutomate, verify: feedbackVerifier) }
+            canAutomate: canAutomate, verify: feedbackVerifier, assessmentDirectory: authorFeedbackAssessmentDirectory) }
         let feedbackCoordinator = self.authorFeedbackCoordinator
         self.reReviewCoordinator = settings.map { ReReviewCoordinator(settings: $0, glab: glab,
             canAutomate: canAutomate, verify: reviewVerifier,
@@ -564,6 +565,11 @@ final class MergeRequestAttentionMonitor {
         guard let account, isCurrent(account) else { return }
         draftProofRecoveryCoordinator?.retry(work: .init(host: account.host, projectID: id.projectID, iid: id.iid), username: account.username)
         refresh(host: account.host, username: account.username, todos: [])
+    }
+
+    /// Identifies observed approvals so unchanged author feedback is not reassessed on every refresh.
+    nonisolated static func approvalRevision(_ progress: MergeRequestApprovalProgress) -> String {
+        "\(progress.completed)/\(progress.required):" + Set(progress.approvedBy.map(\.id)).sorted().map(String.init).joined(separator: ",")
     }
 
     func retryAuthorFeedback(_ id: Item.ID) {
@@ -1139,7 +1145,8 @@ final class MergeRequestAttentionMonitor {
                     }
                     if automaticResume == nil, success, let request = item.authoredRequest, let discussions {
                         authorFeedbackCoordinator?.refresh(request: request, discussions: discussions,
-                            drafts: item.draftCount, host: host, user: user)
+                            drafts: item.draftCount, host: host, user: user,
+                            approvalRevision: item.approvalProgress.map(Self.approvalRevision))
                     }
                     if automaticResume == nil, success, let feedback, let request = item.authoredRequest {
                         reReviewCandidates.append((request, feedback, item.draftCount))
