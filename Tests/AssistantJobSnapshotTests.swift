@@ -178,7 +178,7 @@ import Testing
         #expect(result.contains("Review the feedback."))
     }
     @MainActor @Test(arguments: ["followUp", "resolve", "conflict"])
-    func manualWorkerCannotRetainAutomaticWriteGrantsAfterConsentIsRevoked(_ grant: String) throws {
+    func manualWorkerKeepsJobPermissionsWithoutAutomationConsentButNotAfterTheyAreTurnedOff(_ grant: String) throws {
         // given
         var configuration = AutomationSettings()
         configuration.applyPreset(.full, for: .codex)
@@ -191,7 +191,17 @@ import Testing
         try AssistantJobExecutor.validateConfiguration(handoff, automation: configuration)
 
         // when
-        configuration.packageDecision = .undecided
+        configuration.applyPreset(.manual, for: .codex)
+
+        // then
+        try AssistantJobExecutor.validateConfiguration(handoff, automation: configuration)
+
+        // when
+        switch grant {
+        case "followUp": configuration.allowFollowUpPush = false
+        case "resolve": configuration.autoResolveOwnReviewThreads = false
+        default: configuration.allowConflictPush = false
+        }
 
         // then
         #expect(throws: AssistantJobExecutor.ExecutionError.disabledPermission) {

@@ -5,13 +5,17 @@
       "extractionState": "manual",
       "localizations": { "en": { "stringUnit": { "state": "translated", "value": "Review & feedback rules and MR event rules are independent. Both can start work under your saved policy. Inspect their enablement and filters on those pages; editing templates here does not change either route." } } }
     },
+    "settings.jobPermissions": {
+      "extractionState": "manual",
+      "localizations": { "en": { "stringUnit": { "state": "translated", "value": "These permissions also apply to jobs you start yourself, including with the Manual preset or with automation switched off. Automatic jobs use them only while automation is on." } } }
+    },
     "settings.independentPush": {
       "extractionState": "manual",
       "localizations": { "en": { "stringUnit": { "state": "translated", "value": "Follow-up pushes and conflict pushes are separate permissions. Tool access alone does not authorize either push." } } }
     },
     "settings.conflictPushPrerequisites": {
       "extractionState": "manual",
-      "localizations": { "en": { "stringUnit": { "state": "translated", "value": "Conflict pushes need both conflict preparation under Preparation and tool access above. Saved push permission and repository restrictions remain inactive until both are enabled." } } }
+      "localizations": { "en": { "stringUnit": { "state": "translated", "value": "Conflict pushes need tool access above. Automatic conflict tasks also need conflict preparation under Preparation; conflict jobs you start yourself do not." } } }
     },
     "settings.templatesLocation": {
       "extractionState": "manual",

@@ -218,7 +218,8 @@ struct AutomationPresetProfilesTests {
         var cancelled: Set<UUID> = []
         let monitor = TodoMonitorService(settings: settings, glab: glab, cancelPolicyJob: { id, current in
             cancelled.insert(id)
-            if let job = current.assistantHandoffs.first(where: { $0.id == id }), job.followUpPushAllowed != nil {
+            // "Automatic work stays private" revokes automatic pushes; a job the user started keeps its permission.
+            if let job = current.assistantHandoffs.first(where: { $0.id == id }), job.followUpPushAllowed != nil, job.manual != true {
                 let url = FollowUpVerificationStore.recordURL(kind: "follow-up-runs", work: job.key.work,
                     username: job.key.username, in: FollowUpVerificationStore.directory)
                 let record = (try? Data(contentsOf: url)).flatMap { try? JSONSerialization.jsonObject(with: $0) } as? [String: Any]

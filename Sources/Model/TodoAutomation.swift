@@ -270,6 +270,22 @@ struct AutomationSettings: Codable, Equatable, Sendable {
             ? "\(assistant.rawValue)|\(codexReviewModel.rawValue)|\(codexReviewThinking.rawValue)"
             : "\(assistant.rawValue)|\(claudeCodingModel.rawValue)|\(claudeCodingThinking.rawValue)"
     }
+
+    // Job permissions describe what a worker may do. A job the user starts needs the permission and a chosen
+    // preset (Manual included), so untouched defaults never grant writes; an automatic job also needs
+    // automation consent (a non-Manual preset and the global switch on).
+
+    private func permitsJobWrites(manual: Bool) -> Bool {
+        manual ? packageDecision != .undecided : hasAutomaticPublicActionConsent
+    }
+
+    func permitsFollowUpPush(manual: Bool) -> Bool {
+        allowFollowUpPush && permitsJobWrites(manual: manual)
+    }
+
+    func permitsOwnThreadResolution(manual: Bool) -> Bool {
+        autoResolveOwnReviewThreads && permitsJobWrites(manual: manual)
+    }
     var allowAutomaticPublicActions = true
     var hasAutomaticPublicActionConsent: Bool { hasAutomaticActionConsent && allowAutomaticPublicActions }
     var workflowRules = MergeWorkflowRules()
@@ -433,7 +449,11 @@ struct AutomationSettings: Codable, Equatable, Sendable {
     mutating func applyPreset(_ preset: AutomationPreset, for assistant: AutomationAssistant) {
         self.assistant = assistant
         if preset == .manual {
+            let firstChoice = packageDecision == .undecided
             disableAssistantPackage()
+            // A first-time Manual choice starts without worker permissions; switching an existing
+            // configuration to Manual keeps them for jobs the user starts.
+            if firstChoice { removeJobPermissions() }
         } else {
             let delivers = preset == .full || preset == .trusted
             packageDecision = .enabled
@@ -537,21 +557,18 @@ struct AutomationSettings: Codable, Equatable, Sendable {
         }
     }
 
+    /// Turns off automatic behavior. Job permissions stay, because they also govern jobs the user starts.
     mutating func disableAssistantPackage() {
         packageDecision = .disabled
         allowAutomaticPublicActions = false
         codexRelayEnabled = false
-        allowAssistantTools = false
         autoMergeEnabled = false
         autoReReviewEnabled = false
         publishDraftsWithoutConfirmation = false
         publishAIRepliesWithoutConfirmation = false
         autoApproveEnabled = false
-        autoResolveOwnReviewThreads = false
         autoResolveAcceptedFeedback = false
         conflictTasksEnabled = false
-        allowConflictPush = false
-        allowFollowUpPush = false
         autoClaimPipelineFailures = false
         autoVerifyReReview = false
         reviewRequested.isEnabled = false
@@ -559,6 +576,13 @@ struct AutomationSettings: Codable, Equatable, Sendable {
         for trigger in MergeWorkflowTrigger.allCases {
             workflowRules[trigger].mode = .off
         }
+    }
+
+    mutating func removeJobPermissions() {
+        allowFollowUpPush = false
+        autoResolveOwnReviewThreads = false
+        allowAssistantTools = false
+        allowConflictPush = false
     }
 
     var usesAssistant: Bool {
@@ -588,8 +612,10 @@ struct AutomationSettings: Codable, Equatable, Sendable {
         allowAssistantTools && matchesOptionalProjectRestriction(project, paths: assistantToolProjects)
     }
 
-    func permitsConflictPush(project: String) -> Bool {
-        hasAutomaticPublicActionConsent && conflictTasksEnabled && permitsAssistantTools(project: project) && allowConflictPush
+    /// Automatic conflict tasks also need consent and the conflict-task trigger; a conflict job the user starts does not.
+    func permitsConflictPush(project: String, manual: Bool = false) -> Bool {
+        permitsJobWrites(manual: manual) && (manual || conflictTasksEnabled)
+            && permitsAssistantTools(project: project) && allowConflictPush
             && matchesOptionalProjectRestriction(project, paths: conflictPushProjects)
     }
 

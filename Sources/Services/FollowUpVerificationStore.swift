@@ -72,7 +72,9 @@ enum FollowUpVerificationStore {
     @MainActor
     static func canPush(_ handoff: AssistantAutomationRunner.Handoff, configuration: AutomationSettings) -> Bool {
         guard handoff.execution?.state.isActive == true, handoff.followUpPushAllowed == true,
-              configuration.allowAutomaticPublicActions, configuration.allowFollowUpPush,
+              configuration.allowFollowUpPush,
+              // "Automatic work stays private" governs automatic jobs, not jobs the user starts.
+              handoff.manual == true || configuration.allowAutomaticPublicActions,
               handoff.key.assistant == configuration.assistant else { return false }
         let work = handoff.key.work
         let target = MRAutomationScope.Target(host: work.host, username: handoff.key.username,

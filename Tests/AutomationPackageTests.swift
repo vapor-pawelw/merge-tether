@@ -671,6 +671,9 @@ struct AutomationPackageTests {
         #expect(try JSONDecoder().decode(AutomationSettings.self, from: Data("{}".utf8)).allowFollowUpPush)
         configuration.disableAssistantPackage()
         #expect(!configuration.allowFollowUpPush)
+        configuration.allowFollowUpPush = true
+        configuration.disableAssistantPackage()
+        #expect(configuration.allowFollowUpPush, "Manual keeps job permissions for jobs the user starts")
     }
 
     @Test func ownThreadResolutionDefaultsOnAndHonorsItsIndependentSwitch() throws {
@@ -689,6 +692,9 @@ struct AutomationPackageTests {
         #expect(settings.autoApproveEnabled)
         settings.disableAssistantPackage()
         #expect(!settings.autoResolveOwnReviewThreads)
+        settings.autoResolveOwnReviewThreads = true
+        settings.disableAssistantPackage()
+        #expect(settings.autoResolveOwnReviewThreads, "Manual keeps job permissions for jobs the user starts")
     }
 
     @Test @MainActor func conflictAndLegacyHandoffsCannotAuthorizeAuthorFollowUpPublication() throws {

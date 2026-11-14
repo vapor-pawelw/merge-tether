@@ -244,7 +244,7 @@ enum AssistantAutomationRunner {
         func validateLaunchPolicy() throws {
             try AssistantJobExecutor.validatePersistence(settings)
             guard !settings.ignoredMergeRequests.contains(target),
-                  !allowsPush || settings.automation.permitsConflictPush(project: mergeRequestURL.gitLabProjectPath),
+                  !allowsPush || settings.automation.permitsConflictPush(project: mergeRequestURL.gitLabProjectPath, manual: manual),
                   manual || (settings.automaticWritesAllowed
                     && automaticConfiguration.preservingScope(from: settings.automation) == settings.automation
                     && settings.automation.scope.resolve(target).active)
@@ -280,8 +280,9 @@ enum AssistantAutomationRunner {
         let prefixedTitle = title.hasPrefix("[MT] ") ? title : "[MT] " + title
         let name = MergeRequestStackSnapshot.title(prefixedTitle, iid: work.iid, position: stackPosition)
         let id = UUID()
-        let followUpPush = settings.automation.hasAutomaticPublicActionConsent && settings.automation.allowFollowUpPush
-        let resolveOwnThreads = settings.automation.hasAutomaticPublicActionConsent && settings.automation.autoResolveOwnReviewThreads
+        // A job the user starts uses the configured job permissions even in Manual or with automation switched off.
+        let followUpPush = settings.automation.permitsFollowUpPush(manual: manual)
+        let resolveOwnThreads = settings.automation.permitsOwnThreadResolution(manual: manual)
         let eventPushPolicy = allowsPush
             ? "This event authorizes only a tested conflict-fix push to the exact verified MR source repository and branch, under its configured project permission. It does not grant author-follow-up response-draft permission."
             : "This event does not authorize a push. Leave remote branches and the MR target unchanged."
@@ -321,7 +322,7 @@ enum AssistantAutomationRunner {
         }
         let followUpProof = mrWorkflow == .followUp && followUpPush
             ? "\n\n" + FollowUpVerificationStore.recordingInstructions(work: work, runID: id) : ""
-        let privateWork = settings.automation.hasAutomaticPublicActionConsent ? "" : """
+        let privateWork = manual || settings.automation.hasAutomaticPublicActionConsent ? "" : """
             Automatic work is private only. Inspect, analyze, review and prepare local changes with full tools, and save warranted private review drafts. Do not publish comments, approve, merge, push, resolve discussions, request reviews, add reactions, mark GitLab to-dos read, retry jobs or create pipelines. Leave those public GitLab actions to explicit user actions. Author-follow-up completion drafts still require delivered and verified remote changes; report local-only proposals in the run result.
             """
         let useReviewModel = assistant == .codex && isReview

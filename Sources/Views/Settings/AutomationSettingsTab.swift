@@ -159,14 +159,17 @@ struct AutomationSettingsTab: View {
 
     private var checkpointFields: some View {
         Group {
-            preparationFields
-            MergeWorkflowPermissionSettingsSection(rules: $draft.workflowRules,
-                infrastructureRetryAvailable: draft.canConfigureInfrastructureRetry)
-            publicationFields
+            Group {
+                preparationFields
+                MergeWorkflowPermissionSettingsSection(rules: $draft.workflowRules,
+                    infrastructureRetryAvailable: draft.canConfigureInfrastructureRetry)
+                publicationFields
+            }
+            .disabled(!draft.hasAutomaticActionConsent)
+            // Job permissions also govern jobs the user starts, so they stay editable in Manual.
             deliveryFields
-            completionFields
+            completionFields.disabled(!draft.hasAutomaticActionConsent)
         }
-        .disabled(!draft.hasAutomaticActionConsent)
     }
 
     private var preparationFields: some View {
@@ -242,9 +245,9 @@ struct AutomationSettingsTab: View {
                 Text(.Settings.settingsAutomationConflictsAllowPush)
             }
             .toggleStyle(.checkbox)
-            .disabled(!draft.conflictTasksEnabled || !draft.allowAssistantTools)
+            .disabled(!draft.allowAssistantTools)
 
-            if !draft.conflictTasksEnabled || !draft.allowAssistantTools {
+            if !draft.allowAssistantTools || !draft.conflictTasksEnabled {
                 Text(.EffectivePolicy.settingsConflictPushPrerequisites).font(.caption).foregroundStyle(.secondary)
             }
             if draft.allowConflictPush || !draft.conflictPushProjects.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
@@ -252,8 +255,12 @@ struct AutomationSettingsTab: View {
                     Text(.Settings.settingsAutomationConflictsPushProjects)
                 }
                 .autocorrectionDisabled()
-                .disabled(!draft.conflictTasksEnabled || !draft.allowAssistantTools || !draft.allowConflictPush)
+                .disabled(!draft.allowAssistantTools || !draft.allowConflictPush)
             }
+            Divider()
+            checkpointToggle($draft.autoResolveOwnReviewThreads, .Settings.settingsAutomationResolveOwnReviewThreads,
+                             help: .Settings.settingsAutomationResolveOwnReviewThreadsHelp, reset: .ownThreadResolution)
+            Text(.EffectivePolicy.settingsJobPermissions).font(.caption).foregroundStyle(.secondary)
         } header: { Text(.EffectivePolicy.settingsDelivery) }
         footer: {
             Text(.Settings.settingsAutomationAuthoredMergeRequestsProjectsHelp).font(.caption).foregroundStyle(.secondary)
@@ -264,8 +271,6 @@ struct AutomationSettingsTab: View {
         Section {
             checkpointToggle($draft.autoApproveEnabled, .Settings.settingsAutomationCheckpointAutoApprove,
                              help: .Settings.settingsAutomationCheckpointAutoApproveHelp, reset: .approval)
-            checkpointToggle($draft.autoResolveOwnReviewThreads, .Settings.settingsAutomationResolveOwnReviewThreads,
-                             help: .Settings.settingsAutomationResolveOwnReviewThreadsHelp, reset: .ownThreadResolution)
             checkpointToggle($draft.autoResolveAcceptedFeedback, .AuthorFeedback.authorFeedbackSetting,
                              help: .AuthorFeedback.authorFeedbackSettingHelp, reset: .acceptedFeedbackResolution)
             VStack(alignment: .leading, spacing: 4) {

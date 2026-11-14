@@ -658,7 +658,8 @@ final class MergeRequestTodoRouter {
         case .refresh: "Refresh current merge request state."
         }
         let configured = Self.configuredAssistantContext(intent, configuration: settings.automation)
-        let conflictPush = intent.kind == .conflict && settings.automation.permitsConflictPush(project: intent.request.webURL.gitLabProjectPath)
+        let conflictPush = intent.kind == .conflict
+            && settings.automation.permitsConflictPush(project: intent.request.webURL.gitLabProjectPath, manual: manual)
         let isolation = workflow == .followUp || intent.kind == .conflict
             ? "\n" + AssistantAutomationRunner.isolatedFixInstructions : ""
         let prompt = task + "\nFocus on these GitLab note IDs: " + intent.noteIDs.sorted().map(String.init).joined(separator: ", ")

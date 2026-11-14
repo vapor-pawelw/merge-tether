@@ -102,7 +102,8 @@ import MergeTetherRemote
             configurationSnapshot: harness.settings.automation, glab: harness.glab)
         await coordinator.waitForTermination()
         #expect(harness.settings.assistantHandoffs.first { $0.id == review.id }?.execution?.state == .succeeded)
-        #expect(review.resolvesOwnThreads == (consent == .enabled))
+        // Job permissions apply to jobs the user starts once a preset is chosen, Manual included.
+        #expect(review.resolvesOwnThreads == (consent != nil))
 
         // when
         try await harness.poll()
