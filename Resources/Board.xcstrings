@@ -30,6 +30,27 @@
         "pl": { "stringUnit": { "state": "translated", "value": "Skomentowano, nigdy nie zatwierdzono" } }
       }
     },
+    "board.approvals.viewerApproved": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": { "stringUnit": { "state": "translated", "value": "You approved" } },
+        "pl": { "stringUnit": { "state": "translated", "value": "Zatwierdzone przez Ciebie" } }
+      }
+    },
+    "board.approvals.viewerNoLongerCounts": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": { "stringUnit": { "state": "translated", "value": "Your earlier approval no longer counts" } },
+        "pl": { "stringUnit": { "state": "translated", "value": "Twoje wcześniejsze zatwierdzenie już się nie liczy" } }
+      }
+    },
+    "board.approvals.viewerSuffix": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": { "stringUnit": { "state": "translated", "value": "(you)" } },
+        "pl": { "stringUnit": { "state": "translated", "value": "(Ty)" } }
+      }
+    },
     "board.approvals.approved": {
       "extractionState": "manual",
       "localizations": {

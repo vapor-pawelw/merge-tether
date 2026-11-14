@@ -27,6 +27,30 @@ struct MergeRequestApprovalProgress: Equatable, Sendable {
         Self.participants(approvedBy: approvedBy, reviewers: reviewers, history: reviewHistory, approvalDates: approvalDates)
     }
 
+    /// The signed-in reviewer's own approval on someone else's MR. Returns nil for the
+    /// viewer's own MR, an unknown viewer, or a viewer who never approved.
+    enum ViewerApproval: Equatable {
+        case approved(Todo.Author)
+        /// Approved earlier, but the approval no longer counts (reset by a push or withdrawn).
+        case noLongerCounts(Todo.Author)
+        var author: Todo.Author {
+            switch self { case .approved(let author), .noLongerCounts(let author): author }
+        }
+    }
+
+    func viewerApproval(username: String?, reviewers: [Todo.Author], isOwnMergeRequest: Bool) -> ViewerApproval? {
+        guard !isOwnMergeRequest,
+              let username = username?.trimmingCharacters(in: .whitespacesAndNewlines).lowercased(),
+              !username.isEmpty,
+              let viewer = participants(reviewers: reviewers).first(where: { $0.author.username.lowercased() == username })
+        else { return nil }
+        switch viewer.status {
+        case .approved: return .approved(viewer.author)
+        case .previouslyApproved: return .noLongerCounts(viewer.author)
+        case .commented, .assigned: return nil
+        }
+    }
+
     static func participants(approvedBy: [Todo.Author] = [], reviewers: [Todo.Author],
                              history: MergeRequestReviewHistory = .init(), approvalDates: [Int: Date] = [:]) -> [Participant] {
         var seen: Set<Int> = []

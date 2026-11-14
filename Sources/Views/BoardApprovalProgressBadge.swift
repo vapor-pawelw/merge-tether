@@ -3,13 +3,21 @@ import SwiftUI
 struct BoardApprovalProgressBadge: View {
     let progress: MergeRequestApprovalProgress?
     var reviewers: [Todo.Author] = []
+    /// Signed-in username; the viewer's own approval is shown only on MRs they review.
+    var viewerUsername: String? = nil
+    var isOwnMergeRequest = true
     @State private var showingPeople = false
     @State private var badgeHovered = false
     @State private var peopleHovered = false
     @State private var hoverTask: Task<Void, Never>?
 
     private var people: [MergeRequestApprovalProgress.Participant] {
-        progress?.participants(reviewers: reviewers) ?? MergeRequestApprovalProgress.participants(reviewers: reviewers)
+        let all = progress?.participants(reviewers: reviewers) ?? MergeRequestApprovalProgress.participants(reviewers: reviewers)
+        guard let viewer = viewerApproval?.author else { return all }
+        return all.filter { $0.id == viewer.id } + all.filter { $0.id != viewer.id }
+    }
+    private var viewerApproval: MergeRequestApprovalProgress.ViewerApproval? {
+        progress?.viewerApproval(username: viewerUsername, reviewers: reviewers, isOwnMergeRequest: isOwnMergeRequest)
     }
     private var satisfied: Bool {
         progress?.isSatisfied ?? false
@@ -19,24 +27,34 @@ struct BoardApprovalProgressBadge: View {
         else if let progress { Text(.Board.boardApprovalsHelp(progress.completed, progress.required)) }
         else { Text(.Board.boardApprovalsUnavailable) }
     }
+    private var label: Text {
+        switch viewerApproval {
+        case .approved: Text(.Board.boardApprovalsViewerApproved) + Text(verbatim: " · ") + explanation
+        case .noLongerCounts: Text(.Board.boardApprovalsViewerNoLongerCounts) + Text(verbatim: " · ") + explanation
+        case nil: explanation
+        }
+    }
 
     var body: some View {
-        if progress.map({ $0.required > 0 || $0.completed > 0 }) ?? true {
+        if progress.map({ $0.required > 0 || $0.completed > 0 }) ?? true || viewerApproval != nil {
             Button { hoverTask?.cancel(); showingPeople = true } label: {
-                HStack(spacing: 3) {
-                    Image(systemName: satisfied ? "checkmark.seal.fill" : "checkmark.seal").accessibilityHidden(true)
-                    if let progress, progress.required == 0 {
-                        Text(verbatim: "\(progress.completed)")
-                    } else if let progress {
-                        Text(.Board.boardApprovalRatio(progress.completed, progress.required))
-                    } else { Text(.Board.boardApprovalsUnknownRatio) }
+                HStack(spacing: 4) {
+                    HStack(spacing: 3) {
+                        Image(systemName: satisfied ? "checkmark.seal.fill" : "checkmark.seal").accessibilityHidden(true)
+                        if let progress, progress.required == 0 {
+                            Text(verbatim: "\(progress.completed)")
+                        } else if let progress {
+                            Text(.Board.boardApprovalRatio(progress.completed, progress.required))
+                        } else { Text(.Board.boardApprovalsUnknownRatio) }
+                    }
+                    .font(.caption2).monospacedDigit().foregroundStyle(satisfied ? Color.green : .secondary)
+                    if let viewerApproval { viewerSegment(viewerApproval) }
                 }
-                .font(.caption2).monospacedDigit().foregroundStyle(satisfied ? Color.green : .secondary)
                 .padding(.horizontal, 5).padding(.vertical, 2)
                 .background(.secondary.opacity(0.08), in: Capsule()).fixedSize()
             }
             .buttonStyle(.plain)
-            .accessibilityLabel(explanation)
+            .accessibilityLabel(label)
             .onHover { badgeHovered = $0; updateHover() }
             .popover(isPresented: $showingPeople, arrowEdge: .bottom) {
                 peopleList.onHover { peopleHovered = $0; updateHover() }
@@ -46,6 +64,29 @@ struct BoardApprovalProgressBadge: View {
             }
             .onDisappear { hoverTask?.cancel(); showingPeople = false }
         }
+    }
+
+    /// Your avatar with a corner glyph, after a divider, so it reads as part of the approvals badge.
+    private func viewerSegment(_ approval: MergeRequestApprovalProgress.ViewerApproval) -> some View {
+        HStack(spacing: 4) {
+            Divider().frame(height: 10)
+            AvatarView(url: approval.author.avatarURL, size: 14)
+                .overlay(alignment: .bottomTrailing) {
+                    Group {
+                        switch approval {
+                        case .approved:
+                            Image(systemName: "checkmark.circle.fill").foregroundStyle(.white, .green)
+                        case .noLongerCounts:
+                            Image(systemName: "arrow.counterclockwise.circle.fill").foregroundStyle(.white, .orange)
+                        }
+                    }
+                    .font(.system(size: 8, weight: .bold))
+                    .background(Circle().fill(.background).padding(-1))
+                    .offset(x: 3, y: 3)
+                }
+                .padding(.trailing, 2)
+        }
+        .accessibilityHidden(true)
     }
 
     private var peopleList: some View {
@@ -63,6 +104,9 @@ struct BoardApprovalProgressBadge: View {
                         Text(verbatim: person.author.name.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
                              ? person.author.username : person.author.name)
                             .font(.callout).foregroundStyle(.primary).lineLimit(1)
+                        if person.id == viewerApproval?.author.id {
+                            Text(.Board.boardApprovalsViewerSuffix).font(.callout).foregroundStyle(.secondary)
+                        }
                         Spacer(minLength: 18)
                         switch person.status {
                         case .approved:

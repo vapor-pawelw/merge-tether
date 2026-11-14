@@ -6,6 +6,7 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 
 ## Unreleased
 
+- Show your own approval on MRs you review: the approvals badge adds your avatar with a check when you approved, or an orange reset mark when your earlier approval no longer counts (for example after a push), and the approvers popover lists you first. Your own MRs are unchanged.
 - Mark merge request actions by effect: sparkles for agent runs, a magnifying sparkle for read-only AI checks and a bolt when automation resumes, with the same icons on matching Settings. Hovering an action explains what runs now and what may follow.
 - Show agent usage split by Codex CLI and Claude CLI on the usage dashboard, in the MR cost ranking, and in Mac and iOS MR Details, so usage stays attributable after switching agents.
 - Review each comment and each review pass once: later author-feedback checks may cite earlier comments but raise no new concerns about ones already assessed, re-reviews of others' MRs cover only code changed since the reviewed head and new or edited notes, and a rebase that keeps the MR's changes neither repeats the feedback check nor reopens the code review. A hidden "Reset review state and recheck everything" action at the bottom of Details runs a full check from scratch.

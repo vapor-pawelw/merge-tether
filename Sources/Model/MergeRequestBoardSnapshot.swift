@@ -29,6 +29,15 @@ struct MergeRequestBoardSnapshot {
                 checkedAt: pipelineEvidenceCheckedAt, job: latestJob) ?? displayRequest
         }
         var id: MergeRequestAttentionMonitor.Item.ID { item.id }
+        /// Own MRs, including ones whose author matches the signed-in username, never show the
+        /// viewer's approval. An unknown author is treated as own so the indicator stays off.
+        func isOwnMergeRequest(viewer: String?) -> Bool {
+            let item = displayItem
+            if item.isAuthored { return true }
+            guard let author = displayRequest?.author.username, !author.isEmpty else { return true }
+            guard let viewer, !viewer.isEmpty else { return true }
+            return author.lowercased() == viewer.lowercased()
+        }
         var isCheckingReadOnlyReconciliation: Bool {
             guard let status = item.authorFeedbackStatus, let request = item.mergeRequest else { return false }
             return status.readOnlyReconciliation && status.phase == .checking

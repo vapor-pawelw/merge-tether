@@ -287,7 +287,9 @@ private struct CommandCenterMRDetailContent: View {
                 }
                 if finishedState == nil {
                     BoardApprovalProgressBadge(progress: presentationRow.displayItem.approvalProgress,
-                        reviewers: presentationRow.displayRequest?.reviewers ?? [])
+                        reviewers: presentationRow.displayRequest?.reviewers ?? [],
+                        viewerUsername: monitor.glab.currentUsername,
+                        isOwnMergeRequest: presentationRow.isOwnMergeRequest(viewer: monitor.glab.currentUsername))
                 }
                 Spacer()
                 HStack(spacing: 0) {
