@@ -268,14 +268,14 @@ struct RemoteCardView: View {
                 .foregroundStyle(card.needsAttention == true ? .orange : .secondary)
                 .fixedSize(horizontal: false, vertical: true)
             }
-            if let status = card.presentation?.status {
+            if let status = card.visibleStatus {
                 HStack(spacing: 5) {
                     if card.presentation?.working == true { ProgressView().controlSize(.mini) }
                     Text(verbatim: status).font(.subheadline)
                 }.foregroundStyle(.secondary)
             }
             if let dependencies = card.dependencies { RemoteMRDependencyRow(dependencies: dependencies) }
-            if let nextStep = card.presentation?.nextStep {
+            if let nextStep = card.visibleNextStep {
                 Text(verbatim: nextStep).font(expanded ? .callout : .caption).foregroundStyle(.secondary)
             }
             if let chips = card.presentation?.chips {

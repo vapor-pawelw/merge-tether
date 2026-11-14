@@ -6,9 +6,68 @@ struct RemoteMRDetailContent: View {
     let card: RemoteCard
     @State private var showingApprovals = false
     @State private var descriptionExpanded = false
+    private var visiblePolicy: [String] { card.visiblePolicy(details.policy) }
 
     var body: some View {
         VStack(alignment: .leading, spacing: 24) {
+            // Same order as the Mac detail: what applies now, then the conversation, then reference data.
+            if !visiblePolicy.isEmpty {
+                section(.RemoteDetail.remoteDetailPolicy) {
+                    ForEach(Array(visiblePolicy.enumerated()), id: \.offset) { _, message in
+                        Text(verbatim: message).font(.callout).foregroundStyle(.secondary)
+                    }
+                }
+            }
+            if let dependencies = card.dependencies {
+                section(.RemoteDetail.remoteDetailDependencies) {
+                    if let position = dependencies.stackPosition { Text(.MRDependencies.mrDependenciesStackPosition(position)).font(.callout) }
+                    ForEach(Array(dependencies.predecessors.enumerated()), id: \.offset) { _, predecessor in
+                        VStack(alignment: .leading, spacing: 5) {
+                            if ["https", "http"].contains(predecessor.url.scheme?.lowercased() ?? ""), predecessor.url.host == card.url?.host {
+                                Link(destination: predecessor.url) {
+                                    Text(verbatim: predecessor.reference + " · " + predecessor.title)
+                                        .frame(minHeight: 44, alignment: .leading)
+                                }.font(.callout)
+                            } else { Text(verbatim: predecessor.reference + " · " + predecessor.title).font(.callout) }
+                            if !predecessor.isCurrent {
+                                Text(.MRDependencies.mrDependenciesLastKnown).font(.caption).foregroundStyle(.secondary)
+                            }
+                        }
+                    }
+                    if let notice = dependencies.notice { Text(verbatim: notice).font(.callout).foregroundStyle(.secondary) }
+                }
+            }
+            section(.RemoteDetail.remoteDetailFeedback) {
+                if details.feedback.isEmpty {
+                    Text(.RemoteDetail.remoteDetailNoFeedback).font(.callout).foregroundStyle(.secondary)
+                } else {
+                    ForEach(Array(details.feedback.enumerated()), id: \.offset) { _, field in fieldView(field) }
+                }
+            }
+            .id(RemoteCardCTA.Destination.feedback)
+            section(.RemoteDetail.remoteDetailDiscussions) {
+                if let threads = details.threads {
+                    if threads.isEmpty {
+                        Text(details.truncated ? .RemoteDetail.remoteDetailTruncated : .RemoteDetail.remoteDetailNoDiscussions)
+                            .font(.callout).foregroundStyle(.secondary)
+                    }
+                    ForEach(threads) { thread in
+                        RemoteDiscussionCard(thread: thread, mergeRequestURL: card.url)
+                    }
+                } else { unavailable }
+            }
+            .id(RemoteDetailAnchor.discussions)
+            section(.RemoteDetail.remoteDetailApprovals) {
+                if let approvals = details.approvals {
+                    RemoteApprovalSummary(details: approvals)
+                    Button { showingApprovals = true } label: {
+                        Label(.RemoteDetail.remoteDetailPeopleAndRules, systemImage: "person.2")
+                            .frame(maxWidth: .infinity, minHeight: 44, alignment: .leading)
+                    }
+                    .accessibilityIdentifier("remote.details.approvals")
+                } else { unavailable }
+            }
+            .id(RemoteDetailAnchor.approvals)
             section(.RemoteDetail.remoteDetailOverview) {
                 ForEach(Array(details.metadata.enumerated()), id: \.offset) { _, field in
                     fieldView(field)
@@ -32,63 +91,6 @@ struct RemoteMRDetailContent: View {
                     }
                 }
             }
-            section(.RemoteDetail.remoteDetailApprovals) {
-                if let approvals = details.approvals {
-                    RemoteApprovalSummary(details: approvals)
-                    Button { showingApprovals = true } label: {
-                        Label(.RemoteDetail.remoteDetailPeopleAndRules, systemImage: "person.2")
-                            .frame(maxWidth: .infinity, minHeight: 44, alignment: .leading)
-                    }
-                    .accessibilityIdentifier("remote.details.approvals")
-                } else { unavailable }
-            }
-            .id(RemoteDetailAnchor.approvals)
-            if let dependencies = card.dependencies {
-                section(.RemoteDetail.remoteDetailDependencies) {
-                    if let position = dependencies.stackPosition { Text(.MRDependencies.mrDependenciesStackPosition(position)).font(.callout) }
-                    ForEach(Array(dependencies.predecessors.enumerated()), id: \.offset) { _, predecessor in
-                        VStack(alignment: .leading, spacing: 5) {
-                            if ["https", "http"].contains(predecessor.url.scheme?.lowercased() ?? ""), predecessor.url.host == card.url?.host {
-                                Link(destination: predecessor.url) {
-                                    Text(verbatim: predecessor.reference + " · " + predecessor.title)
-                                        .frame(minHeight: 44, alignment: .leading)
-                                }.font(.callout)
-                            } else { Text(verbatim: predecessor.reference + " · " + predecessor.title).font(.callout) }
-                            if !predecessor.isCurrent {
-                                Text(.MRDependencies.mrDependenciesLastKnown).font(.caption).foregroundStyle(.secondary)
-                            }
-                        }
-                    }
-                    if let notice = dependencies.notice { Text(verbatim: notice).font(.callout).foregroundStyle(.secondary) }
-                }
-            }
-            if !details.policy.isEmpty {
-                section(.RemoteDetail.remoteDetailPolicy) {
-                    ForEach(Array(details.policy.enumerated()), id: \.offset) { _, message in
-                        Text(verbatim: message).font(.callout).foregroundStyle(.secondary)
-                    }
-                }
-            }
-            section(.RemoteDetail.remoteDetailFeedback) {
-                if details.feedback.isEmpty {
-                    Text(.RemoteDetail.remoteDetailNoFeedback).font(.callout).foregroundStyle(.secondary)
-                } else {
-                    ForEach(Array(details.feedback.enumerated()), id: \.offset) { _, field in fieldView(field) }
-                }
-            }
-            .id(RemoteCardCTA.Destination.feedback)
-            section(.RemoteDetail.remoteDetailDiscussions) {
-                if let threads = details.threads {
-                    if threads.isEmpty {
-                        Text(details.truncated ? .RemoteDetail.remoteDetailTruncated : .RemoteDetail.remoteDetailNoDiscussions)
-                            .font(.callout).foregroundStyle(.secondary)
-                    }
-                    ForEach(threads) { thread in
-                        RemoteDiscussionCard(thread: thread, mergeRequestURL: card.url)
-                    }
-                } else { unavailable }
-            }
-            .id(RemoteDetailAnchor.discussions)
             section(.RemoteDetail.remoteDetailActivity) {
                 Text(.RemoteDetail.remoteDetailHistoryHelp).font(.caption).foregroundStyle(.secondary)
                 if details.activity.isEmpty { Text(.RemoteDetail.remoteDetailNoActivity).font(.callout).foregroundStyle(.secondary) }

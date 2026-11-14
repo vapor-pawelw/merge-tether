@@ -98,6 +98,8 @@ import MergeTetherRemote
             default: ManualMergeBlocker.checking.title
             }
             #expect(card.presentation?.status == String(localized: expected))
+            // The phone prints detail and status as separate lines; the blocker must appear once.
+            #expect(card.detail != card.presentation?.status)
             #expect(!card.actions.contains { [.merge, .enqueueMerge].contains($0.kind) })
             if ["reply", "question", "failed"].contains(gate) { #expect(card.primaryCTA?.destination == .feedback) }
             if ["replyDiscussions", "replyCapability"].contains(gate) {

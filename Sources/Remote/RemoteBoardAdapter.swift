@@ -214,9 +214,11 @@ import MergeTetherRemote
         default: ordinaryWait = false
         }
         let showsWaiting = ordinaryWait && !knownMergeFailure && hasCurrentCatalog && evidenceMatchesCatalogContext
-        card.presentation?.status = String(localized: showsWaiting ? waitingStatus?.title ?? title : title)
+        let status = String(localized: showsWaiting ? waitingStatus?.title ?? title : title)
+        card.presentation?.status = status
         if let detail { card.detail = detail }
-        else if card.detail.isEmpty { card.detail = String(localized: title) }
+        // The status line already carries the blocker; the phone must not print it twice.
+        else if card.detail.isEmpty, String(localized: title) != status { card.detail = String(localized: title) }
         card.actions.removeAll { [.merge, .enqueueMerge].contains($0.kind) }
         if card.primaryCTA == nil {
             if case .feedback = blocker {

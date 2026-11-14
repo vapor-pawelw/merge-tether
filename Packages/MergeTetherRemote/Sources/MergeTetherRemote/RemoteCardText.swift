@@ -1,0 +1,40 @@
+import Foundation
+
+/// The phone shows each sentence once, like the Mac card: a status or next step that repeats
+/// the card's explanation adds nothing, and older hosts may still send such repeats.
+public extension RemoteCard {
+    var visibleStatus: String? {
+        guard let status = presentation?.status?.trimmingCharacters(in: .whitespacesAndNewlines), !status.isEmpty,
+              !Self.repeats(status, in: [detail]) else { return nil }
+        return presentation?.status
+    }
+
+    var visibleNextStep: String? {
+        guard let next = presentation?.nextStep?.trimmingCharacters(in: .whitespacesAndNewlines), !next.isEmpty,
+              !Self.repeats(next, in: [detail, presentation?.status ?? ""]) else { return nil }
+        return presentation?.nextStep
+    }
+
+    /// Policy lines already stated by the card itself, mirroring the Mac summary's exclusions.
+    func visiblePolicy(_ policy: [String]) -> [String] {
+        var shown: [String] = []
+        for line in policy where !Self.repeats(line, in: [detail, presentation?.status ?? "", presentation?.nextStep ?? ""] + shown) {
+            shown.append(line)
+        }
+        return shown
+    }
+
+    private static func repeats(_ text: String, in others: [String]) -> Bool {
+        let key = normalized(text)
+        guard !key.isEmpty else { return true }
+        return others.contains { other in
+            let candidate = normalized(other)
+            return !candidate.isEmpty && (candidate == key
+                || candidate.components(separatedBy: "\n\n").map(normalized).contains(key))
+        }
+    }
+
+    private static func normalized(_ text: String) -> String {
+        text.trimmingCharacters(in: .whitespacesAndNewlines.union(.punctuationCharacters)).lowercased()
+    }
+}

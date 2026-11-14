@@ -42,11 +42,11 @@ struct RemoteCardDetail: View {
                         Menu {
                             Button(.RemoteDetail.remoteDetailOverview) { proxy.scrollTo(RemoteCardCTA.Destination.overview, anchor: .top) }
                             Button(.RemoteDetail.remoteDetailPendingDrafts) { proxy.scrollTo(RemoteCardCTA.Destination.drafts, anchor: .top) }
-                            Button(.RemoteDetail.remoteDetailApprovals) { proxy.scrollTo(RemoteDetailAnchor.approvals, anchor: .top) }
-                            Button(.RemoteDetail.remoteDetailDiscussions) { proxy.scrollTo(RemoteDetailAnchor.discussions, anchor: .top) }
-                            Button(.RemoteDetail.remoteDetailFeedback) { proxy.scrollTo(RemoteCardCTA.Destination.feedback, anchor: .top) }
-                            Button(.RemoteDetail.remoteDetailActivity) { proxy.scrollTo(RemoteCardCTA.Destination.assistantRuns, anchor: .top) }
                             Button(.RemoteDetail.remoteDetailActions) { proxy.scrollTo(RemoteCardCTA.Destination.actions, anchor: .top) }
+                            Button(.RemoteDetail.remoteDetailFeedback) { proxy.scrollTo(RemoteCardCTA.Destination.feedback, anchor: .top) }
+                            Button(.RemoteDetail.remoteDetailDiscussions) { proxy.scrollTo(RemoteDetailAnchor.discussions, anchor: .top) }
+                            Button(.RemoteDetail.remoteDetailApprovals) { proxy.scrollTo(RemoteDetailAnchor.approvals, anchor: .top) }
+                            Button(.RemoteDetail.remoteDetailActivity) { proxy.scrollTo(RemoteCardCTA.Destination.assistantRuns, anchor: .top) }
                         } label: {
                             Label(.RemoteDetail.remoteDetailSections, systemImage: "list.bullet")
                                 .frame(minHeight: 44)
@@ -61,16 +61,17 @@ struct RemoteCardDetail: View {
                             detailReadStatus
                         }
                         draftSection.id(RemoteCardCTA.Destination.drafts)
-                        if current.id.hasPrefix("mr:") {
-                            if let details = loadedDetails {
-                                RemoteMRDetailContent(details: details, card: current)
-                            }
-                        }
+                        // Like the Mac detail, the decision and its controls lead; reference sections follow.
                         if let result = model.state.result {
                             Text(result.status.title).font(.callout).foregroundStyle(.secondary)
                             Button(.Remote.remoteClose) { model.state.acknowledgeResult() }
                         }
                         actionSection.id(RemoteCardCTA.Destination.actions)
+                        if current.id.hasPrefix("mr:") {
+                            if let details = loadedDetails {
+                                RemoteMRDetailContent(details: details, card: current)
+                            }
+                        }
                     }
                     .frame(maxWidth: 680)
                     .frame(maxWidth: .infinity)
@@ -155,12 +156,9 @@ struct RemoteCardDetail: View {
     private var actionSection: some View {
         if boardCard != nil, model.state.pending != nil || current.actions.contains(where: { $0.kind != .deleteDraft }) {
             VStack(alignment: .leading, spacing: 12) {
+                // The header card above already states the explanation; repeat only the controls.
                 Text(.RemoteDetail.remoteDetailActions).font(.headline)
                     .accessibilityAddTraits(.isHeader)
-                if !current.detail.isEmpty {
-                    Text(verbatim: current.detail).font(.callout).foregroundStyle(.secondary)
-                        .fixedSize(horizontal: false, vertical: true)
-                }
                 TimelineView(.periodic(from: .now, by: 1)) { context in
                     VStack(alignment: .leading, spacing: 12) {
                         if model.state.pending != nil { ProgressView(.Remote.remoteRunning) }
