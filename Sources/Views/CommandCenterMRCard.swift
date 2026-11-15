@@ -165,7 +165,7 @@ private struct CommandCenterMRCardContent: View {
             if let author = ReviewingContext(row: row).author {
                 BoardCardAuthor(author: author)
             } else if allowsRemoval {
-                AvatarView(url: nil, size: 16)
+                PersonAvatar(url: nil, size: 16)
                     .help(Text(.ReviewingContext.reviewingAuthorUnknown))
                     .accessibilityLabel(Text(.ReviewingContext.reviewingAuthorUnknown))
             }

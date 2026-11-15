@@ -216,12 +216,17 @@ struct CommandCenterView: View {
         }
     }
 
+    /// Your GitLab name and avatar come from an authored merge request when one is loaded.
+    private var accountPerson: PersonIdentity {
+        guard let username = monitor.glab.currentUsername else { return .init(name: nil, username: nil) }
+        let own = monitor.authoredMergeRequests.requests.lazy.map(\.request.author)
+            .first { $0.username.caseInsensitiveCompare(username) == .orderedSame }
+        return own?.person ?? .init(name: nil, username: username)
+    }
+
     private var accountFooter: some View {
         HStack(spacing: 12) {
-            Label {
-                Text(verbatim: monitor.glab.currentUsername.map { "@\($0)" }
-                     ?? String(localized: .CommandCenter.commandCenterAccountUnavailable))
-            } icon: { Image(systemName: "person.crop.circle") }
+            PersonLabel(person: accountPerson, fallback: Text(.CommandCenter.commandCenterAccountUnavailable))
             if let host = monitor.glab.resolvedHost { Text(verbatim: host).foregroundStyle(.secondary) }
             Spacer()
             Button { openSettings() } label: {

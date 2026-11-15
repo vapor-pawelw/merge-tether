@@ -40,7 +40,7 @@ struct AuthorFeedbackView: View {
                             VStack(alignment: .leading, spacing: 6) {
                                 if source?.id != finding.id, let url = noteURL(finding.id) {
                                     Link(destination: url) {
-                                        Text(.FeedbackSuggestions.feedbackSuggestionsThreadOpenedBy("@" + finding.reviewerUsername))
+                                        Text(.FeedbackSuggestions.feedbackSuggestionsThreadOpenedBy(item.personDirectory.displayName(username: finding.reviewerUsername)))
                                             .fontWeight(.medium)
                                     }
                                 }
@@ -145,11 +145,11 @@ struct AuthorFeedbackView: View {
            status.pendingDraftCount == 0, item.draftCount == 0, item.drafts.isEmpty,
            status.replyNoteIDs.isEmpty, status.followUpNoteIDs.isEmpty, status.codeReviewRequests.isEmpty,
            !sourceLoading, citationContext?.finding(finding, status: status) != nil,
-           let message = finding.resolutionWaitMessage {
+           let message = finding.resolutionWaitMessage(people: item.personDirectory) {
             return message
         }
         return switch finding.state {
-        case .waitingAcceptance: .AuthorFeedback.authorFeedbackWaitingAcceptance(finding.waitingForReviewers.map { "@" + $0 }.joined(separator: ", "))
+        case .waitingAcceptance: finding.waitingAcceptanceMessage(people: item.personDirectory)
         case .needsChanges: .AuthorFeedback.authorFeedbackNeedsChanges
         case .needsVerification: .AuthorFeedback.authorFeedbackNeedsVerification
         case .needsReply: .AuthorFeedback.authorFeedbackReplyNeeded

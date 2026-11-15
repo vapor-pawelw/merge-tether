@@ -52,6 +52,9 @@ public struct RemoteCardChip: Codable, Equatable, Sendable {
 
 public struct RemoteCardText: Codable, Equatable, Sendable {
     public var author: String?
+    /// Optional so older paired installations keep decoding snapshots.
+    public var authorUsername: String?
+    public var authorAvatarURL: URL?
     public var repository: String
     public var draftBadge: String?
     public var status: String?
@@ -61,8 +64,10 @@ public struct RemoteCardText: Codable, Equatable, Sendable {
     public var secondaryCTA: RemoteCardCTA?
     public init(author: String? = nil, repository: String, draftBadge: String? = nil,
                 status: String? = nil, nextStep: String? = nil, working: Bool = false,
-                chips: [RemoteCardChip] = [], secondaryCTA: RemoteCardCTA? = nil) {
-        self.author = author; self.repository = repository; self.draftBadge = draftBadge
+                chips: [RemoteCardChip] = [], secondaryCTA: RemoteCardCTA? = nil,
+                authorUsername: String? = nil, authorAvatarURL: URL? = nil) {
+        self.author = author; self.authorUsername = authorUsername; self.authorAvatarURL = authorAvatarURL
+        self.repository = repository; self.draftBadge = draftBadge
         self.status = status; self.nextStep = nextStep; self.working = working
         self.chips = chips; self.secondaryCTA = secondaryCTA
     }

@@ -7,6 +7,7 @@ import Foundation
     let hasCurrentDependencyHold: Bool
     private let awaitsReviewer: Bool
     private let humanResolutionAuthors: [String]
+    private let people: PersonDirectory
 
     var awaitingRequiredApprovals: Bool {
         guard let progress = approvalProgress, progress.required > 0 else { return false }
@@ -63,6 +64,7 @@ import Foundation
         guard verified.feedback.isEmpty, !verified.needsDiscussion, !verified.needsChanges,
               !verified.hasOtherUnresolvedDiscussions else { return nil }
         approvalProgress = row.displayItem.approvalProgress
+        people = request.personDirectory(approvals: approvalProgress, notes: item.feedback)
         hasCurrentDependencyHold = dependencyHold
         guard awaitsReviewer || awaitingRequiredApprovals else { return nil }
     }
@@ -70,8 +72,8 @@ import Foundation
     var title: LocalizedStringResource {
         guard awaitsReviewer else { return approvalTitle! }
         let reviewerTitle: LocalizedStringResource
-        let names = reviewers.prefix(3).map { "@" + $0 }.joined(separator: ", ")
-        if let resolution = AuthorFeedbackPolicy.resolutionWaitMessage(authors: humanResolutionAuthors) { reviewerTitle = resolution }
+        let names = people.displayNames(Array(reviewers.prefix(3)))
+        if let resolution = AuthorFeedbackPolicy.resolutionWaitMessage(authors: humanResolutionAuthors, people: people) { reviewerTitle = resolution }
         else if reviewers.isEmpty { reviewerTitle = .AuthorFeedback.authorFeedbackWaitingChip }
         else if reviewers.count > 3 {
             reviewerTitle = .AuthorFeedback.authorFeedbackWaitingReviewersMore(names, reviewers.count - 3)

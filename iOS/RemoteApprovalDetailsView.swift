@@ -26,8 +26,9 @@ struct RemoteApprovalDetailsView: View {
                         }
                         ForEach(details.people) { person in
                             VStack(alignment: .leading, spacing: 6) {
-                                Text(verbatim: person.name.isEmpty ? person.username : person.name).font(.body.weight(.medium))
-                                Text(verbatim: "@" + person.username).font(.callout).foregroundStyle(.secondary)
+                                PersonLabel(person: .init(name: person.name, username: person.username, avatarURL: person.avatarURL),
+                                            avatarSize: 24)
+                                    .font(.body.weight(.medium))
                                 Label(person.status.title, systemImage: person.status.symbol)
                                     .font(.callout).foregroundStyle(person.status == .approved ? Color.green : .secondary)
                                 if let changedAt = person.changedAt {

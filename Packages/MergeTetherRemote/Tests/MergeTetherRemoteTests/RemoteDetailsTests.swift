@@ -21,6 +21,35 @@ import Testing
         #expect(try JSONDecoder().decode(RemoteMRDetails.self, from: JSONEncoder().encode(oldDetails)).branches == nil)
     }
 
+    @Test func olderPhonesWithoutAuthorIdentityFieldsCanStillOpenDetails() throws {
+        var card = RemoteCard(id: "mr:1:2", title: "MR", project: "g/p", url: nil)
+        card.presentation = .init(author: "Alice Example", repository: "p",
+            authorUsername: "alice", authorAvatarURL: URL(string: "https://gitlab.example.test/a.png"))
+        let board = RemoteBoard(hostSession: UUID(), account: "me@host", lanes: [.init(id: .own, cards: [card])])
+        #expect(try RemoteDetailRequest(card: card, board: board).matches(board))
+
+        // An older phone decodes the card without the new fields before hashing it.
+        var legacy = card
+        legacy.presentation?.authorUsername = nil
+        legacy.presentation?.authorAvatarURL = nil
+        #expect(try RemoteDetailRequest(card: legacy, board: board).matches(board))
+
+        var changed = legacy
+        changed.presentation?.author = "Someone Else"
+        #expect(try !RemoteDetailRequest(card: changed, board: board).matches(board))
+    }
+
+    @Test func peopleAreOptionalAndClippedWithTheirFields() throws {
+        let legacyField = try JSONDecoder().decode(RemoteDetailField.self, from: Data(#"{"label":"Author","value":"Alice"}"#.utf8))
+        #expect(legacyField.person == nil)
+        let legacyPerson = try JSONDecoder().decode(RemoteApprovalPerson.self,
+            from: Data(#"{"id":1,"name":"Alice","username":"alice","status":"approved"}"#.utf8))
+        #expect(legacyPerson.avatarURL == nil)
+        let person = RemotePerson(name: "Alice", username: "alice", avatarURL: URL(string: "https://gitlab.example.test/a.png"))
+        let field = RemoteDetailField(label: "Alice", value: "Waiting", person: person)
+        #expect(try JSONDecoder().decode(RemoteDetailField.self, from: JSONEncoder().encode(field)) == field)
+    }
+
     @Test func threadOriginDoesNotTurnMissingOrMixedEvidenceIntoAIOrHuman() {
         func thread(_ origins: [RemoteDetailNote.Origin?]) -> RemoteDetailThread {
             .init(id: "thread", state: .general, notes: origins.enumerated().map {

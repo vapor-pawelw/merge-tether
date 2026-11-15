@@ -99,7 +99,7 @@ private struct CommandCenterMRDetailContent: View {
             guard let note else { return String(localized: .FeedbackSuggestions.feedbackSuggestionsResetExplanation) }
             let quote = note.body ?? ""
             let preview = quote.count > 600 ? String(quote.prefix(600)) + "…" : quote
-            let author = note.author?.username.map { "@" + $0 } ?? note.author?.name ?? ""
+            let author = note.author?.person.displayName ?? ""
             let concern = summary == reason ? summary : summary + "\n" + reason
             return String(localized: .FeedbackSuggestions.feedbackSuggestionsConcern) + "\n" + concern
                 + "\n\n" + String(localized: .FeedbackSuggestions.feedbackSuggestionsComment)
@@ -281,9 +281,7 @@ private struct CommandCenterMRDetailContent: View {
                 else if presentationRow.isDraft { BoardDraftBadge() }
                 RepositoryPathText(presentationRow.displayURL.gitLabProjectPath).lineLimit(1)
                 if let author = presentationRow.displayRequest?.author {
-                    AvatarView(url: author.avatarURL, size: 18).accessibilityHidden(true)
-                    Text(verbatim: author.name.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty ? author.username : author.name).lineLimit(1)
-                        .help(Text(verbatim: "@\(author.username)"))
+                    PersonLabel(person: author.person, avatarSize: 18)
                 }
                 if finishedState == nil {
                     BoardApprovalProgressBadge(progress: presentationRow.displayItem.approvalProgress,
@@ -559,9 +557,11 @@ private struct CommandCenterMRDetailContent: View {
                     AssistantUsageMRDetailCost(mergeRequest: usageMergeRequest)
                     if let request = item.mergeRequest {
                         Grid(alignment: .leading, horizontalSpacing: 20, verticalSpacing: 10) {
-                            metadata(.CommandCenter.commandCenterAuthor,
-                                value: request.author.name.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty ? request.author.username : request.author.name)
-                                .help(Text(verbatim: "@\(request.author.username)"))
+                            GridRow(alignment: .firstTextBaseline) {
+                                Text(.CommandCenter.commandCenterAuthor).foregroundStyle(.secondary).gridColumnAlignment(.trailing)
+                                PersonLabel(person: request.author.person).frame(maxWidth: .infinity, alignment: .leading)
+                            }
+                            .font(.callout)
                             metadata(.CommandCenter.commandCenterSource, value: request.sourceBranch)
                             metadata(.CommandCenter.commandCenterTarget, value: request.targetBranch)
                             if let sha = request.sha { metadata(.CommandCenter.commandCenterCommit, value: sha, monospaced: true) }

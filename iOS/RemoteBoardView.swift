@@ -243,8 +243,9 @@ struct RemoteCardView: View {
     }
     @ViewBuilder
     private var author: some View {
-        if let author = card.presentation?.author {
-            Text(verbatim: author).fixedSize(horizontal: false, vertical: true)
+        if let presentation = card.presentation, presentation.author != nil {
+            PersonLabel(person: .init(name: presentation.author, username: presentation.authorUsername,
+                                      avatarURL: presentation.authorAvatarURL))
         }
     }
     private var badges: some View {

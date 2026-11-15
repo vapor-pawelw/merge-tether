@@ -45,10 +45,10 @@ import MergeTetherRemote
         if evidence == "current" {
             #expect(item.authorFeedbackStatus?.findings.count == 3)
             #expect(item.authorFeedbackStatus?.replyNoteIDs.isEmpty == true && item.drafts.isEmpty)
-            #expect(presentation.status == "Awaiting confirmation from @alice · Awaiting required approvals · 0/2")
+            #expect(presentation.status == "Awaiting confirmation from Alice · Awaiting required approvals · 0/2")
             #expect(phone.presentation?.status == presentation.status)
             #expect(phone.dependencies?.predecessors.first?.reference == "!4")
-        } else { #expect(phone.presentation?.status != "Awaiting confirmation from @alice · Awaiting required approvals · 0/2") }
+        } else { #expect(phone.presentation?.status != "Awaiting confirmation from Alice · Awaiting required approvals · 0/2") }
     }
 
     @Test func currentReviewerWaitIncludesApprovalProgressAndKeepsDependenciesSeparate() throws {
@@ -62,7 +62,7 @@ import MergeTetherRemote
         #expect(waiting.reviewers == ["alice"])
         #expect(waiting.approvalProgress?.completed == 0 && waiting.approvalProgress?.required == 2)
         #expect(waiting.awaitingRequiredApprovals)
-        #expect(model.status == "Awaiting confirmation from @alice · Awaiting required approvals · 0/2")
+        #expect(model.status == "Awaiting confirmation from Alice · Awaiting required approvals · 0/2")
         #expect(model.humanAction == nil && !model.working)
         let original = RemoteBoardAdapter.presentation(RemoteBoardAdapter.card(item, account: "me@host"), model: model)
         let phone = RemoteBoardAdapter.mergePresentation(original, item: item, status: try mergeStatus(item),
@@ -82,7 +82,7 @@ import MergeTetherRemote
         #expect(waiting.awaitingRequiredApprovals == !satisfied)
         #expect(waiting.approvalProgress?.completed == 5)
         #expect(String(localized: waiting.title).contains("5/2"))
-        #expect(String(localized: waiting.title).contains("@alice"))
+        #expect(String(localized: waiting.title).contains("Alice"))
         if !satisfied { #expect(String(localized: waiting.title).contains("Awaiting required approvals")) }
     }
 
@@ -101,7 +101,7 @@ import MergeTetherRemote
         var item = try fixture()
         item.approvalProgress = nil
         let presentation = model(row(item))
-        #expect(presentation.status == "Awaiting confirmation from @alice")
+        #expect(presentation.status == "Awaiting confirmation from Alice")
         #expect(presentation.waitingStatus?.approvalProgress == nil)
     }
 
@@ -113,7 +113,7 @@ import MergeTetherRemote
         let waiting = try #require(model(row(item)).waitingStatus)
         #expect(waiting.reviewers == ["alice", "bob", "carol", "dave"])
         let title = String(localized: waiting.title)
-        #expect(title.contains("@alice, @bob, @carol and 1 more"))
+        #expect(title.contains("Alice, @bob, @carol and 1 more"))
         #expect(!title.contains("@dave"))
     }
 

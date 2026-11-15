@@ -31,7 +31,7 @@ import MergeTetherRemote
                 actions: [.init(id: "publish", kind: .publish, token: "preview"), .init(id: "deleteDraft:1", kind: .deleteDraft, token: "preview")],
                 needsAttention: true, mergeRequestIID: 42,
                 primaryCTA: .init(title: String(localized: .MRHumanAction.mrHumanActionActionReviewDrafts), destination: .drafts),
-                presentation: .init(author: "Alex Example", repository: "payments-api"), approvals: .init(completed: 2, required: 2, received: 5, requirementsSatisfied: false)),
+                presentation: .init(author: "Alex Example", repository: "payments-api", authorUsername: "alex"), approvals: .init(completed: 2, required: 2, received: 5, requirementsSatisfied: false)),
             .init(id: "mr:1:43", title: "Keep cached account details available", project: "example/payments-api",
                 url: URL(string: "https://gitlab.example.org/example/payments-api/-/merge_requests/43"),
                 head: "b1c2d3e4", needsAttention: false, mergeRequestIID: 43,
@@ -44,7 +44,7 @@ import MergeTetherRemote
                 actions: [.init(id: "approve", kind: .approve, token: "preview")],
                 needsAttention: true, mergeRequestIID: 17,
                 primaryCTA: .init(title: String(localized: .MRHumanAction.mrHumanActionActionReviewApproval), destination: .actions),
-                presentation: .init(author: "Sam Example", repository: "mobile-app"), approvals: .init(completed: 2, required: 2)),
+                presentation: .init(author: "Sam Example", repository: "mobile-app", authorUsername: "sam"), approvals: .init(completed: 2, required: 2)),
         ]),
         .init(id: .other, cards: []),
     ])
@@ -90,7 +90,8 @@ import MergeTetherRemote
                     createdAt: .now, url: url, origin: .uncertain, authorID: 7)
             ], reply: .none, feedback: .needsVerification),
         ], reasons: ["One approval rule is still pending."], policy: ["Comment publication waits for review. Merge readiness is checked independently."],
-        feedback: [.init(label: "@reviewer1", value: "The reply is prepared. Check the discussion and pending draft before publishing.")],
+        feedback: [.init(label: "Alexandra Example With A Long Display Name", value: "The reply is prepared. Check the discussion and pending draft before publishing.",
+                         person: .init(name: "Alexandra Example With A Long Display Name", username: "reviewer1"))],
         activity: [.init(id: "run1", title: "Handle payment confirmation feedback", status: "Completed", summary: "Preserved the cached confirmation and added duplicate-response coverage.", createdAt: .now.addingTimeInterval(-900), head: card.head)],
         usage: [.init(label: "Reviewer / work agent", value: "$0.1420 · 2 agent requests"), .init(label: "Verifier", value: "$0.0081 · 4 agent requests")],
         branches: .init(source: sourceBranch, target: "main"))

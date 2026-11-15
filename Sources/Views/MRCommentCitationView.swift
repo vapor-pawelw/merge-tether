@@ -3,6 +3,7 @@ import SwiftUI
 struct MRCommentCitationView: View {
     let authorName: String?
     let authorUsername: String?
+    let authorAvatarURL: URL?
     let authorID: Int
     let quote: String
     let url: URL?
@@ -12,6 +13,7 @@ struct MRCommentCitationView: View {
     init(citation: MRCommentCitation, relation: LocalizedStringResource) {
         authorName = citation.note.author?.name
         authorUsername = citation.note.author?.username
+        authorAvatarURL = citation.note.author?.avatarURL
         authorID = citation.note.author?.id ?? 0
         quote = citation.note.body ?? ""
         url = citation.url
@@ -21,6 +23,7 @@ struct MRCommentCitationView: View {
     init(decision: IgnoredFeedbackSuggestion, mergeRequestURL: URL) {
         authorName = decision.sourceAuthorName
         authorUsername = decision.sourceAuthorUsername
+        authorAvatarURL = nil
         authorID = decision.sourceAuthorID
         quote = decision.sourceBody
         relation = .FeedbackSuggestions.feedbackSuggestionsSourceSaved
@@ -30,14 +33,7 @@ struct MRCommentCitationView: View {
             host: decision.target.host, iid: decision.target.iid ?? 0) ? components?.url : nil
     }
 
-    private var author: String {
-        let name = authorName?.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
-        let username = authorUsername?.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
-        if !name.isEmpty && !username.isEmpty && name != username { return "\(name) (@\(username))" }
-        if !username.isEmpty { return "@\(username)" }
-        if !name.isEmpty { return name }
-        return String(localized: .FeedbackSuggestions.feedbackSuggestionsAuthorIdentifier(authorID))
-    }
+    private var author: PersonIdentity { .init(name: authorName, username: authorUsername, avatarURL: authorAvatarURL) }
 
     /// Short comments need no expand control.
     private var isLong: Bool { quote.count > 220 || quote.filter(\.isNewline).count > 2 }
@@ -47,7 +43,9 @@ struct MRCommentCitationView: View {
             // The relation stays available as help and to VoiceOver instead of as a separate heading.
             HStack(alignment: .firstTextBaseline, spacing: 6) {
                 Image(systemName: "text.bubble").foregroundStyle(.secondary).imageScale(.small)
-                Text(verbatim: author).font(.caption.weight(.semibold)).foregroundStyle(.secondary)
+                PersonLabel(person: author, avatarSize: 14,
+                            fallback: Text(.FeedbackSuggestions.feedbackSuggestionsAuthorIdentifier(authorID)))
+                    .font(.caption.weight(.semibold)).foregroundStyle(.secondary)
                 Spacer(minLength: 8)
                 if let url {
                     Link(destination: url) { Text(.FeedbackSuggestions.feedbackSuggestionsOpenComment) }

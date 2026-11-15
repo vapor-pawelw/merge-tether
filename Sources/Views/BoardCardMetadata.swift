@@ -76,21 +76,16 @@ struct BoardCardAuthor: View {
     var roleLabel: LocalizedStringResource? = .ReviewingContext.reviewingAuthorLabel
 
     private var accessibilityLabel: Text {
-        let identity = Text(verbatim: "\(author.name) (@\(author.username))")
+        let identity = Text(verbatim: author.person.accessibilityName ?? author.username)
         guard let roleLabel else { return identity }
         return Text(roleLabel) + Text(verbatim: ": ") + identity
     }
 
     var body: some View {
-        HStack(spacing: 4) {
-            AvatarView(url: author.avatarURL, size: 16).accessibilityHidden(true)
-            Text(verbatim: author.name.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
-                 ? author.username : author.name).lineLimit(1)
-        }
-        .font(.caption).foregroundStyle(.secondary)
-        .help(Text(verbatim: "\(author.name) (@\(author.username))"))
-        .accessibilityElement(children: .ignore)
-        .accessibilityLabel(accessibilityLabel)
+        PersonLabel(person: author.person)
+            .font(.caption).foregroundStyle(.secondary)
+            .accessibilityElement(children: .ignore)
+            .accessibilityLabel(accessibilityLabel)
     }
 }
 

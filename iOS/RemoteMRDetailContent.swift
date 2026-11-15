@@ -132,13 +132,30 @@ struct RemoteMRDetailContent: View {
     }
 
     @ViewBuilder private func fieldView(_ field: RemoteDetailField) -> some View {
+        // A person names either the label (feedback from a reviewer) or the value (the MR author).
+        let person = field.person.map { PersonIdentity(name: $0.name, username: $0.username, avatarURL: $0.avatarURL) }
+        let personIsLabel = person != nil && person?.displayName == field.label
         VStack(alignment: .leading, spacing: 5) {
-            if let url = safeLink(field.url, to: card.url) {
+            if let person, personIsLabel {
+                HStack(spacing: 8) {
+                    PersonLabel(person: person, avatarSize: 20).font(.subheadline.weight(.medium))
+                    if let url = safeLink(field.url, to: card.url) {
+                        Spacer(minLength: 4)
+                        Link(destination: url) { Image(systemName: "arrow.up.right.square") }
+                            .accessibilityLabel(Text(verbatim: field.label))
+                            .frame(minWidth: 44, minHeight: 44)
+                    }
+                }.frame(minHeight: 44, alignment: .leading)
+            } else if let url = safeLink(field.url, to: card.url) {
                 Link(destination: url) { Label { Text(verbatim: field.label) } icon: { Image(systemName: "arrow.up.right.square") } }
                     .font(.subheadline.weight(.medium)).frame(minHeight: 44, alignment: .leading)
             } else { Text(verbatim: field.label).font(.subheadline.weight(.medium)).foregroundStyle(.secondary) }
-            Text(verbatim: field.value).font(.callout).textSelection(.enabled)
-                .fixedSize(horizontal: false, vertical: true)
+            if let person, !personIsLabel {
+                PersonLabel(person: person, avatarSize: 20).font(.callout)
+            } else {
+                Text(verbatim: field.value).font(.callout).textSelection(.enabled)
+                    .fixedSize(horizontal: false, vertical: true)
+            }
         }.frame(maxWidth: .infinity, alignment: .leading)
     }
     private var unavailable: some View { Text(.RemoteDetail.remoteDetailUnavailable).font(.callout).foregroundStyle(.secondary) }
@@ -232,11 +249,9 @@ private struct RemoteDiscussionCard: View {
     }
     private func noteAuthor(_ note: RemoteDetailNote) -> some View {
         VStack(alignment: .leading, spacing: 3) {
-            Text(verbatim: note.author ?? note.username ?? String(localized: .RemoteDetail.remoteDetailUnknownAuthor))
+            PersonLabel(person: .init(name: note.author, username: note.username, avatarURL: note.avatarURL), avatarSize: 20,
+                        fallback: Text(.RemoteDetail.remoteDetailUnknownAuthor))
                 .font(.callout.weight(.medium))
-            if let username = note.username, username != note.author {
-                Text(verbatim: "@" + username).font(.caption).foregroundStyle(.secondary)
-            }
             if note.authorKind == .automation {
                 Label(.AuthorFeedback.authorFeedbackBotAuthor, systemImage: "gearshape")
                     .font(.caption.weight(.medium)).foregroundStyle(.secondary)

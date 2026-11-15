@@ -100,10 +100,8 @@ struct BoardApprovalProgressBadge: View {
                 }
                 ForEach(people) { person in
                     HStack(spacing: 6) {
-                        AvatarView(url: person.author.avatarURL, size: 20).accessibilityHidden(true)
-                        Text(verbatim: person.author.name.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
-                             ? person.author.username : person.author.name)
-                            .font(.callout).foregroundStyle(.primary).lineLimit(1)
+                        PersonLabel(person: person.author.person, avatarSize: 20)
+                            .font(.callout).foregroundStyle(.primary)
                         if person.id == viewerApproval?.author.id {
                             Text(.Board.boardApprovalsViewerSuffix).font(.callout).foregroundStyle(.secondary)
                         }

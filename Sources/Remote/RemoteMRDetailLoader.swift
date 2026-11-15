@@ -57,11 +57,13 @@ import MergeTetherRemote
                 received: $0.completed, requirementsSatisfied: $0.requirementsSatisfied)
         }, people: people.map {
             .init(id: $0.id, name: $0.author.name, username: $0.author.username,
-                status: .init(rawValue: String(describing: $0.status)) ?? .assigned, changedAt: $0.changedAt)
+                status: .init(rawValue: String(describing: $0.status)) ?? .assigned, changedAt: $0.changedAt,
+                avatarURL: $0.author.avatarURL)
         }, rules: rules?.projected, requirementsSatisfied: rules?.requirementsSatisfied,
             historyAvailable: reviewers != nil && discussions != nil)
         let metadata: [RemoteDetailField] = [
-            .init(label: String(localized: .CommandCenter.commandCenterAuthor), value: request.author.name + " (@" + request.author.username + ")"),
+            .init(label: String(localized: .CommandCenter.commandCenterAuthor), value: request.author.person.displayName ?? request.author.username,
+                  person: request.author.remotePerson),
             .init(label: String(localized: .CommandCenter.commandCenterSource), value: request.sourceBranch),
             .init(label: String(localized: .CommandCenter.commandCenterTarget), value: request.targetBranch),
             .init(label: String(localized: .CommandCenter.commandCenterCommit), value: request.sha ?? String(localized: .CommandCenter.commandCenterStatusUnavailable)),
@@ -83,7 +85,7 @@ import MergeTetherRemote
                         var components = URLComponents(url: request.webURL, resolvingAgainstBaseURL: false)
                         components?.fragment = note.id.map { "note_\($0)" }
                         return RemoteDetailNote(id: note.id.map(String.init) ?? "unidentified/\(index)",
-                            author: note.author?.name, username: note.author?.username, body: note.body ?? "",
+                            author: note.author?.person.displayName, username: note.author?.username, body: note.body ?? "",
                             location: MRDiscussionLocation(position: note.position)?.full,
                             createdAt: MergeRequestReviewHistory.date(note.createdAt), url: components?.url, origin: origin,
                             authorID: note.author?.id, authorKind: (note.author?.id).flatMap { id in
@@ -92,7 +94,7 @@ import MergeTetherRemote
                                 case .automation: .automation
                                 case .unknown, nil: nil
                                 }
-                            })
+                            }, avatarURL: note.author?.avatarURL)
                     }, reply: .init(rawValue: String(describing: summary.publishedReply)) ?? .unavailable, draftCount: summary.draftCount)
             }
         }
@@ -110,7 +112,11 @@ struct RemoteApprovalRuleState: Decodable, Sendable {
         let approvalsRequired: Int
         let approved: Bool?
         let approvedBy: [Person]?
-        struct Person: Decodable, Sendable { let username: String? }
+        struct Person: Decodable, Sendable {
+            let username: String?
+            var name: String? = nil
+            var person: PersonIdentity { .init(name: name, username: username) }
+        }
         enum CodingKeys: String, CodingKey {
             case id, name, approved
             case approvalsRequired = "approvals_required", approvedBy = "approved_by"
@@ -128,7 +134,7 @@ struct RemoteApprovalRuleState: Decodable, Sendable {
         rules.enumerated().map { index, rule in
             .init(id: rule.id.map(String.init) ?? "rule/\(index)", name: rule.name ?? "#\(index + 1)",
                 required: rule.approvalsRequired, approved: rule.approved,
-                approvedBy: (rule.approvedBy ?? []).compactMap(\.username).map { "@" + $0 })
+                approvedBy: (rule.approvedBy ?? []).compactMap { $0.person.displayName })
         }
     }
 }

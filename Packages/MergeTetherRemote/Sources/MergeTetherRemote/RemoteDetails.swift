@@ -14,16 +14,40 @@ public struct RemoteDetailRequest: Codable, Equatable, Sendable {
     }
     public func matches(_ board: RemoteBoard) -> Bool {
         isValid && hostSession == board.hostSession && account == board.account
-            && board.cards.contains { $0.id == cardID && (try? RemoteDigest.token($0)) == cardDigest }
+            && board.cards.contains { $0.id == cardID && Self.digests($0).contains(cardDigest) }
+    }
+    /// Older phones drop the author identity fields before hashing the card they open.
+    static func digests(_ card: RemoteCard) -> Set<String> {
+        var legacy = card
+        legacy.presentation?.authorUsername = nil
+        legacy.presentation?.authorAvatarURL = nil
+        return Set([card, legacy].compactMap { try? RemoteDigest.token($0) })
     }
     public var isValid: Bool { cardID.utf8.count <= 128 && account.utf8.count <= 1_024 && cardDigest.utf8.count == 64 }
+}
+
+/// A GitLab person; optional so older paired installations keep decoding details.
+public struct RemotePerson: Codable, Equatable, Sendable {
+    public var name: String?
+    public var username: String?
+    public let avatarURL: URL?
+    public init(name: String?, username: String?, avatarURL: URL? = nil) {
+        self.name = name; self.username = username; self.avatarURL = avatarURL
+    }
+    func clipped(_ text: (String, Int) -> String) -> Self {
+        .init(name: name.map { text($0, 512) }, username: username.map { text($0, 256) }, avatarURL: avatarURL)
+    }
 }
 
 public struct RemoteDetailField: Codable, Equatable, Sendable {
     public var label: String
     public var value: String
     public let url: URL?
-    public init(label: String, value: String, url: URL? = nil) { self.label = label; self.value = value; self.url = url }
+    /// When set, the label names this person and the phone shows them with an avatar.
+    public var person: RemotePerson?
+    public init(label: String, value: String, url: URL? = nil, person: RemotePerson? = nil) {
+        self.label = label; self.value = value; self.url = url; self.person = person
+    }
 }
 
 public struct RemoteApprovalPerson: Codable, Equatable, Identifiable, Sendable {
@@ -33,8 +57,10 @@ public struct RemoteApprovalPerson: Codable, Equatable, Identifiable, Sendable {
     public var username: String
     public let status: Status
     public let changedAt: Date?
-    public init(id: Int, name: String, username: String, status: Status, changedAt: Date? = nil) {
+    public let avatarURL: URL?
+    public init(id: Int, name: String, username: String, status: Status, changedAt: Date? = nil, avatarURL: URL? = nil) {
         self.id = id; self.name = name; self.username = username; self.status = status; self.changedAt = changedAt
+        self.avatarURL = avatarURL
     }
 }
 
@@ -76,13 +102,15 @@ public struct RemoteDetailNote: Codable, Equatable, Identifiable, Sendable {
     public var origin: Origin?
     public let authorID: Int?
     public var authorKind: AuthorKind?
+    public let avatarURL: URL?
     public init(id: String, author: String? = nil, username: String? = nil, body: String, location: String? = nil,
                 createdAt: Date? = nil, url: URL? = nil, origin: Origin? = nil, authorID: Int? = nil,
-                authorKind: AuthorKind? = nil) {
+                authorKind: AuthorKind? = nil, avatarURL: URL? = nil) {
         self.id = id; self.author = author; self.username = username; self.body = body; self.location = location
         self.createdAt = createdAt; self.url = url; self.origin = origin
         self.authorID = authorID
         self.authorKind = authorKind
+        self.avatarURL = avatarURL
     }
 }
 
@@ -191,12 +219,15 @@ public struct RemoteDetailResponse: Codable, Equatable, Sendable {
             if let branches = details.branches {
                 details.branches = .init(source: text(branches.source, 4_000), target: text(branches.target, 4_000))
             }
-            details.metadata = list(details.metadata, 30).map { .init(label: text($0.label, 256), value: text($0.value, 4_000), url: $0.url) }
-            details.feedback = list(details.feedback, 40).map { .init(label: text($0.label, 256), value: text($0.value, 4_000), url: $0.url) }
+            details.metadata = list(details.metadata, 30).map { .init(label: text($0.label, 256), value: text($0.value, 4_000), url: $0.url,
+                                                                     person: $0.person?.clipped(text)) }
+            details.feedback = list(details.feedback, 40).map { .init(label: text($0.label, 256), value: text($0.value, 4_000), url: $0.url,
+                                                                     person: $0.person?.clipped(text)) }
             details.policy = list(details.policy, 20).map { text($0, 2_000) }
             details.reasons = list(details.reasons, 20).map { text($0, 2_000) }
             details.usage = details.usage.map { fields in
-                list(fields, 10).map { .init(label: text($0.label, 256), value: text($0.value, 4_000), url: $0.url) }
+                list(fields, 10).map { .init(label: text($0.label, 256), value: text($0.value, 4_000), url: $0.url,
+                                             person: $0.person?.clipped(text)) }
             }
             if var approvals = details.approvals {
                 if approvals.people.count > 100 || (approvals.rules?.count ?? 0) > 100 { approvals.truncated = true }

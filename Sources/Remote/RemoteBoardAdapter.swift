@@ -8,9 +8,10 @@ import MergeTetherRemote
             project: completion.url.gitLabProjectPath, url: completion.url,
             detail: String(localized: completion.kind == .merged ? .MRLifecycle.completionMerged : .MRLifecycle.completionClosed),
             needsAttention: false, mergeRequestIID: completion.target.iid,
-            presentation: .init(author: completion.author?.name,
+            presentation: .init(author: completion.author?.person.displayName,
                 repository: completion.url.gitLabProjectPath.split(separator: "/").last.map(String.init) ?? "",
-                draftBadge: String(localized: state.badge)))
+                draftBadge: String(localized: state.badge),
+                authorUsername: completion.author?.username, authorAvatarURL: completion.author?.avatarURL))
         if let token = try? RemoteDigest.token([account, try RemoteDigest.token(completion)]) {
             card.actions = [.init(id: "seen", kind: .markDone, token: token)]
         }
@@ -450,16 +451,18 @@ import MergeTetherRemote
             }
             return .init(title: String(localized: label), destination: destination)
         }
-        let author = ReviewingContext(row: model.row).author.map {
-            $0.name.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty ? $0.username : $0.name
-        }
-        card.presentation = .init(author: author,
+        let author: Todo.Author? = ReviewingContext(row: model.row).author
+        let authorName: String? = author?.person.displayName
+        let authorUsername: String? = author?.username
+        let authorAvatarURL: URL? = author?.avatarURL
+        card.presentation = .init(author: authorName,
             repository: card.project.split(separator: "/").last.map(String.init) ?? card.project,
             draftBadge: MergeRequestFinishedState(model.row.displayRequest).map { String(localized: $0.badge) }
                 ?? (model.row.isDraft ? String(localized: .Menu.menuMrDraftBadge) : nil),
             status: model.status, nextStep: model.nextStep, working: model.working,
             chips: model.chips.map { .init(title: String(localized: $0.title), symbol: $0.symbol) },
-            secondaryCTA: human?.action == .retryRun ? .init(title: String(localized: .MRHumanAction.mrHumanActionActionReviewRun), destination: .assistantRuns) : nil)
+            secondaryCTA: human?.action == .retryRun ? .init(title: String(localized: .MRHumanAction.mrHumanActionActionReviewRun), destination: .assistantRuns) : nil,
+            authorUsername: authorUsername, authorAvatarURL: authorAvatarURL)
         if model.actionsBlocked { card.actions = [] }
         return card
     }

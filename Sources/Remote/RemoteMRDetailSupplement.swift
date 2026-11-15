@@ -8,6 +8,7 @@ import MergeTetherRemote
         guard let request = row.displayRequest, let host = monitor.glab.resolvedHost,
               let username = monitor.glab.currentUsername else { return }
         let target = MRAutomationScope.Target(host: host, username: username, projectID: request.projectID, iid: request.iid)
+        let people = request.personDirectory(approvals: item.approvalProgress, notes: item.feedback)
         let assessment = details.discussionFingerprint.flatMap {
             monitor.attention.authorFeedbackCoordinator?.assessment(for: request, fingerprint: $0)
         }
@@ -35,7 +36,7 @@ import MergeTetherRemote
             details.feedback.append(.init(label: String(localized: .AuthorFeedback.authorFeedbackTitle), value: String(localized: phase)))
             for finding in feedback.findings {
                 let fallback: LocalizedStringResource = switch finding.state {
-                case .waitingAcceptance: .AuthorFeedback.authorFeedbackWaitingAcceptance(finding.waitingForReviewers.map { "@" + $0 }.joined(separator: ", "))
+                case .waitingAcceptance: finding.waitingAcceptanceMessage(people: people)
                 case .needsChanges: .AuthorFeedback.authorFeedbackNeedsChanges
                 case .needsVerification: .AuthorFeedback.authorFeedbackNeedsVerification
                 case .needsReply: .AuthorFeedback.authorFeedbackReplyNeeded
@@ -45,12 +46,14 @@ import MergeTetherRemote
                 }
                 let clean = feedback.phase == .complete && feedback.pendingDraftCount == 0
                     && feedback.replyNoteIDs.isEmpty && feedback.followUpNoteIDs.isEmpty && feedback.codeReviewRequests.isEmpty
-                let state = clean ? finding.resolutionWaitMessage ?? fallback : fallback
+                let state = clean ? finding.resolutionWaitMessage(people: people) ?? fallback : fallback
                 var components = URLComponents(url: request.webURL, resolvingAgainstBaseURL: false)
                 components?.fragment = "note_\(finding.sourceNoteID ?? finding.id)"
-                details.feedback.append(.init(label: "@" + finding.reviewerUsername,
+                let reviewer = people.person(username: finding.reviewerUsername)
+                details.feedback.append(.init(label: people.displayName(username: finding.reviewerUsername),
                     value: ([String(localized: state), AgentExplanation.summary(finding.summary), finding.reason].compactMap { $0 })
-                        .map(GlabService.redactWorkflowEvidence).joined(separator: "\n\n"), url: components?.url))
+                        .map(GlabService.redactWorkflowEvidence).joined(separator: "\n\n"), url: components?.url,
+                    person: reviewer.remotePerson))
             }
             for question in feedback.codeReviewRequests {
                 details.feedback.append(.init(label: String(localized: .AuthorFeedback.authorFeedbackCodeReviewQuestion),

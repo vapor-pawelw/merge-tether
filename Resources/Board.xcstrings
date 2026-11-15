@@ -2,6 +2,13 @@
   "sourceLanguage": "en",
   "version": "1.0",
   "strings": {
+    "board.person.usernameHint": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": { "stringUnit": { "state": "translated", "value": "Shows the GitLab username" } },
+        "pl": { "stringUnit": { "state": "translated", "value": "Pokazuje nazwę użytkownika GitLab" } }
+      }
+    },
     "board.approvals.received.%lld": {
       "extractionState": "manual",
       "localizations": {

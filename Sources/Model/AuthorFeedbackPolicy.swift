@@ -39,9 +39,13 @@ struct AuthorFeedbackPolicy {
         var automaticResolutionSuppressed = false
         var waitingForHumanResolution: [String] = []
         var canResolve: Bool { state == .ready && discussionID != nil && !automaticResolutionSuppressed }
-        var resolutionWaitMessage: LocalizedStringResource? {
+        var resolutionWaitMessage: LocalizedStringResource? { resolutionWaitMessage(people: .init()) }
+        func resolutionWaitMessage(people: PersonDirectory) -> LocalizedStringResource? {
             guard !automaticResolutionSuppressed, [.waitingAcceptance, .ready, .disabled].contains(state) else { return nil }
-            return AuthorFeedbackPolicy.resolutionWaitMessage(authors: waitingForHumanResolution)
+            return AuthorFeedbackPolicy.resolutionWaitMessage(authors: waitingForHumanResolution, people: people)
+        }
+        func waitingAcceptanceMessage(people: PersonDirectory) -> LocalizedStringResource {
+            .AuthorFeedback.authorFeedbackWaitingAcceptance(people.displayNames(waitingForReviewers))
         }
     }
 
@@ -95,10 +99,10 @@ struct AuthorFeedbackPolicy {
             "security_bot", "automation_bot", "security_policy_bot", "admin_bot", "service_account", "duo_code_review_bot", "orbit_bot"]
     }
 
-    static func resolutionWaitMessage(authors: [String]) -> LocalizedStringResource? {
+    static func resolutionWaitMessage(authors: [String], people: PersonDirectory = .init()) -> LocalizedStringResource? {
         let names = normalizedHandles(authors)
         guard !names.isEmpty else { return nil }
-        let shown = names.prefix(3).map { "@" + $0 }.joined(separator: ", ")
+        let shown = people.displayNames(Array(names.prefix(3)))
         return names.count > 3 ? .AuthorFeedback.authorFeedbackWaitingThreadAuthorsMore(shown, names.count - 3)
             : .AuthorFeedback.authorFeedbackWaitingThreadAuthors(shown)
     }

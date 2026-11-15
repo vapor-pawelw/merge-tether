@@ -52,7 +52,7 @@ struct MRDiscussionThreadsView: View {
                              : hasLoaded || hasError ? .MRDiscussions.mrDiscussionsUnmatchedReply
                              : .MRDiscussions.mrDiscussionsReplyDraft)
                             .font(.caption.weight(.medium)).foregroundStyle(.secondary)
-                        MRDiscussionDraftView(draft: draft, username: currentUsername,
+                        MRDiscussionDraftView(draft: draft, author: currentUser,
                             selection: selection, selectionDisabled: selectionDisabled, onDelete: onDelete)
                     }
                     .padding(12)
@@ -72,9 +72,17 @@ struct MRDiscussionThreadsView: View {
         .frame(maxWidth: .infinity, alignment: .leading)
     }
 
+    /// Your drafts show your GitLab name and avatar when any loaded note carries them.
+    private var currentUser: PersonIdentity? {
+        guard let username = currentUsername?.lowercased() else { return nil }
+        let known = snapshot.threads.lazy.flatMap(\.notes).compactMap(\.author)
+            .first { $0.username?.lowercased() == username }
+        return known?.person ?? .init(name: nil, username: currentUsername)
+    }
+
     private func threadView(_ thread: MRDiscussionSnapshot.Thread) -> some View {
         MRDiscussionThreadView(thread: thread, mergeRequestURL: mergeRequestURL,
-                               currentUsername: currentUsername, initiallyExpanded: expandPendingDrafts && !thread.drafts.isEmpty,
+                               currentUsername: currentUsername, currentUser: currentUser, initiallyExpanded: expandPendingDrafts && !thread.drafts.isEmpty,
                                selection: selection, selectionDisabled: selectionDisabled, draftsFirst: draftsFirst, onDelete: onDelete)
     }
 }
@@ -83,6 +91,7 @@ private struct MRDiscussionThreadView: View {
     let thread: MRDiscussionSnapshot.Thread
     let mergeRequestURL: URL
     let currentUsername: String?
+    let currentUser: PersonIdentity?
     let initiallyExpanded: Bool
     let selection: Binding<DraftPublicationSelection>?
     let selectionDisabled: Bool
@@ -186,7 +195,7 @@ private struct MRDiscussionThreadView: View {
 
     private var draftRows: some View {
         ForEach(Array(thread.drafts.enumerated()), id: \.offset) { _, draft in
-            MRDiscussionDraftView(draft: draft, username: currentUsername, threadLocation: thread.location,
+            MRDiscussionDraftView(draft: draft, author: currentUser, threadLocation: thread.location,
                 selection: selection, selectionDisabled: selectionDisabled, onDelete: onDelete)
         }
     }
@@ -254,7 +263,7 @@ private struct MRDiscussionNoteView: View {
 
 private struct MRDiscussionDraftView: View {
     let draft: GitLabDraftNote
-    let username: String?
+    let author: PersonIdentity?
     var threadLocation: String? = nil
     var selection: Binding<DraftPublicationSelection>? = nil
     var selectionDisabled = false
@@ -266,8 +275,9 @@ private struct MRDiscussionDraftView: View {
                 if let selection {
                     DraftPublicationCheckbox(draft: draft, selection: selection, disabled: selectionDisabled)
                 }
-                if let username { Text(verbatim: "@\(username)").fontWeight(.medium) }
-                else { Text(.MRDiscussions.mrDiscussionsYou).fontWeight(.medium) }
+                PersonLabel(person: author ?? .init(name: nil, username: nil), avatarSize: 18,
+                            fallback: Text(.MRDiscussions.mrDiscussionsYou))
+                    .fontWeight(.medium)
                 Text(.MRDiscussions.mrDiscussionsPrivateDraft).font(.caption.weight(.semibold)).foregroundStyle(Color.accentColor)
                 Spacer(minLength: 4)
                 if let onDelete { DraftDeleteButton(draft: draft, disabled: selectionDisabled, onDelete: onDelete) }
@@ -387,16 +397,9 @@ private struct MRDiscussionAuthorView: View {
 
     var body: some View {
         HStack(alignment: .firstTextBaseline, spacing: 5) {
-            if let name = author?.name, !name.isEmpty, name != author?.username {
-                Text(verbatim: name).fontWeight(.semibold)
-                if let username = author?.username, !username.isEmpty {
-                    Text(verbatim: "@\(username)").foregroundStyle(.secondary)
-                }
-            } else if let username = author?.username, !username.isEmpty {
-                Text(verbatim: "@\(username)").fontWeight(.semibold)
-            } else {
-                Text(.MRDiscussions.mrDiscussionsUnknownAuthor).foregroundStyle(.secondary)
-            }
+            PersonLabel(person: author?.person ?? .init(name: nil, username: nil), avatarSize: 18,
+                        fallback: Text(.MRDiscussions.mrDiscussionsUnknownAuthor).foregroundStyle(.secondary))
+                .fontWeight(.semibold)
             if accountKind == .automation {
                 Label(.AuthorFeedback.authorFeedbackBotAuthor, systemImage: "gearshape")
                     .font(.caption.weight(.medium)).foregroundStyle(.secondary)
