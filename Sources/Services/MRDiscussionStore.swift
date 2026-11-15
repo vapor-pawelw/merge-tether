@@ -151,7 +151,7 @@ final class MRDiscussionStore {
         let provenanceDirectory = self.provenanceDirectory
         return await Task.detached {
             let generated = userID.map { userID in
-                AICommentProvenanceStore.snapshot(context: .init(host: target.host, username: target.username,
+                AICommentProvenanceStore.reconcile(result, context: .init(host: target.host, username: target.username,
                     userID: userID, projectID: target.projectID, iid: target.iid), in: provenanceDirectory)
             }
             var origins: [Int: MRDiscussionSnapshot.Origin] = [:]

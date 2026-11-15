@@ -291,7 +291,8 @@ private struct MRDiscussionOriginBadge: View {
     var origin: MRDiscussionSnapshot.Origin? = nil
 
     private var title: LocalizedStringResource {
-        switch badge {
+        if origin == .appGenerated { return .MRDiscussions.mrDiscussionsAiMergeTether }
+        return switch badge {
         case .ai: .MRDiscussions.mrDiscussionsAi
         case .uncertain: .MRDiscussions.mrDiscussionsAiUncertain
         case .human: .MRDiscussions.mrDiscussionsHuman
@@ -305,7 +306,8 @@ private struct MRDiscussionOriginBadge: View {
         }
     }
     private var symbol: String {
-        switch badge {
+        if origin == .appGenerated { return "wand.and.stars" }
+        return switch badge {
         case .ai: "sparkles"
         case .uncertain: "questionmark"
         case .human: "person.fill"

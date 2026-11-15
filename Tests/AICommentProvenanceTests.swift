@@ -228,4 +228,77 @@ struct AICommentProvenanceTests: Sendable {
         #expect(gitlab.requests.allSatisfy { $0.method == "GET" })
     }
 
+
+    private func recordReply(_ id: Int = 11, body: String = "Generated reply", in directory: URL) throws -> GitLabDraftNote {
+        // GitLab returns diff-thread replies with an all-null position object.
+        let generated = GitLabDraftNote(id: id, authorID: 9, note: body, discussionID: "thread",
+            position: .init(newPath: nil, newLine: nil, oldPath: nil, oldLine: nil))
+        try AICommentProvenanceStore.recordGenerated([.init(id: id, bodySHA256: AICommentAssessmentStore.digest(body))],
+            baseline: [], current: [generated], context: context, runID: UUID(), headSHA: String(repeating: "a", count: 40), in: directory)
+        return generated
+    }
+    private let diffThread = #"{"id":1,"body":"Reviewer note","author":{"id":5,"username":"reviewer"},"position":{"new_path":"A.swift","new_line":3}}"#
+
+    @Test func aReplyInADiffThreadBindsDespiteTheEmptyDraftPosition() throws {
+        let directory = try temporaryDirectory()
+        defer { try? FileManager.default.removeItem(at: directory) }
+        let generated = try recordReply(in: directory)
+        let before = try discussions("[\(diffThread)]")
+        let attempt = try #require(AICommentProvenanceStore.capturePublication([generated], context: context, before: before, in: directory))
+        let after = try discussions("[\(diffThread),{\"id\":2,\"body\":\"Generated reply\",\"author\":{\"id\":9,\"username\":\"me\"},\"position\":{\"new_path\":\"A.swift\",\"new_line\":3}}]")
+        try AICommentProvenanceStore.recordPublished(attempt, after: after, in: directory)
+        #expect(AICommentProvenanceStore.isGenerated(after[0].notes[1], discussionID: "thread", context: context, in: directory))
+    }
+
+    @Test(arguments: ["exact", "duplicate", "otherAuthor", "otherThread", "edited", "newThreadReply"])
+    func reconciliationLinksOnlyTheSingleExactPublishedNote(_ scenario: String) throws {
+        // given
+        let directory = try temporaryDirectory()
+        defer { try? FileManager.default.removeItem(at: directory) }
+        if scenario == "newThreadReply" {
+            try AICommentProvenanceStore.recordGenerated([.init(id: 11, bodySHA256: AICommentAssessmentStore.digest("Generated reply"))],
+                baseline: [], current: [draft(11, thread: nil)], context: context, runID: UUID(),
+                headSHA: String(repeating: "a", count: 40), in: directory)
+        } else {
+            _ = try recordReply(in: directory)
+        }
+        let body = scenario == "edited" ? "Edited reply" : "Generated reply"
+        let author = scenario == "otherAuthor" ? 5 : 9
+        let note = "{\"id\":2,\"body\":\"\(body)\",\"author\":{\"id\":\(author),\"username\":\"me\"}}"
+        var threads = try discussions(scenario == "duplicate" ? "[\(diffThread),\(note),\(note.replacingOccurrences(of: ":2,", with: ":3,"))]" : "[\(diffThread),\(note)]")
+        if scenario == "otherThread" { threads = [.init(id: "other-thread", notes: threads[0].notes)] }
+        // when
+        let snapshot = AICommentProvenanceStore.reconcile(threads, context: context, in: directory)
+        // then
+        let linked = scenario == "exact"
+        #expect(snapshot.contains(threads[0].notes[1], discussionID: threads[0].id) == linked)
+        #expect(AICommentProvenanceStore.isGenerated(threads[0].notes[1], discussionID: threads[0].id, context: context, in: directory) == linked)
+        #expect(!snapshot.contains(threads[0].notes[0], discussionID: threads[0].id))
+    }
+
+    @Test func terminalMergeRequestsAndInactiveScopesDropTheirOrigins() throws {
+        // given
+        let directory = try temporaryDirectory()
+        defer { try? FileManager.default.removeItem(at: directory) }
+        let other = AICommentProvenanceStore.Context(host: context.host, username: "me", userID: 9, projectID: 1, iid: 3)
+        let generated = try recordReply(in: directory)
+        try AICommentProvenanceStore.recordGenerated([.init(id: 12, bodySHA256: AICommentAssessmentStore.digest("Generated reply"))],
+            baseline: [], current: [draft(12)], context: other, runID: UUID(), headSHA: String(repeating: "a", count: 40), in: directory)
+        // when
+        AICommentProvenanceStore.removeMergeRequest(context, in: directory)
+        // then
+        #expect(AICommentProvenanceStore.generation(for: generated, context: context, in: directory) == nil)
+        #expect(AICommentProvenanceStore.generation(for: draft(12), context: other, in: directory) != nil)
+
+        // when
+        AICommentProvenanceStore.pruneInactive(before: Date().addingTimeInterval(-60), in: directory)
+        // then
+        #expect(AICommentProvenanceStore.generation(for: draft(12), context: other, in: directory) != nil)
+
+        // when
+        AICommentProvenanceStore.pruneInactive(before: Date().addingTimeInterval(60), in: directory)
+        // then
+        #expect(AICommentProvenanceStore.generation(for: draft(12), context: other, in: directory) == nil)
+        #expect(try FileManager.default.contentsOfDirectory(atPath: directory.path).isEmpty)
+    }
 }

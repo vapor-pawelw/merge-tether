@@ -167,7 +167,7 @@ enum AICommentProvenanceStore {
             let candidates = added.filter { discussionID, note in
                 note.author?.username == context.username && note.body == draft.note
                     && (draft.discussionID == nil || draft.discussionID == discussionID)
-                    && (draft.position == nil || draft.position == note.position)
+                    && AICommentProvenanceStore.positionMatches(draft.position, note.position, reply: draft.discussionID != nil)
             }
             guard candidates.count == 1, let match = candidates.first,
                   let discussionID = match.0, !discussionID.isEmpty else { return }
@@ -198,6 +198,80 @@ enum AICommentProvenanceStore {
             }
         }
         return .init(context: context, notes: notes)
+    }
+
+    /// GitLab returns replies with an empty `position` object; their thread, not the diff anchor, identifies them.
+    private nonisolated static func positionMatches(_ draft: GitLabDraftNote.Position?,
+        _ note: GitLabDraftNote.Position?, reply: Bool) -> Bool {
+        guard !reply, let draft, draft.isAnchored else { return true }
+        return draft == note
+    }
+
+    /// Links app-generated drafts to their published notes when the publication receipt was not recorded.
+    /// A note qualifies only when it is the single exact-body note by this account in the draft's thread
+    /// (or a new thread it starts), and no other generated draft claims it.
+    nonisolated static func reconcile(_ discussions: [GitLabMergeRequestDiscussion], context: Context,
+        in directory: URL = directory) -> Snapshot {
+        let existing = snapshot(context: context, in: directory)
+        guard context.isValid else { return existing }
+        let folder = file(kind: "drafts", id: 0, context: context, in: directory).deletingLastPathComponent()
+        guard let files = try? FileManager.default.contentsOfDirectory(at: folder, includingPropertiesForKeys: [.fileSizeKey]),
+              files.count <= 10_000 else { return existing }
+        let drafts: [GeneratedDraft] = files.filter { $0.pathExtension == "json" }.compactMap { url in
+            guard let record: GeneratedDraft = read(url), record.version == 1, record.context == context, record.draftID > 0,
+                  url.deletingPathExtension().lastPathComponent == String(record.draftID) else { return nil }
+            return record
+        }
+        let linkedDrafts = Set(existing.notes.values.map(\.draftID))
+        var claims: [Int: [PublishedNote]] = [:]
+        for record in drafts where !linkedDrafts.contains(record.draftID) {
+            var candidates: [PublishedNote] = []
+            for thread in discussions {
+                guard let threadID = thread.id, !threadID.isEmpty else { continue }
+                let published = thread.notes.filter { $0.system != true }
+                for (index, note) in published.enumerated() {
+                    guard let id = note.id, id > 0, existing.notes[id] == nil,
+                          note.author?.id == context.userID, note.author?.username == context.username,
+                          let body = note.body, !body.isEmpty, AICommentAssessmentStore.digest(body) == record.bodySHA256 else { continue }
+                    let placed = record.discussionID.map { $0 == threadID }
+                        ?? (index == 0 && positionMatches(record.position, note.position, reply: false))
+                    guard placed else { continue }
+                    candidates.append(.init(version: 1, context: context, runID: record.runID, draftID: record.draftID,
+                        noteID: id, discussionID: threadID, bodySHA256: record.bodySHA256))
+                }
+            }
+            if candidates.count == 1, let match = candidates.first { claims[match.noteID, default: []].append(match) }
+        }
+        var notes = existing.notes
+        for (noteID, records) in claims where records.count == 1 {
+            guard let record = records.first else { continue }
+            do { try write(record, to: file(kind: "notes", id: noteID, context: context, in: directory)) }
+            catch { continue }
+            notes[noteID] = record
+        }
+        return .init(context: context, notes: notes)
+    }
+
+    /// Display evidence is only useful while the MR is open; terminal MRs drop their whole scope.
+    nonisolated static func removeMergeRequest(_ context: Context, in directory: URL = directory) {
+        guard context.isValid else { return }
+        let scope = file(kind: "notes", id: 0, context: context, in: directory)
+            .deletingLastPathComponent().deletingLastPathComponent()
+        try? FileManager.default.removeItem(at: scope)
+    }
+
+    /// Removes scopes with no write since `cutoff`, covering MRs whose closure the app never observed.
+    nonisolated static func pruneInactive(before cutoff: Date, in directory: URL = directory) {
+        let keys: [URLResourceKey] = [.contentModificationDateKey, .isDirectoryKey]
+        let manager = FileManager.default
+        guard let scopes = try? manager.contentsOfDirectory(at: directory, includingPropertiesForKeys: keys) else { return }
+        for scope in scopes where (try? scope.resourceValues(forKeys: [.isDirectoryKey]).isDirectory) == true
+            && scope.lastPathComponent.utf8.count == 64 {
+            let files = manager.enumerator(at: scope, includingPropertiesForKeys: keys)?
+                .compactMap { $0 as? URL }.filter { $0.pathExtension == "json" } ?? []
+            let newest = files.compactMap { try? $0.resourceValues(forKeys: [.contentModificationDateKey]).contentModificationDate }.max()
+            if newest.map({ $0 < cutoff }) ?? true { try? manager.removeItem(at: scope) }
+        }
     }
 
     private nonisolated static func displayDirectories(_ directory: URL, legacyDirectory: URL?) -> [URL] {

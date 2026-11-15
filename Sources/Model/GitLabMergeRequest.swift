@@ -240,6 +240,8 @@ struct GitLabDraftNote: Codable, Equatable, Sendable {
             case oldPath = "old_path"
             case oldLine = "old_line"
         }
+
+        var isAnchored: Bool { newPath != nil || oldPath != nil || newLine != nil || oldLine != nil }
     }
 
     enum Kind: Equatable {

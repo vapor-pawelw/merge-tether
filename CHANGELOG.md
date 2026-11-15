@@ -6,6 +6,7 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 
 ## Unreleased
 
+- Label your comments published from MergeTether-generated drafts as **AI · MergeTether** in MR Details instead of **AI uncertain**. Replies in diff threads were never matched to their published comment; they now are, and comments already published from recorded drafts are linked when Details next loads. Merged and closed MRs drop this local record, and records untouched for 180 days are removed.
 - Show your own approval on MRs you review: the approvals badge adds your avatar with a check when you approved, or an orange reset mark when your earlier approval no longer counts (for example after a push), and the approvers popover lists you first. Your own MRs are unchanged.
 - Show each MR explanation once on iOS: the card no longer repeats the merge blocker as both explanation and status, Actions no longer repeat the header text, and policy lines already stated on the card are hidden. iOS MR Details now follow the Mac order: decisions and actions first, then policy, feedback and discussions, with approvals, overview, history and usage below.
 - Mark merge request actions by effect: sparkles for agent runs, a magnifying sparkle for read-only AI checks and a bolt when automation resumes, with the same icons on matching Settings. Hovering an action explains what runs now and what may follow.

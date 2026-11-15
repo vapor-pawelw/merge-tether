@@ -306,6 +306,7 @@ final class MergeRequestAttentionMonitor {
     private let aiAssessmentDirectory: URL
     private let followUpDirectory: URL
     private let provenanceDirectory: URL
+    private var lastProvenancePrune: Date?
     private var verifiedRemoteFiles: [String: [FollowUpVerification.FileEvidence]] = [:]
     private var isRefreshingDrafts = false
     @ObservationIgnored private let pendingDraftPolling = PendingDraftPolling()
@@ -716,6 +717,14 @@ final class MergeRequestAttentionMonitor {
         for continuation in waiting { continuation.resume() }
     }
 
+    /// Merged and closed MRs drop their display origins when observed; this sweep covers unobserved ones.
+    private func pruneInactiveProvenance(now: Date) {
+        guard lastProvenancePrune.map({ now.timeIntervalSince($0) >= 86_400 }) ?? true else { return }
+        lastProvenancePrune = now
+        let directory = provenanceDirectory, cutoff = now.addingTimeInterval(-180 * 86_400)
+        Task.detached(priority: .background) { AICommentProvenanceStore.pruneInactive(before: cutoff, in: directory) }
+    }
+
     private func poll(_ account: Account, todos: [Todo], revision: UInt64,
                       automaticResume: (id: Item.ID, action: MRAutomaticAction)? = nil) async throws {
         let host = account.host
@@ -759,7 +768,12 @@ final class MergeRequestAttentionMonitor {
             // A newer reopening must win over an older in-flight terminal read.
             guard settings?.mrLifecycleLedger.request(for: reviewTarget)?.state != "opened" else { return }
             settings?.completeCommentReview(for: reviewTarget)
+            let origins = AICommentProvenanceStore.Context(host: host, username: user.username, userID: user.id,
+                projectID: request.projectID, iid: request.iid)
+            let directory = provenanceDirectory
+            Task.detached(priority: .utility) { AICommentProvenanceStore.removeMergeRequest(origins, in: directory) }
         }
+        pruneInactiveProvenance(now: observedAt)
         guard revision == glab.accountRevision else { return }
         for pending in settings?.pendingCommentReviews ?? [] where pending.host == host && pending.username == user.username {
             if isIgnored(pending) || settings?.mrLifecycleLedger.request(for: pending)?.state == "merged" {

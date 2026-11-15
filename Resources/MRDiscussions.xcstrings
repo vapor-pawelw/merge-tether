@@ -221,6 +221,17 @@
         }
       }
     },
+    "mrDiscussions.aiMergeTether": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "AI · MergeTether"
+          }
+        }
+      }
+    },
     "mrDiscussions.aiAssessed": {
       "extractionState": "manual",
       "localizations": {
