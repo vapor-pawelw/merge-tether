@@ -201,6 +201,38 @@ struct ReReviewAssessmentTests {
         #expect(assessment.missingPublishedRepliesByThread(in: threads, authorID: 3) == [13: [13]])
     }
 
+    @Test(arguments: ["answered", "resolvableOverview", "otherReviewer", "laterSubmission", "missingTimestamp",
+                      "blockedFinding", "question", "ignored", "replyByReviewer"])
+    func anOverviewFromTheSameReviewSubmissionIsAnsweredByTheFindingThreadReply(_ scenario: String) throws {
+        // given: a non-resolvable review overview and the resolvable finding it summarizes, published together
+        let overviewTime = "2026-11-04T21:32:03.557Z"
+        let findingTime = scenario == "laterSubmission" ? "2026-11-05T09:00:00.000Z" : "2026-11-04T21:32:03.692Z"
+        let created = scenario == "missingTimestamp" ? "" : #","created_at":"\#(overviewTime)""#
+        let findingAuthor = scenario == "otherReviewer" ? 9 : 7
+        let replyAuthor = scenario == "replyByReviewer" ? 7 : 3
+        let threads = try JSONDecoder().decode([GitLabMergeRequestDiscussion].self, from: Data("""
+            [{"id":"overview","notes":[{"id":10,"author":{"id":7},"system":false,"resolvable":\(scenario == "resolvableOverview"),"resolved":false\(created),"body":"I left one recommendation, on the title filter."}]},
+             {"id":"finding","notes":[{"id":11,"author":{"id":\(findingAuthor)},"system":false,"resolvable":true,"resolved":true,"created_at":"\(findingTime)","body":"Bound the title filter."},
+                                      {"id":14,"author":{"id":\(replyAuthor)},"system":false,"resolvable":true,"resolved":true,"created_at":"2026-11-05T07:40:33.959Z","body":"Added a 255-code-point limit."}]}]
+            """.utf8))
+        let assessment = ReReviewAssessment(notes: [
+            .init(noteID: 10, state: .addressed, reason: "The same correction is explained in reply 14.",
+                informationalPurpose: .concreteCodeReviewFeedback,
+                ignoredDecisionIDs: scenario == "ignored" ? [UUID()] : nil, publishedReplyNoteID: 14),
+            .init(noteID: 11, state: scenario == "blockedFinding" ? .blocking : .addressed, reason: "The title limit is verified.",
+                publishedReplyNoteID: scenario == "blockedFinding" ? nil : 14)
+        ], codeReviewRequests: scenario == "question"
+            ? [.init(sourceNoteID: 10, sourceQuote: "title filter", kind: .feedbackVerification, summary: "Check", question: "Is it bounded?")]
+            : nil)
+
+        // when
+        let missing = assessment.missingPublishedReplyNoteIDs(in: threads, authorID: 3)
+
+        // then
+        #expect(missing.contains(10) == (scenario != "answered"))
+        #expect(assessment.missingPublishedRepliesByThread(in: threads, authorID: 3)[10] == (scenario == "answered" ? nil : [10]))
+    }
+
     @Test func addressedGeneralFeedbackAlsoNeedsItsOwnReplyButInformationalSummariesDoNot() throws {
         let threads = try JSONDecoder().decode([GitLabMergeRequestDiscussion].self, from: Data(#"[{"id":"general-feedback","notes":[{"id":10,"author":{"id":7},"system":false,"resolvable":false,"body":"Please document the new fallback."}]},{"id":"summary","notes":[{"id":12,"author":{"id":9},"system":false,"body":"The review raised the fallback documentation issue."}]}]"#.utf8))
         let assessment = ReReviewAssessment(notes: [

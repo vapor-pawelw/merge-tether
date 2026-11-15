@@ -114,8 +114,48 @@ struct ReReviewAssessment: Codable, Sendable {
     /// Includes actionable general comments; private drafts never prove publication.
     func missingPublishedReplyNoteIDs(in discussions: [GitLabMergeRequestDiscussion], authorID: Int,
                                      excludedReplyAuthorIDs: Set<Int> = []) -> Set<Int> {
-        repliesOwedByAddressedNotes(in: discussions, authorID: authorID, excludedReplyAuthorIDs: excludedReplyAuthorIDs)
+        let owed = repliesOwedByAddressedNotes(in: discussions, authorID: authorID, excludedReplyAuthorIDs: excludedReplyAuthorIDs)
+        return owed
             .subtracting(coveredReviewSummaryIDs(in: discussions, authorID: authorID, excludedReplyAuthorIDs: excludedReplyAuthorIDs))
+            .subtracting(answeredReviewOverviewIDs(in: discussions, authorID: authorID, owed: owed))
+    }
+
+    /// A non-resolvable overview comment published in the same review submission as a resolvable
+    /// finding by the same reviewer is answered by the verified reply in that finding's thread.
+    /// The semantic check already proved the reply covers the whole overview; this only waives the
+    /// duplicate local reply. Standalone general comments and separate findings keep their own reply.
+    private func answeredReviewOverviewIDs(in discussions: [GitLabMergeRequestDiscussion], authorID: Int, owed: Set<Int>) -> Set<Int> {
+        let byID = Dictionary(notes.map { ($0.noteID, $0) }, uniquingKeysWith: { first, _ in first })
+        let questions = Set(reviewRequests.map(\.sourceNoteID))
+        return Set(owed.compactMap { id -> Int? in
+            guard let assessment = byID[id], let replyID = assessment.publishedReplyNoteID,
+                  (assessment.ignoredDecisionIDs ?? []).isEmpty, !questions.contains(id),
+                  hasPublishedReply(for: assessment, in: discussions, authorID: authorID),
+                  let overviewThread = discussions.first(where: { $0.notes.first?.id == id }),
+                  let overview = overviewThread.notes.first, overview.resolvable == false,
+                  let reviewer = overview.author?.id, let submitted = Self.date(overview.createdAt),
+                  let replyThread = discussions.first(where: { $0.notes.contains { $0.id == replyID } }),
+                  replyThread.notes.first?.id != id else { return nil }
+            let answersSiblingFinding = replyThread.notes.contains { finding in
+                guard let findingID = finding.id, findingID < replyID, finding.system == false,
+                      finding.resolvable == true, finding.author?.id == reviewer,
+                      let posted = Self.date(finding.createdAt), abs(posted.timeIntervalSince(submitted)) <= 60,
+                      let verified = byID[findingID], [.addressed, .informational].contains(verified.state),
+                      (verified.ignoredDecisionIDs ?? []).isEmpty, !questions.contains(findingID),
+                      !owed.contains(findingID) else { return false }
+                return true
+            }
+            return answersSiblingFinding ? id : nil
+        })
+    }
+
+    private static func date(_ raw: String?) -> Date? {
+        guard let raw else { return nil }
+        let formatter = ISO8601DateFormatter()
+        formatter.formatOptions = [.withInternetDateTime, .withFractionalSeconds]
+        if let date = formatter.date(from: raw) { return date }
+        formatter.formatOptions = [.withInternetDateTime]
+        return formatter.date(from: raw)
     }
 
     private func repliesOwedByAddressedNotes(in discussions: [GitLabMergeRequestDiscussion], authorID: Int,
