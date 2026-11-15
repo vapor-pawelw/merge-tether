@@ -32,6 +32,10 @@ connection replaces the previous phone for that pairing. Native clients disconne
 in the background and refresh every 25 seconds while foregrounded, renewing sooner after a slow reply
 when needed to keep the host status current. The connection label remains stable
 during an in-flight refresh; remote writes still require an unexpired snapshot.
+These periodic and connection hellos are answered from the Mac's current board without
+a GitLab read; the Mac waits at most a few seconds for a refresh already in progress and
+starts a background refresh only when its data is older than two minutes. Commands still
+refresh GitLab and re-check their token before any write.
 
 After trusting a pairing, the pairing form closes as soon as it is saved, independently
 of the first Mac response. The phone shows **Connecting to Mac…** for at most 45 seconds,
@@ -41,8 +45,8 @@ never requires reopening the Mac's pairing window for an ordinary connection att
 the current Mac app starts its saved phone connection on launch. The Mac must be awake
 and MergeTether running; Keychain authorization or a blocked relay can still prevent connection.
 
-The circular toolbar arrow is **Refresh board**: it requests data over the current
-connection and coalesces outstanding refreshes. **… → Reconnect** deliberately replaces
+The circular toolbar arrow is **Refresh board**: it asks the Mac to read GitLab before
+answering (the additive `refresh` hello field) and coalesces outstanding refreshes. **… → Reconnect** deliberately replaces
 the phone transport, including its retry backoff, while keeping the saved pairing.
 Reconnect is also offered directly when the Mac is unavailable, and repeated taps
 coalesce while connecting. Returning from the background creates a fresh connection.

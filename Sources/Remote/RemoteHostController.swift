@@ -46,6 +46,7 @@ extension RemoteConnection: RemoteHostTransport {}
     private var originSubscription: RemoteDetailOriginSubscription?
     @ObservationIgnored private var originUpdateTask: Task<Void, Never>?
     @ObservationIgnored private(set) var detailTask: Task<Void, Never>?
+    @ObservationIgnored private var backgroundRefresh: Task<Void, Never>?
     private let detailReader: DetailReader
     private var activeDetailRequest: RemoteDetailRequest?
     private var lastDetailRead = Date.distantPast
@@ -201,7 +202,18 @@ extension RemoteConnection: RemoteHostTransport {}
             phoneSupportsMRControls = message.capabilities?.contains(RemoteMessage.mrControlsCapability) == true
             phoneSupportsOriginUpdates = phoneSupportsDetails && message.capabilities?.contains(RemoteMessage.detailOriginsCapability) == true
             if !phoneSupportsOriginUpdates { clearOriginSubscription() }
-            let fresh = await refreshSource(force: false, deadline: .now + .seconds(35))
+            let fresh: Bool
+            if message.refresh == true || monitor.lastRefresh == nil {
+                // An explicit refresh, or a Mac that has not loaded GitLab yet, waits for current data.
+                fresh = await refreshSource(force: message.refresh == true, deadline: .now + .seconds(35))
+            } else {
+                // Connecting and lease renewal answer from the current board. Commands still refresh
+                // and re-check their tokens before any write, so this never widens what the phone may do.
+                fresh = await RemoteRefreshBarrier.refresh(deadline: .now + .seconds(4), isRefreshing: {
+                    self.monitor.isLoading || self.monitor.attention.isLoading || self.monitor.authoredMergeRequests.isLoading
+                }, refresh: {}, validate: { true })
+                refreshInBackgroundIfStale()
+            }
             guard connection === active else { return }
             var board = snapshot()
             if !fresh { board.partial = true }
@@ -346,6 +358,16 @@ extension RemoteConnection: RemoteHostTransport {}
             }
         }
     }
+    /// Keeps an open phone current without making it wait: a later lease renewal carries the result.
+    private func refreshInBackgroundIfStale() {
+        guard backgroundRefresh == nil, !monitor.isLoading,
+              monitor.lastRefresh.map({ now().timeIntervalSince($0) > 120 }) ?? true else { return }
+        backgroundRefresh = Task { [weak self] in
+            await self?.monitor.refreshNow()
+            self?.backgroundRefresh = nil
+        }
+    }
+
     private func refreshSource(force: Bool, deadline: ContinuousClock.Instant) async -> Bool {
         await RemoteRefreshBarrier.refresh(deadline: deadline, isRefreshing: {
             self.monitor.isLoading || self.monitor.attention.isLoading || self.monitor.authoredMergeRequests.isLoading

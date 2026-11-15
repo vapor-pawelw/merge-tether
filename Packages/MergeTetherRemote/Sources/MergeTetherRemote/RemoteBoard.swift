@@ -197,11 +197,15 @@ public struct RemoteMessage: Codable, Sendable {
     public var detailRequest: RemoteDetailRequest?
     public var detailResponse: RemoteDetailResponse?
     public var detailOrigins: RemoteDetailOrigins?
+    /// A hello the user started with Refresh: the host reads GitLab before answering.
+    /// Without it the host answers from its current board, so connecting and lease renewals stay fast.
+    public var refresh: Bool?
     public init(type: Kind, challenge: UUID? = nil, board: RemoteBoard? = nil,
                 command: RemoteCommand? = nil, result: RemoteCommandResult? = nil, capabilities: [String]? = nil,
                 detailRequest: RemoteDetailRequest? = nil, detailResponse: RemoteDetailResponse? = nil,
-                detailOrigins: RemoteDetailOrigins? = nil) {
+                detailOrigins: RemoteDetailOrigins? = nil, refresh: Bool? = nil) {
         self.type = type; self.challenge = challenge; self.board = board; self.command = command; self.result = result
+        self.refresh = refresh
         self.capabilities = capabilities
         self.detailRequest = detailRequest; self.detailResponse = detailResponse
         self.detailOrigins = detailOrigins

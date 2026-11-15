@@ -197,6 +197,28 @@ struct RemoteHostStartupTests {
 
 @MainActor
 struct RemoteHostSessionTests {
+    @Test func anOrdinaryHelloAnswersFromTheCurrentBoardWhileRefreshReadsGitLabFirst() async throws {
+        let f = try Fixture()
+        defer { f.clean() }
+        await f.host.startupLoadTask?.value
+        _ = try await f.board(requireCards: false)
+        #expect(f.monitor.lastRefresh != nil)
+        final class Count { var todos = 0 }
+        let count = Count(), original = f.gitlab.handler
+        f.gitlab.handler = { call in
+            if call.method == "GET", call.command.contains("/todos?") { count.todos += 1 }
+            return try await original?(call) ?? InMemoryGitLab.output("[]")
+        }
+        // Connecting and lease renewal must not wait on (or start) a GitLab read for fresh data.
+        await f.transport.onMessage?(.init(type: .hello, challenge: UUID(), capabilities: [RemoteMessage.mergeActionsCapability]))
+        #expect(count.todos == 0)
+        #expect(f.transport.messages.last?.type == .snapshot)
+        await f.transport.onMessage?(.init(type: .hello, challenge: UUID(), capabilities: [RemoteMessage.mergeActionsCapability],
+            refresh: true))
+        #expect(count.todos == 1)
+        #expect(f.transport.messages.last?.type == .snapshot)
+    }
+
     @Test func reconnectRejectsAnEncryptedCommandFromThePreviousSession() async throws {
         let f = try Fixture()
         defer { f.clean() }

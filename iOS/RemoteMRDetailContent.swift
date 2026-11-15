@@ -9,7 +9,7 @@ struct RemoteMRDetailContent: View {
     private var visiblePolicy: [String] { card.visiblePolicy(details.policy) }
 
     var body: some View {
-        VStack(alignment: .leading, spacing: 24) {
+        LazyVStack(alignment: .leading, spacing: 24) {
             // Same order as the Mac detail: what applies now, then the conversation, then reference data.
             if !visiblePolicy.isEmpty {
                 section(.RemoteDetail.remoteDetailPolicy) {
@@ -51,8 +51,11 @@ struct RemoteMRDetailContent: View {
                         Text(details.truncated ? .RemoteDetail.remoteDetailTruncated : .RemoteDetail.remoteDetailNoDiscussions)
                             .font(.callout).foregroundStyle(.secondary)
                     }
-                    ForEach(threads) { thread in
-                        RemoteDiscussionCard(thread: thread, mergeRequestURL: card.url)
+                    // Long conversations: only threads near the viewport are built and measured.
+                    LazyVStack(alignment: .leading, spacing: 14) {
+                        ForEach(threads) { thread in
+                            RemoteDiscussionCard(thread: thread, mergeRequestURL: card.url)
+                        }
                     }
                 } else { unavailable }
             }
@@ -94,7 +97,7 @@ struct RemoteMRDetailContent: View {
             section(.RemoteDetail.remoteDetailActivity) {
                 Text(.RemoteDetail.remoteDetailHistoryHelp).font(.caption).foregroundStyle(.secondary)
                 if details.activity.isEmpty { Text(.RemoteDetail.remoteDetailNoActivity).font(.callout).foregroundStyle(.secondary) }
-                ForEach(details.activity) { activity in
+                LazyVStack(alignment: .leading, spacing: 14) { ForEach(details.activity) { activity in
                     DisclosureGroup {
                         if let summary = activity.summary {
                             Text(verbatim: summary).font(.callout).textSelection(.enabled)
@@ -113,7 +116,7 @@ struct RemoteMRDetailContent: View {
                         }.frame(minHeight: 44, alignment: .leading)
                     }
                     Divider()
-                }
+                } }
             }
             .id(RemoteCardCTA.Destination.assistantRuns)
             section(.RemoteDetail.remoteDetailUsage) {

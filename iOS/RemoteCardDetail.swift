@@ -8,29 +8,39 @@ struct RemoteCardDetail: View {
     @State private var confirmationCard: RemoteCard?
     @State private var approvalID: UUID?
     @State private var confirmationAccount = ""
+    /// The last details shown for this card, kept on screen while a re-read is in flight so sections do not vanish.
+    @State private var retainedDetails: RemoteMRDetails?
     @Environment(\.dismiss) private var dismiss
     private var boardCard: RemoteCard? { model.state.board?.cards.first { $0.id == original.id } }
     private var current: RemoteCard { boardCard ?? original }
+    /// Matching a response hashes the card, so it is evaluated once per body rather than per use or timer tick.
     private var loadedDetails: RemoteMRDetails? {
         guard let board = model.state.board, let card = boardCard else { return nil }
         return model.detailState.details(for: card, board: board)
     }
-    private var headerCard: RemoteCard {
+    private func headerCard(_ details: RemoteMRDetails?) -> RemoteCard {
         var card = current
-        if let details = loadedDetails { card.approvals = details.approvals?.progress }
+        if let details { card.approvals = details.approvals?.progress }
         return card
     }
-    private var detailIdentity: String {
-        (model.state.board?.hostSession.uuidString ?? "") + (model.state.board?.account ?? "")
-            + ((try? RemoteDigest.token(current)) ?? "") + String(model.supportsDetails)
+    private struct DetailIdentity: Equatable {
+        let session: UUID?, account: String?, card: RemoteCard, supportsDetails: Bool
+    }
+    private var detailIdentity: DetailIdentity {
+        .init(session: model.state.board?.hostSession, account: model.state.board?.account,
+              card: current, supportsDetails: model.supportsDetails)
     }
     var body: some View {
+        let fresh = loadedDetails
+        let rereading = model.detailState.pending != nil && boardCard != nil
+        let shown = fresh ?? (rereading ? retainedDetails : nil)
         NavigationStack {
             ScrollViewReader { proxy in
                 ScrollView(showsIndicators: false) {
-                    VStack(alignment: .leading, spacing: 24) {
-                        RemoteCardView(card: headerCard, expanded: true).id(RemoteCardCTA.Destination.overview)
-                        if let branches = loadedDetails?.branches {
+                    // Lazy: off-screen sections are not laid out again on each board update.
+                    LazyVStack(alignment: .leading, spacing: 24) {
+                        RemoteCardView(card: headerCard(shown), expanded: true).id(RemoteCardCTA.Destination.overview)
+                        if let branches = shown?.branches {
                             Label { Text(verbatim: branches.source + " → " + branches.target) } icon: {
                                 Image(systemName: "arrow.triangle.branch")
                             }
@@ -58,7 +68,7 @@ struct RemoteCardDetail: View {
                             Text(.Remote.remoteCompleteOnMac).foregroundStyle(.secondary)
                         }
                         if current.id.hasPrefix("mr:") {
-                            detailReadStatus
+                            detailReadStatus(fresh)
                         }
                         draftSection.id(RemoteCardCTA.Destination.drafts)
                         // Like the Mac detail, the decision and its controls lead; reference sections follow.
@@ -68,7 +78,7 @@ struct RemoteCardDetail: View {
                         }
                         actionSection.id(RemoteCardCTA.Destination.actions)
                         if current.id.hasPrefix("mr:") {
-                            if let details = loadedDetails {
+                            if let details = shown {
                                 RemoteMRDetailContent(details: details, card: current)
                             }
                         }
@@ -82,6 +92,9 @@ struct RemoteCardDetail: View {
                     guard current.id.hasPrefix("mr:") else { return }
                     await model.requestDetails(card: current)
                 }
+                .onChange(of: fresh) { _, value in if let value { retainedDetails = value } }
+                .onChange(of: detailIdentity.session) { _, _ in retainedDetails = nil }
+                .onChange(of: detailIdentity.account) { _, _ in retainedDetails = nil }
             }
             .navigationTitle(Text(verbatim: current.title))
             .navigationBarTitleDisplayMode(.inline)
@@ -197,7 +210,8 @@ struct RemoteCardDetail: View {
         if let label = action.label { Text(verbatim: label) } else { Text(action.kind.title) }
     }
 
-    private var detailReadStatus: some View {
+    private func detailReadStatus(_ loadedDetails: RemoteMRDetails?) -> some View {
+        // Each tick only reads cheap time-based state; the details were matched once by the caller.
         TimelineView(.periodic(from: .now, by: 1)) { context in
             VStack(alignment: .leading, spacing: 10) {
                 if boardCard == nil {
@@ -214,7 +228,7 @@ struct RemoteCardDetail: View {
                         Text(model.detailState.failure == .changed ? .RemoteDetail.remoteDetailContextChanged : .RemoteDetail.remoteDetailReadFailed)
                             .foregroundStyle(.orange)
                         if model.detailState.failure == .changed {
-                            Button { Task { await model.refresh(force: true) } } label: {
+                            Button { Task { await model.refresh(fromGitLab: true) } } label: {
                                 Label(.Remote.remoteRefreshData, systemImage: "arrow.clockwise").frame(minHeight: 44)
                             }
                         }

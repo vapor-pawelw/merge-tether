@@ -73,7 +73,7 @@ struct RemoteBoardView: View {
                             TimelineView(.periodic(from: .now, by: 1)) { context in
                                 let status = model.connectionStatus(now: context.date)
                                 HStack(spacing: 16) {
-                                    Button { Task { await model.refresh() } } label: { Image(systemName: "arrow.clockwise") }
+                                    Button { Task { await model.refresh(fromGitLab: true) } } label: { Image(systemName: "arrow.clockwise") }
                                         .accessibilityLabel(Text(.Remote.remoteRefreshData))
                                         .accessibilityIdentifier("remote.refresh")
                                         .disabled(status != .connected)

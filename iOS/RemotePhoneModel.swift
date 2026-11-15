@@ -183,12 +183,14 @@ enum RemotePhoneConnectionStatus { case unpaired, connecting, connected, offline
         detailState.disconnect(); supportsDetails = false; supportsOriginUpdates = false
         shouldRecoverCommand = recovery != nil; receiptChallenge = nil; receiptRevision = nil
     }
-    func refresh(force: Bool = false) async {
+    /// `fromGitLab` is for the user's Refresh: the Mac reads GitLab first. Other hellos return its current board.
+    func refresh(force: Bool = false, fromGitLab: Bool = false) async {
         let requestState = state
-        guard let connection, let challenge = requestState.beginRefresh(force: force, now: now()) else { return }
+        guard let connection, let challenge = requestState.beginRefresh(force: force || fromGitLab, now: now()) else { return }
         do { try await connection.send(.init(type: .hello, challenge: challenge,
             capabilities: [RemoteMessage.commentReviewCapability, RemoteMessage.mergeActionsCapability, RemoteMessage.detailsCapability,
-                           RemoteMessage.detailOriginsCapability, RemoteMessage.mrControlsCapability])) }
+                           RemoteMessage.detailOriginsCapability, RemoteMessage.mrControlsCapability],
+            refresh: fromGitLab ? true : nil)) }
         catch {
             guard !Task.isCancelled, self.connection === connection, self.state === requestState else { return }
             if requestState.refreshFailed(challenge: challenge) { self.error = true; self.connectionFailed = true }

@@ -6,6 +6,7 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 
 ## Unreleased
 
+- Connect the iOS app to the Mac faster: the Mac answers from its current board instead of reading GitLab first, and reads GitLab only when you tap Refresh or its data is over two minutes old. iOS MR Details scroll more smoothly: details are matched once per update, long discussions and history load lazily, and the previous details stay visible while they are re-read.
 - Label your comments published from MergeTether-generated drafts as **AI · MergeTether** in MR Details instead of **AI uncertain**. Replies in diff threads were never matched to their published comment; they now are, and comments already published from recorded drafts are linked when Details next loads. Merged and closed MRs drop this local record, and records untouched for 180 days are removed.
 - Add MR controls to iOS details: publish a single draft comment, run an agent review, stop a running agent, and ignore or restore an author-feedback suggestion. Drafts with quick actions or thread resolution still need the Mac. Older phones do not receive the new actions.
 - Show your own approval on MRs you review: the approvals badge adds your avatar with a check when you approved, or an orange reset mark when your earlier approval no longer counts (for example after a push), and the approvers popover lists you first. Your own MRs are unchanged.
