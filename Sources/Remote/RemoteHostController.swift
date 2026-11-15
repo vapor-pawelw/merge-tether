@@ -40,6 +40,7 @@ extension RemoteConnection: RemoteHostTransport {}
     private var phoneSupportsMergeActions = false
     private var phoneSupportsDetails = false
     private var phoneSupportsOriginUpdates = false
+    private var phoneSupportsMRControls = false
     private var originObserver: UUID?
     private var authorKindObserver: UUID?
     private var originSubscription: RemoteDetailOriginSubscription?
@@ -137,6 +138,7 @@ extension RemoteConnection: RemoteHostTransport {}
         phoneSupportsMergeActions = false
         phoneSupportsDetails = false
         phoneSupportsOriginUpdates = false
+        phoneSupportsMRControls = false
         clearOriginSubscription()
         detailTask?.cancel(); detailTask = nil; activeDetailRequest = nil
         lastDetailRead = .distantPast
@@ -196,6 +198,7 @@ extension RemoteConnection: RemoteHostTransport {}
             phoneSupportsCommentReview = message.capabilities?.contains(RemoteMessage.commentReviewCapability) == true
             phoneSupportsMergeActions = message.capabilities?.contains(RemoteMessage.mergeActionsCapability) == true
             phoneSupportsDetails = message.capabilities?.contains(RemoteMessage.detailsCapability) == true
+            phoneSupportsMRControls = message.capabilities?.contains(RemoteMessage.mrControlsCapability) == true
             phoneSupportsOriginUpdates = phoneSupportsDetails && message.capabilities?.contains(RemoteMessage.detailOriginsCapability) == true
             if !phoneSupportsOriginUpdates { clearOriginSubscription() }
             let fresh = await refreshSource(force: false, deadline: .now + .seconds(35))
@@ -203,7 +206,7 @@ extension RemoteConnection: RemoteHostTransport {}
             var board = snapshot()
             if !fresh { board.partial = true }
             do { try await active.send(.init(type: .snapshot, challenge: challenge, board: board,
-                capabilities: [RemoteMessage.detailsCapability, RemoteMessage.detailOriginsCapability])) }
+                capabilities: [RemoteMessage.detailsCapability, RemoteMessage.detailOriginsCapability, RemoteMessage.mrControlsCapability])) }
             catch { failed = true; try? await active.send(.init(type: .unavailable)) }
         case .receipt:
             guard let command = message.command, let challenge = message.challenge, let pairing else { return }
@@ -376,7 +379,8 @@ extension RemoteConnection: RemoteHostTransport {}
                 }
             }
         }
-        return board.forClient(supportsCommentReview: phoneSupportsCommentReview, supportsMergeActions: phoneSupportsMergeActions)
+        return board.forClient(supportsCommentReview: phoneSupportsCommentReview, supportsMergeActions: phoneSupportsMergeActions,
+            supportsMRControls: phoneSupportsMRControls)
     }
     private func execute(_ card: RemoteCard, action: RemoteAction) async -> RemoteCommandResult.Status {
         if card.id.hasPrefix("completion:") {
@@ -407,6 +411,11 @@ extension RemoteConnection: RemoteHostTransport {}
             .first(where: { "mr:\($0.id.projectID):\($0.id.iid)" == card.id }),
               RemoteBoardAdapter.card(item, account: account).drafts == card.drafts,
               item.mergeRequest?.sha == card.head else { return .changed }
+        if RemoteActionKind.mrControls.contains(action.kind) {
+            guard phoneSupportsMRControls else { return .changed }
+            let row = (board.own + board.reviewed).first { $0.item.id == item.id }
+            return await executeControl(action, item: item, row: row)
+        }
         switch action.kind {
         case .merge, .enqueueMerge:
             guard phoneSupportsMergeActions, let request = item.authoredRequest else { return .changed }
@@ -469,6 +478,63 @@ extension RemoteConnection: RemoteHostTransport {}
                 return .completed
             }
             await monitor.attention.retryReReview(item.id); return .completed
+        default: return .changed
+        }
+    }
+
+    /// Runs one MR control after the gate matched its token against a freshly refreshed board.
+    private func executeControl(_ action: RemoteAction, item: MergeRequestAttentionMonitor.Item,
+                                row: MergeRequestBoardSnapshot.Row?) async -> RemoteCommandResult.Status {
+        func suffix(_ prefix: String) -> String? {
+            action.id.hasPrefix(prefix) ? String(action.id.dropFirst(prefix.count)) : nil
+        }
+        guard let target = monitor.scopeTarget(projectID: item.id.projectID, iid: item.id.iid, url: item.url) else { return .changed }
+        switch action.kind {
+        case .stopJob:
+            guard let id = suffix("stopJob:").flatMap(UUID.init(uuidString:)), row?.latestJob?.id == id,
+                  row?.latestJob?.execution?.state.isActive == true else { return .changed }
+            monitor.cancelAssistantJob(id)
+            return .completed
+        case .runReview:
+            guard action.id == "runReview", monitor.canRunReview(for: item) else { return .changed }
+            await monitor.runReview(for: item)
+            return monitor.assistantJobActionError == nil ? .completed : .failed
+        case .publishDraft:
+            guard let id = suffix("publishDraft:").flatMap(Int.init),
+                  let draft = item.drafts.first(where: { $0.id == id }), DraftPublicationRisk(draft: draft) == nil,
+                  let host = monitor.glab.resolvedHost, let username = monitor.glab.currentUsername else { return .changed }
+            await monitor.attention.publishDrafts([draft], for: .init(host: host, username: username,
+                projectID: item.id.projectID, iid: item.id.iid, url: item.url))
+            switch monitor.attention.confirmationStates[item.id] {
+            case .failed: return .uncertain
+            case .changed: return .changed
+            default:
+                return monitor.attention.currentOpenItems.first(where: { $0.id == item.id })?.drafts.contains(draft) == false
+                    ? .completed : .uncertain
+            }
+        case .ignoreSuggestion:
+            guard let findingID = suffix("ignoreSuggestion:").flatMap(Int.init),
+                  let suggestion = RemoteBoardAdapter.ignorableSuggestions(item).first(where: { $0.findingID == findingID }),
+                  let fingerprint = item.authorFeedbackStatus?.fingerprint else { return .changed }
+            do {
+                // The phone never saw the comment body; bind it to the conversation the verdict was made on.
+                let discussions = try await monitor.glab.fetchMergeRequestDiscussions(
+                    projectID: item.id.projectID, iid: item.id.iid, host: target.host)
+                guard ReviewVerdict.fingerprint(discussions) == fingerprint,
+                      let note = discussions.flatMap(\.notes).first(where: { $0.id == suggestion.noteID }) else { return .changed }
+                try await monitor.ignoreFeedbackSuggestion(note, concernSummary: suggestion.summary,
+                    concernReason: suggestion.reason, for: target)
+                return .completed
+            } catch let error as FeedbackSuggestionDecisionError {
+                return error == .unavailable ? .failed : .changed
+            } catch { return .failed }
+        case .restoreSuggestion:
+            guard let id = suffix("restoreSuggestion:").flatMap(UUID.init(uuidString:)),
+                  monitor.settings.feedbackSuggestionDecisions.entries(for: target).contains(where: { $0.id == id }) else { return .changed }
+            do {
+                try await monitor.restoreFeedbackSuggestion(id, for: target)
+                return .completed
+            } catch { return .changed }
         default: return .changed
         }
     }

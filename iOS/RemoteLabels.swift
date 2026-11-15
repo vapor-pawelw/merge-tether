@@ -31,6 +31,11 @@ extension RemoteActionKind {
         case .handoff: .Remote.remoteHandoff
         case .reReview: .Remote.remoteReReview
         case .verify: .Remote.remoteVerify
+        case .publishDraft: .Remote.remotePublishDraft
+        case .runReview: .Remote.remoteRunReview
+        case .stopJob: .Remote.remoteStopJob
+        case .ignoreSuggestion: .FeedbackSuggestions.feedbackSuggestionsIgnore
+        case .restoreSuggestion: .FeedbackSuggestions.feedbackSuggestionsRestore
         }
     }
 }

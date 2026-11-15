@@ -1388,6 +1388,176 @@
           }
         }
       }
+    },
+    "remote.publishDraft": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Publish comment"
+          }
+        },
+        "pl": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Opublikuj komentarz"
+          }
+        }
+      }
+    },
+    "remote.publishDraftHelp": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "The Mac re-checks this draft against the current MR and publishes only this comment on GitLab. Other drafts stay private."
+          }
+        },
+        "pl": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Mac ponownie sprawdzi ten szkic względem bieżącego MR i opublikuje w GitLabie tylko ten komentarz. Pozostałe szkice pozostaną prywatne."
+          }
+        }
+      }
+    },
+    "remote.runReview": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Run review"
+          }
+        },
+        "pl": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Uruchom przegląd"
+          }
+        }
+      }
+    },
+    "remote.runReviewHelp": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "The Mac starts an agent review of the current head. It prepares private draft comments only; nothing is published without your confirmation."
+          }
+        },
+        "pl": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Mac uruchomi przegląd bieżącej wersji przez agenta. Przygotuje tylko prywatne szkice komentarzy; nic nie zostanie opublikowane bez Twojego potwierdzenia."
+          }
+        }
+      }
+    },
+    "remote.stopJob": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Stop agent run"
+          }
+        },
+        "pl": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Zatrzymaj pracę agenta"
+          }
+        }
+      }
+    },
+    "remote.stopJobHelp": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "The Mac stops the running agent. Work it already saved, such as private drafts, stays in place."
+          }
+        },
+        "pl": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Mac zatrzyma działającego agenta. Zapisane już efekty, np. prywatne szkice, pozostaną."
+          }
+        }
+      }
+    },
+    "remote.ignoreSuggestion.%@": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Ignore: %@"
+          }
+        },
+        "pl": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Ignoruj: %@"
+          }
+        }
+      }
+    },
+    "remote.ignoreSuggestionHelp": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Agents stop raising this concern for this MR until the comment changes or you restore it. GitLab is not changed."
+          }
+        },
+        "pl": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Agenci przestaną zgłaszać tę uwagę w tym MR, dopóki komentarz się nie zmieni lub jej nie przywrócisz. GitLab nie zostanie zmieniony."
+          }
+        }
+      }
+    },
+    "remote.restoreSuggestion.%@": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Restore: %@"
+          }
+        },
+        "pl": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Przywróć: %@"
+          }
+        }
+      }
+    },
+    "remote.restoreSuggestionHelp": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Agents may raise this concern again on the next feedback check. GitLab is not changed."
+          }
+        },
+        "pl": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Agenci mogą ponownie zgłosić tę uwagę przy następnym sprawdzeniu opinii. GitLab nie zostanie zmieniony."
+          }
+        }
+      }
     }
   },
   "version": "1.0"

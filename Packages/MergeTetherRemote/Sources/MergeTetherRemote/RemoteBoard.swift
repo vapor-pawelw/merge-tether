@@ -2,15 +2,21 @@ import Foundation
 import CryptoKit
 
 public enum RemoteLaneID: String, Codable, CaseIterable, Sendable { case ready, attention, todos, drafts, own, reviewed, other }
-public enum RemoteActionKind: String, Codable, Sendable { case publish, approve, markDone, prepare, handoff, reReview, verify, retryJob, deleteDraft, finishCommentReview, merge, enqueueMerge, resolveThreads, checkThreads }
+public enum RemoteActionKind: String, Codable, Sendable { case publish, approve, markDone, prepare, handoff, reReview, verify, retryJob, deleteDraft, finishCommentReview, merge, enqueueMerge, resolveThreads, checkThreads
+    // MR controls; sent only to phones that announce `mrControlsCapability`.
+    case publishDraft, runReview, stopJob, ignoreSuggestion, restoreSuggestion
+    public static let mrControls: Set<RemoteActionKind> = [.publishDraft, .runReview, .stopJob, .ignoreSuggestion, .restoreSuggestion]
+}
 
 public struct RemoteAction: Codable, Equatable, Identifiable, Sendable {
     public var id: String
     public var kind: RemoteActionKind
     public var token: String
     public var confirmationText: String?
-    public init(id: String, kind: RemoteActionKind, token: String, confirmationText: String? = nil) {
-        self.id = id; self.kind = kind; self.token = token; self.confirmationText = confirmationText
+    /// Button text when one card offers several actions of the same kind, such as one per suggestion.
+    public var label: String?
+    public init(id: String, kind: RemoteActionKind, token: String, confirmationText: String? = nil, label: String? = nil) {
+        self.id = id; self.kind = kind; self.token = token; self.confirmationText = confirmationText; self.label = label
     }
 }
 
@@ -180,6 +186,7 @@ public struct RemoteMessage: Codable, Sendable {
     public static let commentReviewCapability = "comment-review-v1"
     public static let detailsCapability = "mr-details-v1"
     public static let detailOriginsCapability = "detail-origins-v1"
+    public static let mrControlsCapability = "mr-controls-v1"
     public enum Kind: String, Codable, Sendable { case hello, snapshot, command, accepted, result, receipt, receiptResult = "receipt-result", unavailable, hostReady = "host-ready", detailRequest = "detail-request", details, cancelDetails = "cancel-details" }
     public var type: Kind
     public var challenge: UUID?
@@ -202,10 +209,14 @@ public struct RemoteMessage: Codable, Sendable {
 }
 
 extension RemoteBoard {
-    public func forClient(supportsCommentReview: Bool, supportsMergeActions: Bool = false) -> Self {
+    public func forClient(supportsCommentReview: Bool, supportsMergeActions: Bool = false, supportsMRControls: Bool = false) -> Self {
         var compatible = self
         for lane in compatible.lanes.indices {
             for card in compatible.lanes[lane].cards.indices {
+                if !supportsMRControls {
+                    // Older phones cannot decode these kinds; one unknown value would reject the whole board.
+                    compatible.lanes[lane].cards[card].actions.removeAll { RemoteActionKind.mrControls.contains($0.kind) }
+                }
                 if !supportsMergeActions {
                     compatible.lanes[lane].cards[card].actions.removeAll { [.merge, .enqueueMerge, .resolveThreads, .checkThreads].contains($0.kind) }
                 }

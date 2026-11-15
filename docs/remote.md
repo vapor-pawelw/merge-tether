@@ -198,6 +198,12 @@ requests and check then confirm concrete thread-resolution IDs. These commands c
 the same manual Mac executors: merge checks current account, source/target,
 dependencies, semantic feedback, published replies, drafts, unfinished work and
 submission receipts; resolution rechecks the confirmed IDs before each write.
+Phones advertising `mr-controls-v1` can also publish one draft at a time, start an
+agent review, stop a running agent job, and ignore or restore an author-feedback
+suggestion. Single-draft publication uses the Mac's manual publication path; drafts with
+potential quick actions or thread resolution get no phone button and stay a Mac decision.
+Ignoring a suggestion rereads the discussions and requires the conversation fingerprint
+the assessment was made on.
 Proposals can be inspected and opened in GitLab; adoption/ignore and settings remain
 on the desktop.
 
@@ -241,5 +247,7 @@ pending-command safety without a live relay or GitLab.
 ### Merge action capabilities
 
 Within cryptographic protocol v2, `merge-actions-v1` names the independent action capability. Advertising it enables explicit merge, supported auto-merge/train requests and bounded thread-resolution previews. Host-side live guards remain authoritative. Queued and in-train results do not claim a finished merge. A v2 client without this capability receives snapshots with these action cases filtered out; native v1 pairing is unsupported.
+
+`mr-controls-v1` follows the same rule for `publishDraft`, `runReview`, `stopJob`, `ignoreSuggestion` and `restoreSuggestion`: clients that do not advertise it never receive those cases. Actions may carry an additive `label` for per-item buttons.
 
 Approval metadata keeps the legacy `completed` field bounded for older decoders. The additive `received` field carries every current unique approver, including 5/2, and `requirementsSatisfied` preserves the distinction between total approvals and satisfaction of specific required rules. Updated phones use those fields for text, help and badge state.

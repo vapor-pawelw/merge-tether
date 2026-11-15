@@ -29,3 +29,31 @@ import Testing
         #expect(shown == ["Approval is manual", "Publication is manual"])
     }
 }
+
+@Suite struct MRControlCompatibilityTests {
+    private var board: RemoteBoard {
+        var card = RemoteCard(id: "mr:1:2", title: "MR", project: "g/p", url: nil)
+        card.actions = [.init(id: "approve", kind: .approve, token: "a"),
+            .init(id: "publishDraft:4", kind: .publishDraft, token: "b"),
+            .init(id: "stopJob:x", kind: .stopJob, token: "c"),
+            .init(id: "ignoreSuggestion:9", kind: .ignoreSuggestion, token: "d", label: "Ignore: Rename")]
+        return RemoteBoard(hostSession: UUID(), account: "me@host", lanes: [.init(id: .own, cards: [card])])
+    }
+
+    @Test func phonesWithoutTheCapabilityNeverReceiveKindsTheyCannotDecode() throws {
+        let legacy = board.forClient(supportsCommentReview: true, supportsMergeActions: true)
+        #expect(legacy.cards.first?.actions.map(\.kind) == [.approve])
+        let current = board.forClient(supportsCommentReview: true, supportsMergeActions: true, supportsMRControls: true)
+        #expect(current.cards.first?.actions.count == 4)
+        // An older decoder knows only the original kinds; the filtered wire must still decode.
+        let wire = try JSONEncoder().encode(legacy)
+        #expect(!String(decoding: wire, as: UTF8.self).contains("publishDraft"))
+    }
+
+    @Test func actionLabelsAreAdditiveOnTheWire() throws {
+        let legacy = try JSONDecoder().decode(RemoteAction.self, from: Data(#"{"id":"approve","kind":"approve","token":"t"}"#.utf8))
+        #expect(legacy.label == nil)
+        let labeled = RemoteAction(id: "restoreSuggestion:1", kind: .restoreSuggestion, token: "t", label: "Restore: Rename")
+        #expect(try JSONDecoder().decode(RemoteAction.self, from: JSONEncoder().encode(labeled)) == labeled)
+    }
+}

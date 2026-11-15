@@ -188,7 +188,7 @@ enum RemotePhoneConnectionStatus { case unpaired, connecting, connected, offline
         guard let connection, let challenge = requestState.beginRefresh(force: force, now: now()) else { return }
         do { try await connection.send(.init(type: .hello, challenge: challenge,
             capabilities: [RemoteMessage.commentReviewCapability, RemoteMessage.mergeActionsCapability, RemoteMessage.detailsCapability,
-                           RemoteMessage.detailOriginsCapability])) }
+                           RemoteMessage.detailOriginsCapability, RemoteMessage.mrControlsCapability])) }
         catch {
             guard !Task.isCancelled, self.connection === connection, self.state === requestState else { return }
             if requestState.refreshFailed(challenge: challenge) { self.error = true; self.connectionFailed = true }

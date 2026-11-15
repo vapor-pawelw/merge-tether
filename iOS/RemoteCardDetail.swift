@@ -97,7 +97,7 @@ struct RemoteCardDetail: View {
             .alert(Text(confirmation?.kind.title ?? .Remote.remoteConfirm), isPresented: Binding(
                 get: { confirmation != nil }, set: { if !$0 { confirmation = nil } }
             )) {
-                Button(role: confirmation?.kind == .deleteDraft ? .destructive : nil) {
+                Button(role: confirmation?.kind == .deleteDraft || confirmation?.kind == .stopJob ? .destructive : nil) {
                     guard let action = confirmation, let card = confirmationCard else { return }
                     let approval = approvalID
                     confirmation = nil; confirmationCard = nil; approvalID = nil
@@ -145,8 +145,9 @@ struct RemoteCardDetail: View {
                 ForEach(current.drafts) { draft in
                     RemoteDraftCard(draft: draft,
                         deleteAction: boardCard?.actions.first { $0.kind == .deleteDraft && $0.id == "deleteDraft:\(draft.id)" },
-                        canDelete: boardCard != nil && model.state.canAct(now: .now),
-                        onDelete: showConfirmation)
+                        publishAction: boardCard?.actions.first { $0.kind == .publishDraft && $0.id == "publishDraft:\(draft.id)" },
+                        canAct: boardCard != nil && model.state.canAct(now: .now),
+                        onAction: showConfirmation)
                 }
             }
         }
@@ -154,7 +155,7 @@ struct RemoteCardDetail: View {
 
     @ViewBuilder
     private var actionSection: some View {
-        if boardCard != nil, model.state.pending != nil || current.actions.contains(where: { $0.kind != .deleteDraft }) {
+        if boardCard != nil, model.state.pending != nil || !buttonActions.isEmpty {
             VStack(alignment: .leading, spacing: 12) {
                 // The header card above already states the explanation; repeat only the controls.
                 Text(.RemoteDetail.remoteDetailActions).font(.headline)
@@ -162,11 +163,20 @@ struct RemoteCardDetail: View {
                 TimelineView(.periodic(from: .now, by: 1)) { context in
                     VStack(alignment: .leading, spacing: 12) {
                         if model.state.pending != nil { ProgressView(.Remote.remoteRunning) }
-                        ForEach(current.actions.filter { $0.kind != .deleteDraft }) { action in
-                            Button { showConfirmation(action) } label: {
-                                Text(action.kind.title).frame(maxWidth: .infinity)
+                        ForEach(buttonActions.filter { !Self.secondaryKinds.contains($0.kind) }) { action in
+                            Button(role: action.kind == .stopJob ? .destructive : nil) { showConfirmation(action) } label: {
+                                actionTitle(action).frame(maxWidth: .infinity)
                             }
                             .buttonStyle(.borderedProminent).controlSize(.large)
+                            .disabled(!model.state.canAct(now: context.date))
+                        }
+                        // Suggestion decisions change only local agent guidance, so they read as secondary.
+                        ForEach(buttonActions.filter { Self.secondaryKinds.contains($0.kind) }) { action in
+                            Button { showConfirmation(action) } label: {
+                                actionTitle(action).multilineTextAlignment(.leading)
+                                    .frame(maxWidth: .infinity, minHeight: 44, alignment: .leading)
+                            }
+                            .buttonStyle(.bordered)
                             .disabled(!model.state.canAct(now: context.date))
                         }
                     }
@@ -176,6 +186,15 @@ struct RemoteCardDetail: View {
             .frame(maxWidth: .infinity, alignment: .leading)
             .background(Color(uiColor: .secondarySystemGroupedBackground), in: RoundedRectangle(cornerRadius: 16))
         }
+    }
+
+    private static let secondaryKinds: Set<RemoteActionKind> = [.ignoreSuggestion, .restoreSuggestion]
+    /// Draft-level actions live on their draft cards.
+    private var buttonActions: [RemoteAction] {
+        current.actions.filter { $0.kind != .deleteDraft && $0.kind != .publishDraft }
+    }
+    private func actionTitle(_ action: RemoteAction) -> Text {
+        if let label = action.label { Text(verbatim: label) } else { Text(action.kind.title) }
     }
 
     private var detailReadStatus: some View {

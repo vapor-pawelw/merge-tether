@@ -69,7 +69,7 @@ let project = Project(
                 "UILaunchScreen": .dictionary([:]),
             ]),
             sources: ["iOS/**/*.swift", "Sources/Views/StatusFlowLayout.swift"],
-            resources: ["Resources/MergeActions.xcstrings", "Resources/Remote.xcstrings", "Resources/Board.xcstrings", "Resources/MRHumanAction.xcstrings", "Resources/AuthorFeedback.xcstrings", "Resources/MRDependencies.xcstrings", "Resources/CommentReview.xcstrings", "iOS/Resources/**"],
+            resources: ["Resources/MergeActions.xcstrings", "Resources/Remote.xcstrings", "Resources/Board.xcstrings", "Resources/MRHumanAction.xcstrings", "Resources/AuthorFeedback.xcstrings", "Resources/MRDependencies.xcstrings", "Resources/CommentReview.xcstrings", "Resources/FeedbackSuggestions.xcstrings", "iOS/Resources/**"],
             dependencies: [.target(name: "MergeTetherRemote")],
             settings: .settings(base: [
                 "TARGETED_DEVICE_FAMILY": "1,2",

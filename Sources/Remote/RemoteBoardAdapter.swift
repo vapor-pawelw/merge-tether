@@ -133,6 +133,7 @@ import MergeTetherRemote
                             card.actions.append(.init(id: "job:\(job.id)", kind: .retryJob, token: token))
                         }
                     }
+                    card.actions += mrControls(item: item, row: row, monitor: monitor, account: account, busy: busy)
                 } else if let todo = board.otherTodos.first(where: { "todo:\($0.id)" == card.id }),
                           monitor.isAssessingNotice(todo) {
                     card.needsAttention = false
@@ -262,6 +263,74 @@ import MergeTetherRemote
                 confirmationText: String(localized: .MergeActions.mergeActionsResolveHelp)))
         }
         return card
+    }
+
+    /// Mac-detail controls offered to the phone. Each token binds the MR, its conversation and the
+    /// automation settings, so any change since the phone's snapshot rejects the command as changed.
+    static func mrControls(item: MergeRequestAttentionMonitor.Item, row: MergeRequestBoardSnapshot.Row,
+                           monitor: TodoMonitorService, account: String, busy: Bool) -> [RemoteAction] {
+        guard let request = item.mergeRequest, request.state == "opened", row.evidenceMatchesCatalogContext,
+              let base = try? RemoteDigest.token([account, try RemoteDigest.token(request),
+                  item.observedDiscussionFingerprint ?? "", try RemoteDigest.token(monitor.settings.automation)]) else { return [] }
+        func token(_ parts: [String]) -> String? { try? RemoteDigest.token([base] + parts) }
+        var actions: [RemoteAction] = []
+        // Stopping stays available while the run makes the card busy; it never writes to GitLab.
+        if let job = row.latestJob, job.execution?.state.isActive == true, let token = token(["stop", job.id.uuidString]) {
+            actions.append(.init(id: "stopJob:\(job.id)", kind: .stopJob, token: token,
+                confirmationText: String(localized: .Remote.remoteStopJobHelp)))
+        }
+        guard !busy, row.latestJob?.execution?.state.isActive != true else { return actions }
+        if monitor.canRunReview(for: item), let token = token(["review", request.sha ?? ""]) {
+            actions.append(.init(id: "runReview", kind: .runReview, token: token,
+                confirmationText: String(localized: .Remote.remoteRunReviewHelp)))
+        }
+        if item.commentReviewSnapshot != nil {
+            for draft in item.drafts {
+                // Quick actions and thread resolution stay a Mac decision, where every effect is shown.
+                guard let id = draft.id, id > 0, DraftPublicationRisk(draft: draft) == nil,
+                      !(draft.note ?? "").trimmingCharacters(in: .whitespacesAndNewlines).isEmpty,
+                      let draftToken = try? RemoteDigest.token(draft), let token = token(["draft", draftToken]) else { continue }
+                actions.append(.init(id: "publishDraft:\(id)", kind: .publishDraft, token: token,
+                    confirmationText: String(localized: .Remote.remotePublishDraftHelp)))
+            }
+        }
+        guard let target = monitor.scopeTarget(projectID: item.id.projectID, iid: item.id.iid, url: item.url) else { return actions }
+        let ignored = monitor.settings.feedbackSuggestionDecisions.entries(for: target)
+        for suggestion in ignorableSuggestions(item) where !ignored.contains(where: { $0.sourceNoteID == suggestion.noteID }) {
+            guard let token = token(["ignore", String(suggestion.findingID), String(suggestion.noteID),
+                                     suggestion.summary, suggestion.reason]) else { continue }
+            actions.append(.init(id: "ignoreSuggestion:\(suggestion.findingID)", kind: .ignoreSuggestion, token: token,
+                confirmationText: suggestion.summary + "\n\n" + suggestion.reason + "\n\n" + String(localized: .Remote.remoteIgnoreSuggestionHelp),
+                label: String(localized: .Remote.remoteIgnoreSuggestion(suggestion.summary))))
+        }
+        for decision in ignored {
+            guard let token = token(["restore", decision.id.uuidString, decision.sourceRevision]) else { continue }
+            actions.append(.init(id: "restoreSuggestion:\(decision.id)", kind: .restoreSuggestion, token: token,
+                confirmationText: decision.concernSummary + "\n\n" + String(localized: .Remote.remoteRestoreSuggestionHelp),
+                label: String(localized: .Remote.remoteRestoreSuggestion(decision.concernSummary))))
+        }
+        return actions
+    }
+
+    struct IgnorableSuggestion: Equatable {
+        let findingID: Int, noteID: Int, summary: String, reason: String
+    }
+
+    /// The same findings the Mac detail offers to ignore: current, explained, and still asking for work.
+    static func ignorableSuggestions(_ item: MergeRequestAttentionMonitor.Item) -> [IgnorableSuggestion] {
+        guard let request = item.mergeRequest, let status = item.authorFeedbackStatus,
+              status.phase == .complete || status.phase == .waitingPublication,
+              !status.head.isEmpty, status.head == request.sha,
+              status.semanticContextFingerprint == request.semanticContextFingerprint,
+              status.fingerprint == item.observedDiscussionFingerprint else { return [] }
+        return status.findings.compactMap { finding in
+            guard let noteID = finding.sourceNoteID,
+                  let reason = finding.reason?.trimmingCharacters(in: .whitespacesAndNewlines), !reason.isEmpty,
+                  finding.state == .needsChanges || finding.state == .needsVerification
+                    || status.followUpNoteIDs.contains(noteID) || status.replyNoteIDs.contains(noteID) else { return nil }
+            return .init(findingID: finding.id, noteID: noteID,
+                summary: AgentExplanation.summary(finding.summary) ?? reason, reason: reason)
+        }
     }
 
     static func resolutionPreview(_ original: RemoteCard, item: MergeRequestAttentionMonitor.Item,

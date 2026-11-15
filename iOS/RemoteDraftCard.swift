@@ -4,8 +4,9 @@ import MergeTetherRemote
 struct RemoteDraftCard: View {
     let draft: RemoteDraft
     let deleteAction: RemoteAction?
-    let canDelete: Bool
-    let onDelete: (RemoteAction) -> Void
+    var publishAction: RemoteAction? = nil
+    let canAct: Bool
+    let onAction: (RemoteAction) -> Void
 
     var body: some View {
         VStack(alignment: .leading, spacing: 14) {
@@ -16,12 +17,12 @@ struct RemoteDraftCard: View {
                     .background(Color.accentColor.opacity(0.08), in: Capsule())
                 Spacer(minLength: 0)
                 if let deleteAction {
-                    Button { onDelete(deleteAction) } label: {
+                    Button { onAction(deleteAction) } label: {
                         Image(systemName: "trash").frame(minWidth: 44, minHeight: 44)
                     }
                     .buttonStyle(.plain).foregroundStyle(.secondary)
                     .accessibilityLabel(Text(.CommentReview.commentReviewDelete))
-                    .disabled(!canDelete)
+                    .disabled(!canAct)
                     .accessibilityIdentifier("remote.delete-draft.\(draft.id)")
                 }
             }
@@ -52,6 +53,14 @@ struct RemoteDraftCard: View {
                 }
                 .font(.caption).foregroundStyle(.orange)
                 .fixedSize(horizontal: false, vertical: true)
+            }
+            // Drafts with quick actions or thread resolution get no button: the Mac shows their effects.
+            if let publishAction {
+                Button { onAction(publishAction) } label: {
+                    Label(.Remote.remotePublishDraft, systemImage: "paperplane").frame(minHeight: 44)
+                }
+                .buttonStyle(.bordered).disabled(!canAct)
+                .accessibilityIdentifier("remote.publish-draft.\(draft.id)")
             }
         }
         .padding(16)
