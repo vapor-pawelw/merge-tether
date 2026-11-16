@@ -21,6 +21,33 @@ import MergeTetherRemote
         #expect(legacy.authorKind == nil && legacy.origin == .ai)
     }
 
+    @Test func automationStatusMirrorsTheMacPanelForOpenMRsOnly() throws {
+        let suiteName = "RemoteAutomationStatus-\(UUID().uuidString)"
+        let defaults = try #require(UserDefaults(suiteName: suiteName))
+        defaults.removePersistentDomain(forName: suiteName)
+        let settings = SettingsManager(defaults: defaults)
+        let target = MRAutomationScope.Target(host: "gitlab.example.test", username: "owner", projectID: 1, iid: 2)
+        let ready = try JSONDecoder().decode(GitLabMergeRequest.self, from: Data(raw.utf8))
+        let draft = try JSONDecoder().decode(GitLabMergeRequest.self,
+            from: Data(raw.replacingOccurrences(of: #""draft":false"#, with: #""draft":true"#).utf8))
+        let closed = try JSONDecoder().decode(GitLabMergeRequest.self,
+            from: Data(raw.replacingOccurrences(of: #""state":"opened""#, with: #""state":"closed""#).utf8))
+        settings.automation.applyPreset(.manual, for: .codex)
+        #expect(RemoteMRDetailSupplement.automationStatus(settings: settings, target: target, request: ready) == nil)
+
+        settings.automation.applyPreset(.full, for: .codex)
+        let source = { (label: LocalizedStringResource) in
+            String(localized: .Menu.menuScopePopoverSource(String(localized: label)))
+        }
+        #expect(RemoteMRDetailSupplement.automationStatus(settings: settings, target: target, request: ready)
+            == .init(active: true, summary: String(localized: .Menu.menuScopeActive) + " · " + source(.Menu.menuScopeSourceGlobal)))
+        #expect(RemoteMRDetailSupplement.automationStatus(settings: settings, target: target, request: draft)
+            == .init(active: false, summary: String(localized: .Menu.menuScopePaused) + " · " + source(.Menu.menuScopeSourceDraft)))
+        settings.automation.scope.setManualChoice(.paused, for: target)
+        #expect(RemoteMRDetailSupplement.automationStatus(settings: settings, target: target, request: ready)?.active == false)
+        #expect(RemoteMRDetailSupplement.automationStatus(settings: settings, target: target, request: closed) == nil)
+    }
+
     @Test func extraContextReachesThePhoneOnlyForMatchingDraftsAndNotes() throws {
         let request = try JSONDecoder().decode(GitLabMergeRequest.self, from: Data(raw.utf8))
         let discussions = try JSONDecoder().decode([GitLabMergeRequestDiscussion].self,

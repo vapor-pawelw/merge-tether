@@ -96,6 +96,7 @@ import MergeTetherRemote
         activity: [.init(id: "run1", title: "Handle payment confirmation feedback", status: "Completed", summary: "Preserved the cached confirmation and added duplicate-response coverage.", createdAt: .now.addingTimeInterval(-900), head: card.head)],
         usage: [.init(label: "Reviewer / work agent", value: "$0.1420 · 2 agent requests"), .init(label: "Verifier", value: "$0.0081 · 4 agent requests")],
         branches: .init(source: sourceBranch, target: "main"))
+        details.automation = .init(active: true, summary: "Automation enabled · Decided by: Repository")
         if CommandLine.arguments.contains("--remote-preview-origin-resume") {
             details.originResume = .init(changeID: UUID().uuidString, resumesAt: .now.addingTimeInterval(600), drafts: 1)
         }

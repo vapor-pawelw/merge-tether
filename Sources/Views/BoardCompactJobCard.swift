@@ -70,9 +70,6 @@ struct BoardCompactJobCard: View {
                 Text(verbatim: repositoryPath).foregroundStyle(.secondary)
                 if let finishedItem { FinishedMergeRequestStatus(item: finishedItem, monitor: monitor) }
                 AssistantJobRow(handoff: handoff, monitor: monitor, readOnly: finishedState != nil)
-                if finishedState == nil {
-                    MRAutomationScopeMenu(monitor: monitor, target: scopeTarget, projectPath: repositoryPath, isDraft: isDraft)
-                }
             }
         }
     }

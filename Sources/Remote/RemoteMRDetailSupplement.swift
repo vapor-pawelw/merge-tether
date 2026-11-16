@@ -2,6 +2,18 @@ import Foundation
 import MergeTetherRemote
 
 @MainActor enum RemoteMRDetailSupplement {
+    /// Mirrors the Mac's lightning button: shown only for open MRs while some automation is configured.
+    static func automationStatus(settings: SettingsManager, target: MRAutomationScope.Target,
+                                 request: GitLabMergeRequest) -> RemoteAutomationStatus? {
+        let automation = settings.configuredAutomation
+        guard automation.hasEnabledAutomation, request.state == "opened" else { return nil }
+        let isDraft = request.draft == true || request.detailedMergeStatus == "draft_status"
+        let summary = MRAutomationControl.summary(automation.scope, target: target, isDraft: isDraft)
+        let state = String(localized: summary.active ? .Menu.menuScopeActive : .Menu.menuScopePaused)
+        let source = String(localized: .Menu.menuScopePopoverSource(String(localized: MRAutomationControl.sourceLabel(summary.source))))
+        return .init(active: summary.active, summary: state + " · " + source)
+    }
+
     static func append(to details: inout RemoteMRDetails, row: MergeRequestBoardSnapshot.Row,
                        monitor: TodoMonitorService, usage: AssistantUsageSnapshot?) {
         let item = row.evidenceMatchesCatalogContext ? row.item : row.displayItem
@@ -29,6 +41,7 @@ import MergeTetherRemote
         let policy = MREffectivePolicyPresentation(input: input)
         details.policy = policy.clauses.map { String(localized: message($0)) }
         details.rules = policy.routineClauses.map { String(localized: message($0)) }
+        details.automation = automationStatus(settings: monitor.settings, target: target, request: request)
         if let feedback = item.authorFeedbackStatus, feedback.head == request.sha,
            feedback.semanticContextFingerprint == request.semanticContextFingerprint,
            feedback.fingerprint == details.discussionFingerprint {

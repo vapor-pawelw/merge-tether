@@ -36,6 +36,21 @@ import Testing
         #expect(bounded.rules?.allSatisfy(bounded.policy.contains) == true)
     }
 
+    @Test func automationStatusIsOptionalRoundTripsAndIsClippedWhenBounded() throws {
+        let legacy = try JSONDecoder().decode(RemoteMRDetails.self, from: Data(
+            #"{"checkedAt":0,"metadata":[],"reasons":[],"policy":[],"feedback":[],"activity":[],"truncated":false}"#.utf8))
+        #expect(legacy.automation == nil)
+        var details = RemoteMRDetails(checkedAt: date)
+        details.automation = .init(active: false, summary: "Automation paused · Decided by: Draft default")
+        #expect(try JSONDecoder().decode(RemoteMRDetails.self, from: JSONEncoder().encode(details)) == details)
+
+        details.automation = .init(active: true, summary: String(repeating: "a", count: 2_000))
+        let board = board()
+        let request = try RemoteDetailRequest(card: board.cards[0], board: board)
+        let bounded = try #require(RemoteDetailResponse(request: request, status: .current, details: details).bounded().details)
+        #expect(bounded.automation?.active == true && bounded.automation?.summary.count == 512 && bounded.truncated)
+    }
+
     @Test func extraContextIsOptionalForOlderPayloadsAndRoundTrips() throws {
         let legacyNote = try JSONDecoder().decode(RemoteDetailNote.self, from: Data(#"{"id":"1","body":"Reply","origin":"ai"}"#.utf8))
         #expect(legacyNote.extraContext == nil)

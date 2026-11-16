@@ -310,7 +310,7 @@ private struct CommandCenterMRDetailContent: View {
                 HStack(spacing: 0) {
                     if finishedState == nil, let target = monitor.scopeTarget(projectID: item.id.projectID, iid: item.id.iid, url: item.url) {
                         BoardAutomationToggle(monitor: monitor, target: target, projectPath: item.url.gitLabProjectPath,
-                            isDraft: presentationRow.isDraft, policyNotes: routinePolicy)
+                            isDraft: presentationRow.isDraft, policy: automationPolicy)
                     }
                     BoardPinButton(pin: .mergeRequest(host: monitor.glab.resolvedHost,
                         username: monitor.glab.currentUsername, projectID: item.id.projectID, iid: item.id.iid),
@@ -401,9 +401,11 @@ private struct CommandCenterMRDetailContent: View {
     }
 
     /// Saved rules for this MR: in the automation toggle's help and under Details, not beside blockers.
-    private var routinePolicy: [LocalizedStringResource] {
-        MREffectivePolicySummary.presentation(row: presentationRow, monitor: monitor).0.routineClauses.map(\.message)
+    private var automationPolicy: MREffectivePolicyPresentation {
+        MREffectivePolicySummary.presentation(row: presentationRow, monitor: monitor).0
     }
+
+    private var routinePolicy: [LocalizedStringResource] { automationPolicy.routineClauses.map(\.message) }
 
     private var headerMenu: some View {
         BoardActionsMenu {
