@@ -284,6 +284,12 @@ struct RemoteCardView: View {
                     Text(verbatim: status).font(.subheadline)
                 }.foregroundStyle(.secondary)
             }
+            if let drafts = card.presentation?.pendingDrafts {
+                Label { Text(verbatim: drafts).foregroundStyle(.primary) } icon: {
+                    Image(systemName: "text.bubble").foregroundStyle(.secondary)
+                }
+                .font(.subheadline).fixedSize(horizontal: false, vertical: true)
+            }
             if let dependencies = card.dependencies { RemoteMRDependencyRow(dependencies: dependencies) }
             if let steps = card.presentation?.steps, !steps.isEmpty {
                 RemoteStepChain(steps: steps, current: card.presentation?.currentStep ?? 0)
@@ -298,7 +304,7 @@ struct RemoteCardView: View {
                         .padding(.horizontal, 8).padding(.vertical, 4)
                         .background(.secondary.opacity(0.06), in: Capsule())
                 }
-            } else if !card.drafts.isEmpty {
+            } else if !card.drafts.isEmpty, card.presentation?.pendingDrafts == nil {
                 Label(.Remote.remoteComments, systemImage: "text.bubble").font(.caption).foregroundStyle(.tint)
             }
         }.frame(maxWidth: .infinity, alignment: .leading)

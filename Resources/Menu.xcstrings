@@ -870,17 +870,6 @@
         }
       }
     },
-    "menu.confirm.replyTo": {
-      "extractionState": "manual",
-      "localizations": {
-        "en": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "Reply in thread (%@)"
-          }
-        }
-      }
-    },
     "menu.confirm.general": {
       "extractionState": "manual",
       "localizations": {

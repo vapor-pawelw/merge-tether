@@ -26,7 +26,8 @@ final class MergeRequestAttentionMonitor {
         /// Exact drafts covered by automatic publication, including the stability wait.
         var automaticDraftIDs: Set<Int> = []
         var automaticPublicationPolicy: AutomaticPublicationPolicy?
-        var replyRecipients: [String: String] = [:]
+        /// Other participants of each draft reply thread, keyed by discussion ID.
+        var replyRecipients: [String: [PersonIdentity]] = [:]
         var awaitingRemoteVerification = false
         var draftProofRecoveryChecking = false
         var draftProofRecoveryReadFailure = false
@@ -1057,7 +1058,7 @@ final class MergeRequestAttentionMonitor {
                         updated.replyRecipients = [:]
                         if let discussions {
                             for discussion in discussions {
-                                if let id = discussion.id, let recipients = discussion.replyRecipients(excluding: user.id) {
+                                if let id = discussion.id, case let recipients = discussion.replyRecipients(excluding: user.id), !recipients.isEmpty {
                                     updated.replyRecipients[id] = recipients
                                 }
                             }

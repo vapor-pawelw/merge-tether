@@ -386,6 +386,20 @@ import MergeTetherRemote
         #expect(!changed.actions.contains { $0.kind == .resolveThreads })
     }
 
+    @Test func phoneDraftsNameReplyRecipientsAndCardsSummarizePendingDrafts() throws {
+        var item = try item()
+        item.drafts = [.init(id: 11, authorID: 3, note: "Reply", discussionID: "thread", position: nil),
+                       .init(id: 12, authorID: 3, note: "General", discussionID: nil, position: nil)]
+        item.draftCount = 2
+        item.replyRecipients = ["thread": [.init(name: "Pragmatic Reviewer", username: "ext_pragmatic_pw1")]]
+        let card = RemoteBoardAdapter.card(item, account: "me@host")
+        #expect(card.drafts.first?.replyRecipients == [.init(name: "Pragmatic Reviewer", username: "ext_pragmatic_pw1")])
+        #expect(card.drafts.first?.context == "thread")
+        #expect(card.drafts.last?.replyRecipients == nil)
+        let summary = String(localized: try #require(MRPendingDraftsSummary(item: item)).message)
+        #expect(summary.contains("Pragmatic Reviewer") && !summary.contains("@"))
+    }
+
     func item() throws -> MergeRequestAttentionMonitor.Item {
         var item = MergeRequestAttentionMonitor.Item(id: .init(projectID: 1, iid: 2), title: "Fix a crash",
             url: URL(string: "https://gitlab.example.org/group/project/-/merge_requests/2")!)

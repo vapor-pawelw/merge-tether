@@ -113,6 +113,14 @@ private struct CommandCenterMRCardContent: View {
                     }
                     .font(.caption).foregroundStyle(.secondary)
                 }
+                if !presentation.working, let drafts = MRPendingDraftsSummary(item: item) {
+                    Label { Text(drafts.message).foregroundStyle(isMuted ? Color.secondary : Color.primary) } icon: {
+                        Image(systemName: "text.bubble").foregroundStyle(.secondary)
+                    }
+                    .labelStyle(BoardCardStatusLabelStyle())
+                    .font(.callout)
+                    .fixedSize(horizontal: false, vertical: true)
+                }
                 if let chain = presentation.stepChain {
                     BoardStepChain(steps: chain.steps.map { String(localized: $0) }, current: chain.current)
                 } else if let nextStep = presentation.nextStep {

@@ -3654,7 +3654,7 @@ import MergeTetherRemote
         try harness.write("discussions.json", #"[{"id":"abc","notes":[{"id":40,"author":{"id":8,"username":"GitLabDuo"},"system":false},{"id":41,"author":{"id":3,"username":"me"},"system":false},{"id":42,"author":{"id":9,"username":"alice"},"system":false},{"id":43,"author":{"id":8,"username":"GitLabDuo"},"system":false},{"id":44,"author":{"id":10,"username":"system-bot"},"system":true}]}]"#)
         try await harness.poll()
         let item = try #require(harness.monitor.currentItems.first)
-        #expect(item.replyRecipients["abc"] == "@GitLabDuo, @alice")
+        #expect(item.replyRecipients["abc"]?.compactMap(\.normalizedUsername) == ["GitLabDuo", "alice"])
         #expect(item.replyRecipients["unknown"] == nil)
     }
 

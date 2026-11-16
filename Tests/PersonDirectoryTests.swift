@@ -72,4 +72,55 @@ import MergeTetherRemote
             from: Data(#"{"author":"Alice","repository":"r","working":false,"chips":[]}"#.utf8))
         #expect(legacyText.authorUsername == nil && legacyText.authorAvatarURL == nil)
     }
+
+    @Test func replyRecipientsCarryDisplayNamesAndSkipTheViewerAndSystemNotes() throws {
+        let discussion = try JSONDecoder().decode(GitLabMergeRequestDiscussion.self, from: Data(#"""
+            {"id":"t","notes":[
+              {"id":1,"author":{"id":5,"username":"ext_pragmatic_pw1","name":"Pragmatic Reviewer"},"system":false},
+              {"id":2,"author":{"id":3,"username":"me","name":"Me"},"system":false},
+              {"id":3,"author":{"id":5,"username":"EXT_pragmatic_pw1","name":"Pragmatic Reviewer"},"system":false},
+              {"id":4,"author":{"id":6,"username":"bot","name":"Bot"},"system":true}]}
+            """#.utf8))
+        let recipients = discussion.replyRecipients(excluding: 3)
+        #expect(recipients.map(\.displayName) == ["Pragmatic Reviewer"])
+        #expect(recipients.first?.handle == "@ext_pragmatic_pw1")
+    }
+
+    @Test func pendingDraftsSummaryNamesPeopleStillWithoutAPublishedReply() throws {
+        var item = MergeRequestAttentionMonitor.Item(id: .init(projectID: 1, iid: 2), title: "MR",
+            url: URL(string: "https://gitlab.example.com/g/p/-/merge_requests/2")!, needsDiscussion: false)
+        #expect(MRPendingDraftsSummary(item: item) == nil)
+        func draft(_ id: Int, _ thread: String?) -> GitLabDraftNote {
+            .init(id: id, authorID: 3, note: "Reply", discussionID: thread, position: nil)
+        }
+        let alice = PersonIdentity(name: "Alice Example", username: "alice")
+        let bob = PersonIdentity(name: "Bob Example", username: "bob")
+        item.drafts = [draft(1, "a"), draft(2, "b"), draft(3, nil), draft(4, "missing")]
+        item.draftCount = 4
+        item.replyRecipients = ["a": [alice], "b": [bob, alice], "unrelated": [.init(name: "Carol", username: "carol")]]
+        let summary = try #require(MRPendingDraftsSummary(item: item))
+        #expect(summary.count == 4)
+        #expect(summary.awaitingReply == [alice, bob])
+        let message = String(localized: summary.message)
+        #expect(message.contains("4"))
+        #expect(message.contains("Alice Example, Bob Example"))
+        #expect(!message.contains("@"))
+
+        item.drafts = [draft(1, nil)]
+        item.draftCount = 1
+        let general = try #require(MRPendingDraftsSummary(item: item))
+        #expect(general.awaitingReply.isEmpty)
+        #expect(String(localized: general.message) == String(localized: .Board.boardPendingDraftsSingle))
+    }
+
+    @Test func pendingDraftsSummaryCapsTheNamedPeople() throws {
+        var item = MergeRequestAttentionMonitor.Item(id: .init(projectID: 1, iid: 2), title: "MR",
+            url: URL(string: "https://gitlab.example.com/g/p/-/merge_requests/2")!, needsDiscussion: false)
+        item.drafts = [.init(id: 1, authorID: 3, note: "Reply", discussionID: "t", position: nil)]
+        item.replyRecipients = ["t": ["a", "b", "c", "d", "e"].map { (id: String) in PersonIdentity(name: "Person \(id)", username: id) }]
+        let message = String(localized: try #require(MRPendingDraftsSummary(item: item)).message)
+        #expect(message.contains("Person a, Person b, Person c"))
+        #expect(!message.contains("Person d"))
+        #expect(message.contains("2"))
+    }
 }

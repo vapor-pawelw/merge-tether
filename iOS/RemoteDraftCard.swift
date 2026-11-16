@@ -27,7 +27,18 @@ struct RemoteDraftCard: View {
                     .accessibilityIdentifier("remote.delete-draft.\(draft.id)")
                 }
             }
-            if let context = draft.context, !context.isEmpty {
+            if let recipients = draft.replyRecipients, !recipients.isEmpty {
+                // A reply's thread ID means nothing to people; name who it answers instead.
+                StatusFlowLayout(spacing: 6) {
+                    Label(.RemoteDetail.remoteDetailReplyInThread, systemImage: "arrowshape.turn.up.left")
+                    ForEach(Array(recipients.enumerated()), id: \.offset) { _, person in
+                        PersonLabel(person: .init(name: person.name, username: person.username, avatarURL: person.avatarURL),
+                                    avatarSize: 16)
+                    }
+                }
+                .font(.caption).foregroundStyle(.secondary)
+                .accessibilityIdentifier("remote.draft-recipients.\(draft.id)")
+            } else if let context = draft.context, !context.isEmpty {
                 DisclosureGroup {
                     Text(verbatim: context).font(.caption.monospaced())
                         .foregroundStyle(.secondary).textSelection(.enabled)

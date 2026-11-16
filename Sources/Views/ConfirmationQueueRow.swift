@@ -175,11 +175,13 @@ struct ConfirmationQueueRow<AdditionalActions: View>: View {
     private func draftContent(_ draft: GitLabDraftNote) -> some View {
         VStack(alignment: .leading, spacing: 2) {
             if let threadID = draft.discussionID {
-                if let recipients = item.replyRecipients[threadID] {
-                    Text(.Menu.menuConfirmReplyTo(recipients)).font(.caption2)
-                } else {
-                    Text(.Menu.menuConfirmReply).font(.caption2)
+                StatusFlowLayout(spacing: 6) {
+                    Text(.Menu.menuConfirmReply)
+                    ForEach(item.replyRecipients[threadID] ?? [], id: \.self) { person in
+                        PersonLabel(person: person, avatarSize: 12)
+                    }
                 }
+                .font(.caption2)
             }
             switch draft.kind {
             case .line(let location):
