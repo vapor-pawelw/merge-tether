@@ -105,15 +105,18 @@ public struct RemoteDetailNote: Codable, Equatable, Identifiable, Sendable {
     public let avatarURL: URL?
     /// `true` when the user set `origin` by hand rather than an assessment.
     public var originManual: Bool?
+    /// App-only Markdown from MergeTether's agent. Additive: older phones ignore it.
+    public var extraContext: String?
     public init(id: String, author: String? = nil, username: String? = nil, body: String, location: String? = nil,
                 createdAt: Date? = nil, url: URL? = nil, origin: Origin? = nil, authorID: Int? = nil,
-                authorKind: AuthorKind? = nil, avatarURL: URL? = nil, originManual: Bool? = nil) {
+                authorKind: AuthorKind? = nil, avatarURL: URL? = nil, originManual: Bool? = nil, extraContext: String? = nil) {
         self.originManual = originManual
         self.id = id; self.author = author; self.username = username; self.body = body; self.location = location
         self.createdAt = createdAt; self.url = url; self.origin = origin
         self.authorID = authorID
         self.authorKind = authorKind
         self.avatarURL = avatarURL
+        self.extraContext = extraContext
     }
 }
 
@@ -187,6 +190,8 @@ public struct RemoteMRDetails: Codable, Equatable, Sendable {
     public var branches: RemoteDetailBranches?
     /// A comment-origin change waiting before it lets automation publish drafts.
     public var originResume: RemoteOriginResume?
+    /// App-only Markdown from MergeTether's agent for pending board drafts, keyed by draft ID. Additive.
+    public var draftContexts: [String: String]?
     public init(checkedAt: Date, metadata: [RemoteDetailField] = [], description: String? = nil,
                 approvals: RemoteApprovalDetails? = nil, threads: [RemoteDetailThread]? = nil,
                 reasons: [String] = [], policy: [String] = [], feedback: [RemoteDetailField] = [],
@@ -264,10 +269,16 @@ public struct RemoteDetailResponse: Codable, Equatable, Sendable {
                         var note = original
                         if note.body.count > 4_000 { thread.truncated = true }
                         note.body = text(note.body, 4_000)
+                        note.extraContext = note.extraContext.map { text($0, 4_000) }
                         return note
                     }
                     return thread
                 }
+            }
+            details.draftContexts = details.draftContexts.map { contexts in
+                if contexts.count > 100 { clipped = true }
+                return Dictionary(uniqueKeysWithValues: contexts.sorted { $0.key < $1.key }.prefix(100)
+                    .filter { $0.key.utf8.count <= 32 }.map { ($0.key, text($0.value, 4_000)) })
             }
             details.activity = list(details.activity, 30).map { original in
                 var activity = original
@@ -281,7 +292,16 @@ public struct RemoteDetailResponse: Codable, Equatable, Sendable {
         guard size() > RemoteCipher.maximumPayloadBytes else { return result }
         result.details?.truncated = true
         while size() > RemoteCipher.maximumPayloadBytes, var details = result.details {
-            if var threads = details.threads, !threads.isEmpty {
+            // Optional explanations go first: they are shown on demand and the comments stay readable without them.
+            if details.draftContexts?.isEmpty == false { details.draftContexts = nil }
+            else if details.threads?.contains(where: { $0.notes.contains { $0.extraContext != nil } }) == true {
+                details.threads = details.threads?.map { thread in
+                    var thread = thread
+                    for index in thread.notes.indices { thread.notes[index].extraContext = nil }
+                    return thread
+                }
+            }
+            else if var threads = details.threads, !threads.isEmpty {
                 if threads.count > 1 { threads = Array(threads.prefix(threads.count / 2)) }
                 else if threads[0].notes.count > 1 {
                     threads[0].notes = Array(threads[0].notes.prefix(threads[0].notes.count / 2)); threads[0].truncated = true

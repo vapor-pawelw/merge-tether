@@ -345,6 +345,9 @@ private struct RemoteDiscussionCard: View {
         if let location = note.location, location != thread.location { RemoteFullContextLabel(full: location) }
         RemoteMarkdownText(source: note.body).font(.callout).lineSpacing(3).textSelection(.enabled)
             .fixedSize(horizontal: false, vertical: true)
+        if let extraContext = note.extraContext, !extraContext.isEmpty {
+            RemoteExtraContextButton(markdown: extraContext)
+        }
         if let url = safeLink(note.url, to: mergeRequestURL) {
             Link(destination: url) { Label(.RemoteDetail.remoteDetailOpenComment, systemImage: "arrow.up.right.square") }
                 .font(.caption).frame(minHeight: 44)

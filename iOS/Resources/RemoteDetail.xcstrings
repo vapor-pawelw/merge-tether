@@ -1307,6 +1307,40 @@
           }
         }
       }
+    },
+    "remoteDetail.extraContext": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Extra context"
+          }
+        },
+        "pl": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Dodatkowy kontekst"
+          }
+        }
+      }
+    },
+    "remoteDetail.extraContextHelp": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "MergeTether's explanation for you. It stays in the app and is never posted to GitLab."
+          }
+        },
+        "pl": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Wyjaśnienie MergeTether dla Ciebie. Pozostaje w aplikacji i nigdy nie trafia do GitLaba."
+          }
+        }
+      }
     }
   },
   "version": "1.0"

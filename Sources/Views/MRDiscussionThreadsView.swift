@@ -18,6 +18,7 @@ struct MRDiscussionThreadsView: View {
     var draftsFirst = false
     /// Present when the user may change comment origins; `nil` classification returns to automatic assessment.
     var onSetOrigin: MRDiscussionOriginAction? = nil
+    var extraContexts: AICommentProvenanceStore.ExtraContexts = .empty
     let onRefresh: () -> Void
 
     var body: some View {
@@ -55,7 +56,7 @@ struct MRDiscussionThreadsView: View {
                              : hasLoaded || hasError ? .MRDiscussions.mrDiscussionsUnmatchedReply
                              : .MRDiscussions.mrDiscussionsReplyDraft)
                             .font(.caption.weight(.medium)).foregroundStyle(.secondary)
-                        MRDiscussionDraftView(draft: draft, author: currentUser,
+                        MRDiscussionDraftView(draft: draft, author: currentUser, extraContext: extraContexts.forDraft(draft),
                             selection: selection, selectionDisabled: selectionDisabled, onDelete: onDelete)
                     }
                     .padding(12)
@@ -86,8 +87,8 @@ struct MRDiscussionThreadsView: View {
     private func threadView(_ thread: MRDiscussionSnapshot.Thread) -> some View {
         MRDiscussionThreadView(thread: thread, mergeRequestURL: mergeRequestURL,
                                currentUsername: currentUsername, currentUser: currentUser, initiallyExpanded: expandPendingDrafts && !thread.drafts.isEmpty,
-                               selection: selection, selectionDisabled: selectionDisabled, draftsFirst: draftsFirst, onDelete: onDelete,
-                               onSetOrigin: onSetOrigin)
+                               selection: selection, selectionDisabled: selectionDisabled, draftsFirst: draftsFirst,
+                               extraContexts: extraContexts, onDelete: onDelete, onSetOrigin: onSetOrigin)
     }
 }
 
@@ -102,6 +103,7 @@ private struct MRDiscussionThreadView: View {
     let selection: Binding<DraftPublicationSelection>?
     let selectionDisabled: Bool
     let draftsFirst: Bool
+    var extraContexts: AICommentProvenanceStore.ExtraContexts = .empty
     var onDelete: ((GitLabDraftNote) -> Void)? = nil
     var onSetOrigin: MRDiscussionOriginAction? = nil
     @State private var isExpanded = false
@@ -145,7 +147,7 @@ private struct MRDiscussionThreadView: View {
                             MRDiscussionNoteView(note: note, origin: note.id.flatMap { thread.origins[$0] },
                                                  authorKind: (note.author?.id).flatMap { thread.authorKinds[$0] },
                                                  mergeRequestURL: mergeRequestURL, threadLocation: thread.location,
-                                                 onSetOrigin: noteOriginAction(note))
+                                                 onSetOrigin: noteOriginAction(note), extraContext: extraContexts.forNote(note.id))
                         }
                         if !draftsFirst { draftRows }
                     }
@@ -213,10 +215,12 @@ private struct MRDiscussionThreadView: View {
             if let firstComment {
                 MRDiscussionNoteHeader(note: firstComment, origin: firstComment.id.flatMap { thread.origins[$0] },
                     authorKind: (firstComment.author?.id).flatMap { thread.authorKinds[$0] },
-                    mergeRequestURL: mergeRequestURL, onSetOrigin: noteOriginAction(firstComment))
+                    mergeRequestURL: mergeRequestURL, onSetOrigin: noteOriginAction(firstComment),
+                    extraContext: extraContexts.forNote(firstComment.id))
                     .foregroundStyle(thread.state == .resolved ? Color.secondary : Color.primary)
                 if !isExpanded, let body = firstComment.body {
-                    Text(verbatim: body).font(.callout)
+                    // Same inline Markdown as the expanded comment.
+                    Text(SafeInlineMarkdown.render(body) ?? AttributedString(body)).font(.callout)
                         .foregroundStyle(thread.state == .resolved ? Color.secondary : Color.primary).lineLimit(2)
                         .padding(.top, 1)
                 }
@@ -238,6 +242,7 @@ private struct MRDiscussionThreadView: View {
     private var draftRows: some View {
         ForEach(Array(thread.drafts.enumerated()), id: \.offset) { _, draft in
             MRDiscussionDraftView(draft: draft, author: currentUser, threadLocation: thread.location,
+                extraContext: extraContexts.forDraft(draft),
                 selection: selection, selectionDisabled: selectionDisabled, onDelete: onDelete)
         }
     }
@@ -279,11 +284,13 @@ private struct MRDiscussionNoteView: View {
     let mergeRequestURL: URL
     let threadLocation: String?
     var onSetOrigin: ((AICommentOriginOverride.Classification?) -> Void)? = nil
+    var extraContext: String? = nil
 
     var body: some View {
         VStack(alignment: .leading, spacing: 7) {
             MRDiscussionNoteHeader(note: note, origin: origin, authorKind: authorKind,
-                                   mergeRequestURL: mergeRequestURL, onSetOrigin: onSetOrigin)
+                                   mergeRequestURL: mergeRequestURL, onSetOrigin: onSetOrigin,
+                                   extraContext: extraContext)
             MRDiscussionNoteContent(note: note, threadLocation: threadLocation)
         }
         .frame(maxWidth: .infinity, alignment: .leading)
@@ -297,6 +304,7 @@ private struct MRDiscussionNoteHeader: View {
     let authorKind: AuthorFeedbackPolicy.AccountKind?
     let mergeRequestURL: URL
     var onSetOrigin: ((AICommentOriginOverride.Classification?) -> Void)? = nil
+    var extraContext: String? = nil
 
     var body: some View {
         HStack(alignment: .firstTextBaseline, spacing: 8) {
@@ -307,6 +315,7 @@ private struct MRDiscussionNoteHeader: View {
                                         scope: .comment, onSelect: onSetOrigin)
             }
             Spacer(minLength: 4)
+            if let extraContext { ExtraContextButton(markdown: extraContext) }
             if let posted = note.createdAt {
                 Text(verbatim: MRDiscussionTimestamp.display(posted)).font(.caption).foregroundStyle(.secondary)
                     .lineLimit(1).fixedSize().help(posted)
@@ -341,6 +350,7 @@ private struct MRDiscussionDraftView: View {
     let draft: GitLabDraftNote
     let author: PersonIdentity?
     var threadLocation: String? = nil
+    var extraContext: String? = nil
     var selection: Binding<DraftPublicationSelection>? = nil
     var selectionDisabled = false
     var onDelete: ((GitLabDraftNote) -> Void)? = nil
@@ -356,6 +366,7 @@ private struct MRDiscussionDraftView: View {
                     .fontWeight(.medium)
                 Text(.MRDiscussions.mrDiscussionsPrivateDraft).font(.caption.weight(.semibold)).foregroundStyle(Color.accentColor)
                 Spacer(minLength: 4)
+                if let extraContext { ExtraContextButton(markdown: extraContext) }
                 if let onDelete { DraftDeleteButton(draft: draft, disabled: selectionDisabled, onDelete: onDelete) }
             }
             .font(.callout)
@@ -369,6 +380,36 @@ private struct MRDiscussionDraftView: View {
         .frame(maxWidth: .infinity, alignment: .leading)
         .background(Color.accentColor.opacity(0.07), in: RoundedRectangle(cornerRadius: 8))
         .overlay(alignment: .leading) { Rectangle().fill(Color.accentColor.opacity(0.45)).frame(width: 2) }
+    }
+}
+
+/// App-only agent explanation. It is local display data and never part of the published comment.
+private struct ExtraContextButton: View {
+    let markdown: String
+    @State private var isPresented = false
+
+    var body: some View {
+        Button { isPresented.toggle() } label: {
+            Label { Text(.MRDiscussions.mrDiscussionsExtraContext) } icon: { Image(systemName: "lightbulb") }
+                .font(.caption.weight(.medium))
+        }
+        .buttonStyle(.borderless)
+        .foregroundStyle(Color.accentColor)
+        .help(Text(.MRDiscussions.mrDiscussionsExtraContextHelp))
+        .accessibilityHint(Text(.MRDiscussions.mrDiscussionsExtraContextHelp))
+        .popover(isPresented: $isPresented, arrowEdge: .bottom) {
+            ScrollView {
+                VStack(alignment: .leading, spacing: 12) {
+                    Label { Text(.MRDiscussions.mrDiscussionsExtraContextHelp) } icon: { Image(systemName: "lock") }
+                        .font(.caption).foregroundStyle(.secondary)
+                        .fixedSize(horizontal: false, vertical: true)
+                    ExtraContextMarkdown(source: markdown).font(.callout)
+                }
+                .padding(16)
+            }
+            .frame(width: 440)
+            .frame(maxHeight: 520)
+        }
     }
 }
 

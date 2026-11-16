@@ -72,6 +72,8 @@ struct AssistantJobResult: Codable, Equatable, Sendable {
     struct GeneratedDraft: Codable, Equatable, Sendable {
         let id: Int
         let bodySHA256: String
+        /// App-only Markdown for the MergeTether user. It is stored locally and never sent to GitLab.
+        var extraContext: String? = nil
     }
 
     let status: Status
@@ -79,7 +81,19 @@ struct AssistantJobResult: Codable, Equatable, Sendable {
     var blocker: String? = nil
     var generatedDrafts: [GeneratedDraft]? = nil
 
-    static let schema = #"{"type":"object","additionalProperties":false,"properties":{"status":{"type":"string","enum":["succeeded","blocked"]},"summary":{"type":"string"},"blocker":{"type":["string","null"],"maxLength":240},"generatedDrafts":{"type":"array","maxItems":100,"items":{"type":"object","additionalProperties":false,"properties":{"id":{"type":"integer","minimum":1},"bodySHA256":{"type":"string","pattern":"^[0-9a-f]{64}$"}},"required":["id","bodySHA256"]}}},"required":["status","summary","blocker","generatedDrafts"]}"#
+    static let schema = #"{"type":"object","additionalProperties":false,"properties":{"status":{"type":"string","enum":["succeeded","blocked"]},"summary":{"type":"string"},"blocker":{"type":["string","null"],"maxLength":240},"generatedDrafts":{"type":"array","maxItems":100,"items":{"type":"object","additionalProperties":false,"properties":{"id":{"type":"integer","minimum":1},"bodySHA256":{"type":"string","pattern":"^[0-9a-f]{64}$"},"extraContext":{"type":["string","null"],"maxLength":4000}},"required":["id","bodySHA256","extraContext"]}}},"required":["status","summary","blocker","generatedDrafts"]}"#
+
+    static let extraContextInstructions = """
+        extraContext is optional app-only Markdown shown to the MergeTether user beside that draft, and later beside
+        the published comment. It is never posted to GitLab. Leave it null by default; most comments need none.
+        Add it only when it would help the user decide whether to publish the draft or understand the actual problem
+        without knowing this codebase: a simpler, less precise explanation, background on the code involved, why it
+        matters, and the trade-offs or alternatives. Keep the GitLab comment itself as concise as the task, the user's
+        guidelines and skills require; extra detail belongs here instead. Write in the language of the comment, at
+        most 4000 characters, with short paragraphs, lists and inline code. Do not repeat the comment, invent facts,
+        or include secrets, credentials, tokens, personal data or raw tool output. Never copy extraContext into a
+        draft body, reply, description or any other GitLab write, and never use it to carry quick actions.
+        """
 
     static func codex(_ data: Data) throws -> Self {
         guard let result = try? JSONDecoder().decode(Self.self, from: data),

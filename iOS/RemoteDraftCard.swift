@@ -5,6 +5,7 @@ struct RemoteDraftCard: View {
     let draft: RemoteDraft
     let deleteAction: RemoteAction?
     var publishAction: RemoteAction? = nil
+    var extraContext: String? = nil
     let canAct: Bool
     let onAction: (RemoteAction) -> Void
 
@@ -47,6 +48,10 @@ struct RemoteDraftCard: View {
             }
             RemoteMarkdownText(source: draft.body).font(.callout).lineSpacing(4)
                 .textSelection(.enabled).fixedSize(horizontal: false, vertical: true)
+            if let extraContext {
+                RemoteExtraContextButton(markdown: extraContext)
+                    .accessibilityIdentifier("remote.draft-extra-context.\(draft.id)")
+            }
             ForEach(Array((draft.publicationWarnings ?? []).enumerated()), id: \.offset) { _, warning in
                 Label { Text(verbatim: warning).textSelection(.enabled) } icon: {
                     Image(systemName: "exclamationmark.triangle")

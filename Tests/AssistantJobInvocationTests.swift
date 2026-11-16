@@ -82,6 +82,8 @@ struct AssistantJobInvocationTests {
         #expect(instructions.contains("In generatedDrafts, list only private drafts you actually created"))
         #expect(instructions.contains("Do not list untouched, user-created or merely observed drafts"))
         #expect(instructions.contains("never replaces a follow-up seal"))
+        #expect(instructions.contains("as {id,bodySHA256,extraContext}"))
+        #expect(instructions.contains("extraContext is optional app-only Markdown"))
         #expect(instructions.contains("Do not open coding-agent desktop apps"))
         #expect(!instructions.contains("Do not open desktop apps,"))
         #expect(instructions.contains("installed and configured local runtime"))

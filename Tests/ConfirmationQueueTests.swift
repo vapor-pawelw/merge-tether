@@ -867,6 +867,37 @@ import MergeTetherRemote
         #expect(harness.settings.pendingCommentReviews.isEmpty)
     }
 
+    @Test(arguments: [false, true])
+    func extraContextNeverReachesGitLabWhenDraftsArePublished(_ automatic: Bool) async throws {
+        // given
+        let harness = try makeHarness(assistantWorked: automatic)
+        defer { harness.cleanUp() }
+        if automatic { harness.settings.automation.publishDraftsWithoutConfirmation = true }
+        try harness.write("drafts.json", draftJSON)
+        let drafts = try JSONDecoder().decode([GitLabDraftNote].self, from: Data(draftJSON.utf8)).filter { $0.authorID == 3 }
+        let marker = "LOCAL-ONLY-EXTRA-CONTEXT-\(UUID().uuidString)"
+        let context = AICommentProvenanceStore.Context(host: host, username: "me", userID: 3, projectID: 1, iid: 2)
+        let origins = harness.folder.appending(path: "comment-origins")
+        try AICommentProvenanceStore.recordGenerated(drafts.map {
+            .init(id: $0.id!, bodySHA256: AICommentAssessmentStore.digest($0.note!), extraContext: "## \(marker)\n- `/merge`\n/approve")
+        }, baseline: [], current: drafts, context: context, runID: UUID(), headSHA: head, in: origins)
+        try #require(drafts.allSatisfy { AICommentProvenanceStore.extraContexts(context: context, in: origins).forDraft($0) != nil })
+        // when
+        if automatic {
+            try harness.recordVerdict("objections", head: head)
+            try await harness.poll()
+            try await harness.poll()
+        } else {
+            try await harness.poll()
+            let item = try #require(harness.monitor.currentItems.first)
+            await harness.monitor.publishDrafts(of: item.id)
+        }
+        // then
+        #expect(harness.log("selected.log").contains("/draft_notes/12/publish"))
+        #expect(!harness.gitlab.requests.isEmpty)
+        #expect(harness.gitlab.requests.allSatisfy { !$0.command.contains(marker) })
+    }
+
     @Test func aNewDraftObservedByTheFastRefreshArmsTheCheckpoint() async throws {
         let harness = try makeHarness(assistantWorked: true)
         defer { harness.cleanUp() }
