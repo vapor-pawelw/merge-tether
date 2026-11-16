@@ -135,7 +135,9 @@ struct BoardAutomationToggle: View {
             .help(Text(summary.active ? .Menu.menuScopeButtonHelpActive : .Menu.menuScopeButtonHelpPaused))
             .popover(isPresented: $showingDetails, arrowEdge: .bottom) {
                 MRAutomationPopover(editor: editor, policy: policy)
+                    .onExitCommand { showingDetails = false }
             }
+            .preference(key: BoardDetailPopoverPresentedKey.self, value: showingDetails)
             .accessibilityLabel(Text(.Menu.menuScopeTitle))
             .accessibilityValue(Text(scopeChoiceLabel(summary.choice)) + Text(", ")
                 + Text(summary.active ? .Menu.menuScopeActive : .Menu.menuScopePaused))

@@ -13,6 +13,7 @@ struct CommandCenterBoardView: View {
         var id: MergeRequestAttentionMonitor.Item.ID { item.id }
     }
     @State private var selected: Selection?
+    @State private var detailPopoverPresented = false
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
 
     private var account: GlabService.AuthedHost? {
@@ -46,6 +47,7 @@ struct CommandCenterBoardView: View {
                     Button { selected = nil } label: { Image(systemName: "xmark") }
                         .buttonStyle(.borderless).foregroundStyle(.secondary)
                         .keyboardShortcut(.cancelAction)
+                        .disabled(detailPopoverPresented)
                         .accessibilityLabel(Text(.CommandCenter.commandCenterClose))
                 }
                 .padding(.horizontal, 20).padding(.vertical, 10)
@@ -56,6 +58,8 @@ struct CommandCenterBoardView: View {
                 }
             }
             .frame(minWidth: 700, idealWidth: 820, minHeight: 600, idealHeight: 780)
+            .interactiveDismissDisabled(detailPopoverPresented)
+            .onPreferenceChange(BoardDetailPopoverPresentedKey.self) { detailPopoverPresented = $0 }
         }
         .onChange(of: account) { _, _ in selected = nil }
         .onReceive(NotificationCenter.default.publisher(for: NSWindow.willCloseNotification)) { notification in
