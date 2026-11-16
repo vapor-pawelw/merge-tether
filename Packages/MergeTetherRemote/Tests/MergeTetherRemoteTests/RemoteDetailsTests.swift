@@ -97,6 +97,27 @@ import Testing
         #expect(try !RemoteDetailRequest(card: changed, board: board).matches(board))
     }
 
+    @Test func olderPhonesWithoutDraftRecipientFieldsCanStillOpenDetails() throws {
+        var card = RemoteCard(id: "mr:1:2", title: "MR", project: "g/p", url: nil,
+            drafts: [.init(id: 11, body: "Reply", context: "thread",
+                           replyRecipients: [.init(name: "Alice Example", username: "alice")])])
+        card.presentation = .init(author: "Alice Example", repository: "p", authorUsername: "alice",
+            pendingDrafts: "1 unpublished draft · no reply published yet to Alice Example")
+        let board = RemoteBoard(hostSession: UUID(), account: "me@host", lanes: [.init(id: .own, cards: [card])])
+        let wire = try JSONDecoder().decode(RemoteCard.self, from: JSONEncoder().encode(card))
+        #expect(wire.drafts.first?.replyRecipients?.first?.name == "Alice Example")
+        #expect(wire.presentation?.pendingDrafts == card.presentation?.pendingDrafts)
+
+        var legacy = card
+        legacy.presentation?.pendingDrafts = nil
+        legacy.drafts[0].replyRecipients = nil
+        #expect(try RemoteDetailRequest(card: legacy, board: board).matches(board))
+        legacy.presentation?.authorUsername = nil
+        #expect(try RemoteDetailRequest(card: legacy, board: board).matches(board))
+        legacy.drafts[0].body = "Edited"
+        #expect(try !RemoteDetailRequest(card: legacy, board: board).matches(board))
+    }
+
     @Test func peopleAreOptionalAndClippedWithTheirFields() throws {
         let legacyField = try JSONDecoder().decode(RemoteDetailField.self, from: Data(#"{"label":"Author","value":"Alice"}"#.utf8))
         #expect(legacyField.person == nil)

@@ -16,12 +16,16 @@ public struct RemoteDetailRequest: Codable, Equatable, Sendable {
         isValid && hostSession == board.hostSession && account == board.account
             && board.cards.contains { $0.id == cardID && Self.digests($0).contains(cardDigest) }
     }
-    /// Older phones drop the author identity fields before hashing the card they open.
+    /// Older phones drop fields they do not know before hashing the card they open:
+    /// the pending-drafts line and reply recipients, and before those the author identity.
     static func digests(_ card: RemoteCard) -> Set<String> {
-        var legacy = card
+        var withoutDrafts = card
+        withoutDrafts.presentation?.pendingDrafts = nil
+        for index in withoutDrafts.drafts.indices { withoutDrafts.drafts[index].replyRecipients = nil }
+        var legacy = withoutDrafts
         legacy.presentation?.authorUsername = nil
         legacy.presentation?.authorAvatarURL = nil
-        return Set([card, legacy].compactMap { try? RemoteDigest.token($0) })
+        return Set([card, withoutDrafts, legacy].compactMap { try? RemoteDigest.token($0) })
     }
     public var isValid: Bool { cardID.utf8.count <= 128 && account.utf8.count <= 1_024 && cardDigest.utf8.count == 64 }
 }

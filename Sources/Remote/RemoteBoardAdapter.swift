@@ -35,8 +35,10 @@ import MergeTetherRemote
             let context: String?
             if case let .line(location) = draft.kind { context = location }
             else { context = draft.discussionID }
+            let recipients = draft.discussionID.flatMap { item.replyRecipients[$0] }?.map(\.remotePerson)
             return RemoteDraft(id: draft.id ?? (-1 - index), body: draft.note ?? "", context: context,
-                publicationWarnings: DraftPublicationRisk(draft: draft)?.messages.map { String(localized: $0) })
+                publicationWarnings: DraftPublicationRisk(draft: draft)?.messages.map { String(localized: $0) },
+                replyRecipients: recipients?.isEmpty == false ? recipients : nil)
         }
         var card = RemoteCard(id: "mr:\(item.id.projectID):\(item.id.iid)", title: item.title,
             project: item.url.gitLabProjectPath, url: item.url,
@@ -484,7 +486,8 @@ import MergeTetherRemote
             chips: model.chips.map { .init(title: String(localized: $0.title), symbol: $0.symbol) },
             secondaryCTA: human?.action == .retryRun ? .init(title: String(localized: .MRHumanAction.mrHumanActionActionReviewRun), destination: .assistantRuns) : nil,
             authorUsername: authorUsername, authorAvatarURL: authorAvatarURL,
-            steps: model.stepChain.map { $0.steps.map { String(localized: $0) } }, currentStep: model.stepChain?.current)
+            steps: model.stepChain.map { $0.steps.map { String(localized: $0) } }, currentStep: model.stepChain?.current,
+            pendingDrafts: model.working ? nil : MRPendingDraftsSummary(item: model.row.item).map { String(localized: $0.message) })
         if model.actionsBlocked { card.actions = [] }
         return card
     }

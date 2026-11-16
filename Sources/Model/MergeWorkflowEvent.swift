@@ -71,15 +71,15 @@ struct GitLabMergeRequestDiscussion: Codable, Sendable {
         }
     }
 
-    func replyRecipients(excluding userID: Int) -> String? {
+    /// Other human-visible participants, in thread order, for showing who a reply answers.
+    func replyRecipients(excluding userID: Int) -> [PersonIdentity] {
         var seen: Set<String> = []
-        let handles = notes.compactMap { note -> String? in
-            guard note.system != true, let author = note.author, author.id != userID,
-                  let username = author.username?.trimmingCharacters(in: .whitespacesAndNewlines),
-                  !username.isEmpty, seen.insert(username.lowercased()).inserted else { return nil }
-            return "@\(username)"
+        return notes.compactMap { note -> PersonIdentity? in
+            guard note.system != true, let author = note.author, author.id != userID else { return nil }
+            let person = author.person
+            guard let key = person.normalizedUsername?.lowercased(), seen.insert(key).inserted else { return nil }
+            return person
         }
-        return handles.isEmpty ? nil : handles.joined(separator: ", ")
     }
 
     static func unresolvedFeedback(in discussions: [Self], excluding userID: Int) -> [Note] {

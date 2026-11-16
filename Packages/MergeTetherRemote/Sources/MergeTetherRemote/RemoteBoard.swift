@@ -27,8 +27,12 @@ public struct RemoteDraft: Codable, Equatable, Identifiable, Sendable {
     public var body: String
     public var context: String?
     public var publicationWarnings: [String]?
-    public init(id: Int, body: String, context: String? = nil, publicationWarnings: [String]? = nil) {
+    /// Other participants of the thread a reply draft answers; older Macs omit it.
+    public var replyRecipients: [RemotePerson]?
+    public init(id: Int, body: String, context: String? = nil, publicationWarnings: [String]? = nil,
+                replyRecipients: [RemotePerson]? = nil) {
         self.id = id; self.body = body; self.context = context; self.publicationWarnings = publicationWarnings
+        self.replyRecipients = replyRecipients
     }
 }
 
@@ -69,11 +73,15 @@ public struct RemoteCardText: Codable, Equatable, Sendable {
     /// The automation order behind `nextStep`, with the current step's index.
     public var steps: [String]?
     public var currentStep: Int?
+    /// Unpublished drafts and who still has no published reply; older phones ignore it.
+    public var pendingDrafts: String?
     public init(author: String? = nil, repository: String, draftBadge: String? = nil,
                 status: String? = nil, nextStep: String? = nil, working: Bool = false,
                 chips: [RemoteCardChip] = [], secondaryCTA: RemoteCardCTA? = nil,
                 authorUsername: String? = nil, authorAvatarURL: URL? = nil,
-                requirements: [String]? = nil, steps: [String]? = nil, currentStep: Int? = nil) {
+                requirements: [String]? = nil, steps: [String]? = nil, currentStep: Int? = nil,
+                pendingDrafts: String? = nil) {
+        self.pendingDrafts = pendingDrafts
         self.requirements = requirements; self.steps = steps; self.currentStep = currentStep
         self.author = author; self.authorUsername = authorUsername; self.authorAvatarURL = authorAvatarURL
         self.repository = repository; self.draftBadge = draftBadge

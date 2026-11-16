@@ -1,6 +1,23 @@
 {
   "sourceLanguage": "en",
   "strings": {
+    "remoteDetail.replyInThread": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Reply in thread"
+          }
+        },
+        "pl": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Odpowiedź w wątku"
+          }
+        }
+      }
+    },
     "remoteDetail.actions": {
       "extractionState": "manual",
       "localizations": {

@@ -2,6 +2,34 @@
   "sourceLanguage": "en",
   "version": "1.0",
   "strings": {
+    "board.pendingDrafts.single": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": { "stringUnit": { "state": "translated", "value": "1 unpublished draft" } },
+        "pl": { "stringUnit": { "state": "translated", "value": "1 nieopublikowana wersja robocza" } }
+      }
+    },
+    "board.pendingDrafts.%lld": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": { "stringUnit": { "state": "translated", "value": "%lld unpublished drafts" } },
+        "pl": { "stringUnit": { "state": "translated", "value": "Nieopublikowane wersje robocze: %lld" } }
+      }
+    },
+    "board.pendingDrafts.awaitingReply.%@.%@": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": { "stringUnit": { "state": "translated", "value": "%1$@ · no reply published yet to %2$@" } },
+        "pl": { "stringUnit": { "state": "translated", "value": "%1$@ · brak opublikowanej odpowiedzi dla: %2$@" } }
+      }
+    },
+    "board.pendingDrafts.awaitingReplyMore.%@.%@.%lld": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": { "stringUnit": { "state": "translated", "value": "%1$@ · no reply published yet to %2$@ and %3$lld more" } },
+        "pl": { "stringUnit": { "state": "translated", "value": "%1$@ · brak opublikowanej odpowiedzi dla: %2$@ i %3$lld innych" } }
+      }
+    },
     "board.person.usernameHint": {
       "extractionState": "manual",
       "localizations": {
