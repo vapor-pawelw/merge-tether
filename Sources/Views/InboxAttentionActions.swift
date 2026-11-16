@@ -8,7 +8,19 @@ struct InboxAttentionActions: View {
     let onMerge: () -> Void
     @State private var confirmsPipeline = false
 
+    private var hasContent: Bool {
+        (item.needsConfirmation && (item.hasConflict || item.failedPipeline || item.needsChanges
+            || item.needsDiscussion || !item.feedback.isEmpty))
+            || feedbackAction == .running || feedbackAction == .ready(.assistant) || feedbackAction == .failed
+            || item.needsPipelineHandoff || item.needsMerge
+    }
+
     var body: some View {
+        // Nothing to show adds no container, so the parent stack leaves no gap.
+        if hasContent { content }
+    }
+
+    private var content: some View {
         VStack(alignment: .leading, spacing: 5) {
             if item.needsConfirmation {
                 if item.hasConflict { Text(.Menu.menuAttentionConflict) }

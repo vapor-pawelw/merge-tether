@@ -96,6 +96,14 @@ private struct CommandCenterMRCardContent: View {
                             }
                         } else if presentation.refreshFailed {
                             Label { Text(.AutomationProgress.progressRefreshFailed) } icon: { Image(systemName: "arrow.clockwise") }
+                        } else if let waiting = shownRequirements {
+                            // One blocker per line, in the same style as the merge blockers below.
+                            VStack(alignment: .leading, spacing: 5) {
+                                ForEach(Array(waiting.requirements.enumerated()), id: \.offset) { _, line in
+                                    BoardRequirementLine(text: line, isMuted: isMuted)
+                                }
+                            }
+                            .font(.callout)
                         } else if humanAction == nil, let status = neutralStatus {
                             Text(status).font(.callout).foregroundStyle(isMuted ? Color.secondary : Color.primary).lineLimit(2)
                                 .help(Text(reviewingContext.presenceMessage)
@@ -105,14 +113,18 @@ private struct CommandCenterMRCardContent: View {
                     }
                     .font(.caption).foregroundStyle(.secondary)
                 }
-                if let nextStep = presentation.nextStep {
+                if let chain = presentation.stepChain {
+                    BoardStepChain(steps: chain.steps.map { String(localized: $0) }, current: chain.current)
+                } else if let nextStep = presentation.nextStep {
                     Text(verbatim: nextStep)
                         .font(.subheadline).foregroundStyle(.secondary)
                         .fixedSize(horizontal: false, vertical: true)
                 }
                 MergeActionsView(item: item, monitor: monitor, evidenceMatchesCatalogContext: row.evidenceMatchesCatalogContext,
                     actionsBlocked: presentation.actionsBlocked, onReviewFeedback: { openAttention(.feedback) },
-                    showsExplanations: false, statusTrailer: {
+                    showsExplanations: false, textFont: .callout,
+                    coveredBlockers: shownRequirements?.coveredBlockers ?? [],
+                    hidesBlockedActions: presentation.working, statusTrailer: {
                         // Short state chips and automation rules sit together, above the action row.
                         VStack(alignment: .leading, spacing: 5) {
                             if !chips.isEmpty {
@@ -123,7 +135,7 @@ private struct CommandCenterMRCardContent: View {
                                 }
                             }
                             MREffectivePolicySummary(row: row, monitor: monitor,
-                                excluding: [presentation.message, presentation.nextStep ?? ""])
+                                excluding: [presentation.message, presentation.nextStep ?? ""], holdsOnly: true)
                         }
                     }) {
                     if humanAction?.action == .retryRun {
@@ -179,7 +191,9 @@ private struct CommandCenterMRCardContent: View {
             HStack(spacing: 0) {
                 if finishedState == nil, let scopeTarget {
                     BoardAutomationToggle(monitor: monitor, target: scopeTarget,
-                        projectPath: item.url.gitLabProjectPath, isDraft: isDraft)
+                        projectPath: item.url.gitLabProjectPath, isDraft: isDraft,
+                        policyNotes: MREffectivePolicySummary.presentation(row: row, monitor: monitor).0
+                            .routineClauses.map(\.message))
                 }
                 BoardPinButton(pin: .mergeRequest(host: monitor.glab.resolvedHost,
                     username: monitor.glab.currentUsername, projectID: item.id.projectID, iid: item.id.iid),
@@ -190,6 +204,12 @@ private struct CommandCenterMRCardContent: View {
     }
 
     private var reviewingContext: ReviewingContext { presentation.reviewingContext }
+    /// Requirements are listed only where the neutral status would have shown them.
+    private var shownRequirements: MRWaitingStatus? {
+        guard humanAction == nil, neutralStatus != nil, let waiting = presentation.waitingStatus,
+              !waiting.requirements.isEmpty else { return nil }
+        return waiting
+    }
     private var neutralStatus: LocalizedStringResource? {
         if monitor.authoredMergeRequests.requests.contains(where: {
             $0.request.projectID == item.id.projectID && $0.request.iid == item.id.iid
@@ -518,5 +538,43 @@ struct BoardTodoRow: View {
             MRAutomationScopeMenu(monitor: monitor, target: scopeTarget,
                 projectPath: todo.project.pathWithNamespace, isDraft: isDraft)
         }
+    }
+}
+
+/// A merge requirement that someone else must satisfy; the lock marks it as a blocker, not app work.
+struct BoardRequirementLine: View {
+    let text: LocalizedStringResource
+    var isMuted = false
+
+    var body: some View {
+        HStack(alignment: .firstTextBaseline, spacing: 6) {
+            Image(systemName: "lock").foregroundStyle(.secondary).frame(width: 14)
+            Text(text).foregroundStyle(isMuted ? Color.secondary : Color.primary)
+                .fixedSize(horizontal: false, vertical: true)
+        }
+        .accessibilityElement(children: .combine)
+    }
+}
+
+/// The automation order with the current step emphasised and later steps dimmed.
+struct BoardStepChain: View {
+    let steps: [String]
+    let current: Int
+
+    var body: some View {
+        StatusFlowLayout(spacing: 4) {
+            ForEach(Array(steps.enumerated()), id: \.offset) { index, step in
+                HStack(spacing: 4) {
+                    if index > 0 { Image(systemName: "chevron.right").imageScale(.small).foregroundStyle(.tertiary) }
+                    Text(verbatim: step)
+                        .fontWeight(index == current ? .semibold : .regular)
+                        .foregroundStyle(index == current ? AnyShapeStyle(.primary)
+                            : index < current ? AnyShapeStyle(.secondary) : AnyShapeStyle(.tertiary))
+                }
+            }
+        }
+        .font(.subheadline)
+        .help(Text(.CommentReview.commentReviewStepsHelp))
+        .accessibilityElement(children: .combine)
     }
 }

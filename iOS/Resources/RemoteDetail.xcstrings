@@ -392,6 +392,23 @@
         }
       }
     },
+    "remoteDetail.automationRules": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Automation rules"
+          }
+        },
+        "pl": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Reguły automatyzacji"
+          }
+        }
+      }
+    },
     "remoteDetail.feedback": {
       "extractionState": "manual",
       "localizations": {

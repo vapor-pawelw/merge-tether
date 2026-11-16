@@ -242,6 +242,17 @@
         }
       }
     },
+    "policy.automationRules": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Rules for this merge request:"
+          }
+        }
+      }
+    },
     "policy.commentReview": {
       "extractionState": "manual",
       "localizations": {

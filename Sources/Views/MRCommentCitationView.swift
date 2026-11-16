@@ -1,4 +1,5 @@
 import SwiftUI
+import MergeTetherRemote
 
 struct MRCommentCitationView: View {
     let authorName: String?
@@ -55,7 +56,11 @@ struct MRCommentCitationView: View {
             .help(Text(relation))
             .accessibilityElement(children: .combine)
             .accessibilityHint(Text(relation))
-            Text(verbatim: quote).font(.callout).foregroundStyle(.primary.opacity(0.85)).textSelection(.enabled)
+            // Collapsed and expanded quotes share the same Markdown formatting.
+            Group {
+                if let rendered = SafeInlineMarkdown.render(quote) { Text(rendered) } else { Text(verbatim: quote) }
+            }
+            .font(.callout).foregroundStyle(.primary.opacity(0.85)).textSelection(.enabled)
                 .lineLimit(isExpanded || !isLong ? nil : 2).fixedSize(horizontal: false, vertical: true)
             if isLong || isExpanded {
                 Button { isExpanded.toggle() } label: {

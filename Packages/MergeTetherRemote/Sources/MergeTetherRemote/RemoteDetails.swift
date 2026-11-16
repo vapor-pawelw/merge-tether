@@ -177,6 +177,8 @@ public struct RemoteMRDetails: Codable, Equatable, Sendable {
     public var threads: [RemoteDetailThread]?
     public var reasons: [String]
     public var policy: [String]
+    /// The saved rules within `policy`; newer phones list them with reference data, apart from holds.
+    public var rules: [String]?
     public var feedback: [RemoteDetailField]
     public var activity: [RemoteDetailActivity]
     public var usage: [RemoteDetailField]?
@@ -229,6 +231,7 @@ public struct RemoteDetailResponse: Codable, Equatable, Sendable {
             details.feedback = list(details.feedback, 40).map { .init(label: text($0.label, 256), value: text($0.value, 4_000), url: $0.url,
                                                                      person: $0.person?.clipped(text)) }
             details.policy = list(details.policy, 20).map { text($0, 2_000) }
+            details.rules = details.rules.map { list($0, 20).map { text($0, 2_000) } }
             details.reasons = list(details.reasons, 20).map { text($0, 2_000) }
             details.usage = details.usage.map { fields in
                 list(fields, 10).map { .init(label: text($0.label, 256), value: text($0.value, 4_000), url: $0.url,
@@ -299,7 +302,10 @@ public struct RemoteDetailResponse: Codable, Equatable, Sendable {
             }
             else if let text = details.description, !text.isEmpty { details.description = String(text.prefix(text.count / 2)) }
             else if !details.feedback.isEmpty { details.feedback = Array(details.feedback.prefix(details.feedback.count / 2)) }
-            else if !details.policy.isEmpty { details.policy = Array(details.policy.prefix(details.policy.count / 2)) }
+            else if !details.policy.isEmpty {
+                details.policy = Array(details.policy.prefix(details.policy.count / 2))
+                details.rules = details.rules?.filter(details.policy.contains)
+            }
             else if !details.reasons.isEmpty { details.reasons = Array(details.reasons.prefix(details.reasons.count / 2)) }
             else if let usage = details.usage, !usage.isEmpty { details.usage = Array(usage.prefix(usage.count / 2)) }
             else if !details.metadata.isEmpty { details.metadata = Array(details.metadata.prefix(details.metadata.count / 2)) }

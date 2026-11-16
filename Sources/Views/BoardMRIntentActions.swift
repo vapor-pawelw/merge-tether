@@ -7,9 +7,19 @@ struct BoardMRIntentActions: View {
     @State private var starting: Set<UUID> = []
     @Environment(\.openSettings) private var openSettings
 
+    private var needsCLI: Bool {
+        row.attentionIntents.contains(where: { $0.state != .completed && $0.kind != .refresh })
+            && !monitor.availableAssistants.contains(monitor.settings.automation.assistant)
+    }
+
     var body: some View {
+        // Nothing to show adds no container, so the parent stack leaves no gap.
+        if !Self.visibleIntents(row.attentionIntents).isEmpty || needsCLI { content }
+    }
+
+    private var content: some View {
         VStack(alignment: .leading, spacing: 12) {
-            ForEach(row.attentionIntents.filter { $0.state != .completed }, id: \.id) { intent in
+            ForEach(Self.visibleIntents(row.attentionIntents), id: \.id) { intent in
                 VStack(alignment: .leading, spacing: 6) {
                     HStack(alignment: .firstTextBaseline, spacing: 12) {
                         Label { Text(Self.title(intent.kind)) } icon: { Image(systemName: symbol(intent.kind)) }
@@ -43,8 +53,7 @@ struct BoardMRIntentActions: View {
                     }
                 }
             }
-            if row.attentionIntents.contains(where: { $0.state != .completed && $0.kind != .refresh }),
-               !monitor.availableAssistants.contains(monitor.settings.automation.assistant) {
+            if needsCLI {
                 HStack {
                     BoardStatusChip(title: .Board.boardCompactCliRequired, symbol: "terminal", tint: .orange)
                         .help(Text(.Board.boardIntentCliRequired))
@@ -54,6 +63,20 @@ struct BoardMRIntentActions: View {
             }
         }
         .controlSize(.small)
+    }
+
+    /// One row per kind: queued duplicates read as the same task twice. A running one wins,
+    /// then a failure that needs a retry, then the oldest pending one.
+    static func visibleIntents(_ intents: [MRTodoIntent]) -> [MRTodoIntent] {
+        let open = intents.filter { $0.state != .completed }
+        func rank(_ intent: MRTodoIntent) -> Int {
+            switch intent.state { case .running: 0; case .failed: 1; default: 2 }
+        }
+        var chosen: [MRTodoIntent.Kind: MRTodoIntent] = [:]
+        for intent in open where chosen[intent.kind].map({ rank(intent) < rank($0) }) ?? true {
+            chosen[intent.kind] = intent
+        }
+        return open.filter { chosen[$0.kind]?.id == $0.id }
     }
 
     private func canRun(_ kind: MRTodoIntent.Kind) -> Bool {

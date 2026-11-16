@@ -35,6 +35,28 @@ struct MRProgressPresentationTests {
         }
     }
 
+    @Test(arguments: [true, false])
+    func pendingCommentReviewShowsTheStepOrderWithCommentReviewCurrent(_ authored: Bool) {
+        var item = MergeRequestAttentionMonitor.Item(id: .init(projectID: 1, iid: 2), title: "Example",
+            url: URL(string: "https://gitlab.example.test/group/repo/-/merge_requests/2")!, isAuthored: authored)
+        let idle = MergeRequestBoardSnapshot.Row(item: item, latestJob: nil, intents: [])
+        #expect(MRCardPresentation(row: idle, reviewingContext: ReviewingContext(row: idle), allowsRemoval: !authored,
+            assistantReady: true).stepChain == nil)
+        item.draftCount = 1
+        let row = MergeRequestBoardSnapshot.Row(item: item, latestJob: nil, intents: [])
+        let model = MRCardPresentation(row: row, reviewingContext: ReviewingContext(row: row), allowsRemoval: !authored,
+            assistantReady: true)
+        let chain = model.stepChain
+        #expect(chain?.current == 0)
+        #expect(chain?.steps.map { String(localized: $0) } == (authored
+            ? ["Comment review", "Re-review readiness", "Merge checks"]
+            : ["Comment review", "Review verdict and discussion checks", "Approval"]))
+        let phone = RemoteBoardAdapter.presentation(RemoteBoardAdapter.card(item, account: "me@host"), model: model)
+        #expect(phone.presentation?.steps == chain?.steps.map { String(localized: $0) })
+        #expect(phone.presentation?.currentStep == 0)
+        #expect(phone.presentation?.nextStep == model.nextStep)
+    }
+
     @Test func anIdleAuthoredMRAlwaysHasAStatusWithoutInventingWork() {
         let model = presentation("idle")
         #expect(model.status == "Monitoring MR")

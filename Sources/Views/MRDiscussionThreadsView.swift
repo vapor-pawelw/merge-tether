@@ -1,4 +1,5 @@
 import Foundation
+import MergeTetherRemote
 import SwiftUI
 
 /// Conversation context with optional draft selection. Publication stays in the confirmation controls.
@@ -488,19 +489,7 @@ private struct MRDiscussionOriginBadge: View {
 /// Native inline Markdown preserves multiline text and never loads HTML or remote images.
 private struct MRDiscussionBody: View {
     let source: String?
-    private var rendered: AttributedString? {
-        guard let body = source else { return nil }
-        guard var text = try? AttributedString(markdown: body,
-            options: .init(interpretedSyntax: .inlineOnlyPreservingWhitespace)) else { return nil }
-        let unsafeLinks = text.runs.filter { run in
-            guard let link = run.link else { return false }
-            return !["http", "https"].contains(link.scheme?.lowercased() ?? "")
-        }.map(\.range)
-        for range in unsafeLinks { text[range].link = nil }
-        let imageRanges = text.runs.filter { $0.imageURL != nil }.map(\.range)
-        for range in imageRanges { text[range].imageURL = nil }
-        return text
-    }
+    private var rendered: AttributedString? { source.flatMap(SafeInlineMarkdown.render) }
     var body: some View {
         Group {
             if let rendered { Text(rendered) }

@@ -82,7 +82,7 @@ struct MergeActionReadinessTests {
         #expect(listed.manualMergeBlocker(using: checked) == nil)
     }
 
-    @Test(arguments: ["permission", "conflict", "pipeline", "discussions", "queued", "checking"])
+    @Test(arguments: ["permission", "conflict", "pipeline", "discussions", "queued", "checking", "dependencies"])
     func explicitCatalogBlockersStillVetoAReadyDetail(_ blocker: String) throws {
         let checked = try status()
         let changes: [String: Any]
@@ -92,6 +92,8 @@ struct MergeActionReadinessTests {
         case "pipeline": changes = ["head_pipeline": ["id": 4, "status": "failed"]]
         case "discussions": changes = ["blocking_discussions_resolved": false]
         case "queued": changes = ["merge_when_pipeline_succeeds": true]
+        // GitLab's dependency status names its cause instead of the generic blocked message.
+        case "dependencies": changes = ["detailed_merge_status": "merge_request_blocked"]
         default: changes = ["detailed_merge_status": "checking"]
         }
         let listed = try item(checked, changes: changes)
@@ -101,6 +103,7 @@ struct MergeActionReadinessTests {
         case "pipeline": .prerequisite(.pipeline)
         case "discussions": .prerequisite(.discussions)
         case "queued": .submission
+        case "dependencies": .prerequisite(.dependencies)
         default: .prerequisite(.checking)
         }
         #expect(!listed.canOfferManualMerge(using: checked))

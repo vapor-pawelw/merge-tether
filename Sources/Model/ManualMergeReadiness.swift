@@ -187,6 +187,8 @@ extension MergeRequestAttentionMonitor.Item {
         case "ci_must_pass", "ci_still_running", "security_policy_pipeline_check", "status_checks_must_pass":
             return .prerequisite(.pipeline)
         case "approvals_syncing", "checking", "preparing", "unchecked": return .prerequisite(.checking)
+        // GitLab reports this status only for unmerged merge request dependencies.
+        case "merge_request_blocked": return .prerequisite(.dependencies)
         default: return .prerequisite(.other)
         }
     }
