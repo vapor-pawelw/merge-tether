@@ -82,7 +82,7 @@ struct MRProgressPresentationTests {
             assistantReady: true, showsReadProgress: false)
         #expect(model.busy == aiChecking)
         #expect(model.working)
-        #expect(model.status == (aiChecking ? "Assessing AI assistance" : "Checking replies"))
+        #expect(model.status == (aiChecking ? "Assessing AI assistance · Codex CLI" : "Checking replies · Codex CLI"))
         if !aiChecking { #expect(model.humanAction?.kind == .blockedRun) }
     }
 
@@ -153,7 +153,7 @@ struct MRProgressPresentationTests {
     }
 
     private func presentation(_ stage: String, state: AssistantJobExecution.State? = nil,
-                              showsReadProgress: Bool = true) -> MRCardPresentation {
+                              showsReadProgress: Bool = true, assistant: AutomationAssistant = .codex) -> MRCardPresentation {
         var item = MergeRequestAttentionMonitor.Item(id: .init(projectID: 1, iid: 2), title: "Example",
             url: URL(string: "https://gitlab.example.test/group/repo/-/merge_requests/2")!)
         var confirmation: MergeRequestAttentionMonitor.ConfirmationState?
@@ -181,7 +181,7 @@ struct MRProgressPresentationTests {
             automaticPipelineProgress: state == nil && stage == "pipeline",
             conflictReceipts: stage == "conflictReceipt" ? [.init(host: "gitlab.example.test", userID: 3,
                 projectID: 1, iid: 2, sourceSHA: "head", targetSHA: "target", allowsPush: false, jobID: job?.id)] : [],
-            showsReadProgress: showsReadProgress)
+            showsReadProgress: showsReadProgress, assistant: assistant)
     }
 
     @Test(arguments: ["replies", "feedback", "ai", "readiness"])
@@ -189,6 +189,31 @@ struct MRProgressPresentationTests {
         let model = presentation(stage, showsReadProgress: false)
         #expect(model.working && model.status != nil)
         #expect(model.busy && model.actionsBlocked)
+    }
+
+    @Test(arguments: ["replies", "feedback", "ai", "readiness"], [AutomationAssistant.codex, .claude])
+    func semanticChecksNameTheAgentOnMacAndPhone(_ stage: String, _ assistant: AutomationAssistant) {
+        let model = presentation(stage, showsReadProgress: false, assistant: assistant)
+        #expect(model.status?.hasSuffix(" · " + String(localized: assistant.displayName)) == true)
+        #expect(model.activityEffect == .aiCheck)
+        let phone = RemoteBoardAdapter.presentation(RemoteBoardAdapter.card(model.row.item, account: "me@host"), model: model)
+        #expect(phone.presentation?.status == model.status)
+        #expect(phone.presentation?.statusSymbol == MRActionCTA.verifyFeedback.symbol)
+    }
+
+    @Test(arguments: ["publishing", "approving", "idle", "pipeline"])
+    func deterministicWorkDoesNotClaimToUseAnAgent(_ stage: String) {
+        let model = presentation(stage, assistant: .claude)
+        #expect(model.activityEffect == nil)
+        #expect(model.status?.contains("CLI") == false)
+    }
+
+    @Test func activeJobsKeepTheirRecordedProviderWhenSettingsChange() {
+        let original = presentation("review", state: .running)
+        let model = MRCardPresentation(row: original.row, reviewingContext: original.reviewingContext,
+            allowsRemoval: false, assistantReady: true, assistant: .claude)
+        #expect(model.status == "Running review · Codex CLI")
+        #expect(model.activityEffect == MRActionCTA.runReview.effect)
     }
 
     @Test func quietReviewingChecksExplainTheReadWithoutInventingAHumanAction() {
@@ -199,6 +224,7 @@ struct MRProgressPresentationTests {
         let model = MRCardPresentation(row: row, reviewingContext: ReviewingContext(row: row),
             allowsRemoval: true, assistantReady: true, isRefreshingAttention: true, showsReadProgress: false)
         #expect(model.working && model.status == "Checking review" && model.nextStep == nil)
+        #expect(model.activityEffect == nil)
         #expect(model.actionsBlocked && model.actionLabel == nil)
     }
 
@@ -218,7 +244,8 @@ struct MRProgressPresentationTests {
     func showsTheCurrentCheckWithoutInventingAHumanTask(stage: String, expected: String) {
         let model = presentation(stage)
         #expect(model.working)
-        #expect(model.status == expected)
+        let usesAgent = !["publishing", "approving", "pipeline"].contains(stage)
+        #expect(model.status == expected + (usesAgent ? " · Codex CLI" : ""))
         #expect(model.humanAction == nil && model.actionLabel == nil)
     }
 
@@ -227,11 +254,15 @@ struct MRProgressPresentationTests {
         ("conflict", "Resolving conflicts"), ("conflictReceipt", "Resolving conflicts"), ("pipeline", "Handling pipeline"), ("unknown", "Running agent")
     ])
     func runningJobsIdentifyTheirTaskWithoutParsingAgentText(stage: String, expected: String) {
-        #expect(presentation(stage, state: .running).status == expected + " · Codex CLI")
+        let model = presentation(stage, state: .running)
+        #expect(model.status == expected + " · Codex CLI")
+        #expect(model.activityEffect == .agent)
     }
 
     @Test(arguments: ["review", "followUp", "pipeline", "conflict", "unknown"])
     func queuedJobsDoNotClaimThatTheAgentHasStarted(stage: String) {
-        #expect(presentation(stage, state: .queued).status == "Queued for agent · Codex CLI")
+        let model = presentation(stage, state: .queued)
+        #expect(model.status == "Queued for agent · Codex CLI")
+        #expect(model.activityEffect == .agent)
     }
 }

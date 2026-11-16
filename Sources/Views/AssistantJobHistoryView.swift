@@ -63,7 +63,10 @@ struct AssistantJobRow: View {
                     .font(.caption).foregroundStyle(.secondary)
                 }
                 Spacer(minLength: 12)
-                if !finished, handoff.execution?.state.isActive == true { ProgressView().controlSize(.small) }
+                if !finished, handoff.execution?.state.isActive == true {
+                    MRActionEffectIcon(effect: .agent)
+                    ProgressView().controlSize(.small)
+                }
                 Text(stateLabel).font(.caption.weight(.medium))
             }
             DisclosureGroup(isExpanded: $promptExpanded) {

@@ -22,7 +22,16 @@ struct BoardMRIntentActions: View {
             ForEach(Self.visibleIntents(row.attentionIntents), id: \.id) { intent in
                 VStack(alignment: .leading, spacing: 6) {
                     HStack(alignment: .firstTextBaseline, spacing: 12) {
-                        Label { Text(Self.title(intent.kind)) } icon: { Image(systemName: symbol(intent.kind)) }
+                        Label {
+                            if intent.state == .running, MRActionCTA(intent: intent.kind) != nil {
+                                Text(verbatim: MRActivity.agentStatus(Self.title(intent.kind),
+                                    assistant: row.latestJob.flatMap { $0.id == intent.jobID ? $0.key.assistant : nil }
+                                        ?? monitor.settings.automation.assistant))
+                            } else { Text(Self.title(intent.kind)) }
+                        } icon: {
+                            Image(systemName: intent.state == .running
+                                ? MRActionCTA(intent: intent.kind)?.symbol ?? symbol(intent.kind) : symbol(intent.kind))
+                        }
                             .font(.subheadline.weight(.medium))
                         Spacer()
                         if intent.state == .running {

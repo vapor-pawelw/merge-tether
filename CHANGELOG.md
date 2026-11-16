@@ -6,6 +6,8 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 
 ## Unreleased
 
+- Name Codex CLI or Claude CLI and show the matching agent or AI-check action icon during agent work, including feedback, reply and authorship assessments on Mac and iOS. Keep AI icons visible beside running-action spinners.
+
 - Stop offering to publish a reply draft that repeats a reply already in its thread, for example when the agent saved the same reply twice. Such a draft is never published automatically or by **Publish all**, starts unchecked in MR Details, and the card asks you to delete it instead. You can still select it deliberately.
 - Say what failed instead of "Couldn’t refresh status": the card and MR Details now name the check, such as "Couldn’t check reviewer comments: AI CLI unavailable" or "Couldn’t refresh merge requests from GitLab". When several checks fail, the card shows how many and lists each one with its technical cause on hover.
 - Rename the "Checking feedback" status to "Checking whether reviewer comments are addressed", which is what it does on your own MRs.

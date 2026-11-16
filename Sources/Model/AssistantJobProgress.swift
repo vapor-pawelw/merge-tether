@@ -1,6 +1,10 @@
 import Foundation
 
 extension AssistantAutomationRunner.Handoff {
+    func progressStatus(intents: [MRTodoIntent] = [], conflictReceipts: Set<MergeConflictReceipt> = []) -> String {
+        MRActivity.agentStatus(progressTitle(intents: intents, conflictReceipts: conflictReceipts), assistant: key.assistant)
+    }
+
     /// Task routing identifies the activity; CLI output cannot reliably identify a live substep.
     func progressTitle(intents: [MRTodoIntent] = [], conflictReceipts: Set<MergeConflictReceipt> = []) -> LocalizedStringResource {
         let intentKind = intents.first {

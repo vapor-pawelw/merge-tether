@@ -25,7 +25,8 @@ struct AuthorFeedbackView: View {
                 VStack(alignment: .leading, spacing: 14) {
                     switch status.phase {
                     case .checking:
-                        HStack { ProgressView().controlSize(.small); Text(.AuthorFeedback.authorFeedbackChecking) }
+                        MRActivityStatus(status: MRActivity.agentStatus(.AuthorFeedback.authorFeedbackChecking,
+                            assistant: monitor.settings.automation.assistant), startedAt: nil, effect: .aiCheck)
                     case .failed: Text(.AuthorFeedback.authorFeedbackFailed).foregroundStyle(.orange)
                     case .waitingPublication: Text(.AuthorFeedback.authorFeedbackWaitingPublication(status.pendingDraftCount))
                     case .complete: EmptyView()

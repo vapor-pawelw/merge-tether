@@ -357,7 +357,7 @@ private struct CommandCenterMRDetailContent: View {
                         }
                         if progress.working, let status = progress.status {
                             MRActivityStatus(status: status,
-                                startedAt: monitor.activityStartedAt(for: item, activity: progress.activity))
+                                startedAt: monitor.activityStartedAt(for: item, activity: progress.activity), effect: progress.activityEffect)
                             .font(.callout).foregroundStyle(.secondary)
                         } else if progress.refreshFailed {
                             Label { Text(verbatim: progress.refreshFailureLabel ?? String(localized: .AutomationProgress.progressRefreshFailed)) }
@@ -574,9 +574,10 @@ private struct CommandCenterMRDetailContent: View {
     private var decisionActions: some View {
             CommentReviewImpactView(item: item, reReviewEnabled: monitor.settings.automation.autoReReviewEnabled)
             BoardMRIntentActions(row: presentationRow, monitor: monitor)
-            ReReviewControls(item: presentationItem, monitor: monitor.attention,
+            ReReviewControls(item: presentationItem, monitor: monitor.attention, assistant: monitor.settings.automation.assistant,
                 hidesStaleResult: MRCardPresentation(row: presentationRow, monitor: monitor, allowsRemoval: isReviewed).working)
             InboxAttentionActions(item: presentationItem, feedbackAction: monitor.attentionFeedbackAction(for: item),
+                assistant: presentationRow.latestJob?.key.assistant ?? monitor.settings.automation.assistant,
                 onFeedback: { Task { await monitor.runAttentionFeedback(for: item) } },
                 onPipeline: { monitor.confirmPipelineHandoff(for: item.id) },
                 onMerge: { NSWorkspace.shared.open(item.url) })

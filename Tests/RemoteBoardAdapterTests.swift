@@ -452,7 +452,8 @@ import MergeTetherRemote
         let board = MergeRequestBoardSnapshot(own: [], reviewed: [], todos: [], attention: [], handoffs: [], host: target.host, username: "me")
         let phone = RemoteBoardAdapter.project(board: board, other: [.init(id: pin, content: content)], session: UUID(), account: "me@host")
         let card = try #require(phone.lanes[2].cards.first)
-        #expect(card.presentation?.status == (state == .queued ? "Queued for agent" : "Handling feedback"))
+        #expect(card.presentation?.status == (state == .queued ? "Queued for agent · Codex CLI" : "Handling feedback · Codex CLI"))
+        #expect(card.presentation?.statusSymbol == MRActionCTA.runReview.symbol)
         #expect(card.presentation?.working == true)
         #expect(card.needsAttention == false && card.primaryCTA == nil && card.actions.isEmpty)
     }

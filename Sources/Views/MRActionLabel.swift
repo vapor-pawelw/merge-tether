@@ -11,7 +11,10 @@ struct MRActionLabel: View {
     var body: some View {
         if let symbol = cta.symbol ?? fallbackSymbol {
             Label { Text(title).lineLimit(1) } icon: {
-                if working { ProgressView().controlSize(.mini) } else { Image(systemName: symbol) }
+                HStack(spacing: 4) {
+                    if working { ProgressView().controlSize(.mini) }
+                    if !working || cta.effect.symbol != nil { Image(systemName: symbol) }
+                }
             }
         } else if working {
             ProgressView().controlSize(.mini)

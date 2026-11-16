@@ -146,10 +146,10 @@ struct BoardJobStatusActions: View {
                         ? .AutomationProgress.progressPausedLogin : .AutomationProgress.progressPausedLimit)
                         .font(.caption).foregroundStyle(.secondary)
                 } else if active {
-                    MRActivityStatus(status: String(localized: handoff.progressTitle(intents: monitor.settings.mrActionIntents,
-                        conflictReceipts: monitor.settings.conflictReceipts)),
+                    MRActivityStatus(status: handoff.progressStatus(intents: monitor.settings.mrActionIntents,
+                        conflictReceipts: monitor.settings.conflictReceipts),
                         startedAt: handoff.execution?.state == .running
-                            ? handoff.execution?.startedAt ?? handoff.createdAt : handoff.createdAt)
+                            ? handoff.execution?.startedAt ?? handoff.createdAt : handoff.createdAt, effect: .agent)
                         .font(.caption).foregroundStyle(muted ? Color.secondary : Color.blue)
                 } else {
                     BoardStatusChip(title: .Board.boardCompactBlocked, symbol: "exclamationmark.circle",
