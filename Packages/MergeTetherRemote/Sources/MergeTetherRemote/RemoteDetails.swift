@@ -160,6 +160,14 @@ public struct RemoteDetailBranches: Codable, Equatable, Sendable {
     public init(source: String, target: String) { self.source = source; self.target = target }
 }
 
+/// This MR's saved automation state and what decides it, as the Mac's automation panel shows it. Read-only.
+public struct RemoteAutomationStatus: Codable, Equatable, Sendable {
+    public var active: Bool
+    /// Localized on the Mac, for example "Automation enabled · Decided by: Repository".
+    public var summary: String
+    public init(active: Bool, summary: String) { self.active = active; self.summary = summary }
+}
+
 public struct RemoteDetailActivity: Codable, Equatable, Identifiable, Sendable {
     public let id: String
     public var title: String
@@ -192,6 +200,8 @@ public struct RemoteMRDetails: Codable, Equatable, Sendable {
     public var originResume: RemoteOriginResume?
     /// App-only Markdown from MergeTether's agent for pending board drafts, keyed by draft ID. Additive.
     public var draftContexts: [String: String]?
+    /// Additive; older hosts send none and older phones ignore it.
+    public var automation: RemoteAutomationStatus?
     public init(checkedAt: Date, metadata: [RemoteDetailField] = [], description: String? = nil,
                 approvals: RemoteApprovalDetails? = nil, threads: [RemoteDetailThread]? = nil,
                 reasons: [String] = [], policy: [String] = [], feedback: [RemoteDetailField] = [],
@@ -237,6 +247,7 @@ public struct RemoteDetailResponse: Codable, Equatable, Sendable {
                                                                      person: $0.person?.clipped(text)) }
             details.policy = list(details.policy, 20).map { text($0, 2_000) }
             details.rules = details.rules.map { list($0, 20).map { text($0, 2_000) } }
+            details.automation = details.automation.map { .init(active: $0.active, summary: text($0.summary, 512)) }
             details.reasons = list(details.reasons, 20).map { text($0, 2_000) }
             details.usage = details.usage.map { fields in
                 list(fields, 10).map { .init(label: text($0.label, 256), value: text($0.value, 4_000), url: $0.url,

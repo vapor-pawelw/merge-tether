@@ -1232,6 +1232,138 @@
           }
         }
       }
+    },
+    "menu.scope.buttonHelpActive": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Automation enabled for this merge request. Click for details and rules; Option-click to pause."
+          }
+        }
+      }
+    },
+    "menu.scope.buttonHelpPaused": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Automation paused for this merge request. Click for details and rules; Option-click to turn it on."
+          }
+        }
+      }
+    },
+    "menu.scope.buttonAccessibilityHint": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Shows this merge request’s automation state, rules and switches."
+          }
+        }
+      }
+    },
+    "menu.scope.popoverSource.%@": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Decided by: %@"
+          }
+        }
+      }
+    },
+    "menu.scope.popoverPauseMergeRequest": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Pause for this MR"
+          }
+        }
+      }
+    },
+    "menu.scope.popoverEnableMergeRequest": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Turn on for this MR"
+          }
+        }
+      }
+    },
+    "menu.scope.popoverPauseRepository": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Pause for this repository"
+          }
+        }
+      }
+    },
+    "menu.scope.popoverEnableRepository": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Turn on for this repository"
+          }
+        }
+      }
+    },
+    "menu.scope.popoverMergeRequest": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "This merge request"
+          }
+        }
+      }
+    },
+    "menu.scope.popoverRepository": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Repository"
+          }
+        }
+      }
+    },
+    "menu.scope.popoverGloballySuspended": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "All automation is switched off. Choices saved here apply when you switch it back on."
+          }
+        }
+      }
+    },
+    "menu.scope.popoverOptionClickHint": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Tip: Option-click the bolt to switch automation without opening this panel."
+          }
+        }
+      }
     }
   },
   "version": "1.0"

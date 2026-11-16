@@ -1,128 +1,31 @@
 import AppKit
 import SwiftUI
 
-struct BoardAutomationToggle: View {
+/// Applies per-MR and repository scope changes for the popover, the bolt shortcut and the scope menu alike.
+@MainActor
+struct MRAutomationScopeEditor {
     let monitor: TodoMonitorService
     let target: MRAutomationScope.Target
     var projectPath: String? = nil
     var isDraft = false
-    /// Saved rules for this MR, listed in the help instead of on the card.
-    var policyNotes: [LocalizedStringResource] = []
-    private var settings: SettingsManager { monitor.settings }
+    /// Injected by tests; the app asks with a modal alert that outlives a dismissed menu or popover.
+    var confirm: @MainActor (LocalizedStringResource) async -> Bool = { confirmDraftAutomation(message: $0) }
 
-    var body: some View {
-        if settings.configuredAutomation.hasEnabledAutomation {
-            let status = settings.configuredAutomation.scope.resolve(target, isDraft: isDraft)
-            let choice = settings.configuredAutomation.scope.manualChoice(for: target)
-            Button {
-                if isDraft && !status.active {
-                    Task {
-                        guard confirmDraftAutomation(message: draftAutomationMessage(target: target, projectPath: projectPath)) else { return }
-                        scopeEnabledBinding(settings: settings, target: target, projectPath: projectPath,
-                                            isDraft: isDraft).wrappedValue = true
-                        announceChange()
-                    }
-                } else {
-                    scopeEnabledBinding(settings: settings, target: target, projectPath: projectPath,
-                                        isDraft: isDraft).wrappedValue.toggle()
-                    announceChange()
-                }
-            } label: {
-                Image(systemName: status.active ? "bolt.fill" : "bolt.slash")
-                    .font(.system(size: 11, weight: .medium))
-                    .foregroundStyle(status.active ? Color.accentColor : Color.secondary)
-                    .frame(width: 24, height: 24)
-                    .overlay(alignment: .bottomTrailing) {
-                        if choice == .forceOn || choice == .paused {
-                            Circle().fill(.secondary).frame(width: 3, height: 3)
-                        }
-                    }
-                    .contentShape(Rectangle())
-            }
-            .buttonStyle(.plain)
-            .boardHeaderControlHover()
-            .help(scopeHelp(status, choice: choice, hasActionExceptions: hasActionExceptions(settings, target: target))
-                + policyHelp)
-            .accessibilityLabel(Text(.Menu.menuScopeTitle))
-            .accessibilityValue(Text(scopeChoiceLabel(choice)) + Text(", ")
-                + Text(status.active ? .Menu.menuScopeActive : .Menu.menuScopePaused))
-        }
+    var settings: SettingsManager { monitor.settings }
+
+    /// Saved policy, ignoring the global switch, so choices made while it is off are visible and editable.
+    var summary: MRAutomationControl.Summary {
+        MRAutomationControl.summary(settings.configuredAutomation.scope, target: target, isDraft: isDraft)
     }
 
-    private var policyHelp: Text {
-        guard !policyNotes.isEmpty else { return Text(verbatim: "") }
-        return policyNotes.reduce(Text(verbatim: "\n\n") + Text(.EffectivePolicy.policyAutomationRules)) { help, note in
-            help + Text(verbatim: "\n• ") + Text(note)
-        }
+    var globallySuspended: Bool { !settings.automationGloballyEnabled }
+
+    var hasActionExceptions: Bool {
+        target.iid != nil && MRAutomaticAction.allCases.contains { !settings.actionIsAutomatic($0, for: target) }
     }
 
-    private func announceChange() {
-        guard let iid = target.iid else { return }
-        monitor.automationToggleNotices.post(.mergeRequest(iid: iid, projectPath: projectPath,
-            active: settings.configuredAutomation.scope.resolve(target, isDraft: isDraft).active))
-    }
-}
-
-struct MRAutomationScopeMenu: View {
-    let monitor: TodoMonitorService
-    let target: MRAutomationScope.Target
-    var projectPath: String? = nil
-    var isDraft = false
-    private var settings: SettingsManager { monitor.settings }
-
-    var body: some View {
-        if settings.configuredAutomation.hasEnabledAutomation {
-            let status = settings.configuredAutomation.scope.resolve(target, isDraft: isDraft)
-            let choice = settings.configuredAutomation.scope.manualChoice(for: target)
-            Menu {
-                if target.iid != nil {
-                    choiceButton(.inherit)
-                    choiceButton(.forceOn)
-                    choiceButton(.paused)
-                    Divider()
-                    ForEach(applicableActions, id: \.self) { action in
-                        Toggle(isOn: Binding(get: {
-                            settings.actionIsAutomatic(action, for: target)
-                        }, set: { enabled in
-                            Task { await monitor.setAutomaticAction(action, enabled: enabled, for: target) }
-                        })) {
-                            Text(actionLabel(action))
-                        }
-                        .help(Text(.AutomaticActions.automaticActionsInheritHelp))
-                    }
-                    Divider()
-                }
-                Toggle(isOn: Binding(get: {
-                    settings.configuredAutomation.scope.resolve(target.repository).active
-                }, set: { enabled in
-                    changeScope(for: target.repository, message: repositoryConfirmationMessage) {
-                        $0.setEnabled(enabled, for: target.repository)
-                    }
-                })) {
-                    Label { Text(.Menu.menuScopeRepositoryDefault) } icon: { Image(systemName: "folder") }
-                }
-                .help(Text(.Menu.menuScopeRepositoryDefaultHelp))
-                if settings.automation.scope[target.repository] != .inherit {
-                    Button {
-                        changeScope(for: target.repository, message: repositoryConfirmationMessage) {
-                            $0.setManualChoice(.inherit, for: target.repository)
-                        }
-                    } label: { Text(.Menu.menuScopeFollowGlobal) }
-                }
-            } label: {
-                Label { Text(.Menu.menuScopeTitle) } icon: {
-                    Image(systemName: status.active ? "bolt.circle" : "pause.circle")
-                }
-            }
-            .menuStyle(.borderlessButton)
-            .fixedSize()
-            .font(.caption)
-            .help(scopeHelp(status, choice: choice, hasActionExceptions: hasActionExceptions(settings, target: target)))
-        }
-    }
-
-    /// Cached, account-bound metadata only: rendering a menu never starts a read.
-    private var applicableActions: [MRAutomaticAction] {
+    /// Cached, account-bound metadata only: rendering a menu or popover never starts a read.
+    var applicableActions: [MRAutomaticAction] {
         guard let iid = target.iid, monitor.glab.resolvedHost == target.host,
               monitor.glab.currentUsername == target.username,
               let request = monitor.boardDisplayRequests.first(where: {
@@ -132,80 +35,304 @@ struct MRAutomationScopeMenu: View {
         return [.commentPublication, request.author.username == target.username ? .merge : .approval]
     }
 
-    private func actionLabel(_ action: MRAutomaticAction) -> LocalizedStringResource {
-        switch action {
-        case .commentPublication: .AutomaticActions.automaticActionsPublication
-        case .merge: .AutomaticActions.automaticActionsMerge
-        case .approval: .AutomaticActions.automaticActionsApproval
+    /// Flips this MR's effective state, as the popover's main button and an Option-click do.
+    func toggle() async {
+        let enabled = !summary.active
+        guard await apply(changing: target, message: draftAutomationMessage(target: target, projectPath: projectPath),
+                          { $0.setEnabled(enabled, for: target, isDraft: isDraft) }) else { return }
+        announceChange()
+    }
+
+    func choose(_ choice: MRAutomationScope.Choice) async {
+        guard choice != summary.choice else { return }
+        await apply(changing: target,
+            message: draftAutomationMessage(target: target, projectPath: projectPath, followsDefaults: choice == .inherit)) {
+            $0.setManualChoice(choice, for: target)
         }
     }
+
+    func setRepositoryDefault(_ enabled: Bool) async {
+        await apply(changing: target.repository, message: repositoryConfirmationMessage) {
+            $0.setEnabled(enabled, for: target.repository)
+        }
+    }
+
+    func followGeneralScope() async {
+        await apply(changing: target.repository, message: repositoryConfirmationMessage) {
+            $0.setManualChoice(.inherit, for: target.repository)
+        }
+    }
+
+    var repositoryDefaultActive: Bool { settings.configuredAutomation.scope.resolve(target.repository).active }
+    var repositoryHasOverride: Bool { settings.automation.scope[target.repository] != .inherit }
 
     private var repositoryConfirmationMessage: LocalizedStringResource {
         .Menu.menuScopeDraftConfirmationRepositoryMessage(
             projectPath ?? settings.automation.scope.repositoryLabel(for: target) ?? String(target.projectID))
     }
 
-    private func changeScope(for key: MRAutomationScope.Target, message: LocalizedStringResource,
-                             change: @escaping (inout MRAutomationScope) -> Void) {
-        var proposed = settings.configuredAutomation.scope
+    /// Returns whether the change was saved; a declined Draft confirmation leaves the scope untouched.
+    @discardableResult
+    private func apply(changing key: MRAutomationScope.Target, message: LocalizedStringResource,
+                       _ change: (inout MRAutomationScope) -> Void) async -> Bool {
+        let current = settings.configuredAutomation.scope
+        var proposed = current
         change(&proposed)
-        let enablesThisDraft = isDraft && !settings.configuredAutomation.scope.resolve(target, isDraft: true).active
-            && proposed.resolve(target, isDraft: true).active
-        let enablesRepositoryDrafts = key.iid == nil && !proposed.pauseDraftsByDefault
-            && !settings.configuredAutomation.scope.resolve(key).active && proposed.resolve(key).active
-        let save = {
-            change(&settings.automation.scope)
-            if let projectPath { settings.automation.scope.rememberRepository(projectPath, for: key) }
-            settings.save()
+        if MRAutomationControl.requiresDraftConfirmation(from: current, to: proposed, changing: key,
+                                                         target: target, isDraft: isDraft) {
+            guard await confirm(message) else { return false }
         }
-        if enablesThisDraft || enablesRepositoryDrafts {
-            Task {
-                guard confirmDraftAutomation(message: message) else { return }
-                save()
-            }
-        } else {
-            save()
-        }
+        change(&settings.automation.scope)
+        if let projectPath { settings.automation.scope.rememberRepository(projectPath, for: key) }
+        settings.save()
+        return true
     }
 
-    private func choiceButton(_ choice: MRAutomationScope.Choice) -> some View {
-        Button {
-            changeScope(for: target,
-                message: draftAutomationMessage(target: target, projectPath: projectPath, followsDefaults: choice == .inherit)) {
-                $0.setManualChoice(choice, for: target)
+    private func announceChange() {
+        guard let iid = target.iid else { return }
+        monitor.automationToggleNotices.post(.mergeRequest(iid: iid, projectPath: projectPath,
+            active: settings.configuredAutomation.scope.resolve(target, isDraft: isDraft).active))
+    }
+}
+
+/// The bolt in card and Details headers: a click explains this MR's automation, Option-click switches it.
+struct BoardAutomationToggle: View {
+    let monitor: TodoMonitorService
+    let target: MRAutomationScope.Target
+    var projectPath: String? = nil
+    var isDraft = false
+    /// Saved policy for this MR, shown in the popover instead of on the card.
+    var policy: MREffectivePolicyPresentation? = nil
+    @State private var showingDetails = false
+
+    private var editor: MRAutomationScopeEditor {
+        .init(monitor: monitor, target: target, projectPath: projectPath, isDraft: isDraft)
+    }
+
+    var body: some View {
+        if monitor.settings.configuredAutomation.hasEnabledAutomation {
+            let summary = editor.summary
+            Button {
+                if NSEvent.modifierFlags.contains(.option) {
+                    Task { await editor.toggle() }
+                } else {
+                    showingDetails.toggle()
+                }
+            } label: {
+                Image(systemName: summary.active ? "bolt.fill" : "bolt.slash")
+                    .font(.system(size: 11, weight: .medium))
+                    .foregroundStyle(summary.active ? Color.accentColor : Color.secondary)
+                    .frame(width: 24, height: 24)
+                    .overlay(alignment: .bottomTrailing) {
+                        if summary.choice == .forceOn || summary.choice == .paused {
+                            Circle().fill(.secondary).frame(width: 3, height: 3)
+                        }
+                    }
+                    .contentShape(Rectangle())
             }
-        } label: {
-            Label { Text(scopeChoiceLabel(choice)) } icon: {
-                if settings.configuredAutomation.scope.manualChoice(for: target) == choice {
-                    Image(systemName: "checkmark")
+            .buttonStyle(.plain)
+            .boardHeaderControlHover()
+            .help(Text(summary.active ? .Menu.menuScopeButtonHelpActive : .Menu.menuScopeButtonHelpPaused))
+            .popover(isPresented: $showingDetails, arrowEdge: .bottom) {
+                MRAutomationPopover(editor: editor, policy: policy)
+            }
+            .accessibilityLabel(Text(.Menu.menuScopeTitle))
+            .accessibilityValue(Text(scopeChoiceLabel(summary.choice)) + Text(", ")
+                + Text(summary.active ? .Menu.menuScopeActive : .Menu.menuScopePaused))
+            .accessibilityHint(Text(.Menu.menuScopeButtonAccessibilityHint))
+        }
+    }
+}
+
+/// Everything that decides this MR's automation, readable without hovering, with the switch on top.
+struct MRAutomationPopover: View {
+    let editor: MRAutomationScopeEditor
+    var policy: MREffectivePolicyPresentation? = nil
+
+    var body: some View {
+        let summary = editor.summary
+        VStack(alignment: .leading, spacing: 12) {
+            header(summary)
+            if editor.globallySuspended {
+                caption(.Menu.menuScopePopoverGloballySuspended)
+            }
+            Button { Task { await editor.toggle() } } label: {
+                Text(primaryTitle(summary)).frame(maxWidth: .infinity)
+            }
+            .buttonStyle(.borderedProminent)
+            .controlSize(.large)
+            .keyboardShortcut(.defaultAction)
+
+            if editor.target.iid != nil {
+                Divider()
+                mergeRequestSection
+            }
+            if let policy, !policy.clauses.isEmpty || policy.settingsAction != nil {
+                Divider()
+                VStack(alignment: .leading, spacing: 6) {
+                    sectionTitle(.EffectivePolicy.policyAutomationRules)
+                    MREffectivePolicyView(presentation: policy)
+                }
+            }
+            Divider()
+            repositorySection
+            Text(.Menu.menuScopePopoverOptionClickHint)
+                .font(.caption2).foregroundStyle(.tertiary)
+                .fixedSize(horizontal: false, vertical: true)
+        }
+        .padding(16)
+        .frame(width: 320, alignment: .leading)
+    }
+
+    private func header(_ summary: MRAutomationControl.Summary) -> some View {
+        HStack(alignment: .firstTextBaseline, spacing: 8) {
+            Image(systemName: summary.active ? "bolt.fill" : "bolt.slash")
+                .foregroundStyle(summary.active ? Color.accentColor : Color.secondary)
+            VStack(alignment: .leading, spacing: 2) {
+                Text(summary.active ? .Menu.menuScopeActive : .Menu.menuScopePaused).font(.headline)
+                Text(.Menu.menuScopePopoverSource(String(localized: MRAutomationControl.sourceLabel(summary.source))))
+                    .font(.caption).foregroundStyle(.secondary)
+            }
+        }
+        .accessibilityElement(children: .combine)
+    }
+
+    private var mergeRequestSection: some View {
+        VStack(alignment: .leading, spacing: 8) {
+            sectionTitle(.Menu.menuScopePopoverMergeRequest)
+            Picker(selection: Binding(get: { editor.summary.choice }, set: { choice in
+                Task { await editor.choose(choice) }
+            })) {
+                ForEach([MRAutomationScope.Choice.inherit, .forceOn, .paused], id: \.self) { choice in
+                    Text(scopeChoiceLabel(choice)).tag(choice)
+                }
+            } label: { Text(.Menu.menuScopePopoverMergeRequest) }
+            .pickerStyle(.radioGroup)
+            .labelsHidden()
+            caption(.Menu.menuScopeDraftSafetyHelp)
+            VStack(alignment: .leading, spacing: 4) {
+                ForEach(editor.applicableActions, id: \.self) { action in
+                    Toggle(isOn: Binding(get: {
+                        editor.settings.actionIsAutomatic(action, for: editor.target)
+                    }, set: { enabled in
+                        Task { await editor.monitor.setAutomaticAction(action, enabled: enabled, for: editor.target) }
+                    })) {
+                        Text(actionLabel(action))
+                    }
+                    .toggleStyle(.checkbox)
+                    .help(Text(.AutomaticActions.automaticActionsInheritHelp))
                 }
             }
         }
     }
-}
 
-@MainActor
-private func scopeEnabledBinding(settings: SettingsManager, target: MRAutomationScope.Target,
-                                 projectPath: String?, isDraft: Bool = false) -> Binding<Bool> {
-    Binding(get: { settings.configuredAutomation.scope.resolve(target, isDraft: isDraft).active }, set: { enabled in
-        settings.automation.scope.setEnabled(enabled, for: target, isDraft: isDraft)
-        if settings.automation.scope[target] != .inherit, let projectPath {
-            settings.automation.scope.rememberRepository(projectPath, for: target)
+    private var repositorySection: some View {
+        VStack(alignment: .leading, spacing: 6) {
+            sectionTitle(.Menu.menuScopePopoverRepository)
+            Toggle(isOn: Binding(get: { editor.repositoryDefaultActive }, set: { enabled in
+                Task { await editor.setRepositoryDefault(enabled) }
+            })) { Text(.Menu.menuScopeRepositoryDefault) }
+            .toggleStyle(.checkbox)
+            caption(.Menu.menuScopeRepositoryDefaultHelp)
+            if editor.repositoryHasOverride {
+                Button { Task { await editor.followGeneralScope() } } label: { Text(.Menu.menuScopeFollowGlobal) }
+                    .buttonStyle(.link).font(.caption)
+            }
         }
-        settings.save()
-    })
+    }
+
+    private func primaryTitle(_ summary: MRAutomationControl.Summary) -> LocalizedStringResource {
+        switch (editor.target.iid != nil, summary.active) {
+        case (true, true): .Menu.menuScopePopoverPauseMergeRequest
+        case (true, false): .Menu.menuScopePopoverEnableMergeRequest
+        case (false, true): .Menu.menuScopePopoverPauseRepository
+        case (false, false): .Menu.menuScopePopoverEnableRepository
+        }
+    }
+
+    private func sectionTitle(_ title: LocalizedStringResource) -> some View {
+        Text(title).font(.subheadline.weight(.semibold))
+    }
+
+    private func caption(_ text: LocalizedStringResource) -> some View {
+        Text(text).font(.caption).foregroundStyle(.secondary).fixedSize(horizontal: false, vertical: true)
+    }
 }
 
-@MainActor
-private func hasActionExceptions(_ settings: SettingsManager, target: MRAutomationScope.Target) -> Bool {
-    target.iid != nil && MRAutomaticAction.allCases.contains { !settings.actionIsAutomatic($0, for: target) }
+/// The same choices in context and action menus, where a popover cannot open.
+struct MRAutomationScopeMenu: View {
+    let monitor: TodoMonitorService
+    let target: MRAutomationScope.Target
+    var projectPath: String? = nil
+    var isDraft = false
+
+    private var editor: MRAutomationScopeEditor {
+        .init(monitor: monitor, target: target, projectPath: projectPath, isDraft: isDraft)
+    }
+
+    var body: some View {
+        if monitor.settings.configuredAutomation.hasEnabledAutomation {
+            let summary = editor.summary
+            Menu {
+                if target.iid != nil {
+                    choiceButton(.inherit, current: summary.choice)
+                    choiceButton(.forceOn, current: summary.choice)
+                    choiceButton(.paused, current: summary.choice)
+                    Divider()
+                    ForEach(editor.applicableActions, id: \.self) { action in
+                        Toggle(isOn: Binding(get: {
+                            monitor.settings.actionIsAutomatic(action, for: target)
+                        }, set: { enabled in
+                            Task { await monitor.setAutomaticAction(action, enabled: enabled, for: target) }
+                        })) {
+                            Text(actionLabel(action))
+                        }
+                        .help(Text(.AutomaticActions.automaticActionsInheritHelp))
+                    }
+                    Divider()
+                }
+                Toggle(isOn: Binding(get: { editor.repositoryDefaultActive }, set: { enabled in
+                    Task { await editor.setRepositoryDefault(enabled) }
+                })) {
+                    Label { Text(.Menu.menuScopeRepositoryDefault) } icon: { Image(systemName: "folder") }
+                }
+                .help(Text(.Menu.menuScopeRepositoryDefaultHelp))
+                if editor.repositoryHasOverride {
+                    Button { Task { await editor.followGeneralScope() } } label: { Text(.Menu.menuScopeFollowGlobal) }
+                }
+            } label: {
+                Label { Text(.Menu.menuScopeTitle) } icon: {
+                    Image(systemName: summary.active ? "bolt.circle" : "pause.circle")
+                }
+            }
+            .menuStyle(.borderlessButton)
+            .fixedSize()
+            .font(.caption)
+            .help(scopeHelp(summary, hasActionExceptions: editor.hasActionExceptions))
+        }
+    }
+
+    private func choiceButton(_ choice: MRAutomationScope.Choice, current: MRAutomationScope.Choice) -> some View {
+        Button { Task { await editor.choose(choice) } } label: {
+            Label { Text(scopeChoiceLabel(choice)) } icon: {
+                if current == choice { Image(systemName: "checkmark") }
+            }
+        }
+    }
 }
 
-private func scopeHelp(_ status: (active: Bool, source: MRAutomationScope.Source),
-                       choice: MRAutomationScope.Choice, hasActionExceptions: Bool = false) -> Text {
-    let source = String(localized: scopeSourceLabel(status.source))
-    return Text(scopeChoiceLabel(choice)) + Text("\n")
-        + Text(status.active ? .Menu.menuScopeEnabledHelp(source) : .Menu.menuScopePausedHelp(source))
+private func actionLabel(_ action: MRAutomaticAction) -> LocalizedStringResource {
+    switch action {
+    case .commentPublication: .AutomaticActions.automaticActionsPublication
+    case .merge: .AutomaticActions.automaticActionsMerge
+    case .approval: .AutomaticActions.automaticActionsApproval
+    }
+}
+
+private func scopeHelp(_ summary: MRAutomationControl.Summary, hasActionExceptions: Bool = false) -> Text {
+    let source = String(localized: MRAutomationControl.sourceLabel(summary.source))
+    return Text(scopeChoiceLabel(summary.choice)) + Text("\n")
+        + Text(summary.active ? .Menu.menuScopeEnabledHelp(source) : .Menu.menuScopePausedHelp(source))
         + Text("\n") + Text(.Menu.menuScopeDraftSafetyHelp)
         + (hasActionExceptions ? Text("\n") + Text(.AutomaticActions.automaticActionsExceptionsHelp) : Text(""))
 }
@@ -215,15 +342,6 @@ private func scopeChoiceLabel(_ choice: MRAutomationScope.Choice) -> LocalizedSt
     case .inherit, .active: .Menu.menuScopeAuto
     case .forceOn: .Menu.menuScopeAlwaysOn
     case .paused: .Menu.menuScopeAlwaysOff
-    }
-}
-
-private func scopeSourceLabel(_ source: MRAutomationScope.Source) -> LocalizedStringResource {
-    switch source {
-    case .global: .Menu.menuScopeSourceGlobal
-    case .repository: .Menu.menuScopeSourceRepo
-    case .mergeRequest: .Menu.menuScopeSourceMR
-    case .draft: .Menu.menuScopeSourceDraft
     }
 }
 

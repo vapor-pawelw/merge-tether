@@ -93,8 +93,18 @@ struct RemoteMRDetailContent: View {
                             .frame(minHeight: 44)
                     }.font(.callout)
                 }
-                if !rules.isEmpty {
+                if let automation = details.automation {
                     Divider()
+                    // Read-only, like the Mac's lightning panel header; switching stays on the Mac.
+                    Label { Text(verbatim: automation.summary) } icon: {
+                        Image(systemName: automation.active ? "bolt.fill" : "bolt.slash")
+                            .foregroundStyle(automation.active ? Color.accentColor : Color.secondary)
+                    }
+                    .font(.callout)
+                    .accessibilityElement(children: .combine)
+                }
+                if !rules.isEmpty {
+                    if details.automation == nil { Divider() }
                     Text(.RemoteDetail.remoteDetailAutomationRules).font(.subheadline.weight(.medium))
                     ForEach(Array(rules.enumerated()), id: \.offset) { _, rule in
                         Text(verbatim: rule).font(.callout).foregroundStyle(.secondary)

@@ -192,8 +192,7 @@ private struct CommandCenterMRCardContent: View {
                 if finishedState == nil, let scopeTarget {
                     BoardAutomationToggle(monitor: monitor, target: scopeTarget,
                         projectPath: item.url.gitLabProjectPath, isDraft: isDraft,
-                        policyNotes: MREffectivePolicySummary.presentation(row: row, monitor: monitor).0
-                            .routineClauses.map(\.message))
+                        policy: MREffectivePolicySummary.presentation(row: row, monitor: monitor).0)
                 }
                 BoardPinButton(pin: .mergeRequest(host: monitor.glab.resolvedHost,
                     username: monitor.glab.currentUsername, projectID: item.id.projectID, iid: item.id.iid),
@@ -482,10 +481,6 @@ struct BoardTodoRow: View {
                 }
                 Link(destination: todo.targetURL) {
                     Label { Text(.Board.boardEventOpen) } icon: { Image(systemName: "arrow.up.right.square") }
-                }
-                if let scopeTarget {
-                    MRAutomationScopeMenu(monitor: monitor, target: scopeTarget,
-                        projectPath: todo.project.pathWithNamespace, isDraft: isDraft)
                 }
             }
         }
