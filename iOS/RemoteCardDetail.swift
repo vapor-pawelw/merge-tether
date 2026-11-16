@@ -70,7 +70,7 @@ struct RemoteCardDetail: View {
                         if current.id.hasPrefix("mr:") {
                             detailReadStatus(fresh)
                         }
-                        draftSection.id(RemoteCardCTA.Destination.drafts)
+                        draftSection(shown).id(RemoteCardCTA.Destination.drafts)
                         // Like the Mac detail, the decision and its controls lead; reference sections follow.
                         if let result = model.state.result {
                             Text(result.status.title).font(.callout).foregroundStyle(.secondary)
@@ -140,7 +140,7 @@ struct RemoteCardDetail: View {
     }
 
     @ViewBuilder
-    private var draftSection: some View {
+    private func draftSection(_ details: RemoteMRDetails?) -> some View {
         if !current.drafts.isEmpty {
             VStack(alignment: .leading, spacing: 12) {
                 HStack(alignment: .firstTextBaseline, spacing: 8) {
@@ -159,6 +159,7 @@ struct RemoteCardDetail: View {
                     RemoteDraftCard(draft: draft,
                         deleteAction: boardCard?.actions.first { $0.kind == .deleteDraft && $0.id == "deleteDraft:\(draft.id)" },
                         publishAction: boardCard?.actions.first { $0.kind == .publishDraft && $0.id == "publishDraft:\(draft.id)" },
+                        extraContext: details?.draftContexts?[String(draft.id)],
                         canAct: boardCard != nil && model.state.canAct(now: .now),
                         onAction: showConfirmation)
                 }

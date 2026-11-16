@@ -21,6 +21,27 @@ import MergeTetherRemote
         #expect(legacy.authorKind == nil && legacy.origin == .ai)
     }
 
+    @Test func extraContextReachesThePhoneOnlyForMatchingDraftsAndNotes() throws {
+        let request = try JSONDecoder().decode(GitLabMergeRequest.self, from: Data(raw.utf8))
+        let discussions = try JSONDecoder().decode([GitLabMergeRequestDiscussion].self,
+            from: Data(#"[{"id":"thread","notes":[{"id":1,"author":{"id":7,"username":"reviewer"},"system":false,"body":"Concern"},{"id":2,"author":{"id":4,"username":"owner"},"system":false,"body":"Generated reply"}]}]"#.utf8))
+        let current = GitLabDraftNote(id: 11, authorID: 4, note: "Generated draft", discussionID: "thread", position: nil)
+        let edited = GitLabDraftNote(id: 12, authorID: 4, note: "Edited by the user", discussionID: "thread", position: nil)
+        var contexts = AICommentProvenanceStore.ExtraContexts()
+        contexts.drafts[11] = .init(bodySHA256: AICommentAssessmentStore.digest("Generated draft"), markdown: "Draft background")
+        contexts.drafts[12] = .init(bodySHA256: AICommentAssessmentStore.digest("Generated draft"), markdown: "Stale background")
+        contexts.notes[2] = "Published background"
+        let details = RemoteMRDetailLoader.project(request: request, progress: nil, rules: nil, reviewers: nil,
+            discussions: discussions, origins: [2: .appGenerated], drafts: [current, edited], username: "owner",
+            extraContexts: contexts)
+        #expect(details.draftContexts == ["11": "Draft background"])
+        let notes = try #require(details.threads?.first?.notes)
+        #expect(notes[0].extraContext == nil && notes[1].extraContext == "Published background")
+        let none = RemoteMRDetailLoader.project(request: request, progress: nil, rules: nil, reviewers: nil,
+            discussions: discussions, drafts: [current], username: "owner")
+        #expect(none.draftContexts == nil)
+    }
+
     @Test func currentFeedbackProjectionKeepsAssessmentSeparateFromRepliesAndResolution() throws {
         let note = RemoteDetailNote(id: "11", author: "Reviewer", body: "Concern", origin: .human, authorID: 7)
         let reply = RemoteDetailNote(id: "12", author: "Owner", body: "Done", origin: .ai, authorID: 3)

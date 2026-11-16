@@ -223,6 +223,7 @@ private struct CommandCenterMRDetailContent: View {
             .onAppear { publicationSession.open(with: item.drafts, accountAvailable: discussionTarget != nil) }
             .onChange(of: item.drafts) { _, drafts in
                 publicationSession.draftsChanged(drafts)
+                Task { await discussionStore.reloadOrigins(glab: monitor.glab) }
             }
             .onChange(of: discussionTarget) { _, _ in
                 publicationSession.clearSelection()
@@ -841,7 +842,8 @@ private struct CommandCenterMRDetailContent: View {
             expandPendingDrafts: true, selection: $publicationSession.selection,
             selectionDisabled: discussionTarget == nil || monitor.attention.confirmationStates[item.id]?.isBusy == true,
             onDelete: { draft in Task { await monitor.attention.deleteDraft(draft, from: item.id) } },
-            title: .DraftPublication.draftPublicationThreads, draftsFirst: true, onRefresh: refreshDiscussions)
+            title: .DraftPublication.draftPublicationThreads, draftsFirst: true,
+            extraContexts: current ? discussionStore.extraContexts : .empty, onRefresh: refreshDiscussions)
     }
 
     @ViewBuilder private func discussionThreads(_ discussions: MRDiscussionSnapshot) -> some View {
@@ -851,7 +853,7 @@ private struct CommandCenterMRDetailContent: View {
             MRDiscussionThreadsView(snapshot: snapshot, mergeRequestURL: item.url,
             currentUsername: monitor.glab.currentUsername, isLoading: current && discussionStore.isLoading,
             hasError: current && discussionStore.hasError, hasLoaded: current && discussionStore.hasLoaded,
-            onRefresh: refreshDiscussions)
+            extraContexts: current ? discussionStore.extraContexts : .empty, onRefresh: refreshDiscussions)
         }
     }
 

@@ -331,6 +331,10 @@ A successful Mac or phone Details discussion read can schedule missing authorshi
 
 These assessments have display purpose and separate storage. They do not satisfy automatic publication eligibility, even if a display file is passed to an action reader. Strictly attributed legacy records can be read for display without being imported into the installation's current action evidence. Ordinary refresh or reopening on iPhone retrieves completed classifications; no recurring full-Details polling is added.
 
+## Extra context for generated comments
+
+Review and follow-up workers may attach optional app-only Markdown (`extraContext`) to each draft they declare in `generatedDrafts`. It is meant for the MergeTether user: simpler explanations, background on the code involved, why the comment matters and its trade-offs, so the GitLab comment can stay concise or follow the user's guidelines. Workers leave it null by default. MergeTether stores it beside the local authorship record for that exact draft ID and body, shows it from an **Extra context** button in Mac and iOS Details while the draft text is unchanged, and keeps showing it beside the comment once that draft's publication is recorded or reconciled. It is never part of a draft body, a publication request, a quick action or any other GitLab write, and it grants no permission. It is removed with the MR's other display records.
+
 ## Automatic approval
 
 **Approve merge requests automatically** is enabled by Trusted and Max and disabled by Safe and Manual. Approval requires:

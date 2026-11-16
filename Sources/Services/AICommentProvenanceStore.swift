@@ -46,6 +46,9 @@ enum AICommentProvenanceStore {
         fileprivate let context: Context
         fileprivate let notes: [Int: PublishedNote]
 
+        /// The draft that became this note, when the publication was recorded or reconciled.
+        func draftID(forNote id: Int) -> Int? { notes[id]?.draftID }
+
         func contains(_ note: GitLabMergeRequestDiscussion.Note, discussionID: String?) -> Bool {
             guard context.isValid, note.system != true, let id = note.id, id > 0,
                   note.author?.id == context.userID, note.author?.username == context.username,
@@ -53,6 +56,47 @@ enum AICommentProvenanceStore {
             return record.version == 1 && record.context == context && record.noteID == id && record.draftID > 0 && record.discussionID == discussionID
                 && record.bodySHA256 == AICommentAssessmentStore.digest(body)
         }
+    }
+
+    /// App-only Markdown written by the agent for the user. It is read from local files for display
+    /// and never enters a draft body, publication request or any other GitLab write.
+    struct ExtraContexts: Equatable, Sendable {
+        struct Entry: Equatable, Sendable {
+            let bodySHA256: String
+            let markdown: String
+        }
+        var drafts: [Int: Entry] = [:]
+        var notes: [Int: String] = [:]
+
+        static let empty = ExtraContexts()
+        var isEmpty: Bool { drafts.isEmpty && notes.isEmpty }
+
+        /// A draft edited after generation no longer matches the text the context explained.
+        func forDraft(_ draft: GitLabDraftNote) -> String? {
+            guard let id = draft.id, let entry = drafts[id], let body = draft.note,
+                  AICommentAssessmentStore.digest(body) == entry.bodySHA256 else { return nil }
+            return entry.markdown
+        }
+
+        func forNote(_ id: Int?) -> String? { id.flatMap { notes[$0] } }
+
+        /// Only a note whose current text still matches its publication receipt keeps the context.
+        mutating func removeNote(_ id: Int) { notes[id] = nil }
+    }
+
+    private struct ExtraContextRecord: Codable, Sendable {
+        let version: Int
+        let context: Context
+        let draftID: Int
+        let bodySHA256: String
+        let markdown: String
+    }
+
+    nonisolated static let extraContextLimit = 4_000
+
+    nonisolated static func normalizedExtraContext(_ text: String?) -> String? {
+        guard let trimmed = text?.trimmingCharacters(in: .whitespacesAndNewlines), !trimmed.isEmpty else { return nil }
+        return trimmed.count > extraContextLimit ? String(trimmed.prefix(extraContextLimit)) : trimmed
     }
 
     struct PreparedPublication: Sendable {
@@ -85,7 +129,37 @@ enum AICommentProvenanceStore {
                   AICommentAssessmentStore.digest(body) == claim.bodySHA256,
                   previous.first?.note.map(AICommentAssessmentStore.digest) != claim.bodySHA256 else { continue }
             try remember(draft, context: context, runID: runID, headSHA: headSHA, in: directory)
+            let contextFile = file(kind: "context", id: claim.id, context: context, in: directory)
+            if let markdown = normalizedExtraContext(claim.extraContext) {
+                // Display-only: a failed write never blocks the authorship receipt above.
+                try? write(ExtraContextRecord(version: 1, context: context, draftID: claim.id,
+                    bodySHA256: claim.bodySHA256, markdown: markdown), to: contextFile)
+            } else {
+                try? FileManager.default.removeItem(at: contextFile)
+            }
         }
+    }
+
+    /// Loads the agent's app-only explanations for current drafts and the notes published from them.
+    nonisolated static func extraContexts(context: Context, snapshot: Snapshot? = nil, in directory: URL = directory) -> ExtraContexts {
+        guard context.isValid else { return .empty }
+        let folder = file(kind: "context", id: 0, context: context, in: directory).deletingLastPathComponent()
+        guard let files = try? FileManager.default.contentsOfDirectory(at: folder, includingPropertiesForKeys: [.fileSizeKey]),
+              files.count <= 10_000 else { return .empty }
+        var result = ExtraContexts()
+        for url in files where url.pathExtension == "json" {
+            guard let record: ExtraContextRecord = read(url, limit: 32_768), record.version == 1, record.context == context,
+                  record.draftID > 0, url.deletingPathExtension().lastPathComponent == String(record.draftID),
+                  let markdown = normalizedExtraContext(record.markdown) else { continue }
+            result.drafts[record.draftID] = .init(bodySHA256: record.bodySHA256, markdown: markdown)
+        }
+        if let snapshot, snapshot.context == context {
+            for (noteID, note) in snapshot.notes {
+                guard let entry = result.drafts[note.draftID], entry.bodySHA256 == note.bodySHA256 else { continue }
+                result.notes[noteID] = entry.markdown
+            }
+        }
+        return result
     }
 
     /// The caller supplies only receipts already authenticated as belonging to app-owned runs.
@@ -296,9 +370,9 @@ enum AICommentProvenanceStore {
         return directory.appending(path: scope).appending(path: kind).appending(path: "\(id).json")
     }
 
-    private nonisolated static func read<T: Decodable>(_ url: URL) -> T? {
-        guard let size = try? url.resourceValues(forKeys: [.fileSizeKey]).fileSize, size < 16_384,
-              let data = try? Data(contentsOf: url), data.count < 16_384 else { return nil }
+    private nonisolated static func read<T: Decodable>(_ url: URL, limit: Int = 16_384) -> T? {
+        guard let size = try? url.resourceValues(forKeys: [.fileSizeKey]).fileSize, size < limit,
+              let data = try? Data(contentsOf: url), data.count < limit else { return nil }
         return try? JSONDecoder().decode(T.self, from: data)
     }
 

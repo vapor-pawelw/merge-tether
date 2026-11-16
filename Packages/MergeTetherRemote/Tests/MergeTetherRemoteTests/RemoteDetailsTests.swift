@@ -21,6 +21,49 @@ import Testing
         #expect(try JSONDecoder().decode(RemoteMRDetails.self, from: JSONEncoder().encode(oldDetails)).branches == nil)
     }
 
+    @Test func extraContextIsOptionalForOlderPayloadsAndRoundTrips() throws {
+        let legacyNote = try JSONDecoder().decode(RemoteDetailNote.self, from: Data(#"{"id":"1","body":"Reply","origin":"ai"}"#.utf8))
+        #expect(legacyNote.extraContext == nil)
+        let legacyDetails = try JSONDecoder().decode(RemoteMRDetails.self, from: Data(
+            #"{"checkedAt":0,"metadata":[],"reasons":[],"policy":[],"feedback":[],"activity":[],"truncated":false}"#.utf8))
+        #expect(legacyDetails.draftContexts == nil)
+        var details = RemoteMRDetails(checkedAt: date, threads: [.init(id: "thread", state: .open,
+            notes: [.init(id: "20", body: "Reply", origin: .ai, extraContext: "**Why** it matters")])])
+        details.draftContexts = ["11": "- Background"]
+        let decoded = try JSONDecoder().decode(RemoteMRDetails.self, from: JSONEncoder().encode(details))
+        #expect(decoded == details)
+        #expect(decoded.threads?.first?.notes.first?.extraContext == "**Why** it matters")
+        #expect(decoded.draftContexts?["11"] == "- Background")
+
+        // An older phone's decoder sees only the fields it knows; the extra keys are ignored.
+        struct OlderNote: Decodable { let id: String; let body: String }
+        let older = try JSONDecoder().decode(OlderNote.self, from: JSONEncoder().encode(decoded.threads![0].notes[0]))
+        #expect(older.id == "20" && older.body == "Reply")
+    }
+
+    @Test func boundedDetailsClipExtraContextAndDropItBeforeComments() throws {
+        let board = board(), card = board.cards[0]
+        let request = try RemoteDetailRequest(card: card, board: board)
+        let long = String(repeating: "ą", count: 5_000)
+        var details = RemoteMRDetails(checkedAt: date, threads: [.init(id: "t", state: .open,
+            notes: [.init(id: "1", body: "Short", extraContext: long)])])
+        details.draftContexts = ["11": long]
+        let clipped = RemoteDetailResponse(request: request, status: .current, details: details).bounded()
+        #expect(clipped.details?.threads?.first?.notes.first?.extraContext?.count == 4_000)
+        #expect(clipped.details?.draftContexts?["11"]?.count == 4_000)
+        #expect(clipped.details?.truncated == true)
+
+        let contexts = Dictionary(uniqueKeysWithValues: (0..<100).map { (String($0), String(repeating: "\"ą", count: 2_000)) })
+        let notes = (0..<30).map { RemoteDetailNote(id: String($0), body: "Comment \($0)", extraContext: String(repeating: "\"ą", count: 2_000)) }
+        var large = RemoteMRDetails(checkedAt: date, threads: [.init(id: "t", state: .open, notes: notes)])
+        large.draftContexts = contexts
+        let fitted = RemoteDetailResponse(request: request, status: .current, details: large).bounded()
+        let encoded = try JSONEncoder().encode(RemoteMessage(type: .details, detailResponse: fitted))
+        #expect(encoded.count <= RemoteCipher.maximumPayloadBytes)
+        #expect(fitted.details?.threads?.first?.notes.count == 30)
+        #expect(fitted.details?.draftContexts == nil)
+    }
+
     @Test func olderPhonesWithoutAuthorIdentityFieldsCanStillOpenDetails() throws {
         var card = RemoteCard(id: "mr:1:2", title: "MR", project: "g/p", url: nil)
         card.presentation = .init(author: "Alice Example", repository: "p",

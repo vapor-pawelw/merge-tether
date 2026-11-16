@@ -35,9 +35,11 @@ import MergeTetherRemote
         let discussions = store.hasLoaded && !store.hasError ? store.discussions : nil
         let origins = store.origins
         let authorKinds = store.authorKinds
+        let extraContexts = store.extraContexts
         let details = await Task.detached(priority: .utility) {
             project(request: latest, progress: progress, rules: ruleState, reviewers: reviewerHistory,
-                discussions: discussions, origins: origins, drafts: drafts, username: username, authorKinds: authorKinds)
+                discussions: discussions, origins: origins, drafts: drafts, username: username, authorKinds: authorKinds,
+                extraContexts: extraContexts)
         }.value
         try check(latest)
         return details
@@ -46,7 +48,8 @@ import MergeTetherRemote
     nonisolated static func project(request: GitLabMergeRequest, progress: MergeRequestApprovalProgress?, rules: RemoteApprovalRuleState?,
                         reviewers: [GitLabMergeRequestReviewer]?, discussions: [GitLabMergeRequestDiscussion]?,
                         origins: [Int: MRDiscussionSnapshot.Origin] = [:], drafts: [GitLabDraftNote], username: String,
-                        authorKinds: [Int: AuthorFeedbackPolicy.AccountKind] = [:]) -> RemoteMRDetails {
+                        authorKinds: [Int: AuthorFeedbackPolicy.AccountKind] = [:],
+                        extraContexts: AICommentProvenanceStore.ExtraContexts = .empty) -> RemoteMRDetails {
         var progress = progress
         let history = MergeRequestReviewHistory(reviewers: reviewers ?? [], discussions: discussions ?? [], authorID: request.author.id)
         progress?.reviewHistory = history
@@ -94,13 +97,18 @@ import MergeTetherRemote
                                 case .automation: .automation
                                 case .unknown, nil: nil
                                 }
-                            }, avatarURL: note.author?.avatarURL)
+                            }, avatarURL: note.author?.avatarURL, extraContext: extraContexts.forNote(note.id))
                     }, reply: .init(rawValue: String(describing: summary.publishedReply)) ?? .unavailable, draftCount: summary.draftCount)
             }
         }
         var details = RemoteMRDetails(checkedAt: .now, metadata: metadata, description: request.description, approvals: approvals, threads: threads,
             branches: .init(source: request.sourceBranch, target: request.targetBranch))
         details.discussionFingerprint = discussions.flatMap { ReviewVerdict.fingerprint($0) }
+        let draftContexts = Dictionary(drafts.compactMap { draft in
+            guard let id = draft.id, id > 0, let markdown = extraContexts.forDraft(draft) else { return nil as (String, String)? }
+            return (String(id), markdown)
+        }, uniquingKeysWith: { first, _ in first })
+        details.draftContexts = draftContexts.isEmpty ? nil : draftContexts
         return details
     }
 }

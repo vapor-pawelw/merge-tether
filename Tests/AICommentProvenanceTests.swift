@@ -229,6 +229,79 @@ struct AICommentProvenanceTests: Sendable {
     }
 
 
+    @Test func extraContextIsStoredLocallyForTheExactDraftAndFollowsItsPublishedNote() throws {
+        // given
+        let directory = try temporaryDirectory()
+        defer { try? FileManager.default.removeItem(at: directory) }
+        let generated = draft(11), plain = draft(12, body: "Plain reply")
+        let markdown = "## Background\n- The parser drops `nil` here."
+        // when
+        try AICommentProvenanceStore.recordGenerated([
+            .init(id: 11, bodySHA256: AICommentAssessmentStore.digest(generated.note!), extraContext: "  \(markdown)\n"),
+            .init(id: 12, bodySHA256: AICommentAssessmentStore.digest(plain.note!), extraContext: " ")
+        ], baseline: [], current: [generated, plain], context: context, runID: UUID(),
+            headSHA: String(repeating: "a", count: 40), in: directory)
+        // then
+        let drafts = AICommentProvenanceStore.extraContexts(context: context, in: directory)
+        #expect(drafts.forDraft(generated) == markdown)
+        #expect(drafts.forDraft(plain) == nil)
+        #expect(drafts.forDraft(draft(11, body: "User edit")) == nil)
+        let other = AICommentProvenanceStore.Context(host: context.host, username: "other", userID: 19, projectID: 1, iid: 2)
+        #expect(AICommentProvenanceStore.extraContexts(context: other, in: directory).isEmpty)
+
+        let publication = try #require(AICommentProvenanceStore.capturePublication([generated], context: context, before: [], in: directory))
+        let after = try discussions(#"[{"id":20,"body":"Generated reply","author":{"id":9,"username":"me"}}]"#)
+        try AICommentProvenanceStore.recordPublished(publication, after: after, in: directory)
+        let snapshot = AICommentProvenanceStore.snapshot(context: context, in: directory)
+        let published = AICommentProvenanceStore.extraContexts(context: context, snapshot: snapshot, in: directory)
+        #expect(published.forNote(20) == markdown)
+        #expect(published.forNote(21) == nil)
+
+        // A later rewrite without context removes the stale explanation.
+        let rewritten = draft(11, body: "Rewritten reply")
+        try AICommentProvenanceStore.recordGenerated([.init(id: 11, bodySHA256: AICommentAssessmentStore.digest(rewritten.note!))],
+            baseline: [generated], current: [rewritten], context: context, runID: UUID(),
+            headSHA: String(repeating: "a", count: 40), in: directory)
+        let afterRewrite = AICommentProvenanceStore.extraContexts(context: context, snapshot: snapshot, in: directory)
+        #expect(afterRewrite.forDraft(rewritten) == nil && afterRewrite.forNote(20) == nil)
+    }
+
+    @Test func oversizedExtraContextIsClippedAndBlankContextIsDropped() {
+        let long = String(repeating: "ą", count: AICommentProvenanceStore.extraContextLimit + 50)
+        #expect(AICommentProvenanceStore.normalizedExtraContext(long)?.count == AICommentProvenanceStore.extraContextLimit)
+        #expect(AICommentProvenanceStore.normalizedExtraContext(" \n ") == nil)
+        #expect(AICommentProvenanceStore.normalizedExtraContext(nil) == nil)
+    }
+
+    @MainActor @Test func detailsShowExtraContextOnlyForTheMatchingPublishedNote() async throws {
+        // given
+        let directory = try temporaryDirectory()
+        defer { try? FileManager.default.removeItem(at: directory) }
+        let generated = draft(11)
+        try AICommentProvenanceStore.recordGenerated([.init(id: 11, bodySHA256: AICommentAssessmentStore.digest(generated.note!),
+            extraContext: "Why this matters")], baseline: [], current: [generated], context: context, runID: UUID(),
+            headSHA: String(repeating: "a", count: 40), in: directory)
+        let gitlab = InMemoryGitLab()
+        defer { gitlab.close() }
+        let glab = gitlab.service(host: context.host, username: "me")
+        gitlab.handler = { call in
+            if call.endpoint == "/user" { return InMemoryGitLab.output(#"{"id":9,"username":"me"}"#) }
+            if call.endpoint.contains("/discussions") {
+                return InMemoryGitLab.output(#"[{"id":"thread","notes":[{"id":5,"body":"Reviewer note","author":{"id":5,"username":"reviewer"}},{"id":20,"body":"Generated reply","author":{"id":9,"username":"me"}}]}]"#)
+            }
+            return try gitlab.unexpected(call)
+        }
+        let store = MRDiscussionStore(assessmentDirectory: directory.appending(path: "assessments"), provenanceDirectory: directory)
+        // when
+        await store.refresh(target: .init(host: context.host, username: "me", projectID: 1, iid: 2,
+            url: URL(string: "https://gitlab.example.test/g/p/-/merge_requests/2")!), glab: glab)
+        // then
+        #expect(store.extraContexts.forNote(20) == "Why this matters")
+        #expect(store.extraContexts.forNote(5) == nil)
+        #expect(store.extraContexts.forDraft(generated) == "Why this matters")
+        #expect(gitlab.requests.allSatisfy { $0.method == "GET" })
+    }
+
     private func recordReply(_ id: Int = 11, body: String = "Generated reply", in directory: URL) throws -> GitLabDraftNote {
         // GitLab returns diff-thread replies with an all-null position object.
         let generated = GitLabDraftNote(id: id, authorID: 9, note: body, discussionID: "thread",

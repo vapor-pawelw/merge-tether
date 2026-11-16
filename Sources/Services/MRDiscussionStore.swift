@@ -37,6 +37,8 @@ final class MRDiscussionStore {
     private(set) var target: MRDiscussionTarget?
     private(set) var discussions: [GitLabMergeRequestDiscussion] = []
     private(set) var origins: [Int: MRDiscussionSnapshot.Origin] = [:]
+    /// App-only agent explanations for drafts and published notes; never part of a GitLab write.
+    private(set) var extraContexts: AICommentProvenanceStore.ExtraContexts = .empty
     private(set) var authorKinds: [Int: AuthorFeedbackPolicy.AccountKind] = [:]
     private(set) var isLoading = false
     private(set) var hasError = false
@@ -81,7 +83,9 @@ final class MRDiscussionStore {
                     iid: requested.iid, host: requested.host)
             }
             guard isCurrent(current, target: requested, glab: glab, revision: revision) else { return }
-            var assessed = await cachedOrigins(in: result, target: requested, userID: authenticatedUserID)
+            let cached = await cachedOrigins(in: result, target: requested, userID: authenticatedUserID)
+            var assessed = cached.0
+            let contexts = cached.1
             guard isCurrent(current, target: requested, glab: glab, revision: revision) else { return }
             var verifiedAssistantIDs: Set<Int> = []
             // A username is only a lookup hint. GitLab must confirm this is its assistant account.
@@ -113,6 +117,7 @@ final class MRDiscussionStore {
             loadedRevision = revision
             discussions = result
             origins = assessed
+            extraContexts = contexts
             authorKinds = kinds
             hasLoaded = true
             if load == nil || verifyAuthorKind != nil {
@@ -127,6 +132,7 @@ final class MRDiscussionStore {
                 loadedRevision = nil
                 discussions = []
                 origins = [:]
+                extraContexts = .empty
                 authorKinds = [:]
                 hasLoaded = false
             }
@@ -137,23 +143,30 @@ final class MRDiscussionStore {
     func reloadOrigins(glab: GlabService) async {
         guard let target, hasLoaded, loadedRevision == glab.accountRevision, matchesAccount(target, glab: glab) else { return }
         let current = generation, revision = glab.accountRevision
-        var updated = await cachedOrigins(in: discussions, target: target, userID: authenticatedUserID)
+        let cached = await cachedOrigins(in: discussions, target: target, userID: authenticatedUserID)
+        var updated = cached.0
+        let contexts = cached.1
         guard isCurrent(current, target: target, glab: glab, revision: revision) else { return }
         for (id, origin) in origins where origin == .verifiedAssistant { updated[id] = origin }
         origins = updated
+        extraContexts = contexts
     }
 
     private func cachedOrigins(in result: [GitLabMergeRequestDiscussion], target: MRDiscussionTarget,
-                               userID: Int?) async -> [Int: MRDiscussionSnapshot.Origin] {
+                               userID: Int?) async -> ([Int: MRDiscussionSnapshot.Origin], AICommentProvenanceStore.ExtraContexts) {
         let directory = assessmentDirectory
         let legacyDirectory = legacyAssessmentDirectory
         let displayDirectory = displayAssessmentDirectory
         let provenanceDirectory = self.provenanceDirectory
         return await Task.detached {
-            let generated = userID.map { userID in
-                AICommentProvenanceStore.reconcile(result, context: .init(host: target.host, username: target.username,
-                    userID: userID, projectID: target.projectID, iid: target.iid), in: provenanceDirectory)
+            let context = userID.map { userID in
+                AICommentProvenanceStore.Context(host: target.host, username: target.username,
+                    userID: userID, projectID: target.projectID, iid: target.iid)
             }
+            let generated = context.map { AICommentProvenanceStore.reconcile(result, context: $0, in: provenanceDirectory) }
+            var contexts = context.map {
+                AICommentProvenanceStore.extraContexts(context: $0, snapshot: generated, in: provenanceDirectory)
+            } ?? .empty
             var origins: [Int: MRDiscussionSnapshot.Origin] = [:]
             for thread in result {
                 for note in thread.notes where note.system != true {
@@ -161,6 +174,7 @@ final class MRDiscussionStore {
                         origins[id] = .appGenerated
                         continue
                     }
+                    if let id = note.id { contexts.removeNote(id) }
                     if let id = note.id, id > 0, let record = AICommentAssessmentStore.displayResult(for: note,
                         host: target.host, projectID: target.projectID, iid: target.iid,
                         username: target.username, in: directory, legacyDirectory: legacyDirectory, displayDirectory: displayDirectory),
@@ -174,7 +188,7 @@ final class MRDiscussionStore {
                     }
                 }
             }
-            return origins
+            return (origins, contexts)
         }.value
     }
 
@@ -242,6 +256,7 @@ final class MRDiscussionStore {
         loadedRevision = nil
         discussions = []
         origins = [:]
+        extraContexts = .empty
         authorKinds = [:]
         authorKindVersions = [:]
         hasError = false

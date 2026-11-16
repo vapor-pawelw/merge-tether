@@ -584,6 +584,28 @@
           }
         }
       }
+    },
+    "mrDiscussions.extraContext": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Extra context"
+          }
+        }
+      }
+    },
+    "mrDiscussions.extraContextHelp": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "MergeTether's explanation for you. It stays in the app and is never posted to GitLab."
+          }
+        }
+      }
     }
   },
   "version": "1.0"

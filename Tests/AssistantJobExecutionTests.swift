@@ -61,6 +61,22 @@ import Testing
         #expect(claude.generatedDrafts == result.generatedDrafts)
     }
 
+    @Test func generatedDraftsCarryOptionalAppOnlyExtraContext() throws {
+        let hash = AICommentAssessmentStore.digest("Generated reply")
+        let codex = try AssistantJobResult.codex(Data("{\"status\":\"succeeded\",\"summary\":\"Saved\",\"blocker\":null,\"generatedDrafts\":[{\"id\":11,\"bodySHA256\":\"\(hash)\",\"extraContext\":\"**Why** it matters\"},{\"id\":12,\"bodySHA256\":\"\(hash)\",\"extraContext\":null}]}".utf8))
+        #expect(codex.generatedDrafts == [.init(id: 11, bodySHA256: hash, extraContext: "**Why** it matters"), .init(id: 12, bodySHA256: hash)])
+        let claude = try AssistantJobResult.claude(Data("{\"is_error\":false,\"structured_output\":{\"status\":\"succeeded\",\"summary\":\"Saved\",\"generatedDrafts\":[{\"id\":11,\"bodySHA256\":\"\(hash)\",\"extraContext\":\"**Why** it matters\"}]}}".utf8))
+        #expect(claude.generatedDrafts?.first?.extraContext == "**Why** it matters")
+        // Strict structured output lists every property as required; null is the default.
+        let schema = try #require(JSONSerialization.jsonObject(with: Data(AssistantJobResult.schema.utf8)) as? [String: Any])
+        let item = try #require(((schema["properties"] as? [String: Any])?["generatedDrafts"] as? [String: Any])?["items"] as? [String: Any])
+        #expect((item["required"] as? [String])?.contains("extraContext") == true)
+        let field = try #require((item["properties"] as? [String: Any])?["extraContext"] as? [String: Any])
+        #expect(field["type"] as? [String] == ["string", "null"] && field["maxLength"] as? Int == 4_000)
+        #expect(AssistantJobResult.extraContextInstructions.contains("never posted to GitLab"))
+        #expect(AssistantJobResult.extraContextInstructions.contains("Leave it null by default"))
+    }
+
     @Test func legacyAttentionReasonsRedactCredentials() {
         let execution = AssistantJobExecution(state: .blocked, summary: "Work checked.\n\nCommand failed with token=glpat-synthetic123456789")
         #expect(execution.attentionExplanation?.contains("glpat-synthetic123456789") == false)
