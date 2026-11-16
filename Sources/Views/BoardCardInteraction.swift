@@ -1,5 +1,14 @@
 import SwiftUI
 
+/// A containing sheet must release Escape while a child popover owns dismissal.
+struct BoardDetailPopoverPresentedKey: PreferenceKey {
+    static let defaultValue = false
+
+    static func reduce(value: inout Bool, nextValue: () -> Bool) {
+        value = value || nextValue()
+    }
+}
+
 private struct BoardHeaderControlHover: ViewModifier {
     @State private var hovered = false
     @Environment(\.isEnabled) private var enabled
@@ -64,6 +73,7 @@ extension View {
 
 struct BoardItemDetailSheet<Content: View>: View {
     @Environment(\.dismiss) private var dismiss
+    @State private var detailPopoverPresented = false
     @ViewBuilder let content: () -> Content
 
     var body: some View {
@@ -73,6 +83,7 @@ struct BoardItemDetailSheet<Content: View>: View {
                 Spacer()
                 Button { dismiss() } label: { Image(systemName: "xmark") }
                     .keyboardShortcut(.cancelAction)
+                    .disabled(detailPopoverPresented)
                     .accessibilityLabel(Text(.CommandCenter.commandCenterClose))
             }
             .padding(16)
@@ -83,5 +94,7 @@ struct BoardItemDetailSheet<Content: View>: View {
             }
         }
         .frame(minWidth: 600, idealWidth: 760, minHeight: 440, idealHeight: 640)
+        .interactiveDismissDisabled(detailPopoverPresented)
+        .onPreferenceChange(BoardDetailPopoverPresentedKey.self) { detailPopoverPresented = $0 }
     }
 }
