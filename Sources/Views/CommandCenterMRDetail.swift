@@ -151,9 +151,11 @@ private struct CommandCenterMRDetailContent: View {
                                 Task { await scroll(to: item.authorFeedbackStatus == nil ? .comments : .feedbackStatus, proxy: proxy) }
                             }, showsExplanations: false,
                             showsReplySources: !(showsDecisions && item.authorFeedbackStatus != nil),
-                            textFont: .callout, statusTrailer: {
+                            textFont: .callout,
+                            coveredBlockers: shownRequirements(presentation)?.coveredBlockers ?? [],
+                            hidesBlockedActions: presentation.working, statusTrailer: {
                                 MREffectivePolicySummary(row: presentationRow, monitor: monitor,
-                                    excluding: [presentation.humanAction?.explanation ?? ""])
+                                    excluding: [presentation.humanAction?.explanation ?? ""], holdsOnly: true)
                             }, additionalActions: { EmptyView() })
                     }
                     if finishedState == nil { supplementaryActions(citationContext: citationContext).id(Anchor.actions) }
@@ -293,7 +295,7 @@ private struct CommandCenterMRDetailContent: View {
                 HStack(spacing: 0) {
                     if finishedState == nil, let target = monitor.scopeTarget(projectID: item.id.projectID, iid: item.id.iid, url: item.url) {
                         BoardAutomationToggle(monitor: monitor, target: target, projectPath: item.url.gitLabProjectPath,
-                            isDraft: presentationRow.isDraft)
+                            isDraft: presentationRow.isDraft, policyNotes: routinePolicy)
                     }
                     BoardPinButton(pin: .mergeRequest(host: monitor.glab.resolvedHost,
                         username: monitor.glab.currentUsername, projectID: item.id.projectID, iid: item.id.iid),
@@ -319,7 +321,14 @@ private struct CommandCenterMRDetailContent: View {
                     } else {
                         // The Next step box below already states what needs attention.
                         let genericAttention = needsHumanAttention && (progress.working || progress.status == nil)
-                        if (needsHumanAttention || !progress.working) && !(genericAttention && showsDecisions) {
+                        if let waiting = shownRequirements(progress) {
+                            VStack(alignment: .leading, spacing: 5) {
+                                ForEach(Array(waiting.requirements.enumerated()), id: \.offset) { _, line in
+                                    BoardRequirementLine(text: line)
+                                }
+                            }
+                            .font(.callout)
+                        } else if (needsHumanAttention || !progress.working) && !(genericAttention && showsDecisions) {
                             Label {
                                 if let status = progress.status, !progress.working {
                                     Text(verbatim: status)
@@ -367,6 +376,18 @@ private struct CommandCenterMRDetailContent: View {
                 .buttonStyle(.bordered)
             }
         }
+    }
+
+    /// The card's requirement list, shown where the single waiting sentence used to be.
+    private func shownRequirements(_ progress: MRCardPresentation) -> MRWaitingStatus? {
+        guard !needsHumanAttention, !progress.working, let waiting = progress.waitingStatus,
+              !waiting.requirements.isEmpty else { return nil }
+        return waiting
+    }
+
+    /// Saved rules for this MR: in the automation toggle's help and under Details, not beside blockers.
+    private var routinePolicy: [LocalizedStringResource] {
+        MREffectivePolicySummary.presentation(row: presentationRow, monitor: monitor).0.routineClauses.map(\.message)
     }
 
     private var headerMenu: some View {
@@ -533,7 +554,8 @@ private struct CommandCenterMRDetailContent: View {
     private var decisionActions: some View {
             CommentReviewImpactView(item: item, reReviewEnabled: monitor.settings.automation.autoReReviewEnabled)
             BoardMRIntentActions(row: presentationRow, monitor: monitor)
-            ReReviewControls(item: presentationItem, monitor: monitor.attention)
+            ReReviewControls(item: presentationItem, monitor: monitor.attention,
+                hidesStaleResult: MRCardPresentation(row: presentationRow, monitor: monitor, allowsRemoval: isReviewed).working)
             InboxAttentionActions(item: presentationItem, feedbackAction: monitor.attentionFeedbackAction(for: item),
                 onFeedback: { Task { await monitor.runAttentionFeedback(for: item) } },
                 onPipeline: { monitor.confirmPipelineHandoff(for: item.id) },
@@ -574,6 +596,14 @@ private struct CommandCenterMRDetailContent: View {
                         }
                     }
                     if finishedState == nil { statusReasons }
+                    if finishedState == nil, !routinePolicy.isEmpty {
+                        VStack(alignment: .leading, spacing: 4) {
+                            Text(.EffectivePolicy.policyAutomationRules).font(.callout).foregroundStyle(.secondary)
+                            ForEach(Array(routinePolicy.enumerated()), id: \.offset) { _, rule in
+                                Text(rule).font(.callout)
+                            }
+                        }
+                    }
                     IgnoredFeedbackSuggestionsView(entries: ignoredSuggestions, mergeRequestURL: item.url,
                         isUpdating: isUpdatingFeedbackDecision, onRestore: restoreSuggestion, onReset: {
                             guard let target else { return }
@@ -619,7 +649,8 @@ private struct CommandCenterMRDetailContent: View {
     private func supplementaryActions(citationContext: MRCommentCitation.Context?) -> some View {
         if !showsDecisions {
             if item.needsConfirmation { confirmationControls }
-            VStack(alignment: .leading, spacing: 12) { decisionActions }
+            // Flattened: an empty wrapper would still take the parent's spacing.
+            decisionActions
             FollowUpAutomationHoldView(row: presentationRow, monitor: monitor)
             if item.authorFeedbackStatus != nil { feedbackCheck(citationContext: citationContext).id(Anchor.feedbackStatus) }
         }

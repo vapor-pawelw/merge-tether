@@ -21,6 +21,21 @@ import Testing
         #expect(try JSONDecoder().decode(RemoteMRDetails.self, from: JSONEncoder().encode(oldDetails)).branches == nil)
     }
 
+    @Test func savedRulesAreOptionalAndStayASubsetOfPolicyWhenBounded() throws {
+        // Older hosts send no rules; the phone then shows every policy line together, as before.
+        let legacy = try JSONDecoder().decode(RemoteMRDetails.self,
+            from: JSONEncoder().encode(RemoteMRDetails(checkedAt: date, policy: ["Merge waits for you"])))
+        #expect(legacy.rules == nil)
+        var details = RemoteMRDetails(checkedAt: date, description: String(repeating: "ą", count: 100_000),
+            policy: ["Automatic work paused: sign in to the coding agent", "Merge waits for you"])
+        details.rules = ["Merge waits for you"]
+        #expect(try JSONDecoder().decode(RemoteMRDetails.self, from: JSONEncoder().encode(details)) == details)
+        let board = board()
+        let request = try RemoteDetailRequest(card: board.cards[0], board: board)
+        let bounded = try #require(RemoteDetailResponse(request: request, status: .current, details: details).bounded().details)
+        #expect(bounded.rules?.allSatisfy(bounded.policy.contains) == true)
+    }
+
     @Test func olderPhonesWithoutAuthorIdentityFieldsCanStillOpenDetails() throws {
         var card = RemoteCard(id: "mr:1:2", title: "MR", project: "g/p", url: nil)
         card.presentation = .init(author: "Alice Example", repository: "p",

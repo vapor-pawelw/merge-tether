@@ -14,6 +14,8 @@ struct MREffectivePolicyPresentationTests {
             settings.setActionAutomatic(.merge, enabled: false, for: target)
             let result = presentation(settings)
             #expect(result.clauses == [.publicationAfterChecks(.all), .mergeManual])
+            // Saved rules move to the automation toggle's help; the card keeps only holds.
+            #expect(result.routineClauses == result.clauses && result.cardClauses.isEmpty)
             #expect(settings.automation.autoMergeEnabled)
         }
     }
@@ -42,6 +44,7 @@ struct MREffectivePolicyPresentationTests {
 
             // Then the existing automation tab opens, without granting consent or changing toggles.
             #expect(policy.clauses == [.automationDecisionRequired])
+            #expect(policy.cardClauses == policy.clauses && policy.routineClauses.isEmpty)
             #expect(action == .chooseAutomationSettings && opened == .automation)
             #expect(restored.automation == before && restored.automation.packageDecision == .undecided)
             #expect(!restored.automaticWritesAllowed)

@@ -61,7 +61,8 @@ struct AuthorFeedbackView: View {
                                 }
                                 .padding(.leading, 20)
                             }
-                            .fixedSize(horizontal: false, vertical: true)
+                            // No vertical fixedSize here: it measured collapsed disclosures and let
+                            // expanded technical details overlap the following rows.
                         }
                         ForEach(status.codeReviewRequests) { question in
                             VStack(alignment: .leading, spacing: 4) {

@@ -62,10 +62,17 @@ public struct RemoteCardText: Codable, Equatable, Sendable {
     public var working: Bool
     public var chips: [RemoteCardChip]
     public var secondaryCTA: RemoteCardCTA?
+    /// Merge requirements, one per line; `status` keeps the joined sentence for older phones.
+    public var requirements: [String]?
+    /// The automation order behind `nextStep`, with the current step's index.
+    public var steps: [String]?
+    public var currentStep: Int?
     public init(author: String? = nil, repository: String, draftBadge: String? = nil,
                 status: String? = nil, nextStep: String? = nil, working: Bool = false,
                 chips: [RemoteCardChip] = [], secondaryCTA: RemoteCardCTA? = nil,
-                authorUsername: String? = nil, authorAvatarURL: URL? = nil) {
+                authorUsername: String? = nil, authorAvatarURL: URL? = nil,
+                requirements: [String]? = nil, steps: [String]? = nil, currentStep: Int? = nil) {
+        self.requirements = requirements; self.steps = steps; self.currentStep = currentStep
         self.author = author; self.authorUsername = authorUsername; self.authorAvatarURL = authorAvatarURL
         self.repository = repository; self.draftBadge = draftBadge
         self.status = status; self.nextStep = nextStep; self.working = working

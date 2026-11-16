@@ -218,9 +218,18 @@ import MergeTetherRemote
         let showsWaiting = ordinaryWait && !knownMergeFailure && hasCurrentCatalog && evidenceMatchesCatalogContext
         let status = String(localized: showsWaiting ? waitingStatus?.title ?? title : title)
         card.presentation?.status = status
+        if showsWaiting, let waitingStatus, !waitingStatus.requirements.isEmpty {
+            // Like the Mac card: one requirement per line, with an uncovered blocker joining the list.
+            var lines = waitingStatus.requirements.map { String(localized: $0) }
+            let covered: Bool = if case .prerequisite(let reason) = blocker { waitingStatus.coveredBlockers.contains(reason) } else { false }
+            if !covered, !lines.contains(String(localized: title)) { lines.append(String(localized: title)) }
+            card.presentation?.requirements = lines
+        }
         if let detail { card.detail = detail }
-        // The status line already carries the blocker; the phone must not print it twice.
-        else if card.detail.isEmpty, String(localized: title) != status { card.detail = String(localized: title) }
+        // The status line or requirement list already carries the blocker; the phone must not print it twice.
+        else if card.presentation?.requirements == nil, card.detail.isEmpty, String(localized: title) != status {
+            card.detail = String(localized: title)
+        }
         card.actions.removeAll { [.merge, .enqueueMerge].contains($0.kind) }
         if card.primaryCTA == nil {
             if case .feedback = blocker {
@@ -462,7 +471,8 @@ import MergeTetherRemote
             status: model.status, nextStep: model.nextStep, working: model.working,
             chips: model.chips.map { .init(title: String(localized: $0.title), symbol: $0.symbol) },
             secondaryCTA: human?.action == .retryRun ? .init(title: String(localized: .MRHumanAction.mrHumanActionActionReviewRun), destination: .assistantRuns) : nil,
-            authorUsername: authorUsername, authorAvatarURL: authorAvatarURL)
+            authorUsername: authorUsername, authorAvatarURL: authorAvatarURL,
+            steps: model.stepChain.map { $0.steps.map { String(localized: $0) } }, currentStep: model.stepChain?.current)
         if model.actionsBlocked { card.actions = [] }
         return card
     }

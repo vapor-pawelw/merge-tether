@@ -5,8 +5,17 @@ struct MREffectivePolicySummary: View {
     let row: MergeRequestBoardSnapshot.Row
     let monitor: TodoMonitorService
     var excluding: [String] = []
+    /// Cards move routine rules into the automation toggle's help and keep only holds.
+    var holdsOnly = false
 
     var body: some View {
+        let (presentation, submissionTitle) = Self.presentation(row: row, monitor: monitor)
+        MREffectivePolicyView(presentation: presentation, holdsOnly: holdsOnly,
+            excluding: excluding + (submissionTitle.map { [String(localized: $0)] } ?? []))
+    }
+
+    static func presentation(row: MergeRequestBoardSnapshot.Row, monitor: TodoMonitorService)
+        -> (MREffectivePolicyPresentation, LocalizedStringResource?) {
         let target = monitor.scopeTarget(projectID: row.id.projectID, iid: row.id.iid, url: row.item.url)
         let request = row.displayRequest
         let sameContext = row.evidenceMatchesCatalogContext
@@ -26,18 +35,23 @@ struct MREffectivePolicySummary: View {
             readState: .init(catalogCurrent: catalogCurrent, row: row, input: monitor.boardRowInput(for: row)),
             submission: submission,
             cliHold: monitor.cliHealth.hold(for: monitor.settings.automation.assistant)?.issue.kind)
-        MREffectivePolicyView(presentation: .init(input: input),
-            excluding: excluding + (status?.submissionState.title.map { [String(localized: $0)] } ?? []))
+        return (.init(input: input), status?.submissionState.title)
     }
 }
 
 struct MREffectivePolicyView: View {
     let presentation: MREffectivePolicyPresentation
+    var holdsOnly = false
     var excluding: [String] = []
     @Environment(\.openSettings) private var openSettings
 
     var body: some View {
-        let clauses = presentation.clauses.filter { !excluding.contains(String(localized: $0.message)) }
+        let clauses = (holdsOnly ? presentation.cardClauses : presentation.clauses)
+            .filter { !excluding.contains(String(localized: $0.message)) }
+        if !clauses.isEmpty || presentation.settingsAction != nil { content(clauses) }
+    }
+
+    private func content(_ clauses: [MREffectivePolicyPresentation.Clause]) -> some View {
         VStack(alignment: .leading, spacing: 6) {
             if !clauses.isEmpty {
                 // Separate pills keep each rule scannable instead of one run-on sentence.
@@ -85,7 +99,7 @@ private struct PolicyPillLabelStyle: LabelStyle {
     }
 }
 
-private extension MREffectivePolicyPresentation.Clause {
+extension MREffectivePolicyPresentation.Clause {
     var symbol: String {
         switch self {
         case .publicationAfterChecks: "text.bubble"

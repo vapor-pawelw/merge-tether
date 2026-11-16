@@ -6,7 +6,9 @@ struct RemoteMRDetailContent: View {
     let card: RemoteCard
     @State private var showingApprovals = false
     @State private var descriptionExpanded = false
-    private var visiblePolicy: [String] { card.visiblePolicy(details.policy) }
+    /// Holds that stop work lead; saved rules sit with the reference data, as on the Mac.
+    private var rules: [String] { details.rules ?? [] }
+    private var visiblePolicy: [String] { card.visiblePolicy(details.policy.filter { !rules.contains($0) }) }
 
     var body: some View {
         LazyVStack(alignment: .leading, spacing: 24) {
@@ -86,6 +88,13 @@ struct RemoteMRDetailContent: View {
                             .frame(minHeight: 44)
                     }.font(.callout)
                 }
+                if !rules.isEmpty {
+                    Divider()
+                    Text(.RemoteDetail.remoteDetailAutomationRules).font(.subheadline.weight(.medium))
+                    ForEach(Array(rules.enumerated()), id: \.offset) { _, rule in
+                        Text(verbatim: rule).font(.callout).foregroundStyle(.secondary)
+                    }
+                }
                 if !details.reasons.isEmpty {
                     Divider()
                     ForEach(Array(details.reasons.enumerated()), id: \.offset) { _, reason in
@@ -98,23 +107,7 @@ struct RemoteMRDetailContent: View {
                 Text(.RemoteDetail.remoteDetailHistoryHelp).font(.caption).foregroundStyle(.secondary)
                 if details.activity.isEmpty { Text(.RemoteDetail.remoteDetailNoActivity).font(.callout).foregroundStyle(.secondary) }
                 LazyVStack(alignment: .leading, spacing: 14) { ForEach(details.activity) { activity in
-                    DisclosureGroup {
-                        if let summary = activity.summary {
-                            Text(verbatim: summary).font(.callout).textSelection(.enabled)
-                                .fixedSize(horizontal: false, vertical: true).padding(.top, 8)
-                        }
-                        if let head = activity.head {
-                            Text(.RemoteSecurity.remoteSecurityCommit).font(.caption).foregroundStyle(.secondary)
-                            Text(verbatim: head).font(.caption.monospaced()).textSelection(.enabled)
-                        }
-                    } label: {
-                        VStack(alignment: .leading, spacing: 6) {
-                            Text(verbatim: activity.title).font(.subheadline.weight(.medium))
-                            Text(verbatim: activity.status).font(.callout).foregroundStyle(.secondary)
-                            Text(activity.createdAt, format: .dateTime.year().month().day().hour().minute())
-                                .font(.caption).foregroundStyle(.secondary)
-                        }.frame(minHeight: 44, alignment: .leading)
-                    }
+                    RemoteActivityRow(activity: activity)
                     Divider()
                 } }
             }
@@ -169,6 +162,42 @@ struct RemoteMRDetailContent: View {
     }
 }
 
+private struct RemoteActivityRow: View {
+    let activity: RemoteDetailActivity
+    @State private var expanded = false
+    var body: some View {
+        DisclosureGroup(isExpanded: $expanded) {
+            // Full-width leading stack: without it the disclosure centres short lines.
+            VStack(alignment: .leading, spacing: 4) {
+                if let summary = activity.summary {
+                    Text(verbatim: summary).font(.callout).textSelection(.enabled)
+                        .fixedSize(horizontal: false, vertical: true).padding(.bottom, 4)
+                }
+                if let head = activity.head {
+                    Text(.RemoteSecurity.remoteSecurityCommit).font(.caption).foregroundStyle(.secondary)
+                    Text(verbatim: head).font(.caption.monospaced()).textSelection(.enabled)
+                }
+            }
+            .multilineTextAlignment(.leading)
+            .frame(maxWidth: .infinity, alignment: .leading).padding(.top, 8)
+        } label: {
+            VStack(alignment: .leading, spacing: 6) {
+                Text(verbatim: activity.title).font(.subheadline.weight(.medium)).foregroundStyle(.primary)
+                Text(verbatim: activity.status).font(.callout).foregroundStyle(.secondary)
+                Text(activity.createdAt, format: .dateTime.year().month().day().hour().minute())
+                    .font(.caption).foregroundStyle(.secondary)
+            }
+            .multilineTextAlignment(.leading)
+            .frame(maxWidth: .infinity, minHeight: 44, alignment: .leading)
+            // The whole row toggles, not only the chevron.
+            .contentShape(Rectangle())
+            .onTapGesture { withAnimation { expanded.toggle() } }
+        }
+        // Like the thread disclosures: a neutral chevron instead of link-blue labels.
+        .tint(.secondary)
+    }
+}
+
 enum RemoteDetailAnchor: Hashable { case approvals, discussions }
 
 private struct RemoteDiscussionCard: View {
@@ -201,7 +230,7 @@ private struct RemoteDiscussionCard: View {
                             }
                         }
                         if let location = note.location, location != thread.location { RemoteFullContextLabel(full: location) }
-                        Text(verbatim: note.body).font(.callout).lineSpacing(3).textSelection(.enabled)
+                        RemoteMarkdownText(source: note.body).font(.callout).lineSpacing(3).textSelection(.enabled)
                             .fixedSize(horizontal: false, vertical: true)
                         if let url = safeLink(note.url, to: mergeRequestURL) {
                             Link(destination: url) { Label(.RemoteDetail.remoteDetailOpenComment, systemImage: "arrow.up.right.square") }
@@ -210,7 +239,10 @@ private struct RemoteDiscussionCard: View {
                     }
                     if note.id != thread.notes.last?.id { Divider() }
                 }
-            }.padding(.top, 12)
+            }
+            .multilineTextAlignment(.leading)
+            .frame(maxWidth: .infinity, alignment: .leading)
+            .padding(.top, 12)
         } label: {
             VStack(alignment: .leading, spacing: 8) {
                 StatusFlowLayout {
@@ -238,9 +270,14 @@ private struct RemoteDiscussionCard: View {
                 }
                 if let first = thread.notes.first {
                     noteAuthor(first)
-                    if !expanded { Text(verbatim: first.body).font(.callout).lineLimit(3).foregroundStyle(.secondary) }
+                    if !expanded { RemoteMarkdownText(source: first.body).font(.callout).lineLimit(3).foregroundStyle(.secondary) }
                 }
-            }.frame(maxWidth: .infinity, minHeight: 44, alignment: .leading)
+            }
+            .multilineTextAlignment(.leading)
+            .frame(maxWidth: .infinity, minHeight: 44, alignment: .leading)
+            // The whole label toggles; the author name button keeps its own tap.
+            .contentShape(Rectangle())
+            .onTapGesture { withAnimation { expanded.toggle() } }
         }
         .tint(.secondary)
         .padding(12)
@@ -304,6 +341,14 @@ private struct RemoteDiscussionCard: View {
         return Label(title, systemImage: origin == .ai ? "sparkles" : origin == .human ? "person" : "questionmark.circle")
             .font(.caption.weight(.medium)).foregroundStyle(color)
             .padding(.horizontal, 7).padding(.vertical, 3).background(color.opacity(0.08), in: Capsule())
+    }
+}
+
+/// Comment Markdown with the same formatting collapsed or expanded, as on the Mac.
+struct RemoteMarkdownText: View {
+    let source: String
+    var body: some View {
+        if let rendered = SafeInlineMarkdown.render(source) { Text(rendered) } else { Text(verbatim: source) }
     }
 }
 

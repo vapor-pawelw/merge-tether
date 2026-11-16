@@ -69,25 +69,41 @@ import Foundation
         guard awaitsReviewer || awaitingRequiredApprovals else { return nil }
     }
 
-    var title: LocalizedStringResource {
-        guard awaitsReviewer else { return approvalTitle! }
-        let reviewerTitle: LocalizedStringResource
-        let names = people.displayNames(Array(reviewers.prefix(3)))
-        if let resolution = AuthorFeedbackPolicy.resolutionWaitMessage(authors: humanResolutionAuthors, people: people) { reviewerTitle = resolution }
-        else if reviewers.isEmpty { reviewerTitle = .AuthorFeedback.authorFeedbackWaitingChip }
-        else if reviewers.count > 3 {
-            reviewerTitle = .AuthorFeedback.authorFeedbackWaitingReviewersMore(names, reviewers.count - 3)
-        } else { reviewerTitle = .AuthorFeedback.authorFeedbackWaitingReviewers(names) }
-        guard let approvalTitle else { return reviewerTitle }
-        return .AuthorFeedback.authorFeedbackWaitingSummary(String(localized: reviewerTitle), String(localized: approvalTitle))
+    /// One blocker per line; the header badge already shows the approval count.
+    var requirements: [LocalizedStringResource] {
+        var lines: [LocalizedStringResource] = []
+        if let reviewerRequirement { lines.append(reviewerRequirement) }
+        if awaitingRequiredApprovals, let progress = approvalProgress {
+            let remaining = progress.required - progress.completed
+            lines.append(remaining > 0 ? .AuthorFeedback.authorFeedbackNeedsMoreApprovals(remaining)
+                : .MergeActions.mergeActionsApprovals)
+        }
+        return lines
     }
 
-    private var approvalTitle: LocalizedStringResource? {
-        guard let progress = approvalProgress else { return nil }
-        if awaitingRequiredApprovals {
-            return .AuthorFeedback.authorFeedbackWaitingRequiredApprovals(progress.completed, progress.required)
+    /// Merge blockers these requirements already state, so the card does not repeat them.
+    var coveredBlockers: Set<MergeRequestBlocker> {
+        var covered: Set<MergeRequestBlocker> = []
+        if awaitsReviewer { covered.insert(.discussions) }
+        if awaitingRequiredApprovals { covered.insert(.approvals) }
+        return covered
+    }
+
+    /// A single line for surfaces that cannot show the list.
+    var title: LocalizedStringResource {
+        let lines = requirements
+        guard lines.count > 1 else { return lines.first ?? .MergeActions.mergeActionsApprovals }
+        return lines.dropFirst().reduce(lines[0]) { summary, line in
+            .AuthorFeedback.authorFeedbackWaitingSummary(String(localized: summary), String(localized: line))
         }
-        if progress.required == 0 { return .Board.boardApprovalsReceived(progress.completed) }
-        return .AuthorFeedback.authorFeedbackWaitingApprovalCount(progress.completed, progress.required)
+    }
+
+    private var reviewerRequirement: LocalizedStringResource? {
+        guard awaitsReviewer else { return nil }
+        let names = people.displayNames(Array(reviewers.prefix(3)))
+        if let resolution = AuthorFeedbackPolicy.resolutionWaitMessage(authors: humanResolutionAuthors, people: people) { return resolution }
+        if reviewers.isEmpty { return .AuthorFeedback.authorFeedbackWaitingChip }
+        if reviewers.count > 3 { return .AuthorFeedback.authorFeedbackWaitingReviewersMore(names, reviewers.count - 3) }
+        return .AuthorFeedback.authorFeedbackWaitingReviewers(names)
     }
 }

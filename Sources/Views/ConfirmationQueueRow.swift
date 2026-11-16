@@ -1,4 +1,5 @@
 import SwiftUI
+import MergeTetherRemote
 
 /// Pending draft publication or approval in an MR’s details.
 struct ConfirmationQueueRow<AdditionalActions: View>: View {
@@ -188,7 +189,10 @@ struct ConfirmationQueueRow<AdditionalActions: View>: View {
             case .general:
                 Text(.Menu.menuConfirmGeneral).font(.caption2)
             }
-            Text(verbatim: draft.note ?? "")
+            Group {
+                let note = draft.note ?? ""
+                if let rendered = SafeInlineMarkdown.render(note) { Text(rendered) } else { Text(verbatim: note) }
+            }
                 .lineLimit(5)
                 .textSelection(.enabled)
                 .foregroundStyle(.primary)

@@ -6,6 +6,8 @@ struct BoardAutomationToggle: View {
     let target: MRAutomationScope.Target
     var projectPath: String? = nil
     var isDraft = false
+    /// Saved rules for this MR, listed in the help instead of on the card.
+    var policyNotes: [LocalizedStringResource] = []
     private var settings: SettingsManager { monitor.settings }
 
     var body: some View {
@@ -39,10 +41,18 @@ struct BoardAutomationToggle: View {
             }
             .buttonStyle(.plain)
             .boardHeaderControlHover()
-            .help(scopeHelp(status, choice: choice, hasActionExceptions: hasActionExceptions(settings, target: target)))
+            .help(scopeHelp(status, choice: choice, hasActionExceptions: hasActionExceptions(settings, target: target))
+                + policyHelp)
             .accessibilityLabel(Text(.Menu.menuScopeTitle))
             .accessibilityValue(Text(scopeChoiceLabel(choice)) + Text(", ")
                 + Text(status.active ? .Menu.menuScopeActive : .Menu.menuScopePaused))
+        }
+    }
+
+    private var policyHelp: Text {
+        guard !policyNotes.isEmpty else { return Text(verbatim: "") }
+        return policyNotes.reduce(Text(verbatim: "\n\n") + Text(.EffectivePolicy.policyAutomationRules)) { help, note in
+            help + Text(verbatim: "\n• ") + Text(note)
         }
     }
 

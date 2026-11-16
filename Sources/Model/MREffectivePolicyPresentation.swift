@@ -88,6 +88,9 @@ struct MREffectivePolicyPresentation {
     }
 
     let clauses: [Clause]
+    /// Saved rules that read the same on every card; the card keeps only conditions that stop work.
+    var routineClauses: [Clause] { clauses.filter(\.isRoutine) }
+    var cardClauses: [Clause] { clauses.filter { !$0.isRoutine } }
     enum SettingsAction { case chooseAutomationSettings }
     var settingsAction: SettingsAction? { clauses.contains(.automationDecisionRequired) ? .chooseAutomationSettings : nil }
 
@@ -113,5 +116,15 @@ struct MREffectivePolicyPresentation {
             completion = input.localDelivery ? .deliveryManual : input.mergeAllowed ? .mergeAfterChecks : .mergeManual
         } else { completion = input.approvalAllowed ? .approvalAfterChecks : .approvalManual }
         clauses = [publication, completion]
+    }
+}
+
+extension MREffectivePolicyPresentation.Clause {
+    var isRoutine: Bool {
+        switch self {
+        case .publicationAfterChecks, .publicationManual, .mergeManual, .mergeAfterChecks,
+             .approvalManual, .approvalAfterChecks, .deliveryManual, .privateWork, .finishCommentReview: true
+        default: false
+        }
     }
 }

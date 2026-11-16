@@ -26,6 +26,20 @@ struct ReviewingContextTests {
               execution: .init(state: state), workflow: .review, expectedHeadSHA: "abc")
     }
 
+    @Test func detailsShowOneTaskRowPerKindPreferringRunningThenFailedWork() throws {
+        let request = try request()
+        func intent(_ kind: MRTodoIntent.Kind, _ state: MRTodoIntent.State) -> MRTodoIntent {
+            .init(id: UUID(), target: .init(host: "gitlab.example.test", username: "me", projectID: 1, iid: 2),
+                kind: kind, state: state, todoIDs: [], noteIDs: [], sourceEvents: [], request: request,
+                headSHA: "abc", updatedAt: Date())
+        }
+        let pending = intent(.followUp, .pending), running = intent(.followUp, .running)
+        let secondRunning = intent(.followUp, .running), failed = intent(.pipeline, .failed)
+        let pipelinePending = intent(.pipeline, .pending), done = intent(.conflict, .completed)
+        let visible = BoardMRIntentActions.visibleIntents([pending, running, secondRunning, pipelinePending, failed, done])
+        #expect(visible.map(\.id) == [running.id, failed.id])
+    }
+
     @Test(arguments: [false, true])
     func adoptedDraftKeepsOrdinaryManualActionsWithoutStartingAutomaticWork(_ ready: Bool) throws {
         let request = try request(draft: true)

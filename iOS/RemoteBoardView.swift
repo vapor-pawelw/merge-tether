@@ -269,14 +269,26 @@ struct RemoteCardView: View {
                 .foregroundStyle(card.needsAttention == true ? .orange : .secondary)
                 .fixedSize(horizontal: false, vertical: true)
             }
-            if let status = card.visibleStatus {
+            if let requirements = card.presentation?.requirements, !requirements.isEmpty {
+                VStack(alignment: .leading, spacing: 4) {
+                    ForEach(Array(requirements.enumerated()), id: \.offset) { _, line in
+                        Label { Text(verbatim: line).foregroundStyle(.primary) } icon: {
+                            Image(systemName: "lock").foregroundStyle(.secondary)
+                        }
+                        .fixedSize(horizontal: false, vertical: true)
+                    }
+                }.font(.subheadline)
+            } else if let status = card.visibleStatus {
                 HStack(spacing: 5) {
                     if card.presentation?.working == true { ProgressView().controlSize(.mini) }
                     Text(verbatim: status).font(.subheadline)
                 }.foregroundStyle(.secondary)
             }
             if let dependencies = card.dependencies { RemoteMRDependencyRow(dependencies: dependencies) }
-            if let nextStep = card.visibleNextStep {
+            if let steps = card.presentation?.steps, !steps.isEmpty {
+                RemoteStepChain(steps: steps, current: card.presentation?.currentStep ?? 0)
+                    .font(expanded ? .callout : .caption)
+            } else if let nextStep = card.visibleNextStep {
                 Text(verbatim: nextStep).font(expanded ? .callout : .caption).foregroundStyle(.secondary)
             }
             if let chips = card.presentation?.chips {
@@ -296,6 +308,23 @@ struct RemoteCardView: View {
             .font(expanded ? .title3.weight(.semibold) : .headline)
             .foregroundStyle(.primary)
             .lineLimit(expanded ? nil : 2).fixedSize(horizontal: false, vertical: true)
+    }
+}
+/// The automation order with the current step emphasised, matching the Mac card.
+private struct RemoteStepChain: View {
+    let steps: [String]
+    let current: Int
+    var body: some View {
+        steps.enumerated().reduce(Text(verbatim: "")) { text, entry in
+            let (index, step) = entry
+            let separator = index > 0 ? Text(verbatim: " › ").foregroundStyle(.tertiary) : Text(verbatim: "")
+            let word = Text(verbatim: step)
+                .fontWeight(index == current ? .semibold : .regular)
+                .foregroundStyle(index == current ? AnyShapeStyle(.primary)
+                    : index < current ? AnyShapeStyle(.secondary) : AnyShapeStyle(.tertiary))
+            return text + separator + word
+        }
+        .fixedSize(horizontal: false, vertical: true)
     }
 }
 private struct RemoteMRDependencyRow: View {

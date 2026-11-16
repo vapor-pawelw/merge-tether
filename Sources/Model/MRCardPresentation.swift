@@ -146,7 +146,8 @@ struct MRCardPresentation {
             && humanAction?.kind != .commentReview
     }
     var waitingStatus: MRWaitingStatus? {
-        guard !busy, !working, !waitingOnCLI, !isRefreshingAttention, !refreshFailed,
+        // A quiet background read keeps the settled waiting list; only a shown refresh replaces it.
+        guard !busy, !working, !waitingOnCLI, !(isRefreshingAttention && showsReadProgress), !refreshFailed,
               humanAction == nil, confirmationState != .failed, confirmationState != .changed else { return nil }
         return MRWaitingStatus(row: row)
     }
@@ -200,6 +201,24 @@ struct MRCardPresentation {
         return finishedState == nil && allowsRemoval && humanAction == nil && !busy
             && !(quietReadCheck && reviewingContext.status == .activityUnknown)
             ? String(localized: reviewingContext.nextStepMessage) : nil
+    }
+    /// The automation order with the step that currently holds the MR; Comment review is
+    /// still open whenever this chain shows, so it is the current step.
+    struct StepChain: Equatable {
+        let steps: [LocalizedStringResource]
+        let current: Int
+        static func == (lhs: Self, rhs: Self) -> Bool {
+            lhs.current == rhs.current && lhs.steps.map { String(localized: $0) } == rhs.steps.map { String(localized: $0) }
+        }
+    }
+    var stepChain: StepChain? {
+        guard finishedState == nil, item.requiresCommentReview || item.draftCount > 0 else { return nil }
+        let steps: [LocalizedStringResource] = item.isAuthored
+            ? [.CommentReview.commentReviewStepCommentReview, .CommentReview.commentReviewStepReReviewReadiness,
+               .CommentReview.commentReviewStepMergeChecks]
+            : [.CommentReview.commentReviewStepCommentReview, .CommentReview.commentReviewStepReviewVerdict,
+               .CommentReview.commentReviewStepApproval]
+        return .init(steps: steps, current: 0)
     }
     var actionLabel: LocalizedStringResource? {
         guard finishedState == nil else { return nil }

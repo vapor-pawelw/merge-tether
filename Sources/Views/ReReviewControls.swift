@@ -3,12 +3,14 @@ import SwiftUI
 struct ReReviewControls: View {
     let item: MergeRequestAttentionMonitor.Item
     let monitor: MergeRequestAttentionMonitor
+    /// While a new feedback check runs, an earlier verdict and its retry are out of date.
+    var hidesStaleResult = false
     @State private var confirm = false
     @State private var isWorking = false
     @Environment(\.openSettings) private var openSettings
 
     var body: some View {
-        if let readiness = item.reReviewReadiness {
+        if let readiness = item.reReviewReadiness, !hidesStaleResult || readiness == .checking {
             VStack(alignment: .leading, spacing: 6) {
                 Label { Text(readiness.message) } icon: {
                     Image(systemName: readiness == .checking ? "hourglass" : "exclamationmark.triangle")

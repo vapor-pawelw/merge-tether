@@ -12,6 +12,10 @@ struct MergeActionsView<StatusTrailer: View, AdditionalActions: View>: View {
     /// Details hides reply sources while its feedback check already lists them.
     var showsReplySources = true
     var textFont: Font = .subheadline
+    /// Blockers the card already lists as requirements.
+    var coveredBlockers: Set<MergeRequestBlocker> = []
+    /// Cards hide actions that would only show disabled while MergeTether is working.
+    var hidesBlockedActions = false
     var statusTrailer: () -> StatusTrailer
     var additionalActions: () -> AdditionalActions
     @Environment(\.openURL) private var openURL
@@ -24,13 +28,15 @@ struct MergeActionsView<StatusTrailer: View, AdditionalActions: View>: View {
     init(item: MergeRequestAttentionMonitor.Item, monitor: TodoMonitorService, evidenceMatchesCatalogContext: Bool = true,
          actionsBlocked: Bool = false, onReviewFeedback: (() -> Void)? = nil, showsExplanations: Bool = true,
          showsReplySources: Bool = true,
-         textFont: Font = .subheadline, @ViewBuilder statusTrailer: @escaping () -> StatusTrailer,
+         textFont: Font = .subheadline, coveredBlockers: Set<MergeRequestBlocker> = [],
+         hidesBlockedActions: Bool = false, @ViewBuilder statusTrailer: @escaping () -> StatusTrailer,
          @ViewBuilder additionalActions: @escaping () -> AdditionalActions) {
         self.item = item; self.monitor = monitor
         self.evidenceMatchesCatalogContext = evidenceMatchesCatalogContext
         self.actionsBlocked = actionsBlocked; self.onReviewFeedback = onReviewFeedback
         self.showsExplanations = showsExplanations; self.showsReplySources = showsReplySources
         self.textFont = textFont
+        self.coveredBlockers = coveredBlockers; self.hidesBlockedActions = hidesBlockedActions
         self.statusTrailer = statusTrailer; self.additionalActions = additionalActions
     }
 
@@ -53,6 +59,14 @@ struct MergeActionsView<StatusTrailer: View, AdditionalActions: View>: View {
     }
     private var state: MergeSubmissionState { result ?? status?.submissionState ?? .none }
     private var hasDiscussionBlock: Bool { status?.blockers.contains(.discussions) == true || item.mergeRequest?.blockingDiscussionsResolved == false }
+    private var shownBlocker: ManualMergeBlocker? {
+        if case .prerequisite(let reason) = blocker, coveredBlockers.contains(reason) { return nil }
+        return blocker
+    }
+    private var showsDiscussionLine: Bool {
+        hasDiscussionBlock && blocker != .prerequisite(.discussions) && !coveredBlockers.contains(.discussions)
+    }
+    private var hidesActions: Bool { hidesBlockedActions && actionsBlocked }
     private var needsGitLabCheck: Bool { state == .uncertain || state == .changed || status?.action == nil && status != nil }
     private var feedbackRecovery: ManualFeedbackRecovery? {
         guard evidenceMatchesCatalogContext, monitor.authoredMergeRequests.hasSyncedCurrentCatalog else { return nil }
@@ -75,7 +89,7 @@ struct MergeActionsView<StatusTrailer: View, AdditionalActions: View>: View {
             statusTrailer()
             HStack(spacing: 8) {
                 if owned {
-                    if state == .none, blocker == nil, let action = status?.action {
+                    if state == .none, blocker == nil, !hidesActions, let action = status?.action {
                         Button { prepared = nil; showingConfirmation = true } label: {
                             if working { ProgressView().controlSize(.small) }
                             else { Text(action.title) }
@@ -83,7 +97,7 @@ struct MergeActionsView<StatusTrailer: View, AdditionalActions: View>: View {
                         .buttonStyle(.borderedProminent).disabled(actionsBlocked || working)
                         .mrActionHelp(.merge)
                     }
-                    if hasDiscussionBlock {
+                    if hasDiscussionBlock, !hidesActions {
                         Button { prepareResolution() } label: {
                             if working { ProgressView().controlSize(.small) }
                             else { MRActionLabel(title: .MergeActions.mergeActionsResolveAll, cta: .resolveThreads) }
@@ -91,7 +105,7 @@ struct MergeActionsView<StatusTrailer: View, AdditionalActions: View>: View {
                         .buttonStyle(.bordered).disabled(working || actionsBlocked)
                         .mrActionHelp(.resolveThreads, detail: .MergeActions.mergeActionsResolveScope)
                     }
-                    feedbackRecoveryAction
+                    if !hidesActions { feedbackRecoveryAction }
                     if needsGitLabCheck { Link(destination: item.url) { Text(.MergeActions.mergeActionsCheckGitLab) } }
                 }
                 additionalActions()
@@ -121,7 +135,7 @@ struct MergeActionsView<StatusTrailer: View, AdditionalActions: View>: View {
 
     private var hasStatusText: Bool {
         status?.request.mergeTrainConflict != nil || status?.request.mergeTrainEvidenceUnavailable == true
-            || state.title != nil || blocker != nil || hasDiscussionBlock
+            || state.title != nil || shownBlocker != nil || showsDiscussionLine
             || (showsReplySources && feedbackRecovery?.replySourceIDs.isEmpty == false) || resolutionMessage != nil || result == .changed
     }
 
@@ -135,13 +149,13 @@ struct MergeActionsView<StatusTrailer: View, AdditionalActions: View>: View {
             statusLine(.MergeActions.mergeActionsTrainEvidenceUnavailable, symbol: "exclamationmark.triangle", emphasized: true)
         } else if let title = state.title {
             statusLine(title, symbol: state.isDelegated ? "clock" : "exclamationmark.circle", emphasized: !state.isDelegated)
-        } else if let blocker {
+        } else if let blocker = shownBlocker {
             statusLine(blocker.title, symbol: "lock")
             if feedbackRecovery?.recoveryAction == .verifyFeedback, feedbackRecheckRoute == .review {
                 statusLine(.MergeActions.mergeActionsFeedbackChecksPaused, symbol: "pause.circle")
             }
         }
-        if hasDiscussionBlock, blocker != .prerequisite(.discussions) {
+        if showsDiscussionLine {
             statusLine(.Menu.menuAuthoredBlockerDiscussions, symbol: "bubble.left.and.exclamationmark.bubble.right", emphasized: true)
         }
         if showsReplySources, let feedbackRecovery, !feedbackRecovery.replySourceIDs.isEmpty {

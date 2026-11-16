@@ -23,7 +23,9 @@ import MergeTetherRemote
                 rechecking: monitor.isLoading || monitor.attention.isLoading),
             submission: status?.submissionState ?? .none,
             cliHold: monitor.cliHealth.hold(for: monitor.settings.automation.assistant)?.issue.kind)
-        details.policy = MREffectivePolicyPresentation(input: input).clauses.map { String(localized: message($0)) }
+        let policy = MREffectivePolicyPresentation(input: input)
+        details.policy = policy.clauses.map { String(localized: message($0)) }
+        details.rules = policy.routineClauses.map { String(localized: message($0)) }
         if let feedback = item.authorFeedbackStatus, feedback.head == request.sha,
            feedback.semanticContextFingerprint == request.semanticContextFingerprint,
            feedback.fingerprint == details.discussionFingerprint {

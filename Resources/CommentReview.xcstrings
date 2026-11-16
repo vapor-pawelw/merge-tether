@@ -199,6 +199,72 @@
           }
         }
       }
+    },
+    "commentReview.step.commentReview": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Comment review"
+          }
+        }
+      }
+    },
+    "commentReview.step.reReviewReadiness": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Re-review readiness"
+          }
+        }
+      }
+    },
+    "commentReview.step.mergeChecks": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Merge checks"
+          }
+        }
+      }
+    },
+    "commentReview.step.reviewVerdict": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Review verdict and discussion checks"
+          }
+        }
+      }
+    },
+    "commentReview.step.approval": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Approval"
+          }
+        }
+      }
+    },
+    "commentReview.stepsHelp": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Automation order for this merge request. The highlighted step is the current one."
+          }
+        }
+      }
     }
   },
   "version": "1.0"

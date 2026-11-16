@@ -244,28 +244,6 @@
         }
       }
     },
-    "authorFeedback.waitingRequiredApprovals.%lld.%lld": {
-      "extractionState": "manual",
-      "localizations": {
-        "en": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "Awaiting required approvals · %lld/%lld"
-          }
-        }
-      }
-    },
-    "authorFeedback.waitingApprovalCount.%lld.%lld": {
-      "extractionState": "manual",
-      "localizations": {
-        "en": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "Required approvals: %lld/%lld"
-          }
-        }
-      }
-    },
     "authorFeedback.waitingSummary.%@.%@": {
       "extractionState": "manual",
       "localizations": {
@@ -317,6 +295,29 @@
           "stringUnit": {
             "state": "translated",
             "value": "This author account is identified as automated by GitLab or a local setting. This is separate from whether the message used AI."
+          }
+        }
+      }
+    },
+    "authorFeedback.needsMoreApprovals.%lld": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "variations": {
+            "plural": {
+              "one": {
+                "stringUnit": {
+                  "state": "translated",
+                  "value": "Needs %lld more approval"
+                }
+              },
+              "other": {
+                "stringUnit": {
+                  "state": "translated",
+                  "value": "Needs %lld more approvals"
+                }
+              }
+            }
           }
         }
       }

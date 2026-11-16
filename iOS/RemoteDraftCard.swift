@@ -45,7 +45,7 @@ struct RemoteDraftCard: View {
                 .tint(.secondary)
                 .accessibilityIdentifier("remote.draft-context.\(draft.id)")
             }
-            Text(verbatim: draft.body).font(.callout).lineSpacing(4)
+            RemoteMarkdownText(source: draft.body).font(.callout).lineSpacing(4)
                 .textSelection(.enabled).fixedSize(horizontal: false, vertical: true)
             ForEach(Array((draft.publicationWarnings ?? []).enumerated()), id: \.offset) { _, warning in
                 Label { Text(verbatim: warning).textSelection(.enabled) } icon: {
