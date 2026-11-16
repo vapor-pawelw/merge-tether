@@ -51,14 +51,24 @@ final class BoardAttentionPresenter {
     }
 
     static func attentionRefreshFailed(row state: RowState, refresh: RefreshState) -> Bool {
+        !attentionRefreshFailures(row: state, refresh: refresh).isEmpty
+    }
+
+    /// Every read that could not confirm this row, in display order, so the card can name what failed.
+    static func attentionRefreshFailures(row state: RowState, refresh: RefreshState) -> [RefreshFailure] {
         let row = state.row
-        guard !isExecuting(state), !row.hasIndependentStoppedWork else { return false }
-        if row.item.authorFeedbackStatus?.isReadOnlyFailure == true { return true }
-        if row.item.draftProofRecoveryReadFailure || refresh.workflowReadFailed { return true }
+        guard !isExecuting(state), !row.hasIndependentStoppedWork else { return [] }
+        var failures: [RefreshFailure] = []
+        if let feedback = row.item.authorFeedbackStatus, feedback.isReadOnlyFailure {
+            failures.append(.init(check: .reviewerFeedback, cause: feedback.failureCause, detail: feedback.failureReason))
+        }
+        if row.item.draftProofRecoveryReadFailure { failures.append(.init(check: .replyDrafts)) }
+        if refresh.workflowReadFailed { failures.append(.init(check: .workflow)) }
         if max(row.item.draftCount, row.item.drafts.count) > 0,
-           refresh.needsAIAssessment, refresh.aiOriginReadFailed { return true }
+           refresh.needsAIAssessment, refresh.aiOriginReadFailed { failures.append(.init(check: .commentOrigin)) }
         // A failed catalog cannot confirm a replacement projection for any of its rows.
-        return refresh.catalogReadFailed
+        if refresh.catalogReadFailed { failures.append(.init(check: .mergeRequests)) }
+        return failures
     }
 
     static func isRecheckingAttention(row state: RowState, refresh: RefreshState) -> Bool {

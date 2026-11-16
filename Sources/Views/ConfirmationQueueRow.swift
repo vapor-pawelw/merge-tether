@@ -73,6 +73,15 @@ struct ConfirmationQueueRow<AdditionalActions: View>: View {
             ForEach(rejected, id: \.draftID) { reply in
                 PreparedReplyWarning(reply: reply).id("prepared-reply-\(reply.draftID)")
             }
+            let duplicates = item.duplicateDraftIDs.count
+            if duplicates > 0 {
+                Label {
+                    Text(duplicates == 1 ? .MRHumanAction.mrHumanActionDuplicateDraftSingle
+                        : .MRHumanAction.mrHumanActionDuplicateDrafts(duplicates))
+                } icon: { Image(systemName: "doc.on.doc") }
+                .foregroundStyle(.orange)
+                .accessibilityIdentifier("duplicate-reply-drafts")
+            }
             if item.awaitingRemoteVerification && rejected.isEmpty {
                 Text(.PreparedReplies.preparedRepliesChecksPending)
                     .foregroundStyle(.orange)

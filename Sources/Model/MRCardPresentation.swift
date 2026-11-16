@@ -20,7 +20,11 @@ struct MRCardPresentation {
     let preservedHumanAction: MRHumanAction?
     let isRefreshingAttention: Bool
     let showsReadProgress: Bool
-    let refreshFailed: Bool
+    let refreshFailures: [RefreshFailure]
+    var refreshFailed: Bool { !refreshFailures.isEmpty }
+    /// Names the failed check inline; several failures collapse to a count with details on hover.
+    var refreshFailureLabel: String? { RefreshFailure.label(refreshFailures) }
+    var refreshFailureHelp: String? { RefreshFailure.help(refreshFailures) }
     let reviewingContext: ReviewingContext
     let allowsRemoval: Bool
     let assistantReady: Bool
@@ -39,12 +43,12 @@ struct MRCardPresentation {
          confirmationState: MergeRequestAttentionMonitor.ConfirmationState? = nil,
          automaticallyPublishedDraftIDs: Set<Int> = [], automaticConflictProgress: Bool = false,
          automaticPipelineProgress: Bool = false, conflictReceipts: Set<MergeConflictReceipt> = [],
-         preservedHumanAction: MRHumanAction? = nil, isRefreshingAttention: Bool = false, refreshFailed: Bool = false,
+         preservedHumanAction: MRHumanAction? = nil, isRefreshingAttention: Bool = false, refreshFailures: [RefreshFailure] = [],
          showsReadProgress: Bool = true, automaticMergeProgress: Bool = false,
          cliHoldKind: AssistantCLIHealthIssue.Kind? = nil) {
         self.row = row; self.reviewingContext = reviewingContext; self.allowsRemoval = allowsRemoval
         self.preservedHumanAction = preservedHumanAction; self.isRefreshingAttention = isRefreshingAttention
-        self.refreshFailed = refreshFailed
+        self.refreshFailures = refreshFailures
         self.showsReadProgress = showsReadProgress
         self.automaticMergeProgress = automaticMergeProgress
         self.cliHoldKind = cliHoldKind
@@ -76,7 +80,7 @@ struct MRCardPresentation {
             conflictReceipts: monitor.settings.conflictReceipts,
             preservedHumanAction: monitor.confirmedHumanAction(for: row),
             isRefreshingAttention: MRBoardProjector.isRecheckingAttention(for: row, input: input),
-            refreshFailed: MRBoardProjector.attentionRefreshFailed(for: row, input: input),
+            refreshFailures: MRBoardProjector.attentionRefreshFailures(for: row, input: input),
             showsReadProgress: monitor.showsRefreshProgress(for: row.id),
             automaticMergeProgress: row.item.mergeRequest.map { monitor.authoredMergeRequests.isMerging($0) } ?? false,
             cliHoldKind: monitor.cliHealth.hold(for: row.latestJob?.key.assistant ?? monitor.settings.automation.assistant)?.issue.kind)

@@ -95,7 +95,9 @@ private struct CommandCenterMRCardContent: View {
                                     startedAt: monitor.activityStartedAt(for: item, activity: presentation.activity))
                             }
                         } else if presentation.refreshFailed {
-                            Label { Text(.AutomationProgress.progressRefreshFailed) } icon: { Image(systemName: "arrow.clockwise") }
+                            Label { Text(verbatim: presentation.refreshFailureLabel ?? String(localized: .AutomationProgress.progressRefreshFailed)) }
+                                icon: { Image(systemName: "arrow.clockwise") }
+                                .help(presentation.refreshFailureHelp ?? "")
                         } else if let waiting = shownRequirements {
                             // One blocker per line, in the same style as the merge blockers below.
                             VStack(alignment: .leading, spacing: 5) {

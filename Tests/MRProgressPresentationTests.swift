@@ -211,7 +211,7 @@ struct MRProgressPresentationTests {
 
     @Test(arguments: [
         ("publishing", "Publishing comments"), ("approving", "Approving MR"),
-        ("replies", "Checking replies"), ("feedback", "Checking feedback"),
+        ("replies", "Checking replies"), ("feedback", "Checking whether reviewer comments are addressed"),
         ("ai", "Assessing AI assistance"), ("readiness", "Checking review readiness"),
         ("conflict", "Preparing conflict fix"), ("pipeline", "Handling pipeline")
     ])

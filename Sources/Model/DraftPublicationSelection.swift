@@ -74,10 +74,13 @@ struct DraftPublicationSession {
     var selection = DraftPublicationSelection()
     private var isOpen = false
 
-    mutating func open(with drafts: [GitLabDraftNote], accountAvailable: Bool = true) {
+    /// Duplicates of a published reply start unchecked; the user may still pick one deliberately.
+    mutating func open(with drafts: [GitLabDraftNote], accountAvailable: Bool = true, duplicateIDs: Set<Int> = []) {
         guard !isOpen else { return }
         isOpen = true
-        selection = accountAvailable ? DraftPublicationSelection(selectingAll: drafts) : DraftPublicationSelection()
+        selection = accountAvailable
+            ? DraftPublicationSelection(selectingAll: drafts.filter { $0.id.map(duplicateIDs.contains) != true })
+            : DraftPublicationSelection()
     }
 
     mutating func draftsChanged(_ drafts: [GitLabDraftNote]) { selection.reconcile(with: drafts) }

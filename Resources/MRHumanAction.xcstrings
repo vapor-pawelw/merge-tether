@@ -496,6 +496,28 @@
           }
         }
       }
+    },
+    "mrHumanAction.duplicateDrafts.%lld": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "%1$lld drafts repeat a reply already in their thread. Delete them instead of publishing."
+          }
+        }
+      }
+    },
+    "mrHumanAction.duplicateDraftSingle": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "1 draft repeats a reply already in its thread. Delete it instead of publishing."
+          }
+        }
+      }
     }
   }
 }

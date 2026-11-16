@@ -74,6 +74,11 @@ final class MergeRequestAttentionMonitor {
         /// Canonical read-only stack/dependency metadata, separate from merge permissions.
         var dependencies: MergeRequestDependencySummary?
 
+        /// Own replies already published, by thread; nil until the discussions were read.
+        var ownPublishedReplies: Set<DuplicateReplyDrafts.Reply>?
+        /// Drafts that would repeat a reply already in their thread.
+        var duplicateDraftIDs: Set<Int> { DuplicateReplyDrafts.ids(in: drafts, published: ownPublishedReplies ?? []) }
+
         var authoredRequest: GitLabMergeRequest? { isAuthored ? mergeRequest : nil }
         var canFinishCommentReview: Bool {
             requiresCommentReview && draftCount == 0 && drafts.isEmpty && commentReviewSnapshot?.covers(mergeRequest) == true
@@ -1010,6 +1015,7 @@ final class MergeRequestAttentionMonitor {
                             )
                         } else { nil as [GitLabMergeRequestDiscussion]? }
                         updated.observedDiscussionFingerprint = discussions.flatMap { ReviewVerdict.fingerprint($0) }
+                        updated.ownPublishedReplies = discussions.map { DuplicateReplyDrafts.publishedReplies(in: $0, userID: user.id) }
                         let reviewers = try? await glab.fetchMergeRequestReviewers(projectID: item.id.projectID, iid: item.id.iid, host: host)
                         if let discussions, let request = item.mergeRequest {
                             updated.approvalProgress?.reviewHistory = MergeRequestReviewHistory(
@@ -1157,8 +1163,10 @@ final class MergeRequestAttentionMonitor {
                             let aiIDs = await aiNoteIDs(in: discussions ?? [], policy: policy, host: host,
                                                        projectID: item.id.projectID, iid: item.id.iid)
                             item.automaticPublicationPolicy = policy
+                            let duplicates = item.duplicateDraftIDs
                             item.automaticDraftIDs = Set(item.drafts.filter {
-                                (!item.isAuthored || (settings.automation.allowFollowUpPush && $0.id.map(contextDraftIDs.contains) == true))
+                                $0.id.map(duplicates.contains) != true
+                                && (!item.isAuthored || (settings.automation.allowFollowUpPush && $0.id.map(contextDraftIDs.contains) == true))
                                     && policy.allows($0, request: request, discussions: discussions, userID: user.id,
                                         host: host, aiNoteIDs: aiIDs)
                             }.compactMap(\.id))
@@ -1934,7 +1942,11 @@ final class MergeRequestAttentionMonitor {
               let displayed = items.first(where: { $0.id == id }), !displayed.drafts.isEmpty,
               !isConfirming(id) else { return }
         if !automatic {
-            await publishDrafts(displayed.drafts, for: .init(host: account.host, username: account.username,
+            // "Publish all" never repeats a reply already in its thread; the user can still pick one explicitly.
+            let duplicates = displayed.duplicateDraftIDs
+            let publishable = displayed.drafts.filter { $0.id.map(duplicates.contains) != true }
+            guard !publishable.isEmpty else { return }
+            await publishDrafts(publishable, for: .init(host: account.host, username: account.username,
                 projectID: id.projectID, iid: id.iid, url: displayed.url))
             return
         }

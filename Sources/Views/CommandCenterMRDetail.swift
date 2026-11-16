@@ -233,7 +233,10 @@ private struct CommandCenterMRDetailContent: View {
                 Task { await discussionStore.reloadOrigins(glab: monitor.glab) }
             }
             .onChange(of: jobs.first?.id) { _, _ in retryError = nil }
-            .onAppear { publicationSession.open(with: item.drafts, accountAvailable: discussionTarget != nil) }
+            .onAppear {
+                publicationSession.open(with: item.drafts, accountAvailable: discussionTarget != nil,
+                    duplicateIDs: item.duplicateDraftIDs)
+            }
             .onChange(of: item.drafts) { _, drafts in
                 publicationSession.draftsChanged(drafts)
                 Task { await discussionStore.reloadOrigins(glab: monitor.glab) }
@@ -357,7 +360,9 @@ private struct CommandCenterMRDetailContent: View {
                                 startedAt: monitor.activityStartedAt(for: item, activity: progress.activity))
                             .font(.callout).foregroundStyle(.secondary)
                         } else if progress.refreshFailed {
-                            Label { Text(.AutomationProgress.progressRefreshFailed) } icon: { Image(systemName: "arrow.clockwise") }
+                            Label { Text(verbatim: progress.refreshFailureLabel ?? String(localized: .AutomationProgress.progressRefreshFailed)) }
+                                icon: { Image(systemName: "arrow.clockwise") }
+                                .help(progress.refreshFailureHelp ?? "")
                                 .font(.callout).foregroundStyle(.secondary)
                         }
                     }
