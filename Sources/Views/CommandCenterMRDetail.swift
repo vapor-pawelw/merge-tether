@@ -63,6 +63,7 @@ private struct CommandCenterMRDetailContent: View {
     @State private var feedbackDecisionConfirmation: FeedbackDecisionConfirmation?
     @State private var isUpdatingFeedbackDecision = false
     @State private var feedbackDecisionError: String?
+    @State private var originChangeFailed = false
 
     private enum Anchor: Hashable { case overview, drafts, comments, details, actions, feedbackStatus, assistantRuns }
 
@@ -172,6 +173,13 @@ private struct CommandCenterMRDetailContent: View {
             .safeAreaInset(edge: .bottom, spacing: 0) {
                 if finishedState == nil { selectedPublicationActions }
             }
+            .safeAreaInset(edge: .top, spacing: 0) {
+                if let target = originTarget, let change = monitor.commentOrigins.pending(for: target) {
+                    CommentOriginResumeBanner(change: change, onUndo: {
+                        do { try monitor.commentOrigins.undo(change.id) } catch { originChangeFailed = true }
+                    }, onContinue: { Task { await monitor.commentOrigins.continueNow(change.id) } })
+                }
+            }
             .task(id: initialSection) {
                 pendingInitialAnchor = nil
                 if needsHumanAttention && item.authorFeedbackStatus?.needsAttention == true { feedbackExpanded = true }
@@ -219,6 +227,9 @@ private struct CommandCenterMRDetailContent: View {
             .onChange(of: monitor.attention.displayAIOriginCoordinator?.revision) { _, _ in
                 Task { await discussionStore.reloadOrigins(glab: monitor.glab) }
             }
+            .onChange(of: monitor.commentOrigins.revision) { _, _ in
+                Task { await discussionStore.reloadOrigins(glab: monitor.glab) }
+            }
             .onChange(of: jobs.first?.id) { _, _ in retryError = nil }
             .onAppear { publicationSession.open(with: item.drafts, accountAvailable: discussionTarget != nil) }
             .onChange(of: item.drafts) { _, drafts in
@@ -250,6 +261,9 @@ private struct CommandCenterMRDetailContent: View {
                          : .FeedbackSuggestions.feedbackSuggestionsIgnoreConfirm)
                 }
             } message: { choice in Text(verbatim: choice.message) }
+            .alert(Text(.MRDiscussions.mrDiscussionsOriginChangeFailed), isPresented: $originChangeFailed) {
+                Button(role: .cancel) {} label: { Text(.MRDiscussions.mrDiscussionsOriginCancel) }
+            } message: { Text(.MRDiscussions.mrDiscussionsOriginChangeFailedMessage) }
             .confirmationDialog(Text(.ReviewReset.reviewResetConfirmTitle), isPresented: $confirmReviewReset, titleVisibility: .visible) {
                 Button(role: .destructive) { resetReviewState() } label: { Text(.ReviewReset.reviewResetConfirm) }
             } message: {
@@ -841,7 +855,26 @@ private struct CommandCenterMRDetailContent: View {
             expandPendingDrafts: true, selection: $publicationSession.selection,
             selectionDisabled: discussionTarget == nil || monitor.attention.confirmationStates[item.id]?.isBusy == true,
             onDelete: { draft in Task { await monitor.attention.deleteDraft(draft, from: item.id) } },
-            title: .DraftPublication.draftPublicationThreads, draftsFirst: true, onRefresh: refreshDiscussions)
+            title: .DraftPublication.draftPublicationThreads, draftsFirst: true, onSetOrigin: originAction,
+            onRefresh: refreshDiscussions)
+    }
+
+    private var originTarget: MRAutomationScope.Target? {
+        monitor.scopeTarget(projectID: item.id.projectID, iid: item.id.iid, url: item.url)
+    }
+
+    /// Origins can be corrected only for the conversation currently loaded for this account.
+    private var originAction: MRDiscussionOriginAction? {
+        guard finishedState == nil, let target = originTarget, discussionTarget != nil,
+              discussionStore.target == discussionTarget, discussionStore.hasLoaded, !discussionStore.hasError else { return nil }
+        let discussions = discussionStore.discussions
+        return { classification, notes in
+            Task {
+                do {
+                    try await monitor.setCommentOrigin(classification, notes: notes, in: discussions, for: target)
+                } catch { originChangeFailed = true }
+            }
+        }
     }
 
     @ViewBuilder private func discussionThreads(_ discussions: MRDiscussionSnapshot) -> some View {
@@ -851,7 +884,7 @@ private struct CommandCenterMRDetailContent: View {
             MRDiscussionThreadsView(snapshot: snapshot, mergeRequestURL: item.url,
             currentUsername: monitor.glab.currentUsername, isLoading: current && discussionStore.isLoading,
             hasError: current && discussionStore.hasError, hasLoaded: current && discussionStore.hasLoaded,
-            onRefresh: refreshDiscussions)
+            onSetOrigin: originAction, onRefresh: refreshDiscussions)
         }
     }
 

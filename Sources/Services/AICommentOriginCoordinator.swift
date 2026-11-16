@@ -17,6 +17,7 @@ final class AICommentOriginCoordinator {
         var signature: String { notes.map { "\($0.id ?? 0):\($0.author?.id ?? 0):\(AICommentAssessmentStore.digest($0.body ?? ""))" }.sorted().joined(separator: "/") }
     }
     private let directory: URL
+    private let overrideDirectory: URL
     private let purpose: AICommentAssessment.Purpose?
     private let assess: Assess
     private let fetchCurrent: FetchCurrent
@@ -44,12 +45,12 @@ final class AICommentOriginCoordinator {
     var onChange: (() -> Void)?
     var onPersisted: (@MainActor (MRAutomationScope.Target, [Note], AICommentOriginAssessment) -> Void)?
 
-    init(directory: URL = AICommentAssessmentStore.directory, purpose: AICommentAssessment.Purpose? = nil,
+    init(directory: URL = AICommentAssessmentStore.directory, overrideDirectory: URL? = nil, purpose: AICommentAssessment.Purpose? = nil,
          assess: @escaping Assess = { try await AICommentOriginAssessor.verify(target: $0, notes: $1, assistant: $2, model: $3, thinking: $4) },
          fetchCurrent: @escaping FetchCurrent, isCurrent: @escaping IsCurrent,
          retryWait: @escaping ReadOnlyAssessmentRetry.Wait = ReadOnlyAssessmentRetry.wait,
          now: @escaping ReadOnlyAssessmentRetry.Clock = { Date() }) {
-        self.directory = directory; self.assess = assess; self.fetchCurrent = fetchCurrent; self.isCurrent = isCurrent
+        self.directory = directory; self.overrideDirectory = overrideDirectory ?? directory; self.assess = assess; self.fetchCurrent = fetchCurrent; self.isCurrent = isCurrent
         self.purpose = purpose
         self.retryWait = retryWait
         self.now = now
@@ -81,6 +82,8 @@ final class AICommentOriginCoordinator {
                 guard failures[identity] != nil,
                       now().timeIntervalSince(attemptedAt) >= ReadOnlyAssessmentRetry.cooldown else { return false }
             }
+            if AICommentOriginOverrideStore.override(for: note, host: target.host, projectID: target.projectID,
+                iid: target.iid!, in: overrideDirectory) != nil { return false }
             if let record = AICommentAssessmentStore.result(for: note, host: target.host, projectID: target.projectID, iid: target.iid!, in: directory) {
                 if record.qualifiesAsAI && (purpose == .display || record.purpose != .display) { return false }
                 if record.provider == assistant.rawValue && record.model == model

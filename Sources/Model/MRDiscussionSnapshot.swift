@@ -16,16 +16,24 @@ struct MRDiscussionSnapshot {
         case assessed(evidence: String)
         case uncertain(evidence: String)
         case humanLikely(evidence: String)
+        /// The user's own verdict; it replaces every automatic signal for this comment.
+        case manual(OriginBadge)
+
+        var isManual: Bool {
+            if case .manual = self { return true }
+            return false
+        }
 
         var badge: OriginBadge {
             switch self {
+            case .manual(let badge): badge
             case .verifiedAssistant, .appGenerated, .assessed: .ai
             case .uncertain: .uncertain
             case .humanLikely: .human
             }
         }
     }
-    enum OriginBadge: Equatable { case ai, uncertain, human }
+    enum OriginBadge: Equatable, Sendable { case ai, uncertain, human }
     enum State: Equatable { case open, resolved, general }
     enum Feedback: String, Equatable, Sendable {
         case addressed, pending, needsVerification, informational, ignored, partlyIgnored, notApplicable

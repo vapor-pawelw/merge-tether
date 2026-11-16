@@ -98,7 +98,7 @@ final class MRDiscussionStore {
                 if verified {
                     verifiedAssistantIDs.insert(id)
                     for note in result.flatMap(\.notes) where note.system != true && note.author?.id == id {
-                        if let noteID = note.id { assessed[noteID] = .verifiedAssistant }
+                        if let noteID = note.id, assessed[noteID]?.isManual != true { assessed[noteID] = .verifiedAssistant }
                     }
                 }
             }
@@ -139,7 +139,7 @@ final class MRDiscussionStore {
         let current = generation, revision = glab.accountRevision
         var updated = await cachedOrigins(in: discussions, target: target, userID: authenticatedUserID)
         guard isCurrent(current, target: target, glab: glab, revision: revision) else { return }
-        for (id, origin) in origins where origin == .verifiedAssistant { updated[id] = origin }
+        for (id, origin) in origins where origin == .verifiedAssistant && updated[id]?.isManual != true { updated[id] = origin }
         origins = updated
     }
 
@@ -157,6 +157,11 @@ final class MRDiscussionStore {
             var origins: [Int: MRDiscussionSnapshot.Origin] = [:]
             for thread in result {
                 for note in thread.notes where note.system != true {
+                    if let id = note.id, let override = AICommentOriginOverrideStore.override(for: note, host: target.host,
+                        projectID: target.projectID, iid: target.iid, username: target.username, in: directory) {
+                        origins[id] = .manual(override.badge)
+                        continue
+                    }
                     if let id = note.id, generated?.contains(note, discussionID: thread.id) == true {
                         origins[id] = .appGenerated
                         continue

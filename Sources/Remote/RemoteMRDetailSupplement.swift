@@ -13,6 +13,9 @@ import MergeTetherRemote
             monitor.attention.authorFeedbackCoordinator?.assessment(for: request, fingerprint: $0)
         }
         applyFeedback(to: &details, assessment: assessment, authorID: request.author.id)
+        if let change = monitor.commentOrigins.pending(for: target), let resumesAt = change.resumesAt {
+            details.originResume = .init(changeID: change.id.uuidString, resumesAt: resumesAt, drafts: change.resumingDrafts)
+        }
         let reasons = RemoteBoardAdapter.detail(item)
         if !reasons.isEmpty { details.reasons = [reasons] }
         let status = RemoteBoardAdapter.matchingMergeStatus(for: row, statuses: monitor.authoredMergeRequests.requests)

@@ -41,6 +41,7 @@ extension RemoteConnection: RemoteHostTransport {}
     private var phoneSupportsDetails = false
     private var phoneSupportsOriginUpdates = false
     private var phoneSupportsMRControls = false
+    private var phoneSupportsCommentOrigins = false
     private var originObserver: UUID?
     private var authorKindObserver: UUID?
     private var originSubscription: RemoteDetailOriginSubscription?
@@ -140,6 +141,7 @@ extension RemoteConnection: RemoteHostTransport {}
         phoneSupportsDetails = false
         phoneSupportsOriginUpdates = false
         phoneSupportsMRControls = false
+        phoneSupportsCommentOrigins = false
         clearOriginSubscription()
         detailTask?.cancel(); detailTask = nil; activeDetailRequest = nil
         lastDetailRead = .distantPast
@@ -200,6 +202,7 @@ extension RemoteConnection: RemoteHostTransport {}
             phoneSupportsMergeActions = message.capabilities?.contains(RemoteMessage.mergeActionsCapability) == true
             phoneSupportsDetails = message.capabilities?.contains(RemoteMessage.detailsCapability) == true
             phoneSupportsMRControls = message.capabilities?.contains(RemoteMessage.mrControlsCapability) == true
+            phoneSupportsCommentOrigins = phoneSupportsDetails && message.capabilities?.contains(RemoteMessage.commentOriginCapability) == true
             phoneSupportsOriginUpdates = phoneSupportsDetails && message.capabilities?.contains(RemoteMessage.detailOriginsCapability) == true
             if !phoneSupportsOriginUpdates { clearOriginSubscription() }
             let fresh: Bool
@@ -218,7 +221,8 @@ extension RemoteConnection: RemoteHostTransport {}
             var board = snapshot()
             if !fresh { board.partial = true }
             do { try await active.send(.init(type: .snapshot, challenge: challenge, board: board,
-                capabilities: [RemoteMessage.detailsCapability, RemoteMessage.detailOriginsCapability, RemoteMessage.mrControlsCapability])) }
+                capabilities: [RemoteMessage.detailsCapability, RemoteMessage.detailOriginsCapability, RemoteMessage.mrControlsCapability,
+                               RemoteMessage.commentOriginCapability])) }
             catch { failed = true; try? await active.send(.init(type: .unavailable)) }
         case .receipt:
             guard let command = message.command, let challenge = message.challenge, let pairing else { return }
@@ -248,7 +252,7 @@ extension RemoteConnection: RemoteHostTransport {}
                 guard let self else { return .uncertain }
                 // Main-actor state may change during an awaited acceptance send.
                 guard acceptanceSent, self.connection === active, self.snapshot() == board else { return .changed }
-                return await self.execute(card, action: action)
+                return await self.execute(card, action: action, argument: command.argument)
             }
             try? await active.send(.init(type: .result, result: result))
         default: break
@@ -402,9 +406,9 @@ extension RemoteConnection: RemoteHostTransport {}
             }
         }
         return board.forClient(supportsCommentReview: phoneSupportsCommentReview, supportsMergeActions: phoneSupportsMergeActions,
-            supportsMRControls: phoneSupportsMRControls)
+            supportsMRControls: phoneSupportsMRControls, supportsCommentOrigins: phoneSupportsCommentOrigins)
     }
-    private func execute(_ card: RemoteCard, action: RemoteAction) async -> RemoteCommandResult.Status {
+    private func execute(_ card: RemoteCard, action: RemoteAction, argument: String? = nil) async -> RemoteCommandResult.Status {
         if card.id.hasPrefix("completion:") {
             return RemoteBoardAdapter.acknowledgeCompletion(card, action: action, monitor: monitor, account: account)
                 ? .completed : .changed
@@ -433,6 +437,10 @@ extension RemoteConnection: RemoteHostTransport {}
             .first(where: { "mr:\($0.id.projectID):\($0.id.iid)" == card.id }),
               RemoteBoardAdapter.card(item, account: account).drafts == card.drafts,
               item.mergeRequest?.sha == card.head else { return .changed }
+        if action.kind == .setCommentOrigin {
+            guard phoneSupportsCommentOrigins, let request = RemoteCommentOriginRequest(argument: argument) else { return .changed }
+            return await executeCommentOrigin(request, item: item)
+        }
         if RemoteActionKind.mrControls.contains(action.kind) {
             guard phoneSupportsMRControls else { return .changed }
             let row = (board.own + board.reviewed).first { $0.item.id == item.id }
@@ -501,6 +509,40 @@ extension RemoteConnection: RemoteHostTransport {}
             }
             await monitor.attention.retryReReview(item.id); return .completed
         default: return .changed
+        }
+    }
+
+    /// Applies the phone's origin verdict only to comments that still match what the phone displayed.
+    private func executeCommentOrigin(_ request: RemoteCommentOriginRequest,
+                                      item: MergeRequestAttentionMonitor.Item) async -> RemoteCommandResult.Status {
+        guard let target = monitor.scopeTarget(projectID: item.id.projectID, iid: item.id.iid, url: item.url) else { return .changed }
+        let center = monitor.commentOrigins
+        switch request.operation {
+        case .undo, .continueNow:
+            guard let id = request.changeID.flatMap(UUID.init(uuidString:)),
+                  let change = center.pending.first(where: { $0.id == id }), change.target == target else { return .changed }
+            if request.operation == .undo {
+                do { try center.undo(id) } catch { return .failed }
+            } else {
+                await center.continueNow(id)
+            }
+            return .completed
+        case .set:
+            guard !request.notes.isEmpty else { return .changed }
+            do {
+                let discussions = try await monitor.glab.fetchMergeRequestDiscussions(
+                    projectID: item.id.projectID, iid: item.id.iid, host: target.host)
+                guard let notes = RemoteCommentOriginMatcher.notes(request.notes, in: discussions) else { return .changed }
+                let classification: AICommentOriginOverride.Classification? = switch request.origin {
+                case .ai: .ai
+                case .uncertain: .uncertain
+                case .human: .human
+                case nil: nil
+                }
+                try await monitor.setCommentOrigin(classification, notes: notes, in: discussions, for: target)
+                return .completed
+            } catch is CommentOriginOverrideCenter.ChangeError { return .changed }
+            catch { return .failed }
         }
     }
 

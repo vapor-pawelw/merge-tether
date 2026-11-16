@@ -303,7 +303,7 @@ final class MergeRequestAttentionMonitor {
     private let settings: SettingsManager?
     private let reportDirectory: URL?
     private let verdictDirectory: URL
-    private let aiAssessmentDirectory: URL
+    let aiAssessmentDirectory: URL
     private let followUpDirectory: URL
     private let provenanceDirectory: URL
     private var lastProvenancePrune: Date?
@@ -2038,6 +2038,25 @@ final class MergeRequestAttentionMonitor {
         return admitted() ? admitted : nil
     }
 
+    /// How many current drafts automation would newly publish if `becomingAI` counted as AI comments.
+    /// Zero when this MR is not published automatically under the current settings.
+    func automaticPublicationGain(for id: Item.ID, discussions: [GitLabMergeRequestDiscussion],
+                                  becomingAI: Set<Int>) async -> Int {
+        guard !becomingAI.isEmpty, let settings, let account, isCurrent(account), let user,
+              settings.automaticPublicWritesAllowed,
+              settings.automation.publishDraftsWithoutConfirmation || settings.automation.publishAIRepliesWithoutConfirmation,
+              let item = items.first(where: { $0.id == id }), !item.drafts.isEmpty, let request = item.mergeRequest,
+              permitsAutomaticPublication(of: request, account: account) else { return 0 }
+        let policy = settings.automation.automaticPublicationPolicy
+        guard policy.mode != .manual, policy.requiresAI else { return 0 }
+        let current = await aiNoteIDs(in: discussions, policy: policy, host: account.host, projectID: id.projectID, iid: id.iid)
+        let widened = current.union(becomingAI)
+        return item.drafts.filter { draft in
+            !policy.allows(draft, request: request, discussions: discussions, userID: user.id, host: account.host, aiNoteIDs: current)
+                && policy.allows(draft, request: request, discussions: discussions, userID: user.id, host: account.host, aiNoteIDs: widened)
+        }.count
+    }
+
     /// Identity verification and content-bound records supply facts; the pure policy
     /// decides the same way for the board preview and the final live publication gate.
     private func aiNoteIDs(in discussions: [GitLabMergeRequestDiscussion], policy: AutomaticPublicationPolicy,
@@ -2052,10 +2071,15 @@ final class MergeRequestAttentionMonitor {
         for id in candidates where (try? await glab.isGitLabDuo(userID: id, host: host)) == true {
             verifiedIdentities.insert(id)
         }
+        let directory = aiAssessmentDirectory, now = Date()
         return Set(notes.compactMap { note in
             guard let id = note.id, id > 0 else { return nil }
+            // The user's verdict also outranks a verified assistant identity.
+            if AICommentOriginOverrideStore.override(for: note, host: host, projectID: projectID, iid: iid, in: directory) != nil {
+                return AICommentAssessmentStore.isAI(note, host: host, projectID: projectID, iid: iid, in: directory, now: now) ? id : nil
+            }
             return verifiedIdentities.contains(note.author?.id ?? 0)
-                || AICommentAssessmentStore.isAI(note, host: host, projectID: projectID, iid: iid, in: aiAssessmentDirectory) ? id : nil
+                || AICommentAssessmentStore.isAI(note, host: host, projectID: projectID, iid: iid, in: directory, now: now) ? id : nil
         })
     }
 

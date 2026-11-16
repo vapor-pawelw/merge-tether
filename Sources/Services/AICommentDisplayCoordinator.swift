@@ -65,6 +65,9 @@ import Observation
         Task { [weak self] in
             let origins = await Task.detached {
                 notes.compactMap { note -> PersistedOrigin? in
+                    // The user's verdict outranks a late model result for the same comment.
+                    if let iid = target.iid, AICommentOriginOverrideStore.override(for: note, host: target.host,
+                        projectID: target.projectID, iid: iid, in: actionDirectory) != nil { return nil }
                     guard let id = note.id, let authorID = note.author?.id, authorID > 0, let body = note.body,
                           let iid = target.iid, let record = AICommentAssessmentStore.displayResult(for: note, host: target.host,
                             projectID: target.projectID, iid: iid, username: target.username, in: actionDirectory,
@@ -158,7 +161,7 @@ import Observation
     }
 
     private func makeCoordinator() -> AICommentOriginCoordinator {
-        let worker = AICommentOriginCoordinator(directory: displayDirectory, purpose: .display,
+        let worker = AICommentOriginCoordinator(directory: displayDirectory, overrideDirectory: assessmentDirectory, purpose: .display,
             assess: { [weak self] target, notes, assistant, model, thinking in
                 guard let self, let generation = latest[target], isCurrent(target, assistant: assistant, model: model, thinking: thinking),
                       await canAutomate(assistant), !Task.isCancelled, latest[target] == generation,
@@ -256,6 +259,8 @@ import Observation
     private nonisolated static func missing(_ notes: [GitLabMergeRequestDiscussion.Note], target: MRAutomationScope.Target,
         actionDirectory: URL, displayDirectory: URL) -> [GitLabMergeRequestDiscussion.Note] {
         notes.filter { note in
+            if let iid = target.iid, AICommentOriginOverrideStore.override(for: note, host: target.host,
+                projectID: target.projectID, iid: iid, in: actionDirectory) != nil { return false }
             guard let iid = target.iid, let record = AICommentAssessmentStore.displayResult(for: note, host: target.host,
                 projectID: target.projectID, iid: iid, username: target.username, in: actionDirectory,
                 displayDirectory: displayDirectory) else { return true }

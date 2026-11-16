@@ -118,6 +118,8 @@ final class TodoMonitorService {
     }
     private let automation: TodoAutomationService
     @ObservationIgnored private lazy var environmentRecovery = makeEnvironmentRecovery()
+    /// The user's comment-origin verdicts and their undo windows.
+    @ObservationIgnored private(set) lazy var commentOrigins = makeCommentOriginCenter()
 
     private func makeEnvironmentRecovery() -> AutomaticEnvironmentRecovery {
         let recovery = AutomaticEnvironmentRecovery(settings: settings, fetch: { [weak self] original in

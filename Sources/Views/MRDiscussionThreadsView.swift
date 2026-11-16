@@ -15,6 +15,8 @@ struct MRDiscussionThreadsView: View {
     var onDelete: ((GitLabDraftNote) -> Void)? = nil
     var title: LocalizedStringResource = .MRDiscussions.mrDiscussionsTitle
     var draftsFirst = false
+    /// Present when the user may change comment origins; `nil` classification returns to automatic assessment.
+    var onSetOrigin: MRDiscussionOriginAction? = nil
     let onRefresh: () -> Void
 
     var body: some View {
@@ -83,9 +85,12 @@ struct MRDiscussionThreadsView: View {
     private func threadView(_ thread: MRDiscussionSnapshot.Thread) -> some View {
         MRDiscussionThreadView(thread: thread, mergeRequestURL: mergeRequestURL,
                                currentUsername: currentUsername, currentUser: currentUser, initiallyExpanded: expandPendingDrafts && !thread.drafts.isEmpty,
-                               selection: selection, selectionDisabled: selectionDisabled, draftsFirst: draftsFirst, onDelete: onDelete)
+                               selection: selection, selectionDisabled: selectionDisabled, draftsFirst: draftsFirst, onDelete: onDelete,
+                               onSetOrigin: onSetOrigin)
     }
 }
+
+typealias MRDiscussionOriginAction = (AICommentOriginOverride.Classification?, [GitLabMergeRequestDiscussion.Note]) -> Void
 
 private struct MRDiscussionThreadView: View {
     let thread: MRDiscussionSnapshot.Thread
@@ -97,7 +102,14 @@ private struct MRDiscussionThreadView: View {
     let selectionDisabled: Bool
     let draftsFirst: Bool
     var onDelete: ((GitLabDraftNote) -> Void)? = nil
+    var onSetOrigin: MRDiscussionOriginAction? = nil
     @State private var isExpanded = false
+    @State private var threadOriginRequest: ThreadOriginRequest?
+
+    private struct ThreadOriginRequest: Identifiable {
+        let id = UUID()
+        let classification: AICommentOriginOverride.Classification?
+    }
 
     private var stateLabel: LocalizedStringResource {
         switch thread.state {
@@ -123,12 +135,16 @@ private struct MRDiscussionThreadView: View {
             DisclosureGroup(isExpanded: $isExpanded) {
                 if isExpanded {
                     VStack(alignment: .leading, spacing: 12) {
-                        ForEach(Array(comments.enumerated()), id: \.offset) { index, note in
-                            if index > 0 { Divider().padding(.vertical, 2) }
+                        // The first comment's author line stays in the header; its body continues here.
+                        if let first = comments.first {
+                            MRDiscussionNoteContent(note: first, threadLocation: thread.location)
+                        }
+                        ForEach(Array(comments.dropFirst().enumerated()), id: \.offset) { _, note in
+                            Divider().padding(.vertical, 2)
                             MRDiscussionNoteView(note: note, origin: note.id.flatMap { thread.origins[$0] },
                                                  authorKind: (note.author?.id).flatMap { thread.authorKinds[$0] },
                                                  mergeRequestURL: mergeRequestURL, threadLocation: thread.location,
-                                                 showsAuthor: index > 0)
+                                                 onSetOrigin: noteOriginAction(note))
                         }
                         if !draftsFirst { draftRows }
                     }
@@ -142,6 +158,30 @@ private struct MRDiscussionThreadView: View {
         .padding(.horizontal, 12).padding(.vertical, 11)
         .frame(maxWidth: .infinity, alignment: .leading)
         .onAppear { if initiallyExpanded { isExpanded = true } }
+        .alert(threadOriginTitle, isPresented: Binding(get: { threadOriginRequest != nil },
+                                                       set: { if !$0 { threadOriginRequest = nil } }),
+               presenting: threadOriginRequest) { request in
+            Button(role: .cancel) { threadOriginRequest = nil } label: { Text(.MRDiscussions.mrDiscussionsOriginCancel) }
+            Button { onSetOrigin?(request.classification, comments); threadOriginRequest = nil } label: {
+                Text(.MRDiscussions.mrDiscussionsOriginConfirm)
+            }
+        } message: { _ in
+            Text(.MRDiscussions.mrDiscussionsThreadOriginMessage(comments.count))
+        }
+    }
+
+    private var threadOriginTitle: Text {
+        switch threadOriginRequest?.classification {
+        case .ai: Text(.MRDiscussions.mrDiscussionsThreadOriginAiTitle)
+        case .uncertain: Text(.MRDiscussions.mrDiscussionsThreadOriginUncertainTitle)
+        case .human: Text(.MRDiscussions.mrDiscussionsThreadOriginHumanTitle)
+        case nil: Text(.MRDiscussions.mrDiscussionsThreadOriginAutomaticTitle)
+        }
+    }
+
+    private func noteOriginAction(_ note: GitLabMergeRequestDiscussion.Note) -> ((AICommentOriginOverride.Classification?) -> Void)? {
+        guard let onSetOrigin else { return nil }
+        return { onSetOrigin($0, [note]) }
     }
 
     private func threadHeader(firstComment: GitLabMergeRequestDiscussion.Note?,
@@ -159,25 +199,26 @@ private struct MRDiscussionThreadView: View {
                 .background(stateColor.opacity(thread.state == .open ? 0.055 : 0.08), in: Capsule())
                 MRDiscussionFeedbackBadge(state: thread.feedback)
                 replyStatus(summary)
-                if let originBadge { MRDiscussionOriginBadge(badge: originBadge) }
-            }
-            StatusFlowLayout {
-                if let location = thread.location {
-                    MRDiscussionLocationLabel(location: .init(full: location))
-                }
-                if let posted = firstComment?.createdAt {
-                    Text(verbatim: MRDiscussionTimestamp.display(posted))
-                        .font(.caption).foregroundStyle(.secondary).help(posted)
-                        .lineLimit(1)
+                if let originBadge {
+                    MRDiscussionOriginBadge(badge: originBadge,
+                        isManual: !thread.origins.isEmpty && thread.origins.values.allSatisfy(\.isManual),
+                        scope: .thread,
+                        onSelect: onSetOrigin == nil ? nil : { threadOriginRequest = .init(classification: $0) })
                 }
             }
-            MRDiscussionAuthorView(author: firstComment?.author,
-                accountKind: (firstComment?.author?.id).flatMap { thread.authorKinds[$0] })
-                .foregroundStyle(thread.state == .resolved ? Color.secondary : Color.primary)
-            if !isExpanded, let body = firstComment?.body {
-                Text(verbatim: body).font(.callout)
-                    .foregroundStyle(thread.state == .resolved ? Color.secondary : Color.primary).lineLimit(2)
-                    .padding(.top, 1)
+            if let location = thread.location {
+                MRDiscussionLocationLabel(location: .init(full: location))
+            }
+            if let firstComment {
+                MRDiscussionNoteHeader(note: firstComment, origin: firstComment.id.flatMap { thread.origins[$0] },
+                    authorKind: (firstComment.author?.id).flatMap { thread.authorKinds[$0] },
+                    mergeRequestURL: mergeRequestURL, onSetOrigin: noteOriginAction(firstComment))
+                    .foregroundStyle(thread.state == .resolved ? Color.secondary : Color.primary)
+                if !isExpanded, let body = firstComment.body {
+                    Text(verbatim: body).font(.callout)
+                        .foregroundStyle(thread.state == .resolved ? Color.secondary : Color.primary).lineLimit(2)
+                        .padding(.top, 1)
+                }
             }
         }
     }
@@ -201,25 +242,28 @@ private struct MRDiscussionThreadView: View {
     }
 }
 
+/// The header is not one big button, so origin menus and links inside it stay clickable.
 private struct MRDiscussionDisclosureStyle: DisclosureGroupStyle {
     func makeBody(configuration: Configuration) -> some View {
         VStack(alignment: .leading, spacing: 0) {
-            Button {
-                configuration.isExpanded.toggle()
-            } label: {
-                HStack(alignment: .top, spacing: 12) {
+            HStack(alignment: .top, spacing: 12) {
+                Button {
+                    configuration.isExpanded.toggle()
+                } label: {
                     Image(systemName: configuration.isExpanded ? "chevron.down" : "chevron.right")
                         .font(.caption.weight(.semibold))
                         .foregroundStyle(.secondary)
                         .frame(width: 12, height: 14)
-                        .accessibilityHidden(true)
-                    configuration.label.frame(maxWidth: .infinity, alignment: .leading)
+                        .contentShape(Rectangle())
                 }
-                .contentShape(Rectangle())
+                .buttonStyle(.plain)
+                .accessibilityLabel(Text(.MRDiscussions.mrDiscussionsToggleThread))
+                .accessibilityValue(Text(configuration.isExpanded
+                    ? .MRDiscussions.mrDiscussionsExpanded : .MRDiscussions.mrDiscussionsCollapsed))
+                configuration.label.frame(maxWidth: .infinity, alignment: .leading)
+                    .contentShape(Rectangle())
+                    .onTapGesture { configuration.isExpanded.toggle() }
             }
-            .buttonStyle(.plain)
-            .accessibilityValue(Text(configuration.isExpanded
-                ? .MRDiscussions.mrDiscussionsExpanded : .MRDiscussions.mrDiscussionsCollapsed))
             if configuration.isExpanded {
                 configuration.content.padding(.leading, 24)
             }
@@ -233,25 +277,56 @@ private struct MRDiscussionNoteView: View {
     let authorKind: AuthorFeedbackPolicy.AccountKind?
     let mergeRequestURL: URL
     let threadLocation: String?
-    var showsAuthor = true
+    var onSetOrigin: ((AICommentOriginOverride.Classification?) -> Void)? = nil
 
     var body: some View {
         VStack(alignment: .leading, spacing: 7) {
-            HStack(alignment: .firstTextBaseline, spacing: 8) {
-                if showsAuthor { MRDiscussionAuthorView(author: note.author, accountKind: authorKind) }
-                if let origin { MRDiscussionOriginBadge(badge: origin.badge, origin: origin) }
-                Spacer(minLength: 4)
-                if showsAuthor, let posted = note.createdAt {
-                    Text(verbatim: MRDiscussionTimestamp.display(posted)).font(.caption).foregroundStyle(.secondary).help(posted)
-                }
-                if let id = note.id, id > 0, let url = discussionNoteURL(mergeRequestURL, id: id) {
-                    Link(destination: url) { Image(systemName: "arrow.up.right.square") }
-                        .buttonStyle(.borderless).foregroundStyle(.secondary)
-                        .help(Text(.MRDiscussions.mrDiscussionsOpenInGitLab))
-                        .accessibilityLabel(Text(.MRDiscussions.mrDiscussionsOpenInGitLab))
-                }
+            MRDiscussionNoteHeader(note: note, origin: origin, authorKind: authorKind,
+                                   mergeRequestURL: mergeRequestURL, onSetOrigin: onSetOrigin)
+            MRDiscussionNoteContent(note: note, threadLocation: threadLocation)
+        }
+        .frame(maxWidth: .infinity, alignment: .leading)
+    }
+}
+
+/// One line for every comment, the thread's first included: author, origin, then date and link on the right.
+private struct MRDiscussionNoteHeader: View {
+    let note: GitLabMergeRequestDiscussion.Note
+    let origin: MRDiscussionSnapshot.Origin?
+    let authorKind: AuthorFeedbackPolicy.AccountKind?
+    let mergeRequestURL: URL
+    var onSetOrigin: ((AICommentOriginOverride.Classification?) -> Void)? = nil
+
+    var body: some View {
+        HStack(alignment: .firstTextBaseline, spacing: 8) {
+            MRDiscussionAuthorView(author: note.author, accountKind: authorKind)
+                .layoutPriority(1)
+            if let origin {
+                MRDiscussionOriginBadge(badge: origin.badge, origin: origin, isManual: origin.isManual,
+                                        scope: .comment, onSelect: onSetOrigin)
             }
-            .font(.callout)
+            Spacer(minLength: 4)
+            if let posted = note.createdAt {
+                Text(verbatim: MRDiscussionTimestamp.display(posted)).font(.caption).foregroundStyle(.secondary)
+                    .lineLimit(1).fixedSize().help(posted)
+            }
+            if let id = note.id, id > 0, let url = discussionNoteURL(mergeRequestURL, id: id) {
+                Link(destination: url) { Image(systemName: "arrow.up.right.square") }
+                    .buttonStyle(.borderless).foregroundStyle(.secondary)
+                    .help(Text(.MRDiscussions.mrDiscussionsOpenInGitLab))
+                    .accessibilityLabel(Text(.MRDiscussions.mrDiscussionsOpenInGitLab))
+            }
+        }
+        .font(.callout)
+    }
+}
+
+private struct MRDiscussionNoteContent: View {
+    let note: GitLabMergeRequestDiscussion.Note
+    let threadLocation: String?
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 7) {
             if let location = MRDiscussionLocation(position: note.position), location.full != threadLocation {
                 MRDiscussionLocationLabel(location: location).textSelection(.enabled)
             }
@@ -297,8 +372,13 @@ private struct MRDiscussionDraftView: View {
 }
 
 private struct MRDiscussionOriginBadge: View {
+    enum Scope { case comment, thread }
     let badge: MRDiscussionSnapshot.OriginBadge
     var origin: MRDiscussionSnapshot.Origin? = nil
+    var isManual = false
+    var scope: Scope = .comment
+    /// Present when the user may change the classification; `nil` returns to automatic assessment.
+    var onSelect: ((AICommentOriginOverride.Classification?) -> Void)? = nil
 
     private var title: LocalizedStringResource {
         if origin == .appGenerated { return .MRDiscussions.mrDiscussionsAiMergeTether }
@@ -324,12 +404,13 @@ private struct MRDiscussionOriginBadge: View {
         }
     }
     private var explanation: Text {
-        switch origin {
+        var text: Text = switch origin {
         case .verifiedAssistant: Text(.MRDiscussions.mrDiscussionsAiVerified)
         case .appGenerated: Text(.MRDiscussions.mrDiscussionsAiAppGenerated)
         case .assessed(let evidence): Text(.MRDiscussions.mrDiscussionsAiAssessed) + Text(verbatim: "\n" + evidence)
         case .uncertain(let evidence): Text(.MRDiscussions.mrDiscussionsAiUncertainHelp) + Text(verbatim: "\n" + evidence)
         case .humanLikely(let evidence): Text(.MRDiscussions.mrDiscussionsHumanHelp) + Text(verbatim: "\n" + evidence)
+        case .manual: Text(.MRDiscussions.mrDiscussionsManualHelp)
         case nil:
             switch badge {
             case .ai: Text(.MRDiscussions.mrDiscussionsThreadAiHelp)
@@ -337,17 +418,70 @@ private struct MRDiscussionOriginBadge: View {
             case .human: Text(.MRDiscussions.mrDiscussionsThreadHumanHelp)
             }
         }
+        if onSelect != nil {
+            text = text + Text(verbatim: "\n\n") + Text(scope == .thread
+                ? .MRDiscussions.mrDiscussionsThreadOriginMenuHelp : .MRDiscussions.mrDiscussionsOriginMenuHelp)
+        }
+        return text
     }
-    var body: some View {
-        Label { Text(title) } icon: { Image(systemName: symbol) }
+    private var current: AICommentOriginOverride.Classification? {
+        guard isManual else { return nil }
+        return switch badge { case .ai: .ai; case .uncertain: .uncertain; case .human: .human }
+    }
+
+    private var capsule: some View {
+        Label {
+            HStack(spacing: 3) {
+                Text(title)
+                if isManual { Image(systemName: "hand.raised.fill").imageScale(.small).accessibilityHidden(true) }
+                if onSelect != nil { Image(systemName: "chevron.down").imageScale(.small).accessibilityHidden(true) }
+            }
+        } icon: { Image(systemName: symbol) }
             .font(.caption2.weight(.semibold))
             .foregroundStyle(color).padding(.horizontal, 6).padding(.vertical, 2)
             .background(color.opacity(0.1), in: Capsule())
             .fixedSize(horizontal: true, vertical: false)
-            .help(explanation)
-            .accessibilityElement(children: .ignore)
-            .accessibilityLabel(Text(title))
-            .accessibilityHint(explanation)
+    }
+
+    var body: some View {
+        if let onSelect {
+            Menu {
+                Section {
+                    option(.ai, title: .MRDiscussions.mrDiscussionsAi, symbol: "sparkles", onSelect: onSelect)
+                    option(.uncertain, title: .MRDiscussions.mrDiscussionsAiUncertain, symbol: "questionmark", onSelect: onSelect)
+                    option(.human, title: .MRDiscussions.mrDiscussionsHuman, symbol: "person.fill", onSelect: onSelect)
+                } header: {
+                    Text(scope == .thread ? .MRDiscussions.mrDiscussionsThreadOriginMenuTitle : .MRDiscussions.mrDiscussionsOriginMenuTitle)
+                }
+                if isManual || scope == .thread {
+                    Divider()
+                    Button { onSelect(nil) } label: {
+                        Label { Text(.MRDiscussions.mrDiscussionsOriginAutomatic) } icon: { Image(systemName: "arrow.uturn.backward") }
+                    }
+                }
+            } label: { capsule }
+                .menuStyle(.button)
+                .buttonStyle(.plain)
+                .menuIndicator(.hidden)
+                .fixedSize()
+                .help(explanation)
+                .accessibilityLabel(Text(title))
+                .accessibilityHint(explanation)
+        } else {
+            capsule
+                .help(explanation)
+                .accessibilityElement(children: .ignore)
+                .accessibilityLabel(Text(title))
+                .accessibilityHint(explanation)
+        }
+    }
+
+    @ViewBuilder
+    private func option(_ value: AICommentOriginOverride.Classification, title: LocalizedStringResource, symbol: String,
+                        onSelect: @escaping (AICommentOriginOverride.Classification?) -> Void) -> some View {
+        Button { onSelect(value) } label: {
+            Label { Text(title) } icon: { Image(systemName: current == value ? "checkmark" : symbol) }
+        }
     }
 }
 

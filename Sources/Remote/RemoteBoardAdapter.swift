@@ -135,6 +135,7 @@ import MergeTetherRemote
                         }
                     }
                     card.actions += mrControls(item: item, row: row, monitor: monitor, account: account, busy: busy)
+                    if let control = commentOriginControl(item: item, monitor: monitor, account: account) { card.actions.append(control) }
                 } else if let todo = board.otherTodos.first(where: { "todo:\($0.id)" == card.id }),
                           monitor.isAssessingNotice(todo) {
                     card.needsAttention = false
@@ -264,6 +265,17 @@ import MergeTetherRemote
                 confirmationText: String(localized: .MergeActions.mergeActionsResolveHelp)))
         }
         return card
+    }
+
+    /// One entry point for correcting comment origins. It writes only local evidence and stays available
+    /// while the card is busy; the command names its comments and the host re-reads GitLab to match them.
+    static func commentOriginControl(item: MergeRequestAttentionMonitor.Item, monitor: TodoMonitorService,
+                                     account: String) -> RemoteAction? {
+        guard let request = item.mergeRequest, request.state == "opened",
+              monitor.scopeTarget(projectID: item.id.projectID, iid: item.id.iid, url: item.url) != nil,
+              let token = try? RemoteDigest.token([account, "commentOrigin", String(request.projectID), String(request.iid)])
+        else { return nil }
+        return .init(id: "commentOrigin", kind: .setCommentOrigin, token: token)
     }
 
     /// Mac-detail controls offered to the phone. Each token binds the MR, its conversation and the

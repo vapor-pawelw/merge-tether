@@ -4,6 +4,8 @@ import MergeTetherRemote
 struct RemoteMRDetailContent: View {
     let details: RemoteMRDetails
     let card: RemoteCard
+    /// Present when the Mac accepts comment-origin changes from this phone.
+    var onCommentOrigin: ((RemoteCommentOriginRequest) -> Void)? = nil
     @State private var showingApprovals = false
     @State private var descriptionExpanded = false
     private var visiblePolicy: [String] { card.visiblePolicy(details.policy) }
@@ -46,6 +48,9 @@ struct RemoteMRDetailContent: View {
             }
             .id(RemoteCardCTA.Destination.feedback)
             section(.RemoteDetail.remoteDetailDiscussions) {
+                if let resume = details.originResume, let onCommentOrigin {
+                    RemoteOriginResumeBanner(resume: resume, onCommentOrigin: onCommentOrigin)
+                }
                 if let threads = details.threads {
                     if threads.isEmpty {
                         Text(details.truncated ? .RemoteDetail.remoteDetailTruncated : .RemoteDetail.remoteDetailNoDiscussions)
@@ -54,7 +59,7 @@ struct RemoteMRDetailContent: View {
                     // Long conversations: only threads near the viewport are built and measured.
                     LazyVStack(alignment: .leading, spacing: 14) {
                         ForEach(threads) { thread in
-                            RemoteDiscussionCard(thread: thread, mergeRequestURL: card.url)
+                            RemoteDiscussionCard(thread: thread, mergeRequestURL: card.url, onCommentOrigin: onCommentOrigin)
                         }
                     }
                 } else { unavailable }
@@ -174,7 +179,14 @@ enum RemoteDetailAnchor: Hashable { case approvals, discussions }
 private struct RemoteDiscussionCard: View {
     let thread: RemoteDetailThread
     let mergeRequestURL: URL?
+    var onCommentOrigin: ((RemoteCommentOriginRequest) -> Void)? = nil
     @State private var expanded = false
+    @State private var threadOriginRequest: ThreadOriginRequest?
+
+    private struct ThreadOriginRequest: Identifiable {
+        let id = UUID()
+        let origin: RemoteDetailNote.Origin?
+    }
     private var color: Color {
         switch thread.state { case .open: .orange; case .resolved: .green; case .general: .secondary }
     }
@@ -186,32 +198,43 @@ private struct RemoteDiscussionCard: View {
         }
     }
     var body: some View {
-        DisclosureGroup(isExpanded: $expanded) {
-            VStack(alignment: .leading, spacing: 18) {
-                if thread.truncated { Text(.RemoteDetail.remoteDetailTruncated).font(.caption).foregroundStyle(.orange) }
-                ForEach(Array(thread.notes.enumerated()), id: \.offset) { index, note in
-                    VStack(alignment: .leading, spacing: 10) {
-                        VStack(alignment: .leading, spacing: 5) {
-                            if index > 0 {
-                                noteAuthor(note)
-                            }
-                            if let origin = note.origin { originBadge(origin) }
-                            if index > 0, let date = note.createdAt {
-                                Text(date, format: .dateTime.year().month().day().hour().minute()).font(.caption).foregroundStyle(.secondary)
-                            }
+        // Not a DisclosureGroup: its label is one button, which would swallow taps on the origin menus.
+        VStack(alignment: .leading, spacing: 0) {
+            header
+            if expanded {
+                VStack(alignment: .leading, spacing: 18) {
+                    if thread.truncated { Text(.RemoteDetail.remoteDetailTruncated).font(.caption).foregroundStyle(.orange) }
+                    ForEach(Array(thread.notes.enumerated()), id: \.offset) { index, note in
+                        VStack(alignment: .leading, spacing: 10) {
+                            // The first comment's author line stays in the header, like on the Mac.
+                            if index > 0 { noteHeader(note) }
+                            noteContent(note)
                         }
-                        if let location = note.location, location != thread.location { RemoteFullContextLabel(full: location) }
-                        Text(verbatim: note.body).font(.callout).lineSpacing(3).textSelection(.enabled)
-                            .fixedSize(horizontal: false, vertical: true)
-                        if let url = safeLink(note.url, to: mergeRequestURL) {
-                            Link(destination: url) { Label(.RemoteDetail.remoteDetailOpenComment, systemImage: "arrow.up.right.square") }
-                                .font(.caption).frame(minHeight: 44)
-                        }
+                        if note.id != thread.notes.last?.id { Divider() }
                     }
-                    if note.id != thread.notes.last?.id { Divider() }
+                }.padding(.top, 12)
+            }
+        }
+        .padding(12)
+        .background(color.opacity(0.025), in: RoundedRectangle(cornerRadius: 12))
+        .overlay { RoundedRectangle(cornerRadius: 12).strokeBorder(color.opacity(0.12), lineWidth: 0.5) }
+        .alert(threadOriginTitle, isPresented: Binding(get: { threadOriginRequest != nil },
+                                                       set: { if !$0 { threadOriginRequest = nil } }),
+               presenting: threadOriginRequest) { request in
+            Button(role: .cancel) { threadOriginRequest = nil } label: { Text(.RemoteDetail.remoteDetailOriginCancel) }
+            Button {
+                if let change = RemoteCommentOriginRequest.set(request.origin, notes: thread.notes, in: thread.id) {
+                    onCommentOrigin?(change)
                 }
-            }.padding(.top, 12)
-        } label: {
+                threadOriginRequest = nil
+            } label: { Text(.RemoteDetail.remoteDetailOriginConfirm) }
+        } message: { _ in
+            Text(.RemoteDetail.remoteDetailThreadOriginMessage(thread.notes.count))
+        }
+    }
+
+    private var header: some View {
+        HStack(alignment: .top, spacing: 8) {
             VStack(alignment: .leading, spacing: 8) {
                 StatusFlowLayout {
                     Label(state, systemImage: thread.state == .resolved ? "checkmark.bubble" : "bubble.left")
@@ -227,36 +250,75 @@ private struct RemoteDiscussionCard: View {
                             Text(thread.draftCount, format: .number)
                         }.font(.caption).foregroundStyle(.tint)
                     }
-                    if let origin = thread.origin { originBadge(origin) }
-                }
-                StatusFlowLayout {
-                    if let location = thread.location { RemoteFullContextLabel(full: location) }
-                    if let date = thread.notes.first?.createdAt {
-                        Text(date, format: .dateTime.year().month().day().hour().minute())
-                            .font(.caption).foregroundStyle(.secondary)
+                    if let origin = thread.origin {
+                        originBadge(origin, manual: thread.notes.allSatisfy { $0.originManual == true }, thread: true) {
+                            threadOriginRequest = .init(origin: $0)
+                        }
                     }
                 }
+                if let location = thread.location { RemoteFullContextLabel(full: location) }
                 if let first = thread.notes.first {
-                    noteAuthor(first)
+                    noteHeader(first)
                     if !expanded { Text(verbatim: first.body).font(.callout).lineLimit(3).foregroundStyle(.secondary) }
                 }
-            }.frame(maxWidth: .infinity, minHeight: 44, alignment: .leading)
-        }
-        .tint(.secondary)
-        .padding(12)
-        .background(color.opacity(0.025), in: RoundedRectangle(cornerRadius: 12))
-        .overlay { RoundedRectangle(cornerRadius: 12).strokeBorder(color.opacity(0.12), lineWidth: 0.5) }
-    }
-    private func noteAuthor(_ note: RemoteDetailNote) -> some View {
-        VStack(alignment: .leading, spacing: 3) {
-            PersonLabel(person: .init(name: note.author, username: note.username, avatarURL: note.avatarURL), avatarSize: 20,
-                        fallback: Text(.RemoteDetail.remoteDetailUnknownAuthor))
-                .font(.callout.weight(.medium))
-            if note.authorKind == .automation {
-                Label(.AuthorFeedback.authorFeedbackBotAuthor, systemImage: "gearshape")
-                    .font(.caption.weight(.medium)).foregroundStyle(.secondary)
-                    .accessibilityHint(Text(.AuthorFeedback.authorFeedbackBotAuthorHelp))
             }
+            .frame(maxWidth: .infinity, minHeight: 44, alignment: .leading)
+            .contentShape(Rectangle())
+            .onTapGesture { withAnimation(.snappy) { expanded.toggle() } }
+            Button { withAnimation(.snappy) { expanded.toggle() } } label: {
+                Image(systemName: "chevron.right").rotationEffect(.degrees(expanded ? 90 : 0))
+                    .font(.footnote.weight(.semibold)).foregroundStyle(.secondary)
+                    .frame(width: 44, height: 44)
+            }
+            .buttonStyle(.plain)
+            .accessibilityLabel(Text(.RemoteDetail.remoteDetailToggleThread))
+            .accessibilityValue(Text(expanded ? .RemoteDetail.remoteDetailShowLess : .RemoteDetail.remoteDetailShowMore))
+        }
+    }
+
+    private var threadOriginTitle: Text {
+        switch threadOriginRequest?.origin {
+        case .ai: Text(.RemoteDetail.remoteDetailThreadOriginAiTitle)
+        case .uncertain: Text(.RemoteDetail.remoteDetailThreadOriginUncertainTitle)
+        case .human: Text(.RemoteDetail.remoteDetailThreadOriginHumanTitle)
+        case nil: Text(.RemoteDetail.remoteDetailThreadOriginAutomaticTitle)
+        }
+    }
+
+    /// Author and origin on the left (wrapping on narrow screens), date on the right: the same line for every comment.
+    private func noteHeader(_ note: RemoteDetailNote) -> some View {
+        HStack(alignment: .top, spacing: 8) {
+            StatusFlowLayout(spacing: 6) {
+                PersonLabel(person: .init(name: note.author, username: note.username, avatarURL: note.avatarURL), avatarSize: 20,
+                            fallback: Text(.RemoteDetail.remoteDetailUnknownAuthor))
+                    .font(.callout.weight(.medium))
+                if note.authorKind == .automation {
+                    Label(.AuthorFeedback.authorFeedbackBotAuthor, systemImage: "gearshape")
+                        .font(.caption.weight(.medium)).foregroundStyle(.secondary).fixedSize()
+                        .accessibilityHint(Text(.AuthorFeedback.authorFeedbackBotAuthorHelp))
+                }
+                if let origin = note.origin {
+                    originBadge(origin, manual: note.originManual == true, thread: false) { choice in
+                        if let change = RemoteCommentOriginRequest.set(choice, notes: [note], in: thread.id) { onCommentOrigin?(change) }
+                    }
+                }
+            }
+            .frame(maxWidth: .infinity, alignment: .leading)
+            if let date = note.createdAt {
+                Text(date, format: .dateTime.month().day().hour().minute())
+                    .font(.caption).foregroundStyle(.secondary).lineLimit(1).fixedSize()
+                    .padding(.top, 2)
+            }
+        }
+    }
+
+    @ViewBuilder private func noteContent(_ note: RemoteDetailNote) -> some View {
+        if let location = note.location, location != thread.location { RemoteFullContextLabel(full: location) }
+        Text(verbatim: note.body).font(.callout).lineSpacing(3).textSelection(.enabled)
+            .fixedSize(horizontal: false, vertical: true)
+        if let url = safeLink(note.url, to: mergeRequestURL) {
+            Link(destination: url) { Label(.RemoteDetail.remoteDetailOpenComment, systemImage: "arrow.up.right.square") }
+                .font(.caption).frame(minHeight: 44)
         }
     }
     private var feedbackBadge: some View {
@@ -294,16 +356,87 @@ private struct RemoteDiscussionCard: View {
         case .unknown, .unavailable: .RemoteDetail.remoteDetailReplyUnknown
         }
     }
-    private func originBadge(_ origin: RemoteDetailNote.Origin) -> some View {
-        let title: LocalizedStringResource = switch origin {
+    private func originTitle(_ origin: RemoteDetailNote.Origin) -> LocalizedStringResource {
+        switch origin {
         case .ai: .RemoteDetail.remoteDetailOriginAI
         case .uncertain: .RemoteDetail.remoteDetailOriginUncertain
         case .human: .RemoteDetail.remoteDetailOriginHuman
         }
+    }
+    private func originSymbol(_ origin: RemoteDetailNote.Origin) -> String {
+        origin == .ai ? "sparkles" : origin == .human ? "person" : "questionmark.circle"
+    }
+
+    @ViewBuilder
+    private func originBadge(_ origin: RemoteDetailNote.Origin, manual: Bool, thread: Bool,
+                             onSelect: @escaping (RemoteDetailNote.Origin?) -> Void) -> some View {
         let color: Color = switch origin { case .ai: .purple; case .uncertain: .orange; case .human: .teal }
-        return Label(title, systemImage: origin == .ai ? "sparkles" : origin == .human ? "person" : "questionmark.circle")
+        let capsule = Label {
+            HStack(spacing: 3) {
+                Text(originTitle(origin))
+                if manual { Image(systemName: "hand.raised.fill").imageScale(.small) }
+                if onCommentOrigin != nil { Image(systemName: "chevron.down").imageScale(.small) }
+            }
+        } icon: { Image(systemName: originSymbol(origin)) }
             .font(.caption.weight(.medium)).foregroundStyle(color)
             .padding(.horizontal, 7).padding(.vertical, 3).background(color.opacity(0.08), in: Capsule())
+            .fixedSize()
+        if onCommentOrigin != nil {
+            Menu {
+                Section {
+                    ForEach([RemoteDetailNote.Origin.ai, .uncertain, .human], id: \.self) { choice in
+                        Button { onSelect(choice) } label: {
+                            Label { Text(originTitle(choice)) } icon: {
+                                Image(systemName: manual && choice == origin ? "checkmark" : originSymbol(choice))
+                            }
+                        }
+                    }
+                } header: {
+                    Text(thread ? .RemoteDetail.remoteDetailThreadOriginMenuTitle : .RemoteDetail.remoteDetailOriginMenuTitle)
+                }
+                if manual || thread {
+                    Button { onSelect(nil) } label: {
+                        Label { Text(.RemoteDetail.remoteDetailOriginAutomatic) } icon: { Image(systemName: "arrow.uturn.backward") }
+                    }
+                }
+            } label: { capsule.contentShape(Rectangle()) }
+                .accessibilityLabel(manual ? Text(originTitle(origin)) + Text(verbatim: ", ") + Text(.RemoteDetail.remoteDetailOriginManual)
+                                           : Text(originTitle(origin)))
+                .accessibilityHint(Text(thread ? .RemoteDetail.remoteDetailThreadOriginMenuHint : .RemoteDetail.remoteDetailOriginMenuHint))
+        } else {
+            capsule.accessibilityElement(children: .combine)
+        }
+    }
+}
+
+/// Shown while an origin change waits before automation publishes drafts; Undo goes back to the Mac.
+private struct RemoteOriginResumeBanner: View {
+    let resume: RemoteOriginResume
+    let onCommentOrigin: (RemoteCommentOriginRequest) -> Void
+
+    var body: some View {
+        TimelineView(.periodic(from: .now, by: 1)) { context in
+            let remaining = Int(resume.resumesAt.timeIntervalSince(context.date).rounded(.up))
+            if remaining > 0 {
+                VStack(alignment: .leading, spacing: 10) {
+                    Label { Text(.RemoteDetail.remoteDetailOriginResume(resume.drafts)).font(.callout.weight(.medium)) } icon: {
+                        Image(systemName: "hourglass").foregroundStyle(.orange)
+                    }
+                    Text(.RemoteDetail.remoteDetailOriginResumeCountdown(remaining))
+                        .font(.caption).foregroundStyle(.secondary).monospacedDigit()
+                    HStack(spacing: 12) {
+                        Button { onCommentOrigin(.init(operation: .undo, changeID: resume.changeID)) } label: {
+                            Text(.RemoteDetail.remoteDetailOriginUndo).frame(minHeight: 32)
+                        }.buttonStyle(.borderedProminent)
+                        Button { onCommentOrigin(.init(operation: .continueNow, changeID: resume.changeID)) } label: {
+                            Text(.RemoteDetail.remoteDetailOriginContinueNow).frame(minHeight: 32)
+                        }.buttonStyle(.bordered)
+                    }
+                }
+                .padding(12).frame(maxWidth: .infinity, alignment: .leading)
+                .background(.orange.opacity(0.1), in: RoundedRectangle(cornerRadius: 12))
+            }
+        }
     }
 }
 

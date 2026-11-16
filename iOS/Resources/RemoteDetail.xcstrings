@@ -1068,6 +1068,228 @@
           }
         }
       }
+    },
+    "remoteDetail.toggleThread": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Show or hide the conversation"
+          }
+        }
+      }
+    },
+    "remoteDetail.originMenuTitle": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Classify this comment"
+          }
+        }
+      }
+    },
+    "remoteDetail.threadOriginMenuTitle": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Classify every comment in this thread"
+          }
+        }
+      }
+    },
+    "remoteDetail.originAutomatic": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Use automatic assessment"
+          }
+        }
+      }
+    },
+    "remoteDetail.originManual": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Set by you"
+          }
+        }
+      }
+    },
+    "remoteDetail.originMenuHint": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Changes how this comment is classified."
+          }
+        }
+      }
+    },
+    "remoteDetail.threadOriginMenuHint": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Changes how every comment in this thread is classified."
+          }
+        }
+      }
+    },
+    "remoteDetail.originCancel": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Cancel"
+          }
+        }
+      }
+    },
+    "remoteDetail.originConfirm": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Change"
+          }
+        }
+      }
+    },
+    "remoteDetail.threadOriginAiTitle": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Mark every comment in this thread as AI?"
+          }
+        }
+      }
+    },
+    "remoteDetail.threadOriginUncertainTitle": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Mark every comment in this thread as AI uncertain?"
+          }
+        }
+      }
+    },
+    "remoteDetail.threadOriginHumanTitle": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Mark every comment in this thread as human?"
+          }
+        }
+      }
+    },
+    "remoteDetail.threadOriginAutomaticTitle": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Return this thread to automatic assessment?"
+          }
+        }
+      }
+    },
+    "remoteDetail.threadOriginMessage.%lld": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "variations": {
+            "plural": {
+              "one": {
+                "stringUnit": {
+                  "state": "translated",
+                  "value": "This changes %lld published comment. Private drafts have no classification and stay as they are."
+                }
+              },
+              "other": {
+                "stringUnit": {
+                  "state": "translated",
+                  "value": "This changes all %lld published comments. Private drafts have no classification and stay as they are."
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "remoteDetail.originResume.%lld": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "variations": {
+            "plural": {
+              "one": {
+                "stringUnit": {
+                  "state": "translated",
+                  "value": "This change lets automation publish %lld draft reply."
+                }
+              },
+              "other": {
+                "stringUnit": {
+                  "state": "translated",
+                  "value": "This change lets automation publish %lld draft replies."
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "remoteDetail.originResumeCountdown.%lld": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Automation continues in %lld s."
+          }
+        }
+      }
+    },
+    "remoteDetail.originUndo": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Undo"
+          }
+        }
+      }
+    },
+    "remoteDetail.originContinueNow": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Continue now"
+          }
+        }
+      }
     }
   },
   "version": "1.0"

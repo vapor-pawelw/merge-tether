@@ -36,6 +36,7 @@ extension RemoteActionKind {
         case .stopJob: .Remote.remoteStopJob
         case .ignoreSuggestion: .FeedbackSuggestions.feedbackSuggestionsIgnore
         case .restoreSuggestion: .FeedbackSuggestions.feedbackSuggestionsRestore
+        case .setCommentOrigin: .RemoteDetail.remoteDetailOriginMenuTitle
         }
     }
 }

@@ -28,7 +28,8 @@ import MergeTetherRemote
                 url: URL(string: "https://gitlab.example.org/example/payments-api/-/merge_requests/42")!,
                 head: "a9f36b246dde", detail: String(localized: .MRHumanAction.mrHumanActionPublicationSingle),
                 drafts: [.init(id: 1, body: "Handled the retry case and added coverage for the duplicate response.", context: "Sources/Checkout.swift:42")],
-                actions: [.init(id: "publish", kind: .publish, token: "preview"), .init(id: "deleteDraft:1", kind: .deleteDraft, token: "preview")],
+                actions: [.init(id: "publish", kind: .publish, token: "preview"), .init(id: "deleteDraft:1", kind: .deleteDraft, token: "preview"),
+                          .init(id: "commentOrigin", kind: .setCommentOrigin, token: "preview")],
                 needsAttention: true, mergeRequestIID: 42,
                 primaryCTA: .init(title: String(localized: .MRHumanAction.mrHumanActionActionReviewDrafts), destination: .drafts),
                 presentation: .init(author: "Alex Example", repository: "payments-api", authorUsername: "alex"), approvals: .init(completed: 2, required: 2, received: 5, requirementsSatisfied: false)),
@@ -59,7 +60,7 @@ import MergeTetherRemote
         let location = "Sources/Payments/Checkout/Confirmation/PaymentConfirmationCoordinator.swift:142"
         let sourceBranch = "feature/payment-confirmation-with-long-branch-name"
         let url = card.url
-        return .init(checkedAt: .now, metadata: [
+        var details = RemoteMRDetails(checkedAt: .now, metadata: [
             .init(label: String(localized: .RemoteDetail.remoteDetailSourceBranch), value: sourceBranch),
             .init(label: String(localized: .RemoteDetail.remoteDetailTargetBranch), value: "main"),
             .init(label: String(localized: .RemoteSecurity.remoteSecurityCommit), value: card.head ?? ""),
@@ -75,7 +76,7 @@ import MergeTetherRemote
                     body: "Please preserve the previous confirmation when the retry fails. A duplicate server response should not replace it with an empty state.",
                     location: location, createdAt: .now.addingTimeInterval(-3600), url: url, origin: .ai, authorID: 1),
                 .init(id: "2", author: "Alex Example", username: "alex", body: "The previous confirmation stays visible. The duplicate-response path now has a regression test.",
-                    createdAt: .now.addingTimeInterval(-1800), url: url, origin: .ai, authorID: 9)
+                    createdAt: .now.addingTimeInterval(-1800), url: url, origin: .ai, authorID: 9, originManual: true)
             ], reply: .published, draftCount: card.drafts.count, feedback: .addressed),
             .init(id: "resolved", state: .resolved, notes: [
                 .init(id: "3", author: "Earlier Reviewer", username: "earlier", body: "The longer translated button title now wraps correctly.",
@@ -95,6 +96,10 @@ import MergeTetherRemote
         activity: [.init(id: "run1", title: "Handle payment confirmation feedback", status: "Completed", summary: "Preserved the cached confirmation and added duplicate-response coverage.", createdAt: .now.addingTimeInterval(-900), head: card.head)],
         usage: [.init(label: "Reviewer / work agent", value: "$0.1420 · 2 agent requests"), .init(label: "Verifier", value: "$0.0081 · 4 agent requests")],
         branches: .init(source: sourceBranch, target: "main"))
+        if CommandLine.arguments.contains("--remote-preview-origin-resume") {
+            details.originResume = .init(changeID: UUID().uuidString, resumesAt: .now.addingTimeInterval(600), drafts: 1)
+        }
+        return details
     }
 }
 @MainActor private final class PreviewTransport: RemotePhoneTransport {

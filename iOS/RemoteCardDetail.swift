@@ -63,7 +63,7 @@ struct RemoteCardDetail: View {
                         }
                         if current.primaryCTA?.destination == .setup {
                             Text(.Remote.remoteSetupOnMac).foregroundStyle(.secondary).id(RemoteCardCTA.Destination.setup)
-                        } else if current.actions.isEmpty, let destination = current.primaryCTA?.destination,
+                        } else if !current.actions.contains(where: { $0.kind != .setCommentOrigin }), let destination = current.primaryCTA?.destination,
                                   destination != .drafts {
                             Text(.Remote.remoteCompleteOnMac).foregroundStyle(.secondary)
                         }
@@ -79,7 +79,10 @@ struct RemoteCardDetail: View {
                         actionSection.id(RemoteCardCTA.Destination.actions)
                         if current.id.hasPrefix("mr:") {
                             if let details = shown {
-                                RemoteMRDetailContent(details: details, card: current)
+                                RemoteMRDetailContent(details: details, card: current,
+                                    onCommentOrigin: current.actions.contains { $0.kind == .setCommentOrigin } ? { request in
+                                        Task { await model.setCommentOrigin(request, card: current) }
+                                    } : nil)
                             }
                         }
                     }
@@ -204,7 +207,7 @@ struct RemoteCardDetail: View {
     private static let secondaryKinds: Set<RemoteActionKind> = [.ignoreSuggestion, .restoreSuggestion]
     /// Draft-level actions live on their draft cards.
     private var buttonActions: [RemoteAction] {
-        current.actions.filter { $0.kind != .deleteDraft && $0.kind != .publishDraft }
+        current.actions.filter { $0.kind != .deleteDraft && $0.kind != .publishDraft && $0.kind != .setCommentOrigin }
     }
     private func actionTitle(_ action: RemoteAction) -> Text {
         if let label = action.label { Text(verbatim: label) } else { Text(action.kind.title) }

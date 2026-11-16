@@ -103,9 +103,12 @@ public struct RemoteDetailNote: Codable, Equatable, Identifiable, Sendable {
     public let authorID: Int?
     public var authorKind: AuthorKind?
     public let avatarURL: URL?
+    /// `true` when the user set `origin` by hand rather than an assessment.
+    public var originManual: Bool?
     public init(id: String, author: String? = nil, username: String? = nil, body: String, location: String? = nil,
                 createdAt: Date? = nil, url: URL? = nil, origin: Origin? = nil, authorID: Int? = nil,
-                authorKind: AuthorKind? = nil, avatarURL: URL? = nil) {
+                authorKind: AuthorKind? = nil, avatarURL: URL? = nil, originManual: Bool? = nil) {
+        self.originManual = originManual
         self.id = id; self.author = author; self.username = username; self.body = body; self.location = location
         self.createdAt = createdAt; self.url = url; self.origin = origin
         self.authorID = authorID
@@ -180,6 +183,8 @@ public struct RemoteMRDetails: Codable, Equatable, Sendable {
     public var truncated: Bool
     public var discussionFingerprint: String?
     public var branches: RemoteDetailBranches?
+    /// A comment-origin change waiting before it lets automation publish drafts.
+    public var originResume: RemoteOriginResume?
     public init(checkedAt: Date, metadata: [RemoteDetailField] = [], description: String? = nil,
                 approvals: RemoteApprovalDetails? = nil, threads: [RemoteDetailThread]? = nil,
                 reasons: [String] = [], policy: [String] = [], feedback: [RemoteDetailField] = [],

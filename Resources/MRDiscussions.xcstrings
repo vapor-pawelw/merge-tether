@@ -584,6 +584,250 @@
           }
         }
       }
+    },
+    "mrDiscussions.toggleThread": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Show or hide the conversation"
+          }
+        }
+      }
+    },
+    "mrDiscussions.originMenuTitle": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Classify this comment"
+          }
+        }
+      }
+    },
+    "mrDiscussions.threadOriginMenuTitle": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Classify every comment in this thread"
+          }
+        }
+      }
+    },
+    "mrDiscussions.originMenuHelp": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Click to correct this comment’s classification."
+          }
+        }
+      }
+    },
+    "mrDiscussions.threadOriginMenuHelp": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Click to correct the classification of every comment in this thread."
+          }
+        }
+      }
+    },
+    "mrDiscussions.originAutomatic": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Use automatic assessment"
+          }
+        }
+      }
+    },
+    "mrDiscussions.manualHelp": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "You set this classification. It replaces the automatic assessment, including for automatic publication, until the comment is edited."
+          }
+        }
+      }
+    },
+    "mrDiscussions.originCancel": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Cancel"
+          }
+        }
+      }
+    },
+    "mrDiscussions.originConfirm": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Change"
+          }
+        }
+      }
+    },
+    "mrDiscussions.threadOriginAiTitle": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Mark every comment in this thread as AI?"
+          }
+        }
+      }
+    },
+    "mrDiscussions.threadOriginUncertainTitle": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Mark every comment in this thread as AI uncertain?"
+          }
+        }
+      }
+    },
+    "mrDiscussions.threadOriginHumanTitle": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Mark every comment in this thread as human?"
+          }
+        }
+      }
+    },
+    "mrDiscussions.threadOriginAutomaticTitle": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Return this thread to automatic assessment?"
+          }
+        }
+      }
+    },
+    "mrDiscussions.threadOriginMessage.%lld": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "variations": {
+            "plural": {
+              "one": {
+                "stringUnit": {
+                  "state": "translated",
+                  "value": "This changes %lld published comment. Private drafts have no classification and stay as they are."
+                }
+              },
+              "other": {
+                "stringUnit": {
+                  "state": "translated",
+                  "value": "This changes all %lld published comments. Private drafts have no classification and stay as they are."
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "mrDiscussions.originChangeFailed": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Couldn’t change the classification"
+          }
+        }
+      }
+    },
+    "mrDiscussions.originChangeFailedMessage": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "The comment may have changed on GitLab, or the classification couldn’t be saved. Refresh the conversation and try again."
+          }
+        }
+      }
+    },
+    "mrDiscussions.originResume.%lld": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "variations": {
+            "plural": {
+              "one": {
+                "stringUnit": {
+                  "state": "translated",
+                  "value": "This change lets automation publish %lld draft reply."
+                }
+              },
+              "other": {
+                "stringUnit": {
+                  "state": "translated",
+                  "value": "This change lets automation publish %lld draft replies."
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "mrDiscussions.originResumeCountdown.%lld": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Automation continues in %lld s."
+          }
+        }
+      }
+    },
+    "mrDiscussions.originUndo": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Undo"
+          }
+        }
+      }
+    },
+    "mrDiscussions.originContinueNow": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Continue now"
+          }
+        }
+      }
     }
   },
   "version": "1.0"

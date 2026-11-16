@@ -80,6 +80,9 @@ import MergeTetherRemote
                             case .appGenerated, .verifiedAssistant, .assessed: .ai
                             case .uncertain: .uncertain
                             case .humanLikely: .human
+                            case .manual(.ai): .ai
+                            case .manual(.uncertain): .uncertain
+                            case .manual(.human): .human
                             }
                         }
                         var components = URLComponents(url: request.webURL, resolvingAgainstBaseURL: false)
@@ -94,7 +97,8 @@ import MergeTetherRemote
                                 case .automation: .automation
                                 case .unknown, nil: nil
                                 }
-                            }, avatarURL: note.author?.avatarURL)
+                            }, avatarURL: note.author?.avatarURL,
+                            originManual: note.id.flatMap { thread.origins[$0] }?.isManual == true ? true : nil)
                     }, reply: .init(rawValue: String(describing: summary.publishedReply)) ?? .unavailable, draftCount: summary.draftCount)
             }
         }
@@ -136,5 +140,28 @@ struct RemoteApprovalRuleState: Decodable, Sendable {
                 required: rule.approvalsRequired, approved: rule.approved,
                 approvedBy: (rule.approvedBy ?? []).compactMap { $0.person.displayName })
         }
+    }
+}
+
+/// Maps the phone's displayed note identities back to the current GitLab comments.
+enum RemoteCommentOriginMatcher {
+    /// `nil` when any requested note is missing, duplicated or no longer has the body and author the phone saw.
+    static func notes(_ requested: [RemoteCommentOriginRequest.Note],
+                      in discussions: [GitLabMergeRequestDiscussion]) -> [GitLabMergeRequestDiscussion.Note]? {
+        var result: [GitLabMergeRequestDiscussion.Note] = []
+        for entry in requested {
+            guard let noteID = Int(entry.noteID), noteID > 0, !result.contains(where: { $0.id == noteID }),
+                  entry.threadID.hasPrefix("discussion/") else { return nil }
+            let discussionID = String(entry.threadID.dropFirst("discussion/".count))
+            let threads = discussions.filter { $0.id == discussionID }
+            guard threads.count == 1 else { return nil }
+            let matches = threads[0].notes.filter { $0.id == noteID && $0.system != true }
+            guard matches.count == 1, let note = matches.first, let authorID = note.author?.id, authorID > 0,
+                  let body = note.body,
+                  (try? RemoteDigest.token([entry.threadID, entry.noteID, String(authorID), body])) == entry.identity
+            else { return nil }
+            result.append(note)
+        }
+        return result.isEmpty ? nil : result
     }
 }

@@ -206,10 +206,15 @@ enum AICommentAssessmentStore {
             && record.model?.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty == false
     }
 
+    /// The user's override wins over any assessment. An override to AI counts only once its undo window has passed.
     nonisolated static func isAI(
-        _ note: GitLabMergeRequestDiscussion.Note, host: String, projectID: Int, iid: Int, in directory: URL
+        _ note: GitLabMergeRequestDiscussion.Note, host: String, projectID: Int, iid: Int, in directory: URL,
+        now: Date = Date()
     ) -> Bool {
-        assessment(for: note, host: host, projectID: projectID, iid: iid, in: directory) != nil
+        if let override = AICommentOriginOverrideStore.override(for: note, host: host, projectID: projectID, iid: iid, in: directory) {
+            return override.classification == .ai && override.isActive(at: now)
+        }
+        return assessment(for: note, host: host, projectID: projectID, iid: iid, in: directory) != nil
     }
 
     nonisolated static func assessment(
@@ -276,7 +281,10 @@ enum AICommentAssessmentStore {
               let sources = AutomaticPublicationPolicy.sourceNotes(for: draft, discussions: discussions, userID: userID)
         else { return false }
         return !sources.isEmpty && sources.allSatisfy { note in
-            duoUserIDs.contains(note.author?.id ?? 0)
+            if AICommentOriginOverrideStore.override(for: note, host: host, projectID: projectID, iid: iid, in: directory) != nil {
+                return isAI(note, host: host, projectID: projectID, iid: iid, in: directory)
+            }
+            return duoUserIDs.contains(note.author?.id ?? 0)
                 || isAI(note, host: host, projectID: projectID, iid: iid, in: directory)
         }
     }

@@ -189,7 +189,8 @@ enum RemotePhoneConnectionStatus { case unpaired, connecting, connected, offline
         guard let connection, let challenge = requestState.beginRefresh(force: force || fromGitLab, now: now()) else { return }
         do { try await connection.send(.init(type: .hello, challenge: challenge,
             capabilities: [RemoteMessage.commentReviewCapability, RemoteMessage.mergeActionsCapability, RemoteMessage.detailsCapability,
-                           RemoteMessage.detailOriginsCapability, RemoteMessage.mrControlsCapability],
+                           RemoteMessage.detailOriginsCapability, RemoteMessage.mrControlsCapability,
+                           RemoteMessage.commentOriginCapability],
             refresh: fromGitLab ? true : nil)) }
         catch {
             guard !Task.isCancelled, self.connection === connection, self.state === requestState else { return }
@@ -223,7 +224,14 @@ enum RemotePhoneConnectionStatus { case unpaired, connecting, connected, offline
         return id
     }
     func cancelApproval() { approvalConfirmation = nil }
-    func perform(card: RemoteCard, action: RemoteAction, approvalID: UUID? = nil) async {
+    /// Sends a comment-origin change, then re-reads the details so the badges and any undo window show.
+    func setCommentOrigin(_ request: RemoteCommentOriginRequest, card: RemoteCard) async {
+        guard let action = card.actions.first(where: { $0.kind == .setCommentOrigin }),
+              let argument = request.argument else { return }
+        await perform(card: card, action: action, argument: argument)
+        await requestDetails(card: state.board?.cards.first { $0.id == card.id } ?? card, force: true)
+    }
+    func perform(card: RemoteCard, action: RemoteAction, approvalID: UUID? = nil, argument: String? = nil) async {
         if action.kind == .approve {
             let confirmation = approvalConfirmation
             cancelApproval()
@@ -234,7 +242,7 @@ enum RemotePhoneConnectionStatus { case unpaired, connecting, connected, offline
         }
         let requestState = state, revision = connectionRevision
         guard !recoveryUnavailable, recovery == nil, let pairing, let connection,
-              let command = requestState.command(card: card, action: action, now: now()) else { return }
+              let command = requestState.command(card: card, action: action, argument: argument, now: now()) else { return }
         let pending = RemoteCommandRecovery(pairingSession: pairing.sessionID, command: command)
         do { try saveRecovery(pending); recovery = pending }
         catch {
