@@ -92,10 +92,12 @@ private struct CommandCenterMRCardContent: View {
                         if presentation.working {
                             if let status = presentation.status {
                                 MRActivityStatus(status: status,
-                                    startedAt: monitor.activityStartedAt(for: item, activity: presentation.activity))
+                                    startedAt: monitor.activityStartedAt(for: item, activity: presentation.activity), effect: presentation.activityEffect)
                             }
                         } else if presentation.refreshFailed {
-                            Label { Text(.AutomationProgress.progressRefreshFailed) } icon: { Image(systemName: "arrow.clockwise") }
+                            Label { Text(verbatim: presentation.refreshFailureLabel ?? String(localized: .AutomationProgress.progressRefreshFailed)) }
+                                icon: { Image(systemName: "arrow.clockwise") }
+                                .help(presentation.refreshFailureHelp ?? "")
                         } else if let waiting = shownRequirements {
                             // One blocker per line, in the same style as the merge blockers below.
                             VStack(alignment: .leading, spacing: 5) {
@@ -456,8 +458,9 @@ struct BoardTodoRow: View {
             }
             HStack {
                 if monitor.isAssessingNotice(todo) {
-                    ProgressView().controlSize(.small)
-                    Text(.AutomationProgress.progressNotice).foregroundStyle(.secondary)
+                    MRActivityStatus(status: MRActivity.agentStatus(.AutomationProgress.progressNotice,
+                        assistant: monitor.settings.automation.assistant), startedAt: nil, effect: .aiCheck)
+                        .foregroundStyle(.secondary)
                 }
                 Spacer(minLength: 0)
                 GitLabRefreshButton(monitor: monitor,

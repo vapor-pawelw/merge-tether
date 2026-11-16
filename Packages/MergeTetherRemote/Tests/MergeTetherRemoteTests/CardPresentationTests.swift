@@ -3,6 +3,18 @@ import Testing
 @testable import MergeTetherRemote
 
 @Suite struct CardPresentationTests {
+    @Test func activeAgentMarkersSurviveTheWireWithoutBreakingOlderPeers() throws {
+        let legacy = Data(#"{"repository":"repo","status":"Monitoring MR","working":false,"chips":[]}"#.utf8)
+        #expect(try JSONDecoder().decode(RemoteCardText.self, from: legacy).statusSymbol == nil)
+        let current = RemoteCardText(repository: "repo", status: "Checking replies · Claude CLI", working: true,
+            pendingDrafts: "1 unpublished draft", statusSymbol: "sparkle.magnifyingglass")
+        let data = try JSONEncoder().encode(current)
+        #expect(try JSONDecoder().decode(RemoteCardText.self, from: data) == current)
+        struct LegacyText: Decodable { let status: String; let working: Bool }
+        let oldPhone = try JSONDecoder().decode(LegacyText.self, from: data)
+        #expect(oldPhone.status == current.status && oldPhone.working)
+    }
+
     @Test func draftWarningsAreAdditiveAndSurviveTheWire() throws {
         let legacy = try JSONDecoder().decode(RemoteDraft.self, from: Data(#"{"id":11,"body":"Reply"}"#.utf8))
         #expect(legacy.publicationWarnings == nil)

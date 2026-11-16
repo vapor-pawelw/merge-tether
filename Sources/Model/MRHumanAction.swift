@@ -98,7 +98,7 @@ struct MRHumanAction {
         }
     }
 
-    enum Kind: Equatable { case blockedRun, interruptedRun, publication, commentReview, uncheckedDrafts, verificationFailure, setupAssistant, reviewDecision, approval, pipelineHandoff, merge, feedback, intent }
+    enum Kind: Equatable { case blockedRun, interruptedRun, publication, commentReview, uncheckedDrafts, duplicateDrafts, verificationFailure, setupAssistant, reviewDecision, approval, pipelineHandoff, merge, feedback, intent }
     enum Action: Equatable { case reviewRun, retryRun, reviewDrafts, verifyFeedback, retryDraftVerification, setupAssistant, reviewDecision, reviewApproval, reviewHandoff, reviewMerge, handleFeedback, retryIntent, reviewFeedback, reviewIssue }
     let kind: Kind
     let action: Action
@@ -213,6 +213,13 @@ struct MRHumanAction {
         let knownAutomatic = automaticallyPublishedDraftIDs.intersection(Set(item.drafts.compactMap(\.id))).count
         let count = max(item.draftCount, item.drafts.count, item.authorFeedbackStatus?.pendingDraftCount ?? 0) - knownAutomatic
         let unchecked = item.awaitingRemoteVerification || item.requiresDiscussionRecheck || confirmationState == .changed
+        // A draft repeating a published reply is deleted, not published; it never offers direct publication.
+        let duplicates = item.duplicateDraftIDs.count
+        if duplicates > 0 {
+            self.init(kind: .duplicateDrafts, action: .reviewDrafts, message: duplicates == 1
+                ? .MRHumanAction.mrHumanActionDuplicateDraftSingle : .MRHumanAction.mrHumanActionDuplicateDrafts(duplicates))
+            return
+        }
         if count > 0 {
             let message: LocalizedStringResource
             if unchecked {

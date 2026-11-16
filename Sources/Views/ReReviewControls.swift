@@ -3,6 +3,7 @@ import SwiftUI
 struct ReReviewControls: View {
     let item: MergeRequestAttentionMonitor.Item
     let monitor: MergeRequestAttentionMonitor
+    let assistant: AutomationAssistant
     /// While a new feedback check runs, an earlier verdict and its retry are out of date.
     var hidesStaleResult = false
     @State private var confirm = false
@@ -12,11 +13,14 @@ struct ReReviewControls: View {
     var body: some View {
         if let readiness = item.reReviewReadiness, !hidesStaleResult || readiness == .checking {
             VStack(alignment: .leading, spacing: 6) {
-                Label { Text(readiness.message) } icon: {
-                    Image(systemName: readiness == .checking ? "hourglass" : "exclamationmark.triangle")
+                if readiness == .checking {
+                    MRActivityStatus(status: MRActivity.agentStatus(readiness.message, assistant: assistant),
+                        startedAt: nil, effect: .aiCheck)
+                        .font(.caption.weight(.semibold)).foregroundStyle(.secondary)
+                } else {
+                    Label { Text(readiness.message) } icon: { Image(systemName: "exclamationmark.triangle") }
+                        .font(.caption.weight(.semibold)).foregroundStyle(.orange)
                 }
-                .font(.caption.weight(.semibold))
-                .foregroundStyle(.orange)
                 if let blockers = blockers(for: readiness) {
                     DisclosureGroup {
                         ForEach(blockers, id: \.noteID) { blocker in

@@ -144,7 +144,8 @@ import MergeTetherRemote
                     card.actions = []
                     card.primaryCTA = nil
                     card.presentation = .init(repository: todo.project.pathWithNamespace.split(separator: "/").last.map(String.init) ?? "",
-                        status: String(localized: .AutomationProgress.progressNotice), working: true)
+                        status: MRActivity.agentStatus(.AutomationProgress.progressNotice, assistant: monitor.settings.automation.assistant),
+                        working: true, statusSymbol: MRActionEffect.aiCheck.symbol)
                 }
                 result.lanes[lane].cards[index] = card
             }
@@ -424,7 +425,8 @@ import MergeTetherRemote
         card.primaryCTA = nil
         card.mergeRequestIID = job.key.work.iid
         card.presentation = .init(repository: card.project.split(separator: "/").last.map(String.init) ?? "",
-            status: String(localized: job.progressTitle(intents: intents, conflictReceipts: conflictReceipts)), working: true)
+            status: job.progressStatus(intents: intents, conflictReceipts: conflictReceipts),
+            working: true, statusSymbol: MRActionEffect.agent.symbol)
         return card
     }
 
@@ -478,16 +480,20 @@ import MergeTetherRemote
         let authorName: String? = author?.person.displayName
         let authorUsername: String? = author?.username
         let authorAvatarURL: URL? = author?.avatarURL
+        let draftBadge = MergeRequestFinishedState(model.row.displayRequest).map { String(localized: $0.badge) }
+            ?? (model.row.isDraft ? String(localized: .Menu.menuMrDraftBadge) : nil)
+        let chips: [RemoteCardChip] = model.chips.map { .init(title: String(localized: $0.title), symbol: $0.symbol) }
+        let steps = model.stepChain.map { $0.steps.map { String(localized: $0) } }
+        let pendingDrafts = model.working ? nil : MRPendingDraftsSummary(item: model.row.item).map { String(localized: $0.message) }
         card.presentation = .init(author: authorName,
             repository: card.project.split(separator: "/").last.map(String.init) ?? card.project,
-            draftBadge: MergeRequestFinishedState(model.row.displayRequest).map { String(localized: $0.badge) }
-                ?? (model.row.isDraft ? String(localized: .Menu.menuMrDraftBadge) : nil),
+            draftBadge: draftBadge,
             status: model.status, nextStep: model.nextStep, working: model.working,
-            chips: model.chips.map { .init(title: String(localized: $0.title), symbol: $0.symbol) },
+            chips: chips,
             secondaryCTA: human?.action == .retryRun ? .init(title: String(localized: .MRHumanAction.mrHumanActionActionReviewRun), destination: .assistantRuns) : nil,
             authorUsername: authorUsername, authorAvatarURL: authorAvatarURL,
-            steps: model.stepChain.map { $0.steps.map { String(localized: $0) } }, currentStep: model.stepChain?.current,
-            pendingDrafts: model.working ? nil : MRPendingDraftsSummary(item: model.row.item).map { String(localized: $0.message) })
+            steps: steps, currentStep: model.stepChain?.current,
+            pendingDrafts: pendingDrafts, statusSymbol: model.activityEffect?.symbol)
         if model.actionsBlocked { card.actions = [] }
         return card
     }

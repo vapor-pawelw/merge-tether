@@ -175,7 +175,7 @@ import MergeTetherRemote
         snapshot.evidenceMatchesCatalogContext = change != "stale"
         let presentation = MRCardPresentation(row: snapshot, reviewingContext: ReviewingContext(row: snapshot),
             allowsRemoval: false, assistantReady: true, confirmationState: change == "changed" ? .changed : nil,
-            isRefreshingAttention: change == "refreshing", refreshFailed: change == "refreshFailure")
+            isRefreshingAttention: change == "refreshing", refreshFailures: change == "refreshFailure" ? [.init(check: .mergeRequests)] : [])
         #expect(presentation.waitingStatus == nil)
         #expect(presentation.status?.contains("@alice") != true)
     }

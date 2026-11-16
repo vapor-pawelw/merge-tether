@@ -338,7 +338,10 @@ struct MRBoardProjector {
             conflictProcessing: input.conflictProcessing, pipelineProcessing: input.pipelineProcessing)
     }
     static func attentionRefreshFailed(for row: MergeRequestBoardSnapshot.Row, input: RowInput) -> Bool {
-        BoardAttentionPresenter.attentionRefreshFailed(row: rowState(row, input: input), refresh: .init(
+        !attentionRefreshFailures(for: row, input: input).isEmpty
+    }
+    static func attentionRefreshFailures(for row: MergeRequestBoardSnapshot.Row, input: RowInput) -> [RefreshFailure] {
+        BoardAttentionPresenter.attentionRefreshFailures(row: rowState(row, input: input), refresh: .init(
             catalogReadFailed: input.catalogReadFailed, workflowReadFailed: input.workflowReadFailed,
             needsAIAssessment: input.automation.needsAIAssessment, aiOriginReadFailed: input.aiOriginReadFailed))
     }

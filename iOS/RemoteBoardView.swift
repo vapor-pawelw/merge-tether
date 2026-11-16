@@ -280,7 +280,10 @@ struct RemoteCardView: View {
                 }.font(.subheadline)
             } else if let status = card.visibleStatus {
                 HStack(spacing: 5) {
-                    if card.presentation?.working == true { ProgressView().controlSize(.mini) }
+                    if card.presentation?.working == true {
+                        ProgressView().controlSize(.mini)
+                        if let symbol = card.presentation?.statusSymbol { Image(systemName: symbol).accessibilityHidden(true) }
+                    }
                     Text(verbatim: status).font(.subheadline)
                 }.foregroundStyle(.secondary)
             }

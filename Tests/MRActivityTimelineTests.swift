@@ -9,7 +9,7 @@ struct MRActivityTimelineTests {
 
     @Test func pollingAndReopeningDetailsKeepTheCurrentStageStart() {
         var timeline = MRActivityTimeline()
-        let check = MRActivity(status: "Checking feedback")
+        let check = MRActivity(status: "Checking whether reviewer comments are addressed")
         timeline.update([target: check], now: start)
         timeline.update([target: check], now: start.addingTimeInterval(50))
         #expect(timeline.startedAt(for: target, activity: check) == start)
@@ -19,7 +19,7 @@ struct MRActivityTimelineTests {
         // given
         var timeline = MRActivityTimeline()
         let other = MRAutomationScope.Target(host: target.host, username: "me", projectID: 1, iid: 3)
-        let check = MRActivity(status: "Checking feedback")
+        let check = MRActivity(status: "Checking whether reviewer comments are addressed")
         let firstRun = MRActivity(status: "Handling feedback", jobID: UUID())
         timeline.update([target: check, other: check], now: start)
         // when
@@ -35,7 +35,7 @@ struct MRActivityTimelineTests {
 
     @Test func idleAndAccountChangesDiscardOldTimers() {
         var timeline = MRActivityTimeline()
-        let check = MRActivity(status: "Checking feedback")
+        let check = MRActivity(status: "Checking whether reviewer comments are addressed")
         timeline.update([target: check], now: start)
         timeline.update([:], now: start.addingTimeInterval(50))
         #expect(timeline.startedAt(for: target, activity: check) == nil)

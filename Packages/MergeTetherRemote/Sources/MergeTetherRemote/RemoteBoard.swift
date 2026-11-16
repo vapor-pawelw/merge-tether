@@ -64,6 +64,8 @@ public struct RemoteCardText: Codable, Equatable, Sendable {
     public var repository: String
     public var draftBadge: String?
     public var status: String?
+    /// Additive marker for active AI work; absent for deterministic reads and older hosts.
+    public var statusSymbol: String?
     public var nextStep: String?
     public var working: Bool
     public var chips: [RemoteCardChip]
@@ -80,11 +82,12 @@ public struct RemoteCardText: Codable, Equatable, Sendable {
                 chips: [RemoteCardChip] = [], secondaryCTA: RemoteCardCTA? = nil,
                 authorUsername: String? = nil, authorAvatarURL: URL? = nil,
                 requirements: [String]? = nil, steps: [String]? = nil, currentStep: Int? = nil,
-                pendingDrafts: String? = nil) {
+                pendingDrafts: String? = nil, statusSymbol: String? = nil) {
         self.pendingDrafts = pendingDrafts
         self.requirements = requirements; self.steps = steps; self.currentStep = currentStep
         self.author = author; self.authorUsername = authorUsername; self.authorAvatarURL = authorAvatarURL
         self.repository = repository; self.draftBadge = draftBadge
+        self.statusSymbol = statusSymbol
         self.status = status; self.nextStep = nextStep; self.working = working
         self.chips = chips; self.secondaryCTA = secondaryCTA
     }

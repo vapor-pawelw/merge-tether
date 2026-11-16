@@ -110,4 +110,39 @@ struct BoardAttentionPresenterTests {
         #expect(!BoardAttentionPresenter.isRecheckingAttention(row: executing, refresh: refreshing))
     }
 
+
+    @Test func eachFailedReadIsNamedSoTheCardCanSayWhatFailed() {
+        var item = MergeRequestAttentionMonitor.Item(id: .init(projectID: 1, iid: 2), title: "Example",
+            url: URL(string: "https://host/group/repo/-/merge_requests/2")!)
+        var feedback = AuthorFeedbackStatus(head: "a", fingerprint: "f", phase: .failed)
+        feedback.isReadOnlyFailure = true
+        feedback.failureCause = .assistantUnavailable
+        feedback.failureReason = "unavailable"
+        item.authorFeedbackStatus = feedback
+        let row = MergeRequestBoardSnapshot.Row(item: item, latestJob: nil, intents: [])
+
+        let single = BoardAttentionPresenter.attentionRefreshFailures(row: .init(row: row), refresh: .init())
+        #expect(single.map(\.check) == [.reviewerFeedback])
+        #expect(RefreshFailure.label(single) == String(localized: .AutomationProgress.progressRefreshFailedWithCause(
+            String(localized: .AutomationProgress.progressRefreshFailedFeedback),
+            String(localized: .AutomationProgress.progressFailureCauseAssistantUnavailable))))
+
+        let several = BoardAttentionPresenter.attentionRefreshFailures(row: .init(row: row),
+            refresh: .init(catalogReadFailed: true, workflowReadFailed: true))
+        #expect(several.map(\.check) == [.reviewerFeedback, .workflow, .mergeRequests])
+        #expect(RefreshFailure.label(several) == String(localized: .AutomationProgress.progressRefreshFailedCount(3)))
+        let help = RefreshFailure.help(several) ?? ""
+        #expect(help.contains(String(localized: .AutomationProgress.progressRefreshFailedWorkflow)))
+        #expect(help.contains(String(localized: .AutomationProgress.progressRefreshFailedMergeRequests)))
+        #expect(help.contains("unavailable"))
+    }
+
+    @Test func failureCausesAreClassifiedWithoutRawErrorText() {
+        #expect(RefreshFailure.Cause(GlabError.timedOut) == .gitLabUnreachable)
+        #expect(RefreshFailure.Cause(GlabError.network("dial tcp")) == .gitLabUnreachable)
+        #expect(RefreshFailure.Cause(GlabError.notAuthenticated) == .gitLabSignIn)
+        #expect(RefreshFailure.Cause(ReReviewVerifier.VerificationError.unavailable) == .assistantUnavailable)
+        #expect(RefreshFailure.Cause(ReReviewVerifier.VerificationError.failed) == .assistantFailed)
+        #expect(RefreshFailure.Cause(GlabError.decoding("x")) == nil)
+    }
 }

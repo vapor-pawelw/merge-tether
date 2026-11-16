@@ -6,6 +6,10 @@ struct MRActivity: Equatable {
     var jobID: UUID? = nil
     var startedAt: Date? = nil
 
+    static func agentStatus(_ title: LocalizedStringResource, assistant: AutomationAssistant) -> String {
+        String(localized: title) + " · " + String(localized: assistant.displayName)
+    }
+
     static func elapsed(since start: Date, now: Date) -> String {
         let seconds = Int(max(0, now.timeIntervalSince(start)))
         if seconds < 60 { return String(localized: .AutomationProgress.progressElapsedSeconds(seconds)) }

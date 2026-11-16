@@ -117,7 +117,7 @@
         "en": {
           "stringUnit": {
             "state": "translated",
-            "value": "Checking feedback"
+            "value": "Checking whether reviewer comments are addressed"
           }
         }
       }
@@ -309,6 +309,142 @@
           "stringUnit": {
             "state": "translated",
             "value": "%1$@ (%2$@)"
+          }
+        }
+      }
+    },
+    "progressRefreshFailedFeedback": {
+      "comment": "The AI check of reviewer comments on your MR failed.",
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Couldn’t check reviewer comments"
+          }
+        }
+      }
+    },
+    "progressRefreshFailedDraftReplies": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Couldn’t verify reply drafts"
+          }
+        }
+      }
+    },
+    "progressRefreshFailedWorkflow": {
+      "comment": "Reading the MR before an automatic workflow step failed.",
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Couldn’t prepare MR automation"
+          }
+        }
+      }
+    },
+    "progressRefreshFailedCommentOrigin": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Couldn’t check which drafts are AI-written"
+          }
+        }
+      }
+    },
+    "progressRefreshFailedMergeRequests": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Couldn’t refresh merge requests from GitLab"
+          }
+        }
+      }
+    },
+    "progressRefreshFailedWithCause": {
+      "comment": "Failed check followed by its cause.",
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "%1$@: %2$@"
+          }
+        }
+      }
+    },
+    "progressRefreshFailedCount": {
+      "comment": "Several status checks of one MR failed; details are on hover.",
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "%lld status checks failed"
+          }
+        }
+      }
+    },
+    "progressRefreshFailedRetry": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "MergeTether retries automatically and keeps the last known status meanwhile."
+          }
+        }
+      }
+    },
+    "progressFailureCauseGitLabUnreachable": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "GitLab unreachable"
+          }
+        }
+      }
+    },
+    "progressFailureCauseGitLabSignIn": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "GitLab sign-in needed"
+          }
+        }
+      }
+    },
+    "progressFailureCauseAssistantUnavailable": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "AI CLI unavailable"
+          }
+        }
+      }
+    },
+    "progressFailureCauseAssistantFailed": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "AI check failed"
           }
         }
       }

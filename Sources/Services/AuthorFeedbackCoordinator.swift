@@ -17,6 +17,7 @@ struct AuthorFeedbackStatus: Equatable, Sendable {
     var addressedNoteIDs: Set<Int> = []
     var ignoredNoteIDs: Set<Int> = []
     var failureReason: String? = nil
+    var failureCause: RefreshFailure.Cause? = nil
     var isReadOnlyFailure = false
     /// Exact stopped attempts observed before the current remote preflight; never persisted as worker success.
     var reconciledFollowUpJobIDs: Set<UUID> = []
@@ -235,6 +236,7 @@ final class AuthorFeedbackCoordinator {
             statuses[target]?.phase = .checking
             statuses[target]?.isReadOnlyFailure = false
             statuses[target]?.failureReason = nil
+            statuses[target]?.failureCause = nil
         }
         let input = Input(request: request, discussions: discussions, user: user, target: target,
                           configuration: settings.automation, fingerprint: fingerprint, drafts: drafts,
@@ -361,6 +363,7 @@ final class AuthorFeedbackCoordinator {
                         failed.phase = .failed
                         failed.failureReason = String(GlabService.redactWorkflowEvidence(String(describing: readOnly?.cause ?? error)).prefix(600))
                         failed.isReadOnlyFailure = readOnly != nil
+                        failed.failureCause = RefreshFailure.Cause(readOnly?.cause ?? error)
                         statuses[target] = failed
                         // Refreshes queued during backoff cannot restart an exhausted snapshot's budget.
                         pending.removeValue(forKey: target)
@@ -656,6 +659,7 @@ final class AuthorFeedbackCoordinator {
                 self.statuses[input.target]?.phase = .checking
                 self.statuses[input.target]?.readOnlyReconciliation = input.readOnly
                 self.statuses[input.target]?.failureReason = nil
+                self.statuses[input.target]?.failureCause = nil
                 self.statuses[input.target]?.isReadOnlyFailure = false
             }) { try await self.prepare(input) }
         } catch is CancellationError { throw CancellationError() }

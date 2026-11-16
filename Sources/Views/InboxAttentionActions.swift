@@ -3,6 +3,7 @@ import SwiftUI
 struct InboxAttentionActions: View {
     let item: MergeRequestAttentionMonitor.Item
     let feedbackAction: TodoAutomationService.ActionState?
+    var assistant: AutomationAssistant = .codex
     let onFeedback: () -> Void
     let onPipeline: () -> Void
     let onMerge: () -> Void
@@ -29,7 +30,8 @@ struct InboxAttentionActions: View {
                 if item.needsDiscussion || !item.feedback.isEmpty { Text(.Menu.menuAttentionDiscussions) }
             }
             if feedbackAction == .running {
-                HStack { ProgressView().controlSize(.small); Text(.Menu.menuTodoAutomationRunning) }
+                MRActivityStatus(status: MRActivity.agentStatus(.Menu.menuTodoAutomationRunning, assistant: assistant),
+                    startedAt: nil, effect: .agent)
             } else if feedbackAction == .ready(.assistant) || feedbackAction == .failed {
                 if feedbackAction == .failed { Text(.Menu.menuTodoAutomationFailed).foregroundStyle(.orange) }
                 Button(action: onFeedback) { MRActionLabel(title: .Menu.menuTodoAutomationPrepareFollowUp, cta: .handleFeedback) }
