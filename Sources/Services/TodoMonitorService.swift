@@ -11,6 +11,10 @@ final class TodoMonitorService {
     let attention: MergeRequestAttentionMonitor
     let authoredMergeRequests: AuthoredMergeRequestMonitor
     private var boardDisplayMetadata = MRDisplayMetadataCache()
+    @ObservationIgnored private let boardProjectorCache = ObservedPresentationCache<MRBoardProjector?>()
+    @ObservationIgnored let boardSnapshotCache = ObservedPresentationCache<MergeRequestBoardSnapshot>()
+    @ObservationIgnored let commandCenterDisplayFrameCache = ObservedPresentationCache<CommandCenterDisplayFrame>()
+    @ObservationIgnored private var liveBoardPresentationRead: Bool?
     let autoHandledEventBanners = AutoHandledEventBannerCenter()
 
     var autoHandledEventBanner: AutoHandledEventBannerCenter.Event? {
@@ -346,6 +350,7 @@ final class TodoMonitorService {
         synchronizeLocalAutomationAuthors()
         boardAttentionPresenter.updateAttention(input)
         boardPolicyOrder.observe(boardOrderingEntries(boardSnapshot))
+        boardSnapshotCache.invalidate()
     }
 
     private func observeMRActivityChanges() {
@@ -456,6 +461,20 @@ final class TodoMonitorService {
 
     /// Capture existing owners and policy decisions as values; the projector cannot call back into them.
     var boardProjector: MRBoardProjector? {
+        withBoardPresentationRead { live in
+            live ? makeBoardProjector() : boardProjectorCache.value { makeBoardProjector() }
+        }
+    }
+
+    func withBoardPresentationRead<Result>(_ read: (Bool) -> Result) -> Result {
+        if let liveBoardPresentationRead { return read(liveBoardPresentationRead) }
+        let live = authoredMergeRequests.workflow.needsLivePipelinePresentation
+        liveBoardPresentationRead = live
+        defer { liveBoardPresentationRead = nil }
+        return read(live)
+    }
+
+    private func makeBoardProjector() -> MRBoardProjector? {
         guard let host = glab.resolvedHost, let username = glab.currentUsername else { return nil }
         let snapshot = attention.presentationSnapshot
         var input = MRBoardProjector.Input(account: .init(host: host, username: username, revision: glab.accountRevision))
@@ -1079,6 +1098,7 @@ final class TodoMonitorService {
         guard previous != current else { return }
         boardPolicyOrder.policyChanged(from: previous.ignoringGlobalSuspension, to: current.ignoringGlobalSuspension,
             grouping: settings.boardGrouping)
+        boardSnapshotCache.invalidate()
         let scopeOnly = previous.preservingScope(from: current) == current
         let host = glab.resolvedHost ?? "", username = glab.currentUsername ?? ""
         let targets = Set(previous.scope.individualTargets(host: host, username: username)

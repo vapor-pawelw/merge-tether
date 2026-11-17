@@ -1,6 +1,6 @@
 import Foundation
 
-/// Values prepared for one render, never retained as evidence for a command.
+/// Immutable display values, never evidence for a command.
 @MainActor
 struct CommandCenterDisplayFrame {
     struct Inbox {
