@@ -3,17 +3,42 @@ import Testing
 @testable import GitLabTodos
 
 struct MRDiscussionSnapshotTests {
-    @Test func authorIdentityRemainsIndependentOfAITextOrigin() throws {
+    @Test(arguments: ["missing", "uncertain", "human", "ai"])
+    func knownBotIdentityDefaultsToMachineWhileOtherAccountsKeepContentInference(_ variant: String) throws {
         let discussions = try JSONDecoder().decode([GitLabMergeRequestDiscussion].self,
             from: Data(#"[{"id":"thread","notes":[{"id":1,"author":{"id":7,"username":"reviewer"},"system":false,"body":"AI-assisted human feedback"},{"id":2,"author":{"id":8,"username":"automation"},"system":false,"body":"Deterministic automation output"}]}]"#.utf8))
-        let origins: [Int: MRDiscussionSnapshot.Origin] = [1: .assessed(evidence: "AI-assisted wording"), 2: .humanLikely(evidence: "No AI generation")]
+        var origins: [Int: MRDiscussionSnapshot.Origin] = [1: .assessed(evidence: "AI-assisted wording")]
+        switch variant {
+        case "uncertain": origins[2] = .uncertain(evidence: "Insufficient AI signals")
+        case "human": origins[2] = .humanLikely(evidence: "Conversational wording")
+        case "ai": origins[2] = .assessed(evidence: "AI-assisted wording")
+        default: break
+        }
         let snapshot = MRDiscussionSnapshot(discussions: discussions, drafts: [], origins: origins,
             authorKinds: [7: .regular, 8: .automation])
         let thread = try #require(snapshot.threads.first)
         #expect(thread.authorKinds[7] == .regular && thread.authorKinds[8] == .automation)
-        #expect(thread.origins == origins)
-        let unknown = MRDiscussionSnapshot(discussions: discussions, drafts: [], origins: origins)
-        #expect(unknown.threads.first?.authorKinds.isEmpty == true)
+        #expect(thread.origins[1] == origins[1])
+        #expect(thread.origins[2]?.badge == .ai)
+        #expect(thread.originBadge == .ai)
+        let withoutBotIdentity = MRDiscussionSnapshot(discussions: discussions, drafts: [], origins: origins)
+        #expect(withoutBotIdentity.threads.first?.origins == origins)
+        #expect(withoutBotIdentity.threads.first?.authorKinds.isEmpty == true)
+    }
+
+    @Test(arguments: [MRDiscussionSnapshot.OriginBadge.human, .uncertain, .ai])
+    func recognizedBotsKeepTheirFixedBadgeWithoutErasingManualContentOrigins(_ badge: MRDiscussionSnapshot.OriginBadge) throws {
+        let discussions = try JSONDecoder().decode([GitLabMergeRequestDiscussion].self,
+            from: Data(#"[{"id":"thread","notes":[{"id":2,"author":{"id":8},"system":false,"body":"Bot output"}]}]"#.utf8))
+        let origins: [Int: MRDiscussionSnapshot.Origin] = [2: .manual(badge)]
+        let snapshot = MRDiscussionSnapshot(discussions: discussions, drafts: [], origins: origins,
+            authorKinds: [8: .automation])
+        #expect(snapshot.threads.first?.origins[2]?.badge == .ai)
+        #expect(snapshot.threads.first?.originBadge == .ai)
+        let noLongerABot = MRDiscussionSnapshot(discussions: discussions, drafts: [], origins: origins,
+            authorKinds: [8: .regular])
+        #expect(noLongerABot.threads.first?.origins[2] == .manual(badge))
+        #expect(noLongerABot.threads.first?.originBadge == badge)
     }
 
     @Test(arguments: ["addressed", "informational", "blocking", "uncertain", "ignoredByUser"])
@@ -31,8 +56,33 @@ struct MRDiscussionSnapshotTests {
             let thread = try presentationThread(notes: "[{\"id\":1,\"author\":{\"id\":7},\"resolvable\":true,\"resolved\":\(resolved)},{\"id\":2,\"author\":{\"id\":9,\"username\":\"me\"}}]",
                 origins: [1: .verifiedAssistant], assessment: assessment, authorID: 9)
             #expect(thread.feedback == expected)
-            #expect(thread.replySummary(currentUsername: "me").publishedReply == .published)
+            #expect(!thread.replySummary(currentUsername: "me").showsPublishedReply)
         }
+    }
+
+    @Test(arguments: [
+        ("rejected,informational", MRDiscussionSnapshot.Feedback.addressed),
+        ("addressed,rejected,informational", .addressed),
+        ("blocking,rejected,informational", .pending),
+        ("uncertain,rejected,informational", .needsVerification)
+    ])
+    func semanticallyResolvedFeedbackIncludesRejectedConcernsWithoutANewAggregateLabel(
+        sequence: String, expected: MRDiscussionSnapshot.Feedback) throws {
+        let states = sequence.split(separator: ",").map(String.init)
+        let entries = states.enumerated().map { index, state in
+            ["noteID": index + 1, "state": state, "reason": "Current source evidence"] as [String: Any]
+        }
+        let data = try JSONSerialization.data(withJSONObject: ["notes": entries])
+        let assessment = try? JSONDecoder().decode(ReReviewAssessment.self, from: data)
+        #expect(assessment != nil)
+        guard let assessment else { return }
+        let notes: [GitLabMergeRequestDiscussion.Note] = states.enumerated().map { index, _ in
+            .init(id: index + 1, author: .init(id: 7, username: "reviewer", name: nil), system: false,
+                resolvable: true, resolved: false, resolvedBy: nil, body: "Review feedback")
+        }
+        let snapshot = MRDiscussionSnapshot(discussions: [.init(id: "thread", notes: notes)], drafts: [], origins: [:],
+            assessment: assessment, authorID: 9)
+        #expect(snapshot.threads.first?.feedback == expected)
     }
 
     @Test func missingOrPartialAssessmentsNeverClaimFeedbackAddressed() throws {
@@ -82,61 +132,115 @@ struct MRDiscussionSnapshotTests {
         #expect(MRDiscussionLocation(full: "literal/path/").compact == "literal/path/")
     }
 
-    @Test func rootCommentAndSystemEventsNeverCountAsOurPublishedReply() throws {
-        let thread = try presentationThread(notes: #"[{"id":1,"author":{"id":9,"username":"me"}},{"id":2,"system":true,"author":{"id":9,"username":"me"}},{"id":3,"author":{"id":7,"username":"reviewer"}}]"#)
-        #expect(thread.replySummary(currentUsername: "me").publishedReply == .none)
-        #expect(thread.replySummary(currentUsername: "reviewer").publishedReply == .published)
+    @Test(arguments: [ReReviewAssessment.Note.State.addressed, .rejected])
+    func completeCurrentSemanticReplyCoverageSurvivesLaterInformationalComments(_ state: ReReviewAssessment.Note.State) throws {
+        let notes = [replyNote(1, authorID: 7, username: "reviewer", body: "First concern"),
+                     replyNote(4, authorID: 7, username: "reviewer", body: "Super, thanks"),
+                     replyNote(3, authorID: 9, username: "me", body: "Addressed the first concern and explained the second"),
+                     replyNote(2, authorID: 7, username: "reviewer", body: "Second concern"),
+                     replyNote(nil, authorID: nil, username: nil, body: "System event", system: true)]
+        let assessment = ReReviewAssessment(notes: [
+            .init(noteID: 1, state: state, reason: "Current verified answer", publishedReplyNoteID: 3),
+            .init(noteID: 2, state: .rejected, reason: "Proposed change disproved with evidence", publishedReplyNoteID: 3),
+            .init(noteID: 4, state: .informational, reason: "Thanks without another request")])
+        let snapshot = MRDiscussionSnapshot(discussions: [.init(id: "thread", notes: notes)], drafts: [], origins: [:],
+            assessment: assessment, authorID: 9)
+        let thread = try #require(snapshot.threads.first)
+        #expect(thread.feedback == .addressed)
+        #expect(thread.replySummary(currentUsername: "me").showsPublishedReply)
+        #expect(thread.notes.compactMap(\.id) == [1, 4, 3, 2])
     }
 
-    @Test func draftDoesNotCountAsPublishedAndCoexistsWithOwnPublishedReply() throws {
-        let notes = #"[{"id":1,"author":{"id":7,"username":"reviewer"}},{"id":2,"author":{"id":9,"username":"me"}}]"#
-        let drafts = #"[{"id":10,"author_id":9,"note":"Pending","discussion_id":"thread"}]"#
-        let thread = try presentationThread(notes: notes, drafts: drafts)
-        let own = thread.replySummary(currentUsername: "me")
-        #expect(own.publishedReply == .published)
-        #expect(own.draftCount == 1)
-        let draftOnly = try presentationThread(notes: #"[{"id":1,"author":{"id":7,"username":"reviewer"}}]"#, drafts: drafts)
-        #expect(draftOnly.replySummary(currentUsername: "me").publishedReply == .none)
-        #expect(draftOnly.replySummary(currentUsername: "me").draftCount == 1)
-        let withoutDraft = try presentationThread(notes: notes)
-        #expect(withoutDraft.replySummary(currentUsername: "me").draftCount == 0)
+    @Test func aVerifiedSubstantiveAnswerCanBePublishedInAnotherDiscussion() throws {
+        let source = GitLabMergeRequestDiscussion(id: "finding", notes: [replyNote(1, authorID: 7, username: "reviewer", body: "Concern")])
+        let answer = GitLabMergeRequestDiscussion(id: "answer", notes: [replyNote(3, authorID: 9, username: "me", body: "Evidence explaining why the concern does not apply")])
+        let assessment = ReReviewAssessment(notes: [.init(noteID: 1, state: .rejected,
+            reason: "Verified current evidence in another discussion", publishedReplyNoteID: 3)])
+        let snapshot = MRDiscussionSnapshot(discussions: [source, answer], drafts: [], origins: [:], assessment: assessment, authorID: 9)
+        #expect(snapshot.threads.first { $0.discussionID == "finding" }?.replySummary(currentUsername: "me").showsPublishedReply == true)
+        #expect(snapshot.threads.first { $0.discussionID == "answer" }?.replySummary(currentUsername: "me").showsPublishedReply == false)
     }
 
-    @Test func anotherAuthorsReplyAndAIOriginNeverStandInForCurrentAccount() throws {
-        let thread = try presentationThread(notes: #"[{"id":1,"author":{"id":7,"username":"reviewer"}},{"id":2,"author":{"id":8,"username":"agent"}}]"#, origins: [2: .verifiedAssistant])
-        #expect(thread.replySummary(currentUsername: "me").publishedReply == .none)
-        #expect(thread.replySummary(currentUsername: "agent").publishedReply == .published)
-        #expect(thread.replySummary(currentUsername: "AGENT").publishedReply == .none)
-    }
-
-    @Test func newerCommentsDistinguishEarlierReplyFromReplyToLatestActivity() throws {
-        let notes = #"[{"id":1,"author":{"id":7,"username":"reviewer"}},{"id":70,"created_at":"2026-11-10T12:00:00Z","author":{"id":9,"username":"me"}},{"id":2,"created_at":"invalid","author":{"id":7,"username":"reviewer"}}]"#
-        let earlier = try presentationThread(notes: notes)
-        #expect(earlier.replySummary(currentUsername: "me").publishedReply == .earlier)
-        let repliedAgain = try presentationThread(notes: String(notes.dropLast()) + #",{"id":4,"author":{"id":9,"username":"me"}},{"id":5,"system":true}]"#)
-        #expect(repliedAgain.replySummary(currentUsername: "me").publishedReply == .published)
-    }
-
-    @Test func unknownIdentityNeverClaimsNoReplyOrReplyToUnknownLatestAuthor() throws {
-        let unknown = try presentationThread(notes: #"[{"id":1},{"id":2,"author":{"id":9,"name":"me"}}]"#)
-        #expect(unknown.replySummary(currentUsername: "me").publishedReply == .unknown)
-        let missingUsernames: [String?] = [nil, "", "  "]
-        for username in missingUsernames {
-            #expect(unknown.replySummary(currentUsername: username).publishedReply == .unavailable)
+    @Test(arguments: ["none", "partial", "duplicateAssessment", "missingProof", "unknownProof", "earlierProof",
+                      "wrongReplyAuthor", "wrongReplyUsername", "missingReplyUsername", "emptyReply", "systemReply",
+                      "duplicateReply", "missingSourceID", "invalidSourceID", "duplicateSourceID", "missingSourceAuthor",
+                      "wrongAccount", "missingAccount", "wrongMRAuthor", "newActionWithoutProof", "newUnassessedComment"])
+    func incompleteSemanticCoverageNeverClaimsAPublishedAnswer(_ variant: String) throws {
+        var notes = [replyNote(1, authorID: 7, username: "reviewer", body: "First concern"),
+                     replyNote(2, authorID: 7, username: "reviewer", body: "Second concern"),
+                     replyNote(3, authorID: 9, username: "me", body: "Answer to both concerns")]
+        var decisions: [ReReviewAssessment.Note] = [
+            .init(noteID: 1, state: .addressed, reason: "Checked", publishedReplyNoteID: 3),
+            .init(noteID: 2, state: .rejected, reason: "Disproved", publishedReplyNoteID: 3)]
+        var currentUsername: String? = "me"
+        var authorID = 9
+        switch variant {
+        case "partial": decisions.removeLast()
+        case "duplicateAssessment": decisions.append(decisions[0])
+        case "missingProof": decisions[1].publishedReplyNoteID = nil
+        case "unknownProof": decisions[1].publishedReplyNoteID = 99
+        case "earlierProof": decisions[1].publishedReplyNoteID = 1
+        case "wrongReplyAuthor": notes[2] = replyNote(3, authorID: 8, username: "me", body: "Another author's text")
+        case "wrongReplyUsername": notes[2] = replyNote(3, authorID: 9, username: "other", body: "Mismatched account")
+        case "missingReplyUsername": notes[2] = replyNote(3, authorID: 9, username: nil, body: "No account handle")
+        case "emptyReply": notes[2].body = "  \n "
+        case "systemReply": notes[2] = replyNote(3, authorID: 9, username: "me", body: "System event", system: true)
+        case "duplicateReply": notes.append(notes[2])
+        case "missingSourceID": notes[1] = replyNote(nil, authorID: 7, username: "reviewer", body: "Unidentified concern")
+        case "invalidSourceID": notes[1] = replyNote(0, authorID: 7, username: "reviewer", body: "Invalid concern")
+        case "duplicateSourceID": notes[1] = replyNote(1, authorID: 7, username: "reviewer", body: "Conflicting concern")
+        case "missingSourceAuthor": notes[1] = replyNote(2, authorID: nil, username: nil, body: "Unknown reviewer")
+        case "wrongAccount": currentUsername = "other"
+        case "missingAccount": currentUsername = nil
+        case "wrongMRAuthor": authorID = 8
+        case "newActionWithoutProof", "newUnassessedComment":
+            notes.append(replyNote(4, authorID: 7, username: "reviewer", body: "Another change is required"))
+            if variant == "newActionWithoutProof" {
+                decisions.append(.init(noteID: 4, state: .addressed, reason: "Still needs its own published explanation"))
+            }
+        default: break
         }
-        let earlier = try presentationThread(notes: #"[{"id":1},{"id":2,"author":{"id":9,"username":"me"}},{"id":3}]"#)
-        #expect(earlier.replySummary(currentUsername: "me").publishedReply == .earlier)
-        let ownLatest = try presentationThread(notes: #"[{"id":1},{"id":2},{"id":3,"author":{"id":9,"username":"me"}}]"#)
-        #expect(ownLatest.replySummary(currentUsername: "me").publishedReply == .published)
-        let rootOnly = try presentationThread(notes: #"[{"id":1}]"#)
-        #expect(rootOnly.replySummary(currentUsername: "me").publishedReply == .none)
+        let assessment = variant == "none" ? nil : ReReviewAssessment(notes: decisions)
+        let snapshot = MRDiscussionSnapshot(discussions: [.init(id: "thread", notes: notes)], drafts: [], origins: [:],
+            assessment: assessment, authorID: authorID)
+        #expect(snapshot.threads.first?.replySummary(currentUsername: currentUsername).showsPublishedReply == false)
     }
 
-    @Test func replySummaryDoesNotInterpretGeneralOrResolvedCommentsAsActionRequired() throws {
-        for flags in [#""resolvable":false"#, #""resolvable":true,"resolved":true"#] {
-            let thread = try presentationThread(notes: "[{\"id\":1,\(flags),\"author\":{\"id\":7,\"username\":\"reviewer\"}}]")
-            #expect(thread.replySummary(currentUsername: "me").publishedReply == .none)
-        }
+    @Test func aCurrentDraftTakesPriorityOverAnAlreadyVerifiedPublishedAnswer() throws {
+        let notes = [replyNote(1, authorID: 7, username: "reviewer", body: "Concern"),
+                     replyNote(3, authorID: 9, username: "me", body: "Verified substantive answer")]
+        let assessment = ReReviewAssessment(notes: [.init(noteID: 1, state: .addressed, reason: "Checked", publishedReplyNoteID: 3)])
+        let draft = GitLabDraftNote(id: 10, authorID: 9, note: "Pending follow-up", discussionID: "thread", position: nil)
+        let privateSnapshot = MRDiscussionSnapshot(discussions: [.init(id: "thread", notes: notes)], drafts: [draft], origins: [:],
+            assessment: assessment, authorID: 9)
+        let pending = try #require(privateSnapshot.threads.first?.replySummary(currentUsername: "me"))
+        #expect(pending.draftCount == 1 && !pending.showsPublishedReply)
+        let publishedSnapshot = MRDiscussionSnapshot(discussions: [.init(id: "thread", notes: notes)], drafts: [], origins: [:],
+            assessment: assessment, authorID: 9)
+        #expect(publishedSnapshot.threads.first?.replySummary(currentUsername: "me").showsPublishedReply == true)
+    }
+
+    @Test func purelyInformationalCommentsNeverClaimThatASubstantiveAnswerWasPublished() throws {
+        let notes = [replyNote(1, authorID: 7, username: "reviewer", body: "Informational report"),
+                     replyNote(3, authorID: 9, username: "me", body: "Thanks")]
+        let assessment = ReReviewAssessment(notes: [.init(noteID: 1, state: .informational, reason: "No author work")])
+        let snapshot = MRDiscussionSnapshot(discussions: [.init(id: "thread", notes: notes)], drafts: [], origins: [:],
+            assessment: assessment, authorID: 9)
+        #expect(snapshot.threads.first?.feedback == .informational)
+        #expect(snapshot.threads.first?.replySummary(currentUsername: "me").showsPublishedReply == false)
+    }
+
+    @Test func ownOpeningCommentsAndSystemEventsNeverStandInForVerifiedAnswers() throws {
+        let ownOpening = [replyNote(1, authorID: 9, username: "me", body: "My opening comment"),
+                          replyNote(2, authorID: 9, username: "me", body: "System event", system: true)]
+        let snapshot = MRDiscussionSnapshot(discussions: [.init(id: "thread", notes: ownOpening)], drafts: [], origins: [:],
+            assessment: ReReviewAssessment(notes: []), authorID: 9)
+        #expect(snapshot.threads.first?.replySummary(currentUsername: "me").showsPublishedReply == false)
+    }
+
+    private func replyNote(_ id: Int?, authorID: Int?, username: String?, body: String?, system: Bool = false) -> GitLabMergeRequestDiscussion.Note {
+        .init(id: id, author: authorID.map { .init(id: $0, username: username, name: nil) }, system: system,
+            resolvable: nil, resolved: nil, resolvedBy: nil, body: body)
     }
 
     @Test func wholeThreadAIRequiresCurrentEvidenceForEveryPublishedPost() throws {
@@ -240,8 +344,8 @@ struct MRDiscussionSnapshotTests {
         #expect(edited.drafts.compactMap(\.id) == [11, 10])
         #expect(edited.drafts.last?.note == "Edited second")
         #expect(selection.selectedDrafts(from: edited.drafts).isEmpty)
-        #expect(edited.replySummary(currentUsername: "me").publishedReply == .earlier)
-        #expect(edited.replySummary(currentUsername: "other").publishedReply == .none)
+        #expect(!edited.replySummary(currentUsername: "me").showsPublishedReply)
+        #expect(!edited.replySummary(currentUsername: "other").showsPublishedReply)
     }
 
     @Test(arguments: [

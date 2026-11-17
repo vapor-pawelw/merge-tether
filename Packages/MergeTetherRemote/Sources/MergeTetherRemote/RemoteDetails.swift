@@ -104,6 +104,8 @@ public struct RemoteDetailNote: Codable, Equatable, Identifiable, Sendable {
     public let createdAt: Date?
     public let url: URL?
     public var origin: Origin?
+    /// Bot identity is a fixed display classification; the raw text verdict survives removal of that identity.
+    public var displayOrigin: Origin? { authorKind == .automation ? .ai : origin }
     public let authorID: Int?
     public var authorKind: AuthorKind?
     public let avatarURL: URL?
@@ -134,9 +136,10 @@ public struct RemoteDetailThread: Codable, Equatable, Identifiable, Sendable {
     public let state: State
     public var location: String?
     public var notes: [RemoteDetailNote]
-    public let reply: Reply
+    public var reply: Reply
     public let draftCount: Int
     public var feedback: Feedback?
+    public var showsPublishedReply: Bool { draftCount == 0 && reply == .published }
     public var truncated = false
     public init(id: String, state: State, location: String? = nil, notes: [RemoteDetailNote], reply: Reply = .unavailable,
                 draftCount: Int = 0, feedback: Feedback? = nil) {
@@ -148,7 +151,7 @@ public struct RemoteDetailThread: Codable, Equatable, Identifiable, Sendable {
         guard !truncated else { return nil }
         var aggregate: RemoteDetailNote.Origin?
         for note in notes {
-            guard let origin = note.origin else { return nil }
+            guard let origin = note.displayOrigin else { return nil }
             if let previous = aggregate, previous != origin {
                 guard previous != .human, origin != .human else { return nil }
                 aggregate = .uncertain

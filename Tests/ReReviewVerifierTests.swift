@@ -4,6 +4,49 @@ import Testing
 
 @Suite("Headless re-review verification")
 struct ReReviewVerifierTests {
+    @Test func verifierOutputCanRepresentRejectedSeparatelyFromCorrectedAndIgnoredFeedback() throws {
+        let document = try #require(JSONSerialization.jsonObject(with: Data(ReReviewVerifier.schema.utf8)) as? [String: Any])
+        let properties = try #require(document["properties"] as? [String: Any])
+        let notes = try #require(properties["notes"] as? [String: Any])
+        let item = try #require(notes["items"] as? [String: Any])
+        let fields = try #require(item["properties"] as? [String: Any])
+        let state = try #require(fields["state"] as? [String: Any])
+        #expect((state["enum"] as? [String])?.contains("rejected") == true)
+    }
+
+    @Test(arguments: AutomationAssistant.allCases)
+    func rejectedOutcomeKeepsItsPublishedExplanationAndAcceptanceThroughProviderDecoding(_ assistant: AutomationAssistant) async throws {
+        let folder = FileManager.default.temporaryDirectory.appending(path: UUID().uuidString)
+        try FileManager.default.createDirectory(at: folder, withIntermediateDirectories: false)
+        defer { try? FileManager.default.removeItem(at: folder) }
+        let script = folder.appending(path: "cli")
+        try Data("""
+            #!/usr/bin/python3
+            import json,pathlib,sys
+            args=sys.argv[1:]
+            sys.stdin.read()
+            schema=json.load(open(args[args.index('--output-schema')+1])) if args[0]=='exec' else json.loads(args[args.index('--json-schema')+1])
+            pathlib.Path(__file__+'.schema').write_text(json.dumps(schema))
+            result={'notes':[{'noteID':10,'state':'rejected','reason':'The current remote request key already prevents duplicate sends.',
+                'publishedReplyNoteID':11,'acceptanceNoteID':12},
+                {'noteID':12,'state':'informational','reason':'The reviewer accepts the verified explanation.'}]}
+            if args[0]=='exec': json.dump(result,open(args[args.index('-o')+1],'w'))
+            else: print(json.dumps({'is_error':False,'structured_output':result}))
+            """.utf8).write(to: script)
+        try FileManager.default.setAttributes([.posixPermissions: 0o700], ofItemAtPath: script.path)
+        let threads = try JSONDecoder().decode([GitLabMergeRequestDiscussion].self, from: Data(#"[{"id":"thread","notes":[{"id":10,"author":{"id":7,"username":"reviewer"},"system":false,"resolvable":true,"resolved":false,"body":"Retry the request again","created_at":"2026-01-01T10:00:00Z"},{"id":11,"author":{"id":3,"username":"me"},"system":false,"body":"The current request key prevents duplicate sends; another retry would send twice.","created_at":"2026-01-01T11:00:00Z"},{"id":12,"author":{"id":7,"username":"reviewer"},"system":false,"body":"Agreed, the existing request key covers this.","created_at":"2026-01-01T12:00:00Z"}]}]"#.utf8))
+        let input = ReReviewVerifier.Input(authorID: 3, headSHA: String(repeating: "a", count: 40),
+            title: "Verified existing retry contract", diff: "Current remote source", discussions: threads)
+        let assessment = try await ReReviewVerifier.run(input, assistant: assistant, model: "fixture", executable: script, retryWait: { _ in })
+        #expect(assessment.notes.first?.state == .rejected)
+        #expect(assessment.notes.first?.publishedReplyNoteID == 11)
+        #expect(assessment.missingPublishedReplyNoteIDs(in: threads, authorID: 3).isEmpty)
+        let findings = AuthorFeedbackPolicy.evaluate(discussions: threads, assessment: assessment, authorID: 3, approvedReviewerIDs: [])
+        #expect(findings.first?.state == .ready && findings.first?.canResolve == true)
+        let captured = try String(contentsOf: URL(fileURLWithPath: script.path + ".schema"), encoding: .utf8)
+        #expect(captured.contains("rejected"))
+    }
+
     @MainActor
     @Test(arguments: AutomationAssistant.allCases)
     func monitorAuthorFeedbackOwnsThreeProviderAttemptsWhileStandaloneReReviewRetainsTwo(_ assistant: AutomationAssistant) async throws {
@@ -117,7 +160,7 @@ struct ReReviewVerifierTests {
         let instructions = try #require(captured["instructions"] as? String).split(whereSeparator: \.isWhitespace).joined(separator: " ")
         #expect(instructions.contains("An actual actionable duplicate finding still requires its own thread reply"))
         #expect(instructions.contains("Coverage neither proves reviewer acceptance nor grants publication, resolution or merge permission"))
-        #expect(instructions.contains("Classify informationalPurpose independently of state, including addressed, informational, blocking and uncertain"))
+        #expect(instructions.contains("Classify informationalPurpose independently of state, including addressed, rejected, informational, blocking and uncertain"))
         #expect(instructions.contains("Return other for unrelated purposes or unclear purpose"))
         #expect(instructions.contains("This own-thread rule does not apply to a review report with valid reviewSummaryCoverage"))
         #expect(instructions.contains("Do not classify the report itself as a second concrete finding"))
@@ -397,6 +440,9 @@ struct ReReviewVerifierTests {
         #expect(instructions.contains("Distinguish an explicit requirement before merge from a suggestion or a prerequisite before deployment"))
         #expect(instructions.contains("classify it addressed when no explicit in-MR action remains"))
         #expect(instructions.contains("Do not invent approval, erase a real defect, or waive an explicit before-merge condition"))
+        #expect(instructions.contains("Local changes, unpushed commits, private drafts and claims of completion do not prove a remote correction"))
+        #expect(instructions.contains("rejected: current evidence supports declining the requested change"))
+        #expect(instructions.contains("Rejecting a proposed remedy while admitting an unresolved defect is blocking"))
         let findings = AuthorFeedbackPolicy.evaluate(discussions: discussions, assessment: assessment,
             authorID: 3, approvedReviewerIDs: [])
         #expect(findings.first(where: { $0.id == 10 })?.state == .waitingAcceptance)
@@ -557,8 +603,18 @@ struct ReReviewVerifierTests {
         let instructions = try #require(captured["instructions"] as? String)
         #expect(instructions.contains("Do not perform a fresh general code review or introduce new findings"))
         let normalized = instructions.split(whereSeparator: \.isWhitespace).joined(separator: " ")
-        #expect(normalized.contains("A supported explanation disputing a proposed remedy can be addressed without proving an undocumented business meaning"))
-        #expect(normalized.contains("Check the separately alleged defect and any remaining author obligation before reaching that verdict"))
+        #expect(normalized.contains("addressed: the requested correction is verified in the CURRENT REMOTE MR source at the exact expected headSHA and live source_project_id"))
+        #expect(normalized.contains("Local changes, unpushed commits, private drafts and claims of completion do not prove a remote correction"))
+        #expect(normalized.contains("rejected: current evidence supports declining the requested change"))
+        #expect(normalized.contains("Do not invent undocumented business meaning to reject a remedy"))
+        #expect(normalized.contains("Check the separately alleged defect and every remaining author obligation"))
+        #expect(normalized.contains("Rejecting a proposed remedy while admitting an unresolved defect is blocking, not rejected or addressed"))
+        #expect(normalized.contains("ALL selected feedback is either addressed by a verified remote correction or supported answer to an explanation-only request, rejected with a justified rationale supported by current evidence"))
+        #expect(normalized.contains("Every still-owed author reply must be published"))
+        #expect(normalized.contains("The UI uses publishedReplyNoteID to show whether ALL current concerns are answered"))
+        #expect(normalized.contains("a merely later post, an obsolete or partial answer, or a promise of future work gets null"))
+        #expect(normalized.contains("A source edit requires fresh semantic comparison, not a blanket timestamp cutoff"))
+        #expect(normalized.contains("Later purely informational thanks or \"super\" do not invalidate valid reply coverage"))
         #expect(normalized.contains("Distinguish work still owed by the author from evidence or acceptance requested from the reviewer"))
         #expect(normalized.contains("Name the exact missing fact and why accessible evidence cannot establish it"))
         #expect(!normalized.contains("then the useful next step for the user"))

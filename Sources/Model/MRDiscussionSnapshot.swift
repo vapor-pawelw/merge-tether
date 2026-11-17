@@ -13,6 +13,7 @@ struct MRDiscussionSnapshot {
     enum Origin: Equatable, Sendable {
         case verifiedAssistant
         case appGenerated
+        case botAccount
         case assessed(evidence: String)
         case uncertain(evidence: String)
         case humanLikely(evidence: String)
@@ -27,7 +28,7 @@ struct MRDiscussionSnapshot {
         var badge: OriginBadge {
             switch self {
             case .manual(let badge): badge
-            case .verifiedAssistant, .appGenerated, .assessed: .ai
+            case .verifiedAssistant, .appGenerated, .botAccount, .assessed: .ai
             case .uncertain: .uncertain
             case .humanLikely: .human
             }
@@ -66,6 +67,8 @@ struct MRDiscussionSnapshot {
         let origins: [Int: Origin]
         var authorKinds: [Int: AuthorFeedbackPolicy.AccountKind] = [:]
         let feedback: Feedback
+        /// Nil means coverage is unverified; an empty array means no substantive answer is required.
+        var verifiedReplyAuthors: [String]? = nil
 
         var originBadge: OriginBadge? {
             var aggregate: OriginBadge?
@@ -85,24 +88,59 @@ struct MRDiscussionSnapshot {
             enum PublishedReply: Equatable { case none, published, earlier, unknown, unavailable }
             let publishedReply: PublishedReply
             let draftCount: Int
+            var showsPublishedReply: Bool { draftCount == 0 && publishedReply == .published }
         }
 
         func replySummary(currentUsername: String?) -> ReplySummary {
             guard let currentUsername, !currentUsername.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else {
                 return .init(publishedReply: .unavailable, draftCount: drafts.count)
             }
-            let replies = notes.filter { $0.system != true }.dropFirst()
-            let latestOwnReply = replies.lastIndex { $0.author?.username == currentUsername }
             let state: ReplySummary.PublishedReply
-            if let latestOwnReply {
-                state = latestOwnReply == replies.indices.last ? .published : .earlier
+            if let verifiedReplyAuthors {
+                state = verifiedReplyAuthors.isEmpty ? .none
+                    : verifiedReplyAuthors.allSatisfy { $0 == currentUsername } ? .published : .unknown
             } else {
-                state = replies.contains { $0.author?.username?.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty != false }
-                    ? .unknown : .none
+                state = .unknown
             }
             return .init(publishedReply: state, draftCount: drafts.count)
         }
     }
+    struct ReplyEvidence {
+        let id: Int?
+        let authorID: Int?
+        let username: String?
+        let body: String?
+
+        static func from(_ note: GitLabMergeRequestDiscussion.Note) -> Self {
+            .init(id: note.id, authorID: note.author?.id, username: note.author?.username, body: note.body)
+        }
+    }
+
+    /// Uses only a current, source-bound semantic assessment supplied by the caller. This is display
+    /// evidence; it never waives the workflow's independent own-thread reply or publication checks.
+    static func replyAuthorsCoveringFeedback(notes: [ReplyEvidence], allNotes: [ReplyEvidence],
+                                             assessment: ReReviewAssessment?, authorID: Int?) -> [String]? {
+        guard let authorID, authorID > 0, let assessment,
+              notes.allSatisfy({ ($0.authorID ?? 0) > 0 }) else { return nil }
+        let external = notes.filter { $0.authorID != authorID }
+        let ids = external.compactMap(\.id)
+        guard ids.count == external.count, ids.allSatisfy({ $0 > 0 }), Set(ids).count == ids.count else { return nil }
+        let verdicts = Dictionary(grouping: assessment.notes, by: \.noteID)
+        var replyAuthors: [String] = []
+        for id in ids {
+            guard let matches = verdicts[id], matches.count == 1, let verdict = matches.first else { return nil }
+            if verdict.state == .informational || verdict.state == .ignoredByUser { continue }
+            guard [.addressed, .rejected].contains(verdict.state),
+                  let replyID = verdict.publishedReplyNoteID, replyID > id else { return nil }
+            let replies = allNotes.filter { $0.id == replyID }
+            guard replies.count == 1, let reply = replies.first, reply.authorID == authorID,
+                  let username = reply.username, !username.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty,
+                  reply.body?.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty == false else { return nil }
+            replyAuthors.append(username)
+        }
+        return replyAuthors
+    }
+
     var threads: [Thread] = []
     var standaloneDrafts: [GitLabDraftNote] = []
 
@@ -128,6 +166,7 @@ struct MRDiscussionSnapshot {
             draftsByDiscussion[id, default: []].append(entry)
         }
         var matchedDrafts: Set<Int> = []
+        let allReplyEvidence = discussions.flatMap(\.notes).filter { $0.system != true }.map(ReplyEvidence.from)
         for (index, discussion) in discussions.enumerated() {
             let notes = discussion.notes.filter { $0.system != true }
             guard !notes.isEmpty else { continue }
@@ -140,13 +179,20 @@ struct MRDiscussionSnapshot {
             let location = MRDiscussionLocation(position: position)?.full
             var threadOrigins: [Int: Origin] = [:]
             for note in notes {
-                if let id = note.id, let origin = origins[id] { threadOrigins[id] = origin }
+                guard let id = note.id else { continue }
+                if let authorID = note.author?.id, authorKinds[authorID] == .automation {
+                    threadOrigins[id] = .botAccount
+                } else if let origin = origins[id] {
+                    threadOrigins[id] = origin
+                }
             }
             threads.append(.init(id: discussion.id.map { "discussion/\($0)" } ?? "unidentified/\(index)",
                 discussionID: discussion.id, notes: notes, drafts: pending.map(\.element), state: state,
                 location: location, origins: threadOrigins,
                 authorKinds: authorKinds.filter { id, _ in notes.contains { $0.author?.id == id } },
-                feedback: Feedback.summarize(notes: notes.map { ($0.id, $0.author?.id) }, assessment: assessment, authorID: authorID)))
+                feedback: Feedback.summarize(notes: notes.map { ($0.id, $0.author?.id) }, assessment: assessment, authorID: authorID),
+                verifiedReplyAuthors: Self.replyAuthorsCoveringFeedback(notes: notes.map(ReplyEvidence.from),
+                    allNotes: allReplyEvidence, assessment: assessment, authorID: authorID)))
         }
         // Group by GitLab state without changing server order within a group.
         threads = [State.open, .resolved, .general].flatMap { state in

@@ -1358,6 +1358,57 @@
           }
         }
       }
+    },
+    "remoteDetail.botOriginHelp": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Known bot or automation account, confirmed by GitLab metadata or your local bot list. Its comments are classified as Bot without distinguishing scripts from AI. This classification cannot be changed here. Automatic bot replies require their separate publication permission."
+          }
+        },
+        "pl": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Konto bota lub automatyzacji, potwierdzone przez dane GitLaba albo lokalną listę botów. Jego komentarze mają etykietę Bot bez rozróżniania skryptów i AI. Nie można tutaj zmienić tej klasyfikacji. Automatyczne odpowiedzi botom wymagają osobnego uprawnienia do publikacji."
+          }
+        }
+      }
+    },
+    "remoteDetail.feedbackAddressedHelp": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "All requested concerns have been handled through verified corrections in the current remote merge-request code or metadata, substantive answers, or justified decisions not to implement a suggestion. Required published replies and GitLab thread resolution are shown separately."
+          }
+        },
+        "pl": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Wszystkie zgłoszone kwestie zostały obsłużone przez zweryfikowane poprawki w aktualnym zdalnym kodzie lub metadanych merge requesta, merytoryczne wyjaśnienia albo uzasadnioną decyzję o niewprowadzaniu sugestii. Wymagane opublikowane odpowiedzi i rozwiązanie wątku w GitLabie są pokazywane osobno."
+          }
+        }
+      }
+    },
+    "remoteDetail.replyPublishedHelp": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Verification confirms that your published reply answers all concerns requiring a reply. Later informational acknowledgements can follow it without changing this status. A pending draft takes priority and is shown instead."
+          }
+        },
+        "pl": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Weryfikacja potwierdza, że Twoja opublikowana odpowiedź obejmuje wszystkie uwagi wymagające odpowiedzi. Późniejsze informacyjne potwierdzenia nie zmieniają tego statusu. Oczekujący szkic jest pokazywany zamiast niego."
+          }
+        }
+      }
     }
   },
   "version": "1.0"

@@ -262,7 +262,8 @@ private struct RemoteDiscussionCard: View {
                presenting: threadOriginRequest) { request in
             Button(role: .cancel) { threadOriginRequest = nil } label: { Text(.RemoteDetail.remoteDetailOriginCancel) }
             Button {
-                if let change = RemoteCommentOriginRequest.set(request.origin, notes: thread.notes, in: thread.id) {
+                if !thread.notes.contains(where: { $0.authorKind == .automation }),
+                   let change = RemoteCommentOriginRequest.set(request.origin, notes: thread.notes, in: thread.id) {
                     onCommentOrigin?(change)
                 }
                 threadOriginRequest = nil
@@ -281,16 +282,20 @@ private struct RemoteDiscussionCard: View {
                         .padding(.horizontal, 8).padding(.vertical, 4)
                         .background(color.opacity(0.07), in: Capsule())
                     feedbackBadge
-                    Text(replyTitle).font(.caption)
-                        .foregroundStyle(thread.reply == .published || thread.reply == .earlier ? Color.blue : Color.secondary)
+                    if thread.showsPublishedReply {
+                        Text(replyTitle).font(.caption).foregroundStyle(Color.blue)
+                            .accessibilityHint(Text(.RemoteDetail.remoteDetailReplyPublishedHelp))
+                    }
                     if thread.draftCount > 0 {
                         HStack(spacing: 5) {
                             Label(.RemoteDetail.remoteDetailDraft, systemImage: "square.and.pencil")
                             Text(thread.draftCount, format: .number)
                         }.font(.caption).foregroundStyle(.tint)
                     }
-                    if let origin = thread.origin {
-                        originBadge(origin, manual: thread.notes.allSatisfy { $0.originManual == true }, thread: true) {
+                    if let origin = thread.origin ?? (!thread.notes.isEmpty && thread.notes.allSatisfy { $0.authorKind == .automation } ? .ai : nil) {
+                        originBadge(origin, manual: thread.notes.allSatisfy { $0.originManual == true }, thread: true,
+                            bot: !thread.notes.isEmpty && thread.notes.allSatisfy { $0.authorKind == .automation },
+                            locked: thread.notes.contains { $0.authorKind == .automation }) {
                             threadOriginRequest = .init(origin: $0)
                         }
                     }
@@ -327,17 +332,13 @@ private struct RemoteDiscussionCard: View {
     /// Author and origin on the left (wrapping on narrow screens), date on the right: the same line for every comment.
     private func noteHeader(_ note: RemoteDetailNote) -> some View {
         HStack(alignment: .top, spacing: 8) {
-            StatusFlowLayout(spacing: 6) {
+            StatusFlowLayout(spacing: note.authorKind == .automation ? 8 : 6) {
                 PersonLabel(person: .init(name: note.author, username: note.username, avatarURL: note.avatarURL), avatarSize: 20,
                             fallback: Text(.RemoteDetail.remoteDetailUnknownAuthor))
                     .font(.callout.weight(.medium))
-                if note.authorKind == .automation {
-                    Label(.AuthorFeedback.authorFeedbackBotAuthor, systemImage: "gearshape")
-                        .font(.caption.weight(.medium)).foregroundStyle(.secondary).fixedSize()
-                        .accessibilityHint(Text(.AuthorFeedback.authorFeedbackBotAuthorHelp))
-                }
-                if let origin = note.origin {
-                    originBadge(origin, manual: note.originManual == true, thread: false) { choice in
+                if let origin = note.displayOrigin {
+                    originBadge(origin, manual: note.originManual == true, thread: false,
+                                bot: note.authorKind == .automation, locked: note.authorKind == .automation) { choice in
                         if let change = RemoteCommentOriginRequest.set(choice, notes: [note], in: thread.id) { onCommentOrigin?(change) }
                     }
                 }
@@ -386,9 +387,13 @@ private struct RemoteDiscussionCard: View {
         case .informational, .notApplicable: "info.circle"
         case .ignored, .partlyIgnored: "minus.circle"
         }
+        let explanation: LocalizedStringResource = switch feedback {
+        case .addressed: .RemoteDetail.remoteDetailFeedbackAddressedHelp
+        default: .RemoteDetail.remoteDetailFeedbackHelp
+        }
         return Label(title, systemImage: symbol).font(.caption.weight(.medium)).foregroundStyle(color)
             .padding(.horizontal, 7).padding(.vertical, 3).background(color.opacity(0.08), in: Capsule())
-            .accessibilityHint(Text(.RemoteDetail.remoteDetailFeedbackHelp))
+            .accessibilityHint(Text(explanation))
     }
     private var replyTitle: LocalizedStringResource {
         switch thread.reply {
@@ -409,21 +414,37 @@ private struct RemoteDiscussionCard: View {
         origin == .ai ? "sparkles" : origin == .human ? "person" : "questionmark.circle"
     }
 
+    private func originColor(_ origin: RemoteDetailNote.Origin, bot: Bool) -> Color {
+        if bot { return .secondary }
+        return switch origin { case .ai: .purple; case .uncertain: .orange; case .human: .teal }
+    }
+
     @ViewBuilder
     private func originBadge(_ origin: RemoteDetailNote.Origin, manual: Bool, thread: Bool,
+                             bot: Bool = false, locked: Bool = false,
                              onSelect: @escaping (RemoteDetailNote.Origin?) -> Void) -> some View {
-        let color: Color = switch origin { case .ai: .purple; case .uncertain: .orange; case .human: .teal }
-        let capsule = Label {
-            HStack(spacing: 3) {
-                Text(originTitle(origin))
-                if manual { Image(systemName: "hand.raised.fill").imageScale(.small) }
-                if onCommentOrigin != nil { Image(systemName: "chevron.down").imageScale(.small) }
+        let color = originColor(origin, bot: bot)
+        let title: LocalizedStringResource = bot ? .AuthorFeedback.authorFeedbackBotAuthor : originTitle(origin)
+        let capsule = Group {
+            if bot {
+                HStack(alignment: .firstTextBaseline, spacing: 4) {
+                    Image(systemName: "gearshape").accessibilityHidden(true)
+                    Text(title)
+                }
+            } else {
+                Label {
+                    HStack(spacing: 3) {
+                        Text(title)
+                        if manual { Image(systemName: "hand.raised.fill").imageScale(.small) }
+                        if onCommentOrigin != nil && !locked { Image(systemName: "chevron.down").imageScale(.small) }
+                    }
+                } icon: { Image(systemName: originSymbol(origin)) }
             }
-        } icon: { Image(systemName: originSymbol(origin)) }
+        }
             .font(.caption.weight(.medium)).foregroundStyle(color)
             .padding(.horizontal, 7).padding(.vertical, 3).background(color.opacity(0.08), in: Capsule())
             .fixedSize()
-        if onCommentOrigin != nil {
+        if onCommentOrigin != nil && !locked {
             Menu {
                 Section {
                     ForEach([RemoteDetailNote.Origin.ai, .uncertain, .human], id: \.self) { choice in
@@ -446,7 +467,12 @@ private struct RemoteDiscussionCard: View {
                                            : Text(originTitle(origin)))
                 .accessibilityHint(Text(thread ? .RemoteDetail.remoteDetailThreadOriginMenuHint : .RemoteDetail.remoteDetailOriginMenuHint))
         } else {
-            capsule.accessibilityElement(children: .combine)
+            if bot {
+                capsule.accessibilityElement(children: .combine)
+                    .accessibilityHint(Text(.RemoteDetail.remoteDetailBotOriginHelp))
+            } else {
+                capsule.accessibilityElement(children: .combine)
+            }
         }
     }
 }

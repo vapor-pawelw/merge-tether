@@ -3,6 +3,20 @@ import Testing
 @testable import MergeTetherRemote
 
 @Suite struct RemoteDetailsTests {
+    @Test(arguments: [
+        (RemoteDetailThread.Reply.published, 0, true), (.published, 1, false), (.published, 2, false),
+        (.earlier, 0, false), (.earlier, 1, false), (.none, 0, false),
+        (.unknown, 0, false), (.unavailable, 0, false)
+    ])
+    func onlyACurrentPublishedReplyWithoutDraftsGetsAPublishedIndicator(
+        reply: RemoteDetailThread.Reply, draftCount: Int, visible: Bool) throws {
+        let thread = RemoteDetailThread(id: "thread", state: .open, notes: [], reply: reply, draftCount: draftCount)
+        #expect(thread.showsPublishedReply == visible)
+        let decoded = try JSONDecoder().decode(RemoteDetailThread.self, from: JSONEncoder().encode(thread))
+        #expect(decoded.reply == reply && decoded.draftCount == draftCount)
+        #expect(decoded.showsPublishedReply == visible)
+    }
+
     @Test func threadAssessmentAndBranchesAreOptionalAndRoundTripWithoutChangingReplyOrOrigin() throws {
         let legacy = try JSONDecoder().decode(RemoteDetailThread.self,
             from: Data(#"{"id":"thread","state":"resolved","notes":[],"reply":"none","draftCount":0,"truncated":false}"#.utf8))

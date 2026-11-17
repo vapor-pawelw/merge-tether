@@ -15,7 +15,7 @@ enum AuthorFeedbackAssessmentStore {
         var diffDigest: String? = nil
     }
 
-    nonisolated static let version = 1
+    nonisolated static let version = 2
     nonisolated static let directory = InstallationStorage.current.evidence
         .appending(path: "author-feedback-assessments", directoryHint: .isDirectory)
 

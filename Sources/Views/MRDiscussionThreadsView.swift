@@ -19,6 +19,7 @@ struct MRDiscussionThreadsView: View {
     /// Present when the user may change comment origins; `nil` classification returns to automatic assessment.
     var onSetOrigin: MRDiscussionOriginAction? = nil
     var extraContexts: AICommentProvenanceStore.ExtraContexts = .empty
+    var currentUserIdentity: PersonIdentity? = nil
     let onRefresh: () -> Void
 
     var body: some View {
@@ -76,12 +77,13 @@ struct MRDiscussionThreadsView: View {
         .frame(maxWidth: .infinity, alignment: .leading)
     }
 
-    /// Your drafts show your GitLab name and avatar when any loaded note carries them.
     private var currentUser: PersonIdentity? {
-        guard let username = currentUsername?.lowercased() else { return nil }
-        let known = snapshot.threads.lazy.flatMap(\.notes).compactMap(\.author)
-            .first { $0.username?.lowercased() == username }
-        return known?.person ?? .init(name: nil, username: currentUsername)
+        guard let username = currentUsername else { return nil }
+        var directory = PersonDirectory(currentUserIdentity.map { [$0] } ?? [])
+        for note in snapshot.threads.flatMap(\.notes) {
+            if let person = note.author?.person { directory.insert(person) }
+        }
+        return directory.person(username: username)
     }
 
     private func threadView(_ thread: MRDiscussionSnapshot.Thread) -> some View {
@@ -168,6 +170,7 @@ private struct MRDiscussionThreadView: View {
             Button { onSetOrigin?(request.classification, comments); threadOriginRequest = nil } label: {
                 Text(.MRDiscussions.mrDiscussionsOriginConfirm)
             }
+            .disabled(containsBotComment)
         } message: { _ in
             Text(.MRDiscussions.mrDiscussionsThreadOriginMessage(comments.count))
         }
@@ -183,8 +186,17 @@ private struct MRDiscussionThreadView: View {
     }
 
     private func noteOriginAction(_ note: GitLabMergeRequestDiscussion.Note) -> ((AICommentOriginOverride.Classification?) -> Void)? {
-        guard let onSetOrigin else { return nil }
+        guard let onSetOrigin, note.id.flatMap({ thread.origins[$0] }) != .botAccount else { return nil }
         return { onSetOrigin($0, [note]) }
+    }
+
+    private var containsBotComment: Bool {
+        thread.notes.contains { $0.system != true && $0.id.flatMap { thread.origins[$0] } == .botAccount }
+    }
+
+    private var containsOnlyBotComments: Bool {
+        let comments = thread.notes.filter { $0.system != true }
+        return !comments.isEmpty && comments.allSatisfy { $0.id.flatMap { thread.origins[$0] } == .botAccount }
     }
 
     private func threadHeader(firstComment: GitLabMergeRequestDiscussion.Note?,
@@ -203,10 +215,10 @@ private struct MRDiscussionThreadView: View {
                 MRDiscussionFeedbackBadge(state: thread.feedback)
                 replyStatus(summary)
                 if let originBadge {
-                    MRDiscussionOriginBadge(badge: originBadge,
+                    MRDiscussionOriginBadge(badge: originBadge, origin: containsOnlyBotComments ? .botAccount : nil,
                         isManual: !thread.origins.isEmpty && thread.origins.values.allSatisfy(\.isManual),
                         scope: .thread,
-                        onSelect: onSetOrigin == nil ? nil : { threadOriginRequest = .init(classification: $0) })
+                        onSelect: onSetOrigin == nil || containsBotComment ? nil : { threadOriginRequest = .init(classification: $0) })
                 }
             }
             if let location = thread.location {
@@ -230,7 +242,9 @@ private struct MRDiscussionThreadView: View {
 
     @ViewBuilder
     private func replyStatus(_ summary: MRDiscussionSnapshot.Thread.ReplySummary) -> some View {
-        MRDiscussionReplyBadge(state: summary.publishedReply)
+        if summary.showsPublishedReply {
+            MRDiscussionReplyBadge(state: summary.publishedReply)
+        }
         if summary.draftCount > 0 {
             Label { Text(.MRDiscussions.mrDiscussionsDraftCount(summary.draftCount)) } icon: {
                 Image(systemName: "square.and.pencil")
@@ -308,7 +322,7 @@ private struct MRDiscussionNoteHeader: View {
 
     var body: some View {
         HStack(alignment: .firstTextBaseline, spacing: 8) {
-            MRDiscussionAuthorView(author: note.author, accountKind: authorKind)
+            MRDiscussionAuthorView(author: note.author, accountKind: origin == .botAccount ? nil : authorKind)
                 .layoutPriority(1)
             if let origin {
                 MRDiscussionOriginBadge(badge: origin.badge, origin: origin, isManual: origin.isManual,
@@ -423,6 +437,7 @@ private struct MRDiscussionOriginBadge: View {
     var onSelect: ((AICommentOriginOverride.Classification?) -> Void)? = nil
 
     private var title: LocalizedStringResource {
+        if origin == .botAccount { return .AuthorFeedback.authorFeedbackBotAuthor }
         if origin == .appGenerated { return .MRDiscussions.mrDiscussionsAiMergeTether }
         return switch badge {
         case .ai: .MRDiscussions.mrDiscussionsAi
@@ -431,13 +446,15 @@ private struct MRDiscussionOriginBadge: View {
         }
     }
     private var color: Color {
-        switch badge {
+        if origin == .botAccount { return .secondary }
+        return switch badge {
         case .ai: .purple
         case .uncertain: .orange
         case .human: .teal
         }
     }
     private var symbol: String {
+        if origin == .botAccount { return "gearshape" }
         if origin == .appGenerated { return "wand.and.stars" }
         return switch badge {
         case .ai: "sparkles"
@@ -447,6 +464,7 @@ private struct MRDiscussionOriginBadge: View {
     }
     private var explanation: Text {
         var text: Text = switch origin {
+        case .botAccount: Text(.MRDiscussions.mrDiscussionsBotOriginHelp)
         case .verifiedAssistant: Text(.MRDiscussions.mrDiscussionsAiVerified)
         case .appGenerated: Text(.MRDiscussions.mrDiscussionsAiAppGenerated)
         case .assessed(let evidence): Text(.MRDiscussions.mrDiscussionsAiAssessed) + Text(verbatim: "\n" + evidence)
@@ -460,7 +478,7 @@ private struct MRDiscussionOriginBadge: View {
             case .human: Text(.MRDiscussions.mrDiscussionsThreadHumanHelp)
             }
         }
-        if onSelect != nil {
+        if onSelect != nil && origin != .botAccount {
             text = text + Text(verbatim: "\n\n") + Text(scope == .thread
                 ? .MRDiscussions.mrDiscussionsThreadOriginMenuHelp : .MRDiscussions.mrDiscussionsOriginMenuHelp)
         }
@@ -472,13 +490,22 @@ private struct MRDiscussionOriginBadge: View {
     }
 
     private var capsule: some View {
-        Label {
-            HStack(spacing: 3) {
-                Text(title)
-                if isManual { Image(systemName: "hand.raised.fill").imageScale(.small).accessibilityHidden(true) }
-                if onSelect != nil { Image(systemName: "chevron.down").imageScale(.small).accessibilityHidden(true) }
+        Group {
+            if origin == .botAccount {
+                HStack(alignment: .firstTextBaseline, spacing: 4) {
+                    Image(systemName: "gearshape").accessibilityHidden(true)
+                    Text(title)
+                }
+            } else {
+                Label {
+                    HStack(spacing: 3) {
+                        Text(title)
+                        if isManual { Image(systemName: "hand.raised.fill").imageScale(.small).accessibilityHidden(true) }
+                        if onSelect != nil { Image(systemName: "chevron.down").imageScale(.small).accessibilityHidden(true) }
+                    }
+                } icon: { Image(systemName: symbol) }
             }
-        } icon: { Image(systemName: symbol) }
+        }
             .font(.caption2.weight(.semibold))
             .foregroundStyle(color).padding(.horizontal, 6).padding(.vertical, 2)
             .background(color.opacity(0.1), in: Capsule())
@@ -486,7 +513,7 @@ private struct MRDiscussionOriginBadge: View {
     }
 
     var body: some View {
-        if let onSelect {
+        if let onSelect, origin != .botAccount {
             Menu {
                 Section {
                     option(.ai, title: .MRDiscussions.mrDiscussionsAi, symbol: "sparkles", onSelect: onSelect)
@@ -604,13 +631,19 @@ private struct MRDiscussionFeedbackBadge: View {
         case .ignored, .partlyIgnored: "minus.circle"
         }
     }
+    private var explanation: LocalizedStringResource {
+        switch state {
+        case .addressed: .MRDiscussions.mrDiscussionsFeedbackAddressedHelp
+        default: .MRDiscussions.mrDiscussionsFeedbackHelp
+        }
+    }
     var body: some View {
         Label { Text(title) } icon: { Image(systemName: symbol) }
             .font(.caption.weight(.medium)).foregroundStyle(color)
             .padding(.horizontal, 7).padding(.vertical, 3)
             .background(color.opacity(0.08), in: Capsule())
-            .help(Text(.MRDiscussions.mrDiscussionsFeedbackHelp))
-            .accessibilityHint(Text(.MRDiscussions.mrDiscussionsFeedbackHelp))
+            .help(Text(explanation))
+            .accessibilityHint(Text(explanation))
     }
 }
 

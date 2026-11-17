@@ -4,6 +4,200 @@ import Testing
 
 @MainActor
 struct MRDiscussionStoreTests {
+    @Test(arguments: ["missing", "uncertain", "human", "staleHuman"])
+    func verifiedBotDefaultsToMachineWithoutWritingAIAuthorshipEvidence(_ variant: String) async throws {
+        let directory = FileManager.default.temporaryDirectory.appending(path: UUID().uuidString)
+        defer { try? FileManager.default.removeItem(at: directory) }
+        let notes = try threads(), source = try #require(notes.first?.notes.first)
+        if variant != "missing" {
+            var record = assessment(note: source, classification: variant == "uncertain" ? "uncertain" : "manual_likely",
+                confidence: variant == "uncertain" ? "uncertain" : "high")
+            if variant == "staleHuman" { record.criteriaVersion = AICommentOriginAssessor.criteriaVersion - 1 }
+            try save(record, in: directory)
+        }
+        let path = AICommentAssessmentStore.fileURL(host: target.host, projectID: 1, iid: 2, noteID: 3, in: directory)
+        let originalRecord = try? Data(contentsOf: path)
+        let glab = glab()
+        let store = MRDiscussionStore(load: { _ in notes }, verifyAuthorKind: { _, _ in .automation }, assessmentDirectory: directory)
+        defer { store.cancel() }
+        await store.refresh(target: target, glab: glab)
+        await store.authorKindTask?.value
+        #expect(store.authorKinds[7] == .automation)
+        let originalOrigin = store.origins[3]
+        #expect(projectedOrigin(in: store)?.badge == .ai)
+        #expect(!AICommentAssessmentStore.isAI(source, host: target.host, projectID: 1, iid: 2, in: directory))
+        #expect((try? Data(contentsOf: path)) == originalRecord)
+        glab.notifyFeedbackAccountKind(userID: 7, kind: .regular, host: target.host,
+            username: target.username, accountRevision: glab.accountRevision)
+        let restored: MRDiscussionSnapshot.Origin? = switch variant {
+        case "uncertain": .uncertain(evidence: "Recorded origin evidence")
+        case "human": .humanLikely(evidence: "Recorded origin evidence")
+        default: nil
+        }
+        #expect(projectedOrigin(in: store) == restored)
+        #expect(store.origins[3] == originalOrigin && store.origins[3] == restored)
+        #expect((try? Data(contentsOf: path)) == originalRecord)
+    }
+
+    @Test(arguments: ["missing", "uncertain", "human"])
+    func removingLocalBotDesignationRestoresTheOriginalContentOrigin(_ variant: String) async throws {
+        let directory = FileManager.default.temporaryDirectory.appending(path: UUID().uuidString)
+        defer { try? FileManager.default.removeItem(at: directory) }
+        let notes = try threads(), source = try #require(notes.first?.notes.first)
+        if variant != "missing" {
+            try save(assessment(note: source, classification: variant == "human" ? "manual_likely" : "uncertain",
+                confidence: variant == "human" ? "high" : "uncertain"), in: directory)
+        }
+        var reads = 0
+        let glab = glab()
+        let store = MRDiscussionStore(load: { _ in reads += 1; return notes }, assessmentDirectory: directory)
+        defer { store.cancel() }
+        await store.refresh(target: target, glab: glab)
+        let original = store.origins[3]
+        glab.notifyFeedbackAccountKind(userID: 7, kind: .regular, host: target.host,
+            username: target.username, accountRevision: glab.accountRevision)
+        glab.updateLocalAutomationAuthors([7], host: target.host, username: target.username)
+        #expect(store.authorKinds[7] == .automation && projectedOrigin(in: store)?.badge == .ai)
+        await store.reloadOrigins(glab: glab)
+        #expect(projectedOrigin(in: store)?.badge == .ai && store.origins[3] == original)
+        glab.updateLocalAutomationAuthors([], host: target.host, username: target.username)
+        #expect(store.authorKinds[7] == .regular && projectedOrigin(in: store) == original && store.origins[3] == original)
+        #expect(reads == 1)
+        #expect(!AICommentAssessmentStore.isAI(source, host: target.host, projectID: 1, iid: 2, in: directory))
+    }
+
+    @Test(arguments: [AICommentOriginOverride.Classification.human, .uncertain])
+    func fixedBotBadgeDoesNotEraseTheManualOriginRestoredAfterUnmarking(_ classification: AICommentOriginOverride.Classification) async throws {
+        let directory = FileManager.default.temporaryDirectory.appending(path: UUID().uuidString)
+        defer { try? FileManager.default.removeItem(at: directory) }
+        let notes = try threads(), source = try #require(notes.first?.notes.first)
+        try AICommentOriginOverrideStore.save(.init(version: 1, host: target.host, username: target.username,
+            projectID: 1, iid: 2, noteID: 3, authorID: 7, bodySHA256: AICommentAssessmentStore.digest(source.body!),
+            classification: classification, createdAt: .distantPast, activatesAt: .distantPast), in: directory)
+        let glab = glab()
+        let store = MRDiscussionStore(load: { _ in notes }, verifyAuthorKind: { _, _ in .automation }, assessmentDirectory: directory)
+        defer { store.cancel() }
+        await store.refresh(target: target, glab: glab)
+        await store.authorKindTask?.value
+        let expected: MRDiscussionSnapshot.Origin = .manual(classification == .human ? .human : .uncertain)
+        #expect(store.authorKinds[7] == .automation && projectedOrigin(in: store)?.badge == .ai && store.origins[3] == expected)
+        glab.updateLocalAutomationAuthors([7], host: target.host, username: target.username)
+        await store.reloadOrigins(glab: glab)
+        #expect(projectedOrigin(in: store)?.badge == .ai && store.origins[3] == expected)
+        glab.notifyFeedbackAccountKind(userID: 7, kind: .regular, host: target.host,
+            username: target.username, accountRevision: glab.accountRevision)
+        #expect(projectedOrigin(in: store)?.badge == .ai && store.origins[3] == expected)
+        glab.updateLocalAutomationAuthors([], host: target.host, username: target.username)
+        #expect(store.authorKinds[7] == .regular && projectedOrigin(in: store) == expected && store.origins[3] == expected)
+    }
+
+    @Test func lateContentAssessmentDoesNotReplaceMachineUntilBotIdentityIsRemoved() async throws {
+        let root = FileManager.default.temporaryDirectory.appending(path: UUID().uuidString)
+        defer { try? FileManager.default.removeItem(at: root) }
+        let action = root.appending(path: "action"), display = root.appending(path: "display")
+        let notes = try threads(), source = try #require(notes.first?.notes.first)
+        let glab = glab()
+        let store = MRDiscussionStore(load: { _ in notes }, verifyAuthorKind: { _, _ in .automation },
+            assessmentDirectory: action, displayAssessmentDirectory: display)
+        defer { store.cancel() }
+        await store.refresh(target: target, glab: glab)
+        await store.authorKindTask?.value
+        #expect(projectedOrigin(in: store)?.badge == .ai)
+        try AICommentAssessmentStore.persist(.init(notes: [.init(noteID: 3, classification: .manualLikely,
+            confidence: .high, evidence: "New content-only assessment")]),
+            target: .init(host: target.host, username: target.username, projectID: 1, iid: 2), notes: [source],
+            assistant: .codex, model: "cheap", purpose: .display, in: display)
+        await store.reloadOrigins(glab: glab)
+        #expect(projectedOrigin(in: store)?.badge == .ai)
+        glab.notifyFeedbackAccountKind(userID: 7, kind: .regular, host: target.host,
+            username: target.username, accountRevision: glab.accountRevision)
+        #expect(projectedOrigin(in: store) == .humanLikely(evidence: "New content-only assessment"))
+        #expect(store.origins[3] == .humanLikely(evidence: "New content-only assessment"))
+        #expect(!AICommentAssessmentStore.isAI(source, host: target.host, projectID: 1, iid: 2, in: action))
+    }
+
+    @Test func staleBotMetadataCannotClassifyAnotherAccountsConversation() async throws {
+        let notes = try threads(), glab = glab()
+        let store = MRDiscussionStore(load: { _ in notes }, assessmentDirectory: URL(fileURLWithPath: "/nonexistent"))
+        defer { store.cancel() }
+        await store.refresh(target: target, glab: glab)
+        let previousRevision = glab.accountRevision
+        glab.currentUsername = "other"
+        let other = MRDiscussionTarget(host: target.host, username: "other", projectID: 1, iid: 2, url: target.url)
+        await store.refresh(target: other, glab: glab)
+        glab.notifyFeedbackAccountKind(userID: 7, kind: .automation, host: target.host,
+            username: target.username, accountRevision: previousRevision)
+        #expect(store.target == other && store.authorKinds[7] != .automation && projectedOrigin(in: store) == nil)
+        glab.notifyFeedbackAccountKind(userID: 7, kind: .automation, host: target.host,
+            username: "other", accountRevision: glab.accountRevision)
+        #expect(store.authorKinds[7] == .automation && projectedOrigin(in: store)?.badge == .ai)
+    }
+
+    @Test func explicitGenerationFooterReplacesUncertainDisplayWithoutCreatingActionEvidence() async throws {
+        let directory = FileManager.default.temporaryDirectory.appending(path: UUID().uuidString)
+        defer { try? FileManager.default.removeItem(at: directory) }
+        let notes = try threads("# Test quality report\n\nTests passed.\n\n*Generated by SoftNet AI Test Review powered by Claude*")
+        let source = try #require(notes.first?.notes.first)
+        try save(assessment(note: source, classification: "uncertain", confidence: "uncertain"), in: directory)
+        let store = MRDiscussionStore(load: { _ in notes }, assessmentDirectory: directory)
+        await store.refresh(target: target, glab: glab())
+        #expect(store.origins[3]?.badge == .ai)
+        #expect(!AICommentAssessmentStore.isAI(source, host: target.host, projectID: 1, iid: 2, in: directory))
+        try AICommentOriginOverrideStore.save(.init(version: 1, host: target.host, username: target.username,
+            projectID: 1, iid: 2, noteID: 3, authorID: source.author!.id,
+            bodySHA256: AICommentAssessmentStore.digest(source.body!), classification: .human,
+            createdAt: .distantPast, activatesAt: .distantPast), in: directory)
+        await store.reloadOrigins(glab: glab())
+        #expect(store.origins[3] == .manual(.human))
+    }
+
+    @Test(arguments: [
+        "> *Generated by SoftNet AI Test Review powered by Claude*",
+        "```markdown\n*Generated by SoftNet AI Test Review powered by Claude*\n```",
+        "~~~markdown\n*Generated by SoftNet AI Test Review powered by Claude*\n~~~",
+        "    Generated by SoftNet AI Test Review powered by Claude",
+        "The footer says: Generated by SoftNet AI Test Review powered by Claude",
+        "Generated by SoftNet AI Test Review powered by Claude\n\nThis is a quoted example, not this review.",
+        "Generated by the test runner",
+        "*Generated by SoftNet AI Test Review powered by Claude*\n<!-- example -->",
+        "<!--\nGenerated by SoftNet AI Test Review powered by Claude\n-->"
+    ])
+    func quotationsExamplesAndUnrelatedAutomationDoNotDeclareAIOrigin(_ body: String) async throws {
+        let notes = try threads(body)
+        let store = MRDiscussionStore(load: { _ in notes }, assessmentDirectory: URL(fileURLWithPath: "/nonexistent"))
+        await store.refresh(target: target, glab: glab())
+        #expect(store.origins[3] == nil)
+    }
+
+    @Test func authenticatedProfileSuppliesDraftIdentityWithoutAnOwnPublishedNote() async throws {
+        let gitlab = InMemoryGitLab(); defer { gitlab.close() }
+        let glab = gitlab.service(host: target.host, username: target.username)
+        let notes = try threads()
+        gitlab.handler = { call in
+            if call.endpoint == "/user" {
+                return InMemoryGitLab.output(#"{"id":9,"username":"me","name":"My Display Name","avatar_url":"https://gitlab.example.test/me.png"}"#)
+            }
+            if call.endpoint.contains("/discussions?") {
+                return InMemoryGitLab.output(String(decoding: try JSONEncoder().encode(notes), as: UTF8.self))
+            }
+            return try gitlab.unexpected(call)
+        }
+        let store = MRDiscussionStore(verifyAuthorKind: { _, _ in .regular },
+            assessmentDirectory: URL(fileURLWithPath: "/nonexistent"))
+        defer { store.cancel() }
+        await store.refresh(target: target, glab: glab)
+        #expect(store.hasLoaded && !store.hasError)
+        #expect(store.currentUser?.displayName == "My Display Name")
+        #expect(store.currentUser?.handle == "@me")
+        #expect(store.currentUser?.avatarURL == URL(string: "https://gitlab.example.test/me.png"))
+        #expect(!store.discussions.flatMap(\.notes).contains { $0.author?.username == "me" })
+        #expect(gitlab.requests.filter { $0.endpoint == "/user" }.count == 1)
+
+        glab.currentUsername = "other"
+        await store.refresh(target: target, glab: glab)
+        #expect(store.currentUser == nil && store.discussions.isEmpty)
+    }
+
     @Test func persistedLocalIdentityIsVisibleBeforeABlockedProfileLookupAndSurvivesItsFailure() async throws {
         struct LookupFailure: Error {}
         let gate = InMemoryGitLab(); defer { gate.close() }
@@ -23,6 +217,7 @@ struct MRDiscussionStoreTests {
         try #require(store.hasLoaded && !store.isLoading)
         #expect(store.authorKinds[7] == .automation && reads == 1)
         #expect(store.discussions.first?.notes.first?.body == "Published comment" && store.origins.isEmpty)
+        #expect(projectedOrigin(in: store)?.badge == .ai)
         gate.write("release")
         await refreshing.value; await store.authorKindTask?.value
         #expect(store.authorKinds[7] == .automation && !store.hasError && reads == 1)
@@ -67,7 +262,7 @@ struct MRDiscussionStoreTests {
         _ = try await glab.feedbackAccountKind(userID: 7, host: target.host)
         #expect(store.authorKinds[7] == .automation)
         #expect(sourceReads == 1 && store.discussions.flatMap(\.notes).map(\.body) == original)
-        #expect(store.origins.isEmpty)
+        #expect(store.origins.isEmpty && projectedOrigin(in: store)?.badge == .ai)
     }
 
     @Test func authorMetadataIsBoundedAndReusedWithoutOriginReloadLookups() async throws {
@@ -89,6 +284,9 @@ struct MRDiscussionStoreTests {
         await store.reloadOrigins(glab: glab)
         #expect(reads.count == 64)
         #expect(store.origins.isEmpty)
+        let projection = MRDiscussionSnapshot(discussions: store.discussions, drafts: [], origins: store.origins, authorKinds: store.authorKinds)
+        #expect(projection.threads.first?.origins.count == 64)
+        #expect(projection.threads.first?.origins.values.allSatisfy { $0.badge == .ai } == true)
     }
 
     @Test func failedAuthorMetadataDoesNotFailReadableDiscussionsOrInventABot() async throws {
@@ -112,7 +310,7 @@ struct MRDiscussionStoreTests {
         }, assessmentDirectory: URL(fileURLWithPath: "/nonexistent"))
         await store.refresh(target: target, glab: glab)
         await store.authorKindTask?.value
-        #expect(store.authorKinds.isEmpty && store.discussions.isEmpty && !store.hasLoaded)
+        #expect(store.authorKinds.isEmpty && store.discussions.isEmpty && store.origins.isEmpty && !store.hasLoaded)
     }
 
     @Test func freshDisplayAssessmentCanReplaceAStaleActionSlotUsingOnlyCachedConversationMetadata() async throws {
@@ -221,6 +419,11 @@ struct MRDiscussionStoreTests {
         let store = MRDiscussionStore(load: { _ in notes }, assessmentDirectory: current, legacyAssessmentDirectory: legacy)
         await store.refresh(target: target, glab: glab())
         #expect(store.origins[3] == (invalid ? nil : .humanLikely(evidence: replacement.evidence)))
+    }
+
+    private func projectedOrigin(in store: MRDiscussionStore, noteID: Int = 3) -> MRDiscussionSnapshot.Origin? {
+        MRDiscussionSnapshot(discussions: store.discussions, drafts: [], origins: store.origins,
+            authorKinds: store.authorKinds).threads.lazy.compactMap { $0.origins[noteID] }.first
     }
 
     private final class Flag { var value = false }

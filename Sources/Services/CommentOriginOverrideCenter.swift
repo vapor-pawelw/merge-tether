@@ -13,7 +13,7 @@ final class CommentOriginOverrideCenter {
     typealias Resume = @MainActor (MRAutomationScope.Target) async -> Void
     typealias Sleep = @Sendable (Duration) async throws -> Void
 
-    enum ChangeError: Error, Equatable { case invalidTarget, unknownComment, storage }
+    enum ChangeError: Error, Equatable { case invalidTarget, unknownComment, automatedAuthor, storage }
 
     struct Change: Identifiable, Equatable {
         let id: UUID

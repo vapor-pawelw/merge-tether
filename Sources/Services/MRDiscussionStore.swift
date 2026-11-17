@@ -32,6 +32,7 @@ final class MRDiscussionStore {
     private let displayAssessmentDirectory: URL?
     private let provenanceDirectory: URL
     private var authenticatedUserID: Int?
+    private(set) var currentUser: PersonIdentity?
     private var loadedRevision: UInt64?
     private var generation = 0
     private(set) var target: MRDiscussionTarget?
@@ -72,12 +73,14 @@ final class MRDiscussionStore {
         do {
             let result: [GitLabMergeRequestDiscussion]
             let authenticatedUserID: Int?
-            if let load { result = try await load(requested); authenticatedUserID = nil }
+            let currentUser: PersonIdentity?
+            if let load { result = try await load(requested); authenticatedUserID = nil; currentUser = nil }
             else {
-                let user: GitLabAuthenticatedUser = try await glab.mergeRequestAPI("/user", host: requested.host)
-                guard user.id > 0, !user.username.isEmpty else { throw GlabError.notAuthenticated }
-                guard user.username == requested.username else { throw IdentityError.accountChanged }
+                let user: GitLabWorkflowUser = try await glab.mergeRequestAPI("/user", host: requested.host)
+                guard user.id > 0, let username = user.username, !username.isEmpty else { throw GlabError.notAuthenticated }
+                guard username == requested.username else { throw IdentityError.accountChanged }
                 authenticatedUserID = user.id
+                currentUser = user.person
                 guard isCurrent(current, target: requested, glab: glab, revision: revision) else { return }
                 result = try await glab.fetchMergeRequestDiscussions(projectID: requested.projectID,
                     iid: requested.iid, host: requested.host)
@@ -114,6 +117,7 @@ final class MRDiscussionStore {
                 if effective != .unknown || kinds[id] != nil { kinds[id] = effective }
             }
             self.authenticatedUserID = authenticatedUserID
+            self.currentUser = currentUser
             loadedRevision = revision
             discussions = result
             origins = assessed
@@ -129,6 +133,7 @@ final class MRDiscussionStore {
             // discard it only after the server actually identifies another user.
             if error is IdentityError {
                 self.authenticatedUserID = nil
+                currentUser = nil
                 loadedRevision = nil
                 discussions = []
                 origins = [:]
@@ -180,6 +185,10 @@ final class MRDiscussionStore {
                         continue
                     }
                     if let id = note.id { contexts.removeNote(id) }
+                    if let declared = AICommentOriginAssessor.declaredAttribution(for: note) {
+                        origins[declared.noteID] = .assessed(evidence: declared.evidence)
+                        continue
+                    }
                     if let id = note.id, id > 0, let record = AICommentAssessmentStore.displayResult(for: note,
                         host: target.host, projectID: target.projectID, iid: target.iid,
                         username: target.username, in: directory, legacyDirectory: legacyDirectory, displayDirectory: displayDirectory),
@@ -258,6 +267,7 @@ final class MRDiscussionStore {
         cancel()
         target = nil
         authenticatedUserID = nil
+        currentUser = nil
         loadedRevision = nil
         discussions = []
         origins = [:]

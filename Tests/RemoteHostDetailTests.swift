@@ -35,6 +35,118 @@ import MergeTetherRemote
         #expect(f.transport.messages.compactMap(\.detailOrigins).count == (supported ? 1 : 0))
     }
 
+    @Test(arguments: [RemoteDetailNote.Origin.human, .uncertain])
+    func markingAndUnmarkingABotUpdatesPhoneMachineBadgesWithoutReplacingTextEvidence(_ underlying: RemoteDetailNote.Origin) async throws {
+        let f = try Fixture(); defer { f.clean() }
+        f.detailNotes = [.init(id: "1", body: "Pipeline completed successfully", origin: underlying,
+            authorID: 7, authorKind: .regular)]
+        let previous = try #require(f.gitlab.handler)
+        f.gitlab.handler = { call in
+            if call.endpoint == "/users/7" { return InMemoryGitLab.output(#"{"id":7,"bot":false}"#) }
+            return try await previous(call)
+        }
+        _ = try await f.monitor.glab.feedbackAccountKind(userID: 7, host: "gitlab.example.test")
+        let board = try await f.board(originUpdates: true)
+        let phone = RemoteDetailState()
+        let request = try #require(phone.begin(card: board.cards[0], board: board))
+        await f.transport.onMessage?(.init(type: .detailRequest, detailRequest: request))
+        await f.host.detailTask?.value
+        let response = try #require(f.transport.messages.last(where: { $0.detailResponse?.request == request })?.detailResponse)
+        phone.receive(response, board: board)
+        let reads = f.gitlab.requests.count
+        let marked = f.monitor.settings.markAutomationAuthor(.init(host: "gitlab.example.test", entityID: 7, label: "@automation"),
+            host: "gitlab.example.test", user: .init(id: 3, username: "me"))
+        #expect(marked)
+        f.monitor.synchronizeLocalAutomationAuthors()
+        try await waitForOrigins(1, f)
+        let markedUpdate = try #require(f.transport.messages.last?.detailOrigins)
+        #expect(markedUpdate.changes.isEmpty)
+        #expect(phone.receiveOrigins(markedUpdate, board: board))
+        let markedNote = try #require(phone.response?.details?.threads?.first?.notes.first)
+        #expect(markedNote.origin == underlying && markedNote.displayOrigin == .ai)
+        #expect(phone.response?.details?.threads?.first?.origin == .ai)
+        let declaration = try #require(f.monitor.settings.reviewParticipationPreferences.localAutomationAuthors.first)
+        let removed = f.monitor.settings.unmarkAutomationAuthor(declaration.id, host: "gitlab.example.test", username: "me")
+        #expect(removed)
+        f.monitor.synchronizeLocalAutomationAuthors()
+        try await waitForOrigins(2, f)
+        let removedUpdate = try #require(f.transport.messages.last?.detailOrigins)
+        #expect(removedUpdate.changes.isEmpty)
+        #expect(phone.receiveOrigins(removedUpdate, board: board))
+        let restoredNote = try #require(phone.response?.details?.threads?.first?.notes.first)
+        #expect(restoredNote.origin == underlying && restoredNote.displayOrigin == underlying)
+        #expect(phone.response?.details?.threads?.first?.origin == underlying)
+        #expect(f.readerCount == 1 && f.gitlab.requests.count == reads)
+    }
+
+    @Test(arguments: ["server", "local"], ["ai", "human", "uncertain", "automatic"])
+    func knownBotAuthorsRejectManualOriginChangesWithoutWritingOverrides(_ identity: String, _ choice: String) async throws {
+        let f = try Fixture(); defer { f.clean() }
+        let noteID = 78_430 + (identity == "server" ? 0 : 10) + ["ai", "human", "uncertain", "automatic"].firstIndex(of: choice)!
+        let source = GitLabMergeRequestDiscussion.Note(id: noteID,
+            author: .init(id: 7, username: "automation", name: "Automation"), system: false,
+            resolvable: true, resolved: false, resolvedBy: nil, body: "Pipeline completed successfully")
+        let discussions = [GitLabMergeRequestDiscussion(id: "thread", notes: [source])]
+        let target = MRAutomationScope.Target(host: "gitlab.example.test", username: "me", projectID: 1, iid: 2)
+        let key = AICommentOriginOverrideStore.Key(host: target.host, projectID: target.projectID, iid: 2, noteID: noteID)
+        let directory = f.monitor.commentOrigins.directory
+        defer { try? AICommentOriginOverrideStore.remove(key, in: directory) }
+        let previous = try #require(f.gitlab.handler)
+        f.gitlab.handler = { call in
+            if call.endpoint == "/users/7" {
+                return InMemoryGitLab.output(identity == "server" ? #"{"id":7,"bot":true}"# : #"{"id":7,"bot":false}"#)
+            }
+            return try await previous(call)
+        }
+        if identity == "local" {
+            let marked = f.monitor.settings.markAutomationAuthor(.init(host: target.host, entityID: 7, label: "@automation"),
+                host: target.host, user: .init(id: 3, username: "me"))
+            #expect(marked)
+        }
+        let classification = choice == "automatic" ? nil : AICommentOriginOverride.Classification(rawValue: choice)
+        await #expect(throws: (any Error).self) {
+            try await f.monitor.setCommentOrigin(classification, notes: [source], in: discussions, for: target)
+        }
+        #expect(AICommentOriginOverrideStore.stored(key, in: directory) == nil)
+        #expect(f.monitor.commentOrigins.revision == 0 && f.monitor.commentOrigins.pending.isEmpty)
+        #expect(f.gitlab.requests.allSatisfy { $0.method == "GET" })
+    }
+
+    @Test(arguments: ["regular", "unknown", "accountRoundtrip"])
+    func originChangesRemainAvailableForNonbotsButCannotSurviveAnAccountRoundtrip(_ identity: String) async throws {
+        let f = try Fixture(); defer { f.clean() }
+        let noteID = 78_460 + ["regular", "unknown", "accountRoundtrip"].firstIndex(of: identity)!
+        let source = GitLabMergeRequestDiscussion.Note(id: noteID,
+            author: .init(id: 7, username: "reviewer", name: "Reviewer"), system: false,
+            resolvable: true, resolved: false, resolvedBy: nil, body: "Please cover the retry case")
+        let discussions = [GitLabMergeRequestDiscussion(id: "thread", notes: [source])]
+        let target = MRAutomationScope.Target(host: "gitlab.example.test", username: "me", projectID: 1, iid: 2)
+        let key = AICommentOriginOverrideStore.Key(host: target.host, projectID: target.projectID, iid: 2, noteID: noteID)
+        let directory = f.monitor.commentOrigins.directory
+        defer { try? AICommentOriginOverrideStore.remove(key, in: directory) }
+        let previous = try #require(f.gitlab.handler)
+        f.gitlab.handler = { call in
+            if call.endpoint == "/users/7" {
+                if identity == "accountRoundtrip" {
+                    f.monitor.glab.currentUsername = "other"; f.monitor.glab.currentUsername = "me"
+                }
+                return InMemoryGitLab.output(identity == "unknown" ? #"{"id":7}"# : #"{"id":7,"bot":false}"#)
+            }
+            return try await previous(call)
+        }
+        if identity == "accountRoundtrip" {
+            await #expect(throws: (any Error).self) {
+                try await f.monitor.setCommentOrigin(.human, notes: [source], in: discussions, for: target)
+            }
+            #expect(AICommentOriginOverrideStore.stored(key, in: directory) == nil)
+            #expect(f.monitor.commentOrigins.revision == 0)
+        } else {
+            try await f.monitor.setCommentOrigin(.human, notes: [source], in: discussions, for: target)
+            #expect(AICommentOriginOverrideStore.stored(key, in: directory)?.classification == .human)
+        }
+        #expect(f.gitlab.requests.allSatisfy { $0.method == "GET" })
+    }
+
     private func origins(_ f: Fixture, revision: UInt64 = 1,
                          classification: AICommentOriginAssessment.Classification = .aiAssisted) -> AICommentDisplayCoordinator.PersistedOrigins {
         .init(target: .init(host: "gitlab.example.test", username: "me", projectID: 1, iid: 2), request: f.source,

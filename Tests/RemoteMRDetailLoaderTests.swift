@@ -4,6 +4,24 @@ import MergeTetherRemote
 @testable import GitLabTodos
 
 @MainActor @Suite struct RemoteMRDetailLoaderTests {
+    @Test(arguments: ["informational", "newRequest", "partial", "draft", "otherAccount", "stale"])
+    func phoneReplyStatusReflectsVerifiedCoverageRatherThanTheLastSpeaker(_ scenario: String) throws {
+        let notes = [RemoteDetailNote(id: "11", username: "reviewer", body: "Fix retry", authorID: 7),
+            RemoteDetailNote(id: "12", username: "owner", body: "Fixed retry; the new retry would duplicate work", authorID: 3),
+            RemoteDetailNote(id: "13", username: "reviewer", body: scenario == "newRequest" ? "Fix timeout too" : "Super", authorID: 7)]
+        var details = RemoteMRDetails(checkedAt: .now, threads: [.init(id: "thread", state: .general, notes: notes,
+            reply: .earlier, draftCount: scenario == "draft" ? 1 : 0)])
+        let assessment = ReReviewAssessment(notes: [
+            .init(noteID: 11, state: .rejected, reason: "Supported rejection", publishedReplyNoteID: scenario == "partial" ? nil : 12),
+            .init(noteID: 13, state: scenario == "newRequest" ? .addressed : .informational, reason: "Current concern assessed")])
+        RemoteMRDetailSupplement.applyFeedback(to: &details, assessment: scenario == "stale" ? nil : assessment,
+            authorID: 3, currentUsername: scenario == "otherAccount" ? "someoneElse" : "owner")
+        let thread = try #require(details.threads?.first)
+        #expect(thread.showsPublishedReply == (scenario == "informational"))
+        #expect(thread.feedback == (scenario == "stale" ? .needsVerification : .addressed))
+        #expect(thread.draftCount == (scenario == "draft" ? 1 : 0))
+    }
+
     @Test func phoneAuthorIdentityRoundTripsSeparatelyFromTextOrigin() throws {
         let request = try JSONDecoder().decode(GitLabMergeRequest.self, from: Data(raw.utf8))
         let discussions = try JSONDecoder().decode([GitLabMergeRequestDiscussion].self,
@@ -19,6 +37,38 @@ import MergeTetherRemote
         #expect(decoded.authorKind == .automation && decoded.origin == .human)
         let legacy = try JSONDecoder().decode(RemoteDetailNote.self, from: Data(#"{"id":"1","body":"Earlier client","origin":"ai"}"#.utf8))
         #expect(legacy.authorKind == nil && legacy.origin == .ai)
+    }
+
+    @Test(arguments: ["unknown", "uncertain", "human", "manualHuman"])
+    func botMachineDisplayPreservesTheUnderlyingTextOriginAndPublicationPermission(_ classification: String) throws {
+        let request = try JSONDecoder().decode(GitLabMergeRequest.self, from: Data(raw.utf8))
+        let discussions = try JSONDecoder().decode([GitLabMergeRequestDiscussion].self,
+            from: Data(#"[{"id":"thread","notes":[{"id":2,"author":{"id":8,"username":"automation"},"system":false,"body":"Pipeline completed successfully"}]}]"#.utf8))
+        let origins: [Int: MRDiscussionSnapshot.Origin]
+        switch classification {
+        case "uncertain": origins = [2: .uncertain(evidence: "No text authorship evidence")]
+        case "human": origins = [2: .humanLikely(evidence: "Conversational text assessment")]
+        case "manualHuman": origins = [2: .manual(.human)]
+        default: origins = [:]
+        }
+        let details = RemoteMRDetailLoader.project(request: request, progress: nil, rules: nil, reviewers: nil,
+            discussions: discussions, origins: origins, drafts: [], username: "owner", authorKinds: [8: .automation])
+        let note = try #require(details.threads?.first?.notes.first)
+        let rawOrigin: RemoteDetailNote.Origin? = classification == "unknown" ? nil
+            : classification == "uncertain" ? .uncertain : .human
+        #expect(note.origin == rawOrigin)
+        #expect(note.authorKind == .automation)
+        #expect(note.displayOrigin == .ai)
+        #expect(details.threads?.first?.origin == .ai)
+        let roundTrip = try JSONDecoder().decode(RemoteDetailNote.self, from: JSONEncoder().encode(note))
+        #expect(roundTrip.origin == rawOrigin && roundTrip.displayOrigin == note.displayOrigin)
+        let draft = GitLabDraftNote(id: 11, authorID: 3, note: "Checked", discussionID: "thread", position: nil)
+        let policy = AutomaticPublicationPolicy(mode: .aiReplies, restrictions: .init(allowBotReplies: false))
+        #expect(!policy.allows(draft, request: request, discussions: discussions, userID: 3,
+            host: "gitlab.example.test", aiNoteIDs: [], botNoteIDs: [2]))
+        let comment = try #require(discussions.first?.notes.first)
+        #expect(!AICommentAssessmentStore.isAI(comment, host: "gitlab.example.test", projectID: 1, iid: 2,
+            in: FileManager.default.temporaryDirectory.appending(path: UUID().uuidString)))
     }
 
     @Test func automationStatusMirrorsTheMacPanelForOpenMRsOnly() throws {
@@ -71,13 +121,15 @@ import MergeTetherRemote
 
     @Test func currentFeedbackProjectionKeepsAssessmentSeparateFromRepliesAndResolution() throws {
         let note = RemoteDetailNote(id: "11", author: "Reviewer", body: "Concern", origin: .human, authorID: 7)
-        let reply = RemoteDetailNote(id: "12", author: "Owner", body: "Done", origin: .ai, authorID: 3)
+        let reply = RemoteDetailNote(id: "12", author: "Owner", username: "owner", body: "Done", origin: .ai, authorID: 3)
         var details = RemoteMRDetails(checkedAt: .now, threads: [.init(id: "thread", state: .resolved,
             notes: [note, reply], reply: .published, draftCount: 1)])
-        RemoteMRDetailSupplement.applyFeedback(to: &details, assessment: nil, authorID: 3)
+        RemoteMRDetailSupplement.applyFeedback(to: &details, assessment: nil, authorID: 3, currentUsername: "owner")
         #expect(details.threads?.first?.feedback == .needsVerification)
-        let assessment = ReReviewAssessment(notes: [.init(noteID: 11, state: .addressed, reason: "Verified current source")])
-        RemoteMRDetailSupplement.applyFeedback(to: &details, assessment: assessment, authorID: 3)
+        #expect(details.threads?.first?.reply == .unknown)
+        let assessment = ReReviewAssessment(notes: [.init(noteID: 11, state: .addressed, reason: "Verified current source",
+            publishedReplyNoteID: 12)])
+        RemoteMRDetailSupplement.applyFeedback(to: &details, assessment: assessment, authorID: 3, currentUsername: "owner")
         #expect(details.threads?.first?.feedback == .addressed)
         #expect(details.threads?.first?.reply == .published && details.threads?.first?.draftCount == 1)
         #expect(details.threads?.first?.origin == nil)
@@ -118,7 +170,8 @@ import MergeTetherRemote
         #expect(replyAuthor.status == .commented)
         #expect(details.approvals?.rules?.map(\.name) == ["Security", "Owners"])
         #expect(details.threads?.map(\.state) == [.open, .resolved, .general])
-        #expect(details.threads?.first?.reply == .published)
+        #expect(details.threads?.first?.reply == .unknown)
+        #expect(details.threads?.first?.showsPublishedReply == false)
         #expect(details.threads?.first?.notes.map(\.body) == ["Open concern", "Published reply"])
         #expect(f.requests.allSatisfy { $0.method == "GET" })
     }

@@ -194,7 +194,7 @@
         "en": {
           "stringUnit": {
             "state": "translated",
-            "value": "AI means recorded app-generated content, a verified assistant or a high-confidence AI-assisted assessment. AI uncertain means an explicitly uncertain assessment. Human means likely manual writing with high confidence, not proven authorship. A thread badge summarizes all published posts; system events and private drafts are excluded. Mixed AI/Human threads or missing current assessments have no thread badge. Badges do not grant publication permission."
+            "value": "AI means recorded app-generated content, a verified assistant or a high-confidence AI-assisted assessment. AI uncertain means an explicitly uncertain assessment. Human means likely manual writing with high confidence, not proven authorship. A thread badge summarizes all published posts; system events and private drafts are excluded. Mixed AI/Human threads or missing current assessments have no thread badge. Badges do not grant publication permission. Bot identifies comments from a known bot or automation account, without deciding whether scripts or AI produced them. Bot classification is fixed by GitLab metadata or your local bot list and cannot be changed in the origin menu."
           }
         }
       }
@@ -293,7 +293,7 @@
         "en": {
           "stringUnit": {
             "state": "translated",
-            "value": "Every published post and reply has recorded app-generation evidence, a verified assistant identity or a current high-confidence AI-assisted assessment. System events and private drafts are excluded. This does not approve the thread or change publication permissions."
+            "value": "Every published post and reply comes from a known bot account or has recorded app-generation evidence, a verified assistant identity or a current high-confidence AI-assisted assessment. System events and private drafts are excluded. This does not approve the thread or change publication permissions."
           }
         }
       }
@@ -415,7 +415,7 @@
         "en": {
           "stringUnit": {
             "state": "translated",
-            "value": "The current account has a published reply in this thread, with no newer comment following it. This does not mean the thread is addressed or resolved."
+            "value": "Verification confirms that your published reply answers all concerns requiring a reply. Later informational acknowledgements can follow it without changing this status. A pending draft takes priority and is shown instead."
           }
         }
       }
@@ -847,6 +847,28 @@
           "stringUnit": {
             "state": "translated",
             "value": "MergeTether's explanation for you. It stays in the app and is never posted to GitLab."
+          }
+        }
+      }
+    },
+    "mrDiscussions.botOriginHelp": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Known bot or automation account, confirmed by GitLab metadata or your local bot list. Its comments are classified as Bot without distinguishing scripts from AI. This classification follows the account and cannot be changed here. Automatic bot replies require their separate publication permission."
+          }
+        }
+      }
+    },
+    "mrDiscussions.feedbackAddressedHelp": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "All requested concerns have been handled through verified corrections in the current remote merge-request code or metadata, substantive answers, or justified decisions not to implement a suggestion. Required published replies and GitLab thread resolution are shown separately."
           }
         }
       }

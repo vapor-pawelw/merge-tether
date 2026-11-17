@@ -189,7 +189,7 @@ struct AuthorFeedbackPolicy {
             let waiting = purelyInformational ? [] : participants.filter { participant in
                 blockers[participant.id] != nil || accountKinds[participant.id] != .automation
                     && !approvedReviewerIDs.contains(participant.id) && !thread.filter {
-                    $0.author?.id == participant.id && ($0.id == rootID || verdicts[$0.id ?? 0]?.state == .addressed)
+                    $0.author?.id == participant.id && ($0.id == rootID || verdicts[$0.id ?? 0].map { [.addressed, .rejected].contains($0.state) } == true)
                 }.allSatisfy(accepted)
             }
             let remaining = thread.compactMap { verdicts[$0.id ?? 0] }.filter(isBlocking)
@@ -258,7 +258,7 @@ struct AuthorFeedbackPolicy {
             guard accountKinds[reviewer] != .automation, !notes.contains(where: {
                 verdicts[$0.id ?? 0].map(isBlocking) == true
             }) else { return nil }
-            let actionable = notes.filter { verdicts[$0.id ?? 0]?.state == .addressed }
+            let actionable = notes.filter { verdicts[$0.id ?? 0].map { [.addressed, .rejected].contains($0.state) } == true }
             guard !actionable.isEmpty else { return nil }
             if approvedReviewerIDs.contains(reviewer) { return reviewer }
             return actionable.allSatisfy { concern in

@@ -238,7 +238,7 @@ final class TodoAutomationService {
                           && verifiedResidual.notes.contains(where: {
                               $0.noteID == question.sourceNoteID && ($0.ignoredDecisionIDs ?? []).isEmpty
                                   && (question.kind == .potentialDefect
-                                      ? [.addressed, .blocking, .uncertain].contains($0.state) : $0.state == .uncertain)
+                                      ? [.addressed, .rejected, .blocking, .uncertain].contains($0.state) : $0.state == .uncertain)
                           })
                   }) else { return .notAdmitted(.contextChanged) }
         }

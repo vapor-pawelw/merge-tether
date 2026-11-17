@@ -896,7 +896,8 @@ private struct CommandCenterMRDetailContent: View {
             selectionDisabled: discussionTarget == nil || monitor.attention.confirmationStates[item.id]?.isBusy == true,
             onDelete: { draft in Task { await monitor.attention.deleteDraft(draft, from: item.id) } },
             title: .DraftPublication.draftPublicationThreads, draftsFirst: true, onSetOrigin: originAction,
-            extraContexts: current ? discussionStore.extraContexts : .empty, onRefresh: refreshDiscussions)
+            extraContexts: current ? discussionStore.extraContexts : .empty,
+            currentUserIdentity: current ? discussionStore.currentUser : nil, onRefresh: refreshDiscussions)
     }
 
     private var originTarget: MRAutomationScope.Target? {
@@ -925,7 +926,7 @@ private struct CommandCenterMRDetailContent: View {
             currentUsername: monitor.glab.currentUsername, isLoading: current && discussionStore.isLoading,
             hasError: current && discussionStore.hasError, hasLoaded: current && discussionStore.hasLoaded,
             onSetOrigin: originAction, extraContexts: current ? discussionStore.extraContexts : .empty,
-            onRefresh: refreshDiscussions)
+            currentUserIdentity: current ? discussionStore.currentUser : nil, onRefresh: refreshDiscussions)
         }
     }
 

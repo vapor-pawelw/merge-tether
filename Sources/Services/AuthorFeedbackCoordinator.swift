@@ -688,7 +688,7 @@ final class AuthorFeedbackCoordinator {
                 phase: drafts.isEmpty ? .complete : .waitingPublication, pendingDraftCount: drafts.count,
                 followUpNoteIDs: followUp,
                 replyNoteIDs: Set(repliesByThread.keys),
-                addressedNoteIDs: Set(assessment.notes.filter { $0.state == .addressed || $0.state == .informational }.map(\.noteID)).subtracting(owedNotes),
+                addressedNoteIDs: Set(assessment.notes.filter { $0.state == .addressed || $0.state == .rejected || $0.state == .informational }.map(\.noteID)).subtracting(owedNotes),
                 completedFollowUpJobID: input.completedFollowUpJobID)
             completed.feedbackDecisionRevision = input.decisionRevision
             completed.reviewParticipationRevision = input.reviewParticipationRevision
@@ -805,7 +805,7 @@ final class AuthorFeedbackCoordinator {
             semanticContextFingerprint: request.semanticContextFingerprint, phase: .complete,
             findings: findings, codeReviewRequests: assessment.reviewRequests,
             acceptedReviewerIDs: accepted, followUpNoteIDs: followUp, replyNoteIDs: missingReplies,
-            addressedNoteIDs: Set(assessment.notes.filter { $0.state == .addressed || $0.state == .informational }.map(\.noteID))
+            addressedNoteIDs: Set(assessment.notes.filter { $0.state == .addressed || $0.state == .rejected || $0.state == .informational }.map(\.noteID))
                 .subtracting(owedNotes).subtracting(acknowledgementFailures.keys),
             completedFollowUpJobID: input.completedFollowUpJobID)
         completed.feedbackDecisionRevision = input.decisionRevision
@@ -840,7 +840,7 @@ final class AuthorFeedbackCoordinator {
                   selected.isDisjoint(with: missingReplies) else { continue }
             if !selected.isDisjoint(with: status.ignoredNoteIDs), candidate.execution?.state != .blocked { continue }
             if candidate.execution?.state == .blocked {
-                let addressed = Set(prepared.assessment.notes.filter { $0.state == .addressed || $0.state == .ignoredByUser }.map(\.noteID))
+                let addressed = Set(prepared.assessment.notes.filter { $0.state == .addressed || $0.state == .rejected || $0.state == .ignoredByUser }.map(\.noteID))
                     .union(prepared.assessment.pureReviewerOptOutNoteIDs(in: discussions, authorID: authorID))
                 guard prepared.assessment.completedBlockedRunIDs?.contains(candidate.id) == true,
                       let context = AuthorFeedbackStatus.blockedContext(for: candidate),

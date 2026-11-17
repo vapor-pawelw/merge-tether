@@ -4,6 +4,39 @@ import Testing
 
 @Suite("Re-review assessment")
 struct ReReviewAssessmentTests {
+    @Test(arguments: [false, true])
+    func rejectedFeedbackStillNeedsItsOwnReplyAndReviewerAcceptance(_ withReply: Bool) throws {
+        let decoded = try? JSONDecoder().decode(ReReviewAssessment.self, from: Data(#"{"notes":[{"noteID":10,"state":"rejected","reason":"Current remote source proves the suggested retry would duplicate a request."}]}"#.utf8))
+        #expect(decoded != nil, "Verified rejection is a distinct semantic outcome, not an implemented correction")
+        guard let assessment = decoded else { return }
+        let reply = withReply ? #",{"id":11,"author":{"id":3,"username":"me"},"system":false,"body":"The existing request key already prevents duplicates; the proposed retry would send twice."}"# : ""
+        let threads = try JSONDecoder().decode([GitLabMergeRequestDiscussion].self, from: Data(#"[{"id":"thread","notes":[{"id":10,"author":{"id":7,"username":"reviewer"},"system":false,"resolvable":true,"resolved":false,"body":"Retry the request once more"}\#(reply)]}]"#.utf8))
+        #expect(assessment.notes.first?.state.rawValue == "rejected")
+        #expect(assessment.missingPublishedReplyNoteIDs(in: threads, authorID: 3) == (withReply ? [] : [10]))
+        #expect(assessment.hasNoRemainingAuthorWork(in: threads, authorID: 3) == withReply)
+        let pending = AuthorFeedbackPolicy.evaluate(discussions: threads, assessment: assessment,
+            authorID: 3, approvedReviewerIDs: [])
+        #expect(pending.first?.state == (withReply ? .waitingAcceptance : .needsReply))
+        #expect(pending.first?.canResolve == false)
+        let approved = AuthorFeedbackPolicy.evaluate(discussions: threads, assessment: assessment,
+            authorID: 3, approvedReviewerIDs: [7])
+        #expect(approved.first?.state == (withReply ? .ready : .needsReply))
+    }
+
+    @Test func legacySemanticAssessmentsCannotBeReusedAsCurrentOrPriorPasses() throws {
+        let folder = FileManager.default.temporaryDirectory.appending(path: UUID().uuidString)
+        defer { try? FileManager.default.removeItem(at: folder) }
+        let target = MRAutomationScope.Target(host: "gitlab.example.test", username: "me", projectID: 1, iid: 2)
+        let record = AuthorFeedbackAssessmentStore.Record(version: 1, target: target, keyDigest: "legacy-semantics",
+            completedFollowUpJobID: nil, assessment: .init(notes: [.init(noteID: 10, state: .addressed,
+                reason: "Old semantics classified a justified rejection as addressed.")]),
+            noteRevisions: [10: "unchanged"], diffDigest: "same-remote-diff")
+        try AuthorFeedbackAssessmentStore.save(record, in: folder)
+        #expect(AuthorFeedbackAssessmentStore.load(target, keyDigest: record.keyDigest, in: folder) == nil)
+        #expect(AuthorFeedbackAssessmentStore.latest(target, in: folder) == nil)
+        #expect(FileManager.default.fileExists(atPath: AuthorFeedbackAssessmentStore.fileURL(target, in: folder).path))
+    }
+
     @Test func coveredSummaryValidationUsesTheSamePersonalNoReplyPreferenceAsReadiness() throws {
         let threads = try summaryDiscussions(withReply: false)
         let assessment = ReReviewAssessment(notes: [

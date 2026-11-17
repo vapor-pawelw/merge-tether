@@ -48,6 +48,7 @@ macOS GitLab inbox and MR automation. Read [README.md](README.md) for behavior,
 ## Changes and verification
 
 - Keep `SettingsManager` persistence explicit with `save()`; avoid writes during view evaluation.
+- New profile-managed permissions inherit missing defaults from the active preset on upgrade; preserve Custom and explicit values, update profile matching/snapshots, and test legacy settings across restart.
 - User-facing strings belong in feature `.xcstrings` catalogs with manual extraction
   and generated symbols. Do not introduce raw localization keys.
 - Test behavior and relevant failure/concurrency cases; verify build/tests before

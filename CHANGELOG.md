@@ -6,6 +6,13 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 
 ## Unreleased
 
+- Assess all feedback concerns together, distinguishing verified upstream corrections from justified rejections in the evidence. Show a pending draft or a reply verified to cover all required answers; informational acknowledgements do not make that reply stale.
+
+- Show a fixed **Bot** origin badge for known automation accounts on Mac and iPhone, preserving ordinary AI/Human assessment underneath and keeping bot publication permission separate. Prevent manual comment-origin edits for bots and tighten author-row spacing.
+
+- Add a separate permission for automatic replies to bot accounts, enabled by Trusted and Max, with fresh account checks before publication. New settings inherit the active profile on upgrade while customized and explicitly saved choices are preserved.
+- Recognize explicit AI generation footers before probabilistic classification, and show the signed-in user's display name on drafts plus reliable username hints on discussion authors.
+
 - Name Codex CLI or Claude CLI and show the matching agent or AI-check action icon during agent work, including feedback, reply and authorship assessments on Mac and iOS. Keep AI icons visible beside running-action spinners.
 
 - Stop offering to publish a reply draft that repeats a reply already in its thread, for example when the agent saved the same reply twice. Such a draft is never published automatically or by **Publish all**, starts unchecked in MR Details, and the card asks you to delete it instead. You can still select it deliberately.

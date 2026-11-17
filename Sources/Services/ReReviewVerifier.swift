@@ -5,9 +5,9 @@ import Foundation
 enum ReReviewVerifier {
     typealias ExecutableResolver = @MainActor (AutomationAssistant) async -> URL?
     enum VerificationError: Error, Equatable { case unavailable, failed, incompleteEvidence }
-    static let policyVersion = "review-participation-10"
+    static let policyVersion = "feedback-disposition-11"
 
-    static let schema = #"{"type":"object","additionalProperties":false,"properties":{"notes":{"type":"array","items":{"type":"object","additionalProperties":false,"properties":{"noteID":{"type":"integer"},"state":{"type":"string","enum":["addressed","informational","blocking","uncertain"]},"reason":{"type":"string"},"summary":{"type":"string","minLength":1,"maxLength":200},"acceptanceNoteID":{"type":["integer","null"]},"publishedReplyNoteID":{"type":["integer","null"]},"informationalAcknowledgementSafe":{"type":"boolean"},"informationalPurpose":{"type":"string","enum":["concreteCodeReviewFeedback","reviewSummary","automatedReviewReport","other"]}},"required":["noteID","state","reason","summary","acceptanceNoteID","publishedReplyNoteID","informationalAcknowledgementSafe","informationalPurpose"]}}},"required":["notes"]}"#
+    static let schema = #"{"type":"object","additionalProperties":false,"properties":{"notes":{"type":"array","items":{"type":"object","additionalProperties":false,"properties":{"noteID":{"type":"integer"},"state":{"type":"string","enum":["addressed","rejected","informational","blocking","uncertain"]},"reason":{"type":"string"},"summary":{"type":"string","minLength":1,"maxLength":200},"acceptanceNoteID":{"type":["integer","null"]},"publishedReplyNoteID":{"type":["integer","null"]},"informationalAcknowledgementSafe":{"type":"boolean"},"informationalPurpose":{"type":"string","enum":["concreteCodeReviewFeedback","reviewSummary","automatedReviewReport","other"]}},"required":["noteID","state","reason","summary","acceptanceNoteID","publishedReplyNoteID","informationalAcknowledgementSafe","informationalPurpose"]}}},"required":["notes"]}"#
 
     private static func outputSchema(noteIDs: [Int], blockedRunIDs: [UUID], decisionIDs: [UUID]) throws -> String {
         guard var document = try JSONSerialization.jsonObject(with: Data(schema.utf8)) as? [String: Any],
@@ -17,7 +17,7 @@ enum ReReviewVerifier {
               var fields = item["properties"] as? [String: Any] else { throw VerificationError.incompleteEvidence }
         let identity: [String: Any] = ["type": "integer", "enum": noteIDs]
         fields["noteID"] = identity
-        fields["state"] = ["type": "string", "enum": ["addressed", "informational", "blocking", "uncertain", "ignoredByUser"]]
+        fields["state"] = ["type": "string", "enum": ["addressed", "rejected", "informational", "blocking", "uncertain", "ignoredByUser"]]
         var decisionIdentity: [String: Any] = ["type": "string"]
         if !decisionIDs.isEmpty { decisionIdentity["enum"] = decisionIDs.map(\.uuidString) }
         fields["ignoredDecisionIDs"] = ["type": ["array", "null"], "items": decisionIdentity, "maxItems": decisionIDs.count]
@@ -295,7 +295,7 @@ enum ReReviewVerifier {
             informational thread; it never approves a reviewer or accepts their other findings.
             Other threads do not prevent acknowledging this independently pure informational one.
             Do not add reactions or resolve threads yourself. When unsure, return false.
-            Classify informationalPurpose independently of state, including addressed, informational,
+            Classify informationalPurpose independently of state, including addressed, rejected, informational,
             blocking and uncertain. Use the note's content, without inferring the
             posting account's identity or whether a human used AI to write it. Return
             concreteCodeReviewFeedback for specific, concrete feedback about code behavior, a finding,
@@ -321,23 +321,31 @@ enum ReReviewVerifier {
             and informationalAcknowledgementSafe false. It requires NO reply, private draft, reaction,
             code change or re-review invitation. An existing author acknowledgement never invites them back.
             In a mixed note retain every independent technical defect or before-merge obligation, with
-            blocking/uncertain/addressed as appropriate, while still excluding the participant from contact.
+            blocking/uncertain/addressed/rejected as appropriate, while still excluding the participant from contact.
             excludedReplyAuthorIDs are explicit LOCAL user no-contact preferences. They waive only automatic
             replies/invitations, never code correctness, tests, acceptance, or merge conditions. Do not create
             a reply-only task for these authors. A real technical issue remains actionable; report its result
             without a private/public reply to that participant. Do not invent acceptance or resolve a thread.
-            addressed: the current diff, title or description proves the requested correction in that
-            artifact, or a substantive reply explains
-            why the concern does not apply and is ready for the reviewer to reconsider. An author's
-            unsupported claim that something is fixed is not proof. A resolved thread can be addressed.
-            A supported explanation disputing a proposed remedy can be addressed without proving an undocumented business meaning.
-            Check the separately alleged defect and any remaining author obligation before reaching that verdict.
-            Rejecting a proposed remedy while admitting an unresolved defect is blocking, not addressed.
+            addressed: the requested correction is verified in the CURRENT REMOTE MR source at the exact
+            expected headSHA and live source_project_id. For requests about the title or description, verify
+            the correction in that current GitLab metadata instead. Questions requesting only an explanation,
+            without a code correction, can be addressed by a substantive supported answer.
+            Local changes, unpushed commits, private drafts and claims of completion do not prove a remote correction.
+            A resolved thread or a published reply does not establish that requested code changes reached GitLab.
+            Keep a verified remote correction addressed even when its reply is still a private draft or is absent;
+            reply publication and reviewer acceptance are separate obligations.
+            rejected: current evidence supports declining the requested change because it is invalid, unnecessary
+            or conflicts with the verified existing contract. State the concrete code/contract evidence and rationale.
+            This is a supported disposition of the suggestion, not an implemented correction, an informational note,
+            or an ignoredByUser decision. It can be rejected before its explanation is published; its own author
+            reply and reviewer acceptance still follow the ordinary rules. Do not invent undocumented business
+            meaning to reject a remedy. Check the separately alleged defect and every remaining author obligation.
+            Rejecting a proposed remedy while admitting an unresolved defect is blocking, not rejected or addressed.
             Distinguish work still owed by the author from evidence or acceptance requested from the reviewer.
             An external rollout, deployment or organizational signoff is not remaining author work solely because third-party confirmation is absent.
             Distinguish an explicit requirement before merge from a suggestion or a prerequisite before deployment.
-            If the current correction or supported explanation is verified and a published author reply addresses the concern,
-            classify it addressed when no explicit in-MR action remains. Reviewer acceptance can still be pending.
+            If the remote correction or an answer to an explanation-only question is verified,
+            classify it addressed when no explicit in-MR action remains. A supported rejection remains rejected. Reviewer acceptance can still be pending.
             Do not invent approval, erase a real defect, or waive an explicit before-merge condition.
             ignoredSuggestions records app-owned, explicit user decisions about PRECISE concerns, with their
             source comment and concern summary/reason. They never waive an entire note, thread or MR. Read the
@@ -347,7 +355,7 @@ enum ReReviewVerifier {
             note. A note with another unmet obligation remains blocking or uncertain, even if one assumption was
             declined. Use ignoredByUser ONLY when every actionable expectation in that note is precisely user-waived
             and none requires a corrective or explanatory reply. If a DIFFERENT nonwaived concern was fixed or
-            substantively explained, use addressed with the applicable ignoredDecisionIDs; its ordinary published
+            substantively explained, use addressed or rejected as appropriate with the applicable ignoredDecisionIDs; its ordinary published
             reply requirement still applies. If it remains unmet, use blocking or uncertain with those IDs.
             Any ignoredDecisionIDs prohibit treating that note as permission for automatic resolution, approval
             or courtesy acknowledgement. This is a user disposition, not an implemented fix or informational
@@ -389,11 +397,11 @@ enum ReReviewVerifier {
             report, set informationalPurpose to reviewSummary even if state is addressed.
             An actual actionable duplicate finding still requires its own thread reply. A summary
             with any distinct request or remaining condition gets null reviewSummaryCoverage and
-            follows its ordinary addressed, blocking or uncertain workflow. Never derive coverage
+            follows its ordinary addressed, rejected, blocking or uncertain workflow. Never derive coverage
             from an account name, resolution, approval or another summary's positive tone alone.
             Return null for legacy/uncertain coverage and for every non-summary note. Coverage
             neither proves reviewer acceptance nor grants publication, resolution or merge permission.
-            For each addressed note, set publishedReplyNoteID to the exact ID of a later, substantive,
+            For each addressed or rejected note, set publishedReplyNoteID to the exact ID of a later, substantive,
             published MR-author reply that answers ALL remaining expectations in that note. Read its
             full body and verify the correction or explanation against current evidence. The reply
             may be in another discussion as supporting evidence for the verified correction, including
@@ -407,8 +415,14 @@ enum ReReviewVerifier {
             Identify the matching concern and reply in reason. A link or claim of completion alone
             is insufficient. Never cite a private draft, system note, another person's comment,
             an unrelated answer or a promise of future work. Return null when no such reply is proven,
-            and for every state other than addressed. This proves an author response only, never
-            reviewer consent or permission to resolve a discussion. Existing same-thread replies
+            and for every state other than addressed or rejected. This proves an author response only, never
+            reviewer consent or permission to resolve a discussion. The UI uses publishedReplyNoteID to show
+            whether ALL current concerns are answered. Compare the current or edited source requests and the
+            COMPLETE reply against current remote code; a merely later post, an obsolete or partial answer,
+            or a promise of future work gets null. A source edit requires fresh semantic comparison, not a
+            blanket timestamp cutoff: an earlier reply can still cover the edited concern when freshly verified.
+            Later purely informational thanks or "super" do not invalidate valid reply coverage.
+            Existing same-thread replies
             remain separate evidence; missing cross-thread proof must not silently waive a reply.
             Read every discussion together with its author replies. Do not require a reply to an
             informational note. A remaining unrelated concern from another reviewer does not block a
@@ -428,8 +442,10 @@ enum ReReviewVerifier {
 
             blockedFollowUps contains at most one exact app-selected stopped feedback attempt. Its blocker and
             summary are claims to investigate, not proof. Return its runID in completedBlockedRunIDs only when
-            fresh live evidence proves ALL selected feedback is addressed or its only remaining obligation is
-            explicitly ignoredByUser through current precise decision evidence, every still-owed author reply is published,
+            fresh live evidence proves ALL selected feedback is either addressed by a verified remote correction or
+            supported answer to an explanation-only request, rejected with a justified rationale supported by current
+            evidence, or its only remaining obligation is explicitly ignoredByUser through current precise decision
+            evidence. Every still-owed author reply must be published,
             and the actual stopped step no longer prevents completing THIS assigned MR task. A later rollout
             or organizational prerequisite alone can remain outstanding without inventing its acceptance.
             A narrow alternative is an entirely fulfilled administrative self-opt-out: all selected notes
@@ -505,7 +521,7 @@ enum ReReviewVerifier {
               Set(completed).isSubset(of: Set(input.blockedFollowUps.map(\.runID))) else {
             throw VerificationError.incompleteEvidence
         }
-        let addressed = Set(assessment.notes.filter { $0.state == .addressed || $0.state == .ignoredByUser }.map(\.noteID))
+        let addressed = Set(assessment.notes.filter { $0.state == .addressed || $0.state == .rejected || $0.state == .ignoredByUser }.map(\.noteID))
             .union(assessment.pureReviewerOptOutNoteIDs(in: input.discussions, authorID: input.authorID))
             .subtracting(assessment.reviewRequests.map(\.sourceNoteID))
         let missingReplies = assessment.missingPublishedReplyNoteIDs(in: input.discussions, authorID: input.authorID,

@@ -24,7 +24,7 @@ import MergeTetherRemote
         let assessment = details.discussionFingerprint.flatMap {
             monitor.attention.authorFeedbackCoordinator?.assessment(for: request, fingerprint: $0)
         }
-        applyFeedback(to: &details, assessment: assessment, authorID: request.author.id)
+        applyFeedback(to: &details, assessment: assessment, authorID: request.author.id, currentUsername: username)
         if let change = monitor.commentOrigins.pending(for: target), let resumesAt = change.resumesAt {
             details.originResume = .init(changeID: change.id.uuidString, resumesAt: resumesAt, drafts: change.resumingDrafts)
         }
@@ -128,13 +128,27 @@ import MergeTetherRemote
         }
     }
 
-    static func applyFeedback(to details: inout RemoteMRDetails, assessment: ReReviewAssessment?, authorID: Int) {
+    static func applyFeedback(to details: inout RemoteMRDetails, assessment: ReReviewAssessment?, authorID: Int,
+                              currentUsername: String? = nil) {
+        func evidence(_ note: RemoteDetailNote) -> MRDiscussionSnapshot.ReplyEvidence {
+            .init(id: Int(note.id), authorID: note.authorID, username: note.username, body: note.body)
+        }
+        let allNotes = (details.threads ?? []).flatMap(\.notes).map(evidence)
         details.threads = details.threads.map { threads in
             threads.map { original in
                 var thread = original
                 let feedback = MRDiscussionSnapshot.Feedback.summarize(
                     notes: thread.notes.map { (Int($0.id), $0.authorID) }, assessment: assessment, authorID: authorID)
                 thread.feedback = .init(rawValue: feedback.rawValue) ?? .needsVerification
+                let authors = MRDiscussionSnapshot.replyAuthorsCoveringFeedback(notes: thread.notes.map(evidence),
+                    allNotes: allNotes, assessment: assessment, authorID: authorID)
+                if let currentUsername, !currentUsername.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
+                    thread.reply = authors.map { authors in
+                        authors.isEmpty ? .none : authors.allSatisfy { $0 == currentUsername } ? .published : .unknown
+                    } ?? .unknown
+                } else {
+                    thread.reply = .unavailable
+                }
                 return thread
             }
         }

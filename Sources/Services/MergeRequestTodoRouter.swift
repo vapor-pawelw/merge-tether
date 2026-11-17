@@ -600,7 +600,7 @@ final class MergeRequestTodoRouter {
         let assessed = Dictionary(uniqueKeysWithValues: assessment.notes.map { ($0.noteID, $0.state) })
         let selected = intent.noteIDs.isEmpty ? Set(assessed.keys) : intent.noteIDs
         guard !selected.isEmpty,
-              selected.allSatisfy({ assessed[$0] == .addressed || assessed[$0] == .informational || assessed[$0] == .ignoredByUser }) else { return .unverified }
+              selected.allSatisfy({ assessed[$0] == .addressed || assessed[$0] == .rejected || assessed[$0] == .informational || assessed[$0] == .ignoredByUser }) else { return .unverified }
         guard assessment.missingPublishedReplyNoteIDs(in: discussions, authorID: request.author.id,
             excludedReplyAuthorIDs: settings.reviewParticipationPreferences.excludedIDs(host: intent.target.host, username: intent.target.username)).isDisjoint(with: selected)
         else { return .unverified }

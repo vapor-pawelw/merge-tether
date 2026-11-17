@@ -80,7 +80,7 @@ import MergeTetherRemote
                     location: thread.location, notes: thread.notes.enumerated().map { index, note in
                         let origin: RemoteDetailNote.Origin? = note.id.flatMap { thread.origins[$0] }.map {
                             switch $0 {
-                            case .appGenerated, .verifiedAssistant, .assessed: .ai
+                            case .appGenerated, .verifiedAssistant, .botAccount, .assessed: .ai
                             case .uncertain: .uncertain
                             case .humanLikely: .human
                             case .manual(.ai): .ai

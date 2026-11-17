@@ -43,9 +43,7 @@ struct PersonLabel: View {
     /// Shown when GitLab returned neither a name nor a username.
     var fallback: Text? = nil
 
-    #if os(iOS)
     @State private var showsHandle = false
-    #endif
 
     var body: some View {
         if let name = person.displayName {
@@ -68,7 +66,11 @@ struct PersonLabel: View {
     @ViewBuilder private func labeled(_ name: String) -> some View {
         #if os(macOS)
         content(name)
-            .help(Text(verbatim: person.handle ?? name))
+            .contentShape(Rectangle())
+            .onHover { showsHandle = $0 && person.handle != nil }
+            .popover(isPresented: $showsHandle, arrowEdge: .bottom) {
+                if let handle = person.handle { handlePopover(name, handle: handle) }
+            }
             .accessibilityElement(children: .ignore)
             .accessibilityLabel(Text(verbatim: person.accessibilityName ?? name))
         #else
@@ -85,15 +87,7 @@ struct PersonLabel: View {
             .accessibilityLabel(Text(verbatim: person.accessibilityName ?? name))
             .accessibilityHint(Text(.Board.boardPersonUsernameHint))
             .popover(isPresented: $showsHandle) {
-                HStack(spacing: 10) {
-                    PersonAvatar(url: person.avatarURL, size: 36).accessibilityHidden(true)
-                    VStack(alignment: .leading, spacing: 2) {
-                        Text(verbatim: name).font(.headline)
-                        Text(verbatim: handle).font(.callout.monospaced()).foregroundStyle(.secondary)
-                            .textSelection(.enabled)
-                    }
-                }
-                .padding(14)
+                handlePopover(name, handle: handle)
                 .presentationCompactAdaptation(.popover)
             }
         } else {
@@ -102,6 +96,18 @@ struct PersonLabel: View {
                 .accessibilityLabel(Text(verbatim: name))
         }
         #endif
+    }
+
+    private func handlePopover(_ name: String, handle: String) -> some View {
+        HStack(spacing: 10) {
+            PersonAvatar(url: person.avatarURL, size: 36).accessibilityHidden(true)
+            VStack(alignment: .leading, spacing: 2) {
+                Text(verbatim: name).font(.headline)
+                Text(verbatim: handle).font(.callout.monospaced()).foregroundStyle(.secondary)
+                    .textSelection(.enabled)
+            }
+        }
+        .padding(14)
     }
 }
 

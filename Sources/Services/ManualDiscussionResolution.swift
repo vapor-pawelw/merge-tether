@@ -69,7 +69,7 @@ enum ManualDiscussionResolution {
                 guard let noteID = note.id, let verdict = verdicts[noteID],
                       !missingReplies.contains(noteID), (verdict.ignoredDecisionIDs ?? []).isEmpty,
                       !valid!.reviewRequests.contains(where: { $0.sourceNoteID == noteID }) else { return false }
-                return verdict.state == .addressed || verdict.state == .informational && verdict.informationalAcknowledgementSafe == true
+                return verdict.state == .addressed || verdict.state == .rejected || verdict.state == .informational && verdict.informationalAcknowledgementSafe == true
             }
             if ready { eligible.append(id) } else { held.append(id) }
         }

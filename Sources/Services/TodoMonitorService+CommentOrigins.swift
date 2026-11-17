@@ -18,6 +18,22 @@ extension TodoMonitorService {
                           notes: [GitLabMergeRequestDiscussion.Note], in discussions: [GitLabMergeRequestDiscussion],
                           for target: MRAutomationScope.Target) async throws -> CommentOriginOverrideCenter.Change {
         guard isCurrentAccount(target) else { throw CommentOriginOverrideCenter.ChangeError.invalidTarget }
+        let revision = glab.accountRevision
+        for authorID in Set(notes.compactMap { $0.author?.id }) where authorID > 0 {
+            if settings.reviewParticipationPreferences.isDeclaredAutomation(
+                host: target.host, username: target.username, userID: authorID) {
+                throw CommentOriginOverrideCenter.ChangeError.automatedAuthor
+            }
+            let kind = try await glab.feedbackAccountKind(userID: authorID, host: target.host)
+            guard isCurrentAccount(target), glab.accountRevision == revision else {
+                throw CommentOriginOverrideCenter.ChangeError.invalidTarget
+            }
+            guard kind != .automation,
+                  !settings.reviewParticipationPreferences.isDeclaredAutomation(
+                    host: target.host, username: target.username, userID: authorID) else {
+                throw CommentOriginOverrideCenter.ChangeError.automatedAuthor
+            }
+        }
         return try await commentOrigins.apply(classification, to: notes, in: discussions, target: target)
     }
 
