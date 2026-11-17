@@ -316,7 +316,10 @@ enum AssistantAutomationRunner {
         } else if settings.automation.hasAutomaticPublicActionConsent && settings.automation.publishDraftsWithoutConfirmation {
             publicationPolicy = "Publish comments without confirmation is ON. Save and re-fetch private drafts; MergeTether publishes eligible drafts automatically after its checks. Do not ask for routine publication approval or publish directly yourself."
         } else if settings.automation.hasAutomaticPublicActionConsent && settings.automation.publishAIRepliesWithoutConfirmation {
-            publicationPolicy = "AI-only reply publication is ON. Save and re-fetch warranted private reply drafts. MergeTether may publish eligible replies to feedback assessed as AI-assisted, including comments posted by a person. Account identity alone does not establish how a comment was written. For likely manual, unclassified or uncertain source comments, leave drafts private and ask for approval on the MR card and describe that pending decision in the run result. Do not publish directly yourself."
+            let botException = settings.automation.publicationRestrictions.allowBotReplies
+                ? " unless they come from a verified bot account: the separate bot-reply permission allows that source without an AI assessment"
+                : ""
+            publicationPolicy = "AI reply publication is ON. Save and re-fetch warranted private reply drafts. MergeTether may publish eligible replies to feedback assessed as AI-assisted, including comments posted by a person. Account identity alone does not establish how a comment was written. For likely manual, unclassified or uncertain source comments, leave drafts private\(botException). For other nonqualifying replies, ask for approval on the MR card and describe that pending decision in the run result. Do not publish directly yourself."
         } else {
             publicationPolicy = "Automatic comment publication is OFF. Save warranted private drafts and ask for approval on the MR card and describe that pending decision in the run result. Do not publish directly yourself."
         }

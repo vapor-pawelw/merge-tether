@@ -18,6 +18,12 @@ struct PublicationRestrictionsSettingsView: View {
             } else if mode == .filtered && !restrictions.hasConditions {
                 Text(.PublicationPolicy.publicationNoConditions).font(.caption).foregroundStyle(.secondary)
             }
+            Toggle(isOn: $restrictions.allowBotReplies) {
+                Text(.PublicationPolicy.publicationAllowBotReplies)
+            }
+            .toggleStyle(.checkbox)
+            .disabled(!filtersActive)
+            Text(.PublicationPolicy.publicationBotRepliesHelp).font(.caption).foregroundStyle(.secondary)
             DisclosureGroup {
                 VStack(alignment: .leading, spacing: 16) {
                     VStack(alignment: .leading, spacing: 6) {
@@ -80,7 +86,12 @@ struct PublicationRestrictionsSettingsView: View {
         if !restrictions.repositories.isEmpty { parts.append(String(localized: .PublicationPolicy.publicationRepositories)) }
         if !restrictions.mergeRequestAuthors.isEmpty { parts.append(String(localized: .PublicationPolicy.publicationMrAuthors)) }
         if !restrictions.sourceCommentAuthors.isEmpty { parts.append(String(localized: .PublicationPolicy.publicationCommentAuthors)) }
-        if requiresAI { parts.append(String(localized: .PublicationPolicy.publicationAiOnly)) }
+        if requiresAI {
+            parts.append(String(localized: restrictions.allowBotReplies
+                ? .Settings.settingsAutomationPublicationAiReplies : .PublicationPolicy.publicationAiOnly))
+        } else if restrictions.allowBotReplies {
+            parts.append(String(localized: .PublicationPolicy.publicationBotRepliesShort))
+        }
         return parts.isEmpty ? String(localized: .PublicationPolicy.publicationNoConditionsShort) : parts.joined(separator: " · ")
     }
 }

@@ -1833,7 +1833,7 @@
         "en": {
           "stringUnit": {
             "state": "translated",
-            "value": "Replies to AI feedback"
+            "value": "Replies to AI or bot feedback"
           }
         }
       }
@@ -1866,7 +1866,7 @@
         "en": {
           "stringUnit": {
             "state": "translated",
-            "value": "Automatically publish checked replies to verified AI comments or comments assessed as AI-assisted with high or very high confidence. Likely manual or uncertain comments and new standalone comments stay private. Optional restrictions can narrow this further."
+            "value": "Automatically publish checked replies to verified AI comments or comments assessed as AI-assisted with high or very high confidence. Known bots have a fixed Bot classification, regardless of whether scripts or AI produced their text. When bot replies are allowed, those accounts qualify through that separate permission without an AI assessment. Other likely manual or uncertain comments and new standalone comments stay private. Optional restrictions can narrow this further."
           }
         }
       }

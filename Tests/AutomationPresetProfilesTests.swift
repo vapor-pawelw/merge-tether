@@ -4,6 +4,54 @@ import Testing
 @testable import GitLabTodos
 
 struct AutomationPresetProfilesTests {
+    @Test(arguments: [AutomationPreset.manual, .safe, .trusted, .full], [false, true])
+    func missingNewPermissionUsesTheActiveProfileAfterRestart(_ preset: AutomationPreset, _ legacy: Bool) throws {
+        var configuration = AutomationSettings()
+        configuration.applyPreset(preset, for: .codex)
+        var json = try #require(JSONSerialization.jsonObject(with: JSONEncoder().encode(configuration)) as? [String: Any])
+        if legacy { json.removeValue(forKey: "selectedPreset") }
+        var restrictions = try #require(json["publicationRestrictions"] as? [String: Any])
+        restrictions.removeValue(forKey: "allowBotReplies")
+        json["publicationRestrictions"] = restrictions
+        let loaded = try JSONDecoder().decode(AutomationSettings.self, from: JSONSerialization.data(withJSONObject: json))
+        let persisted = try #require(JSONSerialization.jsonObject(with: JSONEncoder().encode(loaded)) as? [String: Any])
+        let restored = try #require(persisted["publicationRestrictions"] as? [String: Any])
+        #expect(restored["allowBotReplies"] as? Bool == (preset == .trusted || preset == .full))
+        #expect(loaded.matchingPreset == preset)
+    }
+
+    @Test func addingAPresetDefaultCannotTurnLegacyAllPublicationIntoAFilter() throws {
+        var configuration = AutomationSettings()
+        configuration.applyPreset(.full, for: .codex)
+        configuration.publicationRestrictions = .init()
+        var fields = try #require(JSONSerialization.jsonObject(with: JSONEncoder().encode(configuration)) as? [String: Any])
+        fields.removeValue(forKey: "publicationPolicyMode")
+        fields.removeValue(forKey: "selectedPreset")
+        var restrictions = try #require(fields["publicationRestrictions"] as? [String: Any])
+        restrictions.removeValue(forKey: "allowBotReplies")
+        fields["publicationRestrictions"] = restrictions
+        let loaded = try JSONDecoder().decode(AutomationSettings.self, from: JSONSerialization.data(withJSONObject: fields))
+        #expect(loaded.publicationMode == .all && loaded.matchingPreset == .full)
+        #expect(loaded.publicationRestrictions.allowBotReplies)
+    }
+
+    @Test(arguments: [false, true])
+    func customizedProfilesDoNotGainNewPublicationPermissionOnUpgrade(_ legacy: Bool) throws {
+        var configuration = AutomationSettings()
+        configuration.applyPreset(.trusted, for: .codex)
+        configuration.allowFollowUpPush = false
+        var json = try #require(JSONSerialization.jsonObject(with: JSONEncoder().encode(configuration)) as? [String: Any])
+        if legacy { json.removeValue(forKey: "selectedPreset") }
+        var restrictions = try #require(json["publicationRestrictions"] as? [String: Any])
+        restrictions.removeValue(forKey: "allowBotReplies")
+        json["publicationRestrictions"] = restrictions
+        let loaded = try JSONDecoder().decode(AutomationSettings.self, from: JSONSerialization.data(withJSONObject: json))
+        let persisted = try #require(JSONSerialization.jsonObject(with: JSONEncoder().encode(loaded)) as? [String: Any])
+        let restored = try #require(persisted["publicationRestrictions"] as? [String: Any])
+        #expect(restored["allowBotReplies"] as? Bool == false)
+        #expect(loaded.matchingPreset == nil && !loaded.allowFollowUpPush)
+    }
+
     @MainActor @Test func choosingASettingsProfileFillsOnlyTheDraftAndReadingMatchingStateNeverReappliesIt() throws {
         let suite = "DraftProfileSelection.\(UUID())"
         let defaults = try #require(UserDefaults(suiteName: suite))
@@ -163,6 +211,7 @@ struct AutomationPresetProfilesTests {
         legacy.applyPreset(.checkpoints, for: .codex)
         var json = try #require(JSONSerialization.jsonObject(with: JSONEncoder().encode(legacy)) as? [String: Any])
         json.removeValue(forKey: "allowAutomaticPublicActions")
+        json.removeValue(forKey: "selectedPreset")
         let data = try JSONSerialization.data(withJSONObject: json)
         let loaded = try JSONDecoder().decode(AutomationSettings.self, from: data)
         #expect(loaded.baselinePreset == .checkpoints && loaded.matchingPreset == nil)
@@ -171,6 +220,7 @@ struct AutomationPresetProfilesTests {
         #expect(loaded.publicationMode == .aiReplies && loaded.hasAutomaticActionConsent)
         var encoded = try #require(JSONSerialization.jsonObject(with: JSONEncoder().encode(loaded)) as? [String: Any])
         encoded.removeValue(forKey: "allowAutomaticPublicActions")
+        encoded.removeValue(forKey: "selectedPreset")
         #expect(NSDictionary(dictionary: encoded) == NSDictionary(dictionary: json))
     }
 

@@ -1161,7 +1161,7 @@ final class MergeRequestAttentionMonitor {
                        item.isAuthored || (!item.awaitingRemoteVerification && !item.requiresDiscussionRecheck) {
                         let policy = settings.automation.automaticPublicationPolicy
                         if policy.mode != .manual {
-                            let aiIDs = await aiNoteIDs(in: discussions ?? [], policy: policy, host: host,
+                            let evidence = await publicationNoteEvidence(in: discussions ?? [], policy: policy, host: host,
                                                        projectID: item.id.projectID, iid: item.id.iid)
                             item.automaticPublicationPolicy = policy
                             let duplicates = item.duplicateDraftIDs
@@ -1169,7 +1169,7 @@ final class MergeRequestAttentionMonitor {
                                 $0.id.map(duplicates.contains) != true
                                 && (!item.isAuthored || (settings.automation.allowFollowUpPush && $0.id.map(contextDraftIDs.contains) == true))
                                     && policy.allows($0, request: request, discussions: discussions, userID: user.id,
-                                        host: host, aiNoteIDs: aiIDs)
+                                        host: host, aiNoteIDs: evidence.ai, botNoteIDs: evidence.bots)
                             }.compactMap(\.id))
                         }
                     }
@@ -1576,11 +1576,11 @@ final class MergeRequestAttentionMonitor {
         }
         guard let configuration = settings?.automation, let request = item.mergeRequest else { return }
         let policy = configuration.automaticPublicationPolicy
-        let aiIDs = await aiNoteIDs(in: discussions, policy: policy, host: account.host,
+        let evidence = await publicationNoteEvidence(in: discussions, policy: policy, host: account.host,
                                    projectID: id.projectID, iid: id.iid)
         func qualifies(_ draft: GitLabDraftNote, in threads: [GitLabMergeRequestDiscussion]) -> Bool {
             policy.allows(draft, request: request, discussions: threads, userID: user.id,
-                          host: account.host, aiNoteIDs: aiIDs)
+                          host: account.host, aiNoteIDs: evidence.ai, botNoteIDs: evidence.bots)
         }
         let eligible = candidates.filter { qualifies($0, in: discussions) }
         guard !eligible.isEmpty, isCurrent(account), !isConfirming(id) else { return }
@@ -2062,20 +2062,34 @@ final class MergeRequestAttentionMonitor {
               permitsAutomaticPublication(of: request, account: account) else { return 0 }
         let policy = settings.automation.automaticPublicationPolicy
         guard policy.mode != .manual, policy.requiresAI else { return 0 }
-        let current = await aiNoteIDs(in: discussions, policy: policy, host: account.host, projectID: id.projectID, iid: id.iid)
-        let widened = current.union(becomingAI)
+        let current = await publicationNoteEvidence(in: discussions, policy: policy, host: account.host, projectID: id.projectID, iid: id.iid)
+        let widened = current.ai.union(becomingAI)
         return item.drafts.filter { draft in
-            !policy.allows(draft, request: request, discussions: discussions, userID: user.id, host: account.host, aiNoteIDs: current)
-                && policy.allows(draft, request: request, discussions: discussions, userID: user.id, host: account.host, aiNoteIDs: widened)
+            !policy.allows(draft, request: request, discussions: discussions, userID: user.id, host: account.host, aiNoteIDs: current.ai, botNoteIDs: current.bots)
+                && policy.allows(draft, request: request, discussions: discussions, userID: user.id, host: account.host, aiNoteIDs: widened, botNoteIDs: current.bots)
         }.count
     }
 
     /// Identity verification and content-bound records supply facts; the pure policy
     /// decides the same way for the board preview and the final live publication gate.
-    private func aiNoteIDs(in discussions: [GitLabMergeRequestDiscussion], policy: AutomaticPublicationPolicy,
-                           host: String, projectID: Int, iid: Int) async -> Set<Int> {
-        guard policy.requiresAI else { return [] }
+    private func publicationNoteEvidence(in discussions: [GitLabMergeRequestDiscussion], policy: AutomaticPublicationPolicy,
+                                         host: String, projectID: Int, iid: Int) async -> (ai: Set<Int>, bots: Set<Int>) {
+        guard policy.requiresAI || policy.allowsBotReplies, let username = glab.currentUsername else { return ([], []) }
         let notes = discussions.flatMap(\.notes).filter { $0.system != true }
+        var botAuthors: Set<Int> = []
+        if policy.allowsBotReplies {
+            for id in Set(notes.compactMap { $0.author?.id }).sorted() where id > 0 {
+                let kind = (try? await glab.feedbackAccountKind(userID: id, host: host)) ?? .unknown
+                if kind == .automation || settings?.reviewParticipationPreferences.isDeclaredAutomation(
+                    host: host, username: username, userID: id) == true {
+                    botAuthors.insert(id)
+                }
+            }
+        }
+        let botIDs = Set(notes.compactMap { note in
+            botAuthors.contains(note.author?.id ?? 0) ? note.id : nil
+        })
+        guard policy.requiresAI else { return ([], botIDs) }
         let candidates = Set(notes.compactMap { note -> Int? in
             guard note.author?.username?.lowercased() == "gitlabduo", let id = note.author?.id, id > 0 else { return nil }
             return id
@@ -2085,7 +2099,7 @@ final class MergeRequestAttentionMonitor {
             verifiedIdentities.insert(id)
         }
         let directory = aiAssessmentDirectory, now = Date()
-        return Set(notes.compactMap { note in
+        let aiIDs = Set(notes.compactMap { note -> Int? in
             guard let id = note.id, id > 0 else { return nil }
             // The user's verdict also outranks a verified assistant identity.
             if AICommentOriginOverrideStore.override(for: note, host: host, projectID: projectID, iid: iid, in: directory) != nil {
@@ -2094,6 +2108,7 @@ final class MergeRequestAttentionMonitor {
             return verifiedIdentities.contains(note.author?.id ?? 0)
                 || AICommentAssessmentStore.isAI(note, host: host, projectID: projectID, iid: iid, in: directory, now: now) ? id : nil
         })
+        return (aiIDs, botIDs)
     }
 
     /// Preparation is independent of remote-fix proof. Publication only consumes its records.
@@ -2116,9 +2131,9 @@ final class MergeRequestAttentionMonitor {
             for note in notes { if let id = note.id { sources[id] = note } }
         }
         guard !sources.isEmpty else { return }
-        let knownAI = await aiNoteIDs(in: discussions, policy: policy, host: account.host,
+        let known = await publicationNoteEvidence(in: discussions, policy: policy, host: account.host,
             projectID: request.projectID, iid: request.iid)
-        let unknown = sources.filter { !knownAI.contains($0.key) }.sorted { $0.key < $1.key }.map(\.value)
+        let unknown = sources.filter { !known.ai.contains($0.key) && !known.bots.contains($0.key) }.sorted { $0.key < $1.key }.map(\.value)
         guard !unknown.isEmpty, await permitsAssistantAutomation(for: account), isCurrent(account),
               settings.automation == configuration, !Task.isCancelled else { return }
         let model = configuration.assistant == .codex ? configuration.codexVerificationModel.rawValue
@@ -2165,12 +2180,12 @@ final class MergeRequestAttentionMonitor {
         guard let live, let discussions, let settings else { return false }
         guard permitsParticipantReply(draft, request: live, discussions: discussions, account: account) else { return false }
         let policy = settings.automation.automaticPublicationPolicy
-        let aiIDs = await aiNoteIDs(in: discussions, policy: policy, host: account.host,
+        let evidence = await publicationNoteEvidence(in: discussions, policy: policy, host: account.host,
                                    projectID: id.projectID, iid: id.iid)
         guard isCurrent(account), settings.automation.automaticPublicationPolicy == policy,
               permitsAutomaticPublication(of: live, account: account),
               policy.allows(draft, request: live, discussions: discussions, userID: user.id,
-                            host: account.host, aiNoteIDs: aiIDs) else { return false }
+                            host: account.host, aiNoteIDs: evidence.ai, botNoteIDs: evidence.bots) else { return false }
         if live.author.id != user.id {
             // The discussion reads above can outlive the caller's draft snapshot.
             // Recheck the exact body so a concurrent edit cannot smuggle quick actions.
@@ -2216,7 +2231,7 @@ final class MergeRequestAttentionMonitor {
                   isCurrent(account), settings.automation.allowFollowUpPush,
                   publicationReceipts(projectID: id.projectID, iid: id.iid, host: account.host, username: user.username).contains(receipt),
                   permitsAutomaticPublication(of: currentMR, account: account) else { return blocked() }
-            let freshAIIDs = await aiNoteIDs(in: freshDiscussions, policy: policy, host: account.host,
+            let freshEvidence = await publicationNoteEvidence(in: freshDiscussions, policy: policy, host: account.host,
                                             projectID: id.projectID, iid: id.iid)
             // Identity verification can await GitLab after the proof snapshot's draft
             // read. Re-read the exact body last so a concurrent edit cannot execute
@@ -2231,7 +2246,7 @@ final class MergeRequestAttentionMonitor {
                   permitsAutomaticPublication(of: currentMR, account: account) else { return false }
             guard isCurrent(account), settings.automation.automaticPublicationPolicy == policy,
                   policy.allows(draft, request: currentMR, discussions: freshDiscussions, userID: currentUser.id,
-                                host: account.host, aiNoteIDs: freshAIIDs) else { return false }
+                                host: account.host, aiNoteIDs: freshEvidence.ai, botNoteIDs: freshEvidence.bots) else { return false }
             permitted = true
             return true
         } catch {

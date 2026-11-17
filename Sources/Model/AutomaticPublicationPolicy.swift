@@ -14,14 +14,31 @@ struct AutomaticPublicationRestrictions: Codable, Equatable, Sendable {
     var mergeRequestAuthors: [PublicationIdentity] = []
     var sourceCommentAuthors: [PublicationIdentity] = []
     var requireAI = false
+    var allowBotReplies = false
 
     var hasIdentityConditions: Bool {
         !repositories.isEmpty || !mergeRequestAuthors.isEmpty || !sourceCommentAuthors.isEmpty
     }
-    var hasConditions: Bool { requireAI || hasIdentityConditions }
+    var hasConditions: Bool { requireAI || allowBotReplies || hasIdentityConditions }
 
     static func defaults(for preset: AutomationPreset?) -> Self {
-        .init(requireAI: preset == .full || preset == .checkpoints || preset == .trusted)
+        .init(requireAI: preset == .full || preset == .checkpoints || preset == .trusted,
+              allowBotReplies: preset == .full || preset == .trusted)
+    }
+}
+
+extension AutomaticPublicationRestrictions {
+    private enum CodingKeys: String, CodingKey {
+        case repositories, mergeRequestAuthors, sourceCommentAuthors, requireAI, allowBotReplies
+    }
+
+    init(from decoder: Decoder) throws {
+        let values = try decoder.container(keyedBy: CodingKeys.self)
+        self.init(repositories: try values.decodeIfPresent([PublicationIdentity].self, forKey: .repositories) ?? [],
+                  mergeRequestAuthors: try values.decodeIfPresent([PublicationIdentity].self, forKey: .mergeRequestAuthors) ?? [],
+                  sourceCommentAuthors: try values.decodeIfPresent([PublicationIdentity].self, forKey: .sourceCommentAuthors) ?? [],
+                  requireAI: try values.decodeIfPresent(Bool.self, forKey: .requireAI) ?? false,
+                  allowBotReplies: try values.decodeIfPresent(Bool.self, forKey: .allowBotReplies) ?? false)
     }
 }
 
@@ -31,7 +48,7 @@ struct AutomaticPublicationPolicy: Equatable, Sendable {
 
     func allows(_ draft: GitLabDraftNote, request: GitLabMergeRequest,
                 discussions: [GitLabMergeRequestDiscussion]?, userID: Int, host: String,
-                aiNoteIDs: Set<Int>) -> Bool {
+                aiNoteIDs: Set<Int>, botNoteIDs: Set<Int> = []) -> Bool {
         guard couldAllow(draft, request: request, userID: userID, host: host) else { return false }
         guard requiresSources else { return true }
         guard let sources = Self.sourceNotes(for: draft, discussions: discussions, userID: userID),
@@ -39,7 +56,9 @@ struct AutomaticPublicationPolicy: Equatable, Sendable {
         return sources.allSatisfy { note in
             guard let authorID = note.author?.id, let noteID = note.id else { return false }
             return matches(restrictions.sourceCommentAuthors, host: host, id: authorID)
-                && (!requiresAI || aiNoteIDs.contains(noteID))
+                && (!(requiresAI || allowsBotReplies)
+                    || (requiresAI && aiNoteIDs.contains(noteID))
+                    || (allowsBotReplies && botNoteIDs.contains(noteID)))
         }
     }
 
@@ -57,7 +76,8 @@ struct AutomaticPublicationPolicy: Equatable, Sendable {
     }
 
     var requiresAI: Bool { mode == .aiReplies || (mode == .filtered && restrictions.requireAI) }
-    private var requiresSources: Bool { mode != .all && (requiresAI || !restrictions.sourceCommentAuthors.isEmpty) }
+    var allowsBotReplies: Bool { mode != .manual && mode != .all && restrictions.allowBotReplies }
+    private var requiresSources: Bool { requiresAI || allowsBotReplies || (mode != .all && !restrictions.sourceCommentAuthors.isEmpty) }
 
     private func matches(_ identities: [PublicationIdentity], host: String, id: Int) -> Bool {
         identities.isEmpty || identities.contains { $0.host == host && $0.entityID == id && id > 0 }
@@ -126,7 +146,7 @@ extension AutomationSettings {
 
     private mutating func setConditionalPublication(aiReplies: Bool) {
         publicationRestrictions.requireAI = aiReplies
-        publicationMode = aiReplies ? .aiReplies : publicationRestrictions.hasIdentityConditions ? .filtered : .manual
+        publicationMode = aiReplies ? .aiReplies : publicationRestrictions.hasConditions ? .filtered : .manual
     }
 
     mutating func resetPublication(to preset: AutomationPreset) {

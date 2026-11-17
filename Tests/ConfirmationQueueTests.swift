@@ -2469,6 +2469,79 @@ import MergeTetherRemote
     }
     private let duoDiscussion = #"[{"id":"abc","notes":[{"id":40,"body":"AI finding","author":{"id":8,"username":"GitLabDuo"},"system":false,"resolvable":true,"resolved":false}]}]"#
 
+    @Test(arguments: ["verified", "locallyDeclared", "displayCacheOnly", "disabled", "unknown", "human", "mixed"])
+    func ordinaryBotRepliesUseTheirOwnPermissionWithoutAIClassification(_ evidence: String) async throws {
+        let harness = try makeHarness(assistantWorked: true)
+        defer { harness.cleanUp() }
+        harness.settings.automation.publicationMode = .aiReplies
+        var stored = try #require(JSONSerialization.jsonObject(with: JSONEncoder().encode(harness.settings.automation)) as? [String: Any])
+        var restrictions = try #require(stored["publicationRestrictions"] as? [String: Any])
+        restrictions["allowBotReplies"] = evidence != "disabled"
+        stored["publicationRestrictions"] = restrictions
+        harness.settings.automation = try JSONDecoder().decode(AutomationSettings.self, from: JSONSerialization.data(withJSONObject: stored))
+        try harness.write("drafts.json", draftJSON)
+        var discussion = duoDiscussion.replacingOccurrences(of: "GitLabDuo", with: "botnet")
+            .replacingOccurrences(of: "AI finding", with: "Automated check")
+        if evidence == "mixed" {
+            discussion = discussion.replacingOccurrences(of: "}]}]", with:
+                #"},{"id":41,"body":"Additional question","author":{"id":9,"username":"reviewer"},"system":false}]}]"#)
+        }
+        try harness.write("discussions.json", discussion)
+        let account = evidence == "unknown"
+            ? #"{"id":8,"username":"botnet"}"#
+            : #"{"id":8,"username":"botnet","bot":\#(evidence == "human" || evidence == "locallyDeclared" || evidence == "displayCacheOnly" ? "false" : "true")}"#
+        try harness.write("duo.json", account)
+        if evidence == "locallyDeclared" {
+            let marked = harness.settings.markAutomationAuthor(.init(host: host, entityID: 8, label: "@botnet"),
+                host: host, user: .init(id: 3, username: "me"))
+            #expect(marked)
+        } else if evidence == "displayCacheOnly" {
+            harness.glab.updateLocalAutomationAuthors([8], host: host, username: "me")
+        }
+        let qualifies = evidence == "verified" || evidence == "locallyDeclared"
+        try harness.recordVerdict("objections", head: head)
+        try await harness.poll()
+        let preview = try #require(harness.monitor.currentItems.first)
+        #expect(preview.automaticDraftIDs == (qualifies ? [12] : []))
+        try await harness.poll()
+        #expect(harness.log("selected.log").contains("/draft_notes/12/publish") == qualifies)
+        #expect(harness.log("publish.log").isEmpty)
+        #expect(!harness.log("selected.log").contains("/draft_notes/11/publish"))
+    }
+
+    @Test(arguments: ["server", "local"])
+    func botIdentityIsRecheckedAfterThePublicationPreview(_ source: String) async throws {
+        let harness = try makeHarness(assistantWorked: true)
+        defer { harness.cleanUp() }
+        harness.settings.automation.publicationMode = .aiReplies
+        var stored = try #require(JSONSerialization.jsonObject(with: JSONEncoder().encode(harness.settings.automation)) as? [String: Any])
+        var restrictions = try #require(stored["publicationRestrictions"] as? [String: Any])
+        restrictions["allowBotReplies"] = true
+        stored["publicationRestrictions"] = restrictions
+        harness.settings.automation = try JSONDecoder().decode(AutomationSettings.self, from: JSONSerialization.data(withJSONObject: stored))
+        try harness.write("drafts.json", draftJSON)
+        try harness.write("discussions.json", duoDiscussion.replacingOccurrences(of: "GitLabDuo", with: "botnet")
+            .replacingOccurrences(of: "AI finding", with: "Automated check"))
+        try harness.write("duo.json", #"{"id":8,"username":"botnet","bot":\#(source == "server" ? "true" : "false")}"#)
+        if source == "local" {
+            let marked = harness.settings.markAutomationAuthor(.init(host: host, entityID: 8, label: "@botnet"),
+                host: host, user: .init(id: 3, username: "me"))
+            #expect(marked)
+        }
+        try harness.recordVerdict("objections", head: head)
+        try await harness.poll()
+        #expect(harness.monitor.currentItems.first?.automaticDraftIDs == [12])
+        try harness.write("duo.json", #"{"id":8,"username":"botnet","bot":false}"#)
+        if source == "local" {
+            let declaration = try #require(harness.settings.reviewParticipationPreferences.localAutomationAuthors.first)
+            let removed = harness.settings.unmarkAutomationAuthor(declaration.id, host: host, username: "me")
+            #expect(removed)
+        }
+        try await harness.poll()
+        #expect(harness.log("selected.log").isEmpty)
+        #expect(harness.monitor.currentItems.first?.draftCount == 2)
+    }
+
     @Test func duoRepliesPublishSelectivelyWithoutSendingOtherDrafts() async throws {
         let harness = try makeHarness(assistantWorked: true)
         defer { harness.cleanUp() }

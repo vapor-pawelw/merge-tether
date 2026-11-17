@@ -24,6 +24,7 @@ struct AutomationProfileSnapshot: Codable, Equatable, Sendable {
     let pipelineOwnership: Bool
     let publication: AutomationPublicationMode
     let requireAI: Bool
+    let botReplies: Bool?
     let reviewRule: Rule
     let feedbackRule: Rule
     let eventModes: [String: MergeWorkflowMode]
@@ -45,6 +46,7 @@ struct AutomationProfileSnapshot: Codable, Equatable, Sendable {
         pipelineOwnership = configuration.autoClaimPipelineFailures
         publication = configuration.publicationMode
         requireAI = configuration.publicationRestrictions.requireAI
+        botReplies = configuration.publicationRestrictions.allowBotReplies
         reviewRule = Rule(configuration.reviewRequested)
         feedbackRule = Rule(configuration.authorFeedback)
         eventModes = Dictionary(uniqueKeysWithValues: MergeWorkflowTrigger.allCases.map { ($0.rawValue, configuration.workflowRules[$0].mode) })
@@ -84,6 +86,7 @@ struct AutomationProfileSnapshot: Codable, Equatable, Sendable {
         configuration.autoClaimPipelineFailures = pipelineOwnership
         configuration.publicationMode = publication
         configuration.publicationRestrictions.requireAI = requireAI
+        configuration.publicationRestrictions.allowBotReplies = botReplies ?? false
         reviewRule.apply(to: &configuration.reviewRequested)
         feedbackRule.apply(to: &configuration.authorFeedback)
         for trigger in MergeWorkflowTrigger.allCases {

@@ -20,10 +20,57 @@ struct AutomaticPublicationPolicyTests {
               system: false, resolvable: true, resolved: false, resolvedBy: nil, body: "Feedback")
     }
     func allows(_ policy: AutomaticPublicationPolicy, reply: Bool = true,
-                notes: [GitLabMergeRequestDiscussion.Note]? = nil, ai: Set<Int> = [],
+                notes: [GitLabMergeRequestDiscussion.Note]? = nil, ai: Set<Int> = [], bots: Set<Int> = [],
                 body: String = "Addressed", authorID: Int = 3) throws -> Bool {
         policy.allows(try draft(reply: reply, body: body, authorID: authorID), request: try request(),
-                      discussions: notes.map { [.init(id: "thread", notes: $0)] }, userID: 3, host: host, aiNoteIDs: ai)
+                      discussions: notes.map { [.init(id: "thread", notes: $0)] }, userID: 3, host: host, aiNoteIDs: ai, botNoteIDs: bots)
+    }
+
+    @Test(arguments: [AutomationPublicationMode.aiReplies, .filtered])
+    func verifiedBotsCanQualifyIndependentlyOfAIWhenExplicitlyEnabled(_ mode: AutomationPublicationMode) throws {
+        var restrictions = AutomaticPublicationRestrictions()
+        restrictions.allowBotReplies = true
+        restrictions.requireAI = true
+        let policy = AutomaticPublicationPolicy(mode: mode, restrictions: restrictions)
+        let notes = [note(40, author: 8), note(41, author: 9)]
+        #expect(try allows(policy, notes: notes, ai: [40], bots: [41]))
+        #expect(try !allows(policy, notes: notes, bots: [40]))
+        #expect(try !allows(policy, notes: notes, ai: [40]))
+        #expect(try !allows(policy, notes: notes))
+        restrictions.allowBotReplies = false
+        #expect(try !allows(.init(mode: mode, restrictions: restrictions), notes: notes, ai: [40], bots: [41]))
+    }
+
+    @Test func botOnlyConditionRequiresVerifiedBotSourcesAndNeverGeneralComments() throws {
+        var restrictions = AutomaticPublicationRestrictions()
+        restrictions.allowBotReplies = true
+        let policy = AutomaticPublicationPolicy(mode: .filtered, restrictions: restrictions)
+        #expect(try allows(policy, notes: [note(40, author: 8)], bots: [40]))
+        #expect(try !allows(policy, notes: [note(40, author: 8)], ai: [40]))
+        #expect(try !allows(policy, notes: [note(40, author: 8), note(41, author: 9)], bots: [40]))
+        #expect(try !allows(policy, reply: false, bots: [40]))
+        #expect(try !allows(policy, bots: [40]))
+        #expect(try !allows(.init(mode: .manual, restrictions: restrictions), notes: [note(40, author: 8)], bots: [40]))
+    }
+
+    @Test func botPermissionCannotBypassIdentityFiltersDraftOwnershipOrQuickActions() throws {
+        var restrictions = AutomaticPublicationRestrictions()
+        restrictions.allowBotReplies = true
+        restrictions.repositories = [identity(1)]
+        restrictions.mergeRequestAuthors = [identity(7)]
+        restrictions.sourceCommentAuthors = [identity(8)]
+        let notes = [note(40, author: 8)]
+        #expect(try allows(.init(mode: .aiReplies, restrictions: restrictions), notes: notes, bots: [40]))
+        #expect(try !allows(.init(mode: .aiReplies, restrictions: restrictions), notes: notes, bots: [40], authorID: 99))
+        #expect(try !allows(.init(mode: .aiReplies, restrictions: restrictions), notes: notes, bots: [40], body: "/merge"))
+        restrictions.sourceCommentAuthors = [identity(9)]
+        #expect(try !allows(.init(mode: .aiReplies, restrictions: restrictions), notes: notes, bots: [40]))
+        restrictions.sourceCommentAuthors = [identity(8)]
+        restrictions.repositories = [identity(1, host: "other.example")]
+        #expect(try !allows(.init(mode: .aiReplies, restrictions: restrictions), notes: notes, bots: [40]))
+        restrictions.repositories = [identity(1)]
+        restrictions.mergeRequestAuthors = [identity(9)]
+        #expect(try !allows(.init(mode: .aiReplies, restrictions: restrictions), notes: notes, bots: [40]))
     }
 
     @Test func unrestrictedAllModePreservesGeneralDraftsButManualNeverPublishes() throws {
@@ -241,7 +288,7 @@ struct AutomaticPublicationPolicyTests {
             #expect(settings.publicationMode == preset.defaultPublicationMode)
             #expect(settings.publicationRestrictions == .defaults(for: preset))
         }
-        #expect(AutomaticPublicationRestrictions.defaults(for: .full) == .init(requireAI: true))
+        #expect(AutomaticPublicationRestrictions.defaults(for: .full) == .init(requireAI: true, allowBotReplies: true))
         #expect(AutomaticPublicationRestrictions.defaults(for: .checkpoints) == .init(requireAI: true))
         #expect(AutomaticPublicationRestrictions.defaults(for: .manual) == .init())
         #expect(AutomaticPublicationRestrictions.defaults(for: nil) == .init())
@@ -256,8 +303,9 @@ struct AutomaticPublicationPolicyTests {
         #expect(try !allows(settings.automaticPublicationPolicy, reply: false))
         #expect(try allows(settings.automaticPublicationPolicy, notes: [note(40, author: 8)], ai: [40]))
         settings.setAutomaticAIReplies(false)
-        #expect(settings.publicationMode == .filtered)
-        #expect(try allows(settings.automaticPublicationPolicy, reply: false))
+        #expect(settings.publicationMode == .filtered && settings.publicationRestrictions.allowBotReplies)
+        #expect(try !allows(settings.automaticPublicationPolicy, reply: false))
+        #expect(try allows(settings.automaticPublicationPolicy, notes: [note(40, author: 8)], bots: [40]))
         settings.setPublishAllComments(true)
         #expect(settings.publishesAllComments && !settings.automaticAIReplies)
         settings.setPublishAllComments(false)
@@ -391,7 +439,7 @@ struct AutomaticPublicationPolicyTests {
         expected.setPublishAllComments(true)
         settings.resetPublication(to: .full)
         #expect(settings == expected && !settings.automaticAIReplies)
-        expected.publicationRestrictions = .init(requireAI: true)
+        expected.publicationRestrictions = .defaults(for: .full)
         settings.resetPublicationRestrictions()
         #expect(settings == expected && settings.publishesAllComments && settings.automaticAIReplies)
         settings.resetPublication(to: .checkpoints)

@@ -221,7 +221,7 @@ struct AutomationSettings: Codable, Equatable, Sendable {
         case .all: true
         case .filtered:
             publicationRestrictions.hasConditions
-                && (!(publicationRestrictions.requireAI || !publicationRestrictions.sourceCommentAuthors.isEmpty)
+                && (!(publicationRestrictions.requireAI || publicationRestrictions.allowBotReplies || !publicationRestrictions.sourceCommentAuthors.isEmpty)
                     || drafts.contains { $0.discussionID != nil })
         case .aiReplies: drafts.contains { $0.discussionID != nil }
         case .manual: false
@@ -428,6 +428,71 @@ struct AutomationSettings: Codable, Equatable, Sendable {
             // Removing a legacy condition must not revive the old publish-all flag.
             publicationPolicyMode = .filtered
         }
+        // A new source condition must not reinterpret the legacy publish-all flag.
+        let loadedPublicationMode = publicationMode
+        let selectedPreset: AutomationPreset?
+        if values.contains(.selectedPreset) {
+            selectedPreset = try values.decodeIfPresent(AutomationPreset.self, forKey: .selectedPreset)
+        } else {
+            selectedPreset = AutomationPreset.allCases.first { preset in
+                var candidate = self
+                candidate.publicationMode = loadedPublicationMode
+                candidate.publicationRestrictions.allowBotReplies = AutomaticPublicationRestrictions.defaults(for: preset).allowBotReplies
+                return candidate.matchingPreset == preset
+            }
+        }
+        let restrictionKeys = try values.decodeIfPresent(PublicationMigration.self, forKey: .publicationRestrictions)
+        if restrictionKeys?.allowBotReplies == nil {
+            let botReplies = AutomaticPublicationRestrictions.defaults(for: selectedPreset).allowBotReplies
+            if botReplies != publicationRestrictions.allowBotReplies { publicationMode = loadedPublicationMode }
+            publicationRestrictions.allowBotReplies = botReplies
+        }
+    }
+
+    func encode(to encoder: Encoder) throws {
+        var values = encoder.container(keyedBy: CodingKeys.self)
+        try values.encodeIfPresent(assistant, forKey: .assistant)
+        try values.encodeIfPresent(assistantWorkspace, forKey: .assistantWorkspace)
+        try values.encodeIfPresent(reuseAssistantChats, forKey: .reuseAssistantChats)
+        try values.encodeIfPresent(codexRelayEnabled, forKey: .codexRelayEnabled)
+        try values.encodeIfPresent(codexUseTemplate, forKey: .codexUseTemplate)
+        try values.encodeIfPresent(autoMergeEnabled, forKey: .autoMergeEnabled)
+        try values.encodeIfPresent(conflictTasksEnabled, forKey: .conflictTasksEnabled)
+        try values.encodeIfPresent(reviewRequested, forKey: .reviewRequested)
+        try values.encodeIfPresent(authorFeedback, forKey: .authorFeedback)
+        try values.encodeIfPresent(allowAssistantTools, forKey: .allowAssistantTools)
+        try values.encodeIfPresent(assistantToolProjects, forKey: .assistantToolProjects)
+        try values.encodeIfPresent(packageDecision, forKey: .packageDecision)
+        try values.encodeIfPresent(workflowRules, forKey: .workflowRules)
+        try values.encodeIfPresent(allowAutomaticPublicActions, forKey: .allowAutomaticPublicActions)
+        try values.encodeIfPresent(autoMergeProjects, forKey: .autoMergeProjects)
+        try values.encodeIfPresent(allowConflictPush, forKey: .allowConflictPush)
+        try values.encodeIfPresent(allowFollowUpPush, forKey: .allowFollowUpPush)
+        try values.encodeIfPresent(conflictPushProjects, forKey: .conflictPushProjects)
+        try values.encodeIfPresent(autoReReviewEnabled, forKey: .autoReReviewEnabled)
+        try values.encodeIfPresent(publishDraftsWithoutConfirmation, forKey: .publishDraftsWithoutConfirmation)
+        try values.encodeIfPresent(publishAIRepliesWithoutConfirmation, forKey: .publishAIRepliesWithoutConfirmation)
+        try values.encodeIfPresent(autoApproveEnabled, forKey: .autoApproveEnabled)
+        try values.encodeIfPresent(autoResolveOwnReviewThreads, forKey: .autoResolveOwnReviewThreads)
+        try values.encodeIfPresent(codexReviewModel, forKey: .codexReviewModel)
+        try values.encodeIfPresent(codexReviewThinking, forKey: .codexReviewThinking)
+        try values.encodeIfPresent(claudeCodingModel, forKey: .claudeCodingModel)
+        try values.encodeIfPresent(claudeCodingThinking, forKey: .claudeCodingThinking)
+        try values.encodeIfPresent(assistantDefaultsVersion, forKey: .assistantDefaultsVersion)
+        try values.encodeIfPresent(scope, forKey: .scope)
+        try values.encodeIfPresent(workerExecutionTimeout, forKey: .workerExecutionTimeout)
+        try values.encodeIfPresent(autoVerifyReReview, forKey: .autoVerifyReReview)
+        try values.encodeIfPresent(codexVerificationModel, forKey: .codexVerificationModel)
+        try values.encodeIfPresent(claudeVerificationModel, forKey: .claudeVerificationModel)
+        try values.encodeIfPresent(verificationThinking, forKey: .verificationThinking)
+        try values.encodeIfPresent(autoResolveAcceptedFeedback, forKey: .autoResolveAcceptedFeedback)
+        try values.encodeIfPresent(publicationRestrictions, forKey: .publicationRestrictions)
+        try values.encodeIfPresent(publicationPolicyMode, forKey: .publicationPolicyMode)
+        try values.encodeIfPresent(baselinePreset, forKey: .baselinePreset)
+        try values.encodeIfPresent(projectPermissionsVersion, forKey: .projectPermissionsVersion)
+        try values.encodeIfPresent(autoClaimPipelineFailures, forKey: .autoClaimPipelineFailures)
+        // Explicit null preserves Custom; an absent key belongs to legacy inference.
+        try values.encode(matchingPreset, forKey: .selectedPreset)
     }
 
     private enum CodingKeys: String, CodingKey {
@@ -437,8 +502,10 @@ struct AutomationSettings: Codable, Equatable, Sendable {
         case codexReviewModel, codexReviewThinking, claudeCodingModel, claudeCodingThinking, assistantDefaultsVersion, scope
         case workerExecutionTimeout
         case autoVerifyReReview, codexVerificationModel, claudeVerificationModel, verificationThinking
-        case autoResolveAcceptedFeedback, publicationRestrictions, publicationPolicyMode, baselinePreset, projectPermissionsVersion, autoClaimPipelineFailures
+        case autoResolveAcceptedFeedback, publicationRestrictions, publicationPolicyMode, baselinePreset, projectPermissionsVersion, autoClaimPipelineFailures, selectedPreset
     }
+
+    private struct PublicationMigration: Decodable { let allowBotReplies: Bool? }
 
     private enum RuleMigrationKeys: String, CodingKey { case isEnabled, markDoneOnSuccess }
 
@@ -482,6 +549,7 @@ struct AutomationSettings: Codable, Equatable, Sendable {
         publicationMode = preset.defaultPublicationMode
         baselinePreset = preset
         publicationRestrictions.requireAI = AutomaticPublicationRestrictions.defaults(for: preset).requireAI
+        publicationRestrictions.allowBotReplies = AutomaticPublicationRestrictions.defaults(for: preset).allowBotReplies
     }
 
     var matchingPreset: AutomationPreset? {
@@ -496,7 +564,11 @@ struct AutomationSettings: Codable, Equatable, Sendable {
         var expected = actual
         expected.applyPreset(preset, for: assistant)
         expected.baselinePreset = baselinePreset
+        let expectedBotReplies = expected.publicationRestrictions.allowBotReplies
         expected.publicationRestrictions = publicationRestrictions
+        if publicationMode == .aiReplies || publicationMode == .filtered {
+            expected.publicationRestrictions.allowBotReplies = expectedBotReplies
+        }
         actual.publicationMode = publicationMode
         if !actual.hasAutomaticPublicActionConsent && !expected.hasAutomaticPublicActionConsent {
             actual.removePublicPermissions()

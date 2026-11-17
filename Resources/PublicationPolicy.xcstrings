@@ -12,7 +12,7 @@
     },
     "publication.aiRequiredByMode": {
       "extractionState": "manual",
-      "localizations": { "en": { "stringUnit": { "state": "translated", "value": "Replies to AI feedback always requires this check. Choose Matching filters to configure the AI requirement independently." } } }
+      "localizations": { "en": { "stringUnit": { "state": "translated", "value": "Replies to AI or bot feedback requires an AI assessment, or a verified bot account when bot replies are allowed. Choose Matching filters to configure the AI condition independently." } } }
     },
     "publication.noConditions": {
       "extractionState": "manual",
@@ -259,7 +259,7 @@
         "en": {
           "stringUnit": {
             "state": "translated",
-            "value": "Assessment concerns how the comment was written, including AI assistance used by a person. Replies to likely manual or uncertain comments stay private."
+            "value": "For non-bot accounts, assessment concerns how the comment was written, including AI assistance used by a person. Known bot accounts have a fixed Bot badge. The separate bot-reply permission lets them qualify without an AI assessment; existing AI-evidence conditions remain independent. Other likely manual or uncertain sources stay private."
           }
         }
       }
@@ -340,6 +340,9 @@
           }
         }
       }
-    }
+    },
+    "publication.allowBotReplies": {"extractionState": "manual", "localizations": {"en": {"stringUnit": {"state": "translated", "value": "Allow replies to bot accounts"}}}},
+    "publication.botRepliesHelp": {"extractionState": "manual", "localizations": {"en": {"stringUnit": {"state": "translated", "value": "In conditional modes, accounts confirmed as bots by GitLab metadata or your local bot list can qualify through this separate permission. Their comments stay classified as Bot; no distinction between scripts and AI is needed. Repository and author filters still apply. Each incoming comment must qualify; a human follow-up can keep the reply private. All eligible comments already includes bot replies."}}}},
+    "publication.botRepliesShort": {"extractionState": "manual", "localizations": {"en": {"stringUnit": {"state": "translated", "value": "Bot replies"}}}}
   }
 }

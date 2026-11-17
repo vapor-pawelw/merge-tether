@@ -37,6 +37,42 @@ struct AutomationProfileHistoryTests {
         #expect(configuration.canConfigureInfrastructureRetry)
     }
 
+    @Test(arguments: [false, true])
+    func savedCustomProfileRestoresItsExplicitBotPermission(_ bots: Bool) throws {
+        try fixture { defaults, settings in
+            var configuration = customSettings()
+            configuration.publicationRestrictions.allowBotReplies = bots
+            let snapshot = try #require(AutomationProfileSnapshot.custom(from: configuration))
+            #expect(settings.automationProfileHistory.save(snapshot))
+            let reloaded = SettingsManager(defaults: defaults)
+            let restored = try #require(reloaded.automationProfileHistory.lastGood)
+            var target = AutomationSettings()
+            target.applyPreset(.trusted, for: .codex)
+            restored.apply(to: &target)
+            #expect(target.publicationRestrictions.allowBotReplies == bots)
+            #expect(!target.allowFollowUpPush)
+            #expect(target.matchingPreset == nil)
+        }
+    }
+
+    @Test func aLegacyCustomSnapshotDoesNotInheritNewBotPermissionFromItsRestoreTarget() throws {
+        try fixture { defaults, _ in
+            let snapshot = try #require(AutomationProfileSnapshot.custom(from: customSettings()))
+            var fields = try #require(JSONSerialization.jsonObject(with: JSONEncoder().encode(snapshot)) as? [String: Any])
+            fields.removeValue(forKey: "botReplies")
+            defaults.set(try JSONSerialization.data(withJSONObject: fields), forKey: AutomationProfileHistoryStore.key)
+            let settings = SettingsManager(defaults: defaults)
+            let restored = try #require(settings.automationProfileHistory.lastGood)
+            var target = AutomationSettings()
+            target.applyPreset(.trusted, for: .codex)
+            #expect(target.publicationRestrictions.allowBotReplies)
+            restored.apply(to: &target)
+            #expect(!target.publicationRestrictions.allowBotReplies)
+            #expect(!target.allowFollowUpPush && target.matchingPreset == nil)
+            #expect(settings.automationProfileHistory.failure == nil)
+        }
+    }
+
     private func fixture(faults: Bool = false, _ body: (UserDefaults, SettingsManager) throws -> Void) throws {
         let suite = "AutomationProfileHistoryTests.\(UUID())"
         let defaults: UserDefaults = try #require(faults ? PersistenceFaultDefaults(suiteName: suite) : UserDefaults(suiteName: suite))
