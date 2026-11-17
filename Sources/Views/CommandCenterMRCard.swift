@@ -62,8 +62,8 @@ private struct CommandCenterMRCardContent: View {
             } else {
                 if humanAction != nil {
                     // The orange icon and edge carry urgency; the sentence stays high-contrast.
-                    Label { Text(verbatim: presentation.message).foregroundStyle(isMuted ? Color.secondary : Color.primary) } icon: {
-                        Image(systemName: "exclamationmark.circle.fill").foregroundStyle(isMuted ? Color.secondary : Color.orange)
+                    Label { Text(verbatim: presentation.message).foregroundStyle(Color.primary) } icon: {
+                        Image(systemName: "exclamationmark.circle.fill").foregroundStyle(Color.orange)
                     }
                     .labelStyle(BoardCardStatusLabelStyle())
                     .font(.callout.weight(.medium))
