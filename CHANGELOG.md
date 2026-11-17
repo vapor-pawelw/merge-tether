@@ -6,6 +6,8 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 
 ## Unreleased
 
+- Pull to refresh iPhone board columns, Inbox and MR Details. Automatically refresh GitLab and open Details after actions, recover stale reads without a manual Refresh board step, and preserve reads and confirmed actions across presentation-only updates. Keep Details open with the action result inline. Coalesce fast detail requests and keep unrelated board changes from invalidating an accepted action.
+
 - Mark your own Draft MRs ready from iPhone cards and Details using the Mac's current-account and commit checks. Keep existing feedback and comment-review CTAs available, negotiate the action independently with older phones, and move Details refresh and section navigation into the toolbar with a compact title and branches inside the header.
 
 - Rename the Mac board's Inactive section to **Automation off**, count cards needing attention in its header, and keep attention icons and explanations prominent on muted cards.

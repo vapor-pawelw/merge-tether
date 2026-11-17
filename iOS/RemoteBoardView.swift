@@ -20,7 +20,8 @@ struct RemoteBoardView: View {
                         if board.partial { Text(.Remote.remotePartial).font(.caption).foregroundStyle(.orange).padding(.horizontal) }
                         RemoteLaneBoard(lanes: board.lanes.filter { $0.id != .other }, onOpen: { selected = .init(card: $0) },
                             onOpenCTA: { selected = .init(card: $0, cta: $1) },
-                            onFinishCommentReview: finishCommentReview, canAct: { model.state.canAct(now: $0) })
+                            onFinishCommentReview: finishCommentReview, canAct: { model.state.canAct(now: $0) },
+                            onRefresh: { await model.refreshContent() })
                         if let updated = board.updatedAt {
                             HStack { Text(.Remote.remoteUpdated); Text(updated, style: .relative) }
                                 .font(.caption2).foregroundStyle(.secondary).padding(.horizontal).padding(.bottom, 4)
@@ -95,7 +96,8 @@ struct RemoteBoardView: View {
             .popover(isPresented: $showingInbox, attachmentAnchor: .rect(.bounds), arrowEdge: .top) {
                 RemoteInboxView(cards: inboxCards, onOpen: { pendingInboxCard = .init(card: $0); showingInbox = false },
                     onOpenCTA: { pendingInboxCard = .init(card: $0, cta: $1); showingInbox = false },
-                    onFinishCommentReview: finishCommentReview, canAct: { model.state.canAct(now: $0) })
+                    onFinishCommentReview: finishCommentReview, canAct: { model.state.canAct(now: $0) },
+                    onRefresh: { await model.refreshContent() })
                     .frame(idealWidth: 520, idealHeight: 680)
                     .presentationCompactAdaptation(.sheet)
                     .presentationDetents([.medium, .large])
@@ -110,7 +112,8 @@ struct RemoteBoardView: View {
                 RemoteCardDetail(model: model, original: selection.card, initialSelection: selection)
             }
             .alert(Text(model.state.result?.status.title ?? .Remote.remoteCompleted), isPresented: Binding(
-                get: { model.state.result != nil }, set: { if !$0 { model.state.acknowledgeResult() } }
+                get: { selected == nil && model.state.result != nil },
+                set: { if !$0, selected == nil { model.state.acknowledgeResult() } }
             )) { Button(.Remote.remoteClose) { model.state.acknowledgeResult() } }
         }
     }

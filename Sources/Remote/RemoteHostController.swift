@@ -224,7 +224,7 @@ extension RemoteConnection: RemoteHostTransport {}
             var board = snapshot()
             if !fresh { board.partial = true }
             do { try await active.send(.init(type: .snapshot, challenge: challenge, board: board,
-                capabilities: [RemoteMessage.detailsCapability, RemoteMessage.detailOriginsCapability, RemoteMessage.mrControlsCapability,
+                capabilities: [RemoteMessage.detailsCapability, RemoteMessage.detailContextCapability, RemoteMessage.detailOriginsCapability, RemoteMessage.mrControlsCapability,
                                RemoteMessage.commentOriginCapability, RemoteMessage.markReadyCapability])) }
             catch { failed = true; try? await active.send(.init(type: .unavailable)) }
         case .receipt:
@@ -254,7 +254,14 @@ extension RemoteConnection: RemoteHostTransport {}
             }) { [weak self] card, action in
                 guard let self else { return .uncertain }
                 // Main-actor state may change during an awaited acceptance send.
-                guard acceptanceSent, self.connection === active, self.snapshot() == board else { return .changed }
+                guard acceptanceSent, self.connection === active else { return .changed }
+                let settled = await RemoteRefreshBarrier.refresh(deadline: .now + .seconds(35), isRefreshing: {
+                    self.monitor.isLoading || self.monitor.attention.isLoading || self.monitor.authoredMergeRequests.isLoading
+                }, refresh: {}, validate: { true })
+                let current = self.snapshot()
+                guard settled, self.connection === active, !current.partial,
+                      current.hostSession == board.hostSession, current.account == board.account,
+                      current.cards.contains(where: { $0.hasSameActionContext(as: card) && $0.actions.contains(action) }) else { return .changed }
                 return await self.execute(card, action: action, argument: command.argument)
             }
             try? await active.send(.init(type: .result, result: result))
@@ -277,11 +284,8 @@ extension RemoteConnection: RemoteHostTransport {}
             return
         }
         clearOriginSubscription()
-        guard now().timeIntervalSince(lastDetailRead) >= 1 else {
-            Task { try? await active.send(.init(type: .details, detailResponse: .init(request: request, status: .unavailable))) }
-            return
-        }
-        detailTask?.cancel(); activeDetailRequest = request; lastDetailRead = now()
+        let delay = max(0, 1 - now().timeIntervalSince(lastDetailRead))
+        detailTask?.cancel(); activeDetailRequest = request
         let revision = monitor.glab.accountRevision
         let subscription = phoneSupportsOriginUpdates
             ? RemoteDetailOriginSubscription(request: request, source: source, accountRevision: revision) : nil
@@ -293,6 +297,12 @@ extension RemoteConnection: RemoteHostTransport {}
             }
             let response: RemoteDetailResponse
             do {
+                if delay > 0 { try await Task.sleep(for: .seconds(delay)) }
+                guard !Task.isCancelled, phoneSupportsDetails, connection === active,
+                      self.pairing?.sessionID == pairingSession, monitor.glab.accountRevision == revision,
+                      activeDetailRequest == request else { return }
+                guard request.matches(snapshot()) else { throw RemoteMRDetailLoader.ReadError.changed }
+                lastDetailRead = now()
                 var details = try await detailReader(source, row.evidenceMatchesCatalogContext ? row.item.drafts : [], monitor.glab)
                 let usage = try? await AssistantUsageStore.shared.snapshot()
                 try Task.checkCancellation()

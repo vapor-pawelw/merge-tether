@@ -4,6 +4,154 @@ import MergeTetherRemote
 
 @MainActor @Suite struct RemotePhoneModelTests {
     @Test(arguments: [false, true])
+    func actionsReloadOpenDetailsEvenWhenTheBoardContextDoesNotChange(_ closeBeforeResult: Bool) async throws {
+        let f = try PhoneFixture(), model = f.model
+        var board = f.board; board.lanes[0].cards[0].id = "mr:1:2"
+        let capabilities = [RemoteMessage.detailsCapability, RemoteMessage.detailContextCapability]
+        model.connect(); await model.refresh(); await f.reply(board: board, capabilities: capabilities)
+        let transport = f.transports[0], card = board.cards[0]
+        await model.requestDetails(card: card)
+        let original = try #require(transport.sent.last?.detailRequest)
+        await transport.onMessage?(.init(type: .details, detailResponse: .init(request: original,
+            status: .current, details: .init(checkedAt: f.date))))
+        if closeBeforeResult { model.cancelDetails() }
+        transport.onCommand = { command in
+            await transport.onMessage?(.init(type: .result, result: .init(id: command.id, status: .completed)))
+        }
+        await model.perform(card: card, action: card.actions[0])
+        await f.reply(board: board, capabilities: capabilities)
+        #expect(transport.sent.filter { $0.type == .detailRequest }.count == (closeBeforeResult ? 1 : 2))
+        if !closeBeforeResult {
+            #expect(transport.sent.last?.detailRequest?.id != original.id)
+        }
+    }
+
+    @Test(arguments: [false, true])
+    func stableDetailRequestsAreNegotiatedAndOldHostsKeepTheLegacyDigest(_ supported: Bool) async throws {
+        let f = try PhoneFixture(), model = f.model
+        var board = f.board; board.lanes[0].cards[0].id = "mr:1:2"
+        model.connect(); await model.refresh()
+        await f.reply(board: board, capabilities: [RemoteMessage.detailsCapability]
+            + (supported ? [RemoteMessage.detailContextCapability] : []))
+        await model.requestDetails(card: board.cards[0])
+        let request = try #require(f.transports[0].sent.last?.detailRequest)
+        #expect((request.contentDigest != nil) == supported)
+        model.disconnect()
+        #expect(!model.supportsDetailContext)
+    }
+
+    @Test(arguments: [false, true])
+    func manualRefreshWaitsForTheBoardAndOpenDetailsAndCoalescesGestures(_ detailsOpen: Bool) async throws {
+        let f = try PhoneFixture(), model = f.model
+        var board = f.board; board.lanes[0].cards[0].id = "mr:1:2"
+        let capabilities = [RemoteMessage.detailsCapability, RemoteMessage.detailContextCapability]
+        model.connect(); await model.refresh(); await f.reply(board: board, capabilities: capabilities)
+        let transport = f.transports[0]
+        if detailsOpen {
+            await model.requestDetails(card: board.cards[0])
+            let request = try #require(transport.sent.last?.detailRequest)
+            await transport.onMessage?(.init(type: .details, detailResponse: .init(request: request,
+                status: .current, details: .init(checkedAt: f.date))))
+        }
+        var firstFinished = false, secondFinished = false
+        let first = Task { await model.refreshContent(); firstFinished = true }
+        let second = Task { await model.refreshContent(); secondFinished = true }
+        let deadline = ContinuousClock.now + .seconds(2)
+        while transport.sent.filter({ $0.type == .hello }).count < 2, ContinuousClock.now < deadline { await Task.yield() }
+        #expect(!firstFinished && !secondFinished)
+        await f.reply(board: board, capabilities: capabilities)
+        if detailsOpen {
+            let request = try #require(transport.sent.last?.detailRequest)
+            #expect(request.contentDigest != nil)
+            #expect(!firstFinished && !secondFinished)
+            await transport.onMessage?(.init(type: .details, detailResponse: .init(request: request,
+                status: .current, details: .init(checkedAt: f.date, description: "Refreshed"))))
+        }
+        await first.value; await second.value
+        #expect(transport.sent.filter { $0.type == .hello }.count == 2)
+        #expect(transport.sent.filter { $0.type == .detailRequest }.count == (detailsOpen ? 2 : 0))
+        #expect(!model.isSynchronizingDetails)
+    }
+
+    @Test func continuouslyChangingDetailsStopAutomaticRecoveryAfterTwoAttempts() async throws {
+        let f = try PhoneFixture(), model = f.model
+        var board = f.board; board.lanes[0].cards[0].id = "mr:1:2"
+        model.connect(); await model.refresh(); await f.reply(board: board, capabilities: [RemoteMessage.detailsCapability])
+        let transport = f.transports[0]
+        await model.requestDetails(card: board.cards[0])
+        for _ in 0..<2 {
+            let request = try #require(transport.sent.last?.detailRequest)
+            await transport.onMessage?(.init(type: .details, detailResponse: .init(request: request, status: .changed)))
+            await f.reply(board: board, capabilities: [RemoteMessage.detailsCapability])
+        }
+        let count = transport.sent.count, request = try #require(transport.sent.last?.detailRequest)
+        await transport.onMessage?(.init(type: .details, detailResponse: .init(request: request, status: .changed)))
+        #expect(transport.sent.count == count)
+        #expect(!model.isSynchronizingDetails)
+        #expect(model.detailState.failure == .changed)
+        #expect(transport.sent.allSatisfy { $0.type != .command })
+    }
+
+    @Test(arguments: [false, true])
+    func changedDetailsRecoverThroughAFreshBoardWithoutAskingTheUser(_ actionRunning: Bool) async throws {
+        let f = try PhoneFixture(), model = f.model
+        var board = f.board; board.lanes[0].cards[0].id = "mr:1:2"
+        model.connect(); await model.refresh(); await f.reply(board: board, capabilities: [RemoteMessage.detailsCapability])
+        let transport = f.transports[0], card = board.cards[0]
+        await model.requestDetails(card: card)
+        let request = try #require(transport.sent.last?.detailRequest)
+        let command = actionRunning ? model.state.command(card: card, action: card.actions[0], now: f.date) : nil
+        let sends = transport.sent.count
+        await transport.onMessage?(.init(type: .details, detailResponse: .init(request: request, status: .changed)))
+        #expect(model.detailState.failure != .changed)
+        if let command {
+            #expect(transport.sent.count == sends)
+            await transport.onMessage?(.init(type: .result, result: .init(id: command.id, status: .completed)))
+        }
+        #expect(transport.sent.last?.type == .hello)
+        #expect(transport.sent.last?.refresh == true)
+        board.lanes[0].cards[0].head = "after-action"
+        await f.reply(board: board, capabilities: [RemoteMessage.detailsCapability])
+        let current = try #require(transport.sent.last?.detailRequest)
+        #expect(current.id != request.id)
+        await transport.onMessage?(.init(type: .details, detailResponse: .init(request: current,
+            status: .current, details: .init(checkedAt: f.date, description: "Current details"))))
+        #expect(model.detailState.details(for: board.cards[0], board: board)?.description == "Current details")
+        #expect(model.detailState.failure == nil)
+    }
+
+    @Test(arguments: [RemoteCommandResult.Status.completed, .changed, .uncertain, .checked])
+    func actionResultsSupersedePreActionRefreshesAndReadGitLabAutomatically(_ status: RemoteCommandResult.Status) async throws {
+        let f = try PhoneFixture(), model = f.model, board = f.board
+        model.connect(); await model.refresh(); await f.reply(board: board)
+        let transport = f.transports[0], card = board.cards[0]
+        await model.refresh()
+        let beforeAction = try #require(transport.sent.last?.challenge)
+        transport.onCommand = { command in
+            await transport.onMessage?(.init(type: .result, result: .init(id: command.id, status: status)))
+        }
+        await model.perform(card: card, action: card.actions[0])
+        let refreshed = try #require(transport.sent.last { $0.type == .hello })
+        #expect(refreshed.refresh == true)
+        #expect(refreshed.challenge != beforeAction)
+        var stale = board; stale.lanes[0].cards[0].title = "Before the action"
+        await transport.onMessage?(.init(type: .snapshot, challenge: beforeAction, board: stale))
+        #expect(model.state.board == board)
+        var current = board; current.lanes[0].cards[0].title = "After the action"
+        await f.reply(board: current)
+        #expect(model.state.board == current)
+        #expect(transport.sent.filter { $0.type == .command }.count == 1)
+    }
+
+    @Test func unsolicitedResultsCannotStartRefreshes() async throws {
+        let f = try PhoneFixture(), model = f.model
+        model.connect(); await model.refresh(); await f.reply()
+        let transport = f.transports[0], count = transport.sent.count
+        await transport.onMessage?(.init(type: .result, result: .init(id: UUID(), status: .completed)))
+        #expect(transport.sent.count == count)
+    }
+
+    @Test(arguments: [false, true])
     func originOnlyMessagesUpdateAnOpenConversationAutomaticallyAndCloseCancelsTheCompletedSubscription(_ supported: Bool) async throws {
         let f = try PhoneFixture(), model = f.model
         model.connect(); await model.refresh()

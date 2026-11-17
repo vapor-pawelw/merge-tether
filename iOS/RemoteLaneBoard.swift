@@ -7,6 +7,7 @@ struct RemoteLaneBoard: View {
     let onOpenCTA: (RemoteCard, RemoteCardCTA) -> Void
     var onFinishCommentReview: ((RemoteCard) -> Void)? = nil
     var canAct: ((Date) -> Bool)? = nil
+    var onRefresh: (() async -> Void)? = nil
     @State private var visibleLane: RemoteLaneID?
 
     var body: some View {
@@ -17,7 +18,7 @@ struct RemoteLaneBoard: View {
                 HStack(alignment: .top, spacing: 14) {
                     ForEach(lanes) { lane in
                         RemoteLaneView(lane: lane, onOpen: onOpen, onOpenCTA: onOpenCTA,
-                            onFinishCommentReview: onFinishCommentReview, canAct: canAct)
+                            onFinishCommentReview: onFinishCommentReview, canAct: canAct, onRefresh: onRefresh)
                             .frame(width: laneWidth, height: max(1, geometry.size.height - 12))
                             .id(lane.id)
                     }
@@ -39,6 +40,7 @@ private struct RemoteLaneView: View {
     let onOpenCTA: (RemoteCard, RemoteCardCTA) -> Void
     var onFinishCommentReview: ((RemoteCard) -> Void)? = nil
     var canAct: ((Date) -> Bool)? = nil
+    var onRefresh: (() async -> Void)? = nil
 
     var body: some View {
         VStack(alignment: .leading, spacing: 16) {
@@ -65,6 +67,8 @@ private struct RemoteLaneView: View {
                 }
                 .animation(reduceMotion ? nil : .spring(duration: 0.28, bounce: 0.12), value: lane.cards.map(\.dependencies))
             }
+            .scrollBounceBehavior(.always, axes: .vertical)
+            .refreshable { await onRefresh?() }
         }
         .padding(14)
         .background(Color.secondary.opacity(0.045), in: RoundedRectangle(cornerRadius: 22))

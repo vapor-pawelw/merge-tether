@@ -29,15 +29,16 @@ struct RemoteCardDetail: View {
         return card
     }
     private struct DetailIdentity: Equatable {
-        let session: UUID?, account: String?, card: RemoteCard, supportsDetails: Bool
+        let session: UUID?, account: String?, context: String?, supportsDetails: Bool
     }
     private var detailIdentity: DetailIdentity {
         .init(session: model.state.board?.hostSession, account: model.state.board?.account,
-              card: current, supportsDetails: model.supportsDetails)
+              context: model.supportsDetailContext ? current.detailContextDigest : (try? RemoteDigest.token(current)),
+              supportsDetails: model.supportsDetails)
     }
     var body: some View {
         let fresh = loadedDetails
-        let rereading = model.detailState.pending != nil && boardCard != nil
+        let rereading = (model.detailState.pending != nil || model.isSynchronizingDetails) && boardCard != nil
         let shown = fresh ?? (rereading ? retainedDetails : nil)
         NavigationStack {
             ScrollViewReader { proxy in
@@ -79,6 +80,8 @@ struct RemoteCardDetail: View {
                     .frame(maxWidth: .infinity)
                     .padding(16)
                 }
+                .scrollBounceBehavior(.always, axes: .vertical)
+                .refreshable { await model.refreshContent() }
                 .background(Color(uiColor: .systemGroupedBackground))
                 .scrollPosition(id: $scrollTarget, anchor: .top)
                 .task(id: shown != nil) {
@@ -232,17 +235,12 @@ struct RemoteCardDetail: View {
                 } else if !model.supportsDetails {
                     Text(.RemoteDetail.remoteDetailUpdateMac).foregroundStyle(.secondary)
                 } else {
-                    if model.detailState.isLoading(now: context.date) {
+                    if model.isSynchronizingDetails || model.detailState.isLoading(now: context.date) {
                         ProgressView(.RemoteDetail.remoteDetailLoading)
                     }
-                    if model.detailState.failure != nil || model.detailState.hasTimedOut(now: context.date) {
-                        Text(model.detailState.failure == .changed ? .RemoteDetail.remoteDetailContextChanged : .RemoteDetail.remoteDetailReadFailed)
+                    if !model.isSynchronizingDetails, model.detailState.failure != nil || model.detailState.hasTimedOut(now: context.date) {
+                        Text(.RemoteDetail.remoteDetailReadFailed)
                             .foregroundStyle(.orange)
-                        if model.detailState.failure == .changed {
-                            Button { Task { await model.refresh(fromGitLab: true) } } label: {
-                                Label(.Remote.remoteRefreshData, systemImage: "arrow.clockwise").frame(minHeight: 44)
-                            }
-                        }
                     }
                 }
                 if let details = loadedDetails {
@@ -269,10 +267,10 @@ private struct RemoteDetailRefreshButton: View {
     @State private var now = Date()
 
     var body: some View {
-        let loading = model.detailState.isLoading(now: now)
+        let loading = model.isSynchronizingDetails || model.detailState.isLoading(now: now)
         Button {
-            guard let card else { return }
-            Task { await model.requestDetails(card: card, force: true) }
+            guard card != nil else { return }
+            Task { await model.refreshContent() }
         } label: {
             Image(systemName: "arrow.clockwise").opacity(loading ? 0 : 1)
                 .overlay { if loading { ProgressView() } }

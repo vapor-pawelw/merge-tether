@@ -361,7 +361,7 @@ import MergeTetherRemote
         #expect(f.transport.messages.allSatisfy { $0.detailResponse?.status != .current })
     }
 
-    @Test func duplicateReadsCoalesceAndAThrottledRequestDoesNotCancelTheExistingRead() async throws {
+    @Test func duplicateReadsCoalesceAndAFastReplacementLoadsWithoutAFalseFailure() async throws {
         let f = try Fixture(); defer { f.clean() }
         let board = try await f.board()
         f.heldReads = [1]
@@ -375,7 +375,10 @@ import MergeTetherRemote
         #expect(f.readerCount == 1)
         f.gitlab.write("release-1")
         await read.value
-        #expect(f.transport.messages.filter { $0.detailResponse?.status == .current }.map { $0.detailResponse?.request.id } == [request.id])
+        await f.host.detailTask?.value
+        #expect(f.readerCount == 2)
+        #expect(f.transport.messages.filter { $0.detailResponse?.status == .current }.map { $0.detailResponse?.request.id } == [replacement.id])
+        #expect(f.transport.messages.allSatisfy { $0.detailResponse?.status != .unavailable })
     }
 
     @Test func replacementAndCancellationDiscardTheOldReadWithoutTouchingAnyWriteState() async throws {

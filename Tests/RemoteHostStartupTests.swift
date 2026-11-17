@@ -307,6 +307,53 @@ struct RemoteHostSessionTests {
         #expect(!f.host.connected)
     }
 
+    @Test func aBackgroundRefreshDuringAcceptanceSettlesBeforeTheTargetActionIsRechecked() async throws {
+        let f = try Fixture(); defer { f.clean() }
+        await f.host.startupLoadTask?.value
+        let board = try await f.board(), previous = f.gitlab.handler
+        var refreshing: Task<Void, Never>?
+        f.transport.onSend = { message in
+            guard message.type == .accepted else { return }
+            f.gitlab.handler = { call in
+                if call.command.contains("/todos?") {
+                    f.gitlab.write("refresh-entered")
+                    try await f.gitlab.waitFor("refresh-release")
+                }
+                return try await previous!(call)
+            }
+            refreshing = Task { await f.monitor.refreshNow() }
+            while !f.gitlab.has("refresh-entered") { await Task.yield() }
+            Task {
+                try? await Task.sleep(for: .milliseconds(20))
+                f.gitlab.write("refresh-release")
+            }
+        }
+        await f.transport.onMessage?(.init(type: .command, command: try f.command(board)))
+        await refreshing?.value
+        #expect(f.transport.messages.last?.result?.status == .completed)
+        #expect(f.monitor.lifecycleCompletions.isEmpty)
+    }
+
+    @Test func anotherMRChangingDuringAcceptanceDoesNotInvalidateTheConfirmedAction() async throws {
+        let f = try Fixture(); defer { f.clean() }
+        await f.host.startupLoadTask?.value
+        let board = try await f.board()
+        f.transport.onSend = { message in
+            guard message.type == .accepted else { return }
+            let raw = #"{"project_id":9,"iid":13,"author":{"id":1,"username":"me","name":"Synthetic author"},"title":"Unrelated completion","web_url":"https://gitlab.example.test/team/other/-/merge_requests/13","state":"opened","draft":false,"sha":"head","source_branch":"feature","target_branch":"main","labels":[]}"#
+            let target = MRAutomationScope.Target(host: "gitlab.example.test", username: "me", projectID: 9, iid: 13)
+            if let opened = try? JSONDecoder().decode(GitLabMergeRequest.self, from: Data(raw.utf8)),
+               let closed = try? JSONDecoder().decode(GitLabMergeRequest.self, from: Data(raw.replacingOccurrences(of: "opened", with: "closed").utf8)) {
+                f.monitor.settings.mrLifecycleLedger.record(opened, for: target)
+                f.monitor.settings.mrLifecycleLedger.record(closed, for: target)
+            }
+        }
+        await f.transport.onMessage?(.init(type: .command, command: try f.command(board)))
+        #expect(f.transport.messages.last?.result?.status == .completed)
+        #expect(f.monitor.lifecycleCompletions.count == 1)
+        #expect(f.monitor.lifecycleCompletions.first?.target.projectID == 9)
+    }
+
     @Test func disconnectDuringAcceptancePreventsAnUnstartedWrite() async throws {
         let f = try Fixture()
         defer { f.clean() }

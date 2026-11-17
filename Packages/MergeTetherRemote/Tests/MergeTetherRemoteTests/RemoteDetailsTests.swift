@@ -3,6 +3,42 @@ import Testing
 @testable import MergeTetherRemote
 
 @Suite struct RemoteDetailsTests {
+    @Test func presentationIndependentReadsRemainBoundToContentAndDecodeLegacyRequests() throws {
+        let original = board(), card = original.cards[0]
+        let legacy = try RemoteDetailRequest(card: card, board: original)
+        #expect(legacy.contentDigest == nil)
+        #expect(try JSONDecoder().decode(RemoteDetailRequest.self, from: JSONEncoder().encode(legacy)) == legacy)
+        let current = try RemoteDetailRequest(card: card, board: original, presentationIndependent: true)
+        #expect(current.contentDigest != nil)
+        #expect(try JSONDecoder().decode(RemoteDetailRequest.self, from: JSONEncoder().encode(current)) == current)
+        for change in ["head", "text", "draft", "action", "account", "session"] {
+            var changed = original
+            switch change {
+            case "head": changed.lanes[0].cards[0].head = "new-head"
+            case "text": changed.lanes[0].cards[0].contextRevision = "edited-description"
+            case "draft": changed.lanes[0].cards[0].drafts = [.init(id: 11, body: "New reply")]
+            case "action": changed.lanes[0].cards[0].actions = [.init(id: "approve", kind: .approve, token: "new")]
+            case "account": changed.account = "other"
+            default: changed.hostSession = UUID()
+            }
+            #expect(!current.matches(changed))
+        }
+    }
+
+    @MainActor @Test func presentationUpdatesDoNotInterruptAnOpenDetailsRead() throws {
+        var board = board()
+        let state = RemoteDetailState()
+        let request = try #require(state.begin(card: board.cards[0], board: board, now: date))
+        board.lanes[0].cards[0].presentation = .init(repository: "p", status: "Checking feedback", working: true)
+        board.lanes[0].cards[0].detail = "Updated explanation"
+        board.lanes[0].cards[0].needsAttention = true
+        state.update(board: board)
+        #expect(state.pending == request)
+        #expect(state.failure == nil)
+        state.receive(.init(request: request, status: .current, details: .init(checkedAt: date)), board: board)
+        #expect(state.details(for: board.cards[0], board: board)?.checkedAt == date)
+    }
+
     @Test func threadDraftLinksSurviveTransportAndBoundedExcerpts() throws {
         // given
         let payload = Data(#"{"id":"discussion/first","state":"resolved","notes":[{"id":"1","body":"Concern"}],"reply":"none","draftCount":2,"draftIDs":[11,12],"truncated":false}"#.utf8)

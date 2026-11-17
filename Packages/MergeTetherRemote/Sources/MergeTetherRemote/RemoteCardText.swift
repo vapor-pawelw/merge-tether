@@ -12,14 +12,29 @@ public struct RemoteCardSelection: Identifiable, Equatable, Sendable {
     }
 
     public func action(in current: RemoteCard) -> RemoteAction? {
-        guard current == card, let id = cta?.actionID else { return nil }
-        return current.actions.first { $0.id == id }
+        guard current.hasSameActionContext(as: card), let id = cta?.actionID,
+              let advertised = card.actions.first(where: { $0.id == id }) else { return nil }
+        return current.actions.first { $0 == advertised }
     }
 }
 
 /// The phone shows each sentence once, like the Mac card: a status or next step that repeats
 /// the card's explanation adds nothing, and older hosts may still send such repeats.
 public extension RemoteCard {
+    func hasSameActionContext(as other: RemoteCard) -> Bool {
+        id == other.id && title == other.title && project == other.project && url == other.url
+            && head == other.head && contextRevision == other.contextRevision && drafts == other.drafts
+    }
+
+    var detailContextDigest: String? {
+        var content = self
+        content.detail = ""
+        content.presentation = nil
+        content.needsAttention = nil
+        content.primaryCTA = nil
+        return try? RemoteDigest.token(content)
+    }
+
     var visibleStatus: String? {
         guard let status = presentation?.status?.trimmingCharacters(in: .whitespacesAndNewlines), !status.isEmpty,
               !Self.repeats(status, in: [detail]) else { return nil }

@@ -3,6 +3,17 @@ import Testing
 @testable import MergeTetherRemote
 
 @MainActor @Suite struct PhoneStateTests {
+    @Test func presentationUpdatesPreserveTheExactConfirmedAction() throws {
+        let state = RemotePhoneState(), now = Date()
+        var board = CommandGateTests().board()
+        let card = board.cards[0], action = card.actions[0]
+        state.receive(.init(type: .snapshot, challenge: state.challenge(now: now), board: board), now: now)
+        board.lanes[0].cards[0].presentation = .init(repository: "p", status: "Monitoring", working: false)
+        state.receive(.init(type: .snapshot, challenge: state.challenge(now: now), board: board), now: now)
+        let command = try #require(state.command(card: card, action: action, now: now))
+        #expect(command.actionID == action.id && command.token == action.token)
+    }
+
     @Test func onlyFreshChallengeEnablesActionsAndDisconnectKeepsBoard() {
         let state = RemotePhoneState(), now = Date()
         let board = CommandGateTests().board()

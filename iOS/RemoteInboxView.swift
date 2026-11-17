@@ -7,6 +7,7 @@ struct RemoteInboxView: View {
     let onOpenCTA: (RemoteCard, RemoteCardCTA) -> Void
     var onFinishCommentReview: ((RemoteCard) -> Void)? = nil
     var canAct: ((Date) -> Bool)? = nil
+    var onRefresh: (() async -> Void)? = nil
     @Environment(\.dismiss) private var dismiss
 
     private var triageCards: [RemoteCard] {
@@ -51,6 +52,8 @@ struct RemoteInboxView: View {
                     .frame(maxWidth: .infinity, alignment: .leading)
                     .padding(16)
                 }
+                .scrollBounceBehavior(.always, axes: .vertical)
+                .refreshable { await onRefresh?() }
             }
         }
         .background(.background)

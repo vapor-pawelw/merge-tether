@@ -19,7 +19,13 @@ enum RemotePhoneConnectionStatus { case unpaired, connecting, connected, offline
     var state = RemotePhoneState()
     let detailState = RemoteDetailState()
     private(set) var supportsDetails = false
+    private(set) var supportsDetailContext = false
     private(set) var supportsOriginUpdates = false
+    private(set) var isSynchronizingDetails = false
+    private var viewedCardID: String?
+    private var needsDetailReload = false
+    private var detailRecoveryAttempts = 0
+    @ObservationIgnored private var contentRefresh: Task<Void, Never>?
     var paired = false
     var error = false
     private(set) var pairingRevision = UUID()
@@ -122,6 +128,8 @@ enum RemotePhoneConnectionStatus { case unpaired, connecting, connected, offline
                 if !connected {
                     self.connectionRevision = UUID(); self.cancelApproval(); self.state.disconnected()
                     self.detailState.disconnect(); self.supportsDetails = false; self.supportsOriginUpdates = false
+                    self.supportsDetailContext = false; self.isSynchronizingDetails = false
+                    self.contentRefresh?.cancel(); self.contentRefresh = nil
                     self.shouldRecoverCommand = self.recovery != nil
                     self.receiptChallenge = nil; self.receiptRevision = nil
                 }
@@ -137,7 +145,10 @@ enum RemotePhoneConnectionStatus { case unpaired, connecting, connected, offline
             connection.onMessage = { [weak self, weak connection] message in
                 guard let self, let connection, self.connection === connection else { return }
                 if message.type == .hostReady { await self.refresh(force: true); return }
-                if message.type == .unavailable { self.state.refreshFailed(); self.error = true; self.connectionFailed = true; return }
+                if message.type == .unavailable {
+                    self.state.refreshFailed(); self.error = true; self.connectionFailed = true
+                    self.isSynchronizingDetails = false; return
+                }
                 if message.type == .receiptResult {
                     guard let result = message.result, result.id == self.recovery?.command.id,
                           let challenge = self.receiptChallenge, message.challenge == challenge,
@@ -146,6 +157,7 @@ enum RemotePhoneConnectionStatus { case unpaired, connecting, connected, offline
                     self.receiptChallenge = nil; self.receiptRevision = nil
                     self.state.recoverResult(result)
                     self.shouldRecoverCommand = result.status == .running
+                    if result.status != .running { await self.refreshAfterAction() }
                     return
                 }
                 if message.type == .details {
@@ -156,22 +168,36 @@ enum RemotePhoneConnectionStatus { case unpaired, connecting, connected, offline
                         return
                     }
                     guard let response = message.detailResponse else { return }
+                    guard response.request == self.detailState.pending else { return }
+                    if response.status == .changed, self.detailRecoveryAttempts < 2 {
+                        self.detailRecoveryAttempts += 1
+                        self.detailState.prepareToReload()
+                        self.needsDetailReload = true
+                        self.isSynchronizingDetails = true
+                        if self.state.pending == nil { await self.refresh(force: true, fromGitLab: true) }
+                        return
+                    }
                     self.detailState.receive(response, board: board)
+                    self.isSynchronizingDetails = false
+                    if response.status == .current { self.detailRecoveryAttempts = 0 }
                     return
                 }
                 let accepted = self.state.receive(message, now: self.now())
                 if accepted, message.type == .snapshot, self.state.isConnected(now: self.now()) {
                     self.supportsDetails = message.capabilities?.contains(RemoteMessage.detailsCapability) == true
+                    self.supportsDetailContext = self.supportsDetails && message.capabilities?.contains(RemoteMessage.detailContextCapability) == true
                     self.supportsOriginUpdates = self.supportsDetails && message.capabilities?.contains(RemoteMessage.detailOriginsCapability) == true
                     if let board = self.state.board { self.detailState.update(board: board) }
+                    if self.viewedCardID != nil, self.detailState.failure == .changed { self.isSynchronizingDetails = true }
                     self.error = self.recoveryUnavailable; self.connectionFailed = false; self.connectingUntil = .distantPast
                     await self.recoverLastCommand()
+                    await self.refreshViewedDetails()
                     // A slow reply can consume most of its lease; renew before the next timer tick.
                     if self.state.needsRefresh(now: self.now()) { await self.refresh() }
                 }
-                if message.type == .result {
-                    if let result = message.result, result == self.state.result { self.shouldRecoverCommand = false }
-                    await self.refresh()
+                if accepted, message.type == .result, let result = message.result, result.status != .running {
+                    self.shouldRecoverCommand = false
+                    await self.refreshAfterAction()
                 }
             }
             self.connection = connection; connection.start()
@@ -181,6 +207,8 @@ enum RemotePhoneConnectionStatus { case unpaired, connecting, connected, offline
         let old = connection; connection = nil; connectionRevision = UUID()
         old?.stop(); cancelApproval(); state.disconnected(); connectingUntil = .distantPast
         detailState.disconnect(); supportsDetails = false; supportsOriginUpdates = false
+        supportsDetailContext = false; isSynchronizingDetails = false
+        contentRefresh?.cancel(); contentRefresh = nil
         shouldRecoverCommand = recovery != nil; receiptChallenge = nil; receiptRevision = nil
     }
     /// `fromGitLab` is for the user's Refresh: the Mac reads GitLab first. Other hellos return its current board.
@@ -194,12 +222,60 @@ enum RemotePhoneConnectionStatus { case unpaired, connecting, connected, offline
             refresh: fromGitLab ? true : nil)) }
         catch {
             guard !Task.isCancelled, self.connection === connection, self.state === requestState else { return }
-            if requestState.refreshFailed(challenge: challenge) { self.error = true; self.connectionFailed = true }
+            if requestState.refreshFailed(challenge: challenge) {
+                self.error = true; self.connectionFailed = true; self.isSynchronizingDetails = false
+            }
         }
     }
+    func refreshContent() async {
+        if let contentRefresh { await contentRefresh.value; return }
+        let task = Task { @MainActor [weak self] in
+            guard let self else { return }
+            self.detailRecoveryAttempts = 0
+            self.needsDetailReload = self.viewedCardID != nil
+            self.isSynchronizingDetails = self.viewedCardID != nil
+            self.detailState.prepareToReload()
+            let revision = self.connectionRevision
+            let deadline = ContinuousClock.now + .seconds(45)
+            await self.refresh(force: true, fromGitLab: true)
+            while !Task.isCancelled, self.connectionRevision == revision, ContinuousClock.now < deadline,
+                  self.state.isRefreshing(now: self.now()) || self.detailState.isLoading(now: self.now()) {
+                do { try await Task.sleep(for: .milliseconds(100)) } catch { return }
+            }
+            if self.connectionRevision == revision { self.isSynchronizingDetails = false }
+        }
+        contentRefresh = task
+        await task.value
+        if !task.isCancelled { contentRefresh = nil }
+    }
+
+    private func refreshAfterAction() async {
+        needsDetailReload = viewedCardID != nil
+        isSynchronizingDetails = viewedCardID != nil
+        detailRecoveryAttempts = 0
+        detailState.prepareToReload()
+        await refresh(force: true, fromGitLab: true)
+    }
+
+    private func refreshViewedDetails() async {
+        guard supportsDetails, let id = viewedCardID, let card = state.board?.cards.first(where: { $0.id == id }) else {
+            isSynchronizingDetails = false; return
+        }
+        await requestDetails(card: card, force: needsDetailReload)
+    }
+
     func requestDetails(card: RemoteCard, force: Bool = false) async {
+        guard state.board?.cards.contains(where: { $0.id == card.id }) == true else { return }
+        if viewedCardID != card.id { detailRecoveryAttempts = 0 }
+        viewedCardID = card.id
+        if state.pending != nil || state.isRefreshing(now: now()) {
+            needsDetailReload = true; isSynchronizingDetails = true; return
+        }
         guard supportsDetails, state.isConnected(now: now()), let board = state.board, let connection,
-              let request = detailState.begin(card: card, board: board, now: now(), force: force) else { return }
+              force || detailState.openRequest == nil || detailState.details(for: card, board: board) == nil,
+              let request = detailState.begin(card: card, board: board, now: now(), force: force,
+                  presentationIndependent: supportsDetailContext) else { return }
+        needsDetailReload = false; isSynchronizingDetails = false
         let revision = connectionRevision
         do { try await connection.send(.init(type: .detailRequest, detailRequest: request)) }
         catch {
@@ -210,6 +286,7 @@ enum RemotePhoneConnectionStatus { case unpaired, connecting, connected, offline
     func cancelDetails() {
         let request = detailState.openRequest ?? detailState.pending
         detailState.disconnect()
+        viewedCardID = nil; needsDetailReload = false; isSynchronizingDetails = false; detailRecoveryAttempts = 0
         guard supportsDetails, let request, let connection else { return }
         Task { try? await connection.send(.init(type: .cancelDetails, detailRequest: request)) }
     }
@@ -217,7 +294,7 @@ enum RemotePhoneConnectionStatus { case unpaired, connecting, connected, offline
         cancelApproval()
         guard connection != nil, !recoveryUnavailable, recovery == nil, action.kind == .approve, card.head != nil,
               state.canAct(now: now()), let board = state.board,
-              board.cards.contains(where: { $0 == card && $0.actions.contains(action) }) else { return nil }
+              board.cards.contains(where: { $0.hasSameActionContext(as: card) && $0.actions.contains(action) }) else { return nil }
         let id = UUID()
         approvalConfirmation = .init(id: id, card: card, action: action, hostSession: board.hostSession,
             account: board.account, connectionRevision: connectionRevision, state: state, expiresAt: now().addingTimeInterval(30))
@@ -229,7 +306,6 @@ enum RemotePhoneConnectionStatus { case unpaired, connecting, connected, offline
         guard let action = card.actions.first(where: { $0.kind == .setCommentOrigin }),
               let argument = request.argument else { return }
         await perform(card: card, action: action, argument: argument)
-        await requestDetails(card: state.board?.cards.first { $0.id == card.id } ?? card, force: true)
     }
     func perform(card: RemoteCard, action: RemoteAction, approvalID: UUID? = nil, argument: String? = nil) async {
         if action.kind == .approve {
@@ -238,7 +314,7 @@ enum RemotePhoneConnectionStatus { case unpaired, connecting, connected, offline
             guard let confirmation, confirmation.id == approvalID, confirmation.card == card, confirmation.action == action,
                   confirmation.state === state, confirmation.connectionRevision == connectionRevision, now() < confirmation.expiresAt,
                   state.board?.hostSession == confirmation.hostSession, state.board?.account == confirmation.account,
-                  state.board?.cards.contains(card) == true else { return }
+                  state.board?.cards.contains(where: { $0.hasSameActionContext(as: card) && $0.actions.contains(action) }) == true else { return }
         }
         let requestState = state, revision = connectionRevision
         guard !recoveryUnavailable, recovery == nil, let pairing, let connection,

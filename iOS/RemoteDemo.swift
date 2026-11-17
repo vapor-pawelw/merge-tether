@@ -5,7 +5,8 @@ import MergeTetherRemote
 @MainActor enum RemoteDemo {
     static func makeModel() -> RemotePhoneModel? {
         let arguments = CommandLine.arguments
-        let draftPreview = arguments.contains("--remote-preview-draft")
+        let staleDetails = arguments.contains("--remote-preview-stale-details")
+        let draftPreview = arguments.contains("--remote-preview-draft") || staleDetails
         let boardPreview = arguments.contains("--remote-preview") || draftPreview
         let previewBoard = draftPreview ? draftBoard : board
         let connecting = arguments.contains("--remote-preview-connecting")
@@ -18,7 +19,8 @@ import MergeTetherRemote
         let model = RemotePhoneModel(relayConfiguration: .init(rawOrigin: pairing.origin.absoluteString), loadPairing: { pairing }, savePairing: { _ in },
             loadRecovery: { nil }, saveRecovery: { _ in }, removeRecovery: {}, makeConnection: { _ in
             connections += 1
-            return PreviewTransport(board: boardPreview ? previewBoard : nil, delay: connections > 1, failed: failed)
+            return PreviewTransport(board: boardPreview ? previewBoard : nil, delay: connections > 1, failed: failed,
+                staleDetails: staleDetails)
         }, now: { Date().addingTimeInterval(offline ? -46 : 0) })
         if boardPreview { model.state.receive(.init(type: .snapshot, challenge: model.state.challenge(), board: previewBoard)) }
         return model
@@ -133,22 +135,43 @@ import MergeTetherRemote
 @MainActor private final class PreviewTransport: RemotePhoneTransport {
     var onMessage: (@MainActor (RemoteMessage) async -> Void)?
     var onStatus: (@MainActor (Bool, Bool) -> Void)?
-    let board: RemoteBoard?
+    var board: RemoteBoard?
     let delay: Bool
     let failed: Bool
-    init(board: RemoteBoard?, delay: Bool, failed: Bool) { self.board = board; self.delay = delay; self.failed = failed }
+    private var staleDetails: Bool
+    init(board: RemoteBoard?, delay: Bool, failed: Bool, staleDetails: Bool = false) {
+        self.board = board; self.delay = delay; self.failed = failed; self.staleDetails = staleDetails
+    }
     func start() { onStatus?(!failed, failed) }
     func stop() { onStatus?(false, false) }
     func send(_ message: RemoteMessage) async throws {
-        if message.type == .hello, let board {
+        if message.type == .hello, var board {
             if delay { try await Task.sleep(for: .seconds(8)) }
+            if message.refresh == true { try await Task.sleep(for: .milliseconds(300)); board.updatedAt = .now; self.board = board }
             await onMessage?(.init(type: .snapshot, challenge: message.challenge, board: board,
-                capabilities: [RemoteMessage.detailsCapability]))
+                capabilities: [RemoteMessage.detailsCapability, RemoteMessage.detailContextCapability]))
         } else if message.type == .detailRequest, let request = message.detailRequest, let board,
                   request.matches(board), let card = board.cards.first(where: { $0.id == request.cardID }) {
+            if staleDetails {
+                staleDetails = false
+                await onMessage?(.init(type: .details, detailResponse: .init(request: request, status: .changed)))
+                return
+            }
             await onMessage?(.init(type: .details, detailResponse: .init(request: request, status: .current,
                 details: RemoteDemo.details(for: card))))
         } else if let command = message.command {
+            if command.actionID == "markReady", var board {
+                for lane in board.lanes.indices {
+                    for index in board.lanes[lane].cards.indices where board.lanes[lane].cards[index].id == command.cardID {
+                        board.lanes[lane].cards[index].title = board.lanes[lane].cards[index].title.replacingOccurrences(of: "Draft: ", with: "")
+                        board.lanes[lane].cards[index].presentation?.draftBadge = nil
+                        board.lanes[lane].cards[index].actions = []
+                        board.lanes[lane].cards[index].primaryCTA = nil
+                        board.lanes[lane].cards[index].contextRevision = "ready"
+                    }
+                }
+                self.board = board
+            }
             await onMessage?(.init(type: .result, result: .init(id: command.id, status: .completed)))
         }
     }

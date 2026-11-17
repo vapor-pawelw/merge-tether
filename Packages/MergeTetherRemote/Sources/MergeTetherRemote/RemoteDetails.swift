@@ -7,14 +7,20 @@ public struct RemoteDetailRequest: Codable, Equatable, Sendable {
     public let account: String
     public let cardID: String
     public let cardDigest: String
-    public init(card: RemoteCard, board: RemoteBoard) throws {
+    public let contentDigest: String?
+    public init(card: RemoteCard, board: RemoteBoard, presentationIndependent: Bool = false) throws {
         guard card.id.utf8.count <= 128, board.account.utf8.count <= 1_024 else { throw RemoteProtocolError.invalid }
         id = UUID(); hostSession = board.hostSession; account = board.account
         cardID = card.id; cardDigest = try RemoteDigest.token(card)
+        contentDigest = presentationIndependent ? card.detailContextDigest : nil
     }
     public func matches(_ board: RemoteBoard) -> Bool {
         isValid && hostSession == board.hostSession && account == board.account
-            && board.cards.contains { $0.id == cardID && Self.digests($0).contains(cardDigest) }
+            && board.cards.contains { card in
+                guard card.id == cardID else { return false }
+                if let contentDigest { return card.detailContextDigest == contentDigest }
+                return Self.digests(card).contains(cardDigest)
+            }
     }
     /// Older phones drop fields they do not know before hashing the card they open:
     /// action links and discussion destinations, the pending-drafts line and reply recipients,
@@ -38,7 +44,10 @@ public struct RemoteDetailRequest: Codable, Equatable, Sendable {
         }
         return Set((versions + olderDestinations).compactMap { try? RemoteDigest.token($0) })
     }
-    public var isValid: Bool { cardID.utf8.count <= 128 && account.utf8.count <= 1_024 && cardDigest.utf8.count == 64 }
+    public var isValid: Bool {
+        cardID.utf8.count <= 128 && account.utf8.count <= 1_024 && cardDigest.utf8.count == 64
+            && (contentDigest == nil || contentDigest?.utf8.count == 64)
+    }
 }
 
 /// A GitLab person; optional so older paired installations keep decoding details.
@@ -378,10 +387,11 @@ public struct RemoteDetailResponse: Codable, Equatable, Sendable {
     private var originRevisions: [String: UInt64] = [:]
     private var authorKindRevisions: [String: UInt64] = [:]
     public init() {}
-    public func begin(card: RemoteCard, board: RemoteBoard, now: Date = Date(), force: Bool = false) -> RemoteDetailRequest? {
+    public func begin(card: RemoteCard, board: RemoteBoard, now: Date = Date(), force: Bool = false,
+                      presentationIndependent: Bool = true) -> RemoteDetailRequest? {
         guard board.cards.contains(card), card.id.hasPrefix("mr:"),
               force || pending == nil || !isLoading(now: now),
-              let request = try? RemoteDetailRequest(card: card, board: board) else { return nil }
+              let request = try? RemoteDetailRequest(card: card, board: board, presentationIndependent: presentationIndependent) else { return nil }
         pending = request; openRequest = request; deadline = now.addingTimeInterval(45); failure = nil
         originRevisions = [:]
         authorKindRevisions = [:]
@@ -403,6 +413,7 @@ public struct RemoteDetailResponse: Codable, Equatable, Sendable {
         if let pending, !pending.matches(board) { self.pending = nil; failure = .changed }
     }
     public func disconnect() { pending = nil; openRequest = nil; originRevisions = [:]; authorKindRevisions = [:] }
+    public func prepareToReload() { disconnect(); failure = nil }
 
     @discardableResult public func receiveOrigins(_ update: RemoteDetailOrigins, board: RemoteBoard) -> Bool {
         let authors = update.authorKinds ?? []
