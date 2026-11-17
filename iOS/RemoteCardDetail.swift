@@ -43,37 +43,17 @@ struct RemoteCardDetail: View {
             ScrollViewReader { proxy in
                 ScrollView(showsIndicators: false) {
                     // Lazy: off-screen sections are not laid out again on each board update.
-                    LazyVStack(alignment: .leading, spacing: 24) {
-                        RemoteCardView(card: headerCard(shown), expanded: true).id(RemoteCardCTA.Destination.overview)
-                        if let branches = shown?.branches {
-                            Label { Text(verbatim: branches.source + " → " + branches.target) } icon: {
-                                Image(systemName: "arrow.triangle.branch")
-                            }
-                            .font(.callout.monospaced()).foregroundStyle(.secondary).textSelection(.enabled)
-                            .frame(maxWidth: .infinity, alignment: .leading)
-                            .fixedSize(horizontal: false, vertical: true)
-                            .accessibilityLabel(Text(.RemoteDetail.remoteDetailBranches(branches.source, branches.target)))
-                        }
-                        Menu {
-                            Button(.RemoteDetail.remoteDetailOverview) { proxy.scrollTo(RemoteCardCTA.Destination.overview, anchor: .top) }
-                            Button(.RemoteDetail.remoteDetailPendingDrafts) { proxy.scrollTo(RemoteCardCTA.Destination.drafts, anchor: .top) }
-                            Button(.RemoteDetail.remoteDetailActions) { proxy.scrollTo(RemoteCardCTA.Destination.actions, anchor: .top) }
-                            Button(.RemoteDetail.remoteDetailFeedback) { proxy.scrollTo(RemoteCardCTA.Destination.feedback, anchor: .top) }
-                            Button(.RemoteDetail.remoteDetailDiscussions) { proxy.scrollTo(RemoteCardCTA.Destination.discussions, anchor: .top) }
-                            Button(.RemoteDetail.remoteDetailApprovals) { proxy.scrollTo(RemoteDetailAnchor.approvals, anchor: .top) }
-                            Button(.RemoteDetail.remoteDetailActivity) { proxy.scrollTo(RemoteCardCTA.Destination.assistantRuns, anchor: .top) }
-                        } label: {
-                            Label(.RemoteDetail.remoteDetailSections, systemImage: "list.bullet")
-                                .frame(minHeight: 44)
+                    LazyVStack(alignment: .leading, spacing: 16) {
+                        VStack(alignment: .leading, spacing: 10) {
+                            RemoteCardView(card: headerCard(shown), expanded: true, branches: shown?.branches)
+                                .id(RemoteCardCTA.Destination.overview)
+                            if current.id.hasPrefix("mr:") { detailReadStatus(fresh) }
                         }
                         if current.primaryCTA?.destination == .setup {
                             Text(.Remote.remoteSetupOnMac).foregroundStyle(.secondary).id(RemoteCardCTA.Destination.setup)
-                        } else if !current.actions.contains(where: { $0.kind != .setCommentOrigin }), let destination = current.primaryCTA?.destination,
-                                  destination != .drafts {
+                        } else if !current.actions.contains(where: { $0.kind != .setCommentOrigin }),
+                                  current.primaryCTA?.destination == .actions {
                             Text(.Remote.remoteCompleteOnMac).foregroundStyle(.secondary)
-                        }
-                        if current.id.hasPrefix("mr:") {
-                            detailReadStatus(fresh)
                         }
                         if initialActionChanged {
                             Text(.Remote.remoteChanged).font(.callout).foregroundStyle(.orange)
@@ -125,18 +105,21 @@ struct RemoteCardDetail: View {
                 .onChange(of: fresh) { _, value in if let value { retainedDetails = value } }
                 .onChange(of: detailIdentity.session) { _, _ in retainedDetails = nil }
                 .onChange(of: detailIdentity.account) { _, _ in retainedDetails = nil }
-            }
-            .navigationTitle(Text(verbatim: current.title))
-            .navigationBarTitleDisplayMode(.inline)
-            .toolbar {
-                ToolbarItem(placement: .topBarLeading) {
-                    if let url = current.url, ["https", "http"].contains(url.scheme?.lowercased() ?? "") {
-                        Link(destination: url) { Image(systemName: "arrow.up.right.square") }
-                            .accessibilityLabel(Text(.Remote.remoteOpen))
+                .toolbar {
+                    ToolbarItem(placement: .topBarLeading) {
+                        Button { dismiss() } label: { Image(systemName: "xmark") }
+                            .accessibilityLabel(Text(.Remote.remoteClose))
+                    }
+                    ToolbarItemGroup(placement: .topBarTrailing) {
+                        if current.id.hasPrefix("mr:") { RemoteDetailRefreshButton(model: model, card: boardCard) }
+                        sectionMenu(proxy)
                     }
                 }
-                ToolbarItem(placement: .topBarTrailing) { Button(.Remote.remoteClose) { dismiss() } }
             }
+            .navigationTitle(Text(verbatim: current.mergeRequestIID.map {
+                (current.presentation?.repository ?? current.project) + " · !\($0)"
+            } ?? current.title))
+            .navigationBarTitleDisplayMode(.inline)
             .alert(Text(confirmation?.kind.title ?? .Remote.remoteConfirm), isPresented: Binding(
                 get: { confirmation != nil }, set: { if !$0 { confirmation = nil } }
             )) {
@@ -158,6 +141,24 @@ struct RemoteCardDetail: View {
             }
             .onDisappear { model.cancelApproval(); model.cancelDetails() }
         }
+    }
+
+    private func sectionMenu(_ proxy: ScrollViewProxy) -> some View {
+        Menu {
+            Button(.RemoteDetail.remoteDetailOverview) { proxy.scrollTo(RemoteCardCTA.Destination.overview, anchor: .top) }
+            Button(.RemoteDetail.remoteDetailPendingDrafts) { proxy.scrollTo(RemoteCardCTA.Destination.drafts, anchor: .top) }
+            Button(.RemoteDetail.remoteDetailActions) { proxy.scrollTo(RemoteCardCTA.Destination.actions, anchor: .top) }
+            Button(.RemoteDetail.remoteDetailFeedback) { proxy.scrollTo(RemoteCardCTA.Destination.feedback, anchor: .top) }
+            Button(.RemoteDetail.remoteDetailDiscussions) { proxy.scrollTo(RemoteCardCTA.Destination.discussions, anchor: .top) }
+            Button(.RemoteDetail.remoteDetailApprovals) { proxy.scrollTo(RemoteDetailAnchor.approvals, anchor: .top) }
+            Button(.RemoteDetail.remoteDetailActivity) { proxy.scrollTo(RemoteCardCTA.Destination.assistantRuns, anchor: .top) }
+            if let url = current.url, ["https", "http"].contains(url.scheme?.lowercased() ?? "") {
+                Divider()
+                Link(destination: url) { Label(.Remote.remoteOpen, systemImage: "arrow.up.right.square") }
+            }
+        } label: { Image(systemName: "list.bullet") }
+        .accessibilityLabel(Text(.RemoteDetail.remoteDetailSections))
+        .accessibilityIdentifier("remote.details.sections")
     }
 
     private func showConfirmation(_ action: RemoteAction) {
@@ -243,11 +244,6 @@ struct RemoteCardDetail: View {
                             }
                         }
                     }
-                    Button { Task { await model.requestDetails(card: current, force: true) } } label: {
-                        Label(.RemoteDetail.remoteDetailRefresh, systemImage: "arrow.clockwise")
-                            .frame(minHeight: 44)
-                    }
-                    .disabled(model.detailState.isLoading(now: context.date))
                 }
                 if let details = loadedDetails {
                     HStack {
@@ -263,6 +259,32 @@ struct RemoteCardDetail: View {
                     }
                 }
             }.font(.callout).fixedSize(horizontal: false, vertical: true)
+        }
+    }
+}
+
+private struct RemoteDetailRefreshButton: View {
+    let model: RemotePhoneModel
+    let card: RemoteCard?
+    @State private var now = Date()
+
+    var body: some View {
+        let loading = model.detailState.isLoading(now: now)
+        Button {
+            guard let card else { return }
+            Task { await model.requestDetails(card: card, force: true) }
+        } label: {
+            Image(systemName: "arrow.clockwise").opacity(loading ? 0 : 1)
+                .overlay { if loading { ProgressView() } }
+        }
+        .accessibilityLabel(Text(.RemoteDetail.remoteDetailRefresh))
+        .accessibilityIdentifier("remote.details.refresh")
+        .disabled(card == nil || !model.supportsDetails || loading || model.connectionStatus(now: now) != .connected)
+        .task {
+            while !Task.isCancelled {
+                now = Date()
+                do { try await Task.sleep(for: .seconds(1)) } catch { return }
+            }
         }
     }
 }

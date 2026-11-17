@@ -18,6 +18,7 @@ extension RemoteActionKind {
     var title: LocalizedStringResource {
         switch self {
         case .checkThreads: .MergeActions.mergeActionsCheckThreads
+        case .markReady: .Remote.remoteMarkReady
         case .merge: .MergeActions.mergeActionsMergeNow
         case .enqueueMerge: .MergeActions.mergeActionsEnqueue
         case .resolveThreads: .MergeActions.mergeActionsResolveConfirm

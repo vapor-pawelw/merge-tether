@@ -254,4 +254,6 @@ Within cryptographic protocol v2, `merge-actions-v1` names the independent actio
 
 `mr-controls-v1` follows the same rule for `publishDraft`, `runReview`, `stopJob`, `ignoreSuggestion` and `restoreSuggestion`: clients that do not advertise it never receive those cases. Actions may carry an additive `label` for per-item buttons.
 
+`mark-ready-v1` independently enables `markReady` for your own open Draft MRs. The Mac uses the same account, ownership, source-commit and result checks as its local button. Confirmation explains that configured automation may resume. Phones without this capability receive neither the new action nor its bound CTA. Update both apps to use it; existing v2 pairing remains valid.
+
 Approval metadata keeps the legacy `completed` field bounded for older decoders. The additive `received` field carries every current unique approver, including 5/2, and `requirementsSatisfied` preserves the distinction between total approvals and satisfaction of specific required rules. Updated phones use those fields for text, help and badge state.

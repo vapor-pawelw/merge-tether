@@ -1592,6 +1592,40 @@
           }
         }
       }
+    },
+    "remote.markReady": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Mark ready"
+          }
+        },
+        "pl": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Oznacz jako gotowy"
+          }
+        }
+      }
+    },
+    "remote.markReadyHelp": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Marks this draft merge request ready in GitLab. Configured automation may resume. This does not merge the request."
+          }
+        },
+        "pl": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Oznacza ten roboczy merge request jako gotowy w GitLabie. Skonfigurowana automatyzacja może zostać wznowiona. Ta akcja nie scala zmian."
+          }
+        }
+      }
     }
   },
   "version": "1.0"

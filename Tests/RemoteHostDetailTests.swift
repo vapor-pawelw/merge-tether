@@ -4,6 +4,32 @@ import MergeTetherRemote
 @testable import GitLabTodos
 
 @MainActor @Suite struct RemoteHostDetailTests {
+    @Test(arguments: ["ready", "headChanged", "lostResponse"])
+    func phoneMarkReadyUsesTheMacWorkflowAndNeverReplaysAnUncertainWrite(_ scenario: String) async throws {
+        let f = try Fixture(draft: true); defer { f.clean() }
+        let board = try await f.board(markReady: true)
+        let card = try #require(board.cards.first { $0.id == "mr:1:2" })
+        let action = try #require(card.actions.first { $0.kind == .markReady })
+        let command = RemoteCommand(hostSession: board.hostSession, account: board.account,
+            cardID: card.id, actionID: action.id, token: action.token)
+        if scenario == "headChanged" {
+            f.gitlab.write("request", f.gitlab.text("request").replacingOccurrences(
+                of: String(repeating: "a", count: 40), with: String(repeating: "b", count: 40)))
+        }
+        if scenario == "lostResponse" { f.gitlab.write("lose-ready-response") }
+        await f.transport.onMessage?(.init(type: .command, command: command))
+        let result = try #require(f.transport.messages.last { $0.type == .result }?.result)
+        #expect(result.status == (scenario == "ready" ? .completed : scenario == "headChanged" ? .changed : .uncertain))
+        let writes = f.gitlab.requests.filter { $0.arguments.starts(with: ["mr", "update"]) }
+        #expect(writes.count == (scenario == "headChanged" ? 0 : 1))
+        if scenario != "headChanged" {
+            #expect(writes.first?.arguments.contains("--ready") == true)
+            #expect(f.gitlab.text("request").contains("\"draft\":false"))
+            await f.transport.onMessage?(.init(type: .command, command: command))
+            #expect(f.gitlab.requests.filter { $0.arguments.starts(with: ["mr", "update"]) }.count == 1)
+        }
+    }
+
     @Test(arguments: [false, true])
     func lateAuthorIdentityPaintsAnOpenPhoneWithoutAnotherDetailsRead(_ supported: Bool) async throws {
         let f = try Fixture(); defer { f.clean() }
@@ -413,7 +439,7 @@ import MergeTetherRemote
                     threads: detailNotes.isEmpty ? nil : [.init(id: "thread", state: .open, notes: detailNotes)], truncated: detailsTruncated)
             }, makeConnection: { [transport] _ in transport })
 
-        init() throws {
+        init(draft: Bool = false) throws {
             defaults = try #require(UserDefaults(suiteName: suite))
             let settings = SettingsManager(defaults: defaults)
             settings.onboardingCompleted = false
@@ -421,27 +447,35 @@ import MergeTetherRemote
             let glab = gitlab.service(host: "gitlab.example.test", username: "me")
             settings.glabPath = glab.glabPath; settings.resolvedHost = glab.resolvedHost
             let raw = #"{"project_id":1,"iid":2,"author":{"id":3,"username":"me","name":"Me"},"title":"Feature","description":"Context","labels":[],"web_url":"https://gitlab.example.test/g/p/-/merge_requests/2","state":"opened","draft":false,"sha":"aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa","source_branch":"feature","target_branch":"main","has_conflicts":false,"blocking_discussions_resolved":true,"detailed_merge_status":"mergeable","user":{"can_merge":false}}"#
-            let request = try JSONDecoder().decode(GitLabMergeRequest.self, from: Data(raw.utf8))
+            let initial = raw.replacingOccurrences(of: "\"draft\":false", with: "\"draft\":\(draft)")
+            gitlab.write("request", initial)
+            let request = try JSONDecoder().decode(GitLabMergeRequest.self, from: Data(initial.utf8))
             source = request
             settings.mrLifecycleLedger.record(request, for: .init(host: "gitlab.example.test", username: "me", projectID: 1, iid: 2))
             settings.save()
-            gitlab.handler = { call in
+            gitlab.handler = { [gitlab] call in
+                if call.arguments.starts(with: ["mr", "update"]) {
+                    gitlab.write("request", gitlab.text("request").replacingOccurrences(of: "\"draft\":true", with: "\"draft\":false"))
+                    if gitlab.has("lose-ready-response") { throw GlabError.timedOut }
+                    return InMemoryGitLab.output()
+                }
                 if call.arguments == ["config", "get", "host"] { return InMemoryGitLab.output("gitlab.example.test") }
                 if call.arguments == ["auth", "status"] { return InMemoryGitLab.output(error: "Logged in to gitlab.example.test as me") }
                 if call.endpoint == "/user" { return InMemoryGitLab.output(#"{"id":3,"username":"me"}"#) }
                 if call.endpoint.hasSuffix("/approvals") { return InMemoryGitLab.output(#"{"approvals_required":0,"approvals_left":0,"approved_by":[]}"#) }
                 if call.endpoint.hasSuffix("/approval_state") { return InMemoryGitLab.output(#"{"rules":[]}"#) }
-                if call.endpoint == "/projects/1/merge_requests/2" { return InMemoryGitLab.output(raw) }
-                if call.endpoint.contains("/merge_requests?scope=created_by_me") { return InMemoryGitLab.output("[" + raw + "]") }
+                if call.endpoint == "/projects/1/merge_requests/2" { return try gitlab.response("request") }
+                if call.endpoint.contains("/merge_requests?scope=created_by_me") { return InMemoryGitLab.output("[" + gitlab.text("request") + "]") }
                 return InMemoryGitLab.output("[]")
             }
             monitor = TodoMonitorService(settings: settings, glab: glab)
             pair = try .generate(origin: #require(URL(string: "https://relay.example.test")), access: String(repeating: "a", count: 43))
         }
-        func board(originUpdates: Bool = false) async throws -> RemoteBoard {
+        func board(originUpdates: Bool = false, markReady: Bool = false) async throws -> RemoteBoard {
             await host.startupLoadTask?.value
             let capabilities = [RemoteMessage.detailsCapability]
                 + (originUpdates ? [RemoteMessage.detailOriginsCapability] : [])
+                + (markReady ? [RemoteMessage.markReadyCapability] : [])
             await transport.onMessage?(.init(type: .hello, challenge: UUID(), capabilities: capabilities))
             // Both background dependency reads can change the card digest after the catalog is idle.
             let deadline = ContinuousClock.now + .seconds(3)

@@ -211,6 +211,7 @@ private struct RemoteConnectionToolbar: View {
 struct RemoteCardView: View {
     let card: RemoteCard
     var expanded = false
+    var branches: RemoteDetailBranches? = nil
     var onOpen: (() -> Void)?
     var onOpenCTA: ((RemoteCardCTA) -> Void)? = nil
     var onFinishCommentReview: (() -> Void)? = nil
@@ -221,6 +222,14 @@ struct RemoteCardView: View {
                 Button(action: onOpen) { header.contentShape(Rectangle()) }.buttonStyle(.plain)
                     .accessibilityIdentifier("remote.card.\(card.id)")
             } else { header }
+            if expanded, let branches {
+                Label { Text(verbatim: branches.source + " → " + branches.target) } icon: {
+                    Image(systemName: "arrow.triangle.branch")
+                }
+                .font(.caption.monospaced()).foregroundStyle(.secondary)
+                .textSelection(.enabled).fixedSize(horizontal: false, vertical: true)
+                .accessibilityLabel(Text(.RemoteDetail.remoteDetailBranches(branches.source, branches.target)))
+            }
             content
             if !expanded, onOpen != nil {
                 HStack {

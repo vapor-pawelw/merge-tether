@@ -42,6 +42,7 @@ extension RemoteConnection: RemoteHostTransport {}
     private var phoneSupportsOriginUpdates = false
     private var phoneSupportsMRControls = false
     private var phoneSupportsCommentOrigins = false
+    private var phoneSupportsMarkReady = false
     private var originObserver: UUID?
     private var authorKindObserver: UUID?
     private var originSubscription: RemoteDetailOriginSubscription?
@@ -142,6 +143,7 @@ extension RemoteConnection: RemoteHostTransport {}
         phoneSupportsOriginUpdates = false
         phoneSupportsMRControls = false
         phoneSupportsCommentOrigins = false
+        phoneSupportsMarkReady = false
         clearOriginSubscription()
         detailTask?.cancel(); detailTask = nil; activeDetailRequest = nil
         lastDetailRead = .distantPast
@@ -202,6 +204,7 @@ extension RemoteConnection: RemoteHostTransport {}
             phoneSupportsMergeActions = message.capabilities?.contains(RemoteMessage.mergeActionsCapability) == true
             phoneSupportsDetails = message.capabilities?.contains(RemoteMessage.detailsCapability) == true
             phoneSupportsMRControls = message.capabilities?.contains(RemoteMessage.mrControlsCapability) == true
+            phoneSupportsMarkReady = message.capabilities?.contains(RemoteMessage.markReadyCapability) == true
             phoneSupportsCommentOrigins = phoneSupportsDetails && message.capabilities?.contains(RemoteMessage.commentOriginCapability) == true
             phoneSupportsOriginUpdates = phoneSupportsDetails && message.capabilities?.contains(RemoteMessage.detailOriginsCapability) == true
             if !phoneSupportsOriginUpdates { clearOriginSubscription() }
@@ -222,7 +225,7 @@ extension RemoteConnection: RemoteHostTransport {}
             if !fresh { board.partial = true }
             do { try await active.send(.init(type: .snapshot, challenge: challenge, board: board,
                 capabilities: [RemoteMessage.detailsCapability, RemoteMessage.detailOriginsCapability, RemoteMessage.mrControlsCapability,
-                               RemoteMessage.commentOriginCapability])) }
+                               RemoteMessage.commentOriginCapability, RemoteMessage.markReadyCapability])) }
             catch { failed = true; try? await active.send(.init(type: .unavailable)) }
         case .receipt:
             guard let command = message.command, let challenge = message.challenge, let pairing else { return }
@@ -406,7 +409,8 @@ extension RemoteConnection: RemoteHostTransport {}
             }
         }
         return board.forClient(supportsCommentReview: phoneSupportsCommentReview, supportsMergeActions: phoneSupportsMergeActions,
-            supportsMRControls: phoneSupportsMRControls, supportsCommentOrigins: phoneSupportsCommentOrigins)
+            supportsMRControls: phoneSupportsMRControls, supportsCommentOrigins: phoneSupportsCommentOrigins,
+            supportsMarkReady: phoneSupportsMarkReady)
     }
     private func execute(_ card: RemoteCard, action: RemoteAction, argument: String? = nil) async -> RemoteCommandResult.Status {
         if card.id.hasPrefix("completion:") {
@@ -447,6 +451,14 @@ extension RemoteConnection: RemoteHostTransport {}
             return await executeControl(action, item: item, row: row)
         }
         switch action.kind {
+        case .markReady:
+            guard phoneSupportsMarkReady, action.id == "markReady", monitor.canMarkMergeRequestReady(item) else { return .changed }
+            do {
+                try await monitor.markMergeRequestReady(for: item)
+                return .completed
+            } catch is CancellationError { return .changed }
+            catch GlabError.notAuthenticated { return .changed }
+            catch { return .uncertain }
         case .merge, .enqueueMerge:
             guard phoneSupportsMergeActions, let request = item.authoredRequest else { return .changed }
             let outcome = await monitor.authoredMergeRequests.mergeManually(request)

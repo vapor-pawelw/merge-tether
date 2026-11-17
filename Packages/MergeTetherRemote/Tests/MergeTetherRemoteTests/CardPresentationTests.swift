@@ -3,6 +3,21 @@ import Testing
 @testable import MergeTetherRemote
 
 @Suite struct CardPresentationTests {
+    @Test func olderPhonesNeverReceiveMarkReadyOrItsExecutableCTA() throws {
+        let action = try JSONDecoder().decode(RemoteAction.self,
+            from: Data(#"{"id":"markReady","kind":"markReady","token":"checked"}"#.utf8))
+        let cta = RemoteCardCTA(title: "Mark ready", destination: .actions, actionID: action.id)
+        let card = RemoteCard(id: "mr:1:2", title: "Draft: Feature", project: "g/p", url: nil,
+            actions: [action], primaryCTA: cta,
+            presentation: .init(repository: "p", secondaryCTA: cta))
+        let board = RemoteBoard(hostSession: UUID(), account: "me@host", lanes: [.init(id: .own, cards: [card])])
+        let legacy = board.forClient(supportsCommentReview: true, supportsMergeActions: true, supportsMRControls: true)
+        #expect(legacy.cards[0].actions.isEmpty)
+        #expect(legacy.cards[0].primaryCTA?.actionID == nil)
+        #expect(legacy.cards[0].presentation?.secondaryCTA == nil)
+        #expect(board.forClient(supportsCommentReview: true, supportsMarkReady: true).cards[0] == card)
+    }
+
     @Test func olderPhonesCanReadDetailsAfterDroppingActionLinksAndAnUnknownDestination() throws {
         // given
         var card = RemoteCard(id: "mr:1:2", title: "MR", project: "g/p", url: nil,

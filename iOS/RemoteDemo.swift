@@ -5,7 +5,9 @@ import MergeTetherRemote
 @MainActor enum RemoteDemo {
     static func makeModel() -> RemotePhoneModel? {
         let arguments = CommandLine.arguments
-        let boardPreview = arguments.contains("--remote-preview")
+        let draftPreview = arguments.contains("--remote-preview-draft")
+        let boardPreview = arguments.contains("--remote-preview") || draftPreview
+        let previewBoard = draftPreview ? draftBoard : board
         let connecting = arguments.contains("--remote-preview-connecting")
         let offline = arguments.contains("--remote-preview-offline")
         let failed = arguments.contains("--remote-preview-failed")
@@ -16,11 +18,24 @@ import MergeTetherRemote
         let model = RemotePhoneModel(relayConfiguration: .init(rawOrigin: pairing.origin.absoluteString), loadPairing: { pairing }, savePairing: { _ in },
             loadRecovery: { nil }, saveRecovery: { _ in }, removeRecovery: {}, makeConnection: { _ in
             connections += 1
-            return PreviewTransport(board: boardPreview ? board : nil, delay: connections > 1, failed: failed)
+            return PreviewTransport(board: boardPreview ? previewBoard : nil, delay: connections > 1, failed: failed)
         }, now: { Date().addingTimeInterval(offline ? -46 : 0) })
-        if boardPreview { model.state.receive(.init(type: .snapshot, challenge: model.state.challenge(), board: board)) }
+        if boardPreview { model.state.receive(.init(type: .snapshot, challenge: model.state.challenge(), board: previewBoard)) }
         return model
     }
+
+    static let draftBoard = RemoteBoard(hostSession: UUID(), account: "Demo", updatedAt: .now, lanes: [
+        .init(id: .own, cards: [
+            .init(id: "mr:1:44", title: "Draft: Keep account settings available across devices", project: "example/payments-api",
+                url: URL(string: "https://gitlab.example.org/example/payments-api/-/merge_requests/44"),
+                head: String(repeating: "a", count: 40),
+                actions: [.init(id: "markReady", kind: .markReady, token: "preview",
+                    confirmationText: String(localized: .Remote.remoteMarkReadyHelp))],
+                needsAttention: false, mergeRequestIID: 44,
+                primaryCTA: .init(title: String(localized: .Remote.remoteMarkReady), destination: .actions, actionID: "markReady"),
+                presentation: .init(author: "Alex Example", repository: "payments-api", draftBadge: "DRAFT", authorUsername: "alex"))
+        ])
+    ])
 
     static let board = RemoteBoard(hostSession: UUID(), account: "Demo", updatedAt: .now, lanes: [
         .init(id: .own, cards: [

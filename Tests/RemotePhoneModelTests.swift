@@ -88,6 +88,7 @@ import MergeTetherRemote
         await model.refresh()
         #expect(fixture.transports.count == 1)
         #expect(fixture.transports[0].sent.map(\.type) == [.hello])
+        #expect(fixture.transports[0].sent[0].capabilities?.contains(RemoteMessage.markReadyCapability) == true)
         await fixture.reply()
         #expect(model.state.isConnected(now: fixture.date))
         await model.refresh()

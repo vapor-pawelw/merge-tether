@@ -4,6 +4,31 @@ import MergeTetherRemote
 @testable import GitLabTodos
 
 @MainActor @Suite struct RemoteBoardAdapterTests {
+    @Test func markReadyDoesNotDisconnectThePrimaryFeedbackAction() {
+        let card = RemoteCard(id: "mr:1:2", title: "Draft: MR", project: "g/p", url: nil,
+            actions: [.init(id: "prepare", kind: .prepare, token: "feedback"),
+                      .init(id: "markReady", kind: .markReady, token: "ready")],
+            primaryCTA: .init(title: "Handle feedback", destination: .feedback))
+        let bound = RemoteBoardAdapter.bindingPrimaryAction(card, humanAction: .handleFeedback, nextStep: .monitoring)
+        #expect(bound.primaryCTA?.actionID == "prepare")
+        #expect(bound.presentation?.secondaryCTA?.actionID == "markReady")
+    }
+
+    @Test(arguments: ["none", "overview", "drafts"])
+    func markReadyRemainsReachableWithoutReplacingACommentReview(_ destination: String) throws {
+        let action = try JSONDecoder().decode(RemoteAction.self,
+            from: Data(#"{"id":"markReady","kind":"markReady","token":"checked"}"#.utf8))
+        let cta: RemoteCardCTA? = destination == "none" ? nil
+            : .init(title: "Review", destination: destination == "overview" ? .overview : .drafts)
+        let card = RemoteCard(id: "mr:1:2", title: "Draft: Feature", project: "g/p", url: nil,
+            actions: [action], primaryCTA: cta)
+        let bound = RemoteBoardAdapter.bindingPrimaryAction(card, humanAction: nil, nextStep: .monitoring)
+        let ready = destination == "drafts" ? bound.presentation?.secondaryCTA : bound.primaryCTA
+        #expect(ready?.actionID == action.id)
+        #expect(ready?.destination == .actions)
+        if destination == "drafts" { #expect(bound.primaryCTA == cta) }
+    }
+
     @Test func assistantSetupRemainsNavigationAndDoesNotBecomeARunCommand() {
         let card = RemoteCard(id: "mr:1:2", title: "MR", project: "g/p", url: nil,
             primaryCTA: .init(title: "Set up agent", destination: .setup))

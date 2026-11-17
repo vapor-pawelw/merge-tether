@@ -6,6 +6,8 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 
 ## Unreleased
 
+- Mark your own Draft MRs ready from iPhone cards and Details using the Mac's current-account and commit checks. Keep existing feedback and comment-review CTAs available, negotiate the action independently with older phones, and move Details refresh and section navigation into the toolbar with a compact title and branches inside the header.
+
 - Rename the Mac board's Inactive section to **Automation off**, count cards needing attention in its header, and keep attention icons and explanations prominent on muted cards.
 
 - Resume unfinished author feedback once after a fresh assessment, using the selected Codex or Claude CLI. Preserve already delivered fixes and drafts, and finish missing replies after an interrupted run instead of treating the earlier attempt as completed work.

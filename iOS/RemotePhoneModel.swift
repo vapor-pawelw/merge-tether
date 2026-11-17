@@ -190,7 +190,7 @@ enum RemotePhoneConnectionStatus { case unpaired, connecting, connected, offline
         do { try await connection.send(.init(type: .hello, challenge: challenge,
             capabilities: [RemoteMessage.commentReviewCapability, RemoteMessage.mergeActionsCapability, RemoteMessage.detailsCapability,
                            RemoteMessage.detailOriginsCapability, RemoteMessage.mrControlsCapability,
-                           RemoteMessage.commentOriginCapability],
+                           RemoteMessage.commentOriginCapability, RemoteMessage.markReadyCapability],
             refresh: fromGitLab ? true : nil)) }
         catch {
             guard !Task.isCancelled, self.connection === connection, self.state === requestState else { return }

@@ -307,6 +307,10 @@ import MergeTetherRemote
                 confirmationText: String(localized: .Remote.remoteStopJobHelp)))
         }
         guard !busy, row.latestJob?.execution?.state.isActive != true else { return actions }
+        if monitor.canMarkMergeRequestReady(item), let token = token(["markReady"]) {
+            actions.append(.init(id: "markReady", kind: .markReady, token: token,
+                confirmationText: String(localized: .Remote.remoteMarkReadyHelp)))
+        }
         if monitor.canRunReview(for: item), let token = token(["review", request.sha ?? ""]) {
             actions.append(.init(id: "runReview", kind: .runReview, token: token,
                 confirmationText: String(localized: .Remote.remoteRunReviewHelp)))
@@ -503,6 +507,20 @@ import MergeTetherRemote
 
     static func bindingPrimaryAction(_ original: RemoteCard, humanAction: MRHumanAction.Action?,
                                      nextStep: ReviewingContext.NextStep) -> RemoteCard {
+        var card = bindingExecutableAction(original, humanAction: humanAction, nextStep: nextStep)
+        if let ready = card.actions.first(where: { $0.kind == .markReady }) {
+            let cta = RemoteCardCTA(title: String(localized: .Remote.remoteMarkReady), destination: .actions, actionID: ready.id)
+            if card.primaryCTA == nil || card.primaryCTA?.destination == .overview { card.primaryCTA = cta }
+            else if card.presentation?.secondaryCTA == nil {
+                card.presentation = card.presentation ?? .init(repository: card.project)
+                card.presentation?.secondaryCTA = cta
+            }
+        }
+        return card
+    }
+
+    private static func bindingExecutableAction(_ original: RemoteCard, humanAction: MRHumanAction.Action?,
+                                                nextStep: ReviewingContext.NextStep) -> RemoteCard {
         guard let cta = original.primaryCTA, cta.destination != .setup else { return original }
         let kind: RemoteActionKind
         switch humanAction {

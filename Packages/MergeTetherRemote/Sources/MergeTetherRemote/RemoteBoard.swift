@@ -8,6 +8,7 @@ public enum RemoteActionKind: String, Codable, Sendable { case publish, approve,
     public static let mrControls: Set<RemoteActionKind> = [.publishDraft, .runReview, .stopJob, .ignoreSuggestion, .restoreSuggestion]
     // Sent only to phones that announce `commentOriginCapability`; its command carries a `RemoteCommentOriginRequest`.
     case setCommentOrigin
+    case markReady
 }
 
 public struct RemoteAction: Codable, Equatable, Identifiable, Sendable {
@@ -220,6 +221,7 @@ public struct RemoteMessage: Codable, Sendable {
     public static let detailOriginsCapability = "detail-origins-v1"
     public static let mrControlsCapability = "mr-controls-v1"
     public static let commentOriginCapability = "comment-origin-v1"
+    public static let markReadyCapability = "mark-ready-v1"
     public enum Kind: String, Codable, Sendable { case hello, snapshot, command, accepted, result, receipt, receiptResult = "receipt-result", unavailable, hostReady = "host-ready", detailRequest = "detail-request", details, cancelDetails = "cancel-details" }
     public var type: Kind
     public var challenge: UUID?
@@ -247,10 +249,20 @@ public struct RemoteMessage: Codable, Sendable {
 
 extension RemoteBoard {
     public func forClient(supportsCommentReview: Bool, supportsMergeActions: Bool = false, supportsMRControls: Bool = false,
-                          supportsCommentOrigins: Bool = false) -> Self {
+                          supportsCommentOrigins: Bool = false, supportsMarkReady: Bool = false) -> Self {
         var compatible = self
         for lane in compatible.lanes.indices {
             for card in compatible.lanes[lane].cards.indices {
+                if !supportsMarkReady {
+                    let removed = Set(compatible.lanes[lane].cards[card].actions.filter { $0.kind == .markReady }.map(\.id))
+                    compatible.lanes[lane].cards[card].actions.removeAll { $0.kind == .markReady }
+                    if let id = compatible.lanes[lane].cards[card].primaryCTA?.actionID, removed.contains(id) {
+                        compatible.lanes[lane].cards[card].primaryCTA = nil
+                    }
+                    if let id = compatible.lanes[lane].cards[card].presentation?.secondaryCTA?.actionID, removed.contains(id) {
+                        compatible.lanes[lane].cards[card].presentation?.secondaryCTA = nil
+                    }
+                }
                 if !supportsCommentOrigins {
                     compatible.lanes[lane].cards[card].actions.removeAll { $0.kind == .setCommentOrigin }
                 }
