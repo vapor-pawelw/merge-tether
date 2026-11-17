@@ -138,6 +138,8 @@ import MergeTetherRemote
                     }
                     card.actions += mrControls(item: item, row: row, monitor: monitor, account: account, busy: busy)
                     if let control = commentOriginControl(item: item, monitor: monitor, account: account) { card.actions.append(control) }
+                    card = bindingPrimaryAction(card, humanAction: presentation.humanAction?.action,
+                        nextStep: presentation.reviewingContext.nextStep)
                 } else if let todo = board.otherTodos.first(where: { "todo:\($0.id)" == card.id }),
                           monitor.isAssessingNotice(todo) {
                     card.needsAttention = false
@@ -470,11 +472,12 @@ import MergeTetherRemote
                 case .reviewComments: .drafts
                 case .viewRun: .assistantRuns
                 case .setupAgent: .setup
-                case .runReview: model.assistantReady ? .overview : .setup
+                case .runReview: model.assistantReady ? .actions : .setup
+                case .viewDiscussions, .monitoring: .discussions
                 default: .feedback
                 }
             }
-            return .init(title: String(localized: label), destination: destination)
+            return .init(title: String(localized: destination == .setup ? .Remote.remoteSetupActionOnMac : label), destination: destination)
         }
         let author: Todo.Author? = ReviewingContext(row: model.row).author
         let authorName: String? = author?.person.displayName
@@ -495,6 +498,28 @@ import MergeTetherRemote
             steps: steps, currentStep: model.stepChain?.current,
             pendingDrafts: pendingDrafts, statusSymbol: model.activityEffect?.symbol)
         if model.actionsBlocked { card.actions = [] }
+        return card
+    }
+
+    static func bindingPrimaryAction(_ original: RemoteCard, humanAction: MRHumanAction.Action?,
+                                     nextStep: ReviewingContext.NextStep) -> RemoteCard {
+        guard let cta = original.primaryCTA, cta.destination != .setup else { return original }
+        let kind: RemoteActionKind
+        switch humanAction {
+        case .retryRun: kind = .retryJob
+        case .verifyFeedback, .retryDraftVerification: kind = .verify
+        case .handleFeedback, .retryIntent: kind = .prepare
+        case nil where nextStep == .runReview: kind = .runReview
+        default: return original
+        }
+        var card = original
+        let matches = card.actions.filter { $0.kind == kind && (humanAction != .retryIntent || $0.id.hasPrefix("intent:")) }
+        card.primaryCTA?.destination = .actions
+        if matches.count == 1 {
+            card.primaryCTA?.actionID = matches[0].id
+        } else {
+            card.primaryCTA?.title = String(localized: .Remote.remoteActionOnMac)
+        }
         return card
     }
 
@@ -526,7 +551,8 @@ private extension MRHumanAction {
         case .retryDraftVerification: .drafts
         case .setupAssistant: .setup
         case .reviewDecision, .reviewFeedback, .handleFeedback, .verifyFeedback: .feedback
-        case .reviewHandoff, .reviewMerge, .reviewIssue, .retryIntent: .overview
+        case .reviewHandoff, .reviewMerge, .retryIntent: .actions
+        case .reviewIssue: .overview
         }
     }
 }

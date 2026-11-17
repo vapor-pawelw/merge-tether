@@ -4,6 +4,44 @@ import MergeTetherRemote
 @testable import GitLabTodos
 
 @MainActor @Suite struct RemoteBoardAdapterTests {
+    @Test func assistantSetupRemainsNavigationAndDoesNotBecomeARunCommand() {
+        let card = RemoteCard(id: "mr:1:2", title: "MR", project: "g/p", url: nil,
+            primaryCTA: .init(title: "Set up agent", destination: .setup))
+        #expect(RemoteBoardAdapter.bindingPrimaryAction(card, humanAction: nil, nextStep: .runReview) == card)
+    }
+
+    @Test(arguments: ["retry", "verify", "draftVerification", "feedback", "intent", "review", "missing", "ambiguous"])
+    func executableCTAsBindTheExactAvailableActionRatherThanOpeningGenericDetails(_ scenario: String) {
+        // given
+        let human: MRHumanAction.Action? = switch scenario {
+        case "retry", "missing", "ambiguous": .retryRun
+        case "verify": .verifyFeedback
+        case "draftVerification": .retryDraftVerification
+        case "feedback": .handleFeedback
+        case "intent": .retryIntent
+        default: nil
+        }
+        let kind: RemoteActionKind = scenario == "retry" || scenario == "missing" || scenario == "ambiguous" ? .retryJob
+            : scenario == "verify" || scenario == "draftVerification" ? .verify
+            : scenario == "review" ? .runReview : .prepare
+        let id = scenario == "intent" ? "intent:fixture" : "exact"
+        var actions = [RemoteAction(id: id, kind: kind, token: "current")]
+        if scenario == "missing" { actions = [] }
+        if scenario == "ambiguous" { actions.append(.init(id: "another", kind: kind, token: "other")) }
+        if scenario == "intent" { actions.append(.init(id: "feedback", kind: .prepare, token: "other")) }
+        let card = RemoteCard(id: "mr:1:2", title: "MR", project: "g/p", url: nil, actions: actions,
+            primaryCTA: .init(title: "Run", destination: .overview))
+        // when
+        let bound = RemoteBoardAdapter.bindingPrimaryAction(card, humanAction: human, nextStep: .runReview)
+        // then
+        #expect(bound.primaryCTA?.destination == .actions)
+        #expect(bound.primaryCTA?.actionID == (["missing", "ambiguous"].contains(scenario) ? nil : id))
+        if ["missing", "ambiguous"].contains(scenario) {
+            #expect(bound.primaryCTA?.title == String(localized: .Remote.remoteActionOnMac))
+        }
+        #expect(bound.actions == actions)
+    }
+
     @Test(arguments: ["command", "resolve", "both", "ordinary"])
     func phonePreviewCarriesDraftWarningsWithoutGrantingUnsafePublication(_ scenario: String) throws {
         var item = try item()
@@ -343,8 +381,8 @@ import MergeTetherRemote
         let card = try #require(board.lanes.first { $0.id == .own }?.cards.first { $0.id == "mr:1:2" })
         let expectedDestination: RemoteCardCTA.Destination = switch scenario {
         case "completed", "obsoletePipeline", "obsoleteWithIndependentIntent": .drafts
-        case "unrelatedCompleted": .assistantRuns
-        default: monitor.availableAssistants.contains(settings.automation.assistant) ? .overview : .setup
+        case "unrelatedCompleted": .actions
+        default: monitor.availableAssistants.contains(settings.automation.assistant) ? .actions : .setup
         }
         #expect(card.needsAttention == true)
         #expect(card.primaryCTA?.destination == expectedDestination)
@@ -503,7 +541,7 @@ import MergeTetherRemote
         #expect(card["needsAttention"] as? Bool == true)
         let cta = try #require(card["primaryCTA"] as? [String: Any])
         #expect(cta["title"] as? String == String(localized: .MRHumanAction.mrHumanActionActionReviewHandoff))
-        #expect(cta["destination"] as? String == "overview")
+        #expect(cta["destination"] as? String == "actions")
         #expect((card["actions"] as? [Any])?.isEmpty == true)
     }
 

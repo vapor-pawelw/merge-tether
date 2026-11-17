@@ -57,7 +57,7 @@ import MergeTetherRemote
         let card = RemoteBoardAdapter.mergeActions(
             RemoteBoardAdapter.presentation(RemoteBoardAdapter.card(row.item, account: "me@\(host)"), model: model),
             item: row.item, status: checked, monitor: service, account: "me@\(host)")
-        #expect(card.primaryCTA?.destination == (outcome == "clean" ? .overview : .feedback))
+        #expect(card.primaryCTA?.destination == (outcome == "clean" ? .actions : .feedback))
         #expect(card.actions.contains { $0.kind == .enqueueMerge } == (outcome == "clean"))
         #expect(row.item.canOfferManualMerge(using: checked) == (outcome == "clean"))
         var staleAccount = MRBoardProjector.Input(account: .init(host: host, username: "other", revision: account.revision + 1))

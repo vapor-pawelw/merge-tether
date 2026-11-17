@@ -1,5 +1,22 @@
 import Foundation
 
+public struct RemoteCardSelection: Identifiable, Equatable, Sendable {
+    public let card: RemoteCard
+    public let cta: RemoteCardCTA?
+    public var id: String { card.id }
+    public var destination: RemoteCardCTA.Destination { cta?.destination ?? .overview }
+    public var needsDetails: Bool { [.feedback, .assistantRuns, .discussions].contains(destination) }
+
+    public init(card: RemoteCard, cta: RemoteCardCTA? = nil) {
+        self.card = card; self.cta = cta
+    }
+
+    public func action(in current: RemoteCard) -> RemoteAction? {
+        guard current == card, let id = cta?.actionID else { return nil }
+        return current.actions.first { $0.id == id }
+    }
+}
+
 /// The phone shows each sentence once, like the Mac card: a status or next step that repeats
 /// the card's explanation adds nothing, and older hosts may still send such repeats.
 public extension RemoteCard {

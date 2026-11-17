@@ -4,6 +4,7 @@ import MergeTetherRemote
 struct RemoteLaneBoard: View {
     let lanes: [RemoteLane]
     let onOpen: (RemoteCard) -> Void
+    let onOpenCTA: (RemoteCard, RemoteCardCTA) -> Void
     var onFinishCommentReview: ((RemoteCard) -> Void)? = nil
     var canAct: ((Date) -> Bool)? = nil
     @State private var visibleLane: RemoteLaneID?
@@ -15,7 +16,8 @@ struct RemoteLaneBoard: View {
             ScrollView(.horizontal, showsIndicators: false) {
                 HStack(alignment: .top, spacing: 14) {
                     ForEach(lanes) { lane in
-                        RemoteLaneView(lane: lane, onOpen: onOpen, onFinishCommentReview: onFinishCommentReview, canAct: canAct)
+                        RemoteLaneView(lane: lane, onOpen: onOpen, onOpenCTA: onOpenCTA,
+                            onFinishCommentReview: onFinishCommentReview, canAct: canAct)
                             .frame(width: laneWidth, height: max(1, geometry.size.height - 12))
                             .id(lane.id)
                     }
@@ -34,6 +36,7 @@ private struct RemoteLaneView: View {
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
     let lane: RemoteLane
     let onOpen: (RemoteCard) -> Void
+    let onOpenCTA: (RemoteCard, RemoteCardCTA) -> Void
     var onFinishCommentReview: ((RemoteCard) -> Void)? = nil
     var canAct: ((Date) -> Bool)? = nil
 
@@ -56,6 +59,7 @@ private struct RemoteLaneView: View {
                     }
                     ForEach(lane.cards) { card in
                         RemoteCardView(card: card, onOpen: { onOpen(card) },
+                            onOpenCTA: { onOpenCTA(card, $0) },
                             onFinishCommentReview: onFinishCommentReview.map { action in { action(card) } }, canAct: canAct)
                     }
                 }

@@ -4,6 +4,11 @@ import MergeTetherRemote
 struct RemoteCardDetail: View {
     @Bindable var model: RemotePhoneModel
     let original: RemoteCard
+    var initialSelection: RemoteCardSelection? = nil
+    @State private var appliedInitialAction = false
+    @State private var initialActionChanged = false
+    @State private var scrolledToInitialDestination = false
+    @State private var scrollTarget: RemoteCardCTA.Destination?
     @State private var confirmation: RemoteAction?
     @State private var confirmationCard: RemoteCard?
     @State private var approvalID: UUID?
@@ -54,7 +59,7 @@ struct RemoteCardDetail: View {
                             Button(.RemoteDetail.remoteDetailPendingDrafts) { proxy.scrollTo(RemoteCardCTA.Destination.drafts, anchor: .top) }
                             Button(.RemoteDetail.remoteDetailActions) { proxy.scrollTo(RemoteCardCTA.Destination.actions, anchor: .top) }
                             Button(.RemoteDetail.remoteDetailFeedback) { proxy.scrollTo(RemoteCardCTA.Destination.feedback, anchor: .top) }
-                            Button(.RemoteDetail.remoteDetailDiscussions) { proxy.scrollTo(RemoteDetailAnchor.discussions, anchor: .top) }
+                            Button(.RemoteDetail.remoteDetailDiscussions) { proxy.scrollTo(RemoteCardCTA.Destination.discussions, anchor: .top) }
                             Button(.RemoteDetail.remoteDetailApprovals) { proxy.scrollTo(RemoteDetailAnchor.approvals, anchor: .top) }
                             Button(.RemoteDetail.remoteDetailActivity) { proxy.scrollTo(RemoteCardCTA.Destination.assistantRuns, anchor: .top) }
                         } label: {
@@ -69,6 +74,9 @@ struct RemoteCardDetail: View {
                         }
                         if current.id.hasPrefix("mr:") {
                             detailReadStatus(fresh)
+                        }
+                        if initialActionChanged {
+                            Text(.Remote.remoteChanged).font(.callout).foregroundStyle(.orange)
                         }
                         draftSection(shown).id(RemoteCardCTA.Destination.drafts)
                         // Like the Mac detail, the decision and its controls lead; reference sections follow.
@@ -86,11 +94,30 @@ struct RemoteCardDetail: View {
                             }
                         }
                     }
+                    .scrollTargetLayout()
                     .frame(maxWidth: 680)
                     .frame(maxWidth: .infinity)
                     .padding(16)
                 }
                 .background(Color(uiColor: .systemGroupedBackground))
+                .scrollPosition(id: $scrollTarget, anchor: .top)
+                .task(id: shown != nil) {
+                    guard let selection = initialSelection else { return }
+                    if !appliedInitialAction {
+                        appliedInitialAction = true
+                        if selection.cta?.actionID != nil {
+                            if model.state.canAct(now: .now), let card = boardCard,
+                               let action = selection.action(in: card) {
+                                showConfirmation(action)
+                            } else { initialActionChanged = true }
+                        }
+                    }
+                    guard !scrolledToInitialDestination, !selection.needsDetails || shown != nil else { return }
+                    await Task.yield()
+                    guard !Task.isCancelled else { return }
+                    scrollTarget = selection.destination
+                    scrolledToInitialDestination = true
+                }
                 .task(id: detailIdentity) {
                     guard current.id.hasPrefix("mr:") else { return }
                     await model.requestDetails(card: current)

@@ -13,7 +13,7 @@ struct RemoteMRDetailContent: View {
     private var visiblePolicy: [String] { card.visiblePolicy(details.policy.filter { !rules.contains($0) }) }
 
     var body: some View {
-        LazyVStack(alignment: .leading, spacing: 24) {
+        Group {
             // Same order as the Mac detail: what applies now, then the conversation, then reference data.
             if !visiblePolicy.isEmpty {
                 section(.RemoteDetail.remoteDetailPolicy) {
@@ -68,7 +68,7 @@ struct RemoteMRDetailContent: View {
                     }
                 } else { unavailable }
             }
-            .id(RemoteDetailAnchor.discussions)
+            .id(RemoteCardCTA.Destination.discussions)
             section(.RemoteDetail.remoteDetailApprovals) {
                 if let approvals = details.approvals {
                     RemoteApprovalSummary(details: approvals)
@@ -215,7 +215,7 @@ private struct RemoteActivityRow: View {
     }
 }
 
-enum RemoteDetailAnchor: Hashable { case approvals, discussions }
+enum RemoteDetailAnchor: Hashable { case approvals }
 
 private struct RemoteDiscussionCard: View {
     let thread: RemoteDetailThread

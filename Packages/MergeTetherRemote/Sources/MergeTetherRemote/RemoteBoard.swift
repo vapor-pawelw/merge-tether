@@ -36,10 +36,10 @@ public struct RemoteDraft: Codable, Equatable, Identifiable, Sendable {
     }
 }
 
-/// A read-only destination, separate from the host-authorized write actions.
+/// A destination, optionally bound to one of the card's host-authorized actions.
 public struct RemoteCardCTA: Codable, Equatable, Sendable {
     public enum Destination: String, Codable, Sendable {
-        case overview, drafts, feedback, assistantRuns, setup, actions
+        case overview, drafts, feedback, assistantRuns, setup, actions, discussions
         public init(from decoder: Decoder) throws {
             let value = try decoder.singleValueContainer().decode(String.self)
             self = Self(rawValue: value) ?? .overview
@@ -47,7 +47,10 @@ public struct RemoteCardCTA: Codable, Equatable, Sendable {
     }
     public var title: String
     public var destination: Destination
-    public init(title: String, destination: Destination) { self.title = title; self.destination = destination }
+    public var actionID: String?
+    public init(title: String, destination: Destination, actionID: String? = nil) {
+        self.title = title; self.destination = destination; self.actionID = actionID
+    }
 }
 
 public struct RemoteCardChip: Codable, Equatable, Sendable {

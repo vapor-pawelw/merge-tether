@@ -3,6 +3,71 @@ import Testing
 @testable import MergeTetherRemote
 
 @Suite struct CardPresentationTests {
+    @Test func olderPhonesCanReadDetailsAfterDroppingActionLinksAndAnUnknownDestination() throws {
+        // given
+        var card = RemoteCard(id: "mr:1:2", title: "MR", project: "g/p", url: nil,
+            primaryCTA: .init(title: "Discussions", destination: .discussions))
+        card.presentation = .init(repository: "p", secondaryCTA: .init(title: "Retry", destination: .actions, actionID: "retry"))
+        let board = RemoteBoard(hostSession: UUID(), account: "me@host", lanes: [.init(id: .own, cards: [card])])
+        // when
+        var legacy = card
+        legacy.primaryCTA?.destination = .overview
+        legacy.presentation?.secondaryCTA?.actionID = nil
+        // then
+        #expect(try RemoteDetailRequest(card: legacy, board: board).matches(board))
+    }
+
+    @Test(arguments: [RemoteCardCTA.Destination.drafts, .feedback, .assistantRuns, .actions, .setup, .discussions])
+    func cardSelectionKeepsTheTappedDestinationSeparateFromTheHeader(_ destination: RemoteCardCTA.Destination) {
+        let card = RemoteCard(id: "mr:1:2", title: "MR", project: "g/p", url: nil,
+            primaryCTA: .init(title: "Primary", destination: .drafts))
+        let selection = RemoteCardSelection(card: card, cta: .init(title: "Tapped", destination: destination))
+        #expect(selection.destination == destination)
+        #expect(selection.needsDetails == [.feedback, .assistantRuns, .discussions].contains(destination))
+        #expect(RemoteCardSelection(card: card).destination == .overview)
+        #expect(selection.action(in: card) == nil)
+    }
+
+    @Test(arguments: ["unchanged", "head", "token", "missing", "unrelated"])
+    func actionSelectionUsesOnlyTheExactCommandFromTheTappedCard(_ change: String) {
+        // given
+        let action = RemoteAction(id: "retry", kind: .retryJob, token: "current")
+        let cta = RemoteCardCTA(title: "Retry", destination: .actions, actionID: "retry")
+        let card = RemoteCard(id: "mr:1:2", title: "MR", project: "g/p", url: nil, head: "old",
+            actions: [action, .init(id: "other", kind: .prepare, token: "other")], primaryCTA: cta)
+        let selection = RemoteCardSelection(card: card, cta: cta)
+        var current = card
+        switch change {
+        case "head": current.head = "new"
+        case "token": current.actions[0].token = "new"
+        case "missing": current.actions.removeFirst()
+        case "unrelated": current.id = "mr:1:3"
+        default: break
+        }
+        // when + then
+        #expect(selection.action(in: current) == (change == "unchanged" ? action : nil))
+    }
+
+    @Test func actionCTAsKeepTheirExactCommandWhileOlderPhonesCanStillReadDetails() throws {
+        // given
+        let data = Data(#"{"title":"Retry run","destination":"actions","actionID":"job:retry"}"#.utf8)
+        let cta = try JSONDecoder().decode(RemoteCardCTA.self, from: data)
+        let card = RemoteCard(id: "mr:1:2", title: "MR", project: "g/p", url: nil,
+            actions: [.init(id: "job:retry", kind: .retryJob, token: "current")], primaryCTA: cta)
+        let board = RemoteBoard(hostSession: UUID(), account: "me@host", lanes: [.init(id: .own, cards: [card])])
+
+        // when
+        let wire = try #require(JSONSerialization.jsonObject(with: JSONEncoder().encode(cta)) as? [String: Any])
+        struct OlderCTA: Codable { let title: String; let destination: RemoteCardCTA.Destination }
+        let older = try JSONDecoder().decode(OlderCTA.self, from: data)
+        var legacy = card
+        legacy.primaryCTA = try JSONDecoder().decode(RemoteCardCTA.self, from: JSONEncoder().encode(older))
+
+        // then
+        #expect(wire["actionID"] as? String == "job:retry")
+        #expect(try RemoteDetailRequest(card: legacy, board: board).matches(board))
+    }
+
     @Test func activeAgentMarkersSurviveTheWireWithoutBreakingOlderPeers() throws {
         let legacy = Data(#"{"repository":"repo","status":"Monitoring MR","working":false,"chips":[]}"#.utf8)
         #expect(try JSONDecoder().decode(RemoteCardText.self, from: legacy).statusSymbol == nil)

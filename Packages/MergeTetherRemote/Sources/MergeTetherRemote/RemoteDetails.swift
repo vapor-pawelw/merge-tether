@@ -17,15 +17,26 @@ public struct RemoteDetailRequest: Codable, Equatable, Sendable {
             && board.cards.contains { $0.id == cardID && Self.digests($0).contains(cardDigest) }
     }
     /// Older phones drop fields they do not know before hashing the card they open:
-    /// the pending-drafts line and reply recipients, and before those the author identity.
+    /// action links and discussion destinations, the pending-drafts line and reply recipients,
+    /// and before those the author identity.
     static func digests(_ card: RemoteCard) -> Set<String> {
-        var withoutDrafts = card
+        var withoutActions = card
+        withoutActions.primaryCTA?.actionID = nil
+        withoutActions.presentation?.secondaryCTA?.actionID = nil
+        var withoutDrafts = withoutActions
         withoutDrafts.presentation?.pendingDrafts = nil
         for index in withoutDrafts.drafts.indices { withoutDrafts.drafts[index].replyRecipients = nil }
         var legacy = withoutDrafts
         legacy.presentation?.authorUsername = nil
         legacy.presentation?.authorAvatarURL = nil
-        return Set([card, withoutDrafts, legacy].compactMap { try? RemoteDigest.token($0) })
+        let versions = [card, withoutActions, withoutDrafts, legacy]
+        let olderDestinations = versions.map { version in
+            var version = version
+            if version.primaryCTA?.destination == .discussions { version.primaryCTA?.destination = .overview }
+            if version.presentation?.secondaryCTA?.destination == .discussions { version.presentation?.secondaryCTA?.destination = .overview }
+            return version
+        }
+        return Set((versions + olderDestinations).compactMap { try? RemoteDigest.token($0) })
     }
     public var isValid: Bool { cardID.utf8.count <= 128 && account.utf8.count <= 1_024 && cardDigest.utf8.count == 64 }
 }

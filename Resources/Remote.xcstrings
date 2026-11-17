@@ -1,6 +1,40 @@
 {
   "sourceLanguage": "en",
   "strings": {
+    "remote.setupActionOnMac": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Set up on Mac"
+          }
+        },
+        "pl": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Skonfiguruj na Macu"
+          }
+        }
+      }
+    },
+    "remote.actionOnMac": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Continue on Mac"
+          }
+        },
+        "pl": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Kontynuuj na Macu"
+          }
+        }
+      }
+    },
     "remote.automation.paused": {
       "extractionState": "manual",
       "localizations": {

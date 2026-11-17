@@ -4,9 +4,9 @@ import MergeTetherRemote
 struct RemoteBoardView: View {
     @Bindable var model: RemotePhoneModel
     @State private var pairingSheet = false
-    @State private var selected: RemoteCard?
+    @State private var selected: RemoteCardSelection?
     @State private var showingInbox = false
-    @State private var pendingInboxCard: RemoteCard?
+    @State private var pendingInboxCard: RemoteCardSelection?
     var body: some View {
         NavigationStack {
             Group {
@@ -18,7 +18,8 @@ struct RemoteBoardView: View {
                             Text(.Remote.remoteAutomationPaused).font(.caption).foregroundStyle(.orange).padding(.horizontal)
                         }
                         if board.partial { Text(.Remote.remotePartial).font(.caption).foregroundStyle(.orange).padding(.horizontal) }
-                        RemoteLaneBoard(lanes: board.lanes.filter { $0.id != .other }, onOpen: { selected = $0 },
+                        RemoteLaneBoard(lanes: board.lanes.filter { $0.id != .other }, onOpen: { selected = .init(card: $0) },
+                            onOpenCTA: { selected = .init(card: $0, cta: $1) },
                             onFinishCommentReview: finishCommentReview, canAct: { model.state.canAct(now: $0) })
                         if let updated = board.updatedAt {
                             HStack { Text(.Remote.remoteUpdated); Text(updated, style: .relative) }
@@ -92,7 +93,8 @@ struct RemoteBoardView: View {
                 pairingSheet = false; selected = nil; showingInbox = false; pendingInboxCard = nil
             }
             .popover(isPresented: $showingInbox, attachmentAnchor: .rect(.bounds), arrowEdge: .top) {
-                RemoteInboxView(cards: inboxCards, onOpen: { pendingInboxCard = $0; showingInbox = false },
+                RemoteInboxView(cards: inboxCards, onOpen: { pendingInboxCard = .init(card: $0); showingInbox = false },
+                    onOpenCTA: { pendingInboxCard = .init(card: $0, cta: $1); showingInbox = false },
                     onFinishCommentReview: finishCommentReview, canAct: { model.state.canAct(now: $0) })
                     .frame(idealWidth: 520, idealHeight: 680)
                     .presentationCompactAdaptation(.sheet)
@@ -104,7 +106,9 @@ struct RemoteBoardView: View {
                     self.pendingInboxCard = nil
                 }
             }
-            .sheet(item: $selected) { card in RemoteCardDetail(model: model, original: card) }
+            .sheet(item: $selected) { selection in
+                RemoteCardDetail(model: model, original: selection.card, initialSelection: selection)
+            }
             .alert(Text(model.state.result?.status.title ?? .Remote.remoteCompleted), isPresented: Binding(
                 get: { model.state.result != nil }, set: { if !$0 { model.state.acknowledgeResult() } }
             )) { Button(.Remote.remoteClose) { model.state.acknowledgeResult() } }
@@ -144,6 +148,24 @@ struct RemoteBoardView: View {
             }
             .font(.caption).padding(.horizontal).padding(.top, 8)
         }
+    }
+}
+
+private struct RemoteCardCTAButton: View {
+    let cta: RemoteCardCTA
+    let canAct: ((Date) -> Bool)?
+    let onTap: () -> Void
+
+    var body: some View {
+        if cta.actionID != nil {
+            TimelineView(.periodic(from: .now, by: 1)) { context in
+                button.disabled(canAct?(context.date) != true)
+            }
+        } else { button }
+    }
+
+    private var button: some View {
+        Button(action: onTap) { Text(verbatim: cta.title) }
     }
 }
 
@@ -190,6 +212,7 @@ struct RemoteCardView: View {
     let card: RemoteCard
     var expanded = false
     var onOpen: (() -> Void)?
+    var onOpenCTA: ((RemoteCardCTA) -> Void)? = nil
     var onFinishCommentReview: (() -> Void)? = nil
     var canAct: ((Date) -> Bool)? = nil
     var body: some View {
@@ -199,12 +222,13 @@ struct RemoteCardView: View {
                     .accessibilityIdentifier("remote.card.\(card.id)")
             } else { header }
             content
-            if !expanded, let onOpen {
+            if !expanded, onOpen != nil {
                 HStack {
                     if let secondary = card.presentation?.secondaryCTA {
-                        Button(action: onOpen) { Text(verbatim: secondary.title) }
+                        RemoteCardCTAButton(cta: secondary, canAct: canAct) { onOpenCTA?(secondary) }
                             .font(.caption).buttonStyle(.plain).foregroundStyle(.secondary)
                             .frame(minHeight: 44)
+                            .accessibilityIdentifier("remote.secondary-cta.\(card.id)")
                     }
                     Spacer(minLength: 0)
                     if card.actions.contains(where: { $0.kind == .finishCommentReview }), let onFinishCommentReview {
@@ -216,7 +240,7 @@ struct RemoteCardView: View {
                                 .accessibilityIdentifier("remote.finish-comment-review.\(card.id)")
                         }
                     } else if let cta = card.primaryCTA {
-                        Button(action: onOpen) { Text(verbatim: cta.title) }
+                        RemoteCardCTAButton(cta: cta, canAct: canAct) { onOpenCTA?(cta) }
                             .font(.subheadline.weight(.semibold)).buttonStyle(.bordered)
                             .controlSize(.large)
                             .accessibilityIdentifier("remote.cta.\(card.id)")
