@@ -103,7 +103,8 @@ import MergeTetherRemote
                             }, avatarURL: note.author?.avatarURL,
                             originManual: note.id.flatMap { thread.origins[$0] }?.isManual == true ? true : nil,
                             extraContext: extraContexts.forNote(note.id))
-                    }, reply: .init(rawValue: String(describing: summary.publishedReply)) ?? .unavailable, draftCount: summary.draftCount)
+                    }, reply: .init(rawValue: String(describing: summary.publishedReply)) ?? .unavailable,
+                    draftCount: summary.draftCount, draftIDs: thread.drafts.compactMap(\.id))
             }
         }
         var details = RemoteMRDetails(checkedAt: .now, metadata: metadata, description: request.description, approvals: approvals, threads: threads,

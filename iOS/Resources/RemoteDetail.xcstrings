@@ -1,6 +1,57 @@
 {
   "sourceLanguage": "en",
   "strings": {
+    "remoteDetail.hideConversation": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Hide conversation"
+          }
+        },
+        "pl": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Zwiń rozmowę"
+          }
+        }
+      }
+    },
+    "remoteDetail.showConversation": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Show conversation"
+          }
+        },
+        "pl": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Pokaż rozmowę"
+          }
+        }
+      }
+    },
+    "remoteDetail.replyingTo": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Replying to"
+          }
+        },
+        "pl": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Odpowiedź na komentarz"
+          }
+        }
+      }
+    },
     "remoteDetail.replyInThread": {
       "extractionState": "manual",
       "localizations": {

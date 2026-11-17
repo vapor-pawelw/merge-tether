@@ -138,13 +138,16 @@ public struct RemoteDetailThread: Codable, Equatable, Identifiable, Sendable {
     public var notes: [RemoteDetailNote]
     public var reply: Reply
     public let draftCount: Int
+    /// Links to the current board's draft bodies; older hosts omit this field.
+    public var draftIDs: [Int]?
     public var feedback: Feedback?
     public var showsPublishedReply: Bool { draftCount == 0 && reply == .published }
     public var truncated = false
     public init(id: String, state: State, location: String? = nil, notes: [RemoteDetailNote], reply: Reply = .unavailable,
-                draftCount: Int = 0, feedback: Feedback? = nil) {
+                draftCount: Int = 0, feedback: Feedback? = nil, draftIDs: [Int]? = nil) {
         self.id = id; self.state = state; self.location = location; self.notes = notes; self.reply = reply; self.draftCount = draftCount
         self.feedback = feedback
+        self.draftIDs = draftIDs
     }
 
     public var origin: RemoteDetailNote.Origin? {
@@ -282,6 +285,7 @@ public struct RemoteDetailResponse: Codable, Equatable, Sendable {
             details.threads = details.threads.map { threads in
                 list(threads, 100).map { original in
                     var thread = original
+                    thread.draftIDs = thread.draftIDs.map { list($0, 100) }
                     if original.notes.count > 30 { thread.truncated = true }
                     thread.notes = list(original.notes, 30).map { original in
                         var note = original

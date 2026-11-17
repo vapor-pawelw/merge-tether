@@ -3,6 +3,26 @@ import Testing
 @testable import MergeTetherRemote
 
 @Suite struct RemoteDetailsTests {
+    @Test func threadDraftLinksSurviveTransportAndBoundedExcerpts() throws {
+        // given
+        let payload = Data(#"{"id":"discussion/first","state":"resolved","notes":[{"id":"1","body":"Concern"}],"reply":"none","draftCount":2,"draftIDs":[11,12],"truncated":false}"#.utf8)
+        var thread = try JSONDecoder().decode(RemoteDetailThread.self, from: payload)
+        thread.notes[0].body = String(repeating: "Comment ", count: 1_000)
+        let board = board()
+        let request = try RemoteDetailRequest(card: board.cards[0], board: board)
+
+        // when
+        let details = RemoteMRDetails(checkedAt: date, threads: [thread])
+        let response = RemoteDetailResponse(request: request, status: .current, details: details).bounded()
+        let bounded = try #require(response.details?.threads?.first)
+        let wire = try #require(JSONSerialization.jsonObject(with: JSONEncoder().encode(bounded)) as? [String: Any])
+
+        // then
+        #expect(wire["draftIDs"] as? [Int] == [11, 12])
+        #expect(bounded.draftCount == 2 && bounded.truncated)
+        #expect(bounded.notes.first?.body.count == 4_000)
+    }
+
     @Test(arguments: [
         (RemoteDetailThread.Reply.published, 0, true), (.published, 1, false), (.published, 2, false),
         (.earlier, 0, false), (.earlier, 1, false), (.none, 0, false),
@@ -20,7 +40,7 @@ import Testing
     @Test func threadAssessmentAndBranchesAreOptionalAndRoundTripWithoutChangingReplyOrOrigin() throws {
         let legacy = try JSONDecoder().decode(RemoteDetailThread.self,
             from: Data(#"{"id":"thread","state":"resolved","notes":[],"reply":"none","draftCount":0,"truncated":false}"#.utf8))
-        #expect(legacy.feedback == nil && legacy.origin == nil)
+        #expect(legacy.feedback == nil && legacy.origin == nil && legacy.draftIDs == nil)
         let note = RemoteDetailNote(id: "11", author: "Reviewer", body: "Concern", origin: .ai, authorID: 7)
         let thread = RemoteDetailThread(id: "thread", state: .open, notes: [note], reply: .published,
             draftCount: 1, feedback: .addressed)

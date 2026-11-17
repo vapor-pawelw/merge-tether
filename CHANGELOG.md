@@ -6,6 +6,8 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 
 ## Unreleased
 
+- Show the original comment and expandable conversation beside iPhone reply drafts, and display draft reply bodies directly in their discussion threads.
+
 - Retain discussion context when a large feedback-check input only needs its diff omitted. Name the exact omitted fields and allow a bounded ten-minute check for live evidence reads, avoiding repeated three-minute timeouts without an assessment.
 
 - Improve macOS board and MR-detail responsiveness by reusing presentation snapshots and sanitized comment Markdown, rendering discussion threads lazily, and avoiding unchanged history serialization during settings saves.

@@ -27,7 +27,8 @@ import MergeTetherRemote
             .init(id: "mr:1:42", title: "Add a clearer payment confirmation", project: "example/payments-api",
                 url: URL(string: "https://gitlab.example.org/example/payments-api/-/merge_requests/42")!,
                 head: "a9f36b246dde", detail: String(localized: .MRHumanAction.mrHumanActionPublicationSingle),
-                drafts: [.init(id: 1, body: "Handled the retry case and added coverage for the duplicate response.", context: "Sources/Checkout.swift:42")],
+                drafts: [.init(id: 1, body: "Handled the retry case and added coverage for the duplicate response.",
+                    replyRecipients: [.init(name: "Alexandra Example With A Long Display Name", username: "reviewer1")])],
                 actions: [.init(id: "publish", kind: .publish, token: "preview"), .init(id: "deleteDraft:1", kind: .deleteDraft, token: "preview"),
                           .init(id: "commentOrigin", kind: .setCommentOrigin, token: "preview"),
                           .init(id: "ignoreSuggestion:1", kind: .ignoreSuggestion, token: "preview",
@@ -83,7 +84,7 @@ import MergeTetherRemote
                     location: location, createdAt: .now.addingTimeInterval(-3600), url: url, origin: .ai, authorID: 1),
                 .init(id: "2", author: "Alex Example", username: "alex", body: "The previous confirmation stays visible. The duplicate-response path now has a regression test.",
                     createdAt: .now.addingTimeInterval(-1800), url: url, origin: .ai, authorID: 9, originManual: true)
-            ], reply: .published, draftCount: card.drafts.count, feedback: .addressed),
+            ], reply: .published, draftCount: card.drafts.count, feedback: .addressed, draftIDs: card.drafts.map(\.id)),
             .init(id: "resolved", state: .resolved, notes: [
                 .init(id: "3", author: "Earlier Reviewer", username: "earlier", body: "The longer translated button title now wraps correctly.",
                     createdAt: .now.addingTimeInterval(-2400), url: url, origin: .human, authorID: 6),

@@ -61,7 +61,9 @@ struct RemoteMRDetailContent: View {
                     // Long conversations: only threads near the viewport are built and measured.
                     LazyVStack(alignment: .leading, spacing: 14) {
                         ForEach(threads) { thread in
-                            RemoteDiscussionCard(thread: thread, mergeRequestURL: card.url, onCommentOrigin: onCommentOrigin)
+                            RemoteDiscussionCard(thread: thread, mergeRequestURL: card.url,
+                                drafts: card.drafts.filter { thread.draftIDs?.contains($0.id) == true },
+                                draftContexts: details.draftContexts ?? [:], onCommentOrigin: onCommentOrigin)
                         }
                     }
                 } else { unavailable }
@@ -218,6 +220,8 @@ enum RemoteDetailAnchor: Hashable { case approvals, discussions }
 private struct RemoteDiscussionCard: View {
     let thread: RemoteDetailThread
     let mergeRequestURL: URL?
+    var drafts: [RemoteDraft] = []
+    var draftContexts: [String: String] = [:]
     var onCommentOrigin: ((RemoteCommentOriginRequest) -> Void)? = nil
     @State private var expanded = false
     @State private var threadOriginRequest: ThreadOriginRequest?
@@ -252,6 +256,12 @@ private struct RemoteDiscussionCard: View {
                         if note.id != thread.notes.last?.id { Divider() }
                     }
                 }.padding(.top, 12)
+            }
+            ForEach(drafts) { draft in
+                RemoteDraftCard(draft: draft, deleteAction: nil, extraContext: draftContexts[String(draft.id)],
+                    canAct: false, onAction: { _ in })
+                    .padding(.top, 12)
+                    .accessibilityIdentifier("remote.thread-draft.\(draft.id)")
             }
         }
         .padding(12)

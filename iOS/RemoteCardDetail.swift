@@ -163,6 +163,7 @@ struct RemoteCardDetail: View {
                         deleteAction: boardCard?.actions.first { $0.kind == .deleteDraft && $0.id == "deleteDraft:\(draft.id)" },
                         publishAction: boardCard?.actions.first { $0.kind == .publishDraft && $0.id == "publishDraft:\(draft.id)" },
                         extraContext: details?.draftContexts?[String(draft.id)],
+                        replyThread: details?.threads?.first { $0.draftIDs?.contains(draft.id) == true },
                         canAct: boardCard != nil && model.state.canAct(now: .now),
                         onAction: showConfirmation)
                 }

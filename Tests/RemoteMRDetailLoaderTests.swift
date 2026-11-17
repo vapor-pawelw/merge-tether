@@ -4,6 +4,32 @@ import MergeTetherRemote
 @testable import GitLabTodos
 
 @MainActor @Suite struct RemoteMRDetailLoaderTests {
+    @Test func phoneThreadsIdentifyTheirDraftRepliesWithoutMixingOtherThreads() throws {
+        // given
+        let request = try JSONDecoder().decode(GitLabMergeRequest.self, from: Data(raw.utf8))
+        let discussions = try JSONDecoder().decode([GitLabMergeRequestDiscussion].self, from: Data(#"[{"id":"first","notes":[{"id":1,"body":"First concern","system":false}]},{"id":"second","notes":[{"id":2,"body":"Different concern","system":false}]}]"#.utf8))
+        let drafts = [
+            GitLabDraftNote(id: 11, authorID: 3, note: "First reply", discussionID: "first", position: nil),
+            GitLabDraftNote(id: 12, authorID: 3, note: "Second reply", discussionID: "first", position: nil),
+            GitLabDraftNote(id: 13, authorID: 3, note: "Other thread", discussionID: "second", position: nil),
+            GitLabDraftNote(id: 14, authorID: 3, note: "New comment", discussionID: nil, position: nil),
+            GitLabDraftNote(id: 15, authorID: 3, note: "Unavailable thread", discussionID: "missing", position: nil)
+        ]
+
+        // when
+        let details = RemoteMRDetailLoader.project(request: request, progress: nil, rules: nil, reviewers: nil,
+            discussions: discussions, drafts: drafts, username: "owner")
+        let data = try JSONEncoder().encode(details)
+        let wire = try #require(JSONSerialization.jsonObject(with: data) as? [String: Any])
+        let threads = try #require(wire["threads"] as? [[String: Any]])
+
+        // then
+        #expect(threads[0]["draftIDs"] as? [Int] == [11, 12])
+        #expect(threads[1]["draftIDs"] as? [Int] == [13])
+        #expect(details.threads?.first?.notes.first?.body == "First concern")
+        #expect(details.threads?.first?.draftCount == 2)
+    }
+
     @Test(arguments: ["informational", "newRequest", "partial", "draft", "otherAccount", "stale"])
     func phoneReplyStatusReflectsVerifiedCoverageRatherThanTheLastSpeaker(_ scenario: String) throws {
         let notes = [RemoteDetailNote(id: "11", username: "reviewer", body: "Fix retry", authorID: 7),
