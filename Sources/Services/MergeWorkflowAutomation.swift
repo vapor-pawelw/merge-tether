@@ -63,6 +63,15 @@ final class MergeWorkflowAutomation {
     private var currentAdmissions: [MergeWorkflowActivityEntry] {
         settings.workflowActivity.filter { isCurrent(host: $0.host, user: $0.user) }
     }
+    // Another installation can own the reservation, independently of observable app state.
+    var needsLivePipelinePresentation: Bool {
+        currentAdmissions.contains { entry in
+            guard entry.state == .alreadyRegistered, entry.event.kind == .pipelineFailure,
+                  let key = pipelineKey(entry) else { return false }
+            return detector.hasActiveReservation(for: key) || AssistantAutomationRunner.isWorking(on: workKey(entry))
+        }
+    }
+
     var entries: [MergeWorkflowActivityEntry] {
         let admissions = currentAdmissions
         guard !admissions.isEmpty else { return [] }

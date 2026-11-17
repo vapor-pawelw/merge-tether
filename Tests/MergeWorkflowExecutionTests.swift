@@ -248,15 +248,18 @@ import Testing
         let glab = gitlab.service(host: stored.host, username: "me")
         let automation = MergeWorkflowAutomation(settings: settings, glab: glab, detector: detector)
         let prepared = automation.entries
+        #expect(!automation.needsLivePipelinePresentation)
         #expect(!automation.isAutomaticallyProcessingPipeline(request, entries: prepared))
 
         // when + then
         let registered = try detector.registerRun(for: .init(host: stored.host,
             projectID: 7, mergeRequestIID: 48197, pipelineID: 101))
         let reservation = try #require(registered)
+        #expect(automation.needsLivePipelinePresentation)
         #expect(automation.isAutomaticallyProcessingPipeline(request, entries: prepared))
         #expect(automation.isAutomaticallyProcessingPipeline(request))
         try detector.finishHandoff(for: reservation)
+        #expect(!automation.needsLivePipelinePresentation)
         #expect(!automation.isAutomaticallyProcessingPipeline(request, entries: prepared))
         #expect(!automation.isAutomaticallyProcessingPipeline(request))
         #expect(gitlab.requests.isEmpty)

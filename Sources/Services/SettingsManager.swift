@@ -25,6 +25,7 @@ final class SettingsManager {
     func recordPersistenceFailure(_ key: String) { persistenceStore.recordFailure(key) }
     @ObservationIgnored private var lastSavedAutomation: AutomationSettings?
     @ObservationIgnored var onAutomationChanged: ((AutomationSettings) -> Void)?
+    @ObservationIgnored private var changedHistoryKeys: Set<String> = []
 
     var refreshInterval: RefreshInterval
     var unreadReminderInterval: UnreadReminderInterval
@@ -71,11 +72,21 @@ final class SettingsManager {
     var conflictReceipts: Set<MergeConflictReceipt>
     var reReviewReceipts: [ReReviewReceipt.Key: ReReviewReceipt]
     var reReviewDraftBaselines: [MRAutomationScope.Target: Int]
-    var assistantHandoffs: [AssistantAutomationRunner.Handoff]
-    var assistantChats: [AssistantAutomationRunner.ChatKey: String]
-    var workflowActivity: [MergeWorkflowActivityEntry]
-    var automationEvents: [MRAutomationEvent]
-    var mrActionIntents: [MRTodoIntent]
+    var assistantHandoffs: [AssistantAutomationRunner.Handoff] {
+        didSet { changedHistoryKeys.insert(Key.assistantHandoffs) }
+    }
+    var assistantChats: [AssistantAutomationRunner.ChatKey: String] {
+        didSet { changedHistoryKeys.insert(Key.assistantChats) }
+    }
+    var workflowActivity: [MergeWorkflowActivityEntry] {
+        didSet { changedHistoryKeys.insert(Key.workflowActivity) }
+    }
+    var automationEvents: [MRAutomationEvent] {
+        didSet { changedHistoryKeys.insert(Key.automationEvents) }
+    }
+    var mrActionIntents: [MRTodoIntent] {
+        didSet { changedHistoryKeys.insert(Key.mrActionIntents) }
+    }
     var routedMRTodoReceipts: Set<MRTodoRouteReceipt>
     var boardPins: Set<BoardCardPin>
     var boardGrouping: MRBoardGrouping = .withoutAutomation
@@ -176,11 +187,11 @@ final class SettingsManager {
         persistenceStore.save(pipelineRefreshAttempts, forKey: Key.pipelineRefreshAttempts)
         persistenceStore.save(pipelineClaimAssessmentAttempts, forKey: Key.pipelineClaimAssessmentAttempts)
         persistenceStore.save(pendingTodoAcknowledgements, forKey: Key.pendingTodoAcknowledgements)
-        persistenceStore.save(assistantHandoffs, forKey: Key.assistantHandoffs)
-        persistenceStore.save(assistantChats, forKey: Key.assistantChats)
-        persistenceStore.save(workflowActivity, forKey: Key.workflowActivity)
-        persistenceStore.save(automationEvents, forKey: Key.automationEvents)
-        persistenceStore.save(mrActionIntents, forKey: Key.mrActionIntents)
+        saveHistory(assistantHandoffs, forKey: Key.assistantHandoffs)
+        saveHistory(assistantChats, forKey: Key.assistantChats)
+        saveHistory(workflowActivity, forKey: Key.workflowActivity)
+        saveHistory(automationEvents, forKey: Key.automationEvents)
+        saveHistory(mrActionIntents, forKey: Key.mrActionIntents)
         persistenceStore.save(routedMRTodoReceipts, forKey: Key.routedMRTodoReceipts)
         persistenceStore.save(boardPins, forKey: Key.boardPins)
         persistenceStore.save(mrLifecycleLedger, forKey: Key.mrLifecycleLedger)
@@ -220,6 +231,10 @@ final class SettingsManager {
         persistenceStore.save(mergeSubmissions, forKey: Key.mergeSubmissions)
         persistenceStore.save(autoMergeOptOuts, forKey: Key.autoMergeOptOuts)
         let synchronized = persistenceStore.synchronize()
+        if !synchronized {
+            changedHistoryKeys.formUnion([Key.assistantHandoffs, Key.assistantChats, Key.workflowActivity,
+                Key.automationEvents, Key.mrActionIntents])
+        }
         let accepted = automationSaved && synchronized
         if accepted { acceptedAutomation = automation.ignoringGlobalSuspension }
         if automationSaved && synchronized {
@@ -227,6 +242,12 @@ final class SettingsManager {
             if previousAutomation != automation { onAutomationChanged?(previousAutomation) }
         }
         return accepted
+    }
+
+    private func saveHistory<Value: Encodable>(_ value: Value, forKey key: String) {
+        if persistenceStore.save(value, forKey: key, changed: changedHistoryKeys.contains(key)) {
+            changedHistoryKeys.remove(key)
+        }
     }
 
     /// Turns the global automation killswitch on or off and stops or resumes automation accordingly.

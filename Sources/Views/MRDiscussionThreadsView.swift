@@ -21,8 +21,10 @@ struct MRDiscussionThreadsView: View {
     var extraContexts: AICommentProvenanceStore.ExtraContexts = .empty
     var currentUserIdentity: PersonIdentity? = nil
     let onRefresh: () -> Void
+    @State private var markdownCache = MRDiscussionMarkdownCache()
 
     var body: some View {
+        let currentUser = self.currentUser
         VStack(alignment: .leading, spacing: 12) {
             HStack {
                 Text(title).font(.headline)
@@ -45,10 +47,10 @@ struct MRDiscussionThreadsView: View {
                 Text(isLoading ? .MRDiscussions.mrDiscussionsLoading : .MRDiscussions.mrDiscussionsUnavailable)
                     .font(.callout).foregroundStyle(.secondary)
             }
-            VStack(alignment: .leading, spacing: 0) {
+            LazyVStack(alignment: .leading, spacing: 0) {
                 ForEach(snapshot.threads) { thread in
                     if thread.id != snapshot.threads.first?.id { Divider() }
-                    threadView(thread)
+                    threadView(thread, currentUser: currentUser)
                 }
                 ForEach(Array(snapshot.standaloneDrafts.enumerated()), id: \.offset) { index, draft in
                     if index > 0 || !snapshot.threads.isEmpty { Divider() }
@@ -57,7 +59,8 @@ struct MRDiscussionThreadsView: View {
                              : hasLoaded || hasError ? .MRDiscussions.mrDiscussionsUnmatchedReply
                              : .MRDiscussions.mrDiscussionsReplyDraft)
                             .font(.caption.weight(.medium)).foregroundStyle(.secondary)
-                        MRDiscussionDraftView(draft: draft, author: currentUser, extraContext: extraContexts.forDraft(draft),
+                        MRDiscussionDraftView(draft: draft, author: currentUser, markdownCache: markdownCache,
+                            extraContext: extraContexts.forDraft(draft),
                             selection: selection, selectionDisabled: selectionDisabled, onDelete: onDelete)
                     }
                     .padding(12)
@@ -86,9 +89,9 @@ struct MRDiscussionThreadsView: View {
         return directory.person(username: username)
     }
 
-    private func threadView(_ thread: MRDiscussionSnapshot.Thread) -> some View {
+    private func threadView(_ thread: MRDiscussionSnapshot.Thread, currentUser: PersonIdentity?) -> some View {
         MRDiscussionThreadView(thread: thread, mergeRequestURL: mergeRequestURL,
-                               currentUsername: currentUsername, currentUser: currentUser, initiallyExpanded: expandPendingDrafts && !thread.drafts.isEmpty,
+                               currentUsername: currentUsername, currentUser: currentUser, markdownCache: markdownCache, initiallyExpanded: expandPendingDrafts && !thread.drafts.isEmpty,
                                selection: selection, selectionDisabled: selectionDisabled, draftsFirst: draftsFirst,
                                extraContexts: extraContexts, onDelete: onDelete, onSetOrigin: onSetOrigin)
     }
@@ -101,6 +104,7 @@ private struct MRDiscussionThreadView: View {
     let mergeRequestURL: URL
     let currentUsername: String?
     let currentUser: PersonIdentity?
+    let markdownCache: MRDiscussionMarkdownCache
     let initiallyExpanded: Bool
     let selection: Binding<DraftPublicationSelection>?
     let selectionDisabled: Bool
@@ -109,6 +113,7 @@ private struct MRDiscussionThreadView: View {
     var onDelete: ((GitLabDraftNote) -> Void)? = nil
     var onSetOrigin: MRDiscussionOriginAction? = nil
     @State private var isExpanded = false
+    @State private var appliedInitialExpansion = false
     @State private var threadOriginRequest: ThreadOriginRequest?
 
     private struct ThreadOriginRequest: Identifiable {
@@ -142,14 +147,14 @@ private struct MRDiscussionThreadView: View {
                     VStack(alignment: .leading, spacing: 12) {
                         // The first comment's author line stays in the header; its body continues here.
                         if let first = comments.first {
-                            MRDiscussionNoteContent(note: first, threadLocation: thread.location)
+                            MRDiscussionNoteContent(note: first, threadLocation: thread.location, markdownCache: markdownCache)
                         }
                         ForEach(Array(comments.dropFirst().enumerated()), id: \.offset) { _, note in
                             Divider().padding(.vertical, 2)
                             MRDiscussionNoteView(note: note, origin: note.id.flatMap { thread.origins[$0] },
                                                  authorKind: (note.author?.id).flatMap { thread.authorKinds[$0] },
                                                  mergeRequestURL: mergeRequestURL, threadLocation: thread.location,
-                                                 onSetOrigin: noteOriginAction(note), extraContext: extraContexts.forNote(note.id))
+                                                 markdownCache: markdownCache, onSetOrigin: noteOriginAction(note), extraContext: extraContexts.forNote(note.id))
                         }
                         if !draftsFirst { draftRows }
                     }
@@ -162,7 +167,11 @@ private struct MRDiscussionThreadView: View {
         }
         .padding(.horizontal, 12).padding(.vertical, 11)
         .frame(maxWidth: .infinity, alignment: .leading)
-        .onAppear { if initiallyExpanded { isExpanded = true } }
+        .onAppear {
+            guard !appliedInitialExpansion else { return }
+            appliedInitialExpansion = true
+            if initiallyExpanded { isExpanded = true }
+        }
         .alert(threadOriginTitle, isPresented: Binding(get: { threadOriginRequest != nil },
                                                        set: { if !$0 { threadOriginRequest = nil } }),
                presenting: threadOriginRequest) { request in
@@ -232,7 +241,7 @@ private struct MRDiscussionThreadView: View {
                     .foregroundStyle(thread.state == .resolved ? Color.secondary : Color.primary)
                 if !isExpanded, let body = firstComment.body {
                     // Same inline Markdown as the expanded comment.
-                    Text(SafeInlineMarkdown.render(body) ?? AttributedString(body)).font(.callout)
+                    Text(markdownCache.render(body) ?? AttributedString(body)).font(.callout)
                         .foregroundStyle(thread.state == .resolved ? Color.secondary : Color.primary).lineLimit(2)
                         .padding(.top, 1)
                 }
@@ -255,7 +264,8 @@ private struct MRDiscussionThreadView: View {
 
     private var draftRows: some View {
         ForEach(Array(thread.drafts.enumerated()), id: \.offset) { _, draft in
-            MRDiscussionDraftView(draft: draft, author: currentUser, threadLocation: thread.location,
+            MRDiscussionDraftView(draft: draft, author: currentUser, markdownCache: markdownCache,
+                                  threadLocation: thread.location,
                 extraContext: extraContexts.forDraft(draft),
                 selection: selection, selectionDisabled: selectionDisabled, onDelete: onDelete)
         }
@@ -297,6 +307,7 @@ private struct MRDiscussionNoteView: View {
     let authorKind: AuthorFeedbackPolicy.AccountKind?
     let mergeRequestURL: URL
     let threadLocation: String?
+    let markdownCache: MRDiscussionMarkdownCache
     var onSetOrigin: ((AICommentOriginOverride.Classification?) -> Void)? = nil
     var extraContext: String? = nil
 
@@ -305,7 +316,7 @@ private struct MRDiscussionNoteView: View {
             MRDiscussionNoteHeader(note: note, origin: origin, authorKind: authorKind,
                                    mergeRequestURL: mergeRequestURL, onSetOrigin: onSetOrigin,
                                    extraContext: extraContext)
-            MRDiscussionNoteContent(note: note, threadLocation: threadLocation)
+            MRDiscussionNoteContent(note: note, threadLocation: threadLocation, markdownCache: markdownCache)
         }
         .frame(maxWidth: .infinity, alignment: .leading)
     }
@@ -348,13 +359,14 @@ private struct MRDiscussionNoteHeader: View {
 private struct MRDiscussionNoteContent: View {
     let note: GitLabMergeRequestDiscussion.Note
     let threadLocation: String?
+    let markdownCache: MRDiscussionMarkdownCache
 
     var body: some View {
         VStack(alignment: .leading, spacing: 7) {
             if let location = MRDiscussionLocation(position: note.position), location.full != threadLocation {
                 MRDiscussionLocationLabel(location: location).textSelection(.enabled)
             }
-            MRDiscussionBody(source: note.body)
+            MRDiscussionBody(source: note.body, markdownCache: markdownCache)
         }
         .frame(maxWidth: .infinity, alignment: .leading)
     }
@@ -363,6 +375,7 @@ private struct MRDiscussionNoteContent: View {
 private struct MRDiscussionDraftView: View {
     let draft: GitLabDraftNote
     let author: PersonIdentity?
+    let markdownCache: MRDiscussionMarkdownCache
     var threadLocation: String? = nil
     var extraContext: String? = nil
     var selection: Binding<DraftPublicationSelection>? = nil
@@ -387,7 +400,7 @@ private struct MRDiscussionDraftView: View {
             if let location = MRDiscussionLocation(position: draft.position), location.full != threadLocation {
                 MRDiscussionLocationLabel(location: location).textSelection(.enabled)
             }
-            MRDiscussionBody(source: draft.note)
+            MRDiscussionBody(source: draft.note, markdownCache: markdownCache)
             DraftPublicationWarnings(drafts: [draft])
         }
         .padding(12)
@@ -557,7 +570,8 @@ private struct MRDiscussionOriginBadge: View {
 /// Native inline Markdown preserves multiline text and never loads HTML or remote images.
 private struct MRDiscussionBody: View {
     let source: String?
-    private var rendered: AttributedString? { source.flatMap(SafeInlineMarkdown.render) }
+    let markdownCache: MRDiscussionMarkdownCache
+    private var rendered: AttributedString? { source.flatMap(markdownCache.render) }
     var body: some View {
         Group {
             if let rendered { Text(rendered) }

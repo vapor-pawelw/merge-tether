@@ -17,14 +17,28 @@ struct MRCommentCitation: Identifiable, Sendable {
 
         init?(target: MRDiscussionTarget, loadedTarget: MRDiscussionTarget?, request: GitLabMergeRequest?,
               discussions: [GitLabMergeRequestDiscussion], hasLoaded: Bool, hasError: Bool) {
+            self.init(target: target, loadedTarget: loadedTarget, request: request,
+                hasLoaded: hasLoaded, hasError: hasError, prepareContent: { MRDiscussionContent(discussions) })
+        }
+
+        init?(target: MRDiscussionTarget, loadedTarget: MRDiscussionTarget?, request: GitLabMergeRequest?,
+              content: MRDiscussionContent?, hasLoaded: Bool, hasError: Bool) {
+            self.init(target: target, loadedTarget: loadedTarget, request: request,
+                hasLoaded: hasLoaded, hasError: hasError, prepareContent: { content })
+        }
+
+        private init?(target: MRDiscussionTarget, loadedTarget: MRDiscussionTarget?, request: GitLabMergeRequest?,
+                      hasLoaded: Bool, hasError: Bool, prepareContent: () -> MRDiscussionContent?) {
             guard hasLoaded, !hasError, loadedTarget == target, !target.username.isEmpty,
                   let request, request.projectID == target.projectID, request.iid == target.iid,
                   request.webURL == target.url,
-                  target.url.isGitLabMergeRequest(host: target.host, iid: target.iid) else { return nil }
+                  target.url.isGitLabMergeRequest(host: target.host, iid: target.iid),
+                  let content = prepareContent() else { return nil }
             self.target = target
             headSHA = request.sha
             semanticContextFingerprint = request.semanticContextFingerprint
-            discussionFingerprint = ReviewVerdict.fingerprint(discussions)
+            discussionFingerprint = content.fingerprint
+            let discussions = content.discussions
 
             // Derive evidence once for this immutable load. Duplicate identities stay
             // ambiguous even when a later copy has otherwise valid quotation data.

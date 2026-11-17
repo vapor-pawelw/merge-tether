@@ -36,7 +36,10 @@ final class MRDiscussionStore {
     private var loadedRevision: UInt64?
     private var generation = 0
     private(set) var target: MRDiscussionTarget?
-    private(set) var discussions: [GitLabMergeRequestDiscussion] = []
+    private var discussionContent: MRDiscussionContent?
+    var discussions: [GitLabMergeRequestDiscussion] { discussionContent?.discussions ?? [] }
+    var discussionFingerprint: String? { discussionContent?.fingerprint }
+    @ObservationIgnored private let presentation = MRDiscussionPresentation()
     private(set) var origins: [Int: MRDiscussionSnapshot.Origin] = [:]
     /// App-only agent explanations for drafts and published notes; never part of a GitLab write.
     private(set) var extraContexts: AICommentProvenanceStore.ExtraContexts = .empty
@@ -86,7 +89,9 @@ final class MRDiscussionStore {
                     iid: requested.iid, host: requested.host)
             }
             guard isCurrent(current, target: requested, glab: glab, revision: revision) else { return }
+            let preparedContent = Task.detached { MRDiscussionContent(result) }
             let cached = await cachedOrigins(in: result, target: requested, userID: authenticatedUserID)
+            let content = await preparedContent.value
             var assessed = cached.0
             let contexts = cached.1
             guard isCurrent(current, target: requested, glab: glab, revision: revision) else { return }
@@ -119,7 +124,7 @@ final class MRDiscussionStore {
             self.authenticatedUserID = authenticatedUserID
             self.currentUser = currentUser
             loadedRevision = revision
-            discussions = result
+            discussionContent = content
             origins = assessed
             extraContexts = contexts
             authorKinds = kinds
@@ -135,7 +140,7 @@ final class MRDiscussionStore {
                 self.authenticatedUserID = nil
                 currentUser = nil
                 loadedRevision = nil
-                discussions = []
+                discussionContent = nil
                 origins = [:]
                 extraContexts = .empty
                 authorKinds = [:]
@@ -269,13 +274,39 @@ final class MRDiscussionStore {
         authenticatedUserID = nil
         currentUser = nil
         loadedRevision = nil
-        discussions = []
+        discussionContent = nil
         origins = [:]
         extraContexts = .empty
         authorKinds = [:]
         authorKindVersions = [:]
         hasError = false
         hasLoaded = false
+    }
+
+    func hasCurrentTarget(_ requested: MRDiscussionTarget?, accountRevision: UInt64) -> Bool {
+        guard let requested, target == requested else { return false }
+        return loadedRevision == nil || loadedRevision == accountRevision
+    }
+
+    func citationContext(target requested: MRDiscussionTarget, request: GitLabMergeRequest?,
+                         accountRevision: UInt64) -> MRCommentCitation.Context? {
+        presentation.citationContext(target: requested, request: request, accountRevision: accountRevision) {
+            guard hasCurrentTarget(requested, accountRevision: accountRevision) else { return nil }
+            return MRCommentCitation.Context(target: requested, loadedTarget: target, request: request,
+                content: discussionContent, hasLoaded: hasLoaded, hasError: hasError)
+        }
+    }
+
+    func presentationSnapshot(target requested: MRDiscussionTarget?, accountRevision: UInt64,
+                              drafts: [GitLabDraftNote], assessment: ReReviewAssessment?,
+                              authorID: Int?) -> MRDiscussionSnapshot {
+        presentation.snapshot(target: requested, accountRevision: accountRevision, drafts: drafts,
+            assessment: assessment, authorID: authorID) {
+            let current = hasCurrentTarget(requested, accountRevision: accountRevision)
+            return MRDiscussionSnapshot(discussions: current ? discussions : [], drafts: drafts,
+                origins: current ? origins : [:], assessment: current ? assessment : nil, authorID: authorID,
+                authorKinds: current ? authorKinds : [:])
+        }
     }
 
     private func matchesAccount(_ target: MRDiscussionTarget, glab: GlabService) -> Bool {

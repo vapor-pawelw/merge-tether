@@ -190,6 +190,111 @@ struct SettingsManagerTests {
         #expect(SettingsManager(defaults: defaults).conversationDestination == .codexApp)
     }
 
+    @Test func unrelatedSavesDoNotRewriteLoadedAssistantHistory() throws {
+        let suite = "SettingsHistoryWrites.\(UUID())"
+        let defaults = try #require(HistoryWriteDefaults(suiteName: suite))
+        defer { defaults.removePersistentDomain(forName: suite) }
+        let settings = SettingsManager(defaults: defaults)
+        let handoff = AssistantAutomationRunner.Handoff(id: UUID(),
+            key: .init(assistant: .codex, work: .init(host: "gitlab.example.test", projectID: 1, iid: 2),
+                username: "me", workspace: "", access: .gitLabRead),
+            title: "Fixture", prompt: String(repeating: "Synthetic transcript ", count: 10_000),
+            createdAt: Date(timeIntervalSince1970: 1), allowsPush: false,
+            execution: .init(state: .queued))
+        settings.assistantHandoffs = [handoff]
+        #expect(settings.save())
+        let history = try #require(defaults.data(forKey: "assistantHandoffs"))
+        defaults.historyWrites = 0
+
+        settings.notificationsEnabled.toggle()
+        #expect(settings.save())
+        let restarted = SettingsManager(defaults: defaults)
+        #expect(restarted.save())
+
+        #expect(defaults.historyWrites == 0)
+        #expect(defaults.data(forKey: "assistantHandoffs") == history)
+        #expect(restarted.assistantHandoffs.first?.prompt == handoff.prompt)
+        restarted.assistantHandoffs[0].execution?.state = .running
+        #expect(restarted.save())
+        #expect(defaults.historyWrites == 1)
+        #expect(SettingsManager(defaults: defaults).assistantHandoffs.first?.execution?.state == .running)
+    }
+
+    @Test func failedHistoryWriteIsRetriedAndNeverClearsThePersistenceHold() throws {
+        let suite = "SettingsHistoryFailure.\(UUID())"
+        let defaults = try #require(PersistenceFaultDefaults(suiteName: suite))
+        defer { defaults.removePersistentDomain(forName: suite) }
+        let settings = SettingsManager(defaults: defaults)
+        #expect(settings.save())
+        defaults.rejectedKey = "assistantHandoffs"
+        let handoff = AssistantAutomationRunner.Handoff(id: UUID(),
+            key: .init(assistant: .codex, work: .init(host: "gitlab.example.test", projectID: 1, iid: 2),
+                username: "me", workspace: "", access: .gitLabRead),
+            title: "Fixture", prompt: "Synthetic prompt", createdAt: Date(timeIntervalSince1970: 1), allowsPush: false)
+        settings.assistantHandoffs.append(handoff)
+        settings.save()
+        #expect(settings.persistenceDegraded.contains("assistantHandoffs"))
+        #expect(SettingsManager(defaults: defaults).assistantHandoffs.isEmpty)
+        defaults.rejectedKey = nil
+        settings.save()
+        let restarted = SettingsManager(defaults: defaults)
+        #expect(restarted.assistantHandoffs.map(\.id) == [handoff.id])
+        #expect(!restarted.automaticActionsAllowed)
+    }
+
+    @Test(arguments: ["assistantChats", "workflowActivity", "automationEvents", "mrActionIntents"])
+    func unrelatedSavesDoNotRewriteOtherHistoryCollections(_ key: String) throws {
+        let suite = "SettingsOtherHistoryWrites.\(UUID())"
+        let defaults = try #require(HistoryWriteDefaults(suiteName: suite))
+        defer { defaults.removePersistentDomain(forName: suite) }
+        let settings = SettingsManager(defaults: defaults)
+        #expect(settings.save())
+        let original = try #require(defaults.data(forKey: key))
+        defaults.writesByKey = [:]
+        settings.notificationsEnabled.toggle()
+        #expect(settings.save())
+        #expect(SettingsManager(defaults: defaults).save())
+        #expect(defaults.writesByKey[key] == nil)
+        #expect(defaults.data(forKey: key) == original)
+    }
+
+    @Test func unexpectedHistoryReplacementIsPreservedAndFailsClosed() throws {
+        let suite = "SettingsHistoryReplacement.\(UUID())"
+        let defaults = try #require(UserDefaults(suiteName: suite))
+        defer { defaults.removePersistentDomain(forName: suite) }
+        let settings = SettingsManager(defaults: defaults)
+        #expect(settings.save())
+        let unsupported = Data("unsupported history".utf8)
+        defaults.set(unsupported, forKey: "assistantHandoffs")
+        settings.notificationsEnabled.toggle()
+        settings.save()
+        #expect(defaults.data(forKey: "assistantHandoffs") == unsupported)
+        #expect(settings.persistenceDegraded.contains("assistantHandoffs"))
+        #expect(!SettingsManager(defaults: defaults).automaticActionsAllowed)
+    }
+
+    @Test func failedSynchronizationRetriesChangedHistoryOnTheNextExplicitSave() throws {
+        let suite = "SettingsHistorySynchronization.\(UUID())"
+        let defaults = try #require(HistoryWriteDefaults(suiteName: suite))
+        defer { defaults.removePersistentDomain(forName: suite) }
+        let settings = SettingsManager(defaults: defaults)
+        #expect(settings.save())
+        defaults.writesByKey = [:]
+        let key = AssistantAutomationRunner.ChatKey(assistant: .codex,
+            work: .init(host: "gitlab.example.test", projectID: 1, iid: 2),
+            username: "me", workspace: "", access: .gitLabRead)
+        settings.assistantChats[key] = "synthetic-thread"
+        defaults.synchronizationFails = true
+        #expect(!settings.save())
+        #expect(defaults.writesByKey["assistantChats"] == 1)
+        defaults.synchronizationFails = false
+        #expect(settings.save())
+        #expect(defaults.writesByKey["assistantChats"] == 2)
+        let restarted = SettingsManager(defaults: defaults)
+        #expect(restarted.assistantChats[key] == "synthetic-thread")
+        #expect(!restarted.automaticActionsAllowed)
+    }
+
     private func makeDefaults() -> UserDefaults {
         let suiteName = "GitLabTodosTests-\(UUID().uuidString)"
         let defaults = UserDefaults(suiteName: suiteName)!
@@ -393,5 +498,20 @@ final class PersistenceFaultDefaults: UserDefaults {
     override func synchronize() -> Bool {
         let result = super.synchronize()
         return !synchronizationFails && result
+    }
+}
+
+private final class HistoryWriteDefaults: UserDefaults {
+    var historyWrites = 0
+    var writesByKey: [String: Int] = [:]
+    var synchronizationFails = false
+    override func set(_ value: Any?, forKey key: String) {
+        if key == "assistantHandoffs" { historyWrites += 1 }
+        writesByKey[key, default: 0] += 1
+        super.set(value, forKey: key)
+    }
+    override func synchronize() -> Bool {
+        let saved = super.synchronize()
+        return !synchronizationFails && saved
     }
 }

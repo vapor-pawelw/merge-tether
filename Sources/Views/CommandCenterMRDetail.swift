@@ -111,8 +111,8 @@ private struct CommandCenterMRDetailContent: View {
 
     private var citationContext: MRCommentCitation.Context? {
         guard let target = discussionTarget else { return nil }
-        return .init(target: target, loadedTarget: discussionStore.target, request: item.mergeRequest,
-            discussions: discussionStore.discussions, hasLoaded: discussionStore.hasLoaded, hasError: discussionStore.hasError)
+        return discussionStore.citationContext(target: target, request: item.mergeRequest,
+            accountRevision: monitor.glab.accountRevision)
     }
     private var ignoredSuggestions: [IgnoredFeedbackSuggestion] {
         target.map { monitor.settings.feedbackSuggestionDecisions.entries(for: $0) } ?? []
@@ -873,22 +873,20 @@ private struct CommandCenterMRDetailContent: View {
     }
 
     private var discussionSnapshot: MRDiscussionSnapshot {
-        let current = discussionTarget != nil && discussionStore.target == discussionTarget
-        let discussions = current ? discussionStore.discussions : []
+        let current = discussionStore.hasCurrentTarget(discussionTarget, accountRevision: monitor.glab.accountRevision)
         let request = presentationRow.displayRequest
         let assessment = current && discussionStore.hasLoaded && !discussionStore.hasError
             ? request.flatMap { request in
-                ReviewVerdict.fingerprint(discussions).flatMap {
+                discussionStore.discussionFingerprint.flatMap {
                     monitor.attention.authorFeedbackCoordinator?.assessment(for: request, fingerprint: $0)
                 }
             } : nil
-        return MRDiscussionSnapshot(discussions: discussions, drafts: item.drafts,
-            origins: current ? discussionStore.origins : [:], assessment: assessment, authorID: request?.author.id,
-            authorKinds: current ? discussionStore.authorKinds : [:])
+        return discussionStore.presentationSnapshot(target: discussionTarget, accountRevision: monitor.glab.accountRevision,
+            drafts: item.drafts, assessment: assessment, authorID: request?.author.id)
     }
 
     private func publicationThreads(_ snapshot: MRDiscussionSnapshot) -> some View {
-        let current = discussionTarget != nil && discussionStore.target == discussionTarget
+        let current = discussionStore.hasCurrentTarget(discussionTarget, accountRevision: monitor.glab.accountRevision)
         return MRDiscussionThreadsView(snapshot: snapshot.pendingPublication, mergeRequestURL: item.url,
             currentUsername: monitor.glab.currentUsername, isLoading: current && discussionStore.isLoading,
             hasError: current && discussionStore.hasError, hasLoaded: current && discussionStore.hasLoaded,
@@ -907,7 +905,8 @@ private struct CommandCenterMRDetailContent: View {
     /// Origins can be corrected only for the conversation currently loaded for this account.
     private var originAction: MRDiscussionOriginAction? {
         guard finishedState == nil, let target = originTarget, discussionTarget != nil,
-              discussionStore.target == discussionTarget, discussionStore.hasLoaded, !discussionStore.hasError else { return nil }
+              discussionStore.hasCurrentTarget(discussionTarget, accountRevision: monitor.glab.accountRevision),
+              discussionStore.hasLoaded, !discussionStore.hasError else { return nil }
         let discussions = discussionStore.discussions
         return { classification, notes in
             Task {
@@ -919,7 +918,7 @@ private struct CommandCenterMRDetailContent: View {
     }
 
     @ViewBuilder private func discussionThreads(_ discussions: MRDiscussionSnapshot) -> some View {
-        let current = discussionTarget != nil && discussionStore.target == discussionTarget
+        let current = discussionStore.hasCurrentTarget(discussionTarget, accountRevision: monitor.glab.accountRevision)
         let snapshot = showsPublication ? discussions.remainingDiscussions : discussions
         if !showsPublication || !snapshot.threads.isEmpty {
             MRDiscussionThreadsView(snapshot: snapshot, mergeRequestURL: item.url,
