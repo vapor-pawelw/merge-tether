@@ -79,9 +79,14 @@ struct CommandCenterBoardView: View {
     }
 
     private func laneCards(_ rows: [MergeRequestBoardSnapshot.Row], removable: Bool = false) -> some View {
-        ForEach(Array(rows.enumerated()), id: \.element.id) { index, row in
+        let inactiveAttentionCount = rows.filter { row in
+            activity(row) == .inactive && row.needsAttention
+                && MRCardPresentation(row: row, monitor: monitor, allowsRemoval: removable).humanAction != nil
+        }.count
+        return ForEach(Array(rows.enumerated()), id: \.element.id) { index, row in
             VStack(spacing: 10) {
-                activityDivider(activity(row), previous: index > 0 ? activity(rows[index - 1]) : nil)
+                activityDivider(activity(row), previous: index > 0 ? activity(rows[index - 1]) : nil,
+                    attentionCount: inactiveAttentionCount)
                 card(row, removable: removable)
             }
             .transition(cardTransition)
@@ -94,13 +99,20 @@ struct CommandCenterBoardView: View {
             isFinished: MergeRequestFinishedState(row.item.mergeRequest) != nil).group
     }
 
-    @ViewBuilder private func activityDivider(_ group: MRBoardActivity.Group, previous: MRBoardActivity.Group?) -> some View {
+    @ViewBuilder private func activityDivider(_ group: MRBoardActivity.Group, previous: MRBoardActivity.Group?,
+                                              attentionCount: Int) -> some View {
         if group != previous, group == .inactive || group == .drafts {
             HStack(spacing: 10) {
                 Text(group == .inactive ? .BoardActivity.inactiveSection : .DraftMR.sectionTitle)
                     .font(.caption.weight(.medium)).foregroundStyle(.secondary)
+                if group == .inactive, attentionCount > 0 {
+                    Text(verbatim: "·").foregroundStyle(.secondary)
+                    Text(.BoardActivity.attentionCount(attentionCount))
+                        .foregroundStyle(.orange)
+                }
                 Rectangle().fill(.secondary.opacity(0.16)).frame(height: 0.5)
             }
+            .font(.caption.weight(.medium))
             .padding(.top, previous == nil ? 2 : 14)
             .padding(.horizontal, 4)
         }

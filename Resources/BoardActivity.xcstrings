@@ -7,7 +7,30 @@
         "en": {
           "stringUnit": {
             "state": "translated",
-            "value": "Inactive"
+            "value": "Without automation"
+          }
+        }
+      }
+    },
+    "attentionCount.%lld": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "variations": {
+            "plural": {
+              "one": {
+                "stringUnit": {
+                  "state": "translated",
+                  "value": "%lld needs attention"
+                }
+              },
+              "other": {
+                "stringUnit": {
+                  "state": "translated",
+                  "value": "%lld need attention"
+                }
+              }
+            }
           }
         }
       }
