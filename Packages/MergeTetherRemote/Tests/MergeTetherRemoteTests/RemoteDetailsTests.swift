@@ -3,6 +3,17 @@ import Testing
 @testable import MergeTetherRemote
 
 @Suite struct RemoteDetailsTests {
+    @Test(arguments: [RemoteApprovalPerson.Status.approved, .previouslyApproved, .commented, .assigned])
+    func onlyApprovalEvidenceMarksTheViewerAndPlacesThemFirst(_ status: RemoteApprovalPerson.Status) throws {
+        let other = RemoteApprovalPerson(id: 8, name: "Other", username: "other", status: .approved)
+        let viewer = RemoteApprovalPerson(id: 7, name: "Viewer", username: "me", status: status)
+        let details = RemoteApprovalDetails(progress: nil, people: [other, viewer], viewerApprovalID: 7)
+        let hasApproval = status == .approved || status == .previouslyApproved
+        #expect(details.viewerApproval == (hasApproval ? viewer : nil))
+        #expect(details.orderedPeople.first == (hasApproval ? viewer : other))
+        #expect(try JSONDecoder().decode(RemoteApprovalDetails.self, from: JSONEncoder().encode(details)) == details)
+    }
+
     @Test func presentationIndependentReadsRemainBoundToContentAndDecodeLegacyRequests() throws {
         let original = board(), card = original.cards[0]
         let legacy = try RemoteDetailRequest(card: card, board: original)

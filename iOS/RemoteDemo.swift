@@ -7,8 +7,9 @@ import MergeTetherRemote
         let arguments = CommandLine.arguments
         let staleDetails = arguments.contains("--remote-preview-stale-details")
         let draftPreview = arguments.contains("--remote-preview-draft") || staleDetails
-        let boardPreview = arguments.contains("--remote-preview") || draftPreview
-        let previewBoard = draftPreview ? draftBoard : board
+        let approvalPreview = arguments.contains("--remote-preview-approvals") || arguments.contains("--remote-preview-approval-reset")
+        let boardPreview = arguments.contains("--remote-preview") || draftPreview || approvalPreview
+        let previewBoard = draftPreview ? draftBoard : approvalPreview ? approvalBoard(reset: arguments.contains("--remote-preview-approval-reset")) : board
         let connecting = arguments.contains("--remote-preview-connecting")
         let offline = arguments.contains("--remote-preview-offline")
         let failed = arguments.contains("--remote-preview-failed")
@@ -24,6 +25,23 @@ import MergeTetherRemote
         }, now: { Date().addingTimeInterval(offline ? -46 : 0) })
         if boardPreview { model.state.receive(.init(type: .snapshot, challenge: model.state.challenge(), board: previewBoard)) }
         return model
+    }
+
+    static func approvalBoard(reset: Bool) -> RemoteBoard {
+        var preview = board
+        var card = preview.lanes[1].cards[0]
+        card.detail = "Keep the previous confirmation visible while an interrupted request is retried."
+        card.primaryCTA = .init(title: String(localized: .Board.boardDetails), destination: .overview)
+        card.actions = []
+        card.approvals = .init(completed: reset ? 1 : 2, required: 2)
+        card.presentation?.approvalPeople = [
+            .init(id: 2, name: "Sam Example", username: "sam", status: .approved),
+            .init(id: 1, name: "Alex Example", username: "alex", status: reset ? .previouslyApproved : .approved),
+            .init(id: 3, name: "Comment Author", username: "commenter", status: .commented)
+        ]
+        card.presentation?.viewerApprovalID = 1
+        preview.lanes = [.init(id: .reviewed, cards: [card, preview.lanes[0].cards[1]])]
+        return preview
     }
 
     static let draftBoard = RemoteBoard(hostSession: UUID(), account: "Demo", updatedAt: .now, lanes: [
@@ -50,10 +68,10 @@ import MergeTetherRemote
                           .init(id: "commentOrigin", kind: .setCommentOrigin, token: "preview"),
                           .init(id: "ignoreSuggestion:1", kind: .ignoreSuggestion, token: "preview",
                               confirmationText: "Keep the cached confirmation visible if a retry is interrupted.",
-                              label: String(localized: .Remote.remoteIgnoreSuggestion("Keep the cached confirmation visible if a retry is interrupted."))),
+                              label: "Keep the cached confirmation visible if a retry is interrupted."),
                           .init(id: "ignoreSuggestion:2", kind: .ignoreSuggestion, token: "preview",
                               confirmationText: "Make the confirmation button label wrap on a compact screen.",
-                              label: String(localized: .Remote.remoteIgnoreSuggestion("Make the confirmation button label wrap on a compact screen.")))],
+                              label: "Make the confirmation button label wrap on a compact screen.")],
                 needsAttention: true, mergeRequestIID: 42,
                 primaryCTA: .init(title: String(localized: .MRHumanAction.mrHumanActionActionReviewDrafts), destination: .drafts),
                 presentation: .init(author: "Alex Example", repository: "payments-api",
@@ -125,6 +143,10 @@ import MergeTetherRemote
         activity: [.init(id: "run1", title: "Handle payment confirmation feedback", status: "Completed", summary: "Preserved the cached confirmation and added duplicate-response coverage.", createdAt: .now.addingTimeInterval(-900), head: card.head)],
         usage: [.init(label: "Reviewer / work agent", value: "$0.1420 · 2 agent requests"), .init(label: "Verifier", value: "$0.0081 · 4 agent requests")],
         branches: .init(source: sourceBranch, target: "main"))
+        if let people = card.presentation?.approvalPeople {
+            details.approvals = .init(progress: card.approvals, people: people, historyAvailable: true,
+                viewerApprovalID: card.presentation?.viewerApprovalID)
+        }
         details.automation = .init(active: true, summary: "Automation enabled · Decided by: Repository")
         if CommandLine.arguments.contains("--remote-preview-origin-resume") {
             details.originResume = .init(changeID: UUID().uuidString, resumesAt: .now.addingTimeInterval(600), drafts: 1)

@@ -4,6 +4,34 @@ import MergeTetherRemote
 @testable import GitLabTodos
 
 @MainActor @Suite struct RemoteBoardAdapterTests {
+    @Test(arguments: ["approved", "reset", "commented", "own", "unknown"])
+    func phoneCardCarriesTheMacApprovalPeopleAndViewerState(_ scenario: String) throws {
+        var item = try item()
+        item.mergeRequest = try MRDependencyPresentationTests().request(2, project: 1, author: 30)
+        item.isAuthored = scenario == "own"
+        let viewer = Todo.Author(id: 7, username: "me", name: "Signed-in reviewer", avatarURL: URL(string: "https://gitlab.example.test/me.png"))
+        let other = Todo.Author(id: 8, username: "other", name: "Other reviewer", avatarURL: nil)
+        var progress = try #require(MergeRequestApprovalProgress(completed: scenario == "approved" || scenario == "own" ? 2 : 1,
+            required: 2, approvedBy: scenario == "approved" || scenario == "own" ? [other, viewer] : [other]))
+        progress.reviewHistory.activities[viewer.id] = .init(author: viewer,
+            previouslyApproved: scenario == "reset", commented: scenario == "commented", changedAt: nil)
+        item.approvalProgress = progress
+        let card = RemoteBoardAdapter.card(item, account: scenario == "unknown" ? "@host" : "me@host")
+        let wire = try #require(JSONSerialization.jsonObject(with: JSONEncoder().encode(card)) as? [String: Any])
+        let presentation = try #require(wire["presentation"] as? [String: Any])
+        let people = try #require(presentation["approvalPeople"] as? [[String: Any]])
+        let viewerFirst = scenario == "approved" || scenario == "reset"
+        #expect(people.first?["id"] as? Int == (viewerFirst ? 7 : 8))
+        #expect(presentation["viewerApprovalID"] as? Int == (viewerFirst ? 7 : nil))
+        if viewerFirst {
+            #expect(people.first?["status"] as? String == (scenario == "approved" ? "approved" : "previouslyApproved"))
+        }
+        #expect(card.approvals?.received == progress.completed)
+        let presented = RemoteBoardAdapter.presentation(card, row: .init(item: item, latestJob: nil, intents: []))
+        #expect(presented.presentation?.approvalPeople?.count == people.count)
+        #expect(presented.presentation?.viewerApprovalID == (viewerFirst ? 7 : nil))
+    }
+
     @Test func markReadyDoesNotDisconnectThePrimaryFeedbackAction() {
         let card = RemoteCard(id: "mr:1:2", title: "Draft: MR", project: "g/p", url: nil,
             actions: [.init(id: "prepare", kind: .prepare, token: "feedback"),

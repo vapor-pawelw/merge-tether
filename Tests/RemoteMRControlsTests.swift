@@ -4,6 +4,41 @@ import MergeTetherRemote
 @testable import GitLabTodos
 
 @MainActor @Suite struct RemoteMRControlsTests {
+    @Test func inheritedCopiesOfOneConcernOfferOneIgnoreActionWithoutHidingDistinctConcerns() throws {
+        var item = try item()
+        let original = try #require(item.authorFeedbackStatus?.findings.first)
+        let inherited = AuthorFeedbackPolicy.Finding(id: 50, discussionID: "another-summary", reviewerID: original.reviewerID,
+            reviewerUsername: original.reviewerUsername, state: .needsVerification, reason: original.reason,
+            waitingForReviewers: [], summary: original.summary, sourceNoteID: original.sourceNoteID)
+        let distinctSource = AuthorFeedbackPolicy.Finding(id: 60, discussionID: "separate-source", reviewerID: original.reviewerID,
+            reviewerUsername: original.reviewerUsername, state: .needsVerification, reason: original.reason,
+            waitingForReviewers: [], summary: original.summary, sourceNoteID: 60)
+        let distinctConcern = AuthorFeedbackPolicy.Finding(id: 70, discussionID: "separate-concern", reviewerID: original.reviewerID,
+            reviewerUsername: original.reviewerUsername, state: .needsVerification,
+            reason: "Cancellation should remain distinguishable from a transport failure", waitingForReviewers: [],
+            summary: "Preserve the cancellation reason", sourceNoteID: original.sourceNoteID)
+        item.authorFeedbackStatus?.findings += [inherited, distinctSource, distinctConcern]
+        let suggestions = RemoteBoardAdapter.ignorableSuggestions(item)
+        #expect(suggestions.count == 4)
+        #expect(suggestions.filter { $0.noteID == 10 && $0.summary == original.summary }.count == 1)
+        #expect(suggestions.contains { $0.noteID == 60 })
+        #expect(suggestions.contains { $0.summary == distinctConcern.summary })
+        #expect(item.authorFeedbackStatus?.findings.count == 7)
+        #expect(item.authorFeedbackStatus?.displayFindings.count == 6)
+    }
+
+    @Test func distinctLongConcernsFromOneCommentRemainVisible() throws {
+        var status = try #require(try item().authorFeedbackStatus)
+        let original = try #require(status.findings.first)
+        status.findings = ["retry", "cancellation"].enumerated().map { index, subject in
+            .init(id: 80 + index, discussionID: "summary-\(index)", reviewerID: original.reviewerID,
+                reviewerUsername: original.reviewerUsername, state: .needsVerification, reason: original.reason,
+                waitingForReviewers: [], summary: String(repeating: "Contract evidence remains unavailable. ", count: 8) + subject,
+                sourceNoteID: original.sourceNoteID)
+        }
+        #expect(status.displayFindings.count == 2)
+    }
+
     @Test(arguments: ["eligible", "ready", "foreign", "closed", "stale", "busy", "head"])
     func phoneOffersMarkReadyUnderTheSameConditionsAsTheMac(_ scenario: String) throws {
         let suite = "RemoteMRControlsTests.\(UUID())"

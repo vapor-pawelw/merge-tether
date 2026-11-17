@@ -52,7 +52,7 @@ import MergeTetherRemote
             case .complete: .AuthorFeedback.authorFeedbackReady
             }
             details.feedback.append(.init(label: String(localized: .AuthorFeedback.authorFeedbackTitle), value: String(localized: phase)))
-            for finding in feedback.findings {
+            for finding in feedback.displayFindings {
                 let fallback: LocalizedStringResource = switch finding.state {
                 case .waitingAcceptance: finding.waitingAcceptanceMessage(people: people)
                 case .needsChanges: .AuthorFeedback.authorFeedbackNeedsChanges

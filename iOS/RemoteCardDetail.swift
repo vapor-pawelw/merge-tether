@@ -25,7 +25,11 @@ struct RemoteCardDetail: View {
     }
     private func headerCard(_ details: RemoteMRDetails?) -> RemoteCard {
         var card = current
-        if let details { card.approvals = details.approvals?.progress }
+        if let approvals = details?.approvals {
+            card.approvals = approvals.progress
+            card.presentation?.approvalPeople = approvals.people
+            card.presentation?.viewerApprovalID = approvals.viewerApprovalID
+        }
         return card
     }
     private struct DetailIdentity: Equatable {
@@ -315,7 +319,7 @@ private struct RemoteDetailActionButtons: View {
                 VStack(alignment: .leading, spacing: 8) {
                     if let label = action.label {
                         Text(verbatim: label).font(.callout).foregroundStyle(.secondary)
-                            .lineLimit(3).frame(maxWidth: .infinity, alignment: .leading)
+                            .fixedSize(horizontal: false, vertical: true).frame(maxWidth: .infinity, alignment: .leading)
                     }
                     Button { onAction(action) } label: {
                         Text(action.kind.title).font(.callout.weight(.medium)).frame(minHeight: 44)

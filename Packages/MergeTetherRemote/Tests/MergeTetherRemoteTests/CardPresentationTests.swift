@@ -3,6 +3,28 @@ import Testing
 @testable import MergeTetherRemote
 
 @Suite struct CardPresentationTests {
+    @Test func onlyPlainOverviewShortcutsDuplicateTheCardTap() {
+        #expect(RemoteCardCTA(title: "Show details", destination: .overview).duplicatesCardTap)
+        #expect(!RemoteCardCTA(title: "Run", destination: .overview, actionID: "run").duplicatesCardTap)
+        #expect(!RemoteCardCTA(title: "Review drafts", destination: .drafts).duplicatesCardTap)
+        #expect(!RemoteCardCTA(title: "View discussions", destination: .discussions).duplicatesCardTap)
+    }
+
+    @Test func approvalPeopleAreAdditiveDisplayMetadataAndOlderPhonesCanStillReadDetails() throws {
+        let viewer = RemoteApprovalPerson(id: 7, name: "Reviewer", username: "me", status: .approved)
+        let card = RemoteCard(id: "mr:1:2", title: "Feature", project: "g/p", url: nil,
+            presentation: .init(repository: "p", approvalPeople: [viewer], viewerApprovalID: 7))
+        let board = RemoteBoard(hostSession: UUID(), account: "me@host", lanes: [.init(id: .reviewed, cards: [card])])
+        let wire = try JSONDecoder().decode(RemoteCard.self, from: JSONEncoder().encode(card))
+        #expect(wire.presentation?.approvalPeople == [viewer])
+        #expect(wire.presentation?.viewerApprovalID == 7)
+        #expect(wire.actions.isEmpty)
+        var legacy = card
+        legacy.presentation?.approvalPeople = nil; legacy.presentation?.viewerApprovalID = nil
+        #expect(try RemoteDetailRequest(card: legacy, board: board).matches(board))
+        #expect(try RemoteDetailRequest(card: legacy, board: board, presentationIndependent: true).matches(board))
+    }
+
     @Test func olderPhonesNeverReceiveMarkReadyOrItsExecutableCTA() throws {
         let action = try JSONDecoder().decode(RemoteAction.self,
             from: Data(#"{"id":"markReady","kind":"markReady","token":"checked"}"#.utf8))

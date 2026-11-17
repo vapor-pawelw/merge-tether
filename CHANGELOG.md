@@ -6,6 +6,9 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 
 ## Unreleased
 
+- Open iPhone MR Details by tapping anywhere on a card outside its controls, and remove redundant Show details buttons. Show current approvers and the signed-in user's current or reset approval on cards and Details, matching macOS.
+- Show inherited copies of the same feedback concern only once in suggestion actions and feedback lists, while preserving distinct source comments and concerns. Keep the concern readable above its short decision button.
+
 - Pull to refresh iPhone board columns, Inbox and MR Details. Automatically refresh GitLab and open Details after actions, recover stale reads without a manual Refresh board step, and preserve reads and confirmed actions across presentation-only updates. Keep Details open with the action result inline. Coalesce fast detail requests and keep unrelated board changes from invalidating an accepted action.
 
 - Mark your own Draft MRs ready from iPhone cards and Details using the Mac's current-account and commit checks. Keep existing feedback and comment-review CTAs available, negotiate the action independently with older phones, and move Details refresh and section navigation into the toolbar with a compact title and branches inside the header.

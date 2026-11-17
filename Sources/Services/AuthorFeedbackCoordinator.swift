@@ -71,6 +71,19 @@ struct AuthorFeedbackStatus: Equatable, Sendable {
             ?? findings.first { $0.state == .needsVerification }
             ?? findings.first { replyNoteIDs.contains($0.id) }
     }
+    /// Several threads can inherit one reviewer's blocker; present its precise source concern once.
+    var displayFindings: [AuthorFeedbackPolicy.Finding] {
+        let ordered = primaryFinding.map { primary in
+            [primary] + findings.filter { $0.id != primary.id }
+        } ?? findings
+        var seen: Set<[String]> = []
+        return ordered.filter { finding in
+            let key = [String(finding.sourceNoteID ?? finding.id),
+                finding.summary?.split(whereSeparator: \.isWhitespace).joined(separator: " ") ?? "",
+                finding.reason?.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""]
+            return seen.insert(key).inserted
+        }
+    }
     var waitingForReviewer: Bool { findings.contains { $0.state == .waitingAcceptance } }
 }
 

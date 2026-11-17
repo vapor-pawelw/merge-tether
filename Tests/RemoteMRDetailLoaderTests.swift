@@ -4,6 +4,28 @@ import MergeTetherRemote
 @testable import GitLabTodos
 
 @MainActor @Suite struct RemoteMRDetailLoaderTests {
+    @Test(arguments: ["approved", "reset", "commented", "own"])
+    func detailApprovalsIdentifyOnlyTheViewersCurrentOrResetApproval(_ scenario: String) throws {
+        let request = try JSONDecoder().decode(GitLabMergeRequest.self, from: Data(raw.utf8))
+        let viewer = Todo.Author(id: 7, username: "me", name: "Signed-in reviewer", avatarURL: nil)
+        let other = Todo.Author(id: 9, username: "other", name: "Other reviewer", avatarURL: nil)
+        let progress = try #require(MergeRequestApprovalProgress(completed: scenario == "approved" ? 2 : 1,
+            required: 2, approvedBy: scenario == "approved" ? [other, viewer] : [other]))
+        let discussions = try JSONDecoder().decode([GitLabMergeRequestDiscussion].self, from: JSONSerialization.data(withJSONObject: [
+            ["id": "thread", "notes": [["id": 12, "author": ["id": 7, "username": "me", "name": "Signed-in reviewer"],
+                "system": scenario == "reset", "body": scenario == "reset" ? "approved this merge request" : "Please check the retry"]]]
+        ]))
+        let details = RemoteMRDetailLoader.project(request: request, progress: progress, rules: nil, reviewers: [],
+            discussions: discussions, drafts: [], username: scenario == "own" ? "owner" : "me")
+        let approvals = try #require(details.approvals)
+        #expect(approvals.viewerApprovalID == (["approved", "reset"].contains(scenario) ? 7 : nil))
+        if scenario == "approved" || scenario == "reset" {
+            #expect(approvals.orderedPeople.first?.id == 7)
+            #expect(approvals.viewerApproval?.status == (scenario == "approved" ? .approved : .previouslyApproved))
+        }
+        if scenario == "commented" { #expect(approvals.people.first { $0.id == 7 }?.status == .commented) }
+    }
+
     @Test func phoneThreadsIdentifyTheirDraftRepliesWithoutMixingOtherThreads() throws {
         // given
         let request = try JSONDecoder().decode(GitLabMergeRequest.self, from: Data(raw.utf8))

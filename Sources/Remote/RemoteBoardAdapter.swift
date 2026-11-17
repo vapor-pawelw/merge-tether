@@ -75,6 +75,15 @@ import MergeTetherRemote
             .init(completed: min($0.completed, $0.required), required: $0.required,
                   received: $0.completed, requirementsSatisfied: $0.requirementsSatisfied)
         }
+        if item.approvalProgress != nil || item.mergeRequest != nil {
+            let username = String(account.split(separator: "@", maxSplits: 1, omittingEmptySubsequences: false).first ?? "")
+            let approvals = RemoteApprovalDetails(progress: item.approvalProgress,
+                reviewers: item.mergeRequest?.reviewers ?? [], viewerUsername: username,
+                isOwnMergeRequest: item.isAuthored || item.mergeRequest == nil
+                    || item.mergeRequest?.author.username.lowercased() == username.lowercased())
+            card.presentation = .init(repository: card.project.split(separator: "/").last.map(String.init) ?? card.project,
+                approvalPeople: approvals.people, viewerApprovalID: approvals.viewerApprovalID)
+        }
         return card
     }
 
@@ -332,13 +341,13 @@ import MergeTetherRemote
                                      suggestion.summary, suggestion.reason]) else { continue }
             actions.append(.init(id: "ignoreSuggestion:\(suggestion.findingID)", kind: .ignoreSuggestion, token: token,
                 confirmationText: suggestion.summary + "\n\n" + suggestion.reason + "\n\n" + String(localized: .Remote.remoteIgnoreSuggestionHelp),
-                label: String(localized: .Remote.remoteIgnoreSuggestion(suggestion.summary))))
+                label: suggestion.summary))
         }
         for decision in ignored {
             guard let token = token(["restore", decision.id.uuidString, decision.sourceRevision]) else { continue }
             actions.append(.init(id: "restoreSuggestion:\(decision.id)", kind: .restoreSuggestion, token: token,
                 confirmationText: decision.concernSummary + "\n\n" + String(localized: .Remote.remoteRestoreSuggestionHelp),
-                label: String(localized: .Remote.remoteRestoreSuggestion(decision.concernSummary))))
+                label: decision.concernSummary))
         }
         return actions
     }
@@ -354,7 +363,7 @@ import MergeTetherRemote
               !status.head.isEmpty, status.head == request.sha,
               status.semanticContextFingerprint == request.semanticContextFingerprint,
               status.fingerprint == item.observedDiscussionFingerprint else { return [] }
-        return status.findings.compactMap { finding in
+        return status.displayFindings.compactMap { finding in
             guard let noteID = finding.sourceNoteID,
                   let reason = finding.reason?.trimmingCharacters(in: .whitespacesAndNewlines), !reason.isEmpty,
                   finding.state == .needsChanges || finding.state == .needsVerification
@@ -500,7 +509,9 @@ import MergeTetherRemote
             secondaryCTA: human?.action == .retryRun ? .init(title: String(localized: .MRHumanAction.mrHumanActionActionReviewRun), destination: .assistantRuns) : nil,
             authorUsername: authorUsername, authorAvatarURL: authorAvatarURL,
             steps: steps, currentStep: model.stepChain?.current,
-            pendingDrafts: pendingDrafts, statusSymbol: model.activityEffect?.symbol)
+            pendingDrafts: pendingDrafts, statusSymbol: model.activityEffect?.symbol,
+            approvalPeople: model.row.evidenceMatchesCatalogContext ? original.presentation?.approvalPeople : nil,
+            viewerApprovalID: model.row.evidenceMatchesCatalogContext ? original.presentation?.viewerApprovalID : nil)
         if model.actionsBlocked { card.actions = [] }
         return card
     }

@@ -39,6 +39,7 @@ public struct RemoteDraft: Codable, Equatable, Identifiable, Sendable {
 
 /// A destination, optionally bound to one of the card's host-authorized actions.
 public struct RemoteCardCTA: Codable, Equatable, Sendable {
+    public var duplicatesCardTap: Bool { destination == .overview && actionID == nil }
     public enum Destination: String, Codable, Sendable {
         case overview, drafts, feedback, assistantRuns, setup, actions, discussions
         public init(from decoder: Decoder) throws {
@@ -81,12 +82,16 @@ public struct RemoteCardText: Codable, Equatable, Sendable {
     public var currentStep: Int?
     /// Unpublished drafts and who still has no published reply; older phones ignore it.
     public var pendingDrafts: String?
+    public var approvalPeople: [RemoteApprovalPerson]?
+    public var viewerApprovalID: Int?
     public init(author: String? = nil, repository: String, draftBadge: String? = nil,
                 status: String? = nil, nextStep: String? = nil, working: Bool = false,
                 chips: [RemoteCardChip] = [], secondaryCTA: RemoteCardCTA? = nil,
                 authorUsername: String? = nil, authorAvatarURL: URL? = nil,
                 requirements: [String]? = nil, steps: [String]? = nil, currentStep: Int? = nil,
-                pendingDrafts: String? = nil, statusSymbol: String? = nil) {
+                pendingDrafts: String? = nil, statusSymbol: String? = nil,
+                approvalPeople: [RemoteApprovalPerson]? = nil, viewerApprovalID: Int? = nil) {
+        self.approvalPeople = approvalPeople; self.viewerApprovalID = viewerApprovalID
         self.pendingDrafts = pendingDrafts
         self.requirements = requirements; self.steps = steps; self.currentStep = currentStep
         self.author = author; self.authorUsername = authorUsername; self.authorAvatarURL = authorAvatarURL

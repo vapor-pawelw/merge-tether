@@ -24,20 +24,8 @@ struct RemoteApprovalDetailsView: View {
                         if details.people.isEmpty, !details.truncated {
                             Text(.Board.boardApprovalsNoPeople).font(.callout).foregroundStyle(.secondary)
                         }
-                        ForEach(details.people) { person in
-                            VStack(alignment: .leading, spacing: 6) {
-                                PersonLabel(person: .init(name: person.name, username: person.username, avatarURL: person.avatarURL),
-                                            avatarSize: 24)
-                                    .font(.body.weight(.medium))
-                                Label(person.status.title, systemImage: person.status.symbol)
-                                    .font(.callout).foregroundStyle(person.status == .approved ? Color.green : .secondary)
-                                if let changedAt = person.changedAt {
-                                    Text(changedAt, format: .dateTime.year().month().day().hour().minute())
-                                        .font(.caption).foregroundStyle(.secondary)
-                                }
-                            }
-                            .frame(maxWidth: .infinity, alignment: .leading)
-                            .accessibilityElement(children: .combine)
+                        ForEach(details.orderedPeople) { person in
+                            RemoteApprovalPersonRow(person: person, isViewer: person.id == details.viewerApproval?.id)
                             Divider()
                         }
                     }
@@ -89,6 +77,11 @@ struct RemoteApprovalSummary: View {
     let details: RemoteApprovalDetails
     var body: some View {
         VStack(alignment: .leading, spacing: 8) {
+            if let viewer = details.viewerApproval {
+                Label(viewer.status == .approved ? .Board.boardApprovalsViewerApproved : .Board.boardApprovalsViewerNoLongerCounts,
+                    systemImage: viewer.status == .approved ? "checkmark.circle.fill" : "arrow.counterclockwise.circle.fill")
+                    .font(.callout.weight(.medium)).foregroundStyle(viewer.status == .approved ? Color.green : .orange)
+            }
             if let progress = details.progress {
                 let received = progress.received ?? progress.completed
                 Text(progress.required == 0 ? .Board.boardApprovalsReceived(received) : .Board.boardApprovalsHelp(received, progress.required))
@@ -106,7 +99,29 @@ struct RemoteApprovalSummary: View {
     }
 }
 
-private extension RemoteApprovalPerson.Status {
+struct RemoteApprovalPersonRow: View {
+    let person: RemoteApprovalPerson
+    var isViewer = false
+    var body: some View {
+        VStack(alignment: .leading, spacing: 6) {
+            HStack(spacing: 6) {
+                PersonLabel(person: .init(name: person.name, username: person.username, avatarURL: person.avatarURL), avatarSize: 24)
+                    .font(.body.weight(.medium))
+                if isViewer { Text(.Board.boardApprovalsViewerSuffix).font(.callout).foregroundStyle(.secondary) }
+            }
+            Label(person.status.title, systemImage: person.status.symbol)
+                .font(.callout).foregroundStyle(person.status == .approved ? Color.green : isViewer && person.status == .previouslyApproved ? .orange : .secondary)
+            if let changedAt = person.changedAt {
+                Text(changedAt, format: .dateTime.year().month().day().hour().minute())
+                    .font(.caption).foregroundStyle(.secondary)
+            }
+        }
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .accessibilityElement(children: .contain)
+    }
+}
+
+extension RemoteApprovalPerson.Status {
     var title: LocalizedStringResource {
         switch self {
         case .approved: .Board.boardApprovalsApproved

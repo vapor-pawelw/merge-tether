@@ -53,17 +53,10 @@ import MergeTetherRemote
         var progress = progress
         let history = MergeRequestReviewHistory(reviewers: reviewers ?? [], discussions: discussions ?? [], authorID: request.author.id)
         progress?.reviewHistory = history
-        let people = progress?.participants(reviewers: request.reviewers ?? [])
-            ?? MergeRequestApprovalProgress.participants(reviewers: request.reviewers ?? [], history: history)
-        let approvals = RemoteApprovalDetails(progress: progress.flatMap {
-            .init(completed: min($0.completed, $0.required), required: $0.required,
-                received: $0.completed, requirementsSatisfied: $0.requirementsSatisfied)
-        }, people: people.map {
-            .init(id: $0.id, name: $0.author.name, username: $0.author.username,
-                status: .init(rawValue: String(describing: $0.status)) ?? .assigned, changedAt: $0.changedAt,
-                avatarURL: $0.author.avatarURL)
-        }, rules: rules?.projected, requirementsSatisfied: rules?.requirementsSatisfied,
-            historyAvailable: reviewers != nil && discussions != nil)
+        let approvals = RemoteApprovalDetails(progress: progress, reviewers: request.reviewers ?? [], viewerUsername: username,
+            isOwnMergeRequest: request.author.username.lowercased() == username.lowercased(),
+            rules: rules?.projected, requirementsSatisfied: rules?.requirementsSatisfied,
+            historyAvailable: reviewers != nil && discussions != nil, reviewHistory: history)
         let metadata: [RemoteDetailField] = [
             .init(label: String(localized: .CommandCenter.commandCenterAuthor), value: request.author.person.displayName ?? request.author.username,
                   person: request.author.remotePerson),

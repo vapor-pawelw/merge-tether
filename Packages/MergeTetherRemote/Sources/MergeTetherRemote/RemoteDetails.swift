@@ -35,7 +35,13 @@ public struct RemoteDetailRequest: Codable, Equatable, Sendable {
         var legacy = withoutDrafts
         legacy.presentation?.authorUsername = nil
         legacy.presentation?.authorAvatarURL = nil
-        let versions = [card, withoutActions, withoutDrafts, legacy]
+        let currentVersions = [card, withoutActions, withoutDrafts, legacy]
+        let versions = currentVersions + currentVersions.map { version in
+            var version = version
+            version.presentation?.approvalPeople = nil
+            version.presentation?.viewerApprovalID = nil
+            return version
+        }
         let olderDestinations = versions.map { version in
             var version = version
             if version.primaryCTA?.destination == .discussions { version.primaryCTA?.destination = .overview }
@@ -106,10 +112,19 @@ public struct RemoteApprovalDetails: Codable, Equatable, Sendable {
     public let requirementsSatisfied: Bool?
     public let historyAvailable: Bool
     public var truncated = false
+    public var viewerApprovalID: Int?
+    public var viewerApproval: RemoteApprovalPerson? {
+        people.first { $0.id == viewerApprovalID && [.approved, .previouslyApproved].contains($0.status) }
+    }
+    public var orderedPeople: [RemoteApprovalPerson] {
+        guard let viewer = viewerApproval else { return people }
+        return people.filter { $0.id == viewer.id } + people.filter { $0.id != viewer.id }
+    }
     public init(progress: RemoteApprovalProgress?, people: [RemoteApprovalPerson] = [], rules: [RemoteApprovalRule]? = nil,
-                requirementsSatisfied: Bool? = nil, historyAvailable: Bool = false) {
+                requirementsSatisfied: Bool? = nil, historyAvailable: Bool = false, viewerApprovalID: Int? = nil) {
         self.progress = progress; self.people = people; self.rules = rules
         self.requirementsSatisfied = requirementsSatisfied; self.historyAvailable = historyAvailable
+        self.viewerApprovalID = viewerApprovalID
     }
 }
 

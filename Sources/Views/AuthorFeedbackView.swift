@@ -32,9 +32,7 @@ struct AuthorFeedbackView: View {
                     case .complete: EmptyView()
                     }
                     if status.phase == .complete || status.phase == .waitingPublication {
-                        let findings = status.primaryFinding.map { primary in
-                            [primary] + status.findings.filter { $0.id != primary.id }
-                        } ?? status.findings
+                        let findings = status.displayFindings
                         ForEach(Array(findings.enumerated()), id: \.element.id) { index, finding in
                             let source = citationContext?.finding(finding, status: status)
                             if index > 0 { Divider() }

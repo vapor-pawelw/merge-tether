@@ -219,12 +219,12 @@ struct RemoteCardView: View {
     var onOpenCTA: ((RemoteCardCTA) -> Void)? = nil
     var onFinishCommentReview: (() -> Void)? = nil
     var canAct: ((Date) -> Bool)? = nil
+    private var primaryCTA: RemoteCardCTA? { card.primaryCTA.flatMap { $0.duplicatesCardTap ? nil : $0 } }
+    private var secondaryCTA: RemoteCardCTA? { card.presentation?.secondaryCTA.flatMap { $0.duplicatesCardTap ? nil : $0 } }
+    private var hasFinishAction: Bool { card.actions.contains { $0.kind == .finishCommentReview } && onFinishCommentReview != nil }
     var body: some View {
         VStack(alignment: .leading, spacing: expanded ? 16 : 12) {
-            if let onOpen {
-                Button(action: onOpen) { header.contentShape(Rectangle()) }.buttonStyle(.plain)
-                    .accessibilityIdentifier("remote.card.\(card.id)")
-            } else { header }
+            header
             if expanded, let branches {
                 Label { Text(verbatim: branches.source + " → " + branches.target) } icon: {
                     Image(systemName: "arrow.triangle.branch")
@@ -234,9 +234,9 @@ struct RemoteCardView: View {
                 .accessibilityLabel(Text(.RemoteDetail.remoteDetailBranches(branches.source, branches.target)))
             }
             content
-            if !expanded, onOpen != nil {
+            if !expanded, onOpen != nil, primaryCTA != nil || secondaryCTA != nil || hasFinishAction {
                 HStack {
-                    if let secondary = card.presentation?.secondaryCTA {
+                    if let secondary = secondaryCTA {
                         RemoteCardCTAButton(cta: secondary, canAct: canAct) { onOpenCTA?(secondary) }
                             .font(.caption).buttonStyle(.plain).foregroundStyle(.secondary)
                             .frame(minHeight: 44)
@@ -251,7 +251,7 @@ struct RemoteCardView: View {
                                 .disabled(canAct?(context.date) != true)
                                 .accessibilityIdentifier("remote.finish-comment-review.\(card.id)")
                         }
-                    } else if let cta = card.primaryCTA {
+                    } else if let cta = primaryCTA {
                         RemoteCardCTAButton(cta: cta, canAct: canAct) { onOpenCTA?(cta) }
                             .font(.subheadline.weight(.semibold)).buttonStyle(.bordered)
                             .controlSize(.large)
@@ -262,10 +262,13 @@ struct RemoteCardView: View {
         }
         .frame(maxWidth: .infinity, alignment: .leading).padding(16)
         .background(Color(uiColor: .secondarySystemGroupedBackground), in: RoundedRectangle(cornerRadius: 16))
-        .overlay { RoundedRectangle(cornerRadius: 16).strokeBorder(Color.primary.opacity(0.06), lineWidth: 0.5) }
+        .modifier(RemoteCardInteraction(onOpen: onOpen))
+        .accessibilityElement(children: .contain)
+        .accessibilityIdentifier("remote.card.\(card.id)")
+        .overlay { RoundedRectangle(cornerRadius: 16).strokeBorder(Color.primary.opacity(0.06), lineWidth: 0.5).allowsHitTesting(false) }
         .overlay(alignment: .leading) {
             if card.needsAttention == true {
-                RoundedRectangle(cornerRadius: 2).fill(.orange).frame(width: 4).padding(.vertical, 12)
+                RoundedRectangle(cornerRadius: 2).fill(.orange).frame(width: 4).padding(.vertical, 12).allowsHitTesting(false)
             }
         }
     }
@@ -311,7 +314,10 @@ struct RemoteCardView: View {
                     .padding(.horizontal, 7).padding(.vertical, 3)
                     .background(.secondary.opacity(0.08), in: Capsule())
             }
-            if card.id.hasPrefix("mr:") { RemoteApprovalProgressBadge(progress: card.approvals) }
+            if card.id.hasPrefix("mr:") {
+                RemoteApprovalProgressBadge(progress: card.approvals, people: card.presentation?.approvalPeople,
+                    viewerApprovalID: card.presentation?.viewerApprovalID)
+            }
         }
     }
     private var content: some View {
@@ -427,30 +433,13 @@ private struct RemoteMRDependencyRow: View {
     }
 }
 
-private struct RemoteApprovalProgressBadge: View {
-    let progress: RemoteApprovalProgress?
-
-    private var received: Int { progress?.received ?? progress?.completed ?? 0 }
-
-    private var explanation: Text {
-        if let progress, progress.required == 0 { Text(.Board.boardApprovalsReceived(received)) }
-        else if let progress { Text(.Board.boardApprovalsHelp(received, progress.required)) }
-        else { Text(.Board.boardApprovalsUnavailable) }
-    }
-    private var complete: Bool { progress.map { received > 0 && ($0.requirementsSatisfied ?? ($0.required == 0 || received >= $0.required)) } ?? false }
-
-    var body: some View {
-        if progress.map({ $0.required > 0 || received > 0 }) ?? true {
-            HStack(spacing: 3) {
-                Image(systemName: complete ? "checkmark.seal.fill" : "checkmark.seal").accessibilityHidden(true)
-                if let progress, progress.required == 0 { Text(verbatim: "\(received)") }
-                else if let progress { Text(.Board.boardApprovalRatio(received, progress.required)) }
-                else { Text(.Board.boardApprovalsUnknownRatio) }
-            }
-            .font(.caption2).monospacedDigit().foregroundStyle(complete ? Color.green : .secondary)
-            .padding(.horizontal, 5).padding(.vertical, 2)
-            .background(.secondary.opacity(0.08), in: Capsule()).fixedSize()
-            .accessibilityElement(children: .ignore).accessibilityLabel(explanation)
-        }
+private struct RemoteCardInteraction: ViewModifier {
+    let onOpen: (() -> Void)?
+    @ViewBuilder func body(content: Content) -> some View {
+        if let onOpen {
+            content.contentShape(Rectangle())
+                .onTapGesture(perform: onOpen)
+                .accessibilityAction(named: Text(.Board.boardDetails), onOpen)
+        } else { content }
     }
 }
