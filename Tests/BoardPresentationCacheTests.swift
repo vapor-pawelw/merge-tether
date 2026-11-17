@@ -10,7 +10,7 @@ struct BoardPresentationCacheTests {
     private let username = "me"
 
     @Test func aWarmBoardAndFrameImmediatelyReflectCatalogChanges() throws {
-        try fixture { monitor, settings in
+        try fixture { monitor, settings, delivery in
             let original = try request(1, title: "Before")
             let target = self.target(1)
             settings.mrLifecycleLedger.record(original, for: target)
@@ -21,15 +21,16 @@ struct BoardPresentationCacheTests {
                 changed.withLock { $0 = true }
             }
             settings.mrLifecycleLedger.record(try request(1, title: "After"), for: target)
-            #expect(changed.withLock { $0 })
             #expect(monitor.boardSnapshot.own.first?.displayTitle == "After")
             #expect(monitor.commandCenterDisplayFrame.board.own.first?.displayTitle == "After")
+            delivery.flush()
+            #expect(changed.withLock { $0 })
         }
     }
 
     @Test(arguments: ["username", "host", "signout"])
     func aWarmBoardCannotCrossAnAccountChange(_ change: String) throws {
-        try fixture { monitor, settings in
+        try fixture { monitor, settings, _ in
             settings.mrLifecycleLedger.record(try request(1), for: target(1))
             #expect(monitor.commandCenterDisplayFrame.board.own.count == 1)
             if change == "username" { monitor.glab.currentUsername = "other" }
@@ -45,7 +46,7 @@ struct BoardPresentationCacheTests {
     }
 
     @Test func aWarmBoardImmediatelyReflectsPinsAndIgnoredTargets() throws {
-        try fixture { monitor, settings in
+        try fixture { monitor, settings, _ in
             for iid in [1, 2] { settings.mrLifecycleLedger.record(try request(iid), for: target(iid)) }
             #expect(monitor.boardSnapshot.own.map(\.id.iid) == [1, 2])
             settings.boardPins = [try #require(BoardCardPin.mergeRequest(host: host, username: username, projectID: 1, iid: 2))]
@@ -55,7 +56,7 @@ struct BoardPresentationCacheTests {
         }
     }
 
-    private func fixture(_ body: (TodoMonitorService, SettingsManager) throws -> Void) throws {
+    private func fixture(_ body: (TodoMonitorService, SettingsManager, DeferredPresentationNotifications) throws -> Void) throws {
         let suite = "BoardPresentationCacheTests.\(UUID())"
         let defaults = try #require(UserDefaults(suiteName: suite))
         defer { defaults.removePersistentDomain(forName: suite) }
@@ -66,9 +67,11 @@ struct BoardPresentationCacheTests {
         let glab = GlabService(commandRunner: { _, _, _, _, _ in throw CancellationError() })
         glab.resolvedHost = host
         glab.currentUsername = username
-        let monitor = TodoMonitorService(settings: settings, glab: glab)
+        let delivery = DeferredPresentationNotifications()
+        let monitor = TodoMonitorService(settings: settings, glab: glab, schedulePresentationNotification: delivery.schedule)
         defer { monitor.stopTimer() }
-        try body(monitor, settings)
+        try body(monitor, settings, delivery)
+        delivery.flush()
     }
 
     private func target(_ iid: Int) -> MRAutomationScope.Target {
