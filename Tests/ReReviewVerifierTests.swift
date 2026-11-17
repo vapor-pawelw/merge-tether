@@ -546,6 +546,64 @@ struct ReReviewVerifierTests {
         #expect(received.flatMap(\.notes).compactMap(\.id) == [10, 20, 21, 30])
     }
 
+    @Test(arguments: AutomationAssistant.allCases)
+    func noFindingsReviewStaysInformationalAlongsideActionableGeneralComments(_ assistant: AutomationAssistant) async throws {
+        let folder = FileManager.default.temporaryDirectory.appending(path: UUID().uuidString)
+        try FileManager.default.createDirectory(at: folder, withIntermediateDirectories: false)
+        defer { try? FileManager.default.removeItem(at: folder) }
+        let script = folder.appending(path: "cli")
+        try Data("""
+            #!/usr/bin/python3
+            import json,pathlib,sys
+            args=sys.argv[1:]
+            incoming=sys.stdin.read()
+            instructions=incoming[:incoming.index('{')] if args[0]=='exec' else args[args.index('-p')+1]
+            pathlib.Path(__file__+'.prompt').write_text(instructions)
+            result={'notes':[
+                {'noteID':10,'state':'informational','reason':'The full thread contains no author obligation.',
+                 'informationalPurpose':'reviewSummary','informationalAcknowledgementSafe':True},
+                {'noteID':20,'state':'blocking','reason':'The fallback is still undocumented.'},
+                {'noteID':30,'state':'informational','reason':'Courtesy does not settle the later request.',
+                 'informationalPurpose':'reviewSummary','informationalAcknowledgementSafe':False},
+                {'noteID':31,'state':'blocking','reason':'The later question still needs an answer.'}]}
+            if args[0]=='exec': json.dump(result,open(args[args.index('-o')+1],'w'))
+            else: print(json.dumps({'is_error':False,'structured_output':result}))
+            """.utf8).write(to: script)
+        try FileManager.default.setAttributes([.posixPermissions: 0o700], ofItemAtPath: script.path)
+        let discussions = try JSONDecoder().decode([GitLabMergeRequestDiscussion].self, from: Data("""
+            [{"id":"no-findings","notes":[{"id":10,"author":{"id":7},"system":false,
+              "body":"I finished my review and found nothing to comment on. Nice work! :tada:"}]},
+             {"id":"mixed","notes":[{"id":20,"author":{"id":7},"system":false,
+              "body":"Looks good overall. Please document the fallback before merging."}]},
+             {"id":"later-request","notes":[{"id":30,"author":{"id":8},"system":false,"body":"Looks good!"},
+              {"id":31,"author":{"id":8},"system":false,"body":"Actually, what happens after a timeout?"}]}]
+            """.utf8))
+        let input = ReReviewVerifier.Input(authorID: 3, headSHA: String(repeating: "a", count: 40),
+            title: "Synthetic review", diff: "Current diff", discussions: discussions,
+            priorAssessment: .init(notes: [.init(noteID: 10, state: .uncertain, reason: "Earlier evidence was omitted")],
+                codeReviewRequests: [], codeChangedSincePrior: false))
+
+        let assessment = try await ReReviewVerifier.run(input, assistant: assistant, model: "fixture", executable: script, retryWait: { _ in })
+
+        let instructions = try String(contentsOf: URL(fileURLWithPath: script.path + ".prompt"), encoding: .utf8)
+            .split(whereSeparator: \.isWhitespace).joined(separator: " ")
+        #expect(instructions.contains("First determine whether the note contains an actionable expectation"))
+        #expect(instructions.contains("A pure no-findings review, praise or courtesy acknowledgement is informational"))
+        #expect(instructions.contains("Do not demand a code fix, author reply or proof of correction for a note with no actionable expectation"))
+        #expect(instructions.contains("An actionable expectation can be prose, a question or a condition; it need not be a bullet point or an explicit bug"))
+        #expect(instructions.contains("A positive sentence never cancels a request elsewhere in the note or thread"))
+        #expect(instructions.contains("Correct an earlier blocking or uncertain classification to informational when the current complete thread proves there is no actionable expectation"))
+        #expect(assessment.notes.first?.state == .informational)
+        #expect(assessment.readinessBlockers.map(\.noteID) == [20, 31])
+        #expect(assessment.missingPublishedReplyNoteIDs(in: discussions, authorID: 3).isEmpty)
+        let findings = AuthorFeedbackPolicy.evaluate(discussions: discussions, assessment: assessment,
+            authorID: 3, approvedReviewerIDs: [])
+        #expect(findings.map(\.id) == [20, 31])
+        #expect(findings.allSatisfy { $0.state == .needsChanges })
+        #expect(AuthorFeedbackPolicy.informationalAcknowledgements(discussions: discussions, assessment: assessment,
+            authorID: 3).map(\.noteIDs) == [[10]])
+    }
+
     @Test(arguments: AutomationAssistant.allCases, VerificationThinking.allCases)
     func verifierCanReadTheTargetWithFullCLIToolsWhileItsRoleStaysReadOnly(_ assistant: AutomationAssistant, _ thinking: VerificationThinking) async throws {
         let folder = FileManager.default.temporaryDirectory.appending(path: UUID().uuidString)
@@ -623,10 +681,13 @@ struct ReReviewVerifierTests {
         #expect(target["url"] as? String == input.target?.url.absoluteString)
         #expect(evidence["headSHA"] as? String == input.headSHA)
         #expect(evidence["thinking"] as? String == thinking.rawValue)
+        #expect(evidence["inlineEvidence"] as? String == "included")
+        #expect(evidence["requiredExternalNoteIDs"] as? [Int] == [10])
+        #expect(evidence["discussions"] != nil)
     }
 
-    @Test(arguments: AutomationAssistant.allCases)
-    func oversizedInlineEvidenceUsesTheMRTargetInsteadOfCreatingAFalseBlocker(_ assistant: AutomationAssistant) async throws {
+    @Test(arguments: AutomationAssistant.allCases, ["description", "diff", "discussions", "unavailableLiveEvidence"])
+    func oversizedInlineEvidenceUsesTheMRTargetInsteadOfCreatingAFalseBlocker(_ assistant: AutomationAssistant, _ oversizedField: String) async throws {
         let folder = FileManager.default.temporaryDirectory.appending(path: UUID().uuidString)
         try FileManager.default.createDirectory(at: folder, withIntermediateDirectories: false)
         defer { try? FileManager.default.removeItem(at: folder) }
@@ -637,17 +698,25 @@ struct ReReviewVerifierTests {
             args=sys.argv[1:]
             incoming=sys.stdin.read()
             evidence=json.loads(incoming[incoming.index('{'):])
+            instructions=incoming[:incoming.index('{')] if args[0]=='exec' else args[args.index('-p')+1]
+            pathlib.Path(__file__+'.prompt').write_text(instructions)
             pathlib.Path(__file__+'.capture').write_text(json.dumps(evidence))
-            result={'notes':[{'noteID':10,'state':'addressed','reason':'Verified description through the live MR target','acceptanceNoteID':None}]}
+            result={'notes':[{'noteID':10,'state':'\(oversizedField == "unavailableLiveEvidence" ? "uncertain" : "addressed")','reason':'Live evidence check result','acceptanceNoteID':None}]}
             if args[0]=='exec': json.dump(result,open(args[args.index('-o')+1],'w'))
             else: print(json.dumps({'is_error':False,'structured_output':result}))
             """.utf8).write(to: script)
         try FileManager.default.setAttributes([.posixPermissions: 0o700], ofItemAtPath: script.path)
         let discussions = try JSONDecoder().decode([GitLabMergeRequestDiscussion].self,
             from: Data(#"[{"id":"thread","notes":[{"id":10,"author":{"id":7},"system":false,"body":"Check the description"}]}]"#.utf8))
+        let large = String(repeating: "Documented requirements\n", count: 12_000)
+        let largeDiscussions = try JSONDecoder().decode([GitLabMergeRequestDiscussion].self,
+            from: JSONSerialization.data(withJSONObject: [["id": "thread", "notes": [
+                ["id": 10, "author": ["id": 7], "system": false, "body": large]
+            ]]]))
         var input = ReReviewVerifier.Input(authorID: 3, headSHA: String(repeating: "a", count: 40),
-            title: "Large MR", description: String(repeating: "Documented requirements\n", count: 12_000),
-            diff: "Current diff", discussions: discussions)
+            title: "Large MR", description: ["description", "unavailableLiveEvidence"].contains(oversizedField) ? large : "Documented requirements",
+            diff: oversizedField == "diff" ? large : "Current diff",
+            discussions: oversizedField == "discussions" ? largeDiscussions : discussions)
         await #expect(throws: ReReviewVerifier.VerificationError.incompleteEvidence) {
             _ = try await ReReviewVerifier.run(input, assistant: assistant, model: "fixture", executable: script, retryWait: { _ in })
         }
@@ -658,7 +727,9 @@ struct ReReviewVerifierTests {
 
         let assessment = try await ReReviewVerifier.run(input, assistant: assistant, model: "fixture", executable: script, retryWait: { _ in })
 
-        #expect(assessment.notes.first?.state == .addressed)
+        let expectedState: ReReviewAssessment.Note.State = oversizedField == "unavailableLiveEvidence" ? .uncertain : .addressed
+        #expect(assessment.notes.first?.state == expectedState)
+        #expect(assessment.readinessBlockers.map(\.noteID) == (expectedState == .uncertain ? [10] : []))
         let sent = try Data(contentsOf: URL(fileURLWithPath: script.path + ".capture"))
         #expect(sent.count <= 180_000)
         let evidence = try #require(JSONSerialization.jsonObject(with: sent) as? [String: Any])
@@ -666,6 +737,17 @@ struct ReReviewVerifierTests {
         #expect(evidence["headSHA"] as? String == input.headSHA)
         #expect(evidence["semanticContextFingerprint"] as? String == "expected-context")
         #expect(evidence["thinking"] as? String == "low")
+        #expect(evidence["inlineEvidence"] as? String == "omittedForSize")
+        #expect(evidence["requiredExternalNoteIDs"] as? [Int] == [10])
+        #expect(evidence["discussions"] == nil)
+        #expect(evidence["diff"] == nil)
+        #expect(evidence["description"] == nil)
+        let instructions = try String(contentsOf: URL(fileURLWithPath: script.path + ".prompt"), encoding: .utf8)
+            .split(whereSeparator: \.isWhitespace).joined(separator: " ")
+        #expect(instructions.contains("omittedForSize means the inline description, diff and discussions were deliberately omitted to fit the input budget"))
+        #expect(instructions.contains("This is not an empty discussion snapshot, missing GitLab threads or a changed MR"))
+        #expect(instructions.contains("Compare live external note IDs against requiredExternalNoteIDs"))
+        #expect(instructions.contains("A failed live read remains uncertain; intentional omission alone does not"))
     }
 
     @Test(arguments: AutomationAssistant.allCases)

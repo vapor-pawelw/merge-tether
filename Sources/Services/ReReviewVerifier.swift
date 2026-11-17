@@ -5,7 +5,7 @@ import Foundation
 enum ReReviewVerifier {
     typealias ExecutableResolver = @MainActor (AutomationAssistant) async -> URL?
     enum VerificationError: Error, Equatable { case unavailable, failed, incompleteEvidence }
-    static let policyVersion = "feedback-disposition-11"
+    static let policyVersion = "feedback-disposition-12"
 
     static let schema = #"{"type":"object","additionalProperties":false,"properties":{"notes":{"type":"array","items":{"type":"object","additionalProperties":false,"properties":{"noteID":{"type":"integer"},"state":{"type":"string","enum":["addressed","rejected","informational","blocking","uncertain"]},"reason":{"type":"string"},"summary":{"type":"string","minLength":1,"maxLength":200},"acceptanceNoteID":{"type":["integer","null"]},"publishedReplyNoteID":{"type":["integer","null"]},"informationalAcknowledgementSafe":{"type":"boolean"},"informationalPurpose":{"type":"string","enum":["concreteCodeReviewFeedback","reviewSummary","automatedReviewReport","other"]}},"required":["noteID","state","reason","summary","acceptanceNoteID","publishedReplyNoteID","informationalAcknowledgementSafe","informationalPurpose"]}}},"required":["notes"]}"#
 
@@ -212,15 +212,17 @@ enum ReReviewVerifier {
                                           reason: String(GlabService.redactWorkflowEvidence($0.reason).prefix(600))) },
                                       codeReviewRequests: prior.codeReviewRequests, codeChangedSincePrior: prior.codeChangedSincePrior)
                               })
-        var encoded = try JSONEncoder().encode(sanitized)
-        if encoded.count > 180_000, let target = input.target {
-            // Retain exact output scope and identity; fetch large MR content through glab.
-            let metadata = Input(authorID: input.authorID, headSHA: input.headSHA, title: sanitized.title,
-                diff: "", discussions: [], target: target, semanticContextFingerprint: input.semanticContextFingerprint,
-                thinking: input.thinking, blockedFollowUps: sanitized.blockedFollowUps, ignoredSuggestions: sanitized.ignoredSuggestions,
-                completedFollowUp: sanitized.completedFollowUp, excludedReplyAuthorIDs: sanitized.excludedReplyAuthorIDs,
-                priorAssessment: sanitized.priorAssessment)
-            encoded = try JSONEncoder().encode(metadata)
+        guard var payload = try JSONSerialization.jsonObject(with: JSONEncoder().encode(sanitized)) as? [String: Any] else {
+            throw VerificationError.incompleteEvidence
+        }
+        payload["inlineEvidence"] = "included"
+        payload["requiredExternalNoteIDs"] = noteIDs
+        var encoded = try JSONSerialization.data(withJSONObject: payload, options: [.sortedKeys])
+        if encoded.count > 180_000, input.target != nil {
+            // Omitted content is not an empty snapshot; preserve identity and exact scope for live reads.
+            payload["inlineEvidence"] = "omittedForSize"
+            for key in ["description", "diff", "discussions"] { payload.removeValue(forKey: key) }
+            encoded = try JSONSerialization.data(withJSONObject: payload, options: [.sortedKeys])
         }
         guard encoded.count <= 180_000 else { throw VerificationError.incompleteEvidence }
         let evidence = String(decoding: encoded, as: UTF8.self)
@@ -237,6 +239,14 @@ enum ReReviewVerifier {
             and its ID is authorID. Read /projects/projectID/merge_requests/iid for current metadata,
             title, description and SHA. Read every page of its discussions using --paginate and
             per_page=100. Read raw_diffs and relevant source files only as needed to judge concerns.
+            inlineEvidence describes transport, not MR state. included means inline content is supplied.
+            omittedForSize means the inline description, diff and discussions were deliberately omitted
+            to fit the input budget. This is not an empty discussion snapshot, missing GitLab threads
+            or a changed MR. Fetch the current metadata and complete paginated discussions from target;
+            fetch diffs or source only for an actionable concern that needs them. Compare live external
+            note IDs against requiredExternalNoteIDs, not against absent inline discussions. Do not
+            require omitted inline content to be restored or reconciled with live text. A failed live
+            read remains uncertain; intentional omission alone does not.
             For file content use the live MR source_project_id and the exact expected headSHA;
             do not clone or scan the whole repository unless narrowly necessary for this assessment.
             The MR must match target host/project/IID/URL and headSHA. If the account or head differs,
@@ -274,7 +284,10 @@ enum ReReviewVerifier {
             Do not raise any new concern, codeReviewRequest or potentialDefect about an earlier assessed note or
             the code it concerns; only repeat a request listed in priorAssessment.codeReviewRequests.
             Keep an earlier note's state unless a new reply in its thread, a new note, or (only when
-            codeChangedSincePrior is true) the code it concerns now settles or reopens it.
+            codeChangedSincePrior is true) the code it concerns now settles or reopens it, or the
+            actionability check below corrects a false feedback classification. Correct an earlier blocking
+            or uncertain classification to informational when the current complete thread proves there
+            is no actionable expectation.
             Without priorAssessment, assess every note from scratch. Automatic work follows existing
             author-feedback settings; this field grants no code, push, publication or resolution permission.
             completedFollowUp is the latest completed worker's report, including its assessment of earlier
@@ -284,6 +297,16 @@ enum ReReviewVerifier {
             erase a separately confirmed unresolved defect or the actual blocked-run obligation.
             Classify EVERY non-system note by someone other than authorID, including general comments.
             Return its exact noteID, state and a concise English reason (at most 600 characters).
+            First determine whether the note contains an actionable expectation after reading its complete
+            thread: a requested change, question, expected answer or outstanding condition. An actionable
+            expectation can be prose, a question or a condition; it need not be a bullet point or an explicit bug.
+            Only then assess whether that expectation is addressed, rejected, blocking or uncertain.
+            A pure no-findings review, praise or courtesy acknowledgement is informational. For example,
+            "I finished my review and found nothing to comment on. Nice work! :tada:" has no correction
+            to verify. Do not demand a code fix, author reply or proof of correction for a note with no
+            actionable expectation. Do not import an unrelated concern or evidence gap from another thread.
+            A positive sentence never cancels a request elsewhere in the note or thread. Read later replies
+            before deciding informationalAcknowledgementSafe; a later request remains independently actionable.
             informational: summaries, reports, acknowledgements, unrelated or non-actionable comments.
             For each note also return informationalAcknowledgementSafe. Set it true ONLY for an
             informational note after reading its COMPLETE thread, including the MR author's replies,
