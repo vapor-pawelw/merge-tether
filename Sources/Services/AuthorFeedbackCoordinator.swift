@@ -462,10 +462,12 @@ final class AuthorFeedbackCoordinator {
     /// A successful worker can leave work outstanding. Its prior semantic verdict then
     /// predates the worker and cannot establish that the worker omitted remaining author work.
     private func completedFollowUpJob(for request: GitLabMergeRequest, target: MRAutomationScope.Target) -> AssistantAutomationRunner.Handoff? {
-        settings.assistantHandoffs.filter {
+        let decision = settings.feedbackSuggestionDecisions.revision(for: target)
+        return settings.assistantHandoffs.filter {
             $0.key.work.host == target.host && $0.key.work.projectID == target.projectID
                 && $0.key.work.iid == target.iid && $0.key.username == target.username
                 && $0.workflow == .followUp && $0.draftRepair == nil
+                && $0.feedbackDecisionRevision == (decision.isEmpty ? nil : decision)
                 && $0.execution?.state == .succeeded
                 && $0.execution?.finishedAt != nil && !($0.feedbackNoteIDs ?? []).isEmpty
         }.max {
@@ -475,18 +477,23 @@ final class AuthorFeedbackCoordinator {
         }
     }
 
-    private func residual(_ input: Input, assessment: ReReviewAssessment, notes: Set<Int>) -> AuthorFeedbackResidual? {
+    private func residual(_ input: Input, assessment: ReReviewAssessment, notes: Set<Int>,
+                          stoppedFollowUps: [AssistantAutomationRunner.Handoff]) -> AuthorFeedbackResidual? {
         let runID = input.completedFollowUpJobID
         guard runID == nil || cache[input.target]?.2 == runID else { return nil }
         let requests = assessment.reviewRequests.filter { notes.contains($0.sourceNoteID) }
         let requestedIDs = Set(requests.map(\.sourceNoteID))
-        let blocking = assessment.notes.filter {
-            notes.contains($0.noteID) && ($0.state == .blocking || requestedIDs.contains($0.noteID))
+        let owed = assessment.missingPublishedReplyNoteIDs(in: input.discussions, authorID: input.user.id,
+            excludedReplyAuthorIDs: excludedReplyAuthors(input))
+        let outstanding = assessment.notes.filter {
+            notes.contains($0.noteID) && ($0.state == .blocking || $0.state == .uncertain
+                || owed.contains($0.noteID) || requestedIDs.contains($0.noteID))
                 && !$0.reason.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
         }
-        guard !blocking.isEmpty, runID != nil || !requests.isEmpty else { return nil }
-        return .init(assessedRunID: runID, notes: blocking,
-            semanticContextFingerprint: input.request.semanticContextFingerprint, codeReviewRequests: requests)
+        guard !outstanding.isEmpty else { return nil }
+        return .init(assessedRunID: runID, notes: outstanding,
+            semanticContextFingerprint: input.request.semanticContextFingerprint, codeReviewRequests: requests,
+            assessedStoppedRunIDs: Set(stoppedFollowUps.filter { $0.execution?.state != .blocked }.map(\.id)))
     }
 
     func reviewContext(for request: GitLabMergeRequest, fingerprint: String) -> AuthorFeedbackResidual? {
@@ -535,6 +542,9 @@ final class AuthorFeedbackCoordinator {
             return .init(runID: job.id, selectedFeedbackIDs: ids,
                 summary: String(GlabService.redactWorkflowEvidence(summary).prefix(2_000)))
         }
+        let stoppedRevision = stoppedFollowUps.map {
+            "\($0.id.uuidString):\(String(describing: $0.execution?.state)):\($0.execution?.finishedAt?.timeIntervalSince1970 ?? 0)"
+        }.sorted().joined(separator: "\n")
         let diffText = String(decoding: diff, as: UTF8.self)
         let diffDigest = MergeRequestDiffDigest.normalized(diffText)
         // Content-bound rather than commit-bound: a rebase that keeps the MR's changes reuses the assessment.
@@ -546,6 +556,7 @@ final class AuthorFeedbackCoordinator {
             + "|" + input.decisionRevision
             + "|" + input.reviewParticipationRevision
             + "|" + String(decoding: try encoder.encode(completedFollowUp), as: UTF8.self)
+            + (stoppedRevision.isEmpty ? "" : "|stopped:" + UserAttentionSnapshot.digest(stoppedRevision))
         let assessment: ReReviewAssessment
         let keyDigest = UserAttentionSnapshot.digest(key)
         let revisions = MergeRequestDiffDigest.noteRevisions(input.discussions)
@@ -681,7 +692,7 @@ final class AuthorFeedbackCoordinator {
             let followUp = settings.automation.scope.permits(request, host: host, username: input.user.username)
                 ? actionable.union(owedNotes).subtracting(draftedNotes) : []
             if settings.automaticWritesAllowed, !followUp.isEmpty { await onNeedsWork?(request, followUp, input.fingerprint,
-                residual(input, assessment: assessment, notes: followUp)) }
+                residual(input, assessment: assessment, notes: followUp, stoppedFollowUps: prepared.stoppedFollowUps)) }
             guard isCurrent(input) else { throw CancellationError() }
             var completed = AuthorFeedbackStatus(head: request.sha ?? "", fingerprint: input.fingerprint,
                 semanticContextFingerprint: request.semanticContextFingerprint,
@@ -783,7 +794,7 @@ final class AuthorFeedbackCoordinator {
         }
         followUp.formUnion(owedNotes)
         if settings.automaticWritesAllowed, !followUp.isEmpty, isCurrent(input) { await onNeedsWork?(request, followUp, input.fingerprint,
-            residual(input, assessment: assessment, notes: followUp)) }
+            residual(input, assessment: assessment, notes: followUp, stoppedFollowUps: prepared.stoppedFollowUps)) }
         guard isCurrent(input) else { throw CancellationError() }
         // Courtesy acknowledgement is optional and must never suppress independent correction work.
         let acknowledgement = try await acknowledgeInformational(input, assessment: assessment, discussions: threads)

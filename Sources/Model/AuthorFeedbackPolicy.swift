@@ -15,6 +15,8 @@ struct AuthorFeedbackResidual: Sendable {
     let notes: [ReReviewAssessment.Note]
     var semanticContextFingerprint: String? = nil
     var codeReviewRequests: [ReReviewAssessment.CodeReviewRequest] = []
+    /// App-observed terminal attempts present before this assessment's remote reads.
+    var assessedStoppedRunIDs: Set<UUID> = []
 }
 
 /// Decides which external threads on the user's own MR may be resolved. A thread is ready only when

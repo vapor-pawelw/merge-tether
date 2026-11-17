@@ -268,7 +268,7 @@ final class TodoAutomationService {
             let unattempted = remaining.subtracting(attempted)
             if !manual || !unattempted.isEmpty { remaining = unattempted }
             if !manual, remaining.isEmpty {
-                recovery = feedbackRecovery(verifiedResidual, request: request, candidates: candidates,
+                recovery = feedbackRecovery(verifiedResidual, request: request, discussions: discussions, candidates: candidates,
                     selectedIDs: Set(noteIDs), work: work, username: username, settings: settings)
                 remaining = Set(recovery?.notes.map(\.noteID) ?? [])
             }
@@ -300,7 +300,7 @@ final class TodoAutomationService {
               (verifiedFingerprint != nil || AssistantAutomationRunner.unhandledFeedback(ids, work: work, username: username, settings: settings) == ids.sorted())
         else { return .notAdmitted(.contextChanged) }
         if let recovery {
-            let fresh = feedbackRecovery(verifiedResidual, request: request, candidates: candidates,
+            let fresh = feedbackRecovery(verifiedResidual, request: request, discussions: discussions, candidates: candidates,
                 selectedIDs: Set(ids), work: work, username: username, settings: settings)
             guard fresh?.origin.id == recovery.origin.id, fresh?.rootID == recovery.rootID,
                   Set(fresh?.notes.map(\.noteID) ?? []) == Set(ids) else { return .notAdmitted(.contextChanged) }
@@ -337,7 +337,7 @@ final class TodoAutomationService {
             let encoded = (try? JSONEncoder().encode(evidence)).map { String(decoding: $0, as: UTF8.self) } ?? "{}"
             return """
 
-                A fresh read-only assessment after the completed follow-up reported possible remaining author work.
+                A fresh read-only assessment after the completed or stopped follow-up reported possible remaining author work.
                 This is one bounded reconciliation of the selected reviewer notes, not a replay of the prior run.
                 Reconcile prior remote work and existing published replies before changing code or drafting.
                 Independently verify each residual claim. If it is unsupported, explain that with evidence; do not
@@ -354,6 +354,7 @@ final class TodoAutomationService {
     }
 
     private func feedbackRecovery(_ residual: AuthorFeedbackResidual?, request: GitLabMergeRequest,
+                                  discussions: [GitLabMergeRequestDiscussion],
                                   candidates: [GitLabMergeRequestDiscussion.Note], selectedIDs: Set<Int>,
                                   work: AssistantAutomationRunner.MergeRequestWork, username: String,
                                   settings: SettingsManager) -> FeedbackRecovery? {
@@ -375,22 +376,38 @@ final class TodoAutomationService {
             let second = $1.execution?.finishedAt ?? $1.createdAt
             return first == second ? $0.id.uuidString > $1.id.uuidString : first > second
         }
-        guard let assessedRunID = residual.assessedRunID, completed.first?.id == assessedRunID else { return nil }
+        guard residual.assessedRunID == completed.first?.id else { return nil }
         let questionIDs = Set(residual.codeReviewRequests.map(\.sourceNoteID))
-        let blocking = Dictionary(residual.notes.filter {
-            selectedIDs.contains($0.noteID) && ($0.state == .blocking || questionIDs.contains($0.noteID))
+        let excluded = settings.reviewParticipationPreferences.excludedIDs(host: work.host, username: username)
+        let owed = ReReviewAssessment(notes: residual.notes).missingPublishedReplyNoteIDs(in: discussions,
+            authorID: request.author.id, excludedReplyAuthorIDs: excluded)
+        let outstanding = Dictionary(residual.notes.filter {
+            selectedIDs.contains($0.noteID) && ($0.state == .blocking || $0.state == .uncertain
+                || owed.contains($0.noteID) || questionIDs.contains($0.noteID))
                 && !$0.reason.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
         }.map { ($0.noteID, $0) }, uniquingKeysWith: { first, _ in first })
-        guard !blocking.isEmpty else { return nil }
+        guard !outstanding.isEmpty else { return nil }
         let revisions = Dictionary(candidates.compactMap { note -> (Int, String)? in
             guard let id = note.id, let authorID = note.author?.id, let body = note.body else { return nil }
             return (id, UserAttentionSnapshot.digest("\(authorID)\n" + body))
         }, uniquingKeysWith: { first, _ in first })
-        for origin in completed where origin.followUpPushAllowed == true {
-            guard let rootID = recoveryRoot(of: origin, handoffs: settings.assistantHandoffs),
-                  recoverySourceIsCurrent(origin, request: request, work: work, username: username, settings: settings) else { continue }
-            let notes = blocking.values.filter { note in
-                guard let revision = revisions[note.noteID], origin.verifiedFeedbackNotes?[note.noteID] == revision,
+        let origins = attempts.filter {
+            $0.workflow == .followUp && $0.draftRepair == nil && $0.pipelineReservation == nil && !$0.allowsPush
+                && $0.followUpPushAllowed == true && $0.execution?.finishedAt != nil
+        }.sorted { $0.createdAt > $1.createdAt }
+        for origin in origins {
+            let stopped = residual.assessedStoppedRunIDs.contains(origin.id)
+                && (origin.execution?.state == .failed || origin.execution?.state == .interrupted
+                    || (origin.execution?.state == .cancelled && origin.key.assistant != settings.automation.assistant))
+            guard stopped || (origin.execution?.state == .succeeded
+                && recoverySourceIsCurrent(origin, request: request, work: work, username: username, settings: settings)),
+                  let rootID = recoveryRoot(of: origin, handoffs: settings.assistantHandoffs) else { continue }
+            // Stopped work may already have pushed a newer head. Reconcile current evidence instead of
+            // replaying its commands; retain the same durable per-note budget as completed-work recovery.
+            let notes = outstanding.values.filter { note in
+                guard stopped || note.state == .blocking || owed.contains(note.noteID) || questionIDs.contains(note.noteID),
+                      !stopped || candidates.first(where: { $0.id == note.noteID })?.resolved != true,
+                      let revision = revisions[note.noteID], origin.verifiedFeedbackNotes?[note.noteID] == revision,
                       origin.feedbackNoteIDs?.contains(note.noteID) == true else { return false }
                 let latest = attempts.filter { attempt in
                     attempt.feedbackNoteIDs?.contains(note.noteID) == true

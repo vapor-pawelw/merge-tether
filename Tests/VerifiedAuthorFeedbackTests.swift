@@ -4,6 +4,113 @@ import Testing
 
 @MainActor
 struct VerifiedAuthorFeedbackTests {
+    @Test(arguments: [AssistantJobExecution.State.failed, .interrupted])
+    func stoppedFeedbackReconcilesTheCurrentRemoteHead(_ state: AssistantJobExecution.State) async throws {
+        try await withFixture { fixture in
+            fixture.settings.automation.allowFollowUpPush = true
+            try await fixture.prepare()
+            try await fixture.waitForJob()
+            fixture.settings.assistantHandoffs[0].execution?.state = state
+            let original = try #require(fixture.settings.assistantHandoffs.first)
+            let deliveredHead = String(repeating: "b", count: 40)
+            try fixture.write("request.json", Fixture.request.replacingOccurrences(of: Fixture.sha, with: deliveredHead))
+
+            try await fixture.prepare(expectedHeadSHA: deliveredHead, residual: .init(notes: [
+                .init(noteID: 20, state: .addressed, reason: "The pushed correction still needs a reply.")
+            ]))
+            try await fixture.waitForJob()
+
+            #expect(fixture.settings.assistantHandoffs.count == 2)
+            #expect(fixture.settings.assistantHandoffs.last?.retryOf == original.id)
+            #expect(fixture.settings.assistantHandoffs.last?.expectedHeadSHA == deliveredHead)
+            #expect(fixture.settings.assistantHandoffs.first?.expectedHeadSHA == Fixture.sha)
+        }
+    }
+
+    @Test(arguments: ["blocked", "cancelled", "resolved", "answered", "pushOff", "noAssessment"])
+    func stoppedRecoveryPreservesDecisionAndReplyGates(_ gate: String) async throws {
+        try await withFixture { fixture in
+            fixture.settings.automation.allowFollowUpPush = true
+            try await fixture.prepare()
+            try await fixture.waitForJob()
+            fixture.settings.assistantHandoffs[0].execution?.state = gate == "blocked" ? .blocked
+                : (gate == "cancelled" ? .cancelled : .failed)
+            if gate == "pushOff" { fixture.settings.automation.allowFollowUpPush = false }
+            let snapshot: String
+            if gate == "resolved" {
+                snapshot = Fixture.discussions.replacingOccurrences(of: "\"resolvable\":false", with: "\"resolvable\":true,\"resolved\":true")
+            } else if gate == "answered" {
+                let reply = ",{\"id\":21,\"author\":{\"id\":3,\"username\":\"me\"},\"system\":false,\"body\":\"Fixed and verified\",\"resolvable\":false}"
+                snapshot = Fixture.discussions.replacingOccurrences(of: "]}]", with: "\(reply)]}]")
+            } else { snapshot = Fixture.discussions }
+            try fixture.write("discussions.json", snapshot)
+
+            try await fixture.prepare(snapshot: snapshot, residual: gate == "noAssessment" ? nil : .init(notes: [
+                .init(noteID: 20, state: .addressed, reason: "The current correction is verified.")
+            ]))
+            try await fixture.waitForJob()
+
+            #expect(fixture.settings.assistantHandoffs.count == 1)
+        }
+    }
+
+    @Test(arguments: [AutomationAssistant.codex, .claude], [false, true])
+    func cancelledFeedbackResumesOnlyAfterChangingProvider(provider: AutomationAssistant, changed: Bool) async throws {
+        try await withFixture { fixture in
+            fixture.settings.automation.assistant = provider
+            fixture.settings.automation.allowAssistantTools = true
+            fixture.settings.automation.allowFollowUpPush = true
+            try await fixture.prepare()
+            try await fixture.waitForJob()
+            fixture.settings.assistantHandoffs[0].execution?.state = .cancelled
+            fixture.settings.automation.assistant = changed ? (provider == .codex ? .claude : .codex) : provider
+
+            try await fixture.prepare(residual: .init(notes: [
+                .init(noteID: 20, state: .blocking, reason: "The assigned correction is still outstanding.")
+            ]))
+            try await fixture.waitForJob()
+
+            #expect(fixture.settings.assistantHandoffs.count == (changed ? 2 : 1))
+            #expect(fixture.settings.assistantHandoffs.last?.key.assistant == fixture.settings.automation.assistant)
+        }
+    }
+
+    @Test(arguments: [AssistantJobExecution.State.failed, .interrupted], [AutomationAssistant.codex, .claude])
+    func stoppedFeedbackResumesOnceWithTheSelectedProvider(state: AssistantJobExecution.State, provider: AutomationAssistant) async throws {
+        try await withFixture { fixture in
+            fixture.settings.automation.assistant = provider
+            fixture.settings.automation.allowAssistantTools = true
+            fixture.settings.automation.allowFollowUpPush = true
+            try await fixture.prepare()
+            try await fixture.waitForJob()
+            fixture.settings.assistantHandoffs[0].execution?.state = state
+            let original = try #require(fixture.settings.assistantHandoffs.first)
+            fixture.settings.automation.assistant = provider == .codex ? .claude : .codex
+            let residual = AuthorFeedbackResidual(notes: [.init(noteID: 20, state: .addressed,
+                reason: "The correction reached the remote branch, but its reply was never prepared.")])
+
+            try await fixture.prepare(residual: residual)
+            try await fixture.waitForJob()
+
+            #expect(fixture.settings.assistantHandoffs.count == 2)
+            guard let successor = fixture.settings.assistantHandoffs.last, successor.id != original.id else { return }
+            #expect(successor.key.assistant == fixture.settings.automation.assistant)
+            #expect(successor.retryOf == original.id && successor.feedbackRecoveryRootID == original.id)
+            #expect(successor.feedbackNoteIDs == [20])
+            #expect(successor.prompt.contains("Reconcile prior remote work and existing published replies before changing code or drafting"))
+            fixture.settings.assistantHandoffs[1].execution?.state = .failed
+            fixture.settings.save()
+            let reloaded = SettingsManager(defaults: fixture.defaults)
+            try await fixture.prepare(using: reloaded, residual: residual)
+            #expect(reloaded.assistantHandoffs.count == 2)
+            reloaded.assistantHandoffs = [original]
+            reloaded.save()
+            let pruned = SettingsManager(defaults: fixture.defaults)
+            try await fixture.prepare(using: pruned, residual: residual)
+            #expect(pruned.assistantHandoffs.count == 1)
+        }
+    }
+
     @Test(arguments: [ReReviewAssessment.Note.State.uncertain, .addressed])
     func aSourceBoundCodeQuestionGetsOnlyOneScopedReviewerRecovery(_ state: ReReviewAssessment.Note.State) async throws {
         // given
@@ -205,7 +312,7 @@ struct VerifiedAuthorFeedbackTests {
     }
 
     @Test(arguments: [AssistantJobExecution.State.failed, .blocked, .interrupted, .cancelled, .queued, .running], [true, false])
-    func aLaterStoppedOrActiveAttemptCannotBeReplayedThroughAnOlderSuccess(state: AssistantJobExecution.State,
+    func laterAttemptsKeepTheirOwnScopeAndRecoveryLineage(state: AssistantJobExecution.State,
                                                                          sameNote: Bool) async throws {
         try await withFixture { fixture in
             fixture.resultStatus = .succeeded
@@ -214,7 +321,8 @@ struct VerifiedAuthorFeedbackTests {
             try await fixture.waitForJob()
             let original = try #require(fixture.settings.assistantHandoffs.first)
             let noteID = sameNote ? 20 : 21
-            fixture.settings.assistantHandoffs.append(.init(id: UUID(), key: original.key,
+            let laterID = UUID()
+            fixture.settings.assistantHandoffs.append(.init(id: laterID, key: original.key,
                 title: "A newer attempt", prompt: "Handle the selected feedback", createdAt: original.createdAt.addingTimeInterval(1),
                 allowsPush: false, feedbackNoteIDs: [noteID],
                 verifiedFeedbackNotes: sameNote ? original.verifiedFeedbackNotes : [21: "another-reviewer-revision"],
@@ -228,7 +336,9 @@ struct VerifiedAuthorFeedbackTests {
             ]))
             try await fixture.waitForJob()
 
-            #expect(fixture.settings.assistantHandoffs.count == (sameNote || state.isActive ? 2 : 3))
+            let resumesStopped = sameNote && (state == .failed || state == .interrupted)
+            #expect(fixture.settings.assistantHandoffs.count == (state.isActive || (sameNote && !resumesStopped) ? 2 : 3))
+            if resumesStopped { #expect(fixture.settings.assistantHandoffs.last?.retryOf == laterID) }
         }
     }
 
@@ -579,6 +689,9 @@ struct VerifiedAuthorFeedbackTests {
                      using settingsOverride: SettingsManager? = nil, residual: AuthorFeedbackResidual? = nil) async throws {
             let discussion = try JSONDecoder().decode([GitLabMergeRequestDiscussion].self, from: Data((snapshot ?? Self.discussions).utf8))
             var boundResidual = residual
+            boundResidual?.assessedStoppedRunIDs = Set((settingsOverride ?? settings).assistantHandoffs.filter {
+                $0.workflow == .followUp && [.failed, .interrupted, .cancelled].contains($0.execution?.state)
+            }.map(\.id))
             if boundResidual?.semanticContextFingerprint == nil {
                 let assessed = try JSONDecoder().decode(GitLabMergeRequest.self, from: Data(Self.request.utf8))
                 boundResidual?.semanticContextFingerprint = assessed.semanticContextFingerprint

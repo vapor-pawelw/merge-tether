@@ -5,6 +5,155 @@ import MergeTetherRemote
 
 @MainActor
 struct AuthorFeedbackCoordinatorTests {
+    @Test(arguments: [AssistantJobExecution.State.failed, .interrupted], [false, true])
+    func recoveryRequiresTheAttemptToHaveStoppedBeforeAssessment(state: AssistantJobExecution.State, stoppedBefore: Bool) async throws {
+        try await withFixture { fixture in
+            fixture.settings.automation.autoResolveAcceptedFeedback = false
+            fixture.settings.automation.authorFeedback.isEnabled = true
+            fixture.settings.automation.allowFollowUpPush = true
+            let request = try JSONDecoder().decode(GitLabMergeRequest.self, from: Data(Fixture.request.utf8))
+            let work = AssistantAutomationRunner.MergeRequestWork(host: Fixture.host, projectID: 1, iid: 2)
+            let original = AssistantAutomationRunner.Handoff(id: UUID(), key: .init(assistant: .codex,
+                work: work, username: "me", workspace: "", access: .gitLabRead),
+                title: "Running feedback", prompt: "Handle feedback", createdAt: Date(timeIntervalSince1970: 1),
+                allowsPush: false, feedbackNoteIDs: [10], verifiedFeedbackNotes: [10: UserAttentionSnapshot.digest("7\nFix A")],
+                followUpPushAllowed: true, execution: .init(state: stoppedBefore ? state : .running,
+                    finishedAt: stoppedBefore ? Date(timeIntervalSince1970: 2) : nil),
+                mergeRequestURL: request.webURL, workflow: .followUp, expectedHeadSHA: request.sha)
+            fixture.settings.assistantHandoffs = [original]
+            let handler = try #require(fixture.gitlab.handler)
+            fixture.gitlab.handler = { command in
+                switch command.endpoint {
+                case "/projects/1": return InMemoryGitLab.output(#"{"default_branch":"main"}"#)
+                case let path where path.hasPrefix("/projects/1/merge_requests?"): return InMemoryGitLab.output("[]")
+                default: return try await handler(command)
+                }
+            }
+            var executed = false
+            let jobs = AssistantJobCoordinator(execute: { _, _ in
+                executed = true
+                return .init(result: .init(status: .blocked, summary: "Unexpected stale recovery"), output: "")
+            })
+            let service = TodoAutomationService(canAutomate: { _ in true }, jobCoordinator: jobs, followUpDirectory: fixture.directory)
+            let coordinator = fixture.coordinator(assessment: .init(notes: [
+                .init(noteID: 10, state: .blocking, reason: "The assessed correction still needs work.")
+            ]), duringVerification: {
+                if !stoppedBefore {
+                    fixture.settings.assistantHandoffs[0].execution = .init(state: state, finishedAt: Date(timeIntervalSince1970: 2))
+                    fixture.gitlab.write("drafts.json", #"[{"id":30,"author_id":3,"discussion_id":"thread-a","note":"Already prepared"}]"#)
+                }
+            })
+            defer { coordinator.cancel() }
+            coordinator.onNeedsWork = { _, ids, fingerprint, context in
+                do {
+                    _ = try await service.prepareFeedback(work: work, noteIDs: ids.sorted(), username: "me",
+                        settings: fixture.settings, glab: fixture.glab, manual: false,
+                        verifiedFingerprint: fingerprint, expectedHeadSHA: Fixture.sha, verifiedResidual: context,
+                        shouldProceed: { true })
+                } catch { Issue.record(error) }
+            }
+
+            try await fixture.run(coordinator)
+            let deadline = ContinuousClock.now + .seconds(5)
+            while jobs.isWorking(on: work), ContinuousClock.now < deadline { try await Task.sleep(for: .milliseconds(10)) }
+
+            #expect(fixture.settings.assistantHandoffs.count == (stoppedBefore ? 2 : 1))
+            #expect(executed == stoppedBefore)
+            #expect(fixture.gitlab.text("drafts.json").contains("Already prepared") == !stoppedBefore)
+        }
+    }
+
+    @Test(arguments: [AssistantJobExecution.State.failed, .interrupted], [false, true])
+    func stoppedAttemptsRequireAPostAttemptAssessment(state: AssistantJobExecution.State, restart: Bool) async throws {
+        try await withFixture { fixture in
+            fixture.settings.automation.autoResolveAcceptedFeedback = false
+            fixture.settings.automation.authorFeedback.isEnabled = true
+            let assessments = fixture.directory.appending(path: "assessments")
+            let first = fixture.coordinator(assessment: .init(notes: [
+                .init(noteID: 10, state: .blocking, reason: "The original correction needs work.")
+            ]), assessmentDirectory: assessments)
+            defer { first.cancel() }
+            try await fixture.run(first)
+            #expect(fixture.inputs.count == 1)
+            let request = try JSONDecoder().decode(GitLabMergeRequest.self, from: Data(Fixture.request.utf8))
+            fixture.settings.assistantHandoffs.append(.init(id: UUID(), key: .init(assistant: .codex,
+                work: .init(host: Fixture.host, projectID: 1, iid: 2), username: "me", workspace: "", access: .gitLabRead),
+                title: "Stopped feedback", prompt: "Handle feedback", createdAt: Date(timeIntervalSince1970: 1),
+                allowsPush: false, feedbackNoteIDs: [10], followUpPushAllowed: true,
+                execution: .init(state: state, finishedAt: Date(timeIntervalSince1970: 2)),
+                mergeRequestURL: request.webURL, workflow: .followUp, expectedHeadSHA: request.sha))
+            let next = restart ? fixture.coordinator(assessmentDirectory: assessments) : first
+            defer { next.cancel() }
+
+            try await fixture.run(next)
+            try await fixture.waitForPass(2)
+
+            #expect(fixture.inputs.count == 2)
+            try await fixture.run(next)
+            #expect(fixture.inputs.count == 2)
+        }
+    }
+
+    @Test func restoredFeedbackCannotInheritAnOlderDecisionsSuccessfulRun() async throws {
+        try await withFixture { fixture in
+            fixture.settings.automation.autoResolveAcceptedFeedback = false
+            fixture.settings.automation.authorFeedback.isEnabled = true
+            let request = try JSONDecoder().decode(GitLabMergeRequest.self, from: Data(Fixture.request.utf8))
+            let target = MRAutomationScope.Target(host: Fixture.host, username: "me", projectID: 1, iid: 2)
+            let old = AssistantAutomationRunner.Handoff(id: UUID(), key: .init(assistant: .codex,
+                work: .init(host: Fixture.host, projectID: 1, iid: 2), username: "me", workspace: "", access: .gitLabRead),
+                title: "Earlier decision", prompt: "Handle feedback", createdAt: Date(timeIntervalSince1970: 1),
+                allowsPush: false, feedbackNoteIDs: [10], followUpPushAllowed: true,
+                execution: .init(state: .succeeded, finishedAt: Date(timeIntervalSince1970: 2), summary: "Handled earlier decision"),
+                mergeRequestURL: request.webURL, workflow: .followUp, expectedHeadSHA: request.sha)
+            let note = try #require(try fixture.discussions().first?.notes.first)
+            let stored = fixture.settings.feedbackSuggestionDecisions.ignore(note,
+                concernSummary: "Decline the suggestion", concernReason: "Keep the existing contract", for: target)
+            let decision = try #require(stored)
+            fixture.settings.feedbackSuggestionDecisions.remove(decision.id, for: target)
+            let stopped = AssistantAutomationRunner.Handoff(id: UUID(), key: old.key,
+                title: "Restored concern", prompt: "Handle feedback", createdAt: Date(timeIntervalSince1970: 3),
+                allowsPush: false, feedbackNoteIDs: [10], followUpPushAllowed: true,
+                execution: .init(state: .failed, finishedAt: Date(timeIntervalSince1970: 4)),
+                mergeRequestURL: request.webURL, workflow: .followUp, expectedHeadSHA: request.sha,
+                feedbackDecisionRevision: fixture.settings.feedbackSuggestionDecisions.revision(for: target))
+            fixture.settings.assistantHandoffs = [old, stopped]
+            let coordinator = fixture.coordinator(assessment: .init(notes: [
+                .init(noteID: 10, state: .blocking, reason: "The restored concern still needs work.")
+            ]))
+            var context: AuthorFeedbackResidual?
+            coordinator.onNeedsWork = { _, _, _, supplied in context = supplied }
+
+            try await fixture.run(coordinator)
+
+            #expect(context != nil)
+            #expect(context?.assessedRunID == nil)
+            #expect(coordinator.status(projectID: 1, iid: 2)?.completedFollowUpJobID == nil)
+        }
+    }
+
+    @Test(arguments: [ReReviewAssessment.Note.State.blocking, .uncertain, .addressed, .rejected])
+    func unfinishedFeedbackRetainsTheAssessmentNeededToResume(_ state: ReReviewAssessment.Note.State) async throws {
+        try await withFixture { fixture in
+            fixture.settings.automation.autoResolveAcceptedFeedback = false
+            fixture.settings.automation.authorFeedback.isEnabled = true
+            try fixture.write("discussions.json", "[\(Fixture.condition)]")
+            let coordinator = fixture.coordinator(assessment: .init(notes: [
+                .init(noteID: 20, state: state, reason: "The previous attempt stopped before completing this feedback.")
+            ]))
+            var selected: Set<Int> = []
+            var context: AuthorFeedbackResidual?
+            coordinator.onNeedsWork = { _, ids, _, supplied in selected = ids; context = supplied }
+
+            try await fixture.run(coordinator)
+
+            #expect(selected == [20])
+            #expect(context?.notes.map(\.noteID) == [20])
+            #expect(context?.notes.first?.state == state)
+            #expect(context?.assessedRunID == nil)
+        }
+    }
+
     @Test func replacementOwnerSurvivesAnObsoleteOptionalAcknowledgementCompletion() async throws {
         try await withFixture { f in
             try f.write("discussions.json", #"[{"id":"thread-a","notes":[{"id":10,"author":{"id":7,"username":"alice"},"system":false,"body":"Review complete, looks good","resolvable":true,"resolved":false}]}]"#)
