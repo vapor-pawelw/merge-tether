@@ -6,6 +6,8 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 
 ## Unreleased
 
+- Keep remote message encryption, decoding and iPhone comment Markdown parsing off the UI thread.
+
 - Assess all feedback concerns together, distinguishing verified upstream corrections from justified rejections in the evidence. Show a pending draft or a reply verified to cover all required answers; informational acknowledgements do not make that reply stale.
 
 - Show a fixed **Bot** origin badge for known automation accounts on Mac and iPhone, preserving ordinary AI/Human assessment underneath and keeping bot publication permission separate. Prevent manual comment-origin edits for bots and tighten author-row spacing.

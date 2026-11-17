@@ -511,8 +511,22 @@ private struct RemoteOriginResumeBanner: View {
 /// Comment Markdown with the same formatting collapsed or expanded, as on the Mac.
 struct RemoteMarkdownText: View {
     let source: String
+    @State private var rendered: Rendered?
+    private struct Rendered {
+        let source: String
+        let text: AttributedString?
+    }
     var body: some View {
-        if let rendered = SafeInlineMarkdown.render(source) { Text(rendered) } else { Text(verbatim: source) }
+        Group {
+            if let rendered, rendered.source == source, let text = rendered.text { Text(text) }
+            else { Text(verbatim: source) }
+        }
+        .task(id: source) {
+            let input = source
+            let text = await Task.detached(priority: .userInitiated) { SafeInlineMarkdown.render(input) }.value
+            guard !Task.isCancelled else { return }
+            rendered = Rendered(source: input, text: text)
+        }
     }
 }
 

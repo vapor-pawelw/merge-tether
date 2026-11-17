@@ -37,7 +37,10 @@ import Foundation
     }
     public func send(_ message: RemoteMessage) async throws {
         guard let socket else { throw RemoteProtocolError.invalid }
-        try await socket.send(.string(cipher.seal(message)))
+        let generation = self.generation
+        let wire = try await cipher.sealInBackground(message)
+        guard self.generation == generation, self.socket === socket else { throw RemoteProtocolError.invalid }
+        try await socket.send(.string(wire))
     }
 
     // The socket reader must keep processing pong frames while a GitLab action awaits I/O.
@@ -83,10 +86,11 @@ import Foundation
                     guard self.generation == generation else { break }
                     guard case let .string(wire) = raw else { throw RemoteProtocolError.invalid }
                     if wire == "pong" { pongAt = Date(); continue }
-                    if let data = wire.data(using: .utf8), let advisory = try? JSONSerialization.jsonObject(with: data) as? [String: String],
+                    if wire.utf8.count <= 256, let data = wire.data(using: .utf8), let advisory = try? JSONSerialization.jsonObject(with: data) as? [String: String],
                        advisory["relay"] == "peer-offline" { onStatus?(false, false); continue }
                     do {
-                        let message = try cipher.open(wire, as: RemoteMessage.self)
+                        let message = try await cipher.openInBackground(wire, as: RemoteMessage.self)
+                        guard self.generation == generation else { break }
                         delay = 1
                         try dispatch(message, generation: generation)
                     } catch RemoteProtocolError.ignored { continue }
