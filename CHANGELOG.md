@@ -6,6 +6,8 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 
 ## Unreleased
 
+- Resume unfinished author feedback once after a fresh assessment, using the selected Codex or Claude CLI. Preserve already delivered fixes and drafts, and finish missing replies after an interrupted run instead of treating the earlier attempt as completed work.
+
 - Make iPhone card buttons open their intended section or confirm the exact advertised action, preserving distinct primary and secondary destinations in the board and inbox.
 
 - Show the original comment and expandable conversation beside iPhone reply drafts, and display draft reply bodies directly in their discussion threads.
