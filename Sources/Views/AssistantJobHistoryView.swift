@@ -86,7 +86,7 @@ struct AssistantJobRow: View {
                 if let summary = execution.summary, summary != execution.attentionExplanation {
                     Text(verbatim: GlabService.redactWorkflowEvidence(summary)).textSelection(.enabled)
                 }
-                if let error = execution.error, error != execution.attentionExplanation {
+                if let error = execution.errorExplanation, error != execution.attentionExplanation {
                     Text(verbatim: GlabService.redactWorkflowEvidence(error)).foregroundStyle(.orange).textSelection(.enabled)
                 }
                 if let output = execution.output, !output.isEmpty {

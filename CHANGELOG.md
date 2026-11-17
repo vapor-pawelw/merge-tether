@@ -18,6 +18,8 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 
 - Keep no-findings reviews and acknowledgements informational, while retaining questions and conditions in general comments. Mark large verifier inputs as deliberately omitted and fetch live discussions instead of treating them as an empty snapshot; refresh earlier assessments under the corrected policy.
 
+- Explain agent run failures with localized messages and recovery steps instead of internal error names such as `disabledPermission`, including saved run and automation history.
+
 - Fix continuous iPhone toolbar updates that keep the main thread busy and make scrolling stutter, including while MR details are open.
 
 - Keep remote message encryption, decoding and iPhone comment Markdown parsing off the UI thread.

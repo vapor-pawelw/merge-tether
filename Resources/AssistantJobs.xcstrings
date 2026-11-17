@@ -220,6 +220,72 @@
           }
         }
       }
+    },
+    "assistant.jobs.error.cliUnavailable": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "The selected agent CLI is unavailable. Check the agent in Settings → Automation, then try again."
+          }
+        }
+      }
+    },
+    "assistant.jobs.error.wrongAccount": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "The signed-in GitLab account or host has changed. Restore the account used for this run, then try again."
+          }
+        }
+      }
+    },
+    "assistant.jobs.error.inactiveMergeRequest": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "This merge request or its pipeline is no longer eligible for this task. Refresh the MR before starting a new run."
+          }
+        }
+      }
+    },
+    "assistant.jobs.error.missingResult": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "The agent finished without a task result. Inspect the run transcript before trying again."
+          }
+        }
+      }
+    },
+    "assistant.jobs.error.disabledPermission": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "This task is blocked by the current automation settings. Check Settings → Automation and this MR’s automation rules before trying again."
+          }
+        }
+      }
+    },
+    "assistant.jobs.error.headChanged": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "The merge request has new commits. Refresh it and start a new run for the current commit."
+          }
+        }
+      }
     }
   },
   "version": "1.0"

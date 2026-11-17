@@ -186,11 +186,11 @@ private struct MRAutomationEventLogRow: View {
     private var summary: String? {
         let text: String?
         switch entry.source {
-        case .job(let job, _): text = job.execution?.attentionExplanation ?? job.execution?.error ?? job.execution?.summary
+        case .job(let job, _): text = job.execution?.attentionExplanation ?? job.execution?.errorExplanation ?? job.execution?.summary
         case .workflow(let workflow): text = workflow.summary ?? workflow.event.context
         case .event(let event): text = event.message
         }
-        return text.map(GlabService.redactWorkflowEvidence)
+        return text.map { GlabService.redactWorkflowEvidence(AssistantJobExecutor.ExecutionError.displayMessage(for: $0)) }
     }
 
     @ViewBuilder private var details: some View {
@@ -208,11 +208,11 @@ private struct MRAutomationEventLogRow: View {
             case .workflow(let workflow):
                 raw(.AutomationHistory.automationHistoryEventID, workflow.id)
                 raw(.AutomationHistory.automationHistoryContext, workflow.event.context)
-                raw(.AutomationHistory.automationHistorySummary, workflow.summary)
+                raw(.AutomationHistory.automationHistorySummary, workflow.summary.map(AssistantJobExecutor.ExecutionError.displayMessage))
                 raw(.AutomationHistory.automationHistoryRunID, workflow.assistantJobID?.uuidString)
             case .event(let event):
                 raw(.AutomationHistory.automationHistoryEventID, event.id.uuidString)
-                raw(.AutomationHistory.automationHistoryError, event.message)
+                raw(.AutomationHistory.automationHistoryError, event.message.map(AssistantJobExecutor.ExecutionError.displayMessage))
                 raw(.AutomationHistory.automationHistoryIntentID, event.intentID?.uuidString)
                 raw(.AutomationHistory.automationHistoryRunID, event.jobID?.uuidString)
                 raw(.AutomationHistory.automationHistoryPreviousRunID, event.relatedJobID?.uuidString)

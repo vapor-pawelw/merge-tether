@@ -16,9 +16,13 @@ struct AssistantJobExecution: Codable, Equatable, Sendable {
     var workingDirectory: String?
     var blocker: String? = nil
 
+    var errorExplanation: String? {
+        error.map { GlabService.redactWorkflowEvidence(AssistantJobExecutor.ExecutionError.displayMessage(for: $0)) }
+    }
+
     var attentionExplanation: String? {
         guard state == .blocked || state == .failed else { return nil }
-        for candidate in [blocker, error] {
+        for candidate in [blocker, errorExplanation] {
             if let text = candidate?.trimmingCharacters(in: .whitespacesAndNewlines), !text.isEmpty {
                 return GlabService.redactWorkflowEvidence(text)
             }

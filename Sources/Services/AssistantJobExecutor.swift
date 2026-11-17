@@ -2,7 +2,25 @@ import Foundation
 
 /// CLI subprocess adapter. Remote effects remain subject to MergeTether's existing evidence gates.
 enum AssistantJobExecutor {
-    enum ExecutionError: Error, Equatable { case cliUnavailable, wrongAccount, inactiveMergeRequest, missingResult, disabledPermission, headChanged }
+    enum ExecutionError: String, Error, Equatable, CustomStringConvertible {
+        case cliUnavailable, wrongAccount, inactiveMergeRequest, missingResult, disabledPermission, headChanged
+
+        var description: String {
+            let message: LocalizedStringResource = switch self {
+            case .cliUnavailable: .AssistantJobs.assistantJobsErrorCliUnavailable
+            case .wrongAccount: .AssistantJobs.assistantJobsErrorWrongAccount
+            case .inactiveMergeRequest: .AssistantJobs.assistantJobsErrorInactiveMergeRequest
+            case .missingResult: .AssistantJobs.assistantJobsErrorMissingResult
+            case .disabledPermission: .AssistantJobs.assistantJobsErrorDisabledPermission
+            case .headChanged: .AssistantJobs.assistantJobsErrorHeadChanged
+            }
+            return String(localized: message)
+        }
+
+        static func displayMessage(for diagnostic: String) -> String {
+            Self(rawValue: diagnostic.trimmingCharacters(in: .whitespacesAndNewlines))?.description ?? diagnostic
+        }
+    }
     struct PersistenceUnavailable: Error, CustomStringConvertible {
         var description: String { String(localized: .Settings.settingsPersistenceActionBlocked) }
     }

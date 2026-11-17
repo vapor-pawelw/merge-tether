@@ -53,7 +53,7 @@ enum WorkflowExecutionProjection {
         case .blocked, .failed, .interrupted: .failed
         case .cancelled: .skipped
         }
-        visible.summary = execution.summary ?? execution.error
+        visible.summary = execution.summary ?? execution.errorExplanation
         return visible
     }
 

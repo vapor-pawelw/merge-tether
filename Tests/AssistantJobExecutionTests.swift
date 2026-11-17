@@ -3,6 +3,42 @@ import Testing
 @testable import GitLabTodos
 
 @Suite struct AssistantJobExecutionTests {
+    @Test(arguments: [
+        (AssistantJobExecutor.ExecutionError.disabledPermission, "This task is blocked by the current automation settings. Check Settings → Automation and this MR’s automation rules before trying again."),
+        (.cliUnavailable, "The selected agent CLI is unavailable. Check the agent in Settings → Automation, then try again."),
+        (.wrongAccount, "The signed-in GitLab account or host has changed. Restore the account used for this run, then try again."),
+        (.inactiveMergeRequest, "This merge request or its pipeline is no longer eligible for this task. Refresh the MR before starting a new run."),
+        (.missingResult, "The agent finished without a task result. Inspect the run transcript before trying again."),
+        (.headChanged, "The merge request has new commits. Refresh it and start a new run for the current commit.")
+    ])
+    func executorFailuresExplainTheProblemAndNextStep(_ error: AssistantJobExecutor.ExecutionError, _ expected: String) {
+        let execution = AssistantJobExecution(state: .failed, error: String(describing: error))
+        #expect(execution.attentionExplanation == expected)
+    }
+
+    @Test func savedPermissionFailureIsReadableWithoutRewritingHistory() throws {
+        let data = Data(#"{"state":"failed","error":"disabledPermission"}"#.utf8)
+        let execution = try JSONDecoder().decode(AssistantJobExecution.self, from: data)
+        #expect(execution.attentionExplanation == "This task is blocked by the current automation settings. Check Settings → Automation and this MR’s automation rules before trying again.")
+        #expect(execution.errorExplanation == execution.attentionExplanation)
+        #expect(execution.error == "disabledPermission")
+        #expect(try JSONDecoder().decode(AssistantJobExecution.self, from: JSONEncoder().encode(execution)) == execution)
+    }
+
+    @Test func arbitraryDiagnosticsArePreservedInsteadOfInterpretedAsErrorNames() {
+        let diagnostic = "The tool reported disabledPermission while inspecting the repository."
+        let execution = AssistantJobExecution(state: .failed, error: diagnostic)
+        #expect(execution.attentionExplanation == diagnostic)
+    }
+
+    @Test func failedCLIResultUsesTheReadableCauseAndKeepsItsTranscript() {
+        let failure = AssistantJobFailure(error: AssistantJobExecutor.ExecutionError.missingResult,
+            output: .init(stdout: Data("Partial work saved".utf8), stderr: "No result file", exitCode: 1))
+        #expect(failure.description == "The agent finished without a task result. Inspect the run transcript before trying again.")
+        #expect(failure.transcript.contains("Partial work saved"))
+        #expect(failure.transcript.contains("No result file"))
+    }
+
     @MainActor @Test(arguments: ["current", "head", "context", "discussion", "account", "mr"])
     func anIndependentCodeQuestionHoldsMergeOnlyForItsCurrentContext(_ changed: String) throws {
         // given

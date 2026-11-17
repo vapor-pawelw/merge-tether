@@ -462,6 +462,21 @@ import Testing
         #expect(settings.assistantHandoffs.first?.deliveredFeedbackTodos.isEmpty == true)
     }
 
+    @Test func permissionFailurePersistsAReadableMessageAcrossRestart() async throws {
+        let (settings, name, defaults) = try fixture()
+        defer { defaults.removePersistentDomain(forName: name) }
+        let pending = job()
+        settings.assistantHandoffs = [pending]
+        let coordinator = AssistantJobCoordinator(execute: { _, _ in
+            throw AssistantJobExecutor.ExecutionError.disabledPermission
+        })
+        #expect(coordinator.schedule(pending, settings: settings))
+        await coordinator.waitForTermination()
+        let execution = try #require(SettingsManager(defaults: defaults).assistantHandoffs.first?.execution)
+        #expect(execution.state == .failed)
+        #expect(execution.error == "This task is blocked by the current automation settings. Check Settings → Automation and this MR’s automation rules before trying again.")
+    }
+
     @Test func thrownExecutorFailureIsPersistedAsFailure() async throws {
         struct Failure: Error {}
         let (settings, name, defaults) = try fixture()

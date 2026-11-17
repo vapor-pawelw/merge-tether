@@ -89,14 +89,14 @@ import MergeTetherRemote
             case .job(let job, let attempt):
                 return .init(id: entry.id, title: String(localized: .AutomationHistory.automationHistoryRun(attempt)) + " · " + job.title,
                     status: jobStatus(job.execution?.state),
-                    summary: (job.execution?.attentionExplanation ?? job.execution?.summary ?? job.execution?.error).map(GlabService.redactWorkflowEvidence),
+                    summary: (job.execution?.attentionExplanation ?? job.execution?.summary ?? job.execution?.errorExplanation).map(GlabService.redactWorkflowEvidence),
                     createdAt: entry.createdAt, head: job.expectedHeadSHA)
             case .workflow(let workflow):
                 return .init(id: entry.id, title: String(localized: workflow.event.kind.displayLabel),
-                    status: workflowStatus(workflow.state), summary: workflow.summary.map(GlabService.redactWorkflowEvidence), createdAt: entry.createdAt)
+                    status: workflowStatus(workflow.state), summary: workflow.summary.map { GlabService.redactWorkflowEvidence(AssistantJobExecutor.ExecutionError.displayMessage(for: $0)) }, createdAt: entry.createdAt)
             case .event(let event):
                 return .init(id: entry.id, title: String(localized: eventTitle(event.action)),
-                    status: eventStatus(event.state), summary: event.message.map(GlabService.redactWorkflowEvidence), createdAt: entry.createdAt)
+                    status: eventStatus(event.state), summary: event.message.map { GlabService.redactWorkflowEvidence(AssistantJobExecutor.ExecutionError.displayMessage(for: $0)) }, createdAt: entry.createdAt)
             }
         }
         if history.entries.count > 30 { details.truncated = true }
