@@ -23,18 +23,24 @@ struct BoardMRIntentActions: View {
                 VStack(alignment: .leading, spacing: 6) {
                     HStack(alignment: .firstTextBaseline, spacing: 12) {
                         Label {
-                            if intent.state == .running, MRActionCTA(intent: intent.kind) != nil {
+                            if intent.isAwaitingFollowUpVerification {
+                                Text(.AutomationProgress.progressFeedbackCheck)
+                            } else if intent.state == .running, MRActionCTA(intent: intent.kind) != nil {
                                 Text(verbatim: MRActivity.agentStatus(Self.title(intent.kind),
                                     assistant: row.latestJob.flatMap { $0.id == intent.jobID ? $0.key.assistant : nil }
                                         ?? monitor.settings.automation.assistant))
                             } else { Text(Self.title(intent.kind)) }
                         } icon: {
-                            Image(systemName: intent.state == .running
-                                ? MRActionCTA(intent: intent.kind)?.symbol ?? symbol(intent.kind) : symbol(intent.kind))
+                            if intent.isAwaitingFollowUpVerification {
+                                Image(systemName: "checkmark.bubble")
+                            } else {
+                                Image(systemName: intent.state == .running
+                                    ? MRActionCTA(intent: intent.kind)?.symbol ?? symbol(intent.kind) : symbol(intent.kind))
+                            }
                         }
                             .font(.subheadline.weight(.medium))
                         Spacer()
-                        if intent.state == .running {
+                        if intent.state == .running || intent.state == .verifying {
                             ProgressView().controlSize(.small)
                         } else {
                             Button {
@@ -79,7 +85,7 @@ struct BoardMRIntentActions: View {
     static func visibleIntents(_ intents: [MRTodoIntent]) -> [MRTodoIntent] {
         let open = intents.filter { $0.state != .completed }
         func rank(_ intent: MRTodoIntent) -> Int {
-            switch intent.state { case .running: 0; case .failed: 1; default: 2 }
+            switch intent.state { case .running, .verifying: 0; case .failed: 1; default: 2 }
         }
         var chosen: [MRTodoIntent.Kind: MRTodoIntent] = [:]
         for intent in open where chosen[intent.kind].map({ rank(intent) < rank($0) }) ?? true {

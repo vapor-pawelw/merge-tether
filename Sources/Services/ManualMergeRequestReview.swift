@@ -23,7 +23,7 @@ extension TodoMonitorService {
             let dependency = await AssistantCLI.detect(assistant, requireCLI: true)
             guard dependency.isReady, target.matchesAccount(host: glab.resolvedHost, username: glab.currentUsername),
                   settings.automation.assistant == assistant else { throw CancellationError() }
-            let head = request.sha ?? ""
+            guard let head = request.sha, !head.isEmpty else { throw AssistantJobExecutor.ExecutionError.headChanged }
             var scope = IncrementalReviewScope(currentHead: head, fullReview: fromScratch)
             if !fromScratch, let verdict = ReviewVerdictStore.verdict(host: target.host, projectID: target.projectID, iid: target.iid),
                verdict.username == target.username, verdict.headSHA != head {
@@ -43,7 +43,8 @@ extension TodoMonitorService {
                 """,
                 workspace: settings.automation.assistantWorkspace, access: .gitLabRead,
                 work: .init(host: target.host, projectID: target.projectID, iid: target.iid),
-                username: target.username, settings: settings, isReview: true, mrWorkflow: .review, manual: true)
+                username: target.username, settings: settings, isReview: true, mrWorkflow: .review, manual: true,
+                expectedHeadSHA: head)
         } catch {
             assistantJobActionError = String(localized: .AssistantJobs.assistantJobsActionFailed)
         }

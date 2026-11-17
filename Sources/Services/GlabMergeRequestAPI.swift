@@ -465,6 +465,7 @@ extension GlabService {
         expectedSemanticContextFingerprint: String? = nil,
         action: MergeSubmissionAction = .mergeNow,
         expectedPolicy: GitLabMergeActionPolicy? = nil,
+        requiresApprovalRules: Bool = false,
         beforeWrite: @MainActor (Int?) throws -> Void = { _ in },
         shouldProceed: @escaping @MainActor @Sendable () -> Bool
     ) async throws -> MergeSubmissionState {
@@ -510,8 +511,11 @@ extension GlabService {
             }
             let policy = try await fetchMergeActionPolicy(projectID: projectID, host: host, request: current)
             guard policy == expectedPolicy, policy.action == action else { throw CancellationError() }
+        }
+        if expectedPolicy != nil || requiresApprovalRules {
             let approvals = try await fetchMergeRequestApprovalState(projectID: projectID, iid: iid, host: host)
-            guard approvals.allRequiredRulesApproved else { throw CancellationError() }
+            guard approvals.allRequiredRulesApproved,
+                  !requiresApprovalRules || approvals.hasRequiredRules else { throw CancellationError() }
         }
         guard current.isReadyForMergeSubmission(action) else { throw CancellationError() }
         guard try await fetchMergeDependencyReadiness(for: current, host: host) == .ready else { throw CancellationError() }

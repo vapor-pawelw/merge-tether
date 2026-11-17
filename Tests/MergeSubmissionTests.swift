@@ -359,6 +359,92 @@ import Testing
         }
     }
 
+    @Test(arguments: [false, true])
+    func aQueueObservedWithoutDiscussionsIsRememberedAcrossRestart(_ stillQueued: Bool) async throws {
+        try await fixture { glab, gitlab, _ in
+            // given
+            let suite = "ObservedQueueDiscussionFailure.\(UUID())"
+            let defaults = try #require(UserDefaults(suiteName: suite))
+            defer { defaults.removePersistentDomain(forName: suite) }
+            let settings = SettingsManager(defaults: defaults)
+            settings.onboardingCompleted = true; settings.notificationsEnabled = false
+            settings.automation.packageDecision = .enabled
+            settings.automation.autoMergeEnabled = true
+            settings.save()
+            let transport = try #require(gitlab.handler)
+            gitlab.write("observed", "queued")
+            gitlab.write("discussion-read-failure")
+            gitlab.handler = { call in
+                if gitlab.has("discussion-read-failure"), call.endpoint.contains("/discussions?") {
+                    return InMemoryGitLab.output(error: "403 Forbidden", code: 1)
+                }
+                return try await transport(call)
+            }
+
+            // when
+            let monitor = AuthoredMergeRequestMonitor(settings: settings, glab: glab, canAutomate: { _ in true })
+            monitor.refreshIfNeeded()
+            while monitor.isLoading { await Task.yield() }
+            let restored = SettingsManager(defaults: defaults)
+            #expect(restored.mergeSubmissions.first?.origin == .observedQueue)
+            #expect(restored.mergeSubmissions.first?.discussionFingerprint == nil)
+            gitlab.remove("discussion-read-failure")
+            if !stillQueued { gitlab.remove("observed") }
+            let restarted = AuthoredMergeRequestMonitor(settings: restored, glab: glab, canAutomate: { _ in true })
+            restarted.refreshIfNeeded()
+            while restarted.isLoading { await Task.yield() }
+
+            // then
+            #expect(restarted.requests.first?.submissionState == (stillQueued ? .queued : .changed))
+            #expect(restored.mergeSubmissions.first?.discussionFingerprint == (stillQueued ? ReviewVerdict.fingerprint([]) : nil))
+            #expect(gitlab.requests.allSatisfy { $0.method == "GET" })
+        }
+    }
+
+    @Test(arguments: ["queued", "train-only"])
+    func aQueueForARepairedHeadSupersedesTheEarlierRejection(_ queue: String) async throws {
+        try await fixture { glab, gitlab, request in
+            // given
+            let suite = "ObservedRepairedMergeQueue.\(UUID())"
+            let defaults = try #require(UserDefaults(suiteName: suite))
+            defer { defaults.removePersistentDomain(forName: suite) }
+            let settings = SettingsManager(defaults: defaults)
+            settings.onboardingCompleted = true; settings.notificationsEnabled = false
+            settings.automation.packageDecision = .enabled
+            settings.automation.autoMergeEnabled = true
+            let rejectedHead = try #require(request.sha)
+            let repairedHead = String(repeating: "c", count: 40)
+            let rejected = MergeSubmissionReceipt(target: .init(host: host, username: user.username, projectID: 1, iid: 2),
+                userID: user.id, context: .init(request), semanticFingerprint: request.semanticContextFingerprint,
+                discussionFingerprint: ReviewVerdict.fingerprint([]), configuration: .init(settings),
+                action: .enqueue, createdAt: Date(), trainNoteIDBeforeAttempt: 0,
+                confirmedTrainRejection: .init(context: .init(request), noteID: 10, sourceSHA: rejectedHead,
+                    targetSHA: String(repeating: "b", count: 40)))
+            try #require(settings.saveMergeSubmission(rejected))
+            gitlab.write("current-head", repairedHead)
+            gitlab.write("observed", queue)
+            gitlab.write("outcome", "queued")
+
+            // when
+            let monitor = AuthoredMergeRequestMonitor(settings: settings, glab: glab, canAutomate: { _ in true })
+            monitor.refreshIfNeeded()
+            while monitor.isLoading { await Task.yield() }
+            #expect(monitor.requests.first?.submissionState == (queue == "queued" ? .queued : .inTrain))
+            let restored = SettingsManager(defaults: defaults)
+            #expect(restored.mergeSubmissions.first?.origin == .observedQueue)
+            #expect(restored.mergeSubmissions.first?.context.head == repairedHead)
+            #expect(restored.mergeSubmissions.first?.confirmedTrainRejection == nil)
+            gitlab.remove("observed")
+            let restarted = AuthoredMergeRequestMonitor(settings: restored, glab: glab, canAutomate: { _ in true })
+            restarted.refreshIfNeeded()
+            while restarted.isLoading { await Task.yield() }
+
+            // then
+            #expect(restarted.requests.first?.submissionState == .changed)
+            #expect(gitlab.requests.allSatisfy { $0.method == "GET" })
+        }
+    }
+
     @Test func aQueueCreatedDuringTheFinalPreflightRemainsUserOwnedAndCannotBeReplaced() async throws {
         try await fixture { glab, gitlab, _ in
             let suite = "MergeQueueRace.\(UUID())"
@@ -469,7 +555,8 @@ import Testing
                     : InMemoryGitLab.output(#"{"reset_approvals_on_push":true}"#)
             case let path where path.hasPrefix("/merge_requests?"): return InMemoryGitLab.output("[" + listed + "]")
             case let path where path.contains("/merge_trains?"):
-                return InMemoryGitLab.output(gitlab.text("observed") == "train" ? #"[{"merge_request":{"project_id":1,"iid":2}}]"# : "[]")
+                return InMemoryGitLab.output(["train", "train-only"].contains(gitlab.text("observed"))
+                    ? #"[{"merge_request":{"project_id":1,"iid":2}}]"# : "[]")
             case "/projects/1/merge_requests/2":
                 var object = try #require(JSONSerialization.jsonObject(with: Data(raw.utf8)) as? [String: Any])
                 if gitlab.has("current-head") { object["sha"] = gitlab.text("current-head") }

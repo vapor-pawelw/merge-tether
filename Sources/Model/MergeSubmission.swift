@@ -59,8 +59,8 @@ struct MergeTrainPreparationConflict: Error, Codable, Hashable, Sendable {
     }
 }
 
-/// Saved before a potentially accepted request. A lost response must survive restart
-/// as an uncertain attempt, rather than inviting another non-idempotent train write.
+/// Saved before a potentially accepted request or as soon as an existing queue is seen.
+/// Either observation must survive restart to prevent a replacement submission.
 struct MergeSubmissionReceipt: Codable, Equatable {
     enum Origin: String, Codable { case appAttempt, observedQueue }
     var origin: Origin = .appAttempt
@@ -68,7 +68,7 @@ struct MergeSubmissionReceipt: Codable, Equatable {
     let userID: Int
     let context: MergeRequestDependencySummary.Context
     let semanticFingerprint: String
-    let discussionFingerprint: String
+    var discussionFingerprint: String?
     let configuration: MergeSubmissionConfiguration
     let action: MergeSubmissionAction
     var state: MergeSubmissionState = .uncertain
@@ -87,9 +87,9 @@ struct MergeSubmissionReceipt: Codable, Equatable {
             && request.state == "opened"
     }
 
-    func matches(_ request: GitLabMergeRequest, discussionFingerprint: String, configuration: MergeSubmissionConfiguration) -> Bool {
+    func matchesContext(_ request: GitLabMergeRequest, configuration: MergeSubmissionConfiguration) -> Bool {
         context == .init(request) && semanticFingerprint == request.semanticContextFingerprint
-            && self.discussionFingerprint == discussionFingerprint && self.configuration == configuration
+            && self.configuration == configuration
     }
 }
 

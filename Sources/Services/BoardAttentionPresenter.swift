@@ -166,7 +166,7 @@ final class BoardAttentionPresenter {
                !row.intents.contains(where: { $0.jobID == job.id && $0.state == .completed }) {
                 add(.failedWork, job.id.uuidString + ":" + execution.state.rawValue)
             }
-            for intent in row.attentionIntents where intent.state != .completed && intent.state != .running {
+            for intent in row.attentionIntents where intent.state == .pending || intent.state == .failed {
                 if intent.state == .failed {
                     add(.failedWork, intent.id.uuidString + ":" + (intent.jobID?.uuidString ?? "") + ":" + UserAttentionSnapshot.digest(intent.error ?? ""))
                 } else {

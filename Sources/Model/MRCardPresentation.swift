@@ -122,8 +122,11 @@ struct MRCardPresentation {
     }
     var working: Bool {
         finishedState == nil && !waitingOnCLI && (executingWork || busy
-            || item.draftProofRecoveryChecking || item.authorFeedbackStatus?.phase == .checking
+            || item.draftProofRecoveryChecking || checkingFollowUp
             || (showsReadProgress && isRefreshingAttention))
+    }
+    private var checkingFollowUp: Bool {
+        item.authorFeedbackStatus?.phase == .checking || row.attentionIntents.contains(where: \.isAwaitingFollowUpVerification)
     }
     var activity: MRActivity? {
         guard working, let status else { return nil }
@@ -200,7 +203,7 @@ struct MRCardPresentation {
         if item.draftProofRecoveryChecking, !row.hasIndependentStoppedWork { return (.AutomationProgress.progressReplies, .aiCheck) }
         if item.aiOriginChecking { return (.AutomationProgress.progressAIAssistance, .aiCheck) }
         if item.draftProofRecoveryChecking { return (.AutomationProgress.progressReplies, .aiCheck) }
-        if item.authorFeedbackStatus?.phase == .checking { return (.AutomationProgress.progressFeedbackCheck, .aiCheck) }
+        if checkingFollowUp { return (.AutomationProgress.progressFeedbackCheck, .aiCheck) }
         if item.reReviewReadiness == .checking { return (.AutomationProgress.progressReviewReadiness, .aiCheck) }
         if automaticPipelineProgress { return (.AutomationProgress.progressPipeline, nil) }
         if automaticConflictProgress { return (.AutomationProgress.progressConflictPreparing, .agent) }

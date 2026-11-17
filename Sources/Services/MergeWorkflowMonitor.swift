@@ -49,7 +49,8 @@ final class MergeWorkflowMonitor {
         /// The head, MR diff content and discussion text your last covering verdict assessed.
         /// Later passes review only what changed since, so unrelated edits never reopen the whole MR.
         var reviewedHead: String? = nil
-        var reviewedDiffDigest: String? = nil
+        // Legacy reviewedDiffDigest values were saved without confirming the head after the diff read.
+        var reviewedDiff: ReviewDiffSnapshot? = nil
         var reviewedNoteRevisions: [Int: String]? = nil
     }
 
@@ -377,11 +378,11 @@ final class MergeWorkflowMonitor {
         automationScope: MRAutomationScope, username: String
     ) async -> [MergeWorkflowEvent] {
         let assigned = try? await glab.fetchReviewAssignedMergeRequests(userID: account.userID, host: account.host)
-        guard assigned != nil || !tracked.isEmpty else { return [] }
         var candidates = assigned ?? []
         var known = Set(candidates.map(Self.key))
         var retained = Set(tracked.filter { $0.host.lowercased() == account.host })
         var merged = baselines.mergedReviews ?? []
+        var failedDetailReads: Set<String> = []
         for (key, checkpoint) in baselines.reviews where checkpoint.hasReviewed {
             let parts = key.split(separator: "!")
             if parts.count == 2, let projectID = Int(parts[0]), let iid = Int(parts[1]) {
@@ -390,23 +391,29 @@ final class MergeWorkflowMonitor {
         }
         for work in retained {
             let key = "\(work.projectID)!\(work.iid)"
-            guard !known.contains(key), !ownedKeys.contains(key), !merged.contains(key),
-                  let request = try? await glab.fetchMergeRequest(projectID: work.projectID, iid: work.iid, host: account.host)
-            else { continue }
+            guard !known.contains(key), !ownedKeys.contains(key), !merged.contains(key) else { continue }
+            guard let request = try? await glab.fetchMergeRequest(projectID: work.projectID, iid: work.iid, host: account.host) else {
+                failedDetailReads.insert(key)
+                continue
+            }
             if request.state == "merged" { merged.insert(key); continue }
             candidates.append(request)
             known.insert(key)
         }
         for request in candidates where request.state == "opened" { merged.remove(Self.key(request)) }
         baselines.mergedReviews = merged.isEmpty ? nil : merged
-        let others = candidates.filter {
-            $0.state == "opened" && $0.author.id != account.userID
+        let otherRequests = candidates.filter {
+            $0.author.id != account.userID
                 && $0.webURL.isGitLabMergeRequest(host: account.host, iid: $0.iid)
         }
-        let keys = Set(others.map(Self.key))
-        baselines.reviews = baselines.reviews.filter { keys.contains($0.key) }
+        let nonterminalKeys = Set(otherRequests.lazy.filter { $0.state != "merged" && $0.state != "closed" }.map(Self.key))
+        baselines.reviews = baselines.reviews.filter { key, _ in
+            guard !ownedKeys.contains(key), !merged.contains(key) else { return false }
+            return nonterminalKeys.contains(key) || failedDetailReads.contains(key)
+                || (assigned == nil && !known.contains(key))
+        }
         var events: [MergeWorkflowEvent] = []
-        for request in others {
+        for request in otherRequests where request.state == "opened" {
             guard !Task.isCancelled else { return [] }
             guard automationScope.permits(request, host: account.host, username: username),
                   let head = request.sha, !head.isEmpty else { continue }
@@ -449,9 +456,8 @@ final class MergeWorkflowMonitor {
             if covered == true, let discussions {
                 let revisions = MergeRequestDiffDigest.noteRevisions(discussions, excludingAuthor: account.userID)
                 // A failed read leaves no digest, so a later head change is never mistaken for a rebase.
-                if previous.reviewedHead != head || previous.reviewedDiffDigest == nil {
-                    previous.reviewedDiffDigest = try? await glab.fetchMergeRequestDiffDigest(
-                        projectID: request.projectID, iid: request.iid, host: account.host)
+                if previous.reviewedDiff?.headSHA != head {
+                    previous.reviewedDiff = try? await glab.fetchReviewDiffSnapshot(for: request, host: account.host)
                 }
                 previous.reviewedHead = head
                 previous.reviewedNoteRevisions = revisions
@@ -485,10 +491,9 @@ final class MergeWorkflowMonitor {
                 var scope = IncrementalReviewScope(currentHead: head)
                 if changedHead, let reviewed = previous.reviewedHead ?? (previous.head != head ? previous.head : nil) {
                     scope.reviewedHead = reviewed
-                    if let reviewedDigest = previous.reviewedDiffDigest, previous.reviewedHead == reviewed,
-                       let currentDigest = try? await glab.fetchMergeRequestDiffDigest(projectID: request.projectID,
-                           iid: request.iid, host: account.host) {
-                        scope.diffUnchanged = currentDigest == reviewedDigest
+                    if let reviewedDiff = previous.reviewedDiff, reviewedDiff.headSHA == reviewed,
+                       let currentDiff = try? await glab.fetchReviewDiffSnapshot(for: request, host: account.host) {
+                        scope.diffUnchanged = currentDiff.digest == reviewedDiff.digest
                     }
                 }
                 if let reviewedNotes = previous.reviewedNoteRevisions, let discussions {

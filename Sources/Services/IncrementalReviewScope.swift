@@ -1,15 +1,21 @@
 import Foundation
 
-/// Digest of an MR diff's content that ignores blob IDs and hunk offsets, so a rebase that leaves
-/// the MR's own changes intact keeps the same digest.
+/// Digest of an MR diff's content that ignores text blob IDs and hunk offsets. Binary summaries
+/// rely on their index lines to distinguish revisions.
 enum MergeRequestDiffDigest {
     static func normalized(_ diff: String) -> String {
-        let lines = diff.split(separator: "\n", omittingEmptySubsequences: false).compactMap { line -> Substring? in
-            if line.hasPrefix("index ") { return nil }
+        var binaryFile = false
+        // Walk backwards because Git writes the index before the binary marker.
+        let lines = diff.split(separator: "\n", omittingEmptySubsequences: false).reversed().compactMap { line -> Substring? in
+            if line.hasPrefix("diff --git ") { binaryFile = false }
+            if line == "GIT binary patch" || (line.hasPrefix("Binary files ") && line.hasSuffix(" differ")) {
+                binaryFile = true
+            }
+            if line.hasPrefix("index ") && !binaryFile { return nil }
             if line.hasPrefix("@@") { return "@@" }
             return line
         }
-        return UserAttentionSnapshot.digest(lines.joined(separator: "\n"))
+        return UserAttentionSnapshot.digest(lines.reversed().joined(separator: "\n"))
     }
 
     /// Text revision of every non-system note, used to tell which notes changed since a review pass.
@@ -27,10 +33,20 @@ enum MergeRequestDiffDigest {
     }
 }
 
+struct ReviewDiffSnapshot: Codable, Equatable {
+    let headSHA: String
+    let digest: String
+}
+
 extension GlabService {
-    func fetchMergeRequestDiffDigest(projectID: Int, iid: Int, host: String) async throws -> String {
-        let diff: Data = try await mergeRequestAPI("/projects/\(projectID)/merge_requests/\(iid)/raw_diffs", host: host, decode: { $0 })
-        return MergeRequestDiffDigest.normalized(String(decoding: diff, as: UTF8.self))
+    func fetchReviewDiffSnapshot(for request: GitLabMergeRequest, host: String) async throws -> ReviewDiffSnapshot {
+        guard let head = request.sha, !head.isEmpty else { throw AssistantJobExecutor.ExecutionError.headChanged }
+        let diff: Data = try await mergeRequestAPI(
+            "/projects/\(request.projectID)/merge_requests/\(request.iid)/raw_diffs", host: host, decode: { $0 })
+        // GitLab returns the latest raw diff. Check the head after reading it against the prior observation.
+        let current = try await fetchMergeRequest(projectID: request.projectID, iid: request.iid, host: host)
+        guard current.state == "opened", current.sha == head else { throw AssistantJobExecutor.ExecutionError.headChanged }
+        return ReviewDiffSnapshot(headSHA: head, digest: MergeRequestDiffDigest.normalized(String(decoding: diff, as: UTF8.self)))
     }
 }
 

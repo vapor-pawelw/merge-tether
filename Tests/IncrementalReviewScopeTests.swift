@@ -12,6 +12,14 @@ struct IncrementalReviewScopeTests {
         #expect(MergeRequestDiffDigest.normalized(reviewed) != MergeRequestDiffDigest.normalized(changed))
     }
 
+    @Test func summaryOnlyBinaryDiffKeepsTheBlobIdentities() {
+        let reviewed = "diff --git a/image.png b/image.png\nindex 1111111..2222222 100644\nBinary files a/image.png and b/image.png differ\n"
+        let changed = reviewed.replacingOccurrences(of: "2222222", with: "3333333")
+        let legacy = UserAttentionSnapshot.digest(reviewed.replacingOccurrences(of: "index 1111111..2222222 100644\n", with: ""))
+        #expect(MergeRequestDiffDigest.normalized(reviewed) != MergeRequestDiffDigest.normalized(changed))
+        #expect(MergeRequestDiffDigest.normalized(reviewed) != legacy)
+    }
+
     @Test func changedNotesListOnlyNewOrEditedNotesOfOtherParticipants() throws {
         let before = try discussions(#"[{"id":"t","notes":[{"id":1,"author":{"id":2},"system":false,"body":"A"},{"id":2,"author":{"id":9},"system":false,"body":"Mine"}]}]"#)
         let after = try discussions(#"[{"id":"t","notes":[{"id":1,"author":{"id":2},"system":false,"body":"A"},{"id":2,"author":{"id":9},"system":false,"body":"Mine, edited"},{"id":3,"author":{"id":3},"system":false,"body":"New"},{"id":4,"author":{"id":3},"system":true,"body":"pushed"}]}]"#)

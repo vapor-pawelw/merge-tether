@@ -54,6 +54,7 @@ struct MergeWorkflowActivityEntry: Codable, Identifiable {
     var assistantJobID: UUID?
     var pipelineClaimAssessment: PipelineClaimAssessmentLineage? = nil
     var readOnlyFailure: MergeWorkflowReadFailure? = nil
+    var deferredForWorker: Bool? = nil
     var isReadOnlyFailure: Bool { readOnlyFailure != nil }
 }
 
@@ -184,7 +185,12 @@ final class MergeWorkflowAutomation {
     private func normalizeRestoredAdmissions() {
         var changed = false
         for index in settings.workflowActivity.indices where [.queued, .running].contains(settings.workflowActivity[index].state) {
+            let entry = settings.workflowActivity[index]
+            // Only a confirmed wait before admission is safe to resume after restart.
+            if entry.state == .queued, entry.deferredForWorker == true, entry.event.kind != .pipelineFailure,
+               entry.assistantJobID == nil, entry.chatURL == nil { continue }
             settings.workflowActivity[index].state = .skipped
+            settings.workflowActivity[index].deferredForWorker = nil
             changed = true
         }
         if changed { settings.save() }
@@ -287,7 +293,11 @@ final class MergeWorkflowAutomation {
             guard let key = pipelineKey(entry),
                   configuredRule(for: entry.event)?.mode == .assistant
             else { continue }
-            update(entry.id, pipelineDisposition(entry, key: key))
+            // A new failure may check for a stale target despite a receipt.
+            // Reconsideration resumes only once the registration is gone.
+            let state: MergeWorkflowActivityState = detector.status(for: key) == .registered
+                ? .alreadyRegistered : pipelineDisposition(entry, key: key)
+            if state != entry.state { update(entry.id, state) }
         }
     }
 
@@ -396,19 +406,29 @@ final class MergeWorkflowAutomation {
         guard work == nil else { return }
         for entry in currentAdmissions where entry.state == .failed && entry.isReadOnlyFailure
             && entry.assistantJobID == nil && entry.chatURL == nil && shouldProceed(entry)
-            && !AssistantAutomationRunner.isWorking(on: workKey(entry)) {
+            && !hasActiveWorker(entry) {
             guard let failure = entry.readOnlyFailure,
                   failure.configuration.preservingScope(from: settings.automation) != settings.automation
                     || now().timeIntervalSince(failure.date) >= ReadOnlyAssessmentRetry.cooldown else { continue }
             update(entry.id, .queued)
         }
-        while let next = currentAdmissions.last(where: { $0.state == .queued && $0.assistantJobID == nil && $0.chatURL == nil }) {
+        for next in currentAdmissions.reversed() where next.state == .queued && next.assistantJobID == nil && next.chatURL == nil {
             let mode = configuredRule(for: next.event)?.mode
             guard next.event.kind != .reviewWaiting, mode == .assistant else {
-                update(next.id, mode == .notify || mode == .preview ? .preview : .skipped)
+                mutate(next.id, ifCurrent: next) {
+                    $0.state = mode == .notify || mode == .preview ? .preview : .skipped
+                    $0.deferredForWorker = nil
+                }
                 continue
             }
-            update(next.id, .running)
+            if next.event.kind != .pipelineFailure, hasActiveWorker(next) {
+                if next.deferredForWorker != true { deferForActiveWorker(next) }
+                continue
+            }
+            mutate(next.id, ifCurrent: next) {
+                $0.state = .running
+                $0.deferredForWorker = nil
+            }
             work = Task {
                 defer {
                     work = nil
@@ -418,6 +438,11 @@ final class MergeWorkflowAutomation {
                     try await execute(next)
                 } catch is CancellationError {
                     update(next.id, .skipped, ifCurrent: next)
+                } catch AssistantJobExecutor.ExecutionError.headChanged where next.event.kind == .reviewUpdate {
+                    update(next.id, .skipped, ifCurrent: next)
+                    onRemoteChange?()
+                } catch AssistantAutomationRunner.HandoffError.mergeRequestBusy where next.event.kind != .pipelineFailure {
+                    deferForActiveWorker(next)
                 } catch PipelineRefreshError.ownershipReserved {
                     update(next.id, .alreadyRegistered, ifCurrent: next)
                 } catch PipelineClaimAssessmentError.ownershipReserved {
@@ -440,6 +465,18 @@ final class MergeWorkflowAutomation {
             }
             return
         }
+    }
+
+    private func deferForActiveWorker(_ entry: MergeWorkflowActivityEntry) {
+        mutate(entry.id, ifCurrent: entry) {
+            $0.state = .queued
+            $0.deferredForWorker = true
+        }
+    }
+
+    private func hasActiveWorker(_ entry: MergeWorkflowActivityEntry) -> Bool {
+        let target = workKey(entry)
+        return jobCoordinator?.isWorking(on: target) ?? AssistantAutomationRunner.isWorking(on: target)
     }
 
     private struct InitialReadFailure: Error {
@@ -632,6 +669,7 @@ final class MergeWorkflowAutomation {
         }
         let isolation = mrWorkflow == .followUp ? "\n\n\(AssistantAutomationRunner.isolatedFixInstructions)" : ""
         let suppliedEvidence = readsInCodex ? "" : "\n\n<gitlab-evidence>\n" + evidence + "\n</gitlab-evidence>"
+        let bindLaunchSnapshot = event.kind == .reviewUpdate || entry.pipelineClaimAssessment != nil
         let job = try await AssistantAutomationRunner.launch(
             settingsBeforeLaunch.assistant,
             title: "\(repository) !\(latest.iid) (\(latest.author.assistantTitleName(viewerUsername: entry.user.username)))",
@@ -642,8 +680,8 @@ final class MergeWorkflowAutomation {
             access: access,
             work: workKey(entry), username: entry.user.username, settings: settings, pipelineReservation: handoff,
             feedbackNoteIDs: feedbackIDs, isReview: event.kind == .reviewUpdate, mrWorkflow: mrWorkflow,
-            expectedHeadSHA: entry.pipelineClaimAssessment == nil ? nil : current.sha, jobCoordinator: jobCoordinator,
-            configurationSnapshot: entry.pipelineClaimAssessment == nil ? nil : assessmentConfiguration,
+            expectedHeadSHA: bindLaunchSnapshot ? current.sha : nil, jobCoordinator: jobCoordinator,
+            configurationSnapshot: bindLaunchSnapshot ? settingsBeforeLaunch : nil,
             glab: glab.freshSession()
         )
         // Transfer this owned reservation to the CLI run; terminal completion

@@ -23,6 +23,17 @@
         }
       }
     },
+    "todoRouting.followUpVerificationUnavailable": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Current feedback could not be verified. Check the merge request and retry the follow-up."
+          }
+        }
+      }
+    },
     "todoRouting.missingRun": {
       "extractionState": "manual",
       "localizations": {

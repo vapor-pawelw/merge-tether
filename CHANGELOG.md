@@ -318,6 +318,14 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 
 ### Fixed
 
+- Recheck that at least one required approval rule remains before submitting an automatic merge. Remember GitLab queue entries even when discussion reads fail or an earlier commit was rejected from the train, so removing a queue entry still stops automatic resubmission.
+
+- Limit **Add and handle** acknowledgements to the selected merge request. Show feedback verification separately from a running worker and restore dispatch or retry when verification finishes.
+
+- Bind re-review diff evidence and instructions to the commit they assessed, refresh review scope when retrying on a newer commit, and inspect changed binary diffs. Preserve review checkpoints through temporary GitLab read failures and defer new workflow events while another worker is active on that merge request.
+
+- Stop repeating automatic pipeline preflights for failures with an existing claim receipt.
+
 - Put the requested version in local release archives and report incomplete publication as a failure when workflow verification cannot finish after a tag push.
 
 - Require explicit automation consent before automatic GitLab writes or worker push/resolution grants, including fresh and legacy installations after a manual review; keep manual actions available.

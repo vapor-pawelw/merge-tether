@@ -119,6 +119,8 @@ enum AssistantAutomationRunner {
         /// Durable lineage for the single automatic reconciliation of a reviewer revision.
         var feedbackRecoveryRootID: UUID? = nil
         var feedbackDecisionRevision: String? = nil
+        /// The commit for which the saved task instructions were selected.
+        var reviewScopeHeadSHA: String? = nil
 
         var deliveredFeedbackTodos: [Todo.FeedbackIdentity] {
             if let execution { return execution.state == .succeeded ? feedbackTodos ?? [] : [] }
@@ -129,6 +131,7 @@ enum AssistantAutomationRunner {
     enum HandoffError: LocalizedError {
         case desktopUnavailable
         case cannotBuildLink
+        case mergeRequestBusy
         case executionUnavailable
         case legacyJob
         case pipelinePassed(Int)
@@ -144,11 +147,18 @@ enum AssistantAutomationRunner {
             }
         }
 
+        var isExecutionUnavailable: Bool {
+            switch self {
+            case .mergeRequestBusy, .executionUnavailable: true
+            default: false
+            }
+        }
+
         var errorDescription: String? {
             switch self {
             case .desktopUnavailable: String(localized: .AutomationRuntime.runtimeDesktopUnavailable)
             case .cannotBuildLink: String(localized: .AutomationRuntime.runtimeCannotBuildLink)
-            case .executionUnavailable: String(localized: .AutomationRuntime.runtimeAlreadyActive)
+            case .mergeRequestBusy, .executionUnavailable: String(localized: .AutomationRuntime.runtimeAlreadyActive)
             case .legacyJob: String(localized: .AutomationRuntime.runtimeLegacyJob)
             case .pipelinePassed(let id): String(localized: .MRFreshness.mrFreshnessPipelinePassed(id))
             case .pipelineSuperseded(let id): String(localized: .MRFreshness.mrFreshnessPipelineSuperseded(id))
@@ -252,18 +262,38 @@ enum AssistantAutomationRunner {
         }
         try validateLaunchPolicy()
         let executionCoordinator = jobCoordinator ?? coordinator
-        guard !executionCoordinator.isWorking(on: work) else { throw HandoffError.executionUnavailable }
+        guard !executionCoordinator.isWorking(on: work) else { throw HandoffError.mergeRequestBusy }
 
+        let review = isReview || mrWorkflow == .review
+        let reviewRetry: Handoff? = if let retryOf, review, manual, pipelineReservation == nil {
+            settings.assistantHandoffs.first {
+                $0.id == retryOf && $0.key.work == work && $0.key.username == username
+            }
+        } else { nil }
         let headSHA: String?
-        if jobCoordinator == nil || configurationSnapshot != nil {
-            headSHA = try await freshRequest(work: work, username: username, settings: settings,
-                isReview: isReview || mrWorkflow == .review, glab: glab).sha
+        var reviewer: GitLabAuthenticatedUser?
+        if jobCoordinator == nil || configurationSnapshot != nil || (reviewRetry != nil && glab != nil) {
+            let snapshot = try await freshRequest(work: work, username: username, settings: settings, isReview: review, glab: glab)
+            headSHA = snapshot.request.sha
+            reviewer = snapshot.user
             guard let headSHA, !headSHA.isEmpty else { throw AssistantJobExecutor.ExecutionError.inactiveMergeRequest }
             if let expectedHeadSHA, expectedHeadSHA != headSHA { throw AssistantJobExecutor.ExecutionError.headChanged }
         } else { headSHA = expectedHeadSHA }
         try validateLaunchPolicy()
-        guard !executionCoordinator.isWorking(on: work) else { throw HandoffError.executionUnavailable }
-        let boundedPrompt = refreshedTaskPrompt(prompt, expectedHeadSHA: headSHA)
+        guard !executionCoordinator.isWorking(on: work) else { throw HandoffError.mergeRequestBusy }
+        let taskPrompt: String
+        if let reviewRetry {
+            guard let headSHA, !headSHA.isEmpty else { throw AssistantJobExecutor.ExecutionError.headChanged }
+            if reviewRetry.reviewScopeHeadSHA == headSHA, reviewRetry.expectedHeadSHA == headSHA {
+                taskPrompt = prompt
+            } else {
+                taskPrompt = retryTaskPrompt(currentReviewTask(work: work, head: headSHA, user: reviewer, settings: settings),
+                    previous: reviewRetry)
+            }
+        } else {
+            taskPrompt = prompt
+        }
+        let boundedPrompt = refreshedTaskPrompt(taskPrompt, expectedHeadSHA: headSHA)
         let acknowledgements = (feedbackTodos + (feedbackTodo.map { [$0] } ?? [])).reduce(into: [Todo.FeedbackIdentity]()) {
             if !$0.contains($1) { $0.append($1) }
         }
@@ -361,11 +391,12 @@ enum AssistantAutomationRunner {
             draftRepair: draftRepair,
             repository: mergeRequestURL.gitLabProjectPath.split(separator: "/").last.map(String.init),
             followUpPushAllowed: mrWorkflow == .followUp ? followUpPush : nil,
-            execution: AssistantJobExecution(state: .queued), taskPrompt: prompt,
+            execution: AssistantJobExecution(state: .queued), taskPrompt: taskPrompt,
             mergeRequestURL: mergeRequestURL, workflow: mrWorkflow,
             resolvesOwnThreads: (isReview || mrWorkflow == .review) ? resolveOwnThreads : nil,
             manual: manual, expectedHeadSHA: headSHA, configurationSnapshot: manual ? settings.automation : automaticConfiguration,
-            retryOf: retryOf, feedbackRecoveryRootID: feedbackRecoveryRootID, feedbackDecisionRevision: decisionContext
+            retryOf: retryOf, feedbackRecoveryRootID: feedbackRecoveryRootID, feedbackDecisionRevision: decisionContext,
+            reviewScopeHeadSHA: review && pipelineReservation == nil && (expectedHeadSHA != nil || reviewRetry != nil) ? headSHA : nil
         )
         for (noteID, revision) in verifiedFeedbackNotes ?? [:] {
             settings.authorFeedbackAttempts.insert(.init(target: target, noteID: noteID, revision: revision,
@@ -453,7 +484,7 @@ enum AssistantAutomationRunner {
                                     allowsPush: handoff.allowsPush, pipelineReservation: reservation,
                                     feedbackNoteIDs: handoff.feedbackNoteIDs ?? [], feedbackTodos: handoff.feedbackTodos ?? [],
                                     isReview: handoff.workflow == .review || handoff.reviewModel != nil, mrWorkflow: handoff.workflow,
-                                    manual: true, expectedHeadSHA: retryHead, jobCoordinator: jobCoordinator,
+                                    manual: true, expectedHeadSHA: retryHead, jobCoordinator: jobCoordinator, glab: glab?.freshSession(),
                                     draftRepair: handoff.draftRepair, retryOf: handoff.id,
                                     feedbackRecoveryRootID: handoff.feedbackRecoveryRootID)
             for index in settings.workflowActivity.indices where settings.workflowActivity[index].assistantJobID == handoff.id {
@@ -467,6 +498,21 @@ enum AssistantAutomationRunner {
             if let reservation { try? ExistingPipelineWorkDetector().finishHandoff(for: reservation) }
             throw error
         }
+    }
+
+    private static func currentReviewTask(work: MergeRequestWork, head: String, user: GitLabAuthenticatedUser?,
+                                          settings: SettingsManager) -> String {
+        let reviewedHead = user.flatMap {
+            ReviewVerdictStore.authenticatedVerdict(host: work.host, projectID: work.projectID, iid: work.iid,
+                user: $0, settings: settings)?.headSHA
+        }
+        let scope = IncrementalReviewScope(reviewedHead: reviewedHead, currentHead: head).instructions
+        let task = """
+            Re-review the merge request at the checked current head.
+            Review the current diff and discussions, verify earlier findings and author replies, and
+            prepare warranted private GitLab draft findings or replies without duplicates.
+            """
+        return scope.isEmpty ? task : task + "\n\n" + scope
     }
 
     /// Reconcile previous effects without accumulating obsolete retry instructions.
@@ -494,7 +540,8 @@ enum AssistantAutomationRunner {
     }
 
     private static func freshRequest(work: MergeRequestWork, username: String, settings: SettingsManager,
-                                     isReview: Bool, glab: GlabService? = nil) async throws -> GitLabMergeRequest {
+                                     isReview: Bool, glab: GlabService? = nil) async throws
+        -> (request: GitLabMergeRequest, user: GitLabAuthenticatedUser) {
         let glab = glab ?? GlabService()
         if let executable = settings.glabPath { glab.glabPath = executable }
         else { glab.glabPath = await OnboardingDetector.findGlabExecutable() }
@@ -506,7 +553,7 @@ enum AssistantAutomationRunner {
         let request = try await glab.fetchMergeRequest(projectID: work.projectID, iid: work.iid, host: work.host)
         guard request.state == "opened" else { throw AssistantJobExecutor.ExecutionError.inactiveMergeRequest }
         try AssistantJobExecutor.validateReviewOwnership(isReview: isReview, authorID: request.author.id, userID: user.id)
-        return request
+        return (request, user)
     }
 
     /// Reopens a Claude Desktop Code session. Claude links cannot carry a prompt into an

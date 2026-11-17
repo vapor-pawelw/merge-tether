@@ -29,10 +29,11 @@ struct TodoMonitorPersistenceGuardTests {
         let todo = try #require(GlabService.decodeTodos(Data(json.utf8)).first)
         let gitlab = InMemoryGitLab()
         defer { gitlab.close() }
+        gitlab.write("todos", json)
         gitlab.handler = { request in
             if request.arguments.first == "config" { return InMemoryGitLab.output(host) }
             if request.arguments.first == "auth" { return InMemoryGitLab.output(error: "Logged in to \(host) as alice") }
-            if request.arguments.contains(where: { $0.hasPrefix("/todos?") }) { return InMemoryGitLab.output(json) }
+            if request.arguments.contains(where: { $0.hasPrefix("/todos?") }) { return try gitlab.response("todos") }
             if request.endpoint == "/user" { return InMemoryGitLab.output(#"{"id":7,"username":"alice"}"#) }
             if request.method == "POST" { return InMemoryGitLab.output("{}") }
             return InMemoryGitLab.output("[]")
@@ -101,6 +102,59 @@ struct TodoMonitorPersistenceGuardTests {
             #expect(gitlab.requests.contains { $0.endpoint == "/user" })
             #expect(acknowledged.isEmpty)
             #expect(!gitlab.requests.contains { $0.method == "POST" })
+        }
+    }
+
+    @Test func addAndHandleAcknowledgesOnlyTodosForTheSelectedMergeRequest() async throws {
+        try await fixture("healthy", preset: .safe) { monitor, settings, gitlab, _ in
+            // given
+            func event(_ id: Int, projectID: Int, iid: Int, host: String) throws -> Todo {
+                let path = "group/repo-\(projectID)"
+                let url = try #require(URL(string: "https://\(host)/\(path)/-/merge_requests/\(iid)"))
+                return Todo(id: id, actionName: .unmergeable, targetType: .mergeRequest, targetURL: url,
+                    body: "Merge request update", createdAt: Date(), state: "pending",
+                    project: .init(id: projectID, nameWithNamespace: path, pathWithNamespace: path),
+                    author: .init(id: 9, username: "reviewer", name: "Reviewer", avatarURL: nil),
+                    target: .init(id: nil, iid: iid, title: "Example", state: "opened", draft: false, workInProgress: false))
+            }
+            let selected = try event(501, projectID: 1, iid: 42, host: host)
+            let sameTarget = try event(502, projectID: 1, iid: 42, host: host)
+            let otherIID = try event(503, projectID: 1, iid: 43, host: host)
+            let otherProject = try event(504, projectID: 2, iid: 42, host: host)
+            let otherHost = try event(505, projectID: 1, iid: 42, host: "other.example.test")
+            let todos = [selected, sameTarget, otherIID, otherProject, otherHost]
+            for todo in [otherIID, otherProject] {
+                settings.automation.scope[.init(host: host, username: "alice", projectID: todo.project.id, iid: todo.target.iid)] = .active
+            }
+            let encoder = JSONEncoder()
+            encoder.dateEncodingStrategy = .iso8601
+            try encoder.encode(todos).store(in: gitlab, as: "todos")
+            let handler = try #require(gitlab.handler)
+            gitlab.handler = { request in
+                if let todo = todos.first(where: { request.endpoint == "/todos/\($0.id)/mark_as_done" }), request.method == "POST" {
+                    try gitlab.editArray("todos") { $0.removeAll { $0["id"] as? Int == todo.id } }
+                } else if let todo = todos.first(where: { request.endpoint == "/projects/\($0.project.id)/merge_requests/\($0.target.iid ?? 0)" }) {
+                    return InMemoryGitLab.output("""
+                        {"project_id":\(todo.project.id),"iid":\(todo.target.iid ?? 0),"author":{"id":9,"username":"reviewer","name":"Reviewer"},
+                         "title":"Example","web_url":"\(todo.targetURL)","state":"opened","sha":"\(String(repeating: "a", count: 40))",
+                         "source_branch":"feature","target_branch":"main","draft":false,"labels":[],"has_conflicts":false}
+                        """)
+                }
+                return try await handler(request)
+            }
+            #expect(settings.automaticWritesAllowed && !settings.automaticPublicWritesAllowed)
+            await monitor.refreshNow()
+            #expect(gitlab.requests.allSatisfy { $0.method == "GET" })
+
+            // when
+            await monitor.adoptMRTodoProposal(selected)
+
+            // then
+            let acknowledged = gitlab.requests.filter { $0.method == "POST" }.map(\.endpoint)
+            #expect(acknowledged.count == 2)
+            #expect(Set(acknowledged) == ["/todos/501/mark_as_done", "/todos/502/mark_as_done"])
+            #expect(Set(monitor.currentAccountTodos.map(\.id)) == [otherIID.id, otherProject.id, otherHost.id])
+            #expect(Set(settings.routedMRTodoReceipts.map(\.event.id)) == [selected.id, sameTarget.id])
         }
     }
 

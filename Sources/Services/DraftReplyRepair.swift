@@ -189,7 +189,7 @@ enum DraftReplyRepair {
             } catch {
                 // A confirmed pre-launch capacity refusal has no effects to replay.
                 if let launchError = error as? AssistantAutomationRunner.HandoffError,
-                   case .executionUnavailable = launchError, job(context, settings: settings) == nil {
+                   launchError.isExecutionUnavailable, job(context, settings: settings) == nil {
                     do {
                         try removeReservation(context, snapshot: snapshot, directory: directory)
                         return .working

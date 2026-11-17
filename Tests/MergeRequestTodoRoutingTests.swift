@@ -673,13 +673,58 @@ import Testing
         router.followUpVerificationPending = { _, _ in verification.ready }
         router.followUpAssessment = { _, _ in verification.ready ? nil : .init(notes: [.init(noteID: 42, state: .addressed, reason: "Current code and published response verified.")]) }
         _ = await router.process([], host: target.host, username: target.username, managed: [target])
-        #expect(f.settings.mrActionIntents[0].state == .running)
+        #expect(f.settings.mrActionIntents[0].state == .verifying)
         #expect(f.settings.mrActionIntents[0].error == nil)
         #expect(!f.settings.automationEvents.contains { $0.state == .failed })
         verification.ready = false
         await router.refreshCompletionEvidence(host: target.host, username: target.username)
         #expect(f.settings.mrActionIntents[0].state == .completed)
         #expect(f.settings.assistantHandoffs.count == 1)
+    }
+
+    @Test(arguments: [false, true], [false, true])
+    func finishingUnboundFollowUpVerificationMakesWorkAvailableAgain(workRemains: Bool, legacyRunning: Bool) async throws {
+        let f = try fixture(owned: true); defer { f.cleanup() }
+        try completedFollowUp(f, withReply: false)
+        f.settings.assistantHandoffs.removeAll()
+        f.settings.mrActionIntents[0].jobID = nil
+        f.settings.mrActionIntents[0].state = legacyRunning ? .running : .pending
+        f.settings.automation.authorFeedback.isEnabled = true
+        f.settings.save()
+        let settings = SettingsManager(defaults: f.defaults)
+        let verification = Readiness()
+        verification.ready = !legacyRunning
+        var launches: [Bool] = []
+        let launchedJobID = UUID()
+        let router = MergeRequestTodoRouter(settings: settings, glab: f.glab, canAutomate: { true }, launcher: { _, manual in
+            launches.append(manual)
+            return launchedJobID
+        })
+        router.followUpVerificationPending = { _, _ in verification.ready }
+        router.followUpAssessment = { _, _ in
+            guard !verification.ready, workRemains else { return nil }
+            return .init(notes: [.init(noteID: 42, state: .blocking, reason: "The requested change is still missing.")])
+        }
+        if !legacyRunning {
+            _ = await router.process([], host: target.host, username: target.username, managed: [target])
+            #expect(settings.mrActionIntents[0].state == .verifying)
+            #expect(settings.mrActionIntents[0].jobID == nil && launches.isEmpty)
+        }
+        verification.ready = false
+
+        await router.refreshCompletionEvidence(host: target.host, username: target.username)
+
+        let intent = settings.mrActionIntents[0]
+        #expect(intent.state == (workRemains ? .pending : .failed))
+        #expect((intent.error == nil) == workRemains)
+        #expect(intent.jobID == nil && launches.isEmpty)
+        _ = await router.process([], host: target.host, username: target.username, managed: [target])
+        if !workRemains {
+            #expect(launches.isEmpty)
+            await router.run(intent.id, manual: true)
+        }
+        #expect(launches == [!workRemains])
+        #expect(settings.mrActionIntents[0].jobID == launchedJobID)
     }
 
     @Test func completionRefreshDoesNotConsumeEvidenceForAnotherAccount() async throws {

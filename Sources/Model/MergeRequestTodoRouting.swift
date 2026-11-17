@@ -6,7 +6,7 @@ enum MRTodoMentionDisposition: Equatable, Sendable { case informational, actiona
 /// finishing the action are deliberately separate states.
 struct MRTodoIntent: Codable, Identifiable, Sendable {
     enum Kind: String, Codable, Hashable, Sendable { case review, followUp, pipeline, conflict, refresh }
-    enum State: String, Codable, Hashable, Sendable { case pending, running, failed, completed }
+    enum State: String, Codable, Hashable, Sendable { case pending, verifying, running, failed, completed }
     let id: UUID
     let target: MRAutomationScope.Target
     let kind: Kind
@@ -20,6 +20,10 @@ struct MRTodoIntent: Codable, Identifiable, Sendable {
     var error: String?
     var updatedAt: Date
     var sourceTodo: Todo?
+
+    var isAwaitingFollowUpVerification: Bool {
+        kind == .followUp && (state == .verifying || (state == .running && jobID == nil))
+    }
 
     /// A notice receipt retains routing history without enrolling its MR for work.
     var grantsManagement: Bool { kind != .refresh }

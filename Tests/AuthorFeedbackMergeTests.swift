@@ -252,6 +252,23 @@ struct AuthorFeedbackMergeTests {
         }
     }
 
+    @Test(arguments: [false, true])
+    func automaticMergeStopsWhenNoRequiredApprovalRuleRemains(_ leavesOptionalRule: Bool) async throws {
+        try await withFixture { monitor, gitlab, _ in
+            monitor.authorFeedbackAllowsMerge = { _, _, _ in
+                gitlab.write("approval-state.json", leavesOptionalRule
+                    ? #"{"rules":[{"approvals_required":0,"approved":false}]}"#
+                    : #"{"rules":[]}"#)
+                return true
+            }
+
+            try await refresh(monitor)
+
+            #expect(gitlab.requests.filter { $0.endpoint.hasSuffix("/approval_state") }.count == 2)
+            #expect(gitlab.requests.allSatisfy { $0.method == "GET" })
+        }
+    }
+
     @Test(arguments: ["ready", "pipeline", "global", "scope", "discussion"])
     func restoringMergeAutoUsesFreshAutomaticGatesWithoutAnotherRefresh(_ gate: String) async throws {
         var state: SettingsManager?
@@ -295,12 +312,13 @@ struct AuthorFeedbackMergeTests {
         }
     }
 
-    @Test(arguments: [false, true])
-    func explicitManualMergeWorksWithAutomaticMergeOffOrPaused(_ globallyEnabled: Bool) async throws {
+    @Test(arguments: [false, true], [false, true])
+    func explicitManualMergeWorksWithAutomaticMergeOffOrPaused(_ globallyEnabled: Bool, _ hasRequiredRules: Bool) async throws {
         try await withFixture(configure: { settings in
             settings.automation.autoMergeEnabled = globallyEnabled
             settings.autoMergeOptOuts.insert(.init(host: "gitlab.example.org", username: "me", projectID: 1, iid: 2))
         }) { monitor, gitlab, _ in
+            if !hasRequiredRules { gitlab.write("approval-state.json", #"{"rules":[]}"#) }
             monitor.authorFeedbackAllowsMerge = { _, _, _ in true }
             monitor.setVisible(true)
             try await refresh(monitor)

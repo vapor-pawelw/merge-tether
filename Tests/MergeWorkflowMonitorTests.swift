@@ -253,6 +253,79 @@ struct MergeWorkflowMonitorTests {
         #expect(incremental.contains("Incremental re-review") && incremental.contains(reviewed) && !incremental.contains("identical"))
     }
 
+    @Test(arguments: ["baseline", "candidate", "legacy"])
+    func reReviewRequiresDiffEvidenceForTheComparedHeads(_ wrongDiff: String) async throws {
+        let suite = "ReviewDiffHeadRace.\(UUID())"
+        let defaults = try #require(UserDefaults(suiteName: suite))
+        defer { defaults.removePersistentDomain(forName: suite) }
+        let directory = FileManager.default.temporaryDirectory.appending(path: UUID().uuidString)
+        defer { try? FileManager.default.removeItem(at: directory) }
+        let host = "gitlab.example.test"
+        let user = GitLabAuthenticatedUser(id: 1, username: "owner")
+        let reviewed = String(repeating: "a", count: 40)
+        let changed = String(repeating: "b", count: 40)
+        let later = String(repeating: "c", count: 40)
+        let reviewedDiff = "diff --git a/A b/A\n@@ -1,2 +1,3 @@\n context\n+reviewed\n"
+        let changedDiff = reviewedDiff.replacingOccurrences(of: "+reviewed", with: "+new code")
+        let gitlab = InMemoryGitLab()
+        defer { gitlab.close() }
+        gitlab.write("head", reviewed)
+        if wrongDiff == "baseline" { gitlab.write("advance-during-diff", changed) }
+        gitlab.handler = { call in
+            #expect(call.method == "GET")
+            switch call.endpoint {
+            case let path where path.starts(with: "/merge_requests?"):
+                return InMemoryGitLab.output("[\(mergeRequest(13, sha: gitlab.text("head"), author: 2))]")
+            case "/projects/7/merge_requests/13":
+                return InMemoryGitLab.output(mergeRequest(13, sha: gitlab.text("head"), author: 2))
+            case "/projects/7/merge_requests/13/raw_diffs":
+                if gitlab.has("advance-during-diff") {
+                    gitlab.write("head", gitlab.text("advance-during-diff"))
+                    gitlab.remove("advance-during-diff")
+                }
+                return InMemoryGitLab.output(gitlab.text("head") == changed ? changedDiff : reviewedDiff)
+            case let path where path.contains("/reviewers?"):
+                return InMemoryGitLab.output(#"[{"user":{"id":1},"state":"reviewed"}]"#)
+            case let path where path.contains("/discussions?"):
+                return InMemoryGitLab.output("[]")
+            default: return try gitlab.unexpected(call)
+            }
+        }
+        let glab = gitlab.service(host: host, username: user.username)
+        let verdict = ReviewVerdict(version: 1, host: host, projectID: 7, iid: 13, headSHA: reviewed, verdict: .noObjections,
+            discussionFingerprint: ReviewVerdict.fingerprint([]), username: user.username, userID: user.id)
+        let verdictFile = ReviewVerdictStore.fileURL(host: host, projectID: 7, iid: 13, in: directory)
+        try FileManager.default.createDirectory(at: verdictFile.deletingLastPathComponent(), withIntermediateDirectories: true)
+        try JSONEncoder().encode(verdict).write(to: verdictFile)
+        func poll() async -> [MergeWorkflowEvent] {
+            var events: [MergeWorkflowEvent] = []
+            let restored = MergeWorkflowMonitor(defaults: defaults, verdictDirectory: directory)
+            await restored.poll(glab: glab, host: host, user: user, authored: [], enabled: [.reviewUpdate], reviewSLA: 3600) {
+                events.append($0)
+            }
+            return events
+        }
+        if wrongDiff == "legacy" {
+            let unboundDigest = MergeRequestDiffDigest.normalized(changedDiff)
+            let baseline = """
+            [{"host":"\(host)","userID":1},{"authored":{},"reviews":{"7!13":{
+            "head":"\(reviewed)","hasReviewed":true,"reportedHeads":["\(reviewed)"],"seenAuthorReplies":[],
+            "reviewedHead":"\(reviewed)","reviewedDiffDigest":"\(unboundDigest)"}}}]
+            """
+            defaults.set(Data(baseline.utf8), forKey: "automation.mergeWorkflowBaselines.v1")
+        } else {
+            let first = await poll()
+            #expect(first.isEmpty)
+        }
+        gitlab.write("head", changed)
+        if wrongDiff == "candidate" { gitlab.write("advance-during-diff", later) }
+
+        let event = try #require(await poll().first)
+        #expect(event.mergeRequest.sha == changed)
+        #expect(event.context.contains("Incremental re-review"))
+        #expect(!event.context.contains("Do not review the code again"))
+    }
+
     @Test func discussionOnlyReReviewNamesOnlyTheChangedNotes() async throws {
         let fixture = try FreshnessFixture(request: mergeRequest(13, sha: String(repeating: "a", count: 40), author: 2))
         defer { fixture.cleanUp() }
@@ -558,6 +631,66 @@ struct MergeWorkflowMonitorTests {
     private func write(_ content: String, to url: URL) throws {
         try Data(content.utf8).write(to: url)
     }
+
+    @Test(arguments: [true, false])
+    func failedDetailReadPreservesUnassignedReviewCheckpoint(headChanged: Bool) async throws {
+        let suite = "RetainedReviewDetailFailure.\(UUID())"
+        let defaults = try #require(UserDefaults(suiteName: suite))
+        defer { defaults.removePersistentDomain(forName: suite) }
+        let host = "gitlab.example.test"
+        let user = GitLabAuthenticatedUser(id: 1, username: "owner")
+        let before = String(repeating: "a", count: 40)
+        let after = headChanged ? String(repeating: "b", count: 40) : before
+        let request = mergeRequest(13, sha: before, author: 2)
+        let gitlab = InMemoryGitLab()
+        defer { gitlab.close() }
+        gitlab.write("assigned", "[\(request)]")
+        gitlab.write("threads", #"[{"id":"mine","notes":[{"id":100,"author":{"id":1},"system":false}]}]"#)
+        gitlab.handler = { call in
+            switch call.endpoint {
+            case let path where path.contains("reviewer_id=1"):
+                return try gitlab.response("assigned")
+            case "/projects/7/merge_requests/13":
+                if gitlab.has("detail-failure") {
+                    return InMemoryGitLab.output(error: "503 Service Unavailable", code: 1)
+                }
+                return try gitlab.response("request")
+            case let path where path.contains("/reviewers?"):
+                return InMemoryGitLab.output("[]")
+            case let path where path.contains("/discussions?"):
+                return try gitlab.response("threads")
+            default:
+                return try gitlab.unexpected(call)
+            }
+        }
+        let glab = gitlab.service(host: host, username: user.username)
+        var events: [MergeWorkflowEvent] = []
+        func poll(_ monitor: MergeWorkflowMonitor) async {
+            await monitor.poll(glab: glab, host: host, user: user, authored: [],
+                enabled: [.reviewUpdate], reviewSLA: 3_600) { events.append($0) }
+        }
+
+        let monitor = MergeWorkflowMonitor(defaults: defaults)
+        await poll(monitor)
+        #expect(events.isEmpty)
+        gitlab.write("assigned", "[]")
+        gitlab.write("detail-failure")
+        await poll(monitor)
+        #expect(events.isEmpty)
+        #expect(gitlab.requests.contains { $0.endpoint == "/projects/7/merge_requests/13" })
+
+        gitlab.remove("detail-failure")
+        gitlab.write("request", mergeRequest(13, sha: after, author: 2))
+        gitlab.write("threads", #"[{"id":"mine","notes":[{"id":100,"author":{"id":1},"system":false},{"id":101,"author":{"id":2},"system":false}]}]"#)
+        let restarted = MergeWorkflowMonitor(defaults: defaults)
+        await poll(restarted)
+        await poll(restarted)
+        #expect(events.count == 1)
+        #expect(events.first?.kind == .reviewUpdate)
+        #expect(events.first?.mergeRequest.sha == after)
+        #expect(events.first?.noteIDs == [101])
+    }
+
     @Test(arguments: [true, false]) func authorRepliesTriggerReReviewWithoutANewCommitAndSurviveRestart(assigned: Bool) async throws {
         let directory = FileManager.default.temporaryDirectory.appending(path: UUID().uuidString)
         try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)

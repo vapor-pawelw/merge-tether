@@ -591,7 +591,7 @@ final class TodoMonitorService {
         settings.automation.scope[target] = .active
         settings.automation.scope.rememberRepository(todo.project.pathWithNamespace, for: target)
         settings.save()
-        await routeMRTodos(host: target.host, username: target.username, automatically: false)
+        await routeMRTodos(host: target.host, username: target.username, manuallyAdopting: target)
         guard !Task.isCancelled else { return }
         for intent in currentMRTodoIntents where intent.target == target && intent.state != .completed {
             await mrTodoRouter.run(intent.id, manual: true)
@@ -611,13 +611,24 @@ final class TodoMonitorService {
             }
     }
 
-    private func routeMRTodos(host: String, username: String, automatically: Bool = true) async {
+    private func routeMRTodos(host: String, username: String, manuallyAdopting target: MRAutomationScope.Target? = nil) async {
+        let automatically = target == nil
         guard !automatically || settings.automaticWritesAllowed else { return }
         let revision = glab.accountRevision
+        let todos: [Todo]
+        if let target {
+            guard let iid = target.iid, target.host == host, target.username == username else { return }
+            todos = currentAccountTodos.filter { todo in
+                todo.targetType == .mergeRequest && todo.project.id == target.projectID && todo.target.iid == iid
+                    && todo.targetURL.gitLabTodoMergeRequestURL(host: host, iid: iid) != nil
+            }
+        } else {
+            todos = allTodos
+        }
         let managed = Set(reviewedMergeRequestItems.compactMap {
             scopeTarget(projectID: $0.id.projectID, iid: $0.id.iid, url: $0.url)
         })
-        let acknowledged = await mrTodoRouter.process(allTodos, host: host, username: username, managed: managed, automatically: automatically)
+        let acknowledged = await mrTodoRouter.process(todos, host: host, username: username, managed: managed, automatically: automatically)
         guard glab.resolvedHost == host, glab.currentUsername == username,
               glab.accountRevision == revision else { return }
         // Apply confirmed GitLab acknowledgements even if a later step degraded persistence.

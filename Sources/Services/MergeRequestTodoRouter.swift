@@ -148,6 +148,7 @@ final class MergeRequestTodoRouter {
         defer { launching.remove(id) }
         guard manual || settings.automaticWritesAllowed else { return }
         guard !Task.isCancelled, let original = settings.mrActionIntents.first(where: { $0.id == id }), original.state != .completed,
+              !original.isAwaitingFollowUpVerification,
               let iid = original.target.iid, isCurrent(original.target.host, original.target.username) else { return }
         let revision = glab.accountRevision
         let isCurrentRun: @MainActor @Sendable () -> Bool = {
@@ -456,10 +457,12 @@ final class MergeRequestTodoRouter {
                              cachedRequests: [MRAutomationScope.Target: GitLabMergeRequest]) async {
         // Completion decisions use a new read after acknowledgements/worker state,
         // rather than the earlier classification snapshot.
+        let revision = glab.accountRevision
         var requests: [MRAutomationScope.Target: GitLabMergeRequest] = [:]
         for original in settings.mrActionIntents where original.target.host == host && original.target.username == username
             && original.state != .completed {
-            guard isCurrent(host, username), let iid = original.target.iid else { return }
+            guard !Task.isCancelled, isCurrent(host, username), glab.accountRevision == revision,
+                  let iid = original.target.iid else { return }
             let job = original.jobID.flatMap { id in settings.assistantHandoffs.first { $0.id == id } }
             let request: GitLabMergeRequest
             do {
@@ -468,8 +471,16 @@ final class MergeRequestTodoRouter {
                     request = try await glab.fetchMergeRequest(projectID: original.target.projectID, iid: iid, host: host)
                     requests[original.target] = request
                 }
-            } catch { continue }
-            guard isCurrent(host, username), request.projectID == original.target.projectID, request.iid == iid,
+            } catch {
+                if !Task.isCancelled, isCurrent(host, username), glab.accountRevision == revision,
+                   original.isAwaitingFollowUpVerification, original.jobID == nil,
+                   matchesCompletionSnapshot(original, job: job) {
+                    failFollowUpVerification(original.id)
+                }
+                continue
+            }
+            guard !Task.isCancelled, isCurrent(host, username), glab.accountRevision == revision,
+                  request.projectID == original.target.projectID, request.iid == iid,
                   request.webURL.isGitLabMergeRequest(host: host, iid: iid) else { continue }
             guard matchesCompletionSnapshot(original, job: job) else { continue }
             // Preserve current readiness so an adopted Draft can start naturally
@@ -481,7 +492,8 @@ final class MergeRequestTodoRouter {
             var successfulPipeline = false
             if original.kind == .pipeline, request.headPipeline?.status == "success" {
                 successfulPipeline = (try? await glab.verifiedSuccessfulPipeline(for: request, host: host)) != nil
-                guard isCurrent(host, username), matchesCompletionSnapshot(original, job: job) else { continue }
+                guard !Task.isCancelled, isCurrent(host, username), glab.accountRevision == revision,
+                      matchesCompletionSnapshot(original, job: job) else { continue }
             }
             let resolvedByState = request.state != "opened"
                 || successfulPipeline
@@ -508,26 +520,26 @@ final class MergeRequestTodoRouter {
             }
             var provedFollowUp = original.kind == .followUp && job?.execution?.state == .succeeded
                 && job.map { followUpMatches($0, request: request) } == true
-            var checkingFollowUp = false
+            var followUpCompletion: FollowUpCompletion = .unverified
             // An earlier unbound routing failure is not a worker result. Current
             // independent evidence can finish it without replaying that attempt.
             let unboundFollowUp = original.jobID == nil
             if original.kind == .followUp, job?.execution?.state == .succeeded || unboundFollowUp || stoppedFollowUp, !provedFollowUp {
-                switch await followUpNeedsNoWork(original, request: request, requireNoDrafts: stoppedFollowUp,
-                    stoppedJob: stoppedFollowUp ? job : nil) {
-                case .proved: provedFollowUp = true
-                case .checking: checkingFollowUp = true
-                case .unverified: break
-                }
+                followUpCompletion = await followUpNeedsNoWork(original, request: request, requireNoDrafts: stoppedFollowUp,
+                    stoppedJob: stoppedFollowUp ? job : nil)
+                provedFollowUp = followUpCompletion == .proved
             }
-            guard isCurrent(host, username) else { return }
+            guard !Task.isCancelled, isCurrent(host, username), glab.accountRevision == revision else { return }
             // A retry, cancellation or dismissal may replace this intent while evidence is read.
             // The old worker's result must not finish or fail the replacement attempt.
             guard matchesCompletionSnapshot(original, job: job) else { continue }
             if sameReviewedHead || provedFollowUp {
                 update(original.id) { $0.state = .completed; $0.error = nil }
-            } else if checkingFollowUp {
-                update(original.id) { $0.state = .running; $0.error = nil }
+            } else if followUpCompletion == .checking {
+                // An unbound earlier failure can reconcile as complete, but must keep its retry fence.
+                if original.state != .verifying, !unboundFollowUp || original.state != .failed {
+                    update(original.id) { $0.state = .verifying; $0.error = nil }
+                }
             } else if stoppedFollowUp, let execution = job?.execution {
                 update(original.id) { $0.state = .failed; $0.error = execution.attentionExplanation ?? execution.error ?? execution.summary }
             } else if job?.execution?.state == .succeeded {
@@ -536,7 +548,20 @@ final class MergeRequestTodoRouter {
                     $0.error = String(localized: original.kind == .followUp
                         ? .TodoRouting.todoRoutingFollowUpNeedsEvidence : .TodoRouting.todoRoutingNeedsRecheck)
                 }
+            } else if original.isAwaitingFollowUpVerification && unboundFollowUp {
+                if followUpCompletion == .needsWork {
+                    update(original.id) { $0.state = .pending; $0.error = nil }
+                } else {
+                    failFollowUpVerification(original.id)
+                }
             }
+        }
+    }
+
+    private func failFollowUpVerification(_ id: UUID) {
+        update(id) {
+            $0.state = .failed
+            $0.error = String(localized: .TodoRouting.todoRoutingFollowUpVerificationUnavailable)
         }
     }
 
@@ -579,7 +604,7 @@ final class MergeRequestTodoRouter {
 
     /// Finishing a no-op action needs current independent evidence, but no publication receipt.
     /// This changes only the local intent; drafts keep their separate remote-proof gate.
-    private enum FollowUpCompletion { case proved, checking, unverified }
+    private enum FollowUpCompletion { case proved, checking, needsWork, unverified }
 
     private func followUpNeedsNoWork(_ intent: MRTodoIntent, request: GitLabMergeRequest,
                                      requireNoDrafts: Bool = false,
@@ -590,20 +615,30 @@ final class MergeRequestTodoRouter {
         guard let iid = intent.target.iid, request.author.username == intent.target.username,
               let head = request.sha, !head.isEmpty,
               let discussions = try? await glab.fetchMergeRequestDiscussions(projectID: request.projectID, iid: iid, host: intent.target.host),
-              let fingerprint = ReviewVerdict.fingerprint(discussions) else { return .unverified }
+              let fingerprint = ReviewVerdict.fingerprint(discussions),
+              !Task.isCancelled, glab.accountRevision == accountRevision,
+              isCurrent(intent.target.host, intent.target.username) else { return .unverified }
         guard let assessment = followUpAssessment?(request, discussions) else {
             return followUpVerificationPending?(request, discussions) == true ? .checking : .unverified
         }
         let ignored = settings.feedbackSuggestionDecisions.applicable(in: discussions, for: intent.target)
+        let excluded = settings.reviewParticipationPreferences.excludedIDs(host: intent.target.host, username: intent.target.username)
         guard (try? assessment.reviewers(in: discussions, authorID: request.author.id, ignoredSuggestions: ignored,
-            excludedReplyAuthorIDs: settings.reviewParticipationPreferences.excludedIDs(host: intent.target.host, username: intent.target.username))) != nil else { return .unverified }
+            excludedReplyAuthorIDs: excluded)) != nil else { return .unverified }
         let assessed = Dictionary(uniqueKeysWithValues: assessment.notes.map { ($0.noteID, $0.state) })
         let selected = intent.noteIDs.isEmpty ? Set(assessed.keys) : intent.noteIDs
-        guard !selected.isEmpty,
-              selected.allSatisfy({ assessed[$0] == .addressed || assessed[$0] == .rejected || assessed[$0] == .informational || assessed[$0] == .ignoredByUser }) else { return .unverified }
-        guard assessment.missingPublishedReplyNoteIDs(in: discussions, authorID: request.author.id,
-            excludedReplyAuthorIDs: settings.reviewParticipationPreferences.excludedIDs(host: intent.target.host, username: intent.target.username)).isDisjoint(with: selected)
-        else { return .unverified }
+        guard !selected.isEmpty, selected.allSatisfy({ assessed[$0] != nil }) else { return .unverified }
+        let noRemainingWork = selected.allSatisfy {
+            assessed[$0] == .addressed || assessed[$0] == .rejected || assessed[$0] == .informational || assessed[$0] == .ignoredByUser
+        }
+        let hasOwedReply = !assessment.missingPublishedReplyNoteIDs(in: discussions, authorID: request.author.id,
+            excludedReplyAuthorIDs: excluded).isDisjoint(with: selected)
+        let needsWork = !assessment.automaticWorkNoteIDs.isDisjoint(with: selected) || (noRemainingWork && hasOwedReply)
+        if needsWork {
+            guard intent.jobID == nil, intent.isAwaitingFollowUpVerification else { return .unverified }
+        } else if !noRemainingWork {
+            return .unverified
+        }
         if requireNoDrafts {
             guard let count = try? await glab.fetchOwnDraftNoteCount(projectID: request.projectID, iid: iid,
                 host: intent.target.host, userID: request.author.id), count == 0 else { return .unverified }
@@ -622,7 +657,7 @@ final class MergeRequestTodoRouter {
         if let stoppedJob, stoppedJob.execution?.state == .blocked {
             guard blockedFollowUpCompletionProof?(stoppedJob, live, liveDiscussions) == true else { return .unverified }
         }
-        return .proved
+        return needsWork ? .needsWork : .proved
     }
 
     /// Uses the original event context for actor/URL placeholders and the current
