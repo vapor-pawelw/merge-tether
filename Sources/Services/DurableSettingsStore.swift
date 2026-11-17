@@ -11,6 +11,7 @@ final class DurableSettingsStore {
     private(set) var failures: [String: Failure] = [:]
     @ObservationIgnored private var corrupt: [String: NSObject] = [:]
     @ObservationIgnored private var backups: [String: String] = [:]
+    @ObservationIgnored private var savedValues: [String: Data] = [:]
 
     init(defaults: UserDefaults) {
         self.defaults = defaults
@@ -28,7 +29,9 @@ final class DurableSettingsStore {
         guard let raw = defaults.object(forKey: key) else { return fallback() }
         do {
             guard let data = raw as? Data else { throw CocoaError(.coderReadCorrupt) }
-            return try JSONDecoder().decode(Value.self, from: data)
+            let value = try JSONDecoder().decode(Value.self, from: data)
+            savedValues[key] = data
+            return value
         } catch {
             corrupt[key] = raw as? NSObject
             recordFailure(key, .decode)
@@ -54,13 +57,19 @@ final class DurableSettingsStore {
     }
 
     @discardableResult
-    func save<Value: Encodable>(_ value: Value, forKey key: String) -> Bool {
+    /// Mutation tracking belongs to the caller; unchanged values still verify their accepted bytes.
+    func save<Value: Encodable>(_ value: Value, forKey key: String, changed: Bool = true) -> Bool {
         guard corrupt[key] == nil else { return false }
+        if !changed, let saved = savedValues[key] {
+            guard defaults.data(forKey: key) == saved else { recordFailure(key, .write); return false }
+            return true
+        }
         let data: Data
         do { data = try JSONEncoder().encode(value) }
         catch { recordFailure(key, .encode); return false }
         defaults.set(data, forKey: key)
         guard defaults.data(forKey: key) == data else { recordFailure(key, .write); return false }
+        savedValues[key] = data
         return true
     }
 
