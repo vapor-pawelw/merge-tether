@@ -177,27 +177,9 @@ struct RemoteCardDetail: View {
                 // The header card above already states the explanation; repeat only the controls.
                 Text(.RemoteDetail.remoteDetailActions).font(.headline)
                     .accessibilityAddTraits(.isHeader)
-                TimelineView(.periodic(from: .now, by: 1)) { context in
-                    VStack(alignment: .leading, spacing: 12) {
-                        if model.state.pending != nil { ProgressView(.Remote.remoteRunning) }
-                        ForEach(buttonActions.filter { !Self.secondaryKinds.contains($0.kind) }) { action in
-                            Button(role: action.kind == .stopJob ? .destructive : nil) { showConfirmation(action) } label: {
-                                actionTitle(action).frame(maxWidth: .infinity)
-                            }
-                            .buttonStyle(.borderedProminent).controlSize(.large)
-                            .disabled(!model.state.canAct(now: context.date))
-                        }
-                        // Suggestion decisions change only local agent guidance, so they read as secondary.
-                        ForEach(buttonActions.filter { Self.secondaryKinds.contains($0.kind) }) { action in
-                            Button { showConfirmation(action) } label: {
-                                actionTitle(action).multilineTextAlignment(.leading)
-                                    .frame(maxWidth: .infinity, minHeight: 44, alignment: .leading)
-                            }
-                            .buttonStyle(.bordered)
-                            .disabled(!model.state.canAct(now: context.date))
-                        }
-                    }
-                }
+                RemoteDetailActionButtons(actions: buttonActions, running: model.state.pending != nil,
+                    onAction: showConfirmation)
+                    .modifier(RemoteActionAvailability(state: model.state))
             }
             .padding(16)
             .frame(maxWidth: .infinity, alignment: .leading)
@@ -205,13 +187,9 @@ struct RemoteCardDetail: View {
         }
     }
 
-    private static let secondaryKinds: Set<RemoteActionKind> = [.ignoreSuggestion, .restoreSuggestion]
     /// Draft-level actions live on their draft cards.
     private var buttonActions: [RemoteAction] {
         current.actions.filter { $0.kind != .deleteDraft && $0.kind != .publishDraft && $0.kind != .setCommentOrigin }
-    }
-    private func actionTitle(_ action: RemoteAction) -> Text {
-        if let label = action.label { Text(verbatim: label) } else { Text(action.kind.title) }
     }
 
     private func detailReadStatus(_ loadedDetails: RemoteMRDetails?) -> some View {
@@ -258,5 +236,50 @@ struct RemoteCardDetail: View {
                 }
             }.font(.callout).fixedSize(horizontal: false, vertical: true)
         }
+    }
+}
+
+private struct RemoteActionAvailability: ViewModifier {
+    let state: RemotePhoneState
+    func body(content: Content) -> some View {
+        TimelineView(.periodic(from: .now, by: 1)) { context in
+            content.disabled(!state.canAct(now: context.date))
+        }
+    }
+}
+
+private struct RemoteDetailActionButtons: View {
+    let actions: [RemoteAction]
+    let running: Bool
+    let onAction: (RemoteAction) -> Void
+    private static let secondaryKinds: Set<RemoteActionKind> = [.ignoreSuggestion, .restoreSuggestion]
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 12) {
+            if running { ProgressView(.Remote.remoteRunning) }
+            ForEach(actions.filter { !Self.secondaryKinds.contains($0.kind) }) { action in
+                Button(role: action.kind == .stopJob ? .destructive : nil) { onAction(action) } label: {
+                    title(action).frame(maxWidth: .infinity)
+                }
+                .buttonStyle(.borderedProminent).controlSize(.large)
+            }
+            ForEach(actions.filter { Self.secondaryKinds.contains($0.kind) }) { action in
+                VStack(alignment: .leading, spacing: 8) {
+                    if let label = action.label {
+                        Text(verbatim: label).font(.callout).foregroundStyle(.secondary)
+                            .lineLimit(3).frame(maxWidth: .infinity, alignment: .leading)
+                    }
+                    Button { onAction(action) } label: {
+                        Text(action.kind.title).font(.callout.weight(.medium)).frame(minHeight: 44)
+                    }
+                    .buttonStyle(.plain)
+                    .foregroundStyle(action.kind == .ignoreSuggestion ? Color.orange : Color.accentColor)
+                }
+                .padding(.vertical, 4)
+            }
+        }
+    }
+    private func title(_ action: RemoteAction) -> Text {
+        if let label = action.label { Text(verbatim: label) } else { Text(action.kind.title) }
     }
 }

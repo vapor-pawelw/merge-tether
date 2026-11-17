@@ -7,6 +7,7 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 ## Unreleased
 
 - Keep remote message encryption, decoding and iPhone comment Markdown parsing off the UI thread.
+- Show iPhone suggestion decisions with short buttons and separate descriptions, and avoid rebuilding action labels every second.
 
 - Assess all feedback concerns together, distinguishing verified upstream corrections from justified rejections in the evidence. Show a pending draft or a reply verified to cover all required answers; informational acknowledgements do not make that reply stale.
 
