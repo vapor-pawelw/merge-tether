@@ -20,7 +20,7 @@ struct AuthorFeedbackResidual: Sendable {
 }
 
 /// Decides which external threads on the user's own MR may be resolved. A thread is ready only when
-/// every actionable participant has no blocking or uncertain note anywhere in the MR and has consented
+/// every actionable participant has no blocking or uncertain note in that thread and has consented
 /// through a current approval or a later, verified acceptance comment. A separately proven purely
 /// informational thread needs no approval and grants no consent for other concerns. The caller
 /// supplies current evidence and rechecks live account/head/discussion/draft state before every write.
@@ -38,6 +38,7 @@ struct AuthorFeedbackPolicy {
         var summary: String? = nil
         /// Exact assessment note whose explanation is displayed; the thread root can differ.
         var sourceNoteID: Int? = nil
+        var manualDecision: ReReviewAssessment.Note.ManualDecision? = nil
         var automaticResolutionSuppressed = false
         var waitingForHumanResolution: [String] = []
         var canResolve: Bool { state == .ready && discussionID != nil && !automaticResolutionSuppressed }
@@ -150,14 +151,6 @@ struct AuthorFeedbackPolicy {
         } ?? [])
         let published = discussions.flatMap(\.notes).filter { $0.system == false }
         let notesByID = Dictionary(published.compactMap { note in note.id.map { ($0, note) } }, uniquingKeysWith: { first, _ in first })
-        var blockers: [Int: Verdict] = [:]
-        for note in published {
-            guard let id = note.id, let reviewer = note.author?.id, let verdict = verdicts[id], isBlocking(verdict) else { continue }
-            if blockers[reviewer] == nil || verdict.state == .blocking && blockers[reviewer]?.state == .uncertain {
-                blockers[reviewer] = verdict
-            }
-        }
-
         func accepted(_ concern: Note) -> Bool {
             guard let id = concern.id, let reviewer = concern.author?.id, let ackID = verdicts[id]?.acceptanceNoteID,
                   ackID > id, let ack = notesByID[ackID], ack.system == false, ack.author?.id == reviewer,
@@ -184,21 +177,22 @@ struct AuthorFeedbackPolicy {
                 participants.append(author)
             }
             let purelyInformational = informationalThreads.contains(discussionID)
-            let blocked = purelyInformational ? [] : participants.filter { blockers[$0.id] != nil }
+            let remaining = thread.compactMap { verdicts[$0.id ?? 0] }.filter(isBlocking)
+            let blocked = purelyInformational ? [] : participants.filter { participant in
+                thread.contains { $0.author?.id == participant.id && verdicts[$0.id ?? 0].map(isBlocking) == true }
+            }
             // A user decision retires local suggestion work. It is neither reviewer
             // consent nor permission to resolve the original GitLab discussion.
             if blocked.isEmpty, thread.contains(where: { !(verdicts[$0.id ?? 0]?.ignoredDecisionIDs ?? []).isEmpty }) { continue }
             let waiting = purelyInformational ? [] : participants.filter { participant in
-                blockers[participant.id] != nil || accountKinds[participant.id] != .automation
+                blocked.contains(where: { $0.id == participant.id }) || accountKinds[participant.id] != .automation
                     && !approvedReviewerIDs.contains(participant.id) && !thread.filter {
                     $0.author?.id == participant.id && ($0.id == rootID || verdicts[$0.id ?? 0].map { [.addressed, .rejected].contains($0.state) } == true)
                 }.allSatisfy(accepted)
             }
-            let remaining = thread.compactMap { verdicts[$0.id ?? 0] }.filter(isBlocking)
             let localConcern = remaining.first { $0.state == .blocking } ?? remaining.first
-            let inherited = blocked.compactMap { blockers[$0.id] }
             let explanation = blocked.isEmpty ? verdicts[rootID]
-                : (localConcern ?? inherited.first { $0.state == .blocking } ?? inherited.first)
+                : localConcern
             let semanticState: State = verified == nil ? .needsVerification
                 : !blocked.isEmpty ? (explanation?.state == .blocking ? .needsChanges : .needsVerification)
                 : thread.contains(where: { missingReplies.contains($0.id ?? 0) }) ? .needsReply
@@ -208,7 +202,7 @@ struct AuthorFeedbackPolicy {
             var finding = Finding(id: rootID, discussionID: discussionID, reviewerID: owner.id,
                                     reviewerUsername: handle(owner), state: state, reason: explanation?.reason,
                                     waitingForReviewers: verified == nil ? [] : waiting.map(handle), summary: explanation?.summary,
-                                    sourceNoteID: explanation?.noteID)
+                                    sourceNoteID: explanation?.noteID, manualDecision: explanation?.manualDecision)
             if pendingDraftCount == 0, verified != nil, [.waitingAcceptance, .ready].contains(semanticState),
                !thread.contains(where: { missingReplies.contains($0.id ?? 0) }) {
                 finding.waitingForHumanResolution = Self.normalizedHandles(participants.filter {
@@ -227,7 +221,7 @@ struct AuthorFeedbackPolicy {
                                         state: pendingDraftCount > 0 ? .waitingPublication
                                             : missingReplies.contains(id) ? .needsReply
                                             : verdict.state == .blocking ? .needsChanges : .needsVerification,
-                                        reason: verdict.reason, waitingForReviewers: [handle(author)], summary: verdict.summary, sourceNoteID: verdict.noteID))
+                                        reason: verdict.reason, waitingForReviewers: [handle(author)], summary: verdict.summary, sourceNoteID: verdict.noteID, manualDecision: verdict.manualDecision))
             }
         }
         let excluded = excludedReplyAuthorIDs.union(verified?.reviewerOptOutIDs(in: discussions, authorID: authorID) ?? [])

@@ -7,9 +7,10 @@ import MergeTetherRemote
         let arguments = CommandLine.arguments
         let staleDetails = arguments.contains("--remote-preview-stale-details")
         let draftPreview = arguments.contains("--remote-preview-draft") || staleDetails
+        let manualDecisionPreview = arguments.contains("--remote-preview-manual-decision")
         let approvalPreview = arguments.contains("--remote-preview-approvals") || arguments.contains("--remote-preview-approval-reset")
-        let boardPreview = arguments.contains("--remote-preview") || draftPreview || approvalPreview
-        let previewBoard = draftPreview ? draftBoard : approvalPreview ? approvalBoard(reset: arguments.contains("--remote-preview-approval-reset")) : board
+        let boardPreview = arguments.contains("--remote-preview") || draftPreview || approvalPreview || manualDecisionPreview
+        let previewBoard = draftPreview ? draftBoard : approvalPreview || manualDecisionPreview ? approvalBoard(reset: arguments.contains("--remote-preview-approval-reset")) : board
         let connecting = arguments.contains("--remote-preview-connecting")
         let offline = arguments.contains("--remote-preview-offline")
         let failed = arguments.contains("--remote-preview-failed")
@@ -146,6 +147,16 @@ import MergeTetherRemote
         if let people = card.presentation?.approvalPeople {
             details.approvals = .init(progress: card.approvals, people: people, historyAvailable: true,
                 viewerApprovalID: card.presentation?.viewerApprovalID)
+        }
+        if CommandLine.arguments.contains("--remote-preview-manual-decision") {
+            details.feedback = [
+                .init(label: String(localized: .AuthorFeedback.authorFeedbackManualDecision), value: "Confirm the required absent-transaction response."),
+                .init(label: String(localized: .AuthorFeedback.authorFeedbackDecisionContext), value: "The application retrieves transaction details from a provider using a transaction identifier. The review asks how an absent transaction is represented and whether callers can distinguish it from a service failure."),
+                .init(label: String(localized: .AuthorFeedback.authorFeedbackDecisionVerified), value: "The adapter preserves an explicit provider not-found response. A stub test verifies that mapping and that other failures remain server errors. This does not establish the real provider response."),
+                .init(label: String(localized: .AuthorFeedback.authorFeedbackDecisionMissing), value: "The available provider contract omits the absent-transaction response. No integration environment was available to check it."),
+                .init(label: String(localized: .AuthorFeedback.authorFeedbackDecisionQuestion), value: "Which response does the required provider contract guarantee for an absent transaction?"),
+                .init(label: String(localized: .AuthorFeedback.authorFeedbackDecisionImpact), value: "This concern remains open pending evidence. Independent corrections can continue; automatic merge remains on hold for this essential requirement.")
+            ]
         }
         details.automation = .init(active: true, summary: "Automation enabled · Decided by: Repository")
         if CommandLine.arguments.contains("--remote-preview-origin-resume") {

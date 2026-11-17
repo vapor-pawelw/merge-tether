@@ -4,6 +4,53 @@ import Testing
 
 @Suite("Headless re-review verification")
 struct ReReviewVerifierTests {
+    @Test func verifierSchemaRequiresAStandaloneExplanationForManualDecisions() throws {
+        let document = try #require(JSONSerialization.jsonObject(with: Data(ReReviewVerifier.schema.utf8)) as? [String: Any])
+        let properties = try #require(document["properties"] as? [String: Any])
+        let notes = try #require(properties["notes"] as? [String: Any])
+        let item = try #require(notes["items"] as? [String: Any])
+        let fields = try #require(item["properties"] as? [String: Any])
+        let decision = try #require(fields["manualDecision"] as? [String: Any])
+        #expect(Set(decision["required"] as? [String] ?? []) == Set(FeedbackManualDecisionFixture.context.keys))
+    }
+
+    @Test(arguments: AutomationAssistant.allCases)
+    func manualDecisionsSurviveProviderDecodingWithoutBecomingCodingWork(_ assistant: AutomationAssistant) async throws {
+        // given
+        let folder = FileManager.default.temporaryDirectory.appending(path: UUID().uuidString)
+        try FileManager.default.createDirectory(at: folder, withIntermediateDirectories: false)
+        defer { try? FileManager.default.removeItem(at: folder) }
+        let script = folder.appending(path: "cli")
+        let expected = ReReviewAssessment(notes: [try FeedbackManualDecisionFixture.note(),
+            .init(noteID: 20, state: .blocking, reason: "Correct the independent retry")])
+        try JSONEncoder().encode(expected).write(to: folder.appending(path: "result.json"))
+        try Data("""
+            #!/usr/bin/python3
+            import json,pathlib,sys
+            args=sys.argv[1:]
+            prompt=sys.stdin.read()
+            if args[0]!='exec': prompt=args[args.index('-p')+1]+'\\n'+prompt
+            pathlib.Path(__file__+'.prompt').write_text(prompt)
+            result=json.load(open(pathlib.Path(__file__).with_name('result.json')))
+            if args[0]=='exec': json.dump(result,open(args[args.index('-o')+1],'w'))
+            else: print(json.dumps({'is_error':False,'structured_output':result}))
+            """.utf8).write(to: script)
+        try FileManager.default.setAttributes([.posixPermissions: 0o700], ofItemAtPath: script.path)
+        let discussions = try JSONDecoder().decode([GitLabMergeRequestDiscussion].self, from: Data(
+            #"[{"id":"contract","notes":[{"id":10,"author":{"id":7,"username":"reviewer"},"system":false,"body":"Clarify the provider contract"}]},{"id":"retry","notes":[{"id":20,"author":{"id":7,"username":"reviewer"},"system":false,"body":"Correct the retry"}]}]"#.utf8))
+        let input = ReReviewVerifier.Input(authorID: 3, headSHA: String(repeating: "a", count: 40),
+            title: "Read transaction details", diff: "Scoped adapter change", discussions: discussions)
+        // when
+        let result = try await ReReviewVerifier.run(input, assistant: assistant, model: "fixture", executable: script, retryWait: { _ in })
+        // then
+        #expect(result.notes.first?.manualDecision == expected.notes.first?.manualDecision)
+        #expect(result.automaticWorkNoteIDs == [20])
+        #expect(Set(result.readinessBlockers.map(\.noteID)) == [10, 20])
+        let prompt = try String(contentsOf: URL(fileURLWithPath: script.path + ".prompt"), encoding: .utf8)
+        #expect(prompt.contains("A conditional request to preserve"))
+        #expect(prompt.contains("other independent corrections must continue"))
+    }
+
     @Test func verifierOutputCanRepresentRejectedSeparatelyFromCorrectedAndIgnoredFeedback() throws {
         let document = try #require(JSONSerialization.jsonObject(with: Data(ReReviewVerifier.schema.utf8)) as? [String: Any])
         let properties = try #require(document["properties"] as? [String: Any])

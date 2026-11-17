@@ -6,6 +6,8 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 
 ## Unreleased
 
+- Assess author-feedback obligations per thread, so one reviewer's unresolved concern no longer blocks independent corrections or accepted threads. Treat verified conditional fixes according to their original scope instead of inventing a stronger external-contract requirement. Escalate genuinely essential external decisions with full context, verified facts, missing evidence, a precise question and merge impact on Mac and iPhone; keep those concerns open without repeatedly assigning them to coding workers. Refresh cached assessments under the updated policy.
+
 - Open iPhone MR Details by tapping anywhere on a card outside its controls, and remove redundant Show details buttons. Show current approvers and the signed-in user's current or reset approval on cards and Details, matching macOS.
 - Show inherited copies of the same feedback concern only once in suggestion actions and feedback lists, while preserving distinct source comments and concerns. Keep the concern readable above its short decision button.
 

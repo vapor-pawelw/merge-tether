@@ -321,6 +321,7 @@ struct MRHumanAction {
 
     private static func feedbackMessage(_ item: MergeRequestAttentionMonitor.Item) -> LocalizedStringResource {
         if let finding = feedbackFinding(item) {
+            if finding.manualDecision != nil { return .AuthorFeedback.authorFeedbackManualDecision }
             if finding.state == .needsChanges { return .MRHumanAction.mrHumanActionFeedback }
             if finding.state == .needsVerification { return .MRHumanAction.mrHumanActionFeedbackUnverified }
             if item.authorFeedbackStatus?.replyNoteIDs.contains(finding.id) == true { return .MRHumanAction.mrHumanActionFeedbackReply }

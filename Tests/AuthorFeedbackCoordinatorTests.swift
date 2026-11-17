@@ -5,6 +5,32 @@ import MergeTetherRemote
 
 @MainActor
 struct AuthorFeedbackCoordinatorTests {
+    @Test(arguments: [false, true], [ReReviewAssessment.Note.State.blocking, .uncertain])
+    func manualDecisionLeavesIndependentCorrectionsInTheAutomaticWorkQueue(_ resolvesAccepted: Bool, _ state: ReReviewAssessment.Note.State) async throws {
+        // given
+        try await withFixture { fixture in
+            fixture.settings.automation.autoResolveAcceptedFeedback = resolvesAccepted
+            fixture.settings.automation.authorFeedback.isEnabled = true
+            try fixture.write("discussions.json", "[\(Fixture.thread),\(Fixture.condition)]")
+            let coordinator = fixture.coordinator(assessment: .init(notes: [
+                try FeedbackManualDecisionFixture.note(),
+                .init(noteID: 20, state: state, reason: "The independent rename still needs work")
+            ]))
+            defer { coordinator.cancel() }
+            var requested: Set<Int> = []
+            coordinator.onNeedsWork = { _, notes, _, _ in requested = notes }
+            // when
+            try await fixture.run(coordinator)
+            // then
+            let status = try #require(coordinator.status(projectID: 1, iid: 2))
+            #expect(requested == [20])
+            #expect(status.followUpNoteIDs == [20])
+            #expect(status.primaryFinding?.sourceNoteID == 20)
+            #expect(status.findings.contains { $0.sourceNoteID == 10 && !$0.canResolve && $0.manualDecision != nil })
+            #expect(!fixture.resolved)
+        }
+    }
+
     @Test(arguments: [AssistantJobExecution.State.failed, .interrupted], [false, true])
     func recoveryRequiresTheAttemptToHaveStoppedBeforeAssessment(state: AssistantJobExecution.State, stoppedBefore: Bool) async throws {
         try await withFixture { fixture in
@@ -1854,11 +1880,12 @@ struct AuthorFeedbackCoordinatorTests {
                 requested = notes
             }
             try await fixture.run(coordinator)
-            #expect(!fixture.resolved)
+            #expect(fixture.resolved)
             #expect(requested == [20])
             let status = try #require(coordinator.status(projectID: 1, iid: 2))
             #expect(status.needsAttention)
-            #expect(status.findings.map(\.state) == [.needsChanges, .needsChanges])
+            #expect(status.findings.map(\.sourceNoteID) == [20])
+            #expect(status.findings.map(\.state) == [.needsChanges])
         }
     }
 

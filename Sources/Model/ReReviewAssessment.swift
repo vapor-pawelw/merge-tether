@@ -24,6 +24,20 @@ struct ReReviewAssessment: Codable, Sendable {
     }
 
     struct Note: Codable, Sendable {
+        struct ManualDecision: Codable, Equatable, Sendable {
+            let context: String
+            let verifiedFacts: String
+            let missingEvidence: String
+            let question: String
+            let mergeImpact: String
+
+            var isValid: Bool {
+                [(context, 2_000), (verifiedFacts, 2_000), (missingEvidence, 2_000),
+                 (question, 1_000), (mergeImpact, 1_000)].allSatisfy {
+                    !$0.0.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty && $0.0.count <= $0.1
+                }
+            }
+        }
         struct ReviewerOptOut: Codable, Sendable {
             let sourceQuote: String
         }
@@ -51,12 +65,21 @@ struct ReReviewAssessment: Codable, Sendable {
         /// Within the enclosing head/text/discussion-bound assessment, this summary adds no obligation beyond the named findings.
         var reviewSummaryCoverage: ReviewSummaryCoverage? = nil
         var reviewerOptOut: ReviewerOptOut? = nil
+        var manualDecision: ManualDecision? = nil
+
+        var needsAutomaticWork: Bool {
+            state == .blocking || state == .uncertain && manualDecision == nil
+        }
     }
     let notes: [Note]
     var completedBlockedRunIDs: [UUID]? = nil
     var codeReviewRequests: [CodeReviewRequest]? = nil
 
     var reviewRequests: [CodeReviewRequest] { codeReviewRequests ?? [] }
+
+    var automaticWorkNoteIDs: Set<Int> {
+        Set(notes.filter(\.needsAutomaticWork).map(\.noteID)).union(reviewRequests.map(\.sourceNoteID))
+    }
 
     func reviewerOptOutIDs(in discussions: [GitLabMergeRequestDiscussion], authorID: Int) -> Set<Int> {
         Set(discussions.flatMap(\.notes).compactMap { source -> Int? in
@@ -264,6 +287,15 @@ struct ReReviewAssessment: Codable, Sendable {
         for note in external {
             guard let id = note.id, let reviewer = note.author?.id, let assessment = byID[id] else {
                 throw ValidationError.incompleteEvidence
+            }
+            if let decision = assessment.manualDecision {
+                guard assessment.state == .uncertain, decision.isValid,
+                      assessment.acceptanceNoteID == nil, assessment.informationalAcknowledgementSafe != true,
+                      assessment.reviewSummaryCoverage == nil, assessment.reviewerOptOut == nil,
+                      (assessment.ignoredDecisionIDs ?? []).isEmpty,
+                      !reviewRequests.contains(where: { $0.sourceNoteID == id }) else {
+                    throw ValidationError.incompleteEvidence
+                }
             }
             let ignoredIDs = assessment.ignoredDecisionIDs ?? []
             if let proof = assessment.reviewerOptOut {

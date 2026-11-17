@@ -64,7 +64,8 @@ import MergeTetherRemote
                 }
                 let clean = feedback.phase == .complete && feedback.pendingDraftCount == 0
                     && feedback.replyNoteIDs.isEmpty && feedback.followUpNoteIDs.isEmpty && feedback.codeReviewRequests.isEmpty
-                let state = clean ? finding.resolutionWaitMessage(people: people) ?? fallback : fallback
+                let state: LocalizedStringResource = finding.manualDecision != nil ? .AuthorFeedback.authorFeedbackManualDecision
+                    : clean ? finding.resolutionWaitMessage(people: people) ?? fallback : fallback
                 var components = URLComponents(url: request.webURL, resolvingAgainstBaseURL: false)
                 components?.fragment = "note_\(finding.sourceNoteID ?? finding.id)"
                 let reviewer = people.person(username: finding.reviewerUsername)
@@ -72,6 +73,17 @@ import MergeTetherRemote
                     value: ([String(localized: state), AgentExplanation.summary(finding.summary), finding.reason].compactMap { $0 })
                         .map(GlabService.redactWorkflowEvidence).joined(separator: "\n\n"), url: components?.url,
                     person: reviewer.remotePerson))
+                if let decision = finding.manualDecision {
+                    let sections: [(LocalizedStringResource, String)] = [
+                        (.AuthorFeedback.authorFeedbackDecisionContext, decision.context),
+                        (.AuthorFeedback.authorFeedbackDecisionVerified, decision.verifiedFacts),
+                        (.AuthorFeedback.authorFeedbackDecisionMissing, decision.missingEvidence),
+                        (.AuthorFeedback.authorFeedbackDecisionQuestion, decision.question),
+                        (.AuthorFeedback.authorFeedbackDecisionImpact, decision.mergeImpact)
+                    ]
+                    details.feedback += sections.map { .init(label: String(localized: $0.0),
+                        value: GlabService.redactWorkflowEvidence($0.1), url: components?.url) }
+                }
             }
             for question in feedback.codeReviewRequests {
                 details.feedback.append(.init(label: String(localized: .AuthorFeedback.authorFeedbackCodeReviewQuestion),

@@ -1,6 +1,72 @@
 {
   "sourceLanguage": "en",
   "strings": {
+    "authorFeedback.manualDecision": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Manual decision needed for this thread"
+          }
+        }
+      }
+    },
+    "authorFeedback.decisionContext": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Problem and context"
+          }
+        }
+      }
+    },
+    "authorFeedback.decisionVerified": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "What has been verified"
+          }
+        }
+      }
+    },
+    "authorFeedback.decisionMissing": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Missing evidence"
+          }
+        }
+      }
+    },
+    "authorFeedback.decisionQuestion": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Decision needed"
+          }
+        }
+      }
+    },
+    "authorFeedback.decisionImpact": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Effect on this merge request"
+          }
+        }
+      }
+    },
     "authorFeedback.setting": {
       "extractionState": "manual",
       "localizations": {

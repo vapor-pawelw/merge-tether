@@ -4,6 +4,30 @@ import Testing
 
 @MainActor
 struct MRFeedbackLaunchCoordinatorTests {
+    @Test(arguments: ["current", "head", "discussion", "context"])
+    func rawFeedbackLaunchRespectsOnlyACurrentSourceBoundManualDecision(_ change: String) async throws {
+        // given
+        let f = try Fixture(); defer { f.cleanup() }
+        try await f.readyForRaw()
+        var item = try f.item()
+        let decision = try #require(try FeedbackManualDecisionFixture.note().manualDecision)
+        item.authorFeedbackStatus = .init(head: change == "head" ? "old-head" : f.request.sha ?? "",
+            fingerprint: change == "discussion" ? "old-discussion" : f.fingerprint,
+            semanticContextFingerprint: change == "context" ? "old-context" : f.request.semanticContextFingerprint,
+            phase: .complete, findings: [.init(id: 20, discussionID: "general-condition", reviewerID: 7,
+                reviewerUsername: "alice", state: .needsVerification, reason: "External evidence required",
+                waitingForReviewers: [], sourceNoteID: 20, manualDecision: decision)])
+        // when
+        let action = f.owner.action(for: item)
+        // then
+        #expect(action == (change == "current" ? nil : .ready(.assistant)))
+        if change == "current" {
+            await f.owner.runAttentionFeedback(for: item, manual: false)
+            await f.coordinator.waitForTermination()
+            #expect(f.settings.assistantHandoffs.isEmpty)
+        }
+    }
+
     @Test func aLateFailureFromAnEarlierAccountRevisionCannotBlockCurrentVerifiedFeedback() async throws {
         let fixture = try Fixture()
         defer { fixture.cleanup() }

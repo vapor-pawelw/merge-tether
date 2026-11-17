@@ -110,7 +110,17 @@ final class MRFeedbackLaunchCoordinator {
     private func noteIDs(for item: Item, account: Account) -> [Int] {
         let notes = TodoAutomationEvent.feedbackWithoutTodo(item.feedback, todos: inbox.allTodos,
             host: account.host, projectID: item.id.projectID, iid: item.id.iid, username: account.username).compactMap(\.id)
-        return AssistantAutomationRunner.unhandledFeedback(notes, work: work(account, item.id), username: account.username, settings: settings)
+        var manualDecisions: Set<Int> = []
+        if let status = item.authorFeedbackStatus, let request = item.authoredRequest,
+           status.phase == .complete || status.phase == .waitingPublication,
+           status.head == request.sha, status.semanticContextFingerprint == request.semanticContextFingerprint,
+           status.fingerprint == item.observedDiscussionFingerprint {
+            manualDecisions = Set(status.findings.compactMap {
+                $0.manualDecision?.isValid == true ? ($0.sourceNoteID ?? $0.id) : nil
+            })
+        }
+        return AssistantAutomationRunner.unhandledFeedback(notes.filter { !manualDecisions.contains($0) },
+            work: work(account, item.id), username: account.username, settings: settings)
     }
     func automaticallyHandlesFeedback(_ item: Item) -> Bool {
         guard settings.automaticWritesAllowed, let account, let request = item.authoredRequest,

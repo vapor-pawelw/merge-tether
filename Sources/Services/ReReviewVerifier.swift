@@ -1,13 +1,13 @@
 import Foundation
 
 /// A bounded headless assessment with a read-only role and live MR tool access.
-/// Supplied evidence is supplementary; absent proof must produce `uncertain`.
+/// Missing evidence for an actual obligation remains uncertain; unrelated unknowns do not add obligations.
 enum ReReviewVerifier {
     typealias ExecutableResolver = @MainActor (AutomationAssistant) async -> URL?
     enum VerificationError: Error, Equatable { case unavailable, failed, incompleteEvidence }
-    static let policyVersion = "feedback-disposition-12"
+    static let policyVersion = "feedback-disposition-13"
 
-    static let schema = #"{"type":"object","additionalProperties":false,"properties":{"notes":{"type":"array","items":{"type":"object","additionalProperties":false,"properties":{"noteID":{"type":"integer"},"state":{"type":"string","enum":["addressed","rejected","informational","blocking","uncertain"]},"reason":{"type":"string"},"summary":{"type":"string","minLength":1,"maxLength":200},"acceptanceNoteID":{"type":["integer","null"]},"publishedReplyNoteID":{"type":["integer","null"]},"informationalAcknowledgementSafe":{"type":"boolean"},"informationalPurpose":{"type":"string","enum":["concreteCodeReviewFeedback","reviewSummary","automatedReviewReport","other"]}},"required":["noteID","state","reason","summary","acceptanceNoteID","publishedReplyNoteID","informationalAcknowledgementSafe","informationalPurpose"]}}},"required":["notes"]}"#
+    static let schema = #"{"type":"object","additionalProperties":false,"properties":{"notes":{"type":"array","items":{"type":"object","additionalProperties":false,"properties":{"noteID":{"type":"integer"},"state":{"type":"string","enum":["addressed","rejected","informational","blocking","uncertain"]},"reason":{"type":"string"},"summary":{"type":"string","minLength":1,"maxLength":200},"acceptanceNoteID":{"type":["integer","null"]},"publishedReplyNoteID":{"type":["integer","null"]},"informationalAcknowledgementSafe":{"type":"boolean"},"informationalPurpose":{"type":"string","enum":["concreteCodeReviewFeedback","reviewSummary","automatedReviewReport","other"]},"manualDecision":{"type":["object","null"],"additionalProperties":false,"properties":{"context":{"type":"string","minLength":1,"maxLength":2000},"verifiedFacts":{"type":"string","minLength":1,"maxLength":2000},"missingEvidence":{"type":"string","minLength":1,"maxLength":2000},"question":{"type":"string","minLength":1,"maxLength":1000},"mergeImpact":{"type":"string","minLength":1,"maxLength":1000}},"required":["context","verifiedFacts","missingEvidence","question","mergeImpact"]}},"required":["noteID","state","reason","summary","acceptanceNoteID","publishedReplyNoteID","informationalAcknowledgementSafe","informationalPurpose","manualDecision"]}}},"required":["notes"]}"#
 
     private static func outputSchema(noteIDs: [Int], blockedRunIDs: [UUID], decisionIDs: [UUID]) throws -> String {
         guard var document = try JSONSerialization.jsonObject(with: Data(schema.utf8)) as? [String: Any],
@@ -303,7 +303,10 @@ enum ReReviewVerifier {
             codeChangedSincePrior is true) the code it concerns now settles or reopens it, or the
             actionability check below corrects a false feedback classification. Correct an earlier blocking
             or uncertain classification to informational when the current complete thread proves there
-            is no actionable expectation.
+            is no actionable expectation. Also correct a prior verdict to addressed when it demanded
+            a stronger obligation than the original feedback and current evidence proves the original
+            obligation fulfilled. Explain that scope correction; it needs no new code merely to
+            preserve an earlier mistaken verdict.
             Without priorAssessment, assess every note from scratch. Automatic work follows existing
             author-feedback settings; this field grants no code, push, publication or resolution permission.
             completedFollowUp is the latest completed worker's report, including its assessment of earlier
@@ -412,6 +415,26 @@ enum ReReviewVerifier {
             When uncertainty concerns an external contract or decision, first inspect accessible authoritative
             evidence relevant to the existing feedback. Name the exact missing fact and why accessible evidence cannot establish it.
             Keep an independently supported defect blocking when it can be corrected without deciding that unknown meaning.
+            Compare the exact original expectation with the verified change before retaining uncertainty.
+            A conditional request to preserve a provider's explicit not-found response is addressed when
+            current code and a focused test prove that mapping. A remaining unknown about which response
+            the provider emits is not itself an unmet requirement. Retain it as blocking/uncertain only
+            if an authoritative requirement or an independently supported original concern actually
+            depends on that unknown. Never promote a speculative stronger contract into a new obligation.
+            For a genuinely essential external decision, after bounded reads of available authoritative
+            sources fail to settle it and no independent implementable work remains on THIS note, return
+            state uncertain and manualDecision. Its context must explain the feature, involved systems,
+            original concern and practical consequence so someone can understand it without this chat.
+            verifiedFacts lists what current code/tests or other evidence actually prove, distinguishing
+            a stub from a real provider observation. missingEvidence names the precise unavailable fact
+            and sources already checked. question asks for the specific human decision/evidence needed.
+            mergeImpact explains why this concern remains open and whether it holds automatic merge;
+            other independent corrections must continue. Do not request credentials or invent evidence.
+            Every field must be complete plain English; do not use a short blocker or summary as context.
+            manualDecision is null for all other notes, recoverable read failures, checks the configured
+            assistant can still perform, and notes with remaining implementable fixes or private code questions.
+            A manual decision is source-bound: it neither waives the concern, requests publication nor
+            transfers its blocker to unrelated threads by the same reviewer.
             Correlate review summaries with the concrete findings they reference across ALL discussions.
             A substantive author answer or verified correction in another thread can address the same
             concern; do not require a duplicate answer in the summary's own thread. A summary that only
@@ -578,7 +601,13 @@ enum ReReviewVerifier {
                 informationalAcknowledgementSafe: note.informationalAcknowledgementSafe,
                 informationalPurpose: note.informationalPurpose, ignoredDecisionIDs: note.ignoredDecisionIDs,
                 publishedReplyNoteID: note.publishedReplyNoteID, reviewSummaryCoverage: note.reviewSummaryCoverage,
-                reviewerOptOut: note.reviewerOptOut)
+                reviewerOptOut: note.reviewerOptOut, manualDecision: note.manualDecision.map {
+                    .init(context: GlabService.redactWorkflowEvidence($0.context),
+                        verifiedFacts: GlabService.redactWorkflowEvidence($0.verifiedFacts),
+                        missingEvidence: GlabService.redactWorkflowEvidence($0.missingEvidence),
+                        question: GlabService.redactWorkflowEvidence($0.question),
+                        mergeImpact: GlabService.redactWorkflowEvidence($0.mergeImpact))
+                })
         }, completedBlockedRunIDs: assessment.completedBlockedRunIDs,
            codeReviewRequests: assessment.codeReviewRequests.map { requests in requests.map { request in
                .init(sourceNoteID: request.sourceNoteID, sourceQuote: GlabService.redactWorkflowEvidence(request.sourceQuote),

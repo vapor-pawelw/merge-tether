@@ -6,7 +6,7 @@ import Testing
 struct AuthorFeedbackPolicyTests {
     private let fixedA = ReReviewAssessment.Note(noteID: 10, state: .addressed, reason: "Current diff fixes A")
 
-    @Test func anInheritedConfirmedConcernLeadsBeforeAnotherParticipantsUncertainty() throws {
+    @Test func aThreadsReplyWorkIsIndependentOfItsParticipantsOtherConcerns() throws {
         let findings = try evaluate([
             thread("shared", note(10, by: 7, "Fix A", resolvable: true), note(11, by: 8, "Also fix B")),
             thread("uncertain", note(20, by: 7, "Verify the timeout")),
@@ -14,7 +14,7 @@ struct AuthorFeedbackPolicyTests {
         ], [fixedA, .init(noteID: 11, state: .addressed, reason: "B is fixed"),
             .init(noteID: 20, state: .uncertain, reason: "The timeout evidence is incomplete"),
             .init(noteID: 30, state: .blocking, reason: "The retry is still incorrect")])
-        #expect(findings.first?.state == .needsChanges && findings.first?.sourceNoteID == 30)
+        #expect(findings.first?.state == .needsReply && findings.first?.sourceNoteID == 10)
     }
 
     @Test func anUncertainThreadKeepsItsOwnSourceWhenAnotherThreadHasAConfirmedBlocker() throws {
@@ -153,7 +153,7 @@ struct AuthorFeedbackPolicyTests {
             authorID: 3, approvedReviewerIDs: []).allSatisfy { !$0.canResolve })
     }
 
-    @Test func advanceApprovalNeverOverridesARemainingConditionElsewhere() throws {
+    @Test func approvalResolvesOnlyTheAddressedThreadWhileAnotherConditionRemains() throws {
         let general = thread("g1", note(20, by: 7, "Also rename X", at: "2026-01-01T10:05:00Z"))
         let otherThread = thread("d2", note(20, by: 7, "Also rename X", at: "2026-01-01T10:05:00Z", resolvable: true))
         for elsewhere in [general, otherThread] {
@@ -162,11 +162,11 @@ struct AuthorFeedbackPolicyTests {
                                            [fixedA, .init(noteID: 20, state: state, reason: "X is not renamed")], approved: [7])
                 #expect(blocked.map(\.id) == [10, 20])
                 let expected: AuthorFeedbackPolicy.State = state == .uncertain ? .needsVerification : .needsChanges
-                #expect(blocked.map(\.state) == [expected, expected])
-                #expect(blocked.map(\.reason) == ["X is not renamed", "X is not renamed"])
-                #expect(blocked[0].waitingForReviewers == ["alice"])
+                #expect(blocked.map(\.state) == [.ready, expected])
+                #expect(blocked.map(\.reason) == ["Current diff fixes A", "X is not renamed"])
+                #expect(blocked[0].waitingForReviewers.isEmpty)
                 #expect(blocked[1].discussionID == (elsewhere == general ? nil : "d2"))
-                #expect(blocked.allSatisfy { !$0.canResolve })
+                #expect(blocked[0].canResolve && !blocked[1].canResolve)
             }
             let answered = thread(elsewhere == general ? "g1" : "d2",
                 note(20, by: 7, "Also rename X", resolvable: elsewhere != general), note(21, by: 3, "Renamed X"))
@@ -272,13 +272,14 @@ struct AuthorFeedbackPolicyTests {
             authorID: 3, approvedReviewerIDs: [7]).isEmpty)
     }
 
-    @Test func resolvedThreadDoesNotEraseAnUnfulfilledReviewerExpectation() throws {
+    @Test(arguments: [ReReviewAssessment.Note.State.blocking, .uncertain])
+    func resolvedThreadKeepsItsOwnUnfulfilledExpectationWithoutBlockingAnother(_ state: ReReviewAssessment.Note.State) throws {
         let closed = thread("old", note(20, by: 7, "Still add regression coverage", resolvable: true, resolved: true))
         let findings = try evaluate([alicesThread, closed], [fixedA,
-            .init(noteID: 20, state: .blocking, reason: "The requested regression test is missing")], approved: [7])
+            .init(noteID: 20, state: state, reason: "The requested regression test is missing")], approved: [7])
         #expect(findings.map(\.id) == [10, 20])
-        #expect(findings.allSatisfy { $0.state == .needsChanges })
-        #expect(findings.allSatisfy { !$0.canResolve })
+        #expect(findings.map(\.state) == [.ready, state == .blocking ? .needsChanges : .needsVerification])
+        #expect(findings[0].canResolve && !findings[1].canResolve)
     }
 
     @Test func draftsDisabledResolvedSystemAndAuthorRootsAreUntouched() throws {

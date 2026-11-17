@@ -68,10 +68,11 @@ struct AuthorFeedbackStatus: Equatable, Sendable {
     }
     var primaryFinding: AuthorFeedbackPolicy.Finding? {
         findings.first { $0.state == .needsChanges }
-            ?? findings.first { $0.state == .needsVerification }
+            ?? findings.first { $0.state == .needsVerification && $0.manualDecision == nil }
             ?? findings.first { replyNoteIDs.contains($0.id) }
+            ?? findings.first { $0.manualDecision != nil }
     }
-    /// Several threads can inherit one reviewer's blocker; present its precise source concern once.
+    /// Repeated source concerns are presented once without hiding distinct feedback.
     var displayFindings: [AuthorFeedbackPolicy.Finding] {
         let ordered = primaryFinding.map { primary in
             [primary] + findings.filter { $0.id != primary.id }
@@ -700,8 +701,7 @@ final class AuthorFeedbackCoordinator {
             let owedNotes = Set(repliesByThread.values.flatMap { $0 })
             let draftedThreads = Set(drafts.compactMap(\.discussionID))
             let draftedNotes = Set(threads.filter { $0.id.map(draftedThreads.contains) == true }.flatMap(\.notes).compactMap(\.id))
-            let actionable = Set(assessment.notes.filter { $0.state == .blocking || $0.state == .uncertain }.map(\.noteID))
-                .union(assessment.reviewRequests.map(\.sourceNoteID))
+            let actionable = assessment.automaticWorkNoteIDs
             let followUp = settings.automation.scope.permits(request, host: host, username: input.user.username)
                 ? actionable.union(owedNotes).subtracting(draftedNotes) : []
             if settings.automaticWritesAllowed, !followUp.isEmpty { await onNeedsWork?(request, followUp, input.fingerprint,
@@ -794,10 +794,7 @@ final class AuthorFeedbackCoordinator {
             $0.system == false && $0.author?.id != input.user.id
         }
         let outstanding: Set<Int> = Set(outstandingNotes.compactMap(\.id))
-        var followUp = Set(assessment.notes.filter {
-            outstanding.contains($0.noteID) && ($0.state == .blocking || $0.state == .uncertain)
-        }.map(\.noteID))
-        followUp.formUnion(assessment.reviewRequests.map(\.sourceNoteID))
+        var followUp = assessment.automaticWorkNoteIDs.intersection(outstanding)
         let repliesByThread = assessment.missingPublishedRepliesByThread(in: threads, authorID: input.user.id, excludedReplyAuthorIDs: excludedReplyAuthors(input))
         // An owed published reply remains work even when approval or a disabled
         // resolution policy changes the finding's presentation state.

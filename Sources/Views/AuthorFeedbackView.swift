@@ -55,7 +55,9 @@ struct AuthorFeedbackView: View {
                                     if let summary = AgentExplanation.summary(finding.summary) {
                                         Text(verbatim: summary).foregroundStyle(.secondary).textSelection(.enabled)
                                     }
-                                    if let reason = finding.reason { AgentDiagnosticDetails(reason: reason) }
+                                    if let decision = finding.manualDecision {
+                                        manualDecision(decision)
+                                    } else if let reason = finding.reason { AgentDiagnosticDetails(reason: reason) }
                                     sourceEvidence(for: finding, status: status, source: source)
                                 }
                                 .padding(.leading, 20)
@@ -102,6 +104,23 @@ struct AuthorFeedbackView: View {
                 .font(.callout).frame(maxWidth: .infinity, alignment: .leading)
     }
 
+    private func manualDecision(_ decision: ReReviewAssessment.Note.ManualDecision) -> some View {
+        VStack(alignment: .leading, spacing: 12) {
+            decisionSection(.AuthorFeedback.authorFeedbackDecisionContext, decision.context)
+            decisionSection(.AuthorFeedback.authorFeedbackDecisionVerified, decision.verifiedFacts)
+            decisionSection(.AuthorFeedback.authorFeedbackDecisionMissing, decision.missingEvidence)
+            decisionSection(.AuthorFeedback.authorFeedbackDecisionQuestion, decision.question)
+            decisionSection(.AuthorFeedback.authorFeedbackDecisionImpact, decision.mergeImpact)
+        }
+    }
+
+    private func decisionSection(_ title: LocalizedStringResource, _ text: String) -> some View {
+        VStack(alignment: .leading, spacing: 4) {
+            Text(title).fontWeight(.medium)
+            Text(verbatim: text).foregroundStyle(.secondary).textSelection(.enabled)
+        }
+    }
+
     private func symbol(_ state: AuthorFeedbackPolicy.State) -> String {
         switch state {
         case .ready: "checkmark.circle"
@@ -141,6 +160,7 @@ struct AuthorFeedbackView: View {
     }
 
     private func message(_ finding: AuthorFeedbackPolicy.Finding) -> LocalizedStringResource {
+        if finding.manualDecision != nil { return .AuthorFeedback.authorFeedbackManualDecision }
         if let status = item.authorFeedbackStatus, status.phase == .complete,
            status.pendingDraftCount == 0, item.draftCount == 0, item.drafts.isEmpty,
            status.replyNoteIDs.isEmpty, status.followUpNoteIDs.isEmpty, status.codeReviewRequests.isEmpty,

@@ -4,6 +4,37 @@ import Testing
 
 @Suite("Re-review assessment")
 struct ReReviewAssessmentTests {
+    @Test func manualDecisionRetainsEnoughContextToUnderstandTheWholeProblem() throws {
+        // given
+        let note = try FeedbackManualDecisionFixture.note()
+        // when
+        let wire = try #require(JSONSerialization.jsonObject(with: JSONEncoder().encode(note)) as? [String: Any])
+        // then
+        #expect(wire["manualDecision"] as? [String: String] == FeedbackManualDecisionFixture.context)
+        let assessment = ReReviewAssessment(notes: [note, .init(noteID: 20, state: .blocking, reason: "Fix the retry")])
+        #expect(assessment.automaticWorkNoteIDs == [20])
+        #expect(assessment.readinessBlockers.map(\.noteID) == [20, 10])
+        #expect(!note.needsAutomaticWork)
+        let legacy = try JSONDecoder().decode(ReReviewAssessment.Note.self,
+            from: Data(#"{"noteID":10,"state":"uncertain","reason":"A source check is still needed"}"#.utf8))
+        #expect(legacy.needsAutomaticWork)
+    }
+
+    @Test(arguments: ["emptyContext", "wrongState", "oversizedQuestion"])
+    func incompleteManualDecisionsCannotSuppressAutomaticWork(_ scenario: String) throws {
+        // given
+        var fields = FeedbackManualDecisionFixture.context
+        if scenario == "emptyContext" { fields["context"] = "  " }
+        if scenario == "oversizedQuestion" { fields["question"] = String(repeating: "?", count: 1001) }
+        let note = try FeedbackManualDecisionFixture.note(state: scenario == "wrongState" ? "blocking" : "uncertain", fields: fields)
+        let discussions = try JSONDecoder().decode([GitLabMergeRequestDiscussion].self, from: Data(
+            #"[{"id":"contract","notes":[{"id":10,"author":{"id":7,"username":"reviewer"},"system":false,"body":"Clarify the provider contract"}]}]"#.utf8))
+        // when + then
+        #expect(throws: ReReviewAssessment.ValidationError.self) {
+            try ReReviewAssessment(notes: [note]).reviewers(in: discussions, authorID: 3)
+        }
+    }
+
     @Test(arguments: [false, true])
     func rejectedFeedbackStillNeedsItsOwnReplyAndReviewerAcceptance(_ withReply: Bool) throws {
         let decoded = try? JSONDecoder().decode(ReReviewAssessment.self, from: Data(#"{"notes":[{"noteID":10,"state":"rejected","reason":"Current remote source proves the suggested retry would duplicate a request."}]}"#.utf8))
@@ -331,5 +362,22 @@ struct ReReviewAssessmentTests {
         let threads = try discussions()
         #expect(ReReviewFeedback(discussions: Array(threads.prefix(2)), authorID: 3).hasUnansweredFeedback == false)
         #expect(ReReviewFeedback(discussions: threads, authorID: 3).hasUnansweredFeedback)
+    }
+}
+
+
+enum FeedbackManualDecisionFixture {
+    static let context = [
+        "context": "The application retrieves one transaction from a provider using its transaction identifier. The review asks how an absent transaction is represented.",
+        "verifiedFacts": "The adapter preserves an explicit provider not-found response. A stub test verifies that mapping and that other failures remain server errors.",
+        "missingEvidence": "The accessible provider contract omits the absent-transaction response. No integration environment is available to verify it.",
+        "question": "Does the required provider contract guarantee a distinct not-found response, and which response is it?",
+        "mergeImpact": "This requirement remains unresolved, so keep this concern open and automatic merge on hold. Other corrections can continue."
+    ]
+    static func note(state: String = "uncertain", fields: [String: String] = context) throws -> ReReviewAssessment.Note {
+        try JSONDecoder().decode(ReReviewAssessment.Note.self, from: JSONSerialization.data(withJSONObject: [
+            "noteID": 10, "state": state, "reason": "An essential provider contract decision needs external evidence.",
+            "summary": "Confirm the required absent-transaction response", "manualDecision": fields
+        ]))
     }
 }
