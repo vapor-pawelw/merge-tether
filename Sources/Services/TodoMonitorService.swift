@@ -11,9 +11,9 @@ final class TodoMonitorService {
     let attention: MergeRequestAttentionMonitor
     let authoredMergeRequests: AuthoredMergeRequestMonitor
     private var boardDisplayMetadata = MRDisplayMetadataCache()
-    @ObservationIgnored private let boardProjectorCache = ObservedPresentationCache<MRBoardProjector?>()
-    @ObservationIgnored let boardSnapshotCache = ObservedPresentationCache<MergeRequestBoardSnapshot>()
-    @ObservationIgnored let commandCenterDisplayFrameCache = ObservedPresentationCache<CommandCenterDisplayFrame>()
+    @ObservationIgnored private let boardProjectorCache: ObservedPresentationCache<MRBoardProjector?>
+    @ObservationIgnored let boardSnapshotCache: ObservedPresentationCache<MergeRequestBoardSnapshot>
+    @ObservationIgnored let commandCenterDisplayFrameCache: ObservedPresentationCache<CommandCenterDisplayFrame>
     @ObservationIgnored private var liveBoardPresentationRead: Bool?
     let autoHandledEventBanners = AutoHandledEventBannerCenter()
 
@@ -230,8 +230,12 @@ final class TodoMonitorService {
         automation: TodoAutomationService = TodoAutomationService(),
         cancelPolicyJob: @escaping @MainActor (UUID, SettingsManager) -> Void = {
             AssistantAutomationRunner.cancel($0, settings: $1)
-        }
+        },
+        schedulePresentationNotification: @escaping PresentationNotificationScheduler = PresentationNotificationDelivery.schedule
     ) {
+        boardProjectorCache = .init(scheduleNotification: schedulePresentationNotification)
+        boardSnapshotCache = .init(scheduleNotification: schedulePresentationNotification)
+        commandCenterDisplayFrameCache = .init(scheduleNotification: schedulePresentationNotification)
         self.settings = settings
         self.glab = glab
         self.todoStore = InboxTodoStore(settings: settings, glab: glab)
