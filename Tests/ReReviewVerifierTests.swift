@@ -682,6 +682,8 @@ struct ReReviewVerifierTests {
         #expect(evidence["headSHA"] as? String == input.headSHA)
         #expect(evidence["thinking"] as? String == thinking.rawValue)
         #expect(evidence["inlineEvidence"] as? String == "included")
+        #expect(evidence["omittedInlineFields"] as? [String] == [])
+        #expect(evidence["verificationBudgetSeconds"] as? Int == 180)
         #expect(evidence["requiredExternalNoteIDs"] as? [Int] == [10])
         #expect(evidence["discussions"] != nil)
     }
@@ -739,12 +741,21 @@ struct ReReviewVerifierTests {
         #expect(evidence["thinking"] as? String == "low")
         #expect(evidence["inlineEvidence"] as? String == "omittedForSize")
         #expect(evidence["requiredExternalNoteIDs"] as? [Int] == [10])
-        #expect(evidence["discussions"] == nil)
+        let omitted = oversizedField == "diff" ? ["diff"]
+            : oversizedField == "discussions" ? ["diff", "description", "discussions"] : ["diff", "description"]
+        #expect(evidence["omittedInlineFields"] as? [String] == omitted)
+        #expect(evidence["verificationBudgetSeconds"] as? Int == 600)
         #expect(evidence["diff"] == nil)
-        #expect(evidence["description"] == nil)
+        #expect((evidence["description"] == nil) == omitted.contains("description"))
+        if omitted.contains("discussions") { #expect(evidence["discussions"] == nil) }
+        else {
+            let retained = try JSONSerialization.data(withJSONObject: try #require(evidence["discussions"]))
+            let received = try JSONDecoder().decode([GitLabMergeRequestDiscussion].self, from: retained)
+            #expect(received.flatMap(\.notes).compactMap(\.body) == ["Check the description"])
+        }
         let instructions = try String(contentsOf: URL(fileURLWithPath: script.path + ".prompt"), encoding: .utf8)
             .split(whereSeparator: \.isWhitespace).joined(separator: " ")
-        #expect(instructions.contains("omittedForSize means the inline description, diff and discussions were deliberately omitted to fit the input budget"))
+        #expect(instructions.contains("omittedForSize means only the fields named in omittedInlineFields were deliberately omitted to fit the input budget"))
         #expect(instructions.contains("This is not an empty discussion snapshot, missing GitLab threads or a changed MR"))
         #expect(instructions.contains("Compare live external note IDs against requiredExternalNoteIDs"))
         #expect(instructions.contains("A failed live read remains uncertain; intentional omission alone does not"))

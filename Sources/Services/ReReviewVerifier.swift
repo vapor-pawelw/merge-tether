@@ -215,14 +215,26 @@ enum ReReviewVerifier {
         guard var payload = try JSONSerialization.jsonObject(with: JSONEncoder().encode(sanitized)) as? [String: Any] else {
             throw VerificationError.incompleteEvidence
         }
+        var verificationBudgetSeconds = 180
         payload["inlineEvidence"] = "included"
+        payload["omittedInlineFields"] = [String]()
+        payload["verificationBudgetSeconds"] = verificationBudgetSeconds
         payload["requiredExternalNoteIDs"] = noteIDs
         var encoded = try JSONSerialization.data(withJSONObject: payload, options: [.sortedKeys])
         if encoded.count > 180_000, input.target != nil {
-            // Omitted content is not an empty snapshot; preserve identity and exact scope for live reads.
+            // Keep the thread context whenever dropping the diff alone fits the budget.
+            // Fetching omitted evidence needs more time, with a fixed upper bound for each attempt.
+            verificationBudgetSeconds = 600
             payload["inlineEvidence"] = "omittedForSize"
-            for key in ["description", "diff", "discussions"] { payload.removeValue(forKey: key) }
-            encoded = try JSONSerialization.data(withJSONObject: payload, options: [.sortedKeys])
+            payload["verificationBudgetSeconds"] = verificationBudgetSeconds
+            var omitted: [String] = []
+            for key in ["diff", "description", "discussions"] {
+                guard payload.removeValue(forKey: key) != nil else { continue }
+                omitted.append(key)
+                payload["omittedInlineFields"] = omitted
+                encoded = try JSONSerialization.data(withJSONObject: payload, options: [.sortedKeys])
+                if encoded.count <= 180_000 { break }
+            }
         }
         guard encoded.count <= 180_000 else { throw VerificationError.incompleteEvidence }
         let evidence = String(decoding: encoded, as: UTF8.self)
@@ -240,13 +252,17 @@ enum ReReviewVerifier {
             title, description and SHA. Read every page of its discussions using --paginate and
             per_page=100. Read raw_diffs and relevant source files only as needed to judge concerns.
             inlineEvidence describes transport, not MR state. included means inline content is supplied.
-            omittedForSize means the inline description, diff and discussions were deliberately omitted
-            to fit the input budget. This is not an empty discussion snapshot, missing GitLab threads
+            omittedForSize means only the fields named in omittedInlineFields were deliberately omitted
+            to fit the input budget. Retained inline fields remain available as supplementary evidence.
+            This is not an empty discussion snapshot, missing GitLab threads
             or a changed MR. Fetch the current metadata and complete paginated discussions from target;
             fetch diffs or source only for an actionable concern that needs them. Compare live external
             note IDs against requiredExternalNoteIDs, not against absent inline discussions. Do not
             require omitted inline content to be restored or reconciled with live text. A failed live
-            read remains uncertain; intentional omission alone does not.
+            read remains uncertain; intentional omission alone does not. Finish within verificationBudgetSeconds
+            seconds, including live reads, and return the structured assessment before that deadline. Prioritize
+            classifying expectations and reading directly relevant evidence; use uncertain for actionable concerns
+            whose proof remains unavailable rather than running out of time without a result.
             For file content use the live MR source_project_id and the exact expected headSHA;
             do not clone or scan the whole repository unless narrowly necessary for this assessment.
             The MR must match target host/project/IID/URL and headSHA. If the account or head differs,
@@ -505,7 +521,7 @@ enum ReReviewVerifier {
                 "-c", "model_reasoning_effort=\"\(input.thinking.rawValue)\"", "-c", "web_search=\"disabled\"",
                 "-c", "agents.enabled=false", "--disable", "apps", "--disable", "plugins",
                 "--disable", "memories", "--output-schema", schemaURL.path, "-o", outputURL.path, "-"],
-                environment: environment, currentDirectory: folder, timeout: 180,
+                environment: environment, currentDirectory: folder, timeout: TimeInterval(verificationBudgetSeconds),
                 input: Data((prompt + "\n\n" + evidence).utf8),
                 usage: .init(role: .verifier, assistant: assistant, model: model, mergeRequest: usageMergeRequest))
             guard output.exitCode == 0, !Task.isCancelled else { throw VerificationError.failed }
@@ -516,7 +532,7 @@ enum ReReviewVerifier {
                 "--settings", #"{"sandbox":{"enabled":false}}"#,
                 "--strict-mcp-config", "--mcp-config", #"{"mcpServers":{}}"#,
                 "--setting-sources", "", "--no-session-persistence", "--output-format", "json", "--json-schema", constrainedSchema],
-                environment: environment, currentDirectory: folder, timeout: 180, input: Data(evidence.utf8),
+                environment: environment, currentDirectory: folder, timeout: TimeInterval(verificationBudgetSeconds), input: Data(evidence.utf8),
                 usage: .init(role: .verifier, assistant: assistant, model: model, mergeRequest: usageMergeRequest))
             guard output.exitCode == 0, !Task.isCancelled else { throw VerificationError.failed }
             struct Envelope: Decodable {

@@ -6,6 +6,8 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 
 ## Unreleased
 
+- Retain discussion context when a large feedback-check input only needs its diff omitted. Name the exact omitted fields and allow a bounded ten-minute check for live evidence reads, avoiding repeated three-minute timeouts without an assessment.
+
 - Keep no-findings reviews and acknowledgements informational, while retaining questions and conditions in general comments. Mark large verifier inputs as deliberately omitted and fetch live discussions instead of treating them as an empty snapshot; refresh earlier assessments under the corrected policy.
 
 - Fix continuous iPhone toolbar updates that keep the main thread busy and make scrolling stutter, including while MR details are open.
