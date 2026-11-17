@@ -6,7 +6,7 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 
 ## Unreleased
 
-- Rename the Mac board's Inactive section to **Without automation**, count cards needing attention in its header, and keep attention icons and explanations prominent on muted cards.
+- Rename the Mac board's Inactive section to **Automation off**, count cards needing attention in its header, and keep attention icons and explanations prominent on muted cards.
 
 - Retain discussion context when a large feedback-check input only needs its diff omitted. Name the exact omitted fields and allow a bounded ten-minute check for live evidence reads, avoiding repeated three-minute timeouts without an assessment.
 
@@ -188,7 +188,7 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 
 - Move transient proposals, unmatched GitLab to-dos, assistant runs and completion updates from the board into a spacious toolbar Inbox popover, keeping My merge requests and Reviewing as the board's persistent lanes.
 
-- Choose Without automation (default) or Drafts for the lower board section, with matching ordering and title/status muting; turning all automation off temporarily uses Drafts without forgetting the saved choice.
+- Choose Automation off (default) or Drafts for the lower board section, with matching ordering and title/status muting; turning all automation off temporarily uses Drafts without forgetting the saved choice.
 
 - Snap the iOS board to wider lanes with hidden scroll indicators and an adaptive landscape layout; keep connection status stable during refresh while preserving action freshness checks.
 
