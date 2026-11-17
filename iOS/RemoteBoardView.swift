@@ -70,26 +70,7 @@ struct RemoteBoardView: View {
                             .accessibilityLabel(Text(.Board.boardInboxButton))
                             .accessibilityValue(Text(.Board.boardInboxAccessibilityCount(inboxCards.count)))
                             .accessibilityIdentifier("remote.inbox")
-                            TimelineView(.periodic(from: .now, by: 1)) { context in
-                                let status = model.connectionStatus(now: context.date)
-                                HStack(spacing: 16) {
-                                    Button { Task { await model.refresh(fromGitLab: true) } } label: { Image(systemName: "arrow.clockwise") }
-                                        .accessibilityLabel(Text(.Remote.remoteRefreshData))
-                                        .accessibilityIdentifier("remote.refresh")
-                                        .disabled(status != .connected)
-                                    Menu {
-                                        if let origin = model.relayConfiguration.origin {
-                                            Text(.Remote.remoteRelayConfigured)
-                                            Text(verbatim: origin.absoluteString)
-                                            Text(.Remote.remoteRelayOwnership)
-                                            Divider()
-                                        }
-                                        reconnectButton.disabled(status == .connecting)
-                                    } label: { Image(systemName: "ellipsis.circle") }
-                                        .accessibilityLabel(Text(.Remote.remoteConnectionMenu))
-                                        .accessibilityIdentifier("remote.connection.menu")
-                                }
-                            }
+                            RemoteConnectionToolbar(model: model)
                         }
                     }
                     ToolbarItem(placement: .topBarLeading) {
@@ -162,6 +143,45 @@ struct RemoteBoardView: View {
                 }
             }
             .font(.caption).padding(.horizontal).padding(.top, 8)
+        }
+    }
+}
+
+// TimelineView inside ToolbarItem causes a continuous toolbar preference-update loop.
+private struct RemoteConnectionToolbar: View {
+    let model: RemotePhoneModel
+    @State private var now = Date()
+
+    var body: some View {
+        let status = model.connectionStatus(now: now)
+        HStack(spacing: 16) {
+            Button { Task { await model.refresh(fromGitLab: true) } } label: {
+                Image(systemName: "arrow.clockwise")
+            }
+            .accessibilityLabel(Text(.Remote.remoteRefreshData))
+            .accessibilityIdentifier("remote.refresh")
+            .disabled(status != .connected)
+            Menu {
+                if let origin = model.relayConfiguration.origin {
+                    Text(.Remote.remoteRelayConfigured)
+                    Text(verbatim: origin.absoluteString)
+                    Text(.Remote.remoteRelayOwnership)
+                    Divider()
+                }
+                Button { model.reconnect() } label: {
+                    Label(.Remote.remoteReconnect, systemImage: "arrow.triangle.2.circlepath")
+                }
+                .accessibilityIdentifier("remote.reconnect")
+                .disabled(status == .connecting)
+            } label: { Image(systemName: "ellipsis.circle") }
+            .accessibilityLabel(Text(.Remote.remoteConnectionMenu))
+            .accessibilityIdentifier("remote.connection.menu")
+        }
+        .task {
+            while !Task.isCancelled {
+                now = Date()
+                do { try await Task.sleep(for: .seconds(1)) } catch { return }
+            }
         }
     }
 }

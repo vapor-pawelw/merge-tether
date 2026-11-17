@@ -6,6 +6,8 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 
 ## Unreleased
 
+- Fix continuous iPhone toolbar updates that keep the main thread busy and make scrolling stutter, including while MR details are open.
+
 - Keep remote message encryption, decoding and iPhone comment Markdown parsing off the UI thread.
 - Show iPhone suggestion decisions with short buttons and separate descriptions, and avoid rebuilding action labels every second.
 
