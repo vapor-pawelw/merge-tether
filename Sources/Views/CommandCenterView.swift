@@ -41,7 +41,7 @@ struct CommandCenterView: View {
             if let todo = monitor.undoableTodo { undoBanner(todo) }
             accountFooter
         }
-        .frame(minWidth: 1040, minHeight: 680)
+        .frame(minWidth: 640, minHeight: 680)
         .overlay(alignment: .bottomTrailing) {
             VStack(alignment: .trailing, spacing: 10) {
                 if let notice = monitor.automationToggleNotices.current {
@@ -109,7 +109,10 @@ struct CommandCenterView: View {
                     }
                 }
                 .help(Text(.Board.boardInboxButton))
-                .accessibilityLabel(Text(.Board.boardInboxAccessibilityCount(display.inbox.items.count)))
+                .accessibilityLabel(
+                    !display.inbox.items.isEmpty || monitor.inboxRefreshState == .current
+                        ? Text(.Board.boardInboxAccessibilityCount(display.inbox.items.count))
+                        : Text(.Board.boardInboxButton))
                 .popover(isPresented: $showingInbox, arrowEdge: .top) {
                     CommandCenterInboxView(monitor: monitor)
                 }

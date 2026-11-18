@@ -421,15 +421,20 @@ final class TodoMonitorService {
     var requiresAssistantCLI: Bool { true }
 
     var boardRefreshState: BoardRefreshState {
-        guard settings.onboardingCompleted else { return .current }
+        settings.onboardingCompleted ? inboxRefreshState : .current
+    }
+
+    var inboxRefreshState: BoardRefreshState {
+        let catalogsEnabled = settings.onboardingCompleted
         let todosReady = hasCompletedFirstFetch && glab.currentUsername != nil
             && inboxHost == glab.resolvedHost && inboxUsername == glab.currentUsername
             && inboxAccountRevision == glab.accountRevision
         let accountUnavailable = glab.currentUsername == nil && glab.authStatus != .unknown
-        return .init(todosReady: todosReady, catalogReady: attention.hasSyncedCurrentCatalog,
-                     authoredReady: authoredMergeRequests.hasSyncedCurrentCatalog,
-                     isRefreshing: isLoading || attention.isLoading || authoredMergeRequests.isLoading,
-                     hasError: lastError != nil || attention.hasError || authoredMergeRequests.hasError || accountUnavailable)
+        return .init(todosReady: todosReady, catalogReady: !catalogsEnabled || attention.hasSyncedCurrentCatalog,
+                     authoredReady: !catalogsEnabled || authoredMergeRequests.hasSyncedCurrentCatalog,
+                     isRefreshing: isLoading || (catalogsEnabled && (attention.isLoading || authoredMergeRequests.isLoading)),
+                     hasError: lastError != nil || accountUnavailable
+                         || (catalogsEnabled && (attention.hasError || authoredMergeRequests.hasError)))
     }
 
     func bootstrap() async {

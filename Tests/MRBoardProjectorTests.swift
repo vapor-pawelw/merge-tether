@@ -29,6 +29,25 @@ struct MRBoardProjectorTests {
         return input
     }
 
+    @Test(arguments: ["ordinary", "quickAction", "resolve", "both", "missingID"])
+    func boardPublicationShortcutRequiresReviewForDraftsWithSideEffects(_ scenario: String) throws {
+        var evidence = item(try request())
+        let note = switch scenario {
+        case "quickAction", "both", "missingID": "Private reply\n  /merge"
+        default: "Private reply about the /merge command."
+        }
+        evidence.drafts = [
+            .init(id: 7, authorID: 3, note: "Ordinary reply", discussionID: "thread", position: nil),
+            .init(id: scenario == "missingID" ? nil : 8, authorID: 3, note: note, discussionID: "thread",
+                resolveDiscussion: scenario == "resolve" || scenario == "both", position: nil),
+        ]
+        evidence.draftCount = evidence.drafts.count
+        let projector = MRBoardProjector(input: input(evidence: evidence, catalog: evidence))
+        let action = try #require(projector.pendingUserAttention.humanActions.values.first)
+        #expect(action.kind == .publication && action.action == .reviewDrafts)
+        #expect(action.draftPublicationShortcut(for: evidence.drafts) == (scenario == "ordinary" ? .publishAll : .review))
+    }
+
     @Test func rawAutomaticOwnershipCannotHideAnOlderPrivateCheckpointAfterDraftFlip() throws {
         var evidence = item(try request())
         evidence.draftCount = 1

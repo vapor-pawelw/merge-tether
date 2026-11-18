@@ -53,7 +53,7 @@ struct MRHumanActionTests {
         let action = try #require(MRHumanAction(row: row(item), assistantReady: false))
         #expect(action.kind == .commentReview)
         #expect(action.action == .reviewDrafts)
-        #expect(!action.showsDirectPublication)
+        #expect(action.draftPublicationShortcut(for: item.drafts) == nil)
         #expect(item.needsAttention && item.needsConfirmation)
     }
     @Test(arguments: ["ready", "verification", "discussion", "changed"])
@@ -65,7 +65,7 @@ struct MRHumanActionTests {
         value.requiresDiscussionRecheck = state == "discussion"
         let action = try #require(MRHumanAction(row: row(value), assistantReady: true,
             confirmationState: state == "changed" ? .changed : nil))
-        #expect(action.showsDirectPublication == (state == "ready"))
+        #expect(action.draftPublicationShortcut(for: value.drafts) == (state == "ready" ? .publishAll : nil))
     }
 
     @Test(arguments: [MRTodoIntent.Kind.followUp, .pipeline])

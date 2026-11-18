@@ -44,6 +44,13 @@
         "pl": { "stringUnit": { "state": "translated", "value": "Otrzymane zatwierdzenia: %lld" } }
       }
     },
+    "board.approvals.requiredPending": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": { "stringUnit": { "state": "translated", "value": "Required approval pending" } },
+        "pl": { "stringUnit": { "state": "translated", "value": "Oczekuje na wymagane zatwierdzenie" } }
+      }
+    },
     "board.approvals.noPeople": {
       "extractionState": "manual",
       "localizations": {
@@ -137,6 +144,20 @@
       "localizations": {
         "en": { "stringUnit": { "state": "translated", "value": "New proposals, unrecognized GitLab to-dos, assistant issues and finished-MR updates will show up here." } },
         "pl": { "stringUnit": { "state": "translated", "value": "Pojawią się tu nowe propozycje, nierozpoznane zadania GitLaba, problemy asystenta i informacje o zakończonych MR-ach." } }
+      }
+    },
+    "board.inbox.unavailable": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": { "stringUnit": { "state": "translated", "value": "Inbox unavailable" } },
+        "pl": { "stringUnit": { "state": "translated", "value": "Skrzynka niedostępna" } }
+      }
+    },
+    "board.inbox.retry": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": { "stringUnit": { "state": "translated", "value": "Retry" } },
+        "pl": { "stringUnit": { "state": "translated", "value": "Spróbuj ponownie" } }
       }
     },
     "board.inbox.triage": {
@@ -703,12 +724,8 @@
     "board.approvalsHelp": {
       "extractionState": "manual",
       "localizations": {
-        "en": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "Required approvals: %lld of %lld"
-          }
-        }
+        "en": { "stringUnit": { "state": "translated", "value": "Approvals received: %lld, required: %lld" } },
+        "pl": { "stringUnit": { "state": "translated", "value": "Otrzymane zatwierdzenia: %lld, wymagane: %lld" } }
       }
     },
     "board.approvalsUnavailable": {

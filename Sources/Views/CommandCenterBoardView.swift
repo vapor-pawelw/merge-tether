@@ -6,6 +6,16 @@ struct CommandCenterBoardView: View {
     let board: MergeRequestBoardSnapshot
     var refreshState: BoardRefreshState = .current
     private var dimUnverifiedContent: Bool { refreshState != .current }
+    private enum Lane: Hashable {
+        case own, reviewing
+
+        var title: LocalizedStringResource {
+            self == .own ? .Board.boardLaneOwn : .Board.boardLaneReviewing
+        }
+
+        var symbol: String { self == .own ? "arrow.triangle.pull" : "text.magnifyingglass" }
+    }
+
     private struct Selection: Identifiable {
         let item: MergeRequestAttentionMonitor.Item
         let section: CommandCenterMRDetailSection
@@ -13,6 +23,7 @@ struct CommandCenterBoardView: View {
         var id: MergeRequestAttentionMonitor.Item.ID { item.id }
     }
     @State private var selected: Selection?
+    @State private var compactLane: Lane = .own
     @State private var detailPopoverPresented = false
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
 
@@ -22,45 +33,22 @@ struct CommandCenterBoardView: View {
     }
 
     var body: some View {
-        HStack(alignment: .top, spacing: 18) {
-            lane(title: .Board.boardLaneOwn, symbol: "arrow.triangle.pull", cardIDs: board.own.map(\.id), dependencies: board.own.map { $0.item.dependencies }) {
-                if board.own.isEmpty {
-                    empty(.Board.boardEmptyOwnTitle, message: .Board.boardLaneOwnEmpty, symbol: "arrow.triangle.pull")
+        GeometryReader { geometry in
+            HStack(alignment: .top, spacing: 18) {
+                if geometry.size.width < 900 {
+                    lane(compactLane, compact: true)
+                } else {
+                    lane(.own)
+                    lane(.reviewing)
                 }
-                laneCards(board.own)
             }
-            lane(title: .Board.boardLaneReviewing, symbol: "text.magnifyingglass", cardIDs: board.reviewed.map(\.id), dependencies: board.reviewed.map { $0.item.dependencies }) {
-                if board.reviewed.isEmpty {
-                    empty(.Board.boardEmptyReviewingTitle, message: .Board.boardLaneReviewingEmpty, symbol: "text.magnifyingglass")
-                }
-                laneCards(board.reviewed, removable: true)
+            .id(account)
+            .padding(14)
+            .sheet(item: $selected) { selection in
+                detailSheet(selection, availableWidth: max(1, geometry.size.width - 24))
             }
         }
-        .id(account)
-        .padding(14)
         .background(Color(nsColor: .windowBackgroundColor))
-        .sheet(item: $selected) { selection in
-            VStack(spacing: 0) {
-                HStack {
-                    Text(selection.section.title).font(.subheadline.weight(.medium)).foregroundStyle(.secondary)
-                    Spacer()
-                    Button { selected = nil } label: { Image(systemName: "xmark") }
-                        .buttonStyle(.borderless).foregroundStyle(.secondary)
-                        .keyboardShortcut(.cancelAction)
-                        .disabled(detailPopoverPresented)
-                        .accessibilityLabel(Text(.CommandCenter.commandCenterClose))
-                }
-                .padding(.horizontal, 20).padding(.vertical, 10)
-                Divider()
-                if selection.account == account {
-                    CommandCenterMRDetail(item: selection.item, monitor: monitor, initialSection: selection.section)
-                        .id(selection.id)
-                }
-            }
-            .frame(minWidth: 700, idealWidth: 820, minHeight: 600, idealHeight: 780)
-            .interactiveDismissDisabled(detailPopoverPresented)
-            .onPreferenceChange(BoardDetailPopoverPresentedKey.self) { detailPopoverPresented = $0 }
-        }
         .onChange(of: account) { _, _ in selected = nil }
         .onReceive(NotificationCenter.default.publisher(for: NSWindow.willCloseNotification)) { notification in
             if (notification.object as? NSWindow)?.identifier?.rawValue == "main" { selected = nil }
@@ -68,6 +56,30 @@ struct CommandCenterBoardView: View {
         .task {
             await monitor.attention.observePendingDrafts()
         }
+    }
+
+    private func detailSheet(_ selection: Selection, availableWidth: CGFloat) -> some View {
+        VStack(spacing: 0) {
+            HStack {
+                Text(selection.section.title).font(.subheadline.weight(.medium)).foregroundStyle(.secondary)
+                Spacer()
+                Button { selected = nil } label: { Image(systemName: "xmark") }
+                    .buttonStyle(.borderless).foregroundStyle(.secondary)
+                    .keyboardShortcut(.cancelAction)
+                    .disabled(detailPopoverPresented)
+                    .accessibilityLabel(Text(.CommandCenter.commandCenterClose))
+            }
+            .padding(.horizontal, 20).padding(.vertical, 10)
+            Divider()
+            if selection.account == account {
+                CommandCenterMRDetail(item: selection.item, monitor: monitor, initialSection: selection.section)
+                    .id(selection.id)
+            }
+        }
+        .frame(minWidth: min(700, availableWidth), idealWidth: min(820, availableWidth), maxWidth: availableWidth,
+               minHeight: 600, idealHeight: 780)
+        .interactiveDismissDisabled(detailPopoverPresented)
+        .onPreferenceChange(BoardDetailPopoverPresentedKey.self) { detailPopoverPresented = $0 }
     }
 
     private func card(_ row: MergeRequestBoardSnapshot.Row, removable: Bool = false) -> some View {
@@ -122,28 +134,48 @@ struct CommandCenterBoardView: View {
         reduceMotion ? .identity : .opacity.combined(with: .scale(scale: 0.98, anchor: .top))
     }
 
-    private func lane<Content: View, ID: Hashable>(title: LocalizedStringResource, symbol: String, cardIDs: [ID],
-                                     dependencies: [MergeRequestDependencySummary?] = [], @ViewBuilder content: () -> Content) -> some View {
-        VStack(spacing: 0) {
+    private func lane(_ lane: Lane, compact: Bool = false) -> some View {
+        let reviewing = lane == .reviewing
+        let rows = reviewing ? board.reviewed : board.own
+        let cardIDs = rows.map(\.id)
+        return VStack(spacing: 0) {
             HStack {
-                Label { Text(title) } icon: { Image(systemName: symbol) }
-                    .font(.subheadline.weight(.semibold))
+                if compact {
+                    Picker(selection: $compactLane) {
+                        Text(Lane.own.title).tag(Lane.own)
+                        Text(Lane.reviewing.title).tag(Lane.reviewing)
+                    } label: { Text(.Board.boardTitle) }
+                    .pickerStyle(.segmented)
+                    .labelsHidden()
+                    .fixedSize()
+                    .accessibilityIdentifier("command-center.board-lane")
+                } else {
+                    Label { Text(lane.title) } icon: { Image(systemName: lane.symbol) }
+                        .font(.subheadline.weight(.semibold))
+                }
                 Spacer()
                 Text(cardIDs.count, format: .number).font(.caption.monospacedDigit()).foregroundStyle(.secondary)
             }
             .padding(.horizontal, 6).padding(.vertical, 10)
             Divider()
             ScrollView {
-                LazyVStack(alignment: .leading, spacing: 10, content: content)
-                    .frame(maxWidth: .infinity, alignment: .leading)
-                    .padding(.vertical, 10).padding(.horizontal, 1)
-                    .opacity(dimUnverifiedContent && !cardIDs.isEmpty ? 0.55 : 1)
-                    .animation(reduceMotion ? nil : .spring(duration: 0.28, bounce: 0.12), value: cardIDs)
-                    .animation(reduceMotion ? nil : .spring(duration: 0.28, bounce: 0.12), value: dependencies)
+                LazyVStack(alignment: .leading, spacing: 10) {
+                    if rows.isEmpty {
+                        empty(reviewing ? .Board.boardEmptyReviewingTitle : .Board.boardEmptyOwnTitle,
+                              message: reviewing ? .Board.boardLaneReviewingEmpty : .Board.boardLaneOwnEmpty,
+                              symbol: lane.symbol)
+                    }
+                    laneCards(rows, removable: reviewing)
+                }
+                .frame(maxWidth: .infinity, alignment: .leading)
+                .padding(.vertical, 10).padding(.horizontal, 1)
+                .opacity(dimUnverifiedContent && !cardIDs.isEmpty ? 0.55 : 1)
+                .animation(reduceMotion ? nil : .spring(duration: 0.28, bounce: 0.12), value: cardIDs)
+                .animation(reduceMotion ? nil : .spring(duration: 0.28, bounce: 0.12), value: rows.map { $0.item.dependencies })
             }
+            .id(lane)
         }
         .frame(minWidth: 320, maxWidth: .infinity, maxHeight: .infinity)
-
     }
 
     private func empty(_ title: LocalizedStringResource, message: LocalizedStringResource, symbol: String) -> some View {

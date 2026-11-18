@@ -6,17 +6,26 @@ struct DraftPublicationRisk: Identifiable, Equatable, Sendable {
     let hasPotentialQuickActions: Bool
     let resolvesDiscussion: Bool
 
+    static func hasSideEffects(_ draft: GitLabDraftNote) -> Bool {
+        draft.resolveDiscussion == true || hasQuickAction(in: draft.note)
+    }
+
     init?(draft: GitLabDraftNote) {
         guard let id = draft.id, id > 0 else { return nil }
-        let hasPotentialQuickActions = (draft.note ?? "").split(whereSeparator: \.isNewline).contains {
-            $0.trimmingCharacters(in: .whitespaces).hasPrefix("/")
-        }
+        let hasPotentialQuickActions = Self.hasQuickAction(in: draft.note)
         let resolvesDiscussion = draft.resolveDiscussion == true
         guard hasPotentialQuickActions || resolvesDiscussion else { return nil }
         self.id = id
         discussionID = draft.discussionID
         self.hasPotentialQuickActions = hasPotentialQuickActions
         self.resolvesDiscussion = resolvesDiscussion
+    }
+
+    private static func hasQuickAction(in note: String?) -> Bool {
+        // Even a slash-command example inside a fence can execute a GitLab quick action.
+        (note ?? "").split(whereSeparator: \.isNewline).contains {
+            $0.trimmingCharacters(in: .whitespaces).hasPrefix("/")
+        }
     }
 
     var messages: [LocalizedStringResource] {

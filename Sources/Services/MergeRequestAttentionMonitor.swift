@@ -2035,11 +2035,18 @@ final class MergeRequestAttentionMonitor {
         }
     }
 
-    func publishDrafts(of id: Item.ID, automatic: Bool = false, checkedDraftIDs: Set<Int> = []) async {
+    func publishDrafts(of id: Item.ID, automatic: Bool = false, checkedDraftIDs: Set<Int> = [],
+                       boardSnapshot: Item? = nil) async {
         guard let account, isCurrent(account), let user,
               let displayed = items.first(where: { $0.id == id }), !displayed.drafts.isEmpty,
               !isConfirming(id) else { return }
         if !automatic {
+            if let boardSnapshot,
+               boardSnapshot.url != displayed.url || boardSnapshot.drafts != displayed.drafts
+                   || displayed.drafts.contains(where: DraftPublicationRisk.hasSideEffects) {
+                confirmationStates[id] = .changed
+                return
+            }
             // "Publish all" never repeats a reply already in its thread; the user can still pick one explicitly.
             let publishable = displayed.publishAllDrafts
             guard !publishable.isEmpty else { return }

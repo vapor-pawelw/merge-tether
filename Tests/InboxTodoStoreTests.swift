@@ -265,4 +265,41 @@ struct InboxTodoStoreTests {
         }
     }
 
+    @Test func inboxRequiresASuccessfulReadForTheCurrentAccount() async throws {
+        try await fixture { store, gitlab, settings in
+            settings.glabPath = store.glab.glabPath
+            settings.resolvedHost = host
+            settings.onboardingCompleted = false
+            gitlab.handler = { request in
+                if request.arguments.first == "config" { return InMemoryGitLab.output(host) }
+                if request.arguments.first == "auth" {
+                    return InMemoryGitLab.output(error: "Logged in to \(host) as alice")
+                }
+                if request.arguments.contains(where: { $0.hasPrefix("/todos?") }) {
+                    if !gitlab.has("inbox-available") {
+                        return InMemoryGitLab.output(error: "network unavailable", code: 1)
+                    }
+                }
+                return InMemoryGitLab.output("[]")
+            }
+            let notifications = NotificationService(authorization: { .denied }, post: { _ in })
+            let monitor = TodoMonitorService(settings: settings, glab: store.glab, notifications: notifications)
+            defer { monitor.stopTimer() }
+            #expect(monitor.inboxRefreshState == .syncing)
+
+            await monitor.refreshManually()
+            #expect(monitor.currentAccountTodos.isEmpty)
+            #expect(monitor.inboxRefreshState == .unavailable)
+
+            gitlab.write("inbox-available")
+            await monitor.refreshManually()
+            #expect(monitor.currentAccountTodos.isEmpty)
+            #expect(monitor.inboxRefreshState == .current)
+
+            store.glab.currentUsername = "bob"
+            store.glab.currentUsername = "alice"
+            #expect(monitor.inboxRefreshState == .syncing)
+        }
+    }
+
 }

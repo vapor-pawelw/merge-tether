@@ -18,6 +18,40 @@
         }
       }
     },
+    "remoteSecurity.confirmationExpired": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Confirmation expired"
+          }
+        },
+        "pl": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Potwierdzenie wygasło"
+          }
+        }
+      }
+    },
+    "remoteSecurity.reloadCurrentCommit": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Reload current commit"
+          }
+        },
+        "pl": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Wczytaj aktualny commit"
+          }
+        }
+      }
+    },
     "remoteSecurity.commit": {
       "extractionState": "manual",
       "localizations": {

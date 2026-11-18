@@ -3,6 +3,39 @@ import Testing
 @testable import MergeTetherRemote
 
 @MainActor @Suite struct PhoneStateTests {
+    @Test func onlyACompleteInboxLaneCanEstablishAnEmptyInbox() {
+        let state = RemotePhoneState(), now = Date()
+        var board = CommandGateTests().board()
+        #expect(state.inboxCards == nil)
+        state.refreshFailed()
+        #expect(state.inboxCards == nil)
+
+        state.receive(.init(type: .snapshot, challenge: state.challenge(now: now), board: board), now: now)
+        #expect(state.inboxCards == nil)
+
+        board.lanes.append(.init(id: .other, cards: []))
+        board.partial = true
+        state.receive(.init(type: .snapshot, challenge: state.challenge(now: now), board: board), now: now)
+        #expect(state.inboxCards == nil)
+
+        board.partial = false
+        state.receive(.init(type: .snapshot, challenge: state.challenge(now: now), board: board), now: now)
+        #expect(state.inboxCards == [])
+
+        let cached = board.cards
+        board.lanes[board.lanes.count - 1].cards = cached
+        board.partial = true
+        state.receive(.init(type: .snapshot, challenge: state.challenge(now: now), board: board), now: now)
+        state.disconnected()
+        #expect(state.inboxCards == cached)
+
+        board.account = "another@example.test"
+        board.hostSession = UUID()
+        board.lanes[board.lanes.count - 1].cards = []
+        state.receive(.init(type: .snapshot, challenge: state.challenge(now: now), board: board), now: now)
+        #expect(state.inboxCards == nil)
+    }
+
     @Test func presentationUpdatesPreserveTheExactConfirmedAction() throws {
         let state = RemotePhoneState(), now = Date()
         var board = CommandGateTests().board()

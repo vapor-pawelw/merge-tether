@@ -123,6 +123,11 @@ struct RemoteCardDetail: View {
                     }
                 }
             }
+            .safeAreaInset(edge: .top, spacing: 0) {
+                if model.expiredApprovalCardID == original.id {
+                    expiredApprovalNotice
+                }
+            }
             .navigationTitle(Text(verbatim: current.mergeRequestIID.map {
                 (current.presentation?.repository ?? current.project) + " · !\($0)"
             } ?? current.title))
@@ -148,6 +153,24 @@ struct RemoteCardDetail: View {
             }
             .onDisappear { model.cancelApproval(); model.cancelDetails() }
         }
+    }
+
+    private var expiredApprovalNotice: some View {
+        VStack(alignment: .leading, spacing: 4) {
+            Label(.RemoteSecurity.remoteSecurityConfirmationExpired, systemImage: "clock.badge.exclamationmark")
+                .font(.headline)
+                .accessibilityAddTraits(.isHeader)
+                .accessibilityIdentifier("remote.approval.expired")
+            Button(.RemoteSecurity.remoteSecurityReloadCurrentCommit) {
+                Task { await model.reloadAfterApprovalExpiry(cardID: original.id) }
+            }
+            .frame(minHeight: 44)
+            .accessibilityIdentifier("remote.approval.reload")
+        }
+        .padding(.horizontal, 16)
+        .padding(.top, 8)
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .background(.regularMaterial)
     }
 
     private func sectionMenu(_ proxy: ScrollViewProxy) -> some View {

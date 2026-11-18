@@ -452,6 +452,47 @@ import MergeTetherRemote
         await model.perform(card: card, action: action, approvalID: id)
         #expect(transport.sent.filter { $0.type == .command }.count == 1)
     }
+
+    @Test func expiredApprovalOffersARefreshAndRequiresNewConsentForTheCurrentCommit() async throws {
+        let fixture = try PhoneFixture(), model = fixture.model
+        model.connect(); await model.refresh()
+        var board = fixture.approvalBoard
+        await fixture.reply(board: board)
+        let card = try #require(board.cards.first), action = try #require(card.actions.first)
+        let expired = try #require(model.prepareApproval(card: card, action: action))
+        let transport = fixture.transports[0]
+
+        fixture.date += 30
+        await model.perform(card: card, action: action, approvalID: expired)
+        #expect(model.expiredApprovalCardID == card.id)
+        #expect(model.state.result == nil)
+        #expect(fixture.pendingRecovery == nil)
+        #expect(transport.sent.allSatisfy { $0.type != .command })
+
+        let reloading = Task { await model.reloadAfterApprovalExpiry(cardID: card.id) }
+        defer { reloading.cancel() }
+        let deadline = ContinuousClock.now + .seconds(2)
+        while transport.sent.last?.refresh != true, ContinuousClock.now < deadline { await Task.yield() }
+        try #require(transport.sent.last?.type == .hello && transport.sent.last?.refresh == true)
+        #expect(model.prepareApproval(card: card, action: action) == nil)
+        board.lanes[0].cards[0].head = "current-head"
+        board.lanes[0].cards[0].actions[0].token = "current-approval-token"
+        await fixture.reply(board: board)
+        await reloading.value
+        #expect(model.expiredApprovalCardID == nil)
+        #expect(model.state.board?.cards.first?.head == "current-head")
+
+        let current = try #require(board.cards.first), currentAction = try #require(current.actions.first)
+        await model.perform(card: current, action: currentAction, approvalID: expired)
+        #expect(transport.sent.allSatisfy { $0.type != .command })
+        let approval = try #require(model.prepareApproval(card: current, action: currentAction))
+        transport.onCommand = { command in
+            await transport.onMessage?(.init(type: .result, result: .init(id: command.id, status: .completed)))
+        }
+        await model.perform(card: current, action: currentAction, approvalID: approval)
+        #expect(transport.sent.compactMap(\.command).map(\.token) == [currentAction.token])
+    }
+
     @Test(arguments: ["head", "account", "session", "action", "target", "title", "expiry", "disconnect", "cancel"])
     func approvalCannotOutliveOrChangeItsIntendedContext(_ change: String) async throws {
         let fixture = try PhoneFixture(), model = fixture.model

@@ -145,8 +145,13 @@ struct MRHumanAction {
         }
     }
 
-    var showsDirectPublication: Bool {
-        kind == .publication && action == .reviewDrafts && preparedReply == nil
+    enum DraftPublicationShortcut: Equatable { case publishAll, review }
+
+    func draftPublicationShortcut(for drafts: [GitLabDraftNote]) -> DraftPublicationShortcut? {
+        guard action == .reviewDrafts, preparedReply == nil, !drafts.isEmpty,
+              [.publication, .uncheckedDrafts, .duplicateDrafts].contains(kind) else { return nil }
+        if drafts.contains(where: DraftPublicationRisk.hasSideEffects) { return .review }
+        return kind == .publication ? .publishAll : nil
     }
 
     init?(row: MergeRequestBoardSnapshot.Row, assistantReady: Bool,

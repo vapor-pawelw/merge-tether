@@ -22,36 +22,50 @@ struct BoardApprovalProgressBadge: View {
     private var satisfied: Bool {
         progress?.isSatisfied ?? false
     }
-    private var explanation: Text {
+    private var requiredApprovalPending: Bool {
+        guard let progress, progress.required > 0 else { return false }
+        return !(progress.requirementsSatisfied ?? (progress.completed >= progress.required))
+    }
+    private var approvalCount: Text {
         if let progress, progress.required == 0 { Text(.Board.boardApprovalsReceived(progress.completed)) }
         else if let progress { Text(.Board.boardApprovalsHelp(progress.completed, progress.required)) }
         else { Text(.Board.boardApprovalsUnavailable) }
     }
     private var label: Text {
+        let explanation = requiredApprovalPending
+            ? approvalCount + Text(verbatim: " · ") + Text(.Board.boardApprovalsRequiredPending)
+            : approvalCount
         switch viewerApproval {
-        case .approved: Text(.Board.boardApprovalsViewerApproved) + Text(verbatim: " · ") + explanation
-        case .noLongerCounts: Text(.Board.boardApprovalsViewerNoLongerCounts) + Text(verbatim: " · ") + explanation
-        case nil: explanation
+        case .approved: return Text(.Board.boardApprovalsViewerApproved) + Text(verbatim: " · ") + explanation
+        case .noLongerCounts: return Text(.Board.boardApprovalsViewerNoLongerCounts) + Text(verbatim: " · ") + explanation
+        case nil: return explanation
         }
     }
 
     var body: some View {
         if progress.map({ $0.required > 0 || $0.completed > 0 }) ?? true || viewerApproval != nil {
             Button { hoverTask?.cancel(); showingPeople = true } label: {
-                HStack(spacing: 4) {
-                    HStack(spacing: 3) {
-                        Image(systemName: satisfied ? "checkmark.seal.fill" : "checkmark.seal").accessibilityHidden(true)
-                        if let progress, progress.required == 0 {
-                            Text(verbatim: "\(progress.completed)")
-                        } else if let progress {
-                            Text(.Board.boardApprovalRatio(progress.completed, progress.required))
-                        } else { Text(.Board.boardApprovalsUnknownRatio) }
+                VStack(alignment: .leading, spacing: 2) {
+                    HStack(spacing: 4) {
+                        HStack(spacing: 3) {
+                            Image(systemName: satisfied ? "checkmark.seal.fill" : "checkmark.seal").accessibilityHidden(true)
+                            if let progress, progress.required == 0 {
+                                Text(verbatim: "\(progress.completed)")
+                            } else if let progress {
+                                Text(.Board.boardApprovalRatio(progress.completed, progress.required))
+                            } else { Text(.Board.boardApprovalsUnknownRatio) }
+                        }
+                        .font(.caption2).monospacedDigit().foregroundStyle(satisfied ? Color.green : .secondary)
+                        if let viewerApproval { viewerSegment(viewerApproval) }
                     }
-                    .font(.caption2).monospacedDigit().foregroundStyle(satisfied ? Color.green : .secondary)
-                    if let viewerApproval { viewerSegment(viewerApproval) }
+                    .fixedSize()
+                    if requiredApprovalPending {
+                        Text(.Board.boardApprovalsRequiredPending)
+                            .font(.caption2).fixedSize(horizontal: false, vertical: true)
+                    }
                 }
                 .padding(.horizontal, 5).padding(.vertical, 2)
-                .background(.secondary.opacity(0.08), in: Capsule()).fixedSize()
+                .background(.secondary.opacity(0.08), in: RoundedRectangle(cornerRadius: 8))
             }
             .buttonStyle(.plain)
             .accessibilityLabel(label)

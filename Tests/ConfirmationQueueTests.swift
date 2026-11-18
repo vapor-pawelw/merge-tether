@@ -1255,11 +1255,30 @@ import MergeTetherRemote
         for draft in item.drafts where draft.id != 14 { selection.setSelected(false, draft: draft) }
         #expect(selection.selectedDrafts(from: item.drafts).count == 1)
         // when
-        await harness.monitor.publishDrafts(of: item.id)
+        await harness.monitor.publishDrafts(of: item.id, boardSnapshot: item)
         // then
         #expect(harness.log("publish.log").isEmpty)
         #expect(harness.log("selected.log").split(separator: "\n").count == 3)
         #expect(harness.monitor.currentOpenItems.first?.drafts.isEmpty == true)
+    }
+
+    @Test(arguments: ["quickAction", "resolve", "changed"])
+    func boardShortcutDoesNotPublishRiskyOrChangedDrafts(_ scenario: String) async throws {
+        let harness = try await manualHarness(); defer { harness.cleanUp() }
+        let displayed = try #require(harness.monitor.currentItems.first)
+        let drafts = switch scenario {
+        case "quickAction": #"[{"id":11,"author_id":3,"note":"Reply\n/merge"}]"#
+        case "resolve": #"[{"id":11,"author_id":3,"note":"Reply","discussion_id":"human","resolve_discussion":true}]"#
+        default: #"[{"id":11,"author_id":3,"note":"Edited but harmless reply"}]"#
+        }
+        try harness.write("drafts.json", drafts)
+        try await harness.poll()
+        let current = try #require(harness.monitor.currentItems.first)
+
+        await harness.monitor.publishDrafts(of: current.id, boardSnapshot: scenario == "changed" ? displayed : current)
+
+        #expect(harness.log("selected.log").isEmpty && harness.log("publish.log").isEmpty)
+        #expect(harness.monitor.confirmationStates[current.id] == .changed)
     }
 
     @Test func manualPublishAllNeverIncludesAnUnseenQuickActionArrivingAfterTheFirstWrite() async throws {

@@ -278,6 +278,8 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 
 ### Changed
 
+- Show one board lane at narrow Mac window widths with a switch between owned and reviewed merge requests. On iPhone, make both lane names and counts visible and keep swipe navigation.
+
 - Group automation permissions into preparation, publication, delivery and completion, keeping existing choices and saved legacy handlers available in Advanced.
 
 - Default feedback, draft-claim and AI-assistance verification to High reasoning for Codex and Claude, with a shared Low, Medium or High setting independent of coding reasoning.
@@ -335,6 +337,11 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 - Bind re-review diff evidence and instructions to the commit they assessed, refresh review scope when retrying on a newer commit, and inspect changed binary diffs. Preserve review checkpoints through temporary GitLab read failures and defer new workflow events while another worker is active on that merge request.
 
 - Stop repeating automatic pipeline preflights for failures with an existing claim receipt.
+
+- Open draft warnings from the Mac board before publishing comments that can change a merge request or resolve a discussion.
+- Show when an iPhone approval confirmation expires and let the reviewer reload the current commit before confirming again.
+- Show when the inbox is unavailable and offer a retry on Mac and iPhone. Show the empty state after a successful sync.
+- Label approval badges on Mac and iPhone when a required approval remains pending.
 
 - Put the requested version in local release archives and report incomplete publication as a failure when workflow verification cannot finish after a tag push.
 

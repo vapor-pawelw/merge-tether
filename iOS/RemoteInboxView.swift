@@ -2,7 +2,9 @@ import SwiftUI
 import MergeTetherRemote
 
 struct RemoteInboxView: View {
-    let cards: [RemoteCard]
+    let cards: [RemoteCard]?
+    let isLoading: Bool
+    let onRetry: () -> Void
     let onOpen: (RemoteCard) -> Void
     let onOpenCTA: (RemoteCard, RemoteCardCTA) -> Void
     var onFinishCommentReview: ((RemoteCard) -> Void)? = nil
@@ -11,18 +13,20 @@ struct RemoteInboxView: View {
     @Environment(\.dismiss) private var dismiss
 
     private var triageCards: [RemoteCard] {
-        cards.filter { $0.id.hasPrefix("mr:") || $0.id.hasPrefix("todo:") }
+        cards?.filter { $0.id.hasPrefix("mr:") || $0.id.hasPrefix("todo:") } ?? []
     }
-    private var jobCards: [RemoteCard] { cards.filter { $0.id.hasPrefix("job:") } }
-    private var updateCards: [RemoteCard] { cards.filter { $0.id.hasPrefix("completion:") } }
+    private var jobCards: [RemoteCard] { cards?.filter { $0.id.hasPrefix("job:") } ?? [] }
+    private var updateCards: [RemoteCard] { cards?.filter { $0.id.hasPrefix("completion:") } ?? [] }
 
     var body: some View {
         VStack(spacing: 0) {
             HStack(alignment: .center, spacing: 12) {
                 VStack(alignment: .leading, spacing: 3) {
                     Text(.Board.boardInboxButton).font(.title2.weight(.semibold))
-                    Text(.Board.boardInboxAccessibilityCount(cards.count))
-                        .font(.caption).foregroundStyle(.secondary)
+                    if let cards {
+                        Text(.Board.boardInboxAccessibilityCount(cards.count))
+                            .font(.caption).foregroundStyle(.secondary)
+                    }
                 }
                 Spacer()
                 Button { dismiss() } label: { Image(systemName: "xmark") }
@@ -33,7 +37,15 @@ struct RemoteInboxView: View {
             .padding(.vertical, 14)
             Divider()
 
-            if cards.isEmpty {
+            if cards == nil {
+                if isLoading {
+                    ProgressView()
+                        .accessibilityLabel(Text(.Board.boardInitialSync))
+                        .frame(maxWidth: .infinity, maxHeight: .infinity)
+                } else {
+                    unavailableState
+                }
+            } else if cards?.isEmpty == true {
                 VStack(spacing: 10) {
                     Image(systemName: "checkmark.circle")
                         .font(.system(size: 32, weight: .light)).foregroundStyle(.secondary)
@@ -57,6 +69,19 @@ struct RemoteInboxView: View {
             }
         }
         .background(.background)
+    }
+
+    private var unavailableState: some View {
+        VStack(spacing: 10) {
+            Image(systemName: "exclamationmark.triangle")
+                .font(.system(size: 32, weight: .light)).foregroundStyle(.secondary)
+                .accessibilityHidden(true)
+            Text(.Board.boardInboxUnavailable).font(.title3.weight(.medium))
+            Button(.Board.boardInboxRetry, action: onRetry)
+                .buttonStyle(.borderedProminent)
+                .accessibilityIdentifier("remote.inbox.retry")
+        }
+        .frame(maxWidth: .infinity, maxHeight: .infinity).padding(24)
     }
 
     @ViewBuilder

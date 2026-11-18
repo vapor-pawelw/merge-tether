@@ -53,7 +53,7 @@ struct DuplicateReplyDraftsTests {
 
         let action = try #require(MRHumanAction(row: .init(item: item, latestJob: nil, intents: []), assistantReady: true))
         #expect(action.kind == .duplicateDrafts)
-        #expect(!action.showsDirectPublication)
+        #expect(action.draftPublicationShortcut(for: item.drafts) == nil)
 
         var session = DraftPublicationSession()
         session.open(with: item.drafts, duplicateIDs: item.duplicateDraftIDs)

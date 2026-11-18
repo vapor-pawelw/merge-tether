@@ -23,9 +23,11 @@ struct CommandCenterInboxView: View {
         HStack(alignment: .center, spacing: 12) {
             VStack(alignment: .leading, spacing: 3) {
                 Text(.Board.boardInboxButton).font(.title2.weight(.semibold))
-                Text(.Board.boardInboxAccessibilityCount(count))
-                    .font(.caption)
-                    .foregroundStyle(.secondary)
+                if count > 0 || monitor.inboxRefreshState == .current {
+                    Text(.Board.boardInboxAccessibilityCount(count))
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                }
             }
             Spacer()
             Button { dismiss() } label: { Image(systemName: "xmark") }
@@ -39,10 +41,17 @@ struct CommandCenterInboxView: View {
 
     @ViewBuilder
     private func content(_ inbox: CommandCenterDisplayFrame.Inbox) -> some View {
-        if inbox.items.isEmpty && monitor.boardRefreshState == .syncing {
-            ProgressView().frame(maxWidth: .infinity, maxHeight: .infinity)
-        } else if inbox.items.isEmpty {
-            emptyState
+        if inbox.items.isEmpty {
+            switch monitor.inboxRefreshState {
+            case .syncing:
+                ProgressView()
+                    .accessibilityLabel(Text(.Board.boardInitialSync))
+                    .frame(maxWidth: .infinity, maxHeight: .infinity)
+            case .unavailable:
+                unavailableState
+            case .current:
+                emptyState
+            }
         } else {
             ScrollView {
                 LazyVStack(alignment: .leading, spacing: 24) {
@@ -54,6 +63,20 @@ struct CommandCenterInboxView: View {
                 .padding(20)
             }
         }
+    }
+
+    private var unavailableState: some View {
+        VStack(spacing: 10) {
+            Image(systemName: "exclamationmark.triangle")
+                .font(.system(size: 32, weight: .light))
+                .foregroundStyle(.secondary)
+                .accessibilityHidden(true)
+            Text(.Board.boardInboxUnavailable).font(.title3.weight(.medium))
+            Button(.Board.boardInboxRetry) { Task { await monitor.refreshManually() } }
+                .buttonStyle(.borderedProminent)
+        }
+        .frame(maxWidth: .infinity, maxHeight: .infinity)
+        .padding(24)
     }
 
     private var emptyState: some View {

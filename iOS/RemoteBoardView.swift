@@ -58,8 +58,8 @@ struct RemoteBoardView: View {
                             Button { showingInbox = true } label: {
                                 Image(systemName: "tray")
                                     .overlay(alignment: .topTrailing) {
-                                        if inboxCards.count > 0 {
-                                            Text(inboxCards.count, format: .number)
+                                        if let cards = model.state.inboxCards, !cards.isEmpty {
+                                            Text(cards.count, format: .number)
                                                 .font(.system(size: 9, weight: .bold))
                                                 .foregroundStyle(.white)
                                                 .padding(.horizontal, 4)
@@ -70,7 +70,9 @@ struct RemoteBoardView: View {
                                     }
                             }
                             .accessibilityLabel(Text(.Board.boardInboxButton))
-                            .accessibilityValue(Text(.Board.boardInboxAccessibilityCount(inboxCards.count)))
+                            .accessibilityValue(model.state.inboxCards.map {
+                                Text(.Board.boardInboxAccessibilityCount($0.count))
+                            } ?? Text(verbatim: ""))
                             .accessibilityIdentifier("remote.inbox")
                             RemoteConnectionToolbar(model: model)
                         }
@@ -94,13 +96,19 @@ struct RemoteBoardView: View {
                 pairingSheet = false; selected = nil; showingInbox = false; pendingInboxCard = nil
             }
             .popover(isPresented: $showingInbox, attachmentAnchor: .rect(.bounds), arrowEdge: .top) {
-                RemoteInboxView(cards: inboxCards, onOpen: { pendingInboxCard = .init(card: $0); showingInbox = false },
-                    onOpenCTA: { pendingInboxCard = .init(card: $0, cta: $1); showingInbox = false },
-                    onFinishCommentReview: finishCommentReview, canAct: { model.state.canAct(now: $0) },
-                    onRefresh: { await model.refreshContent() })
-                    .frame(idealWidth: 520, idealHeight: 680)
-                    .presentationCompactAdaptation(.sheet)
-                    .presentationDetents([.medium, .large])
+                TimelineView(.periodic(from: .now, by: 1)) { context in
+                    let status = model.connectionStatus(now: context.date)
+                    RemoteInboxView(cards: model.state.inboxCards,
+                        isLoading: status == .connecting || (status == .connected && model.state.isRefreshing(now: context.date)),
+                        onRetry: retryInbox,
+                        onOpen: { pendingInboxCard = .init(card: $0); showingInbox = false },
+                        onOpenCTA: { pendingInboxCard = .init(card: $0, cta: $1); showingInbox = false },
+                        onFinishCommentReview: finishCommentReview, canAct: { model.state.canAct(now: $0) },
+                        onRefresh: { await model.refreshContent() })
+                }
+                .frame(idealWidth: 520, idealHeight: 680)
+                .presentationCompactAdaptation(.sheet)
+                .presentationDetents([.medium, .large])
             }
             .onChange(of: showingInbox) { _, isPresented in
                 if !isPresented, let pendingInboxCard {
@@ -117,8 +125,12 @@ struct RemoteBoardView: View {
             )) { Button(.Remote.remoteClose) { model.state.acknowledgeResult() } }
         }
     }
-    private var inboxCards: [RemoteCard] {
-        model.state.board?.lanes.first(where: { $0.id == .other })?.cards ?? []
+    private func retryInbox() {
+        if model.connectionStatus() == .connected {
+            Task { await model.refreshContent() }
+        } else {
+            model.reconnect()
+        }
     }
     private func finishCommentReview(_ card: RemoteCard) {
         guard let action = card.actions.first(where: { $0.kind == .finishCommentReview }) else { return }

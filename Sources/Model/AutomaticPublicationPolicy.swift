@@ -84,12 +84,8 @@ struct AutomaticPublicationPolicy: Equatable, Sendable {
     }
 
     static func safeForAutomaticPublication(_ draft: GitLabDraftNote) -> Bool {
-        guard draft.resolveDiscussion != true, let body = draft.note,
-              !body.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else { return false }
-        // Even a slash-command example inside a fence can execute a GitLab quick action.
-        return !body.split(whereSeparator: \.isNewline).contains {
-            $0.trimmingCharacters(in: .whitespaces).hasPrefix("/")
-        }
+        draft.note?.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty == false
+            && !DraftPublicationRisk.hasSideEffects(draft)
     }
 
     /// Sources are the incoming exchange after our last reply before the newest

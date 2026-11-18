@@ -56,7 +56,7 @@ import Testing
     }
 
     @Test func addsTheViewerSegmentOnlyOnReviewedMRs() {
-        let value = progress(approvedBy: [me])
+        let value = progress(approvedBy: [me], required: 1)
         let plain = NSHostingView(rootView: BoardApprovalProgressBadge(progress: value))
         let own = NSHostingView(rootView: BoardApprovalProgressBadge(progress: value,
             viewerUsername: "me", isOwnMergeRequest: true))

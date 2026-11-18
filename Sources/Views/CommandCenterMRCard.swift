@@ -247,7 +247,7 @@ private struct CommandCenterMRCardContent: View {
 
     private func actionWaitsForRefresh(_ action: MRHumanAction) -> Bool {
         switch action.action {
-        case .reviewDrafts where action.showsDirectPublication && !item.drafts.isEmpty: true
+        case .reviewDrafts where action.draftPublicationShortcut(for: item.drafts) == .publishAll: true
         case .retryRun, .verifyFeedback, .retryDraftVerification, .handleFeedback, .retryIntent: true
         default: false // Opening existing discussions/results never authorizes a GitLab action.
         }
@@ -299,12 +299,18 @@ private struct CommandCenterMRCardContent: View {
                 primary(.CommentReview.commentReviewFinish, cta: .finishCommentReview, enabled: item.canFinishCommentReview) {
                     start { await monitor.attention.finishCommentReview(item) }
                 }
-            } else if action.showsDirectPublication && !item.drafts.isEmpty {
-                primary(.CommentReview.commentReviewPublishAll, cta: .publishComments, enabled: scopeTarget != nil) {
-                    start { await monitor.attention.publishDrafts(of: item.id) }
-                }
             } else {
-                primary(action.actionLabel) { openAttention(.drafts) }
+                switch action.draftPublicationShortcut(for: item.drafts) {
+                case .review:
+                    primary(.CommentReview.commentReviewReviewBeforePublishing) { openAttention(.drafts) }
+                case .publishAll:
+                    primary(.CommentReview.commentReviewPublishAll, cta: .publishComments, enabled: scopeTarget != nil) {
+                        let displayed = item
+                        start { await monitor.attention.publishDrafts(of: displayed.id, boardSnapshot: displayed) }
+                    }
+                case nil:
+                    primary(action.actionLabel) { openAttention(.drafts) }
+                }
             }
         case .reviewApproval:
             primary(action.actionLabel) { openAttention(.drafts) }

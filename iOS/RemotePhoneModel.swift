@@ -53,6 +53,7 @@ enum RemotePhoneConnectionStatus { case unpaired, connecting, connected, offline
         let expiresAt: Date
     }
     private var approvalConfirmation: ApprovalConfirmation?
+    private(set) var expiredApprovalCardID: String?
     private var connectingUntil = Date.distantPast
     private var connectionFailed = false
     private let now: () -> Date
@@ -300,7 +301,15 @@ enum RemotePhoneConnectionStatus { case unpaired, connecting, connected, offline
             account: board.account, connectionRevision: connectionRevision, state: state, expiresAt: now().addingTimeInterval(30))
         return id
     }
-    func cancelApproval() { approvalConfirmation = nil }
+    func cancelApproval() {
+        approvalConfirmation = nil
+        expiredApprovalCardID = nil
+    }
+    func reloadAfterApprovalExpiry(cardID: String) async {
+        guard expiredApprovalCardID == cardID else { return }
+        cancelApproval()
+        await refreshContent()
+    }
     /// Sends a comment-origin change, then re-reads the details so the badges and any undo window show.
     func setCommentOrigin(_ request: RemoteCommentOriginRequest, card: RemoteCard) async {
         guard let action = card.actions.first(where: { $0.kind == .setCommentOrigin }),
@@ -310,11 +319,15 @@ enum RemotePhoneConnectionStatus { case unpaired, connecting, connected, offline
     func perform(card: RemoteCard, action: RemoteAction, approvalID: UUID? = nil, argument: String? = nil) async {
         if action.kind == .approve {
             let confirmation = approvalConfirmation
-            cancelApproval()
+            approvalConfirmation = nil
             guard let confirmation, confirmation.id == approvalID, confirmation.card == card, confirmation.action == action,
-                  confirmation.state === state, confirmation.connectionRevision == connectionRevision, now() < confirmation.expiresAt,
-                  state.board?.hostSession == confirmation.hostSession, state.board?.account == confirmation.account,
-                  state.board?.cards.contains(where: { $0.hasSameActionContext(as: card) && $0.actions.contains(action) }) == true else { return }
+                  confirmation.state === state, confirmation.connectionRevision == connectionRevision,
+                  let board = state.board, board.hostSession == confirmation.hostSession, board.account == confirmation.account else { return }
+            guard now() < confirmation.expiresAt else {
+                expiredApprovalCardID = card.id
+                return
+            }
+            guard board.cards.contains(where: { $0.hasSameActionContext(as: card) && $0.actions.contains(action) }) else { return }
         }
         let requestState = state, revision = connectionRevision
         guard !recoveryUnavailable, recovery == nil, let pairing, let connection,

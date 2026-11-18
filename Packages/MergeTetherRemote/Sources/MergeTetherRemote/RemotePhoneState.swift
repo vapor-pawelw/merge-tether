@@ -12,6 +12,14 @@ import Observation
     private var validUntil: Date = .distantPast
     private var connectedUntil: Date = .distantPast
     public init() {}
+
+    /// An absent lane or incomplete snapshot cannot establish that the inbox is empty.
+    public var inboxCards: [RemoteCard]? {
+        guard let board, let cards = board.lanes.first(where: { $0.id == .other })?.cards,
+              !cards.isEmpty || !board.partial else { return nil }
+        return cards
+    }
+
     public func beginRefresh(force: Bool = false, now: Date = Date()) -> UUID? {
         guard force || expected == nil || now >= challengeUntil else { return nil }
         if force { validUntil = .distantPast }

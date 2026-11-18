@@ -15,43 +15,57 @@ struct RemoteApprovalProgressBadge: View {
     private var complete: Bool {
         progress.map { received > 0 && ($0.requirementsSatisfied ?? ($0.required == 0 || received >= $0.required)) } ?? false
     }
+    private var requiredApprovalPending: Bool {
+        guard let progress, progress.required > 0 else { return false }
+        return !(progress.requirementsSatisfied ?? (received >= progress.required))
+    }
     private var explanation: Text {
         let count = if let progress, progress.required == 0 { Text(.Board.boardApprovalsReceived(received)) }
             else if let progress { Text(.Board.boardApprovalsHelp(received, progress.required)) }
             else { Text(.Board.boardApprovalsUnavailable) }
+        let status = requiredApprovalPending
+            ? count + Text(verbatim: " · ") + Text(.Board.boardApprovalsRequiredPending)
+            : count
         if let viewer {
             return Text(viewer.status == .approved ? .Board.boardApprovalsViewerApproved : .Board.boardApprovalsViewerNoLongerCounts)
-                + Text(verbatim: " · ") + count
+                + Text(verbatim: " · ") + status
         }
-        return count
+        return status
     }
 
     var body: some View {
         if progress.map({ $0.required > 0 || received > 0 }) ?? true || viewer != nil {
             Button { showingPeople = true } label: {
-                HStack(spacing: 4) {
-                    HStack(spacing: 3) {
-                        Image(systemName: complete ? "checkmark.seal.fill" : "checkmark.seal")
-                        if let progress, progress.required == 0 { Text(verbatim: "\(received)") }
-                        else if let progress { Text(.Board.boardApprovalRatio(received, progress.required)) }
-                        else { Text(.Board.boardApprovalsUnknownRatio) }
+                VStack(alignment: .leading, spacing: 2) {
+                    HStack(spacing: 4) {
+                        HStack(spacing: 3) {
+                            Image(systemName: complete ? "checkmark.seal.fill" : "checkmark.seal")
+                            if let progress, progress.required == 0 { Text(verbatim: "\(received)") }
+                            else if let progress { Text(.Board.boardApprovalRatio(received, progress.required)) }
+                            else { Text(.Board.boardApprovalsUnknownRatio) }
+                        }
+                        .font(.caption2).monospacedDigit().foregroundStyle(complete ? Color.green : .secondary)
+                        if let viewer {
+                            Divider().frame(height: 10)
+                            PersonAvatar(url: viewer.avatarURL, size: 16)
+                                .overlay(alignment: .bottomTrailing) {
+                                    Image(systemName: viewer.status == .approved ? "checkmark.circle.fill" : "arrow.counterclockwise.circle.fill")
+                                        .font(.system(size: 9, weight: .bold))
+                                        .foregroundStyle(.white, viewer.status == .approved ? Color.green : .orange)
+                                        .background(Circle().fill(.background).padding(-1))
+                                        .offset(x: 3, y: 2)
+                                }
+                                .padding(.trailing, 2)
+                        }
                     }
-                    .font(.caption2).monospacedDigit().foregroundStyle(complete ? Color.green : .secondary)
-                    if let viewer {
-                        Divider().frame(height: 10)
-                        PersonAvatar(url: viewer.avatarURL, size: 16)
-                            .overlay(alignment: .bottomTrailing) {
-                                Image(systemName: viewer.status == .approved ? "checkmark.circle.fill" : "arrow.counterclockwise.circle.fill")
-                                    .font(.system(size: 9, weight: .bold))
-                                    .foregroundStyle(.white, viewer.status == .approved ? Color.green : .orange)
-                                    .background(Circle().fill(.background).padding(-1))
-                                    .offset(x: 3, y: 2)
-                            }
-                            .padding(.trailing, 2)
+                    .fixedSize()
+                    if requiredApprovalPending {
+                        Text(.Board.boardApprovalsRequiredPending)
+                            .font(.caption2).fixedSize(horizontal: false, vertical: true)
                     }
                 }
                 .padding(.horizontal, 6).padding(.vertical, 3)
-                .background(.secondary.opacity(0.08), in: Capsule())
+                .background(.secondary.opacity(0.08), in: RoundedRectangle(cornerRadius: 8))
                 .frame(minHeight: 44)
                 .contentShape(Rectangle())
             }

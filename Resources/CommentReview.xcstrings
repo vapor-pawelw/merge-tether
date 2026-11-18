@@ -67,6 +67,17 @@
         }
       }
     },
+    "commentReview.reviewBeforePublishing": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Review before publishing"
+          }
+        }
+      }
+    },
     "commentReview.publishSelectedHelp": {
       "extractionState": "manual",
       "localizations": {
