@@ -744,7 +744,7 @@ struct MRHumanActionTests {
         #expect(action.kind == .verificationFailure)
         #expect(action.action == .verifyFeedback)
         #expect(action.detail == nil)
-        #expect(String(localized: action.actionLabel) == "Verify again")
+        #expect(String(localized: action.actionLabel) == "Verify feedback again")
     }
 
     @Test func missingAssistantUsesSetupOnlyWhenNoPublicationDecisionIsPending() throws {

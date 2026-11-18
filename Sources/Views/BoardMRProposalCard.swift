@@ -86,12 +86,14 @@ struct BoardMRProposalCard: View {
                         Task {
                             defer { isWorking = false }
                             if let todo = proposal.todos.first {
-                                await monitor.adoptMRTodoProposal(todo)
+                                await monitor.adoptMRTodoProposal(todo) { intent in
+                                    confirmManualReview(for: monitor.reviewRequest(for: intent), monitor: monitor)
+                                }
                             } else {
                                 do {
                                     _ = try await monitor.addManagedMergeRequest(from: proposal.url.absoluteString)
                                     for intent in proposal.intents where intent.state == .pending || intent.state == .failed {
-                                        await monitor.runMRTodoIntent(id: intent.id)
+                                        await runConfirmedIntent(intent, monitor: monitor)
                                     }
                                 } catch { failed = true }
                             }

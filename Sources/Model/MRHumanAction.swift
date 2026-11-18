@@ -1,5 +1,36 @@
 import Foundation
 
+enum MRVerificationRetry: String, CaseIterable {
+    case authorFeedback = "verifyAuthorFeedback"
+    case drafts = "verifyDrafts"
+    case reReview = "verifyReReview"
+
+    var label: LocalizedStringResource {
+        switch self {
+        case .authorFeedback: .MRHumanAction.mrHumanActionActionVerifyFeedback
+        case .drafts: .MRHumanAction.mrHumanActionActionRetryDraftVerification
+        case .reReview: .Menu.menuReReviewRetry
+        }
+    }
+
+    var effect: MRActionCTA {
+        switch self {
+        case .authorFeedback: .verifyFeedback
+        case .drafts: .retryDraftVerification
+        case .reReview: .verifyReReview
+        }
+    }
+
+    func isAvailable(for item: MergeRequestAttentionMonitor.Item) -> Bool {
+        guard let request = item.mergeRequest, request.state == "opened", request.sha?.isEmpty == false else { return false }
+        switch self {
+        case .authorFeedback: return item.isAuthored && item.authorFeedbackStatus?.phase == .failed
+        case .drafts: return item.draftProofRecoveryFailure != nil
+        case .reReview: return item.reReviewReadiness == .failed || item.reReviewReadiness == .unavailable
+        }
+    }
+}
+
 @MainActor
 struct PreparedReplyContext {
     let draftID: Int
@@ -114,7 +145,8 @@ struct MRHumanAction {
         case .retryIntent: retryIntent.map { "intent:\($0.id)" }
         case .retryRun: retryJob.map { "job:\($0.id)" }
         case .handleFeedback: "prepare"
-        case .verifyFeedback, .retryDraftVerification: "verify"
+        case .verifyFeedback: MRVerificationRetry.authorFeedback.rawValue
+        case .retryDraftVerification: MRVerificationRetry.drafts.rawValue
         default: nil
         }
     }

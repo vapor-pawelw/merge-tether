@@ -328,8 +328,7 @@ private struct CommandCenterMRCardContent: View {
         case .retryIntent:
             if let intent = action.retryIntent {
                 primary(action.actionLabel, cta: MRActionCTA(intent: intent.kind)) {
-                    if intent.kind == .review, confirmManualReview(for: item, monitor: monitor) == nil { return }
-                    start { await monitor.runMRTodoIntent(id: intent.id) }
+                    start { await runConfirmedIntent(intent, monitor: monitor) }
                 }
             } else {
                 primary(action.actionLabel) { openAttention(.overview) }

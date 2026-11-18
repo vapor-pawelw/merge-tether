@@ -144,7 +144,7 @@ struct RemoteCardDetail: View {
                     switch confirmation?.kind {
                     case .deleteDraft: Text(.CommentReview.commentReviewDelete)
                     case .reReview, .merge, .enqueueMerge: Text(confirmation?.kind.title ?? .Remote.remoteConfirm)
-                    case .prepare, .retryJob:
+                    case .prepare, .retryJob, .verify:
                         if let label = confirmation?.label {
                             Text(verbatim: label)
                         } else if let cta = confirmationCard?.primaryCTA, cta.actionID == confirmation?.id {

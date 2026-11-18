@@ -68,6 +68,33 @@ import MergeTetherRemote
         #expect(bound.presentation?.secondaryCTA?.actionID == "markReady")
     }
 
+    @Test func verificationRetriesHaveDistinctActionsWhenFailuresOverlap() throws {
+        var item = try self.item()
+        let request = try MRDependencyPresentationTests().request(2, project: 1)
+        item.mergeRequest = request
+        item.isAuthored = true
+        item.authorFeedbackStatus = .init(head: request.sha!, fingerprint: "feedback", phase: .failed)
+        item.draftProofRecoveryFailure = "Draft check failed"
+        item.reReviewReadiness = .failed
+        let card = RemoteBoardAdapter.card(item, account: "author7@\(request.webURL.host!)")
+        let actions = card.actions.filter { $0.kind == .verify }
+
+        #expect(Set(actions.map(\.id)) == ["verifyAuthorFeedback", "verifyDrafts", "verifyReReview"])
+        #expect(Set(actions.compactMap(\.label)).count == 3)
+        #expect(Set(actions.map(\.token)).count == 3)
+
+        var presented = card
+        presented.primaryCTA = .init(title: "Verify feedback again", destination: .feedback)
+        let selected = RemoteBoardAdapter.bindingPrimaryAction(presented, humanAction: .verifyFeedback,
+            actionID: "verifyAuthorFeedback", nextStep: .monitoring)
+        #expect(selected.primaryCTA?.actionID == "verifyAuthorFeedback")
+
+        item.draftProofRecoveryFailure = nil
+        item.reReviewReadiness = nil
+        let feedbackOnly = RemoteBoardAdapter.card(item, account: "author7@\(request.webURL.host!)")
+        #expect(feedbackOnly.actions.filter { $0.kind == .verify }.map(\.id) == ["verifyAuthorFeedback"])
+    }
+
     @Test func manualReReviewConfirmationDescribesTheUncertaintyAndBindsItToTheAction() throws {
         var item = MergeRequestAttentionMonitor.Item(id: .init(projectID: 1, iid: 2), title: "MR",
             url: URL(string: "https://gitlab.example.test/g/p/-/merge_requests/2")!, isAuthored: true)
@@ -265,7 +292,8 @@ import MergeTetherRemote
                 #expect(card.primaryCTA?.destination == .feedback || card.presentation?.secondaryCTA?.destination == .feedback)
                 #expect(!card.actions.contains { [.verify, .merge, .enqueueMerge, .resolveThreads].contains($0.kind) })
             }
-            #expect(!card.actions.contains { $0.kind == .verify })
+            #expect(card.actions.filter { $0.kind == .verify }.map(\.id)
+                == (gate == "failed" ? ["verifyAuthorFeedback"] : []))
             if gate == "train" { #expect(card.detail == request.mergeTrainConflict?.noteURL.absoluteString) }
         }
     }

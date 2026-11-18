@@ -1107,7 +1107,7 @@
         "en": {
           "stringUnit": {
             "state": "translated",
-            "value": "Verify again"
+            "value": "Verify re-review readiness again"
           }
         }
       }
@@ -1184,7 +1184,7 @@
         "en": {
           "stringUnit": {
             "state": "translated",
-            "value": "Auto follows repository and general rules, including the draft default. Always on/off keeps your choice across draft and ready states. Global action permissions still apply; Draft merge requests never merge automatically."
+            "value": "Follow repository default applies repository and general rules, including the draft default. Always on and Always off keep your choice across draft and ready states. Global action permissions still apply. Draft merge requests are excluded from automatic merge."
           }
         }
       }

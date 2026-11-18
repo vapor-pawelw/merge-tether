@@ -6,6 +6,8 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 
 ## Unreleased
 
+- Show the current publication policy before starting queued Mac reviews. On iPhone, retry author feedback, draft checks, and re-review readiness independently.
+
 - Keep the confirmed merge mode through the GitLab submission and ask for a new confirmation when the available mode changes. Show when the selected assistant may check feedback before merging.
 - Bind Mac and iPhone task buttons to the exact retry or feedback work they describe. Show the effective draft publication policy before starting a review, remaining findings beside Mac approval, and the readiness decision before requesting re-review from iPhone.
 - Identify individual automation opt-ins and let an MR follow its repository default. Save permission reductions without requiring assistant sign-in.

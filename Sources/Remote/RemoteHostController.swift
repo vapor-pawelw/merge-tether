@@ -431,7 +431,9 @@ extension RemoteConnection: RemoteHostTransport {}
                 ? .completed : .changed
         }
         if action.id.hasPrefix("intent:"), let id = UUID(uuidString: String(action.id.dropFirst(7))) {
-            await monitor.runMRTodoIntent(id: id)
+            guard let intent = monitor.currentMRTodoIntents.first(where: { $0.id == id }) else { return .changed }
+            let consent = intent.kind == .review ? monitor.manualReviewConsent(for: monitor.reviewRequest(for: intent)) : nil
+            await monitor.runMRTodoIntent(id: id, confirmedReview: consent)
             return monitor.currentMRTodoIntents.first(where: { $0.id == id })?.state == .failed ? .failed : .completed
         }
         if action.kind == .retryJob, let id = UUID(uuidString: String(action.id.dropFirst(4))) {
@@ -531,11 +533,13 @@ extension RemoteConnection: RemoteHostTransport {}
             await monitor.attention.confirmReReview(item.id, head: head, fingerprint: fingerprint)
             return monitor.attention.currentOpenItems.first(where: { $0.id == item.id })?.reReviewRequested == true ? .completed : .uncertain
         case .verify:
-            if item.draftProofRecoveryFailure != nil {
-                monitor.attention.retryDraftProofRecovery(item.id)
-                return .completed
+            guard let retry = MRVerificationRetry(rawValue: action.id), retry.isAvailable(for: item) else { return .changed }
+            switch retry {
+            case .authorFeedback: monitor.attention.retryAuthorFeedback(item.id)
+            case .drafts: monitor.attention.retryDraftProofRecovery(item.id)
+            case .reReview: await monitor.attention.retryReReview(item.id)
             }
-            await monitor.attention.retryReReview(item.id); return .completed
+            return .completed
         default: return .changed
         }
     }

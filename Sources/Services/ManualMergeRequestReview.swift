@@ -14,20 +14,31 @@ extension AutomationPublicationMode {
 extension TodoMonitorService {
     struct ManualReviewConsent: Equatable {
         let accountRevision: UInt64
+        let target: MRAutomationScope.Target?
         let assistant: AutomationAssistant
         let publicationMode: AutomationPublicationMode
     }
 
     func manualReviewConsent(for item: MergeRequestAttentionMonitor.Item) -> ManualReviewConsent {
+        manualReviewConsent(for: item.mergeRequest)
+    }
+
+    func reviewRequest(for intent: MRTodoIntent) -> GitLabMergeRequest {
+        boardDisplayRequest(for: intent.target, url: intent.request.webURL) ?? intent.request
+    }
+
+    func manualReviewConsent(for request: GitLabMergeRequest?) -> ManualReviewConsent {
+        let target = request.flatMap { scopeTarget(projectID: $0.projectID, iid: $0.iid, url: $0.webURL) }
         let mode: AutomationPublicationMode
-        if let request = item.mergeRequest, let target = scopeTarget(projectID: item.id.projectID, iid: item.id.iid, url: item.url),
+        if let request, let target,
            settings.permitsAutomaticAction(.commentPublication, for: request, target: target),
            settings.automation.automaticPublicationPolicy.covers(request, host: target.host) {
             mode = settings.automation.publicationMode
         } else {
             mode = .manual
         }
-        return .init(accountRevision: glab.accountRevision, assistant: settings.automation.assistant, publicationMode: mode)
+        return .init(accountRevision: glab.accountRevision, target: target,
+                     assistant: settings.automation.assistant, publicationMode: mode)
     }
 
     func canRunReview(for item: MergeRequestAttentionMonitor.Item) -> Bool {

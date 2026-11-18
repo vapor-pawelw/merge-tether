@@ -46,7 +46,7 @@ import MergeTetherRemote
         card.contextRevision = item.mergeRequest.flatMap(contextRevision)
         card.dependencies = dependencyPresentation(item.dependencies, projectID: item.id.projectID)
         let publishable = item.publishAllDrafts
-        var kinds = extraActions
+        var kinds = extraActions.filter { $0 != .verify }
         if item.mergeRequest?.sha != nil {
             if item.draftCount == drafts.count, !publishable.isEmpty, !item.requiresDiscussionRecheck,
                item.drafts.allSatisfy({ $0.id != nil && AICommentAssessmentStore.safeForAutomaticPublication($0) }) { kinds.append(.publish) }
@@ -78,6 +78,11 @@ import MergeTetherRemote
                         label: String(localized: .Menu.menuReReviewConfirm))
                 }
                 return RemoteAction(id: raw, kind: kind, token: token)
+            }
+            for retry in MRVerificationRetry.allCases where retry.isAvailable(for: item) {
+                guard let retryToken = try? RemoteDigest.token([token, retry.rawValue]) else { continue }
+                card.actions.append(.init(id: retry.rawValue, kind: .verify, token: retryToken,
+                    confirmationText: retry.effect.help, label: String(localized: retry.label)))
             }
             card.actions += item.drafts.compactMap { draft in
                 guard let id = draft.id, id > 0 else { return nil }
@@ -128,8 +133,6 @@ import MergeTetherRemote
                     case .ready, .failed: extras.append(.prepare)
                     default: break
                     }
-                    if item.reReviewReadiness == .failed || item.reReviewReadiness == .unavailable
-                        || item.draftProofRecoveryFailure != nil { extras.append(.verify) }
                     let presentation = MRCardPresentation(row: row, monitor: monitor, allowsRemoval: result.lanes[lane].id == .reviewed)
                     let humanAction = presentation.humanAction
                     let feedbackIDs = item.authorFeedbackStatus?.followUpNoteIDs.sorted().map(String.init) ?? []
@@ -152,7 +155,7 @@ import MergeTetherRemote
                     let busy = presentation.actionsBlocked
                     if busy { card.actions = [] }
                     else {
-                        let mode = monitor.manualReviewConsent(for: item).publicationMode
+                        let jobPublication = monitor.manualReviewConsent(for: item).publicationMode
                         card = mergeActions(card, item: item, status: mergeStatus, monitor: monitor, account: account,
                             evidenceMatchesCatalogContext: row.evidenceMatchesCatalogContext)
                         let intent = humanAction?.retryIntent
@@ -160,21 +163,23 @@ import MergeTetherRemote
                             ?? row.attentionIntents.first { $0.state == .pending && !$0.isDeferredReview }
                         if let intent,
                            intent.kind == .refresh || monitor.availableAssistants.contains(monitor.settings.automation.assistant),
-                           let token = try? RemoteDigest.token([account, try RemoteDigest.token(intent),
-                               try RemoteDigest.token(monitor.settings.automation), mode.rawValue]) {
-                            let label = String(localized: MRHumanAction.intentLabel(intent))
-                            let confirmation = intent.kind == .review
-                                ? label + "\n\n" + String(localized: mode.reviewConfirmation) : label
-                            card.actions.append(.init(id: "intent:\(intent.id)", kind: .prepare, token: token,
-                                confirmationText: confirmation, label: label))
+                           let configuration = try? RemoteDigest.token(monitor.settings.automation) {
+                            let publication = monitor.manualReviewConsent(for: monitor.reviewRequest(for: intent)).publicationMode
+                            if let token = try? RemoteDigest.token([account, try RemoteDigest.token(intent), configuration, publication.rawValue]) {
+                                let label = String(localized: MRHumanAction.intentLabel(intent))
+                                let confirmation = intent.kind == .review
+                                    ? label + "\n\n" + String(localized: publication.reviewConfirmation) : label
+                                card.actions.append(.init(id: "intent:\(intent.id)", kind: .prepare, token: token,
+                                    confirmationText: confirmation, label: label))
+                            }
                         }
                         if let job = humanAction?.retryJob ?? row.latestJob, row.stoppedJobNeedsAttention,
                            job.taskPrompt != nil, job.mergeRequestURL != nil,
                            let token = try? RemoteDigest.token([account, try RemoteDigest.token(job),
-                               try RemoteDigest.token(monitor.settings.automation), mode.rawValue]) {
+                               try RemoteDigest.token(monitor.settings.automation), jobPublication.rawValue]) {
                             let label = String(localized: MRHumanAction.retryLabel(job))
                             let confirmation = job.workflow == .review
-                                ? label + "\n\n" + String(localized: mode.reviewConfirmation) : label
+                                ? label + "\n\n" + String(localized: jobPublication.reviewConfirmation) : label
                             card.actions.append(.init(id: "job:\(job.id)", kind: .retryJob, token: token,
                                 confirmationText: confirmation, label: label))
                         }

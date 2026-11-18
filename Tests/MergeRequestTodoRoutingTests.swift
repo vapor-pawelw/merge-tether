@@ -4,6 +4,30 @@ import Testing
 
 @MainActor
 @Suite struct MergeRequestTodoRoutingTests {
+    @Test func manualReviewIntentWaitsForConfirmationOfTheLiveRequest() async throws {
+        let f = try fixture(); defer { f.cleanup() }
+        var launched: UUID?
+        let router = MergeRequestTodoRouter(settings: f.settings, glab: f.glab, canAutomate: { true }, launcher: { intent, _ in
+            launched = intent.id
+            return UUID()
+        })
+        _ = await router.process([todo()], host: target.host, username: target.username, managed: [target], automatically: false)
+        let intent = try #require(f.settings.mrActionIntents.first)
+        #expect(intent.kind == .review)
+
+        var checked: GitLabMergeRequest?
+        await router.run(intent.id, manual: true) { request in
+            checked = request
+            return false
+        }
+        #expect(checked?.sha == intent.request.sha)
+        #expect(launched == nil && f.settings.mrActionIntents.first?.state == .pending)
+
+        await router.run(intent.id, manual: true) { $0.semanticContextFingerprint == checked?.semanticContextFingerprint }
+        #expect(launched == intent.id)
+        #expect(f.settings.mrActionIntents.first?.state == .running)
+    }
+
     @Test(arguments: [AutomationPackageDecision.undecided, .disabled])
     func missingConsentKeepsAutomaticRoutingUnreadWhileManualAcceptanceRemainsAvailable(_ decision: AutomationPackageDecision) async throws {
         // given
