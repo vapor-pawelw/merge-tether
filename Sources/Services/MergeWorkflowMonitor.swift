@@ -45,6 +45,7 @@ final class MergeWorkflowMonitor {
         var head: String
         var hasReviewed: Bool
         var reportedHeads: Set<String> = []
+        var reportedHeadVerdicts: [String: String]? = nil
         var seenAuthorReplies: Set<Int>? = nil
         var reportedEvidenceContexts: Set<String>? = nil
         var reviewWasCovered: Bool? = nil
@@ -463,12 +464,13 @@ final class MergeWorkflowMonitor {
                 previous.reviewedNoteRevisions = nil
                 previous.lastObservedVerdictDigest = nil
             }
-            let verdictDigest: String? = {
-                guard let verdict, verdict.version == 1, verdict.headSHA == head else { return nil }
+            let savedVerdictDigest: String? = {
+                guard let verdict, verdict.version == 1 else { return nil }
                 let encoder = JSONEncoder()
                 encoder.outputFormatting = [.sortedKeys]
                 return (try? encoder.encode(verdict)).map { UserAttentionSnapshot.digest(String(decoding: $0, as: UTF8.self)) }
             }()
+            let verdictDigest = verdict?.headSHA == head ? savedVerdictDigest : nil
             let changedVerdict = verdictDigest.map {
                 previous.lastObservedVerdictDigest != nil && previous.lastObservedVerdictDigest != $0
             } ?? false
@@ -493,8 +495,9 @@ final class MergeWorkflowMonitor {
             let staleContext = await staleReviewContext(request, discussions: discussions, glab: glab,
                 account: account, verdict: verdict)
                 .map { epoch == 0 ? $0 : $0 + "-coverage-\(epoch)" }
+            let hasReviewed = previous.hasReviewed || hasReviewEvidence || previous.reviewedHead != nil || staleContext != nil
             if firstObservation {
-                previous.hasReviewed = hasReviewEvidence || staleContext != nil
+                previous.hasReviewed = hasReviewed
                 previous.reportedEvidenceContexts = staleContext.map { Set([$0]) }
                 baselines.reviews[key] = previous
                 if let staleContext {
@@ -506,18 +509,29 @@ final class MergeWorkflowMonitor {
             }
             let newReplies = replies.flatMap { current in previous.seenAuthorReplies.map { current.subtracting($0) } } ?? []
             if let replies { previous.seenAuthorReplies = (previous.seenAuthorReplies ?? []).union(replies) }
-            let hasReviewed = previous.hasReviewed || hasReviewEvidence || staleContext != nil
-            let changedHead = hasReviewed && previous.head != head && previous.reportedHeads.insert(head).inserted
+            let movedToUncoveredHead = hasReviewed && previous.head != head && covered != true
+            let firstHeadReport = movedToUncoveredHead && previous.reportedHeads.insert(head).inserted
+            // A prior report at this SHA used older review evidence. A fresh event needs its own admission ID.
+            let returnToken: String? = if movedToUncoveredHead, !firstHeadReport, verdict?.headSHA != head,
+                let savedVerdictDigest, previous.reportedHeadVerdicts?[head] != savedVerdictDigest {
+                head + "-return-" + savedVerdictDigest
+            } else { nil }
+            let changedHead = firstHeadReport || returnToken != nil
+            if changedHead, let savedVerdictDigest {
+                previous.reportedHeadVerdicts = previous.reportedHeadVerdicts ?? [:]
+                previous.reportedHeadVerdicts?[head] = savedVerdictDigest
+            }
             let staleUnreported = staleContext.map { !(previous.reportedEvidenceContexts ?? []).contains($0) } == true
             if hasReviewed && (changedHead || !newReplies.isEmpty || staleUnreported) {
                 let observation = Observation(glab: glab, account: account, request: request)
                 let ids = newReplies.sorted()
                 let token = staleUnreported && !changedHead && ids.isEmpty
                     ? head + "-context-" + (staleContext ?? "")
-                    : head + (ids.isEmpty ? "" : "-replies-" + ids.map(String.init).joined(separator: ","))
+                    : (returnToken ?? head) + (ids.isEmpty ? "" : "-replies-" + ids.map(String.init).joined(separator: ","))
                 var scope = IncrementalReviewScope(currentHead: head)
                 let observedReviewHead = previous.head == diagnosedHead ? nil : previous.head
-                if changedHead, let reviewed = previous.reviewedHead ?? observedReviewHead {
+                let reviewedBaseline = previous.reviewedHead == head ? observedReviewHead : previous.reviewedHead ?? observedReviewHead
+                if changedHead, let reviewed = reviewedBaseline {
                     scope.reviewedHead = reviewed
                     if let reviewedDiff = previous.reviewedDiff, reviewedDiff.headSHA == reviewed,
                        let currentDiff = try? await glab.fetchReviewDiffSnapshot(for: request, host: account.host) {

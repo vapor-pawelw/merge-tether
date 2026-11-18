@@ -6,6 +6,12 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 
 ## Unreleased
 
+- Resume queued reviews and re-review readiness checks after temporary GitLab read failures. Keep re-review updates waiting when the workflow queue fills, including across a restart.
+- Resume the final comment-review check after successful automatic draft publication when a GitLab read fails. Match the saved publication evidence against the current account, merge request, discussions and draft list before closing the checkpoint.
+- Schedule re-review after a completed review without findings and when a branch returns to an earlier commit that the latest verdict no longer covers.
+- Retry conflict preparation after a worker temporarily holds the merge request. Allow repair of a confirmed conflict after a GitLab merge queue disappears while preserving the merge submission checkpoint.
+- Diagnose new failed jobs in the same pipeline after a confirmed infrastructure retry, with the original single-retry limit intact.
+
 - Assess author-feedback obligations per thread, so one reviewer's unresolved concern no longer blocks independent corrections or accepted threads. Treat verified conditional fixes according to their original scope instead of inventing a stronger external-contract requirement. Escalate genuinely essential external decisions with full context, verified facts, missing evidence, a precise question and merge impact on Mac and iPhone; keep those concerns open without repeatedly assigning them to coding workers. Refresh cached assessments under the updated policy.
 
 - Open iPhone MR Details by tapping anywhere on a card outside its controls, and remove redundant Show details buttons. Show current approvers and the signed-in user's current or reset approval on cards and Details, matching macOS.

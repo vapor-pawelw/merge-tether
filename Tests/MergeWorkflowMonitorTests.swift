@@ -253,6 +253,78 @@ struct MergeWorkflowMonitorTests {
         #expect(incremental.contains("Incremental re-review") && incremental.contains(reviewed) && !incremental.contains("identical"))
     }
 
+    @Test(arguments: [false, true])
+    func noFindingsReviewSchedulesNextPushEvenWhenGitLabShowsUnreviewed(_ legacyCheckpoint: Bool) async throws {
+        let suite = "NoFindingsReview.\(UUID())"
+        let defaults = try #require(UserDefaults(suiteName: suite))
+        defer { defaults.removePersistentDomain(forName: suite) }
+        let directory = FileManager.default.temporaryDirectory.appending(path: UUID().uuidString)
+        defer { try? FileManager.default.removeItem(at: directory) }
+        let host = "gitlab.example.test"
+        let user = GitLabAuthenticatedUser(id: 1, username: "owner")
+        let reviewed = String(repeating: "a", count: 40)
+        let pushed = String(repeating: "b", count: 40)
+        let threads = #"[{"id":"other","notes":[{"id":200,"author":{"id":3},"system":false,"body":"Other reviewer's condition","resolvable":true,"resolved":false}]}]"#
+        let discussions = try JSONDecoder().decode([GitLabMergeRequestDiscussion].self, from: Data(threads.utf8))
+        let verdict = ReviewVerdict(version: 1, host: host, projectID: 7, iid: 13, headSHA: reviewed, verdict: .noObjections,
+            discussionFingerprint: ReviewVerdict.fingerprint(discussions), username: user.username, userID: user.id)
+        let verdictFile = ReviewVerdictStore.fileURL(host: host, projectID: 7, iid: 13, in: directory)
+        try FileManager.default.createDirectory(at: verdictFile.deletingLastPathComponent(), withIntermediateDirectories: true)
+        try JSONEncoder().encode(verdict).write(to: verdictFile)
+
+        let gitlab = InMemoryGitLab()
+        defer { gitlab.close() }
+        gitlab.write("request", mergeRequest(13, sha: reviewed, author: 2))
+        gitlab.handler = { call in
+            #expect(call.method == "GET")
+            switch call.endpoint {
+            case let path where path.contains("reviewer_id=1"):
+                return InMemoryGitLab.output("[\(gitlab.text("request"))]")
+            case let path where path.contains("/reviewers?"):
+                return InMemoryGitLab.output(#"[{"user":{"id":1},"state":"unreviewed"}]"#)
+            case let path where path.contains("/discussions?"):
+                return InMemoryGitLab.output(threads)
+            case "/projects/7/merge_requests/13":
+                return try gitlab.response("request")
+            case "/projects/7/merge_requests/13/raw_diffs":
+                return InMemoryGitLab.output("diff --git a/A b/A\n@@ -1 +1,2 @@\n context\n+added line\n")
+            default:
+                return try gitlab.unexpected(call)
+            }
+        }
+        let glab = gitlab.service(host: host, username: user.username)
+        var events: [MergeWorkflowEvent] = []
+        func pollAfterRestart() async {
+            let monitor = MergeWorkflowMonitor(defaults: defaults, verdictDirectory: directory)
+            await monitor.poll(glab: glab, host: host, user: user, authored: [], enabled: [.reviewUpdate], reviewSLA: 3_600) {
+                events.append($0)
+            }
+        }
+
+        if legacyCheckpoint {
+            // Older installations persisted the verified head without recording that a review ran.
+            let baseline = """
+            [{"host":"\(host)","userID":1},{"authored":{},"reviews":{"7!13":{
+            "head":"\(reviewed)","hasReviewed":false,"reportedHeads":["\(reviewed)"],"seenAuthorReplies":[],
+            "reviewedHead":"\(reviewed)"}}}]
+            """
+            defaults.set(Data(baseline.utf8), forKey: "automation.mergeWorkflowBaselines.v1")
+        } else {
+            await pollAfterRestart()
+            #expect(events.isEmpty)
+        }
+
+        gitlab.write("request", mergeRequest(13, sha: pushed, author: 2))
+        await pollAfterRestart()
+        await pollAfterRestart()
+
+        let event = try #require(events.first)
+        #expect(events.count == 1)
+        #expect(event.kind == .reviewUpdate)
+        #expect(event.mergeRequest.sha == pushed)
+        #expect(event.context.contains(reviewed))
+    }
+
     @Test(arguments: ["baseline", "candidate", "legacy"])
     func reReviewRequiresDiffEvidenceForTheComparedHeads(_ wrongDiff: String) async throws {
         let suite = "ReviewDiffHeadRace.\(UUID())"
@@ -324,6 +396,91 @@ struct MergeWorkflowMonitorTests {
         #expect(event.mergeRequest.sha == changed)
         #expect(event.context.contains("Incremental re-review"))
         #expect(!event.context.contains("Do not review the code again"))
+    }
+
+    @Test(arguments: ["observed", "unobserved", "covered"])
+    func returningToAPreviousHeadSchedulesOnlyAnUncoveredReview(_ priorReview: String) async throws {
+        let suite = "ReviewHeadReturn.\(UUID())"
+        let defaults = try #require(UserDefaults(suiteName: suite))
+        defer { defaults.removePersistentDomain(forName: suite) }
+        let directory = FileManager.default.temporaryDirectory.appending(path: UUID().uuidString)
+        defer { try? FileManager.default.removeItem(at: directory) }
+        let host = "gitlab.example.test"
+        let user = GitLabAuthenticatedUser(id: 1, username: "owner")
+        let original = String(repeating: "a", count: 40)
+        let pushed = String(repeating: "b", count: 40)
+        let beforeOriginal = String(repeating: "c", count: 40)
+        let gitlab = InMemoryGitLab()
+        defer { gitlab.close() }
+        gitlab.write("head", beforeOriginal)
+        gitlab.handler = { call in
+            switch call.endpoint {
+            case let path where path.starts(with: "/merge_requests?"):
+                return InMemoryGitLab.output("[\(mergeRequest(13, sha: gitlab.text("head"), author: 2))]")
+            case "/projects/7/merge_requests/13":
+                return InMemoryGitLab.output(mergeRequest(13, sha: gitlab.text("head"), author: 2))
+            case "/projects/7/merge_requests/13/raw_diffs":
+                return InMemoryGitLab.output("diff --git a/A b/A\n@@ -1 +1,2 @@\n context\n+\(gitlab.text("head"))\n")
+            case let path where path.contains("/reviewers?"):
+                return InMemoryGitLab.output(#"[{"user":{"id":1},"state":"reviewed"}]"#)
+            case let path where path.contains("/discussions?"):
+                return InMemoryGitLab.output("[]")
+            default:
+                return try gitlab.unexpected(call)
+            }
+        }
+        let glab = gitlab.service(host: host, username: user.username)
+        let settings = SettingsManager(defaults: defaults)
+        settings.automation.applyPreset(.full, for: .codex)
+        settings.automation.workflowRules[.reviewUpdate].mode = .preview
+        settings.save()
+
+        func recordVerdict(at head: String) throws {
+            let receipt = ReviewVerdict(version: 1, host: host, projectID: 7, iid: 13, headSHA: head,
+                verdict: .noObjections, discussionFingerprint: ReviewVerdict.fingerprint([]), username: user.username,
+                userID: user.id, runID: UUID())
+            let file = ReviewVerdictStore.fileURL(host: host, projectID: 7, iid: 13, in: directory)
+            try FileManager.default.createDirectory(at: file.deletingLastPathComponent(), withIntermediateDirectories: true)
+            try JSONEncoder().encode(receipt).write(to: file)
+        }
+        @MainActor func poll() async -> [MergeWorkflowEvent] {
+            let settings = SettingsManager(defaults: defaults)
+            let automation = MergeWorkflowAutomation(settings: settings, glab: glab)
+            let monitor = MergeWorkflowMonitor(defaults: defaults, verdictDirectory: directory)
+            var events: [MergeWorkflowEvent] = []
+            await monitor.poll(glab: glab, host: host, user: user, authored: [], enabled: [.reviewUpdate], reviewSLA: 3_600) {
+                events.append($0)
+                automation.receive($0, host: host, user: user)
+            }
+            return events
+        }
+
+        try recordVerdict(at: beforeOriginal)
+        #expect(await poll().isEmpty)
+        gitlab.write("head", original)
+        let originalEvent = try #require(await poll().first)
+        try recordVerdict(at: original)
+        #expect(await poll().isEmpty)
+        gitlab.write("head", pushed)
+        #expect(await poll().map(\.mergeRequest.sha) == [pushed])
+        try recordVerdict(at: pushed)
+        if priorReview != "unobserved" { #expect(await poll().isEmpty) }
+
+        gitlab.write("head", original)
+        if priorReview == "covered" { try recordVerdict(at: original) }
+        let returning = await poll()
+        if priorReview == "covered" {
+            #expect(returning.isEmpty)
+        } else {
+            try #require(returning.count == 1)
+            #expect(returning[0].mergeRequest.sha == original)
+            #expect(returning[0].identity != originalEvent.identity)
+            #expect(returning[0].context.contains(pushed))
+            let admitted = SettingsManager(defaults: defaults).workflowActivity
+            #expect(admitted.filter { $0.event.mergeRequest.sha == original }.count == 2)
+            #expect(admitted.contains { $0.id == returning[0].identity })
+        }
+        #expect(await poll().isEmpty)
     }
 
     @Test func discussionOnlyReReviewNamesOnlyTheChangedNotes() async throws {
