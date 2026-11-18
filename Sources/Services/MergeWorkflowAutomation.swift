@@ -747,20 +747,25 @@ final class MergeWorkflowAutomation {
                 projectID: latest.projectID, iid: latest.iid), pipelineID: reservation.pipelineID,
                 headSHA: head, reservationID: token)
         } else { confirmation = nil }
-        let job = try await AssistantAutomationRunner.launch(
-            settingsBeforeLaunch.assistant,
-            title: "\(repository) !\(latest.iid) (\(latest.author.assistantTitleName(viewerUsername: entry.user.username)))",
-            stackPosition: stackPosition,
-            mergeRequestURL: latest.webURL,
-            prompt: context + isolation + suppliedEvidence,
-            workspace: settingsBeforeLaunch.assistantWorkspace,
-            access: access,
-            work: workKey(entry), username: entry.user.username, settings: settings, pipelineReservation: handoff,
-            feedbackNoteIDs: feedbackIDs, isReview: event.kind == .reviewUpdate, mrWorkflow: mrWorkflow,
-            expectedHeadSHA: bindLaunchSnapshot || confirmation != nil ? current.sha : nil, jobCoordinator: jobCoordinator,
-            configurationSnapshot: bindLaunchSnapshot ? settingsBeforeLaunch : nil,
-            glab: glab.freshSession(), workflowEventKind: event.kind, pipelineHandoffConfirmation: confirmation
-        )
+        let job: AssistantAutomationRunner.Handoff
+        do {
+            job = try await AssistantAutomationRunner.launch(
+                settingsBeforeLaunch.assistant,
+                title: "\(repository) !\(latest.iid) (\(latest.author.assistantTitleName(viewerUsername: entry.user.username)))",
+                stackPosition: stackPosition,
+                mergeRequestURL: latest.webURL,
+                prompt: context + isolation + suppliedEvidence,
+                workspace: settingsBeforeLaunch.assistantWorkspace,
+                access: access,
+                work: workKey(entry), username: entry.user.username, settings: settings, pipelineReservation: handoff,
+                feedbackNoteIDs: feedbackIDs, isReview: event.kind == .reviewUpdate, mrWorkflow: mrWorkflow,
+                expectedHeadSHA: bindLaunchSnapshot || confirmation != nil ? current.sha : nil, jobCoordinator: jobCoordinator,
+                configurationSnapshot: bindLaunchSnapshot ? settingsBeforeLaunch : nil,
+                glab: glab.freshSession(), workflowEventKind: event.kind, pipelineHandoffConfirmation: confirmation
+            )
+        } catch let failure as AssistantAutomationRunner.ReviewAdmissionReadFailure where event.kind == .reviewUpdate {
+            throw PrelaunchReadFailure(cause: failure.cause, configuration: settingsBeforeLaunch)
+        }
         // Transfer this owned reservation to the CLI run; terminal completion
         // releases it through the monitor callback rather than user dismissal.
         handoff = nil

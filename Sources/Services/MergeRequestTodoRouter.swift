@@ -278,6 +278,9 @@ final class MergeRequestTodoRouter {
                 settings.recordAutomationEvent(target: original.target, action: .retry, origin: .manual, state: .queued,
                     intentID: id, jobID: jobID, relatedJobID: original.jobID)
             }
+        } catch let failure as AssistantAutomationRunner.ReviewAdmissionReadFailure
+            where !manual && original.kind == .review && original.state == .pending && original.jobID == nil {
+            Log.monitor.debug("Could not admit the queued review: \(String(describing: failure.cause), privacy: .private)")
         } catch PipelineRefreshError.ownershipReserved {
             // Another task owns this pipeline. Wait without starting a worker
             // or presenting the lease race as a failed agent execution.

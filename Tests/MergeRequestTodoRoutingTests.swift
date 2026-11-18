@@ -894,6 +894,63 @@ import Testing
         #expect(launches == 1)
     }
 
+    @Test(arguments: ["/user", "/projects/7/merge_requests/11"])
+    func acknowledgedReviewSurvivesAReadFailureInsideTheRealLaunch(_ failingEndpoint: String) async throws {
+        let f = try fixture(); defer { f.cleanup() }
+        f.settings.automation.applyPreset(.full, for: .codex)
+        f.settings.automation.scope[target] = .active
+        f.settings.glabPath = f.glab.glabPath
+        let handler = try #require(f.gitlab.handler)
+        var inAdmission = false
+        var failures = 0
+        f.gitlab.handler = { call in
+            if call.arguments == ["config", "get", "host"] { return InMemoryGitLab.output("gitlab.example.test") }
+            if call.arguments == ["auth", "status"] {
+                inAdmission = true
+                return InMemoryGitLab.output(error: "Logged in to gitlab.example.test as me")
+            }
+            if inAdmission, call.endpoint == failingEndpoint, failures == 0 {
+                failures += 1
+                return InMemoryGitLab.output(error: "HTTP 503 Service Unavailable", code: 1)
+            }
+            return try await handler(call)
+        }
+        let coordinator = AssistantJobCoordinator(execute: { _, _ in
+            .init(result: .init(status: .succeeded, summary: "Review fixture"), output: "")
+        })
+        @MainActor func makeRouter(_ state: SettingsManager) -> MergeRequestTodoRouter {
+            MergeRequestTodoRouter(settings: state, glab: f.glab, canAutomate: { true }, launcher: { intent, manual in
+                let job = try await AssistantAutomationRunner.launch(.codex, title: "Review fixture",
+                    mergeRequestURL: intent.request.webURL, prompt: "Review", workspace: "",
+                    work: .init(host: intent.target.host, projectID: intent.target.projectID, iid: intent.request.iid),
+                    username: intent.target.username, settings: state, feedbackTodos: intent.sourceEvents,
+                    isReview: true, mrWorkflow: .review, manual: manual, jobCoordinator: coordinator,
+                    configurationSnapshot: state.automation, glab: f.glab.freshSession())
+                return job.id
+            })
+        }
+
+        let event = todo()
+        let router = makeRouter(f.settings)
+        #expect(await router.process([event], host: target.host, username: target.username, managed: [target]) == [event.id])
+        #expect(failures == 1)
+        #expect(f.settings.assistantHandoffs.isEmpty)
+        let initial = try #require(f.settings.mrActionIntents.first)
+        #expect(initial.state == .pending && initial.jobID == nil)
+
+        let restored = SettingsManager(defaults: f.defaults)
+        restored.glabPath = f.glab.glabPath
+        let restarted = makeRouter(restored)
+        _ = await restarted.process([], host: target.host, username: target.username, managed: [target])
+        await coordinator.waitForTermination()
+
+        let job = try #require(restored.assistantHandoffs.first)
+        #expect(restored.assistantHandoffs.map(\.id) == [job.id])
+        #expect(restored.mrActionIntents.map(\.id) == [initial.id])
+        #expect(restored.mrActionIntents.first?.jobID == job.id)
+        #expect(f.gitlab.requests.filter { $0.method != "GET" }.map(\.endpoint) == ["/todos/\(event.id)/mark_as_done"])
+    }
+
     @Test func pendingReviewRequestsAcrossHeadsBecomeOneCurrentReviewAction() async throws {
         let f = try fixture(); defer { f.cleanup() }
         let router = MergeRequestTodoRouter(settings: f.settings, glab: f.glab, canAutomate: { false })

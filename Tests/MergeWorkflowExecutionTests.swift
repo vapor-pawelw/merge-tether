@@ -670,6 +670,74 @@ import Testing
         #expect(gitlab.requests.allSatisfy { $0.method == "GET" })
     }
 
+    @Test(arguments: ["/user", "/projects/7/merge_requests/11"])
+    func reReviewResumesAfterAReadFailureInsideTheRealLaunch(_ failingEndpoint: String) async throws {
+        let suite = "WorkflowLaunchRead.\(UUID())"
+        let defaults = try #require(UserDefaults(suiteName: suite))
+        defer { defaults.removePersistentDomain(forName: suite) }
+        let settings = SettingsManager(defaults: defaults)
+        settings.automation.applyPreset(.full, for: .codex)
+        let host = "gitlab-\(UUID().uuidString.lowercased()).example.test"
+        let user = GitLabAuthenticatedUser(id: 1, username: "me")
+        let url = try #require(URL(string: "https://\(host)/team/repo/-/merge_requests/11"))
+        let head = String(repeating: "a", count: 40)
+        let gitlab = reviewRetryGitLab(host: host, url: url, currentHead: head)
+        defer { gitlab.close() }
+        let glab = gitlab.service(host: host, username: user.username)
+        settings.glabPath = glab.glabPath
+        let request = try await glab.fetchMergeRequest(projectID: 7, iid: 11, host: host)
+        let event = MergeWorkflowEvent(kind: .reviewUpdate, mergeRequest: request, identity: "launch-read", context: "Source updated")
+        let handler = try #require(gitlab.handler)
+        var inAdmission = false
+        var available = false
+        var failures = 0
+        gitlab.handler = { call in
+            if call.arguments == ["auth", "status"] { inAdmission = true }
+            if inAdmission, !available, call.endpoint == failingEndpoint {
+                failures += 1
+                return InMemoryGitLab.output(error: "HTTP 503 Service Unavailable", code: 1)
+            }
+            return try await handler(call)
+        }
+        let coordinator = AssistantJobCoordinator(healthStore: AssistantCLIHealthStore(defaults: defaults), execute: { _, _ in
+            .init(result: .init(status: .succeeded, summary: "Review fixture"), output: "")
+        })
+        let clock = ReadRetryClock()
+        @MainActor func make(_ state: SettingsManager) -> MergeWorkflowAutomation {
+            MergeWorkflowAutomation(settings: state, glab: glab, jobCoordinator: coordinator,
+                retryWait: { _ in await Task.yield() }, now: { clock.date })
+        }
+        @MainActor func settle(_ automation: MergeWorkflowAutomation) async throws {
+            let deadline = ContinuousClock.now + .seconds(5)
+            while automation.entries.first.map({ [.queued, .running, .waitingForAssistant].contains($0.state) }) == true {
+                try #require(ContinuousClock.now < deadline)
+                try await Task.sleep(for: .milliseconds(5))
+            }
+        }
+        let initial = make(settings)
+        initial.receive(event, host: host, user: user)
+        initial.startNext()
+        try await settle(initial)
+        #expect(failures > 0)
+        #expect(initial.hasReadOnlyFailure(for: request))
+        #expect(settings.assistantHandoffs.isEmpty)
+
+        let restored = SettingsManager(defaults: defaults)
+        restored.glabPath = glab.glabPath
+        let restarted = make(restored)
+        available = true
+        restarted.startNext()
+        #expect(restarted.entries.first?.state == .failed)
+        clock.date = clock.date.addingTimeInterval(ReadOnlyAssessmentRetry.cooldown + 1)
+        restarted.startNext()
+        try await settle(restarted)
+        await coordinator.waitForTermination()
+        #expect(restarted.entries.map(\.id) == [event.identity])
+        #expect(restarted.entries.first?.state == .completed)
+        #expect(restored.assistantHandoffs.map(\.expectedHeadSHA) == [head])
+        #expect(gitlab.requests.allSatisfy { $0.method == "GET" })
+    }
+
     @Test(arguments: ["cooldown", "dependency", "account-change"])
     func purePrelaunchFailurePreservesRestartAccountHeadAndRetryBoundaries(_ recovery: String) async throws {
         let suite = "WorkflowReadRetry.\(UUID())"

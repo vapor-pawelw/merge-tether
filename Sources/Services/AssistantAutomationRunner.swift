@@ -212,6 +212,11 @@ enum AssistantAutomationRunner {
         }
     }
 
+    // The launcher's authentication and MR reads precede all handoff and worker effects.
+    struct ReviewAdmissionReadFailure: Error {
+        let cause: GlabError
+    }
+
     enum HandoffError: LocalizedError {
         case desktopUnavailable
         case cannotBuildLink
@@ -400,7 +405,12 @@ enum AssistantAutomationRunner {
         var pipelineDiagnosis: ForeignPipelineDiagnosis?
         if foreignDiagnosis || jobCoordinator == nil || configurationSnapshot != nil || (reviewRetry != nil && glab != nil) {
             let service = glab ?? GlabService()
-            let snapshot = try await freshRequest(work: work, username: username, settings: settings, isReview: review, glab: service)
+            let snapshot: (request: GitLabMergeRequest, user: GitLabAuthenticatedUser)
+            do {
+                snapshot = try await freshRequest(work: work, username: username, settings: settings, isReview: review, glab: service)
+            } catch let error as GlabError where !manual && recordsReviewVerdict && retryOf == nil && error.isTransientReadFailure {
+                throw ReviewAdmissionReadFailure(cause: error)
+            }
             guard manual || settings.automation.scope.permits(snapshot.request, host: work.host, username: username) else {
                 throw AssistantJobExecutor.ExecutionError.disabledPermission
             }
