@@ -1215,6 +1215,12 @@ import MergeTetherRemote
          {"id":13,"author_id":8,"note":"Someone else's draft","discussion_id":null,"position":null}]
         """#
 
+    private let authorReplyDraftJSON = #"""
+        [{"id":11,"author_id":3,"note":"Verified first correction.","discussion_id":"abc","position":null},
+         {"id":12,"author_id":3,"note":"Thanks, looks fixed.","discussion_id":"abc","position":null},
+         {"id":13,"author_id":8,"note":"Someone else's draft","discussion_id":null,"position":null}]
+        """#
+
     private var manualTarget: MRDiscussionTarget {
         .init(host: host, username: "me", projectID: 1, iid: 2,
               url: URL(string: "https://gitlab.example.org/g/p/-/merge_requests/2")!)
@@ -4330,7 +4336,8 @@ import MergeTetherRemote
         let harness = try makeHarness(assistantWorked: true, authored: true)
         defer { harness.cleanUp() }
         harness.settings.automation.publishDraftsWithoutConfirmation = true
-        try harness.write("drafts.json", draftJSON)
+        try harness.write("discussions.json", duoDiscussion)
+        try harness.write("drafts.json", authorReplyDraftJSON)
         try harness.verifyFollowUpDrafts()
         try harness.assessFollowUpClaims()
         harness.settings.automation.allowFollowUpPush = false
@@ -4345,13 +4352,93 @@ import MergeTetherRemote
         let harness = try makeHarness(assistantWorked: true, authored: true)
         defer { harness.cleanUp() }
         harness.settings.automation.publishDraftsWithoutConfirmation = true
-        try harness.write("drafts.json", draftJSON)
+        try harness.write("discussions.json", duoDiscussion)
+        try harness.write("drafts.json", authorReplyDraftJSON)
         try harness.verifyFollowUpDrafts()
         try harness.assessFollowUpClaims()
         try await harness.poll()
         try await harness.poll()
         #expect(harness.log("selected.log").split(separator: "\n").count == 2)
         #expect(harness.monitor.currentOpenItems.first?.draftCount == 0)
+    }
+
+    @Test func verifiedAuthorReplyPublishesWithoutPublishingAStandaloneRepairSummary() async throws {
+        let harness = try makeHarness(assistantWorked: true, authored: true)
+        defer { harness.cleanUp() }
+        harness.settings.automation.publishDraftsWithoutConfirmation = true
+        let drafts = draftJSON.replacingOccurrences(of: "Handle nil here.", with: "Pipeline repair completed.")
+        try harness.write("drafts.json", drafts)
+        try harness.write("discussions.json", duoDiscussion)
+        try harness.verifyFollowUpDrafts()
+        try harness.assessFollowUpClaims()
+
+        try await harness.poll()
+        try await harness.poll()
+
+        #expect(harness.log("selected.log").contains("/draft_notes/12/publish"))
+        #expect(!harness.log("selected.log").contains("/draft_notes/11/publish"))
+        #expect(harness.monitor.currentOpenItems.first?.drafts.map(\.id) == [11])
+        #expect(harness.log("drafts.json").contains("Pipeline repair completed."))
+    }
+
+    @Test(arguments: [false, true], [false, true])
+    func selfOnlyDraftsNeverEnterAutomaticProofRecoveryOrShowPublicationProofWarnings(_ prepares: Bool, _ sealed: Bool) async throws {
+        var checks = 0
+        let harness = try makeHarness(assistantWorked: true, authored: true, verifyDraftRecovery: { input, _, _ in
+            checks += 1
+            return .init(drafts: input.requestedDraftIDs.map {
+                .init(draftID: $0, state: .invalid, reason: "Old report is stale")
+            })
+        })
+        defer { harness.monitor.draftProofRecoveryCoordinator?.cancel(); harness.cleanUp() }
+        harness.settings.automation.publishDraftsWithoutConfirmation = true
+        harness.settings.automation.authorFeedback.isEnabled = prepares
+        harness.settings.automation.workflowRules[.newDiscussion].mode = prepares ? .assistant : .off
+        try harness.write("drafts.json", #"[{"id":12,"author_id":3,"note":"Repair report","discussion_id":"abc"}]"#)
+        try harness.write("discussions.json", #"[{"id":"abc","notes":[{"id":40,"author":{"id":3,"username":"me"},"body":"Repair completed","system":false}]}]"#)
+        if sealed { try harness.verifyFollowUpDrafts() }
+
+        try await harness.poll()
+        try await harness.poll()
+        await harness.monitor.refreshPendingDrafts()
+
+        #expect(checks == 0)
+        #expect(harness.monitor.currentItems.first?.awaitingRemoteVerification == false)
+        #expect(harness.monitor.currentItems.first?.draftCount == 1)
+        #expect(harness.log("selected.log").isEmpty)
+    }
+
+    @Test func quickDraftReadRetiresTheProofWarningWhenTheIncomingCommentIsRemoved() async throws {
+        let harness = try makeHarness(assistantWorked: true, authored: true)
+        defer { harness.cleanUp() }
+        harness.settings.automation.publishDraftsWithoutConfirmation = true
+        harness.settings.automation.allowFollowUpPush = false
+        try harness.write("drafts.json", #"[{"id":12,"author_id":3,"note":"Repair report","discussion_id":"abc"}]"#)
+        try harness.write("discussions.json", duoDiscussion)
+        try await harness.poll()
+        #expect(harness.monitor.currentItems.first?.awaitingRemoteVerification == true)
+        try harness.write("discussions.json", #"[{"id":"abc","notes":[{"id":41,"author":{"id":3,"username":"me"},"body":"Repair completed","system":false}]}]"#)
+
+        await harness.monitor.refreshPendingDrafts()
+
+        #expect(harness.monitor.currentItems.first?.awaitingRemoteVerification == false)
+        #expect(harness.monitor.currentItems.first?.incomingReplyDiscussionIDs == [])
+        #expect(harness.monitor.currentItems.first?.draftCount == 1)
+    }
+
+    @Test func publicationProofWarningsUseSourceIDsWithoutRequiringADisplayUsername() async throws {
+        let harness = try makeHarness(assistantWorked: true, authored: true)
+        defer { harness.cleanUp() }
+        harness.settings.automation.publishDraftsWithoutConfirmation = true
+        harness.settings.automation.allowFollowUpPush = false
+        try harness.write("drafts.json", #"[{"id":12,"author_id":3,"note":"Fixed","discussion_id":"abc"}]"#)
+        try harness.write("discussions.json", #"[{"id":"abc","notes":[{"id":40,"author":{"id":8},"body":"Fix the fallback","system":false}]}]"#)
+        try await harness.poll()
+        #expect(harness.monitor.currentItems.first?.awaitingRemoteVerification == true)
+
+        await harness.monitor.refreshPendingDrafts()
+
+        #expect(harness.monitor.currentItems.first?.awaitingRemoteVerification == true)
     }
 
     private func prepareSupersededFollowUpProofs(_ harness: Harness) throws -> UUID {
@@ -4456,12 +4543,13 @@ import MergeTetherRemote
         let harness = try makeHarness(assistantWorked: true, authored: true)
         defer { harness.cleanUp() }
         harness.settings.automation.publishDraftsWithoutConfirmation = true
-        try harness.write("drafts.json", draftJSON)
+        try harness.write("discussions.json", duoDiscussion)
+        try harness.write("drafts.json", authorReplyDraftJSON)
         try harness.verifyFollowUpDrafts()
         try harness.assessFollowUpClaims()
         if change == "content" { try harness.write("remote-file-content.txt", "old code") }
         if change == "duringProof" { try harness.write("edit-during-proof", "yes") }
-        if change == "body" { try harness.write("drafts.json", draftJSON.replacingOccurrences(of: "Thanks, looks fixed.", with: "A different unsupported fix claim")) }
+        if change == "body" { try harness.write("drafts.json", authorReplyDraftJSON.replacingOccurrences(of: "Thanks, looks fixed.", with: "A different unsupported fix claim")) }
         if change == "head" { try harness.write("remote-head.txt", String(repeating: "b", count: 40)) }
         if change == "run" {
             var later = try #require(harness.settings.assistantHandoffs.last)

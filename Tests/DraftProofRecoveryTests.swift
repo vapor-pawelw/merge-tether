@@ -5,6 +5,32 @@ import Testing
 
 @MainActor
 struct DraftProofRecoveryTests {
+    @Test(arguments: ["standalone", "selfThread", "incoming"])
+    func automaticReplyRepairRequiresIncomingFeedbackEvenInManualPublicationMode(_ kind: String) async throws {
+        let f = try Fixture()
+        defer { f.clean() }
+        f.settings.automation.publicationMode = .manual
+        f.snapshot.drafts = [.init(id: 12, authorID: 3, note: "Fixed",
+            discussionID: kind == "standalone" ? nil : "thread", position: nil)]
+        if kind == "selfThread" {
+            f.snapshot.discussions = [.init(id: "thread", notes: [.init(id: 10,
+                author: .init(id: 3, username: "me", name: nil), system: false, resolvable: true,
+                resolved: false, resolvedBy: nil, body: "Repair completed")])]
+        }
+        f.live = f.snapshot
+        f.claimState = .invalid
+        let coordinator = f.coordinator()
+        defer { coordinator.cancel() }
+        f.enableRepairs(coordinator)
+
+        coordinator.schedule(snapshot: f.snapshot, origin: f.proof, configuration: f.settings.automation)
+        if kind == "incoming" { try await f.waitForRepairs(1) }
+        else { try await f.settle(coordinator) }
+
+        #expect(f.repairJobs.count == (kind == "incoming" ? 1 : 0))
+        #expect(f.snapshot.drafts.first?.note == "Fixed")
+    }
+
     @Test func onlyTheExactAppAuthenticatedAssessmentCanAuthorizePublication() async throws {
         let f = try Fixture()
         defer { f.clean() }
@@ -426,6 +452,278 @@ struct DraftProofRecoveryTests {
         #expect(f.assessments == 1 && f.repairJobs.count == 1)
     }
 
+    @Test(arguments: ["provider", "model"], ["validation", "runner"])
+    func aPolicyCancelledPreflightReturnsTheUnusedFinalRepairSlot(_ change: String, _ stage: String) async throws {
+        let f = try Fixture()
+        defer { f.clean() }
+        f.claimState = .uncertain
+        let first = f.coordinator()
+        defer { first.cancel() }
+        f.enableRepairs(first)
+        first.schedule(snapshot: f.snapshot, origin: f.proof, configuration: f.settings.automation)
+        try await f.waitForRepairs(1)
+        let index = try #require(f.settings.assistantHandoffs.indices.last)
+        f.settings.assistantHandoffs[index].execution = .init(state: .failed, finishedAt: Date())
+        first.cancel()
+
+        // Repeated policy wakes may cancel live reads, but none has started a worker.
+        for _ in 0..<2 {
+            let gitlab = f.liveGitLab()
+            defer { gitlab.close() }
+            let glab = gitlab.service(host: f.work.host, username: "me")
+            f.settings.glabPath = glab.glabPath
+            var policyChanged = false
+            var userReads = 0
+            gitlab.beforeCommand = { request in
+                if request.endpoint == "/user" { userReads += 1 }
+                guard stage == "validation" || userReads >= 2 else { return }
+                if !policyChanged {
+                    policyChanged = true
+                    if change == "provider" { f.settings.automation.assistant = f.settings.automation.assistant == .codex ? .claude : .codex }
+                    else { f.settings.automation.codexReviewModel = f.settings.automation.codexReviewModel == .sol ? .astra : .sol }
+                }
+                throw CancellationError()
+            }
+            let pending = f.coordinator()
+            var finished = false
+            pending.onNeedsRepair = { snapshot, origin, assessment in
+                defer { finished = true }
+                return try await DraftReplyRepair.launch(snapshot: snapshot, origin: origin,
+                    assessment: assessment, settings: f.settings, glab: glab, directory: f.folder)
+            }
+            pending.schedule(snapshot: f.snapshot, origin: f.proof, configuration: f.settings.automation)
+            let deadline = ContinuousClock.now + .seconds(3)
+            while !finished, ContinuousClock.now < deadline { try await Task.sleep(for: .milliseconds(10)) }
+            pending.cancel()
+            try #require(finished && policyChanged)
+            #expect(f.repairJobs.count == 1)
+        }
+        let assessmentsBeforeResume = f.assessments
+        let resumed = f.coordinator()
+        defer { resumed.cancel() }
+        f.enableRepairs(resumed)
+        resumed.schedule(snapshot: f.snapshot, origin: f.proof, configuration: f.settings.automation)
+        try await f.waitForRepairs(2)
+        #expect(f.assessments >= assessmentsBeforeResume && f.publication().isEmpty)
+        f.settings.assistantHandoffs[f.settings.assistantHandoffs.count - 1].execution = .init(state: .failed, finishedAt: Date())
+        resumed.cancel()
+        let exhausted = f.coordinator()
+        defer { exhausted.cancel() }
+        f.enableRepairs(exhausted)
+        exhausted.schedule(snapshot: f.snapshot, origin: f.proof, configuration: f.settings.automation)
+        try await f.settle(exhausted)
+        #expect(f.repairJobs.count == 2)
+    }
+
+    @Test(arguments: ["valid", "provider", "model", "interrupted", "policyCancelled", "userStop", "duringStop", "legacyCancel", "wrongParent", "body", "origin", "missingReservation", "budget", "manualChain"])
+    func automaticRepairReconciliationPassesTheRealWorkerValidationOnlyWithBoundProof(_ scenario: String) async throws {
+        let f = try Fixture()
+        defer { f.clean() }
+        f.claimState = .uncertain
+        let first = f.coordinator()
+        defer { first.cancel() }
+        f.enableRepairs(first)
+        first.schedule(snapshot: f.snapshot, origin: f.proof, configuration: f.settings.automation)
+        try await f.waitForRepairs(1)
+        var priorIndex = try #require(f.settings.assistantHandoffs.indices.last)
+        let stoppedState: AssistantJobExecution.State = scenario == "interrupted" ? .interrupted : (scenario == "policyCancelled" ? .cancelled : .failed)
+        f.settings.assistantHandoffs[priorIndex].execution = .init(state: stoppedState, finishedAt: Date())
+        if scenario == "policyCancelled" { f.settings.assistantHandoffs[priorIndex].execution?.cancellationOrigin = .policy }
+        if scenario == "manualChain" {
+            f.settings.assistantHandoffs[priorIndex].execution?.state = .cancelled
+            f.settings.assistantHandoffs[priorIndex].execution?.cancellationOrigin = .user
+            for hop in 0..<2 {
+                let prior = f.settings.assistantHandoffs[priorIndex]
+                let next = AssistantAutomationRunner.Handoff(id: UUID(), key: prior.key, title: "Explicit retry", prompt: "",
+                    createdAt: prior.createdAt.addingTimeInterval(0.001), allowsPush: false, draftRepair: prior.draftRepair,
+                    followUpPushAllowed: true, execution: .init(state: hop == 0 ? .cancelled : .failed, finishedAt: Date()),
+                    workflow: .followUp, manual: true, expectedHeadSHA: prior.expectedHeadSHA, retryOf: prior.id)
+                f.settings.assistantHandoffs.append(next)
+                priorIndex = f.settings.assistantHandoffs.count - 1
+                if hop == 0 { f.settings.assistantHandoffs[priorIndex].execution?.cancellationOrigin = .user }
+            }
+        }
+        first.cancel()
+        if scenario == "provider" { f.settings.automation.assistant = .claude }
+        if scenario == "model" { f.settings.automation.codexReviewModel = f.settings.automation.codexReviewModel == .sol ? .astra : .sol }
+        let second = f.coordinator()
+        defer { second.cancel() }
+        f.enableRepairs(second)
+        second.schedule(snapshot: f.snapshot, origin: f.proof, configuration: f.settings.automation)
+        try await f.waitForRepairs(scenario == "manualChain" ? 4 : 2)
+        let childIndex = try #require(f.settings.assistantHandoffs.indices.last)
+        let childID = f.settings.assistantHandoffs[childIndex].id
+        var context = try #require(f.settings.assistantHandoffs[childIndex].draftRepair)
+        #expect(f.settings.assistantHandoffs[childIndex].retryOf == f.settings.assistantHandoffs[priorIndex].id)
+        if scenario == "userStop" { f.settings.assistantHandoffs[priorIndex].execution?.cancellationOrigin = .user }
+        if scenario == "legacyCancel" { f.settings.assistantHandoffs[priorIndex].execution?.state = .cancelled }
+        if scenario == "wrongParent" { f.settings.assistantHandoffs[childIndex].retryOf = UUID() }
+        let folder = FollowUpVerificationStore.recordURL(kind: "draft-repair-attempts", work: f.work,
+            username: "me", in: f.folder).deletingPathExtension()
+        if scenario == "missingReservation" { try FileManager.default.removeItem(at: folder.appending(path: context.key + ".json")) }
+        if scenario == "body" || scenario == "origin" || scenario == "budget" {
+            var object = try #require(JSONSerialization.jsonObject(with: JSONEncoder().encode(context)) as? [String: Any])
+            if scenario == "body" { object["bodySHA256"] = AICommentAssessmentStore.digest("An unrelated reply") }
+            if scenario == "origin" {
+                var origin = try #require(object["origin"] as? [String: Any]); origin["verificationID"] = UUID().uuidString
+                object["origin"] = origin
+            }
+            if scenario == "budget" {
+                var rejection = try #require(object["rejection"] as? [String: Any]); rejection["reason"] = "Another consumed correction"
+                object["rejection"] = rejection
+            }
+            let changed = try JSONDecoder().decode(DraftReplyRepair.Context.self, from: JSONSerialization.data(withJSONObject: object))
+            if scenario == "budget" {
+                let third = AssistantAutomationRunner.Handoff(id: UUID(), key: f.settings.assistantHandoffs[childIndex].key,
+                    title: "Consumed correction", prompt: "", createdAt: Date(), allowsPush: false, draftRepair: changed,
+                    followUpPushAllowed: true, execution: .init(state: .succeeded), workflow: .followUp, expectedHeadSHA: changed.headSHA)
+                f.settings.assistantHandoffs.append(third)
+                try JSONSerialization.data(withJSONObject: ["context": object, "jobID": third.id.uuidString])
+                    .write(to: folder.appending(path: changed.key + ".json"))
+            } else {
+                context = changed
+                f.settings.assistantHandoffs[childIndex].draftRepair = changed
+            }
+        }
+        let gitlab = f.liveGitLab()
+        defer { gitlab.close() }
+        let glab = gitlab.service(host: f.work.host, username: "me")
+        if scenario == "duringStop" {
+            gitlab.beforeCommand = { _ in f.settings.assistantHandoffs[priorIndex].execution?.cancellationOrigin = .user }
+        }
+        let workerSnapshot = DraftProofRecoveryCoordinator.Snapshot(request: f.snapshot.request, discussions: [], drafts: [],
+            user: f.snapshot.user, host: f.work.host, branchHead: f.snapshot.branchHead)
+        var validated = false
+        do {
+            try await DraftReplyRepair.validate(context, snapshot: workerSnapshot, settings: f.settings,
+                glab: glab, directory: f.folder, excludingRunID: childID)
+            validated = true
+        } catch AssistantJobExecutor.ExecutionError.disabledPermission { }
+        #expect(validated == ["valid", "provider", "model", "interrupted", "policyCancelled", "manualChain"].contains(scenario))
+        if validated { #expect(gitlab.requests.contains { $0.endpoint.contains("/draft_notes") }) }
+        #expect(f.publication().isEmpty)
+    }
+
+    @Test(arguments: ["unchangedTitle", "draftPrefix", "draftPrefixBodyEdit", "unrelatedTitle"], ["validation", "runner"])
+    func aConfirmedLiveDraftPauseReturnsTheUnusedRepairSlotWithoutAdoptingBodyChanges(_ scenario: String, _ stage: String) async throws {
+        let f = try Fixture()
+        defer { f.clean() }
+        f.claimState = .uncertain
+        let first = f.coordinator()
+        defer { first.cancel() }
+        f.enableRepairs(first)
+        first.schedule(snapshot: f.snapshot, origin: f.proof, configuration: f.settings.automation)
+        try await f.waitForRepairs(1)
+        f.settings.assistantHandoffs[f.settings.assistantHandoffs.count - 1].execution = .init(state: .failed, finishedAt: Date())
+        first.cancel()
+        let gitlab = f.liveGitLab()
+        defer { gitlab.close() }
+        let glab = gitlab.service(host: f.work.host, username: "me")
+        f.settings.glabPath = glab.glabPath
+        let uncertain = scenario == "draftPrefixBodyEdit" || scenario == "unrelatedTitle"
+        var changed = false
+        var userReads = 0
+        gitlab.beforeCommand = { request in
+            if request.endpoint == "/user" { userReads += 1 }
+            guard stage == "validation" || userReads >= 2 else { return }
+            if !changed {
+                changed = true
+                let title = scenario == "unchangedTitle" ? f.snapshot.request.title
+                    : (scenario == "unrelatedTitle" ? "Draft: Unrelated changed meaning" : "Draft: " + f.snapshot.request.title)
+                f.live.request = try f.request(title: title, draft: true)
+                if scenario == "draftPrefixBodyEdit" { f.live.drafts[0] = .init(id: 12, authorID: 3, note: "Unexpected user edit", discussionID: "thread", position: nil) }
+            }
+        }
+        let pending = f.coordinator()
+        var finished = false
+        pending.onNeedsRepair = { snapshot, origin, assessment in
+            defer { finished = true }
+            return try await DraftReplyRepair.launch(snapshot: snapshot, origin: origin, assessment: assessment,
+                settings: f.settings, glab: glab, directory: f.folder)
+        }
+        pending.schedule(snapshot: f.snapshot, origin: f.proof, configuration: f.settings.automation)
+        let deadline = ContinuousClock.now + .seconds(3)
+        while !finished, ContinuousClock.now < deadline { try await Task.sleep(for: .milliseconds(10)) }
+        pending.cancel()
+        try #require(finished && changed)
+        #expect(f.repairJobs.count == 1)
+        f.live = f.snapshot
+        let resumed = f.coordinator()
+        defer { resumed.cancel() }
+        f.enableRepairs(resumed)
+        resumed.schedule(snapshot: f.snapshot, origin: f.proof, configuration: f.settings.automation)
+        if uncertain { try await f.settle(resumed) }
+        else { try await f.waitForRepairs(2) }
+        #expect(f.repairJobs.count == (uncertain ? 1 : 2))
+        #expect(f.publication().isEmpty)
+    }
+
+    @Test func theRealExecutorRejectsARepairBodyEditedAfterValidationBeforeTheCLI() async throws {
+        let f = try Fixture()
+        defer { f.clean() }
+        f.claimState = .uncertain
+        let coordinator = f.coordinator()
+        defer { coordinator.cancel() }
+        f.enableRepairs(coordinator)
+        coordinator.schedule(snapshot: f.snapshot, origin: f.proof, configuration: f.settings.automation)
+        try await f.waitForRepairs(1)
+        var child = try #require(f.repairJobs.first)
+        child.configurationSnapshot = f.settings.automation
+        let childIndex = try #require(f.settings.assistantHandoffs.firstIndex { $0.id == child.id })
+        f.settings.assistantHandoffs[childIndex] = child
+        let gitlab = f.liveGitLab()
+        defer { gitlab.close() }
+        let glab = gitlab.service(host: f.work.host, username: "me")
+        f.settings.glabPath = glab.glabPath
+        var draftReads = 0
+        gitlab.beforeCommand = { request in
+            if request.endpoint.contains("/draft_notes?") {
+                draftReads += 1
+                if draftReads == 2 {
+                    f.live.drafts[0] = .init(id: 12, authorID: 3, note: "A later user edit", discussionID: "thread", position: nil)
+                }
+            }
+        }
+        let cli = f.folder.appending(path: "fake-coding-cli")
+        let marker = f.folder.appending(path: "coding-cli-started")
+        try Data("#!/bin/sh\ntouch '\(marker.path)'\nexit 17\n".utf8).write(to: cli)
+        try FileManager.default.setAttributes([.posixPermissions: 0o700], ofItemAtPath: cli.path)
+        let run = InstallationStorage.current.runs.appending(path: child.id.uuidString)
+        defer { try? FileManager.default.removeItem(at: run) }
+        var failure: AssistantJobExecutor.ExecutionError?
+        do {
+            _ = try await AssistantJobExecutor.execute(child, settings: f.settings, glab: glab,
+                followUpDirectory: f.folder, detectCLI: { _ in .ready(cli) })
+        } catch { failure = error as? AssistantJobExecutor.ExecutionError }
+        #expect(draftReads == 2 && failure == .headChanged)
+        #expect(!FileManager.default.fileExists(atPath: marker.path))
+    }
+
+    @Test(arguments: ["ambiguous", "postWorker"])
+    func cancellationWithoutConfirmedPreWorkerPolicyFailureKeepsItsReservation(_ phase: String) async throws {
+        let f = try Fixture()
+        defer { f.clean() }
+        let helper = f.coordinator()
+        defer { helper.cancel() }
+        f.enableRepairs(helper)
+        let recordWorker = try #require(helper.onNeedsRepair)
+        let assessment = DraftProofRecoveryVerifier.Assessment(drafts: [.init(draftID: 12, state: .uncertain, reason: "Unsupported reply")])
+        _ = await DraftReplyRepair.dispatch(snapshot: f.snapshot, origin: f.proof, assessment: assessment,
+            settings: f.settings, directory: f.folder, launch: { snapshot, origin, assessment in
+                if phase == "postWorker" { _ = try await recordWorker(snapshot, origin, assessment) }
+                f.settings.automation.assistant = .claude
+                throw CancellationError()
+            })
+        let folder = FollowUpVerificationStore.recordURL(kind: "draft-repair-attempts", work: f.work,
+            username: "me", in: f.folder).deletingPathExtension()
+        let records = try FileManager.default.contentsOfDirectory(at: folder, includingPropertiesForKeys: nil)
+        #expect(records.filter { $0.pathExtension == "json" }.count == 1)
+        var launches = 0
+        _ = await DraftReplyRepair.dispatch(snapshot: f.snapshot, origin: f.proof, assessment: assessment,
+            settings: f.settings, directory: f.folder, launch: { _, _, _ in launches += 1; return nil })
+        #expect(launches == 0)
+    }
+
     @Test func aTerminalRepairOutcomeDoesNotRestartProgressAndRefreshOnEveryPoll() async throws {
         let f = try Fixture()
         defer { f.clean() }
@@ -726,6 +1024,280 @@ struct DraftProofRecoveryTests {
         #expect(restarted.rejectedDrafts(work: f.work, drafts: f.snapshot.drafts).map(\.state) == [.uncertain])
     }
 
+    @Test(arguments: [AssistantJobExecution.State.failed, .interrupted, .cancelled], ["unchanged", "unchangedRestart", "provider", "providerRestart", "model", "modelRestart"])
+    func stoppedReplyRepairGetsOneFreshPostStopReconciliation(_ state: AssistantJobExecution.State, _ change: String) async throws {
+        let f = try Fixture()
+        defer { f.clean() }
+        f.claimState = .uncertain
+        let first = f.coordinator()
+        defer { first.cancel() }
+        f.enableRepairs(first)
+        first.schedule(snapshot: f.snapshot, origin: f.proof, configuration: f.settings.automation)
+        try await f.waitForRepairs(1)
+        let stopped = try #require(f.repairJobs.first)
+        let index = try #require(f.settings.assistantHandoffs.firstIndex { $0.id == stopped.id })
+        f.settings.assistantHandoffs[index].execution = .init(state: state, finishedAt: Date())
+        if state == .cancelled { f.settings.assistantHandoffs[index].execution?.cancellationOrigin = .policy }
+        first.cancel()
+        if change.hasPrefix("provider") { f.settings.automation.assistant = .claude }
+        if change.hasPrefix("model") { f.settings.automation.codexReviewModel = f.settings.automation.codexReviewModel == .sol ? .astra : .sol }
+        let next = change.hasSuffix("Restart") ? f.coordinator() : first
+        defer { next.cancel() }
+        f.enableRepairs(next)
+
+        next.schedule(snapshot: f.snapshot, origin: f.proof, configuration: f.settings.automation)
+        try await f.waitForRepairs(2)
+
+        #expect(f.assessments == 2)
+        let resumed = try #require(f.repairJobs.last)
+        #expect(resumed.id != stopped.id && resumed.draftRepair?.draftID == 12)
+        #expect(resumed.expectedHeadSHA == f.snapshot.request.sha)
+        #expect(resumed.draftRepair?.bodySHA256 == stopped.draftRepair?.bodySHA256)
+        #expect(f.live.drafts == f.snapshot.drafts && f.publication().isEmpty)
+        let secondIndex = try #require(f.settings.assistantHandoffs.firstIndex { $0.id == resumed.id })
+        f.settings.assistantHandoffs[secondIndex].execution = .init(state: state, finishedAt: Date())
+        if state == .cancelled { f.settings.assistantHandoffs[secondIndex].execution?.cancellationOrigin = .policy }
+        next.cancel()
+        let exhausted = f.coordinator()
+        defer { exhausted.cancel() }
+        f.enableRepairs(exhausted)
+        exhausted.schedule(snapshot: f.snapshot, origin: f.proof, configuration: f.settings.automation)
+        try await f.settle(exhausted)
+        #expect(f.repairJobs.count == 2)
+
+        f.settings.assistantHandoffs.removeAll { $0.draftRepair != nil }
+        let retained = f.settings.assistantHandoffs.count
+        exhausted.cancel()
+        let pruned = f.coordinator()
+        defer { pruned.cancel() }
+        f.enableRepairs(pruned)
+        pruned.schedule(snapshot: f.snapshot, origin: f.proof, configuration: f.settings.automation)
+        try await f.settle(pruned)
+        #expect(f.settings.assistantHandoffs.count == retained)
+    }
+
+    @Test func aStoppedPriorRepairDoesNotHideAnActiveAdmissionRead() async throws {
+        let f = try Fixture()
+        defer { f.clean() }
+        f.claimState = .uncertain
+        let first = f.coordinator()
+        defer { first.cancel() }
+        f.enableRepairs(first)
+        first.schedule(snapshot: f.snapshot, origin: f.proof, configuration: f.settings.automation)
+        try await f.waitForRepairs(1)
+        let index = try #require(f.settings.assistantHandoffs.indices.last)
+        f.settings.assistantHandoffs[index].execution = .init(state: .interrupted, finishedAt: Date())
+        first.cancel()
+        let next = f.coordinator()
+        f.enableRepairs(next)
+        var reads = 0
+        var gate: CheckedContinuation<Void, Never>?
+        defer { gate?.resume(); gate = nil; next.cancel() }
+        f.duringFetch = {
+            reads += 1
+            // The first two reads surround the semantic check; the third admits the repair.
+            if reads == 3 { await withCheckedContinuation { gate = $0 } }
+        }
+        next.schedule(snapshot: f.snapshot, origin: f.proof, configuration: f.settings.automation)
+        let deadline = ContinuousClock.now + .seconds(3)
+        while gate == nil, ContinuousClock.now < deadline { try await Task.sleep(for: .milliseconds(10)) }
+        try #require(gate != nil)
+        #expect(next.isChecking(work: f.work))
+        #expect(f.repairJobs.count == 1 && f.assessments == 2)
+        next.schedule(snapshot: f.snapshot, origin: f.proof, configuration: f.settings.automation)
+        #expect(reads == 3)
+        f.duringFetch = nil
+        let waiting = gate; gate = nil; waiting?.resume()
+        try await f.waitForRepairs(2)
+    }
+
+    @Test func releasingASupersededRepairAdmissionWakesTheNewerAssessment() async throws {
+        let f = try Fixture()
+        defer { f.clean() }
+        f.claimState = .uncertain
+        let first = f.coordinator()
+        defer { first.cancel() }
+        f.enableRepairs(first)
+        first.schedule(snapshot: f.snapshot, origin: f.proof, configuration: f.settings.automation)
+        try await f.waitForRepairs(1)
+        f.settings.assistantHandoffs[f.settings.assistantHandoffs.count - 1].execution = .init(state: .interrupted, finishedAt: Date())
+        first.cancel()
+        let next = f.coordinator()
+        f.enableRepairs(next)
+        var reads = 0
+        var gate: CheckedContinuation<Void, Never>?
+        defer { gate?.resume(); gate = nil; next.cancel() }
+        f.duringFetch = {
+            reads += 1
+            if reads == 3 { await withCheckedContinuation { gate = $0 } }
+        }
+        next.schedule(snapshot: f.snapshot, origin: f.proof, configuration: f.settings.automation)
+        let deadline = ContinuousClock.now + .seconds(3)
+        while gate == nil, ContinuousClock.now < deadline { try await Task.sleep(for: .milliseconds(10)) }
+        try #require(gate != nil)
+        f.duringFetch = nil
+        f.snapshot.discussions[0] = .init(id: "thread", notes: f.snapshot.discussions[0].notes + [.init(id: 22,
+            author: .init(id: 7, username: "reviewer", name: "Reviewer"), system: false,
+            resolvable: true, resolved: false, resolvedBy: nil, body: "Please also verify the precise edge case")])
+        f.live = f.snapshot
+        var newerReady = false
+        next.onChange = {
+            if next.failure(work: f.work) != nil && f.assessments == 3 { newerReady = true }
+            if newerReady && !next.isChecking(work: f.work) && f.repairJobs.count == 1 {
+                next.schedule(snapshot: f.snapshot, origin: f.proof, configuration: f.settings.automation)
+            }
+        }
+        next.schedule(snapshot: f.snapshot, origin: f.proof, configuration: f.settings.automation)
+        while !newerReady, ContinuousClock.now < deadline { try await Task.sleep(for: .milliseconds(10)) }
+        try #require(newerReady && f.repairJobs.count == 1)
+        let waiting = gate; gate = nil; waiting?.resume()
+        try await f.waitForRepairs(2)
+        #expect(f.assessments == 3 && f.publication().isEmpty)
+    }
+
+    @Test func aRepairStoppingDuringTheFirstRemoteReadNeedsALaterAssessment() async throws {
+        let f = try Fixture()
+        defer { f.clean() }
+        f.claimState = .uncertain
+        let first = f.coordinator()
+        defer { first.cancel() }
+        f.enableRepairs(first)
+        first.schedule(snapshot: f.snapshot, origin: f.proof, configuration: f.settings.automation)
+        try await f.waitForRepairs(1)
+        let stopped = try #require(f.repairJobs.first)
+        let index = try #require(f.settings.assistantHandoffs.firstIndex { $0.id == stopped.id })
+        f.snapshot.request = try f.request(head: String(repeating: "b", count: 40))
+        f.snapshot.branchHead = f.snapshot.request.sha!
+        f.live = f.snapshot
+        first.cancel()
+        let next = f.coordinator()
+        defer { next.cancel() }
+        f.enableRepairs(next)
+        f.duringFetch = {
+            f.duringFetch = nil
+            f.settings.assistantHandoffs[index].execution = .init(state: .interrupted, finishedAt: Date())
+        }
+
+        next.schedule(snapshot: f.snapshot, origin: f.proof, configuration: f.settings.automation)
+        try await f.settle(next)
+        #expect(f.repairJobs.count == 1 && f.assessments == 2)
+
+        next.schedule(snapshot: f.snapshot, origin: f.proof, configuration: f.settings.automation)
+        try await f.waitForRepairs(2)
+        #expect(f.assessments == 3)
+    }
+
+    @Test func freshPostStopEvidenceCanCompleteWithoutLaunchingAnotherRepair() async throws {
+        let f = try Fixture()
+        defer { f.clean() }
+        f.claimState = .uncertain
+        let first = f.coordinator()
+        defer { first.cancel() }
+        f.enableRepairs(first)
+        first.schedule(snapshot: f.snapshot, origin: f.proof, configuration: f.settings.automation)
+        try await f.waitForRepairs(1)
+        let index = try #require(f.settings.assistantHandoffs.indices.last)
+        f.settings.assistantHandoffs[index].execution = .init(state: .interrupted, finishedAt: Date())
+        first.cancel()
+        f.claimState = .valid
+        let next = f.coordinator()
+        defer { next.cancel() }
+        f.enableRepairs(next)
+
+        next.schedule(snapshot: f.snapshot, origin: f.proof, configuration: f.settings.automation)
+        try await f.settle(next)
+
+        #expect(f.assessments == 2 && f.publication().count == 1)
+        #expect(f.repairJobs.count == 1 && f.live.drafts == f.snapshot.drafts)
+    }
+
+    @Test(arguments: [false, true])
+    func aPublicationChangeNeverRestartsAnExplicitlyCancelledReplyRepair(_ explicitlyStopped: Bool) async throws {
+        let f = try Fixture()
+        defer { f.clean() }
+        f.claimState = .uncertain
+        let first = f.coordinator()
+        defer { first.cancel() }
+        f.enableRepairs(first)
+        first.schedule(snapshot: f.snapshot, origin: f.proof, configuration: f.settings.automation)
+        try await f.waitForRepairs(1)
+        let index = try #require(f.settings.assistantHandoffs.indices.last)
+        f.settings.assistantHandoffs[index].execution = .init(state: .cancelled, finishedAt: Date())
+        if explicitlyStopped { f.settings.assistantHandoffs[index].execution?.cancellationOrigin = .user }
+        first.cancel()
+        f.settings.automation.publicationRestrictions.allowBotReplies.toggle()
+        let next = f.coordinator()
+        defer { next.cancel() }
+        f.enableRepairs(next)
+
+        next.schedule(snapshot: f.snapshot, origin: f.proof, configuration: f.settings.automation)
+        try await f.settle(next)
+
+        #expect(f.repairJobs.count == 1 && f.assessments == 1)
+        #expect(f.publication().isEmpty)
+    }
+
+    @Test(arguments: ["legacyCancelled", "userCancelled", "userInterrupted", "userFailed"], ["provider", "model"])
+    func stoppingAReplyRepairSurvivesAutomaticCodingPolicyChanges(_ stop: String, _ change: String) async throws {
+        let f = try Fixture()
+        defer { f.clean() }
+        f.claimState = .uncertain
+        let first = f.coordinator()
+        defer { first.cancel() }
+        f.enableRepairs(first)
+        first.schedule(snapshot: f.snapshot, origin: f.proof, configuration: f.settings.automation)
+        try await f.waitForRepairs(1)
+        let index = try #require(f.settings.assistantHandoffs.indices.last)
+        let state: AssistantJobExecution.State = stop == "userInterrupted" ? .interrupted : (stop == "userFailed" ? .failed : .cancelled)
+        f.settings.assistantHandoffs[index].execution = .init(state: state, finishedAt: Date())
+        if stop != "legacyCancelled" { f.settings.assistantHandoffs[index].execution?.cancellationOrigin = .user }
+        first.cancel()
+        if change == "provider" { f.settings.automation.assistant = .claude }
+        else { f.settings.automation.codexReviewModel = f.settings.automation.codexReviewModel == .sol ? .astra : .sol }
+        let next = f.coordinator()
+        defer { next.cancel() }
+        f.enableRepairs(next)
+
+        next.schedule(snapshot: f.snapshot, origin: f.proof, configuration: f.settings.automation)
+        try await f.settle(next)
+
+        #expect(f.repairJobs.count == 1 && f.publication().isEmpty)
+        #expect(f.live.drafts == f.snapshot.drafts)
+    }
+
+    @Test(arguments: [false, true])
+    func onlyANewerExplicitManualRepairRetryCanSupersedeStop(_ manual: Bool) async throws {
+        let f = try Fixture()
+        defer { f.clean() }
+        f.claimState = .uncertain
+        let first = f.coordinator()
+        defer { first.cancel() }
+        f.enableRepairs(first)
+        first.schedule(snapshot: f.snapshot, origin: f.proof, configuration: f.settings.automation)
+        try await f.waitForRepairs(1)
+        let index = try #require(f.settings.assistantHandoffs.indices.last)
+        f.settings.assistantHandoffs[index].execution = .init(state: .cancelled, finishedAt: Date())
+        f.settings.assistantHandoffs[index].execution?.cancellationOrigin = .user
+        let stopped = f.settings.assistantHandoffs[index]
+        let context = try #require(stopped.draftRepair)
+        let replacement = AssistantAutomationRunner.Handoff(id: UUID(), key: stopped.key, title: "Retry", prompt: "",
+            createdAt: stopped.createdAt.addingTimeInterval(1), allowsPush: false,
+            draftRepair: context, followUpPushAllowed: true, execution: .init(state: .failed, finishedAt: Date()),
+            workflow: .followUp, manual: manual, expectedHeadSHA: context.headSHA, retryOf: stopped.id)
+        f.settings.assistantHandoffs.append(replacement)
+        first.cancel()
+        let next = f.coordinator()
+        defer { next.cancel() }
+        f.enableRepairs(next)
+
+        next.schedule(snapshot: f.snapshot, origin: f.proof, configuration: f.settings.automation)
+        if manual { try await f.waitForRepairs(3) }
+        else { try await f.settle(next) }
+
+        #expect(f.repairJobs.count == (manual ? 3 : 2))
+        #expect(f.publication().isEmpty && f.live.drafts == f.snapshot.drafts)
+    }
+
     @Test func explicitManualRepairRetryPersistsItsExactPredecessorBeforeExecution() async throws {
         let f = try Fixture()
         defer { f.clean() }
@@ -808,7 +1380,7 @@ struct DraftProofRecoveryTests {
         #expect(f.live.drafts == f.snapshot.drafts)
     }
 
-    @Test(arguments: ["valid", "extraID", "missingIntent", "wrongIntent", "unknownAncestor", "unfinishedAncestor"])
+    @Test(arguments: ["valid", "extraID", "missingIntent", "wrongIntent", "unknownAncestor", "unfinishedAncestor", "foreignSource", "foreignAccount"])
     func repairedSealIsQuarantinedAndCannotManufactureDraftOwnership(_ scenario: String) async throws {
         let f = try Fixture()
         defer { f.clean() }
@@ -824,6 +1396,12 @@ struct DraftProofRecoveryTests {
         f.live = f.snapshot
         var repaired = f.currentProof(runID: f.settings.assistantHandoffs[index].id,
             body: "Corrected supported facts", extraID: scenario == "extraID" ? 999 : nil)
+        if scenario == "foreignSource" || scenario == "foreignAccount" {
+            var json = try #require(JSONSerialization.jsonObject(with: JSONEncoder().encode(repaired)) as? [String: Any])
+            if scenario == "foreignSource" { json["sourceBranch"] = "foreign-source" }
+            else { json["userID"] = 999 }
+            repaired = try JSONDecoder().decode(FollowUpVerification.self, from: JSONSerialization.data(withJSONObject: json))
+        }
         if scenario == "missingIntent" { repaired.repairIntent = nil }
         if scenario == "wrongIntent" { repaired.repairIntent = .init(draftID: 12, bodySHA256: AICommentAssessmentStore.digest("An unexpected user's edit")) }
         if scenario == "unknownAncestor" {
@@ -849,7 +1427,8 @@ struct DraftProofRecoveryTests {
         }
     }
 
-    @Test func selfEditedRepliesCannotResetTheBoundedRepairLineage() async throws {
+    @Test(arguments: ["unchanged", "provider", "model"])
+    func selfEditedRepliesCannotResetTheBoundedRepairLineage(_ change: String) async throws {
         let f = try Fixture()
         defer { f.clean() }
         f.claimState = .uncertain
@@ -867,6 +1446,9 @@ struct DraftProofRecoveryTests {
             f.live = f.snapshot
             origin = f.currentProof(runID: f.settings.assistantHandoffs[index].id, body: body)
             try f.persist(origin)
+            coordinator.cancel()
+            if change == "provider" { f.settings.automation.assistant = f.settings.automation.assistant == .codex ? .claude : .codex }
+            if change == "model" { f.settings.automation.codexReviewModel = f.settings.automation.codexReviewModel == .sol ? .astra : .sol }
         }
         let final = f.coordinator()
         f.enableRepairs(final)
@@ -875,6 +1457,41 @@ struct DraftProofRecoveryTests {
         #expect(f.repairJobs.count == 2 && final.failure(work: f.work) != nil)
         #expect(final.rejectedDrafts(work: f.work, drafts: f.snapshot.drafts).map(\.draftID) == [12])
         #expect(f.publication().isEmpty)
+    }
+
+    @Test(arguments: ["provider", "model"])
+    func aTrustedEditedSealCannotEraseExplicitRepairStop(_ change: String) async throws {
+        let f = try Fixture()
+        defer { f.clean() }
+        f.claimState = .uncertain
+        let first = f.coordinator()
+        defer { first.cancel() }
+        f.enableRepairs(first)
+        first.schedule(snapshot: f.snapshot, origin: f.proof, configuration: f.settings.automation)
+        try await f.waitForRepairs(1)
+        let index = try #require(f.settings.assistantHandoffs.indices.last)
+        // Completion can race an explicit Stop; the captured user intent must remain authoritative.
+        f.settings.assistantHandoffs[index].execution = .init(state: .succeeded, finishedAt: Date())
+        f.settings.assistantHandoffs[index].execution?.cancellationOrigin = .user
+        try f.archive(f.proof)
+        let body = "Edited but still unsupported reply"
+        f.snapshot.drafts[0] = .init(id: 12, authorID: 3, note: body, discussionID: "thread", position: nil)
+        f.live = f.snapshot
+        let origin = f.currentProof(runID: f.settings.assistantHandoffs[index].id, body: body)
+        try f.persist(origin)
+        #expect(FollowUpVerificationStore.recoveryOrigins(work: f.work, username: "me", settings: f.settings, in: f.folder).contains(origin))
+        first.cancel()
+        if change == "provider" { f.settings.automation.assistant = .claude }
+        else { f.settings.automation.codexReviewModel = f.settings.automation.codexReviewModel == .sol ? .astra : .sol }
+        let next = f.coordinator()
+        defer { next.cancel() }
+        f.enableRepairs(next)
+
+        next.schedule(snapshot: f.snapshot, origin: origin, configuration: f.settings.automation)
+        try await f.settle(next)
+
+        #expect(f.repairJobs.count == 1 && f.publication().isEmpty)
+        #expect(f.live.drafts == f.snapshot.drafts)
     }
 
     @Test func aMisnamedArchiveCannotEstablishHistoricalDraftOwnership() throws {
@@ -1850,6 +2467,7 @@ struct DraftProofRecoveryTests {
         var claimState = DraftProofRecoveryVerifier.Assessment.State.valid
         var claimsOverride: [DraftProofRecoveryVerifier.Assessment.Draft]?
         var duringAssessment: (() -> Void)?
+        var duringFetch: (() async -> Void)?
         var unreadableFiles: Set<String> = []
         var remoteHash = AICommentAssessmentStore.digest("source and test")
         init() throws {
@@ -1930,11 +2548,33 @@ struct DraftProofRecoveryTests {
                     title: "Repair", prompt: "Repair only the known reply", createdAt: Date(), allowsPush: false,
                     codingModel: context.codingModel, codingThinking: context.codingThinking, draftRepair: context,
                     followUpPushAllowed: true, execution: .init(state: .running), taskPrompt: "Repair only the known reply",
-                    mergeRequestURL: snapshot.request.webURL, workflow: .followUp, expectedHeadSHA: snapshot.request.sha)
+                    mergeRequestURL: snapshot.request.webURL, workflow: .followUp, expectedHeadSHA: snapshot.request.sha,
+                    retryOf: context.automaticRecoveryOf)
                 settings.assistantHandoffs.append(handoff); settings.save()
                 return handoff.id
             }
         }
+        func liveGitLab() -> InMemoryGitLab {
+            let gitlab = InMemoryGitLab()
+            gitlab.handler = { [self] command in
+                if command.arguments.first == "config" { return InMemoryGitLab.output(work.host) }
+                if command.arguments.first == "auth" { return InMemoryGitLab.output("Logged in to \(work.host) as me") }
+                @MainActor func output<T: Encodable>(_ value: T) throws -> ProcessRunner.Output {
+                    InMemoryGitLab.output(String(decoding: try JSONEncoder().encode(value), as: UTF8.self))
+                }
+                switch command.endpoint {
+                case "/user": return try output(live.user)
+                case "/projects/1/merge_requests/2": return try output(live.request)
+                case let path where path.contains("/discussions?"): return try output(live.discussions)
+                case let path where path.contains("/draft_notes?"): return try output(live.drafts)
+                case let path where path.contains("/repository/branches/"):
+                    return try InMemoryGitLab.json(["commit": ["id": live.branchHead]])
+                default: return try gitlab.unexpected(command)
+                }
+            }
+            return gitlab
+        }
+
         func waitForRepairs(_ count: Int) async throws {
             let deadline = ContinuousClock.now + .seconds(3)
             while repairJobs.count < count, ContinuousClock.now < deadline { try await Task.sleep(for: .milliseconds(10)) }
@@ -1981,6 +2621,7 @@ struct DraftProofRecoveryTests {
         func coordinator() -> DraftProofRecoveryCoordinator {
             DraftProofRecoveryCoordinator(settings: settings, directory: folder, canAutomate: { [self] _ in automationAvailable },
                 fetch: { [self] _ in
+                    await duringFetch?()
                     if assessments > 0 && fetchFailuresAfterAssessment > 0 {
                         fetchFailuresAfterAssessment -= 1; throw DraftProofRecoveryVerifier.Failure.failed
                     }

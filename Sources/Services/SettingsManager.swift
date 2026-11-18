@@ -64,6 +64,7 @@ final class SettingsManager {
     var automationReceipts: Set<TodoAutomationReceipt>
     var automationAttemptReceipts: Set<TodoAutomationReceipt>
     var authorFeedbackAttempts: Set<AuthorFeedbackAttempt>
+    var assistantAutomaticRetryAttempts: [AssistantAutomaticRetryAttempt] = []
     var feedbackSuggestionDecisions = FeedbackSuggestionDecisions()
     var reviewParticipationPreferences = ReviewParticipationPreferences()
     var pipelineRefreshAttempts: Set<PipelineRefreshAttempt>
@@ -112,6 +113,7 @@ final class SettingsManager {
         automationReceipts = store.load(Key.automationReceipts, fallback: [])
         automationAttemptReceipts = store.load(Key.automationAttemptReceipts, fallback: [])
         authorFeedbackAttempts = store.load(Key.authorFeedbackAttempts, fallback: [])
+        assistantAutomaticRetryAttempts = store.load(Key.assistantAutomaticRetryAttempts, fallback: [])
         feedbackSuggestionDecisions = store.load(Key.feedbackSuggestionDecisions, fallback: FeedbackSuggestionDecisions())
         reviewParticipationPreferences = store.load(Key.reviewParticipationPreferences, fallback: ReviewParticipationPreferences())
         pipelineRefreshAttempts = store.load(Key.pipelineRefreshAttempts, fallback: [])
@@ -182,6 +184,7 @@ final class SettingsManager {
         persistenceStore.save(automationReceipts, forKey: Key.automationReceipts)
         persistenceStore.save(automationAttemptReceipts, forKey: Key.automationAttemptReceipts)
         persistenceStore.save(authorFeedbackAttempts, forKey: Key.authorFeedbackAttempts)
+        persistenceStore.save(assistantAutomaticRetryAttempts, forKey: Key.assistantAutomaticRetryAttempts)
         persistenceStore.save(feedbackSuggestionDecisions, forKey: Key.feedbackSuggestionDecisions)
         persistenceStore.save(reviewParticipationPreferences, forKey: Key.reviewParticipationPreferences)
         persistenceStore.save(pipelineRefreshAttempts, forKey: Key.pipelineRefreshAttempts)
@@ -377,6 +380,7 @@ final class SettingsManager {
         static let automationReceipts = "automationReceipts"
         static let automationAttemptReceipts = "automationAttemptReceipts"
         static let authorFeedbackAttempts = "authorFeedbackAttempts"
+        static let assistantAutomaticRetryAttempts = "assistantAutomaticRetryAttempts"
         static let pipelineRefreshAttempts = "pipelineRefreshAttempts"
         static let pipelineClaimAssessmentAttempts = "pipelineClaimAssessmentAttempts"
         static let pendingTodoAcknowledgements = "pendingTodoAcknowledgements"

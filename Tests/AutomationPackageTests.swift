@@ -697,6 +697,16 @@ struct AutomationPackageTests {
         #expect(settings.autoResolveOwnReviewThreads, "Manual keeps job permissions for jobs the user starts")
     }
 
+    @Test func authorFollowUpsKeepStandaloneRepairReportsInTheRunHistory() {
+        let instructions = AssistantAutomationRunner.MRWorkflow.followUp.instructions(
+            allowFollowUpPush: true, autoResolveOwnReviewThreads: true)
+        #expect(instructions.contains("Do not create standalone draft notes or self-review findings on my own MR"))
+        #expect(instructions.contains("Report pipeline repairs and status summaries in the run result only"))
+        let proof = FollowUpVerificationStore.recordingInstructions(
+            work: .init(host: "gitlab.example.test", projectID: 1, iid: 2), runID: UUID())
+        #expect(proof.contains("If no incoming reviewer reply is owed, do not create drafts or run seal"))
+    }
+
     @Test @MainActor func conflictAndLegacyHandoffsCannotAuthorizeAuthorFollowUpPublication() throws {
         let suite = "AuthorRunKind.\(UUID())"
         let defaults = try #require(UserDefaults(suiteName: suite))
@@ -740,6 +750,7 @@ struct AutomationPackageTests {
         #expect(handoff.prompt.contains("authenticated local `glab`"))
         #expect(handoff.prompt.contains("private `draft_notes` endpoint"))
         #expect(handoff.prompt.contains("Never classify your own reply as the source comment"))
+        #expect(handoff.prompt.contains("On a merge request authored by the authenticated user, keep repair reports in the run result"))
         #expect(handoff.prompt.contains("load and follow the applicable installed MR skills"))
         #expect(handoff.prompt.contains("Do not publish directly yourself"))
         #expect(!handoff.allowsPush && handoff.followUpPushAllowed == nil)

@@ -116,7 +116,17 @@ enum FollowUpVerificationStore {
     }
 
     nonisolated static func receipt(work: AssistantAutomationRunner.MergeRequestWork, username: String, in directory: URL) -> FollowUpVerification? {
-        let url = recordURL(kind: "follow-up-verifications", work: work, username: username, in: directory)
+        readReceipt(kind: "follow-up-verifications", work: work, username: username, in: directory)
+    }
+
+    /// Delivery-only evidence never establishes ownership or permission to publish a draft.
+    nonisolated static func deliveryPreflight(work: AssistantAutomationRunner.MergeRequestWork, username: String, in directory: URL) -> FollowUpVerification? {
+        readReceipt(kind: "follow-up-preflight", work: work, username: username, in: directory)
+    }
+
+    private nonisolated static func readReceipt(kind: String, work: AssistantAutomationRunner.MergeRequestWork,
+                                              username: String, in directory: URL) -> FollowUpVerification? {
+        let url = recordURL(kind: kind, work: work, username: username, in: directory)
         guard let size = try? url.resourceValues(forKeys: [.fileSizeKey]).fileSize, size < 1000000,
               let data = try? Data(contentsOf: url), let receipt = try? JSONDecoder().decode(FollowUpVerification.self, from: data)
         else { return nil }
@@ -267,6 +277,7 @@ enum FollowUpVerificationStore {
         Before implementing, read and assess every current non-system discussion note and retain the `discussionFingerprint` from that status result for the snapshot you assessed. A later permission check must not silently replace the assessed snapshot. If comments change, assess all current feedback again before using its new fingerprint.
         Before drafting, create an evidence JSON file {discussionFingerprint,files}, using the assessed fingerprint and an array of {path,sha256} for the actual committed source/test files backing the replies. Compute hashes from `git show <tested-sha>:<path>`, not uncommitted working files. Run `\(command) verify \(target) --run-id \(run) --head-sha <tested-pushed-sha> --evidence-file <evidence.json>`. The verifier reads GitLab and compares remote content.
         Only after verification succeeds, save and re-fetch warranted private GitLab drafts. Then run `\(command) seal \(target) --verification-id <returned-id> --draft-ids '[<draft-ids>]'`, containing only those new or refreshed draft IDs. Unchanged legacy/user-created drafts cannot be adopted automatically. When re-verifying in this same run, include any still-pending drafts previously sealed by this run; unchanged bodies can be re-bound only after fresh remote verification.
+        If no incoming reviewer reply is owed, do not create drafts or run seal with an empty list. For a delivered repair, retain the status, tested commit, authorized push and remote-head/content verify steps above, then report succeeded in the run result with no generatedDrafts. If no code change is warranted, report the live evidence checked without inventing a delivery receipt. This exception never waives evidence or sealing for a reply that is actually owed.
         The publisher checks account, run, remote head, source branch, file content and exact draft bodies again. If sealing reports changed discussions, re-read and assess the new feedback, re-verify with its fingerprint, then explicitly edit or recreate every unsealed draft from that failed attempt before sealing. If verification or a required push fails, is pending, or is disabled, save NO response drafts for that unfinished run; report pending work only in the in-app result. Do not publish comments yourself or expand existing publication permissions. Follow applicable repository instructions within these permissions; an explicit review-only/local-only request keeps the result local.
         """
     }

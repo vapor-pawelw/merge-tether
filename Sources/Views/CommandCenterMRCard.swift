@@ -132,7 +132,7 @@ private struct CommandCenterMRCardContent: View {
                 }
                 MergeActionsView(item: item, monitor: monitor, evidenceMatchesCatalogContext: row.evidenceMatchesCatalogContext,
                     actionsBlocked: presentation.actionsBlocked, onReviewFeedback: { openAttention(.feedback) },
-                    showsExplanations: false, textFont: .callout,
+                    showsExplanations: false, showsRecoveryActions: false, textFont: .callout,
                     coveredBlockers: shownRequirements?.coveredBlockers ?? [],
                     hidesBlockedActions: presentation.working, statusTrailer: {
                         // Short state chips and automation rules sit together, above the action row.
@@ -147,13 +147,13 @@ private struct CommandCenterMRCardContent: View {
                             MREffectivePolicySummary(row: row, monitor: monitor,
                                 excluding: [presentation.message, presentation.nextStep ?? ""], holdsOnly: true)
                         }
-                    }) {
+                    }) { hasDirectMergeAction in
                     if humanAction?.action == .retryRun {
                         Button { openAttention(.assistantRuns) } label: { Text(.MRHumanAction.mrHumanActionActionReviewRun) }
                             .buttonStyle(.plain)
                     }
                     Spacer(minLength: 6)
-                    primaryAction
+                    primaryAction(hasDirectMergeAction: hasDirectMergeAction)
                     if presentation.showsAdditionalCommentReview {
                         Button { start { await monitor.attention.finishCommentReview(item) } } label: {
                             Text(.CommentReview.commentReviewFinish)
@@ -228,14 +228,12 @@ private struct CommandCenterMRCardContent: View {
     }
 
     @ViewBuilder
-    private var primaryAction: some View {
+    private func primaryAction(hasDirectMergeAction: Bool) -> some View {
         if let job = row.latestJob, job.execution?.state.isActive == true {
             Button(role: .destructive) { monitor.cancelAssistantJob(job.id) } label: { Text(.AssistantJobs.assistantJobsStop) }
                 .buttonStyle(.plain)
         } else if let action = humanAction {
-            if action.action != .reviewMerge || !monitor.authoredMergeRequests.requests.contains(where: {
-                item.canOfferManualMerge(using: $0)
-            }) {
+            if !hasDirectMergeAction || ![.reviewMerge, .reviewDecision].contains(action.action) {
                 humanActionButton(action).disabled(actionWaitsForRefresh(action) && (busy || presentation.isRefreshingAttention))
             }
         } else if !busy, allowsRemoval {

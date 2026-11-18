@@ -240,6 +240,8 @@ struct MRHumanAction {
         let needsAssistant = intent.map { $0.kind != .refresh } == true || !item.feedback.isEmpty
             || item.needsDiscussion || item.needsChanges || item.failedPipeline || item.hasConflict
             || item.authorFeedbackStatus?.needsAttention == true || item.autoApproveReady
+        let hasOutstandingFeedback = item.authorFeedbackStatus?.needsAttention == true
+            || item.needsChanges || !item.feedback.isEmpty || item.reReviewReadiness?.hasConcreteConcerns == true
         if item.canConfirmReReview {
             self.init(kind: .reviewDecision, action: .reviewDecision, message: Self.reviewDecisionMessage(item),
                       detail: Self.feedbackDetail(item), summary: Self.feedbackSummary(item))
@@ -247,12 +249,12 @@ struct MRHumanAction {
             self.init(kind: .approval, action: .reviewApproval, message: .MRHumanAction.mrHumanActionApproval)
         } else if item.needsPipelineHandoff {
             self.init(kind: .pipelineHandoff, action: .reviewHandoff, message: .MRHumanAction.mrHumanActionPipelineHandoff)
-        } else if item.needsMerge {
+        } else if item.needsMerge && !hasOutstandingFeedback {
             self.init(kind: .merge, action: .reviewMerge, message: .MRHumanAction.mrHumanActionMerge)
         } else if item.authorFeedbackStatus?.phase == .failed {
             self.init(kind: .verificationFailure, action: assistantReady ? .verifyFeedback : .setupAssistant,
                       message: .MRHumanAction.mrHumanActionVerificationFailure)
-        } else if !assistantReady && needsAssistant {
+        } else if !assistantReady && needsAssistant && item.authorFeedbackStatus?.primaryFinding?.manualDecision == nil {
             self.init(kind: .setupAssistant, action: .setupAssistant, message: .MRHumanAction.mrHumanActionSetupAssistant)
         } else if item.authorFeedbackStatus?.needsAttention == true {
             self.init(kind: .feedback, action: Self.feedbackAction(item), message: Self.feedbackMessage(item),

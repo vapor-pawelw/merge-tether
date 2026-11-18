@@ -88,6 +88,39 @@
           }
         }
       }
+    },
+    "draftReplyRepairUnconfirmed": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "The saved reply repair was interrupted before its execution could be confirmed. Inspect that attempt before retrying."
+          }
+        }
+      }
+    },
+    "draftReplyRepairStopped": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "The coding agent could not finish repairing this reply. Inspect its recorded result."
+          }
+        }
+      }
+    },
+    "draftReplyRepairExhausted": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Two automatic repairs of this reply have been attempted. Inspect their results before another attempt."
+          }
+        }
+      }
     }
   },
   "version": "1.0"

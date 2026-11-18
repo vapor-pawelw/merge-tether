@@ -4,6 +4,49 @@ import Testing
 
 @MainActor
 struct ReReviewCoordinatorTests {
+    @Test(arguments: ["current", "head", "discussion", "settings", "resolved"])
+    func presentationOnlyUsesTheCurrentReReviewContext(_ change: String) async throws {
+        let f = try Fixture()
+        defer { f.close() }
+        f.settings.automation.autoVerifyReReview = true
+        let coordinator = f.coordinator(verify: { _, _, _ in
+            .init(notes: [.init(noteID: 40, state: .blocking, reason: "The merge condition is unmet")])
+        })
+        defer { coordinator.reset() }
+        await coordinator.refresh(for: try f.request(), feedback: try f.feedback(), draftCount: 0, context: f.context, user: f.user)
+        let deadline = ContinuousClock.now + .seconds(3)
+        while coordinator.isVerifying, ContinuousClock.now < deadline { try await Task.sleep(for: .milliseconds(10)) }
+        if change == "head" { f.gitlab.write("request", Fixture.requestJSON.replacingOccurrences(of: #""sha":"head""#, with: #""sha":"later""#)) }
+        if change == "settings" { f.settings.automation.autoVerifyReReview = false }
+
+        if change == "resolved" { f.gitlab.write("discussions", Fixture.discussionsJSON.replacingOccurrences(of: #""resolved":false"#, with: #""resolved":true"#)) }
+        let status = coordinator.currentStatus(for: f.context, request: try f.request(),
+            fingerprint: change == "discussion" ? "later-discussion" : try f.fingerprint(),
+            activeFingerprint: ReviewVerdict.fingerprint(GitLabMergeRequestDiscussion.activeForReview(try f.discussions())), authorID: f.user.id)
+
+        #expect((status.state?.hasConcreteConcerns == true) == (change == "current"))
+    }
+
+    @Test func withdrawnFeedbackDoesNotKeepAnOldReReviewBlockerAfterEligibilityEnds() async throws {
+        let f = try Fixture()
+        defer { f.close() }
+        f.settings.automation.autoVerifyReReview = true
+        let coordinator = f.coordinator(verify: { _, _, _ in
+            .init(notes: [.init(noteID: 40, state: .blocking, reason: "The merge condition is unmet")])
+        })
+        defer { coordinator.reset() }
+        await coordinator.refresh(for: try f.request(), feedback: try f.feedback(), draftCount: 0, context: f.context, user: f.user)
+        let deadline = ContinuousClock.now + .seconds(3)
+        while coordinator.isVerifying, ContinuousClock.now < deadline { try await Task.sleep(for: .milliseconds(10)) }
+        #expect(coordinator.status(for: f.context, authorID: f.user.id).state?.hasConcreteConcerns == true)
+        f.gitlab.write("reviewers", "[]")
+        f.gitlab.write("discussions", "[]")
+
+        await coordinator.refresh(for: try f.request(), feedback: try f.feedback(), draftCount: 0, context: f.context, user: f.user)
+
+        #expect(coordinator.status(for: f.context, authorID: f.user.id).state == nil)
+    }
+
     @Test(arguments: [false, true])
     func localAutomationDesignationSuppressesHumanReReviewUntilRemoved(_ automatic: Bool) async throws {
         let f = try Fixture()

@@ -54,7 +54,8 @@ extension GlabService {
         let mergeRef = "refs/merge-requests/\(request.iid)/merge"
         let headRef = "refs/merge-requests/\(request.iid)/head"
         let mergedResult = ref == mergeRef
-        if mergedResult {
+        let failedTrain = ref == "refs/merge-requests/\(request.iid)/train" && expectedStatus == "failed"
+        if mergedResult || failedTrain {
             guard project == targetProject else { throw CancellationError() }
         } else {
             guard sha == source,
@@ -81,6 +82,10 @@ extension GlabService {
                   commit.parentIDs.allSatisfy(Self.isFullGitSHA), source != target
             else { throw CancellationError() }
             hasStaleTarget = Set(commit.parentIDs) != Set([source, target])
+            targetHead = target
+        } else if failedTrain {
+            let target = try await fetchBranchHeadSHA(projectID: targetProject, branch: request.targetBranch, host: host)
+            try await verifyFailedTrainContent(sha, request: request, source: source, target: target, host: host)
             targetHead = target
         }
 
@@ -111,5 +116,47 @@ extension GlabService {
             ))
         }
         return pipeline
+    }
+
+    private func verifyFailedTrainContent(_ sha: String, request: GitLabMergeRequest,
+                                         source: String, target: String, host: String) async throws {
+        struct Commit: Decodable {
+            let id: String
+            let parentIDs: [String]
+            enum CodingKeys: String, CodingKey { case id; case parentIDs = "parent_ids" }
+        }
+        struct MergeRef: Decodable {
+            let commitID: String
+            enum CodingKeys: String, CodingKey { case commitID = "commit_id" }
+        }
+        struct Comparison: Decodable {
+            struct Identity: Decodable { let id: String }
+            struct Difference: Decodable {}
+            let commit: Identity
+            let diffs: [Difference]
+            let compareTimeout: Bool?
+            enum CodingKeys: String, CodingKey { case commit, diffs; case compareTimeout = "compare_timeout" }
+        }
+        let project = request.projectID
+        let train: Commit = try await mergeRequestAPI("/projects/\(project)/repository/commits/\(sha)", host: host)
+        let trainParents = Set(train.parentIDs)
+        guard train.id == sha, source != target,
+              train.parentIDs.allSatisfy(Self.isFullGitSHA), trainParents.count == train.parentIDs.count,
+              trainParents == Set([target]) || trainParents == Set([source, target]) else { throw CancellationError() }
+
+        // A squash train has no source parent. Bind its complete content to a
+        // plain merge whose immutable parents are the exact current branches.
+        let reference: MergeRef = try await mergeRequestAPI(
+            "/projects/\(project)/merge_requests/\(request.iid)/merge_ref", host: host)
+        guard Self.isFullGitSHA(reference.commitID) else { throw CancellationError() }
+        let merged: Commit = try await mergeRequestAPI(
+            "/projects/\(project)/repository/commits/\(reference.commitID)", host: host)
+        guard merged.id == reference.commitID, merged.parentIDs.count == 2,
+              Set(merged.parentIDs) == Set([source, target]) else { throw CancellationError() }
+        if merged.id == sha { return }
+        let comparison: Comparison = try await mergeRequestAPI(
+            "/projects/\(project)/repository/compare?from=\(merged.id)&to=\(sha)&straight=true", host: host)
+        guard comparison.commit.id == sha, comparison.compareTimeout == false, comparison.diffs.isEmpty
+        else { throw CancellationError() }
     }
 }

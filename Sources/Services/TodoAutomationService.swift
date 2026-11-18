@@ -404,9 +404,11 @@ final class TodoAutomationService {
                 && $0.followUpPushAllowed == true && $0.execution?.finishedAt != nil
         }.sorted { $0.createdAt > $1.createdAt }
         for origin in origins {
+            guard origin.execution?.cancellationOrigin != .user else { continue }
             let stopped = residual.assessedStoppedRunIDs.contains(origin.id)
                 && (origin.execution?.state == .failed || origin.execution?.state == .interrupted
-                    || (origin.execution?.state == .cancelled && origin.key.assistant != settings.automation.assistant))
+                    || (origin.execution?.state == .cancelled && (origin.execution?.cancellationOrigin == .policy
+                        || origin.execution?.cancellationOrigin == nil && origin.key.assistant != settings.automation.assistant)))
             guard stopped || (origin.execution?.state == .succeeded
                 && recoverySourceIsCurrent(origin, request: request, work: work, username: username, settings: settings)),
                   let rootID = recoveryRoot(of: origin, handoffs: settings.assistantHandoffs) else { continue }
@@ -455,7 +457,8 @@ final class TodoAutomationService {
                                          settings: SettingsManager) -> Bool {
         if let expected = origin.expectedHeadSHA, !expected.isEmpty, expected == request.sha { return true }
         let current = FollowUpVerificationStore.receipt(work: work, username: username, in: followUpDirectory)
-        let proofs = current.map { [$0] } ?? []
+        let preflight = FollowUpVerificationStore.deliveryPreflight(work: work, username: username, in: followUpDirectory)
+        let proofs = [current, preflight].compactMap { $0 }
         let archived = FollowUpVerificationStore.contextReceipts(work: work, username: username,
             settings: settings, in: followUpDirectory)
         return (proofs + archived).contains { proof in

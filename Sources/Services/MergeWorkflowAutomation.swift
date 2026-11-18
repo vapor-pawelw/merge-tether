@@ -224,7 +224,7 @@ final class MergeWorkflowAutomation {
             if let state = settings.assistantHandoffs[jobIndex].execution?.state,
                state.isActive || state == .cancelled {
                 if state.isActive {
-                    AssistantAutomationRunner.cancel(id, settings: settings)
+                    AssistantAutomationRunner.cancel(id, settings: settings, origin: .policy)
                     if settings.assistantHandoffs[jobIndex].execution?.state.isActive == true {
                         settings.assistantHandoffs[jobIndex].execution?.state = .cancelled
                         settings.assistantHandoffs[jobIndex].execution?.finishedAt = Date()
@@ -737,6 +737,16 @@ final class MergeWorkflowAutomation {
                   try detector.recordDiagnosisAfterInfrastructureRetry(failureAfterInfrastructureRetry, for: handoff)
             else { throw CancellationError() }
         }
+        let confirmation: AssistantAutomationRunner.PipelineHandoffConfirmation?
+        if event.kind == .pipelineFailure, confirmedPipelineHandoffs.contains(entry.id) {
+            guard let reservation = handoff, let token = reservation.reservationID,
+                  let head = latest.sha, GlabService.isFullGitSHA(head) else {
+                throw AssistantJobExecutor.ExecutionError.contextUnavailable
+            }
+            confirmation = .init(target: .init(host: entry.host, username: entry.user.username,
+                projectID: latest.projectID, iid: latest.iid), pipelineID: reservation.pipelineID,
+                headSHA: head, reservationID: token)
+        } else { confirmation = nil }
         let job = try await AssistantAutomationRunner.launch(
             settingsBeforeLaunch.assistant,
             title: "\(repository) !\(latest.iid) (\(latest.author.assistantTitleName(viewerUsername: entry.user.username)))",
@@ -747,9 +757,9 @@ final class MergeWorkflowAutomation {
             access: access,
             work: workKey(entry), username: entry.user.username, settings: settings, pipelineReservation: handoff,
             feedbackNoteIDs: feedbackIDs, isReview: event.kind == .reviewUpdate, mrWorkflow: mrWorkflow,
-            expectedHeadSHA: bindLaunchSnapshot ? current.sha : nil, jobCoordinator: jobCoordinator,
+            expectedHeadSHA: bindLaunchSnapshot || confirmation != nil ? current.sha : nil, jobCoordinator: jobCoordinator,
             configurationSnapshot: bindLaunchSnapshot ? settingsBeforeLaunch : nil,
-            glab: glab.freshSession()
+            glab: glab.freshSession(), workflowEventKind: event.kind, pipelineHandoffConfirmation: confirmation
         )
         // Transfer this owned reservation to the CLI run; terminal completion
         // releases it through the monitor callback rather than user dismissal.
@@ -889,6 +899,7 @@ final class MergeWorkflowAutomation {
     }
 
     private func pruneHistory() {
+        AssistantAutomationRunner.migrateTaskOrigins(settings: settings)
         let jobs = WorkflowExecutionProjection.JobIndex(settings.assistantHandoffs)
         let projected = settings.workflowActivity.map(jobs.entry)
         let protected = Set(zip(settings.workflowActivity, projected).flatMap { entry, visible -> [String] in

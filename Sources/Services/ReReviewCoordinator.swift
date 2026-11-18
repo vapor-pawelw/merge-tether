@@ -88,6 +88,18 @@ final class ReReviewCoordinator {
             requested: receipts.contains { $0.requested == true }, unconfirmed: receipts.contains { $0.unconfirmed })
     }
 
+    func currentStatus(for context: Context, request: GitLabMergeRequest?, fingerprint: String?, activeFingerprint: String? = nil, authorID: Int?) -> Status {
+        var result = status(for: context, authorID: authorID)
+        guard result.state?.hasConcreteConcerns == true else { return result }
+        guard let request, let fingerprint, let activeFingerprint,
+              reReviewChecks[context]?.key == reReviewKey(request, fingerprint: fingerprint, activeFingerprint: activeFingerprint, context: context) else {
+            result.state = nil
+            result.fingerprint = nil
+            return result
+        }
+        return result
+    }
+
     func reset() {
         reReviewTasks.values.forEach { $0.task.cancel() }
         reReviewTasks = [:]
@@ -277,6 +289,11 @@ final class ReReviewCoordinator {
             }
             notify(context, unanswered: feedback.hasUnansweredFeedback)
         }
+        let invalidated = reReviewChecks[context].map { $0.key != key } ?? false
+        if invalidated {
+            reReviewChecks.removeValue(forKey: context)
+            reReviewTasks.removeValue(forKey: context)?.task.cancel()
+        }
         let reviewers: [GitLabMergeRequestReviewer]
         let approvers: Set<Int>
         do {
@@ -291,7 +308,11 @@ final class ReReviewCoordinator {
         guard !Task.isCancelled, isCurrent(context), runtimePermitsReReview(context),
               settings.automation.scope.permits(request, host: host, username: context.username),
               usedAssistant || observedPublication || manualReReviewApprovals[context] != nil
-                || (!onlyResolvedFeedback && sharedAssessment != nil) || reviewers.contains(where: { $0.state == "unapproved" }) else { return }
+                || (!onlyResolvedFeedback && sharedAssessment != nil) || reviewers.contains(where: { $0.state == "unapproved" }) else {
+            let removed = reReviewChecks.removeValue(forKey: context) != nil
+            if invalidated || removed { notify(context, unanswered: feedback.hasUnansweredFeedback) }
+            return
+        }
         let history = MergeRequestReviewHistory(reviewers: reviewers, discussions: discussions, authorID: user.id)
         let earlierReviewers = Set(reviewers.filter {
             $0.state == "reviewed" || $0.state == "unapproved"

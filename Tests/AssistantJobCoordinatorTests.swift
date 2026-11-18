@@ -122,6 +122,152 @@ import Testing
         #expect(!coordinator.isWorking(on: original.key.work))
     }
 
+    @Test(arguments: [AssistantJobExecution.State.failed, .interrupted, .succeeded])
+    func stopPersistsAfterTheLiveTaskHasAlreadyExited(_ state: AssistantJobExecution.State) throws {
+        let (settings, name, defaults) = try fixture()
+        defer { defaults.removePersistentDomain(forName: name) }
+        let original = job(state: state)
+        settings.assistantHandoffs = [original]
+        AssistantAutomationRunner.cancel(original.id, settings: settings)
+        let restored = SettingsManager(defaults: defaults).assistantHandoffs.first?.execution
+        #expect(restored?.cancellationOrigin == .user)
+        #expect(restored?.state == state)
+    }
+
+    @Test func anAutomaticReconciliationCannotBypassItsParentsExplicitStop() async throws {
+        let (settings, name, defaults) = try fixture()
+        defer { defaults.removePersistentDomain(forName: name) }
+        var original = job(state: .blocked)
+        original.execution?.cancellationOrigin = .user
+        settings.assistantHandoffs = [original]
+        let coordinator = AssistantJobCoordinator(execute: { _, _ in
+            .init(result: .init(status: .blocked, summary: "Fixture only"), output: "")
+        })
+        do {
+            _ = try await AssistantAutomationRunner.launch(.codex, title: "Reconcile",
+                mergeRequestURL: URL(string: "https://gitlab.example.org/group/project/-/merge_requests/2")!,
+                prompt: "Reconcile the assigned task", workspace: "", access: .gitLabRead,
+                work: original.key.work, username: original.key.username, settings: settings,
+                mrWorkflow: .followUp, manual: false, expectedHeadSHA: "head", jobCoordinator: coordinator,
+                retryOf: original.id)
+            await coordinator.waitForTermination()
+            Issue.record("The stopped parent must veto all automatic reconciliation")
+        } catch { #expect(error as? AssistantJobExecutor.ExecutionError == .disabledPermission) }
+        #expect(settings.assistantHandoffs.count == 1)
+    }
+
+    @Test func lateStopAlsoVetoesAutomaticDescendantsButPreservesAnExplicitManualRetry() throws {
+        let (settings, name, defaults) = try fixture()
+        defer { defaults.removePersistentDomain(forName: name) }
+        let original = job(state: .failed)
+        var automatic = job(state: .failed)
+        automatic.retryOf = original.id; automatic.manual = false
+        var manual = job(state: .failed)
+        manual.retryOf = original.id; manual.manual = true
+        settings.assistantHandoffs = [original, automatic, manual]
+        AssistantAutomationRunner.cancel(original.id, settings: settings)
+        let saved = SettingsManager(defaults: defaults).assistantHandoffs
+        #expect(saved.first { $0.id == original.id }?.execution?.cancellationOrigin == .user)
+        #expect(saved.first { $0.id == automatic.id }?.execution?.cancellationOrigin == .user)
+        #expect(saved.first { $0.id == manual.id }?.execution?.cancellationOrigin == nil)
+    }
+
+    @Test(arguments: [AssistantJobExecution.CancellationOrigin.user, .policy])
+    func cancellingQueuedWorkPersistsItsOriginBeforeFinishing(_ origin: AssistantJobExecution.CancellationOrigin) throws {
+        // given
+        let (settings, name, defaults) = try fixture()
+        defer { defaults.removePersistentDomain(forName: name) }
+        let health = AssistantCLIHealthStore(defaults: defaults)
+        health.record(.init(kind: .rateLimited), assistant: .codex,
+            executable: URL(fileURLWithPath: "/example/codex"), startedAt: Date())
+        let original = job()
+        settings.assistantHandoffs = [original]
+        let coordinator = AssistantJobCoordinator(healthStore: health, execute: { _, _ in
+            Issue.record("Cancelled queued work must not execute")
+            throw CancellationError()
+        })
+        var observedOrigin: AssistantJobExecution.CancellationOrigin?
+        coordinator.onFinished = { _ in
+            observedOrigin = SettingsManager(defaults: defaults).assistantHandoffs.first?.execution?.cancellationOrigin
+        }
+        #expect(coordinator.schedule(original, settings: settings))
+
+        // when
+        coordinator.cancel(original.id, origin: origin)
+
+        // then
+        let persisted = SettingsManager(defaults: defaults).assistantHandoffs.first?.execution
+        #expect(persisted?.state == .cancelled)
+        #expect(persisted?.cancellationOrigin == origin && observedOrigin == origin)
+        #expect(!coordinator.isRunning(original.id))
+    }
+
+    @Test(arguments: [AssistantJobExecution.CancellationOrigin.user, .policy])
+    func runningCancellationOriginSurvivesTerminationAndCheckpointRecovery(_ origin: AssistantJobExecution.CancellationOrigin) async throws {
+        // given
+        let (settings, name, defaults) = try fixture()
+        defer { defaults.removePersistentDomain(forName: name) }
+        let original = job()
+        settings.assistantHandoffs = [original]
+        var continuation: CheckedContinuation<Void, Never>?
+        let coordinator = AssistantJobCoordinator(execute: { handoff, _ in
+            await withCheckedContinuation { continuation = $0 }
+            try await AssistantJobJournal.save(.init(result: .init(status: .succeeded, summary: "Saved work"),
+                output: "Verified completion"), for: handoff)
+            throw CancellationError()
+        })
+        #expect(coordinator.schedule(original, settings: settings))
+        for _ in 0..<100 where continuation == nil { try await Task.sleep(for: .milliseconds(5)) }
+        try #require(continuation != nil)
+
+        // when
+        coordinator.cancel(original.id, origin: origin)
+        let beforeCleanup = SettingsManager(defaults: defaults).assistantHandoffs.first?.execution?.cancellationOrigin
+        coordinator.prepareForTermination(settings: settings)
+        continuation?.resume()
+        await coordinator.waitForTermination()
+        let restarted = SettingsManager(defaults: defaults)
+        let recovery = AssistantJobCoordinator(execute: { _, _ in
+            Issue.record("A recovered completion must not execute again")
+            throw CancellationError()
+        })
+        recovery.synchronizeInterruptedRuns(settings: restarted)
+
+        // then
+        let persisted = restarted.assistantHandoffs.first?.execution
+        #expect(beforeCleanup == origin)
+        #expect(persisted?.state == .succeeded)
+        #expect(persisted?.cancellationOrigin == origin)
+        #expect(SettingsManager(defaults: defaults).assistantHandoffs.first?.execution?.cancellationOrigin == origin)
+    }
+
+    @Test func explicitStopIsTheDefaultAndCannotBeOverwrittenByLaterPolicyCancellation() async throws {
+        // given
+        let (settings, name, defaults) = try fixture()
+        defer { defaults.removePersistentDomain(forName: name) }
+        let original = job()
+        settings.assistantHandoffs = [original]
+        var continuation: CheckedContinuation<Void, Never>?
+        let coordinator = AssistantJobCoordinator(execute: { _, _ in
+            await withCheckedContinuation { continuation = $0 }
+            throw CancellationError()
+        })
+        #expect(coordinator.schedule(original, settings: settings))
+        for _ in 0..<100 where continuation == nil { try await Task.sleep(for: .milliseconds(5)) }
+        try #require(continuation != nil)
+
+        // when
+        coordinator.cancel(original.id)
+        coordinator.cancel(original.id, origin: .policy)
+        continuation?.resume()
+        await coordinator.waitForTermination()
+
+        // then
+        let persisted = SettingsManager(defaults: defaults).assistantHandoffs.first?.execution
+        #expect(persisted?.state == .cancelled)
+        #expect(persisted?.cancellationOrigin == .user)
+    }
+
     @Test func unavailableCheckpointKeyCannotBlockTheMainActorOrTheCaller() async throws {
         let releaseKey = DispatchSemaphore(value: 0)
         defer { releaseKey.signal() }
@@ -157,6 +303,35 @@ import Testing
         #expect(settings.assistantHandoffs[0].execution?.state == .interrupted)
         continuation?.resume()
         await coordinator.waitForTermination()
+    }
+
+    @Test(arguments: [AssistantJobExecution.State.queued, .running, .interrupted])
+    func startupRecoversOnlyTheExactDeadNeverStartedPipelineClaim(_ state: AssistantJobExecution.State) throws {
+        let (settings, name, defaults) = try fixture()
+        defer { defaults.removePersistentDomain(forName: name) }
+        let folder = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
+        defer { try? FileManager.default.removeItem(at: folder) }
+        let owner = ExistingPipelineWorkDetector(directory: folder, installationID: "com.test.local", processID: 700)
+        var original = job(state: state)
+        let optionalClaim = try owner.registerRun(for: .init(host: original.key.work.host, projectID: 1,
+            mergeRequestIID: original.key.work.iid, pipelineID: 12))
+        let claim = try #require(optionalClaim)
+        try owner.bindRun(original.id, to: claim)
+        original.pipelineReservation = claim
+        settings.assistantHandoffs = [original]
+        settings.save()
+        let detector = ExistingPipelineWorkDetector(directory: folder, installationID: "com.test.local", processState: { _ in .dead })
+        let coordinator = AssistantJobCoordinator(execute: { _, _ in
+            Issue.record("Startup must not replay the interrupted executor")
+            throw CancellationError()
+        })
+
+        coordinator.synchronizeInterruptedRuns(settings: settings, pipelineWorkDetector: detector)
+
+        #expect(settings.assistantHandoffs.first?.execution?.state == .interrupted)
+        #expect(detector.hasActiveReservation(for: claim) == (state != .queued))
+        #expect(detector.status(for: claim) == .registered)
+        #expect(SettingsManager(defaults: defaults).assistantHandoffs.first?.execution?.state == .interrupted)
     }
 
     @Test func aCompletedCheckpointIsRecoveredWithoutReplayingTheCLI() async throws {

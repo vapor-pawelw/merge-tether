@@ -9,6 +9,7 @@ final class AssistantDependencyMonitor {
     private var task: Task<Void, Never>?
     private var generation = UUID()
     private let probe: @MainActor (AutomationAssistant, Bool) async -> AssistantDependencyStatus
+    var onReady: ((AutomationAssistant) -> Void)?
     var onRecovered: ((AutomationAssistant) -> Void)?
 
     init(probe: @escaping @MainActor (AutomationAssistant, Bool) async -> AssistantDependencyStatus = AssistantCLI.detect) {
@@ -42,10 +43,12 @@ final class AssistantDependencyMonitor {
                 results[assistant] = await probe(assistant, requireCLI)
             }
             guard generation == current, !Task.isCancelled else { return }
+            let ready = results.keys.filter { results[$0]?.isReady == true && statuses[$0]?.isReady != true }
             let recovered = results.keys.filter { results[$0]?.isReady == true && statuses[$0]?.isReady == false }
             statuses = results
             lastCheck = Date()
             task = nil
+            ready.forEach { onReady?($0) }
             recovered.forEach { onRecovered?($0) }
         }
     }

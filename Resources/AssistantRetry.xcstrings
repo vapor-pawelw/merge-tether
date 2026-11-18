@@ -1,0 +1,83 @@
+{
+  "sourceLanguage": "en",
+  "strings": {
+    "assistantRetry.scheduled": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Automatic retry %1$lld of %2$lld is scheduled for %3$@."
+          }
+        }
+      }
+    },
+    "assistantRetry.started": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Started automatic retry %1$lld of %2$lld after checking the current task."
+          }
+        }
+      }
+    },
+    "assistantRetry.failed": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Automatic retry preparation failed: %@"
+          }
+        }
+      }
+    },
+    "assistantRetry.obsolete": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "The current MR no longer requires this retry."
+          }
+        }
+      }
+    },
+    "assistantRetry.exhausted": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "The %lld automatic retries are exhausted. Review the latest task result before starting another attempt."
+          }
+        }
+      }
+    },
+    "assistantRetry.admissionInterrupted": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "The app stopped while preparing this retry. Its attempt was retained before checking current state again."
+          }
+        }
+      }
+    },
+    "assistantRetry.reservationHeld": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Automatic retry is paused while this MR has an exclusive worker reservation. Confirm that the previous worker has stopped before another run can start."
+          }
+        }
+      }
+    }
+  },
+  "version": "1.0"
+}

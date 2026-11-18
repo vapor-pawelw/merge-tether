@@ -80,7 +80,7 @@ import Testing
               'config get host') printf '%s' 'gitlab.example.test' ;;
               'auth status') printf '%s' 'Logged in to gitlab.example.test as me' >&2 ;;
               'api /user '*) printf '%s' '{"id":1,"username":"me"}' ;;
-              'api /projects/7/merge_requests/11 '*) printf '%s' '{"project_id":7,"iid":11,"author":{"id":1,"username":"me","name":"Me"},"title":"Fixture","web_url":"https://gitlab.example.test/team/repo/-/merge_requests/11","state":"opened","sha":"abc","source_branch":"feature","target_branch":"main","labels":[]}' ;;
+              'api /projects/7/merge_requests/11 '*) printf '%s' '{"project_id":7,"iid":11,"author":{"id":1,"username":"me","name":"Me"},"title":"Fixture","web_url":"https://gitlab.example.test/team/repo/-/merge_requests/11","state":"opened","draft":false,"sha":"aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa","source_branch":"feature","target_branch":"main","labels":[]}' ;;
               *) exit 20 ;;
             esac
             """.utf8).write(to: executable)
@@ -127,7 +127,7 @@ import Testing
             touch "$root/entered"
             count=0
             while test ! -f "$root/release" && test "$count" -lt 500; do sleep 0.01; count=$((count + 1)); done
-            printf '%s' '{"project_id":7,"iid":11,"author":{"id":1,"username":"me","name":"Me"},"title":"Fixture","web_url":"https://\(host)/team/repo/-/merge_requests/11","state":"opened","sha":"\(sha)","source_branch":"feature","target_branch":"main","labels":[]}' ;;
+            printf '%s' '{"project_id":7,"iid":11,"author":{"id":1,"username":"me","name":"Me"},"title":"Fixture","web_url":"https://\(host)/team/repo/-/merge_requests/11","state":"opened","draft":false,"sha":"\(sha)","source_branch":"feature","target_branch":"main","labels":[]}' ;;
           *) exit 20 ;;
         esac
         """.utf8).write(to: executable)

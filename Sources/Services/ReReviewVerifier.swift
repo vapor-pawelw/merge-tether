@@ -442,6 +442,11 @@ enum ReReviewVerifier {
             the provider emits is not itself an unmet requirement. Retain it as blocking/uncertain only
             if an authoritative requirement or an independently supported original concern actually
             depends on that unknown. Never promote a speculative stronger contract into a new obligation.
+            A reviewer may explicitly allow documenting a provider limitation as an alternative to a code change.
+            Assess that alternative against the actual published explanation and verified implementation;
+            do not turn it into an obligation to obtain a new provider guarantee or to invent a response mapping.
+            An unsupported assumption in the reviewer's rationale does not strengthen the requested outcome.
+            Preserve an independently evidenced defect or explicit merge condition when it remains unmet.
             For a genuinely essential external decision, after bounded reads of available authoritative
             sources fail to settle it and no independent implementable work remains on THIS note, return
             state uncertain and manualDecision. Its context must explain the feature, involved systems,

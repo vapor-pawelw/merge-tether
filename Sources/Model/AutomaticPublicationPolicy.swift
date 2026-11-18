@@ -52,9 +52,10 @@ struct AutomaticPublicationPolicy: Equatable, Sendable {
         guard couldAllow(draft, request: request, userID: userID, host: host) else { return false }
         if let discussionID = draft.discussionID,
            discussions?.contains(where: { $0.id == discussionID && $0.isResolvedForReview }) == true { return false }
-        guard requiresSources else { return true }
+        guard requiresSources || request.author.id == userID else { return true }
         guard let sources = Self.sourceNotes(for: draft, discussions: discussions, userID: userID),
               !sources.isEmpty else { return false }
+        if mode == .all { return true }
         return sources.allSatisfy { note in
             guard let authorID = note.author?.id, let noteID = note.id else { return false }
             return matches(restrictions.sourceCommentAuthors, host: host, id: authorID)
@@ -70,6 +71,8 @@ struct AutomaticPublicationPolicy: Equatable, Sendable {
         guard mode != .manual, userID > 0, (draft.id ?? 0) > 0, draft.authorID == userID,
               Self.safeForAutomaticPublication(draft), request.projectID > 0, request.iid > 0,
               request.author.id > 0, request.webURL.isGitLabMergeRequest(host: host, iid: request.iid) else { return false }
+        // A standalone status report becomes an unresolved self-discussion in GitLab.
+        if request.author.id == userID, draft.discussionID?.isEmpty != false { return false }
         if mode == .all { return true }
         guard mode != .filtered || restrictions.hasConditions,
               matches(restrictions.repositories, host: host, id: request.projectID),
@@ -96,7 +99,22 @@ struct AutomaticPublicationPolicy: Equatable, Sendable {
                             userID: Int) -> [GitLabMergeRequestDiscussion.Note]? {
         guard let threadID = draft.discussionID, !threadID.isEmpty,
               let threads = discussions?.filter({ $0.id == threadID }), threads.count == 1 else { return nil }
-        let notes = threads[0].notes.filter { $0.system != true }
+        return sourceNotes(in: threads[0], userID: userID)
+    }
+
+    static func incomingDiscussionIDs(in discussions: [GitLabMergeRequestDiscussion]?, userID: Int) -> Set<String>? {
+        guard let discussions, userID > 0 else { return nil }
+        var seen: Set<String> = [], incoming: Set<String> = []
+        for thread in discussions {
+            guard let id = thread.id, !id.isEmpty, seen.insert(id).inserted,
+                  let sources = sourceNotes(in: thread, userID: userID) else { return nil }
+            if !sources.isEmpty { incoming.insert(id) }
+        }
+        return incoming
+    }
+
+    private static func sourceNotes(in thread: GitLabMergeRequestDiscussion, userID: Int) -> [GitLabMergeRequestDiscussion.Note]? {
+        let notes = thread.notes.filter { $0.system != true }
         guard notes.allSatisfy({ ($0.id ?? 0) > 0 && ($0.author?.id ?? 0) > 0 }),
               Set(notes.compactMap(\.id)).count == notes.count else { return nil }
         let lastIncoming = notes.filter { $0.author?.id != userID }.compactMap(\.id).max() ?? 0

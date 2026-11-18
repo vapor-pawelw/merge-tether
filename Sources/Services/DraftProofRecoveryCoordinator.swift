@@ -19,6 +19,8 @@ final class DraftProofRecoveryCoordinator {
         var user: GitLabAuthenticatedUser
         let host: String
         var branchHead: String
+        var assessedStoppedRepairRunIDs: Set<UUID> = []
+        var automaticRepairRecoveryOf: UUID? = nil
         var work: AssistantAutomationRunner.MergeRequestWork {
             .init(host: host, projectID: request.projectID, iid: request.iid)
         }
@@ -74,6 +76,7 @@ final class DraftProofRecoveryCoordinator {
         let configuration: AutomationSettings
         let context: AttemptContext
         let id: String
+        let stoppedRepairRunIDs: Set<UUID>
     }
     private let settings: SettingsManager
     private let directory: URL
@@ -110,7 +113,8 @@ final class DraftProofRecoveryCoordinator {
     }
 
     func isChecking(work: AssistantAutomationRunner.MergeRequestWork) -> Bool {
-        states[work]?.phase == .checking || (states[work]?.phase == .repairing && stoppedRepairReason(work: work) == nil)
+        states[work]?.phase == .checking || repairTasks[work] != nil
+            || (states[work]?.phase == .repairing && stoppedRepairReason(work: work) == nil)
     }
     func isReadOnlyFailure(work: AssistantAutomationRunner.MergeRequestWork) -> Bool {
         guard let state = states[work], state.phase == .blocked else { return false }
@@ -187,12 +191,19 @@ final class DraftProofRecoveryCoordinator {
 
     func schedule(snapshot: Snapshot, origin: FollowUpVerification, draftIDs: [Int]? = nil, configuration: AutomationSettings) {
         let proposed = draftIDs ?? origin.drafts.map(\.id)
+        // A stopped worker changes the evidence epoch; publication settings never grant another attempt.
+        let stoppedRepairs = stoppedRepairRuns(snapshot: snapshot, draftIDs: proposed)
+        let stoppedIDs = Set(stoppedRepairs.map(\.id))
+        let stoppedRevision = stoppedRepairs.map {
+            "\($0.id.uuidString):\($0.execution?.state.rawValue ?? ""):\($0.execution?.finishedAt?.timeIntervalSince1970 ?? 0)"
+                + ($0.execution?.cancellationOrigin.map { "|cancellation:\($0.rawValue)" } ?? "")
+        }.joined(separator: "|")
         guard FollowUpVerificationStore.validRecoveryScope(proposed, origin: origin),
               permitted(snapshot, configuration: configuration), matchesOwnership(snapshot, origin: origin, draftIDs: proposed),
               FollowUpVerificationStore.recoveryOrigins(work: snapshot.work, username: snapshot.user.username,
                   settings: settings, in: directory).contains(origin),
               let fingerprint = ReviewVerdict.fingerprint(snapshot.discussions),
-              let key = try? verdictContextKey(snapshot, configuration: configuration) else { return }
+              let key = try? verdictContextKey(snapshot, configuration: configuration, stoppedRepairRevision: stoppedRevision) else { return }
         attemptAccounts[snapshot.work] = snapshot.user.username
         let presentation = presentationContext(request: snapshot.request, fingerprint: fingerprint, configuration: configuration)
         discussionRoots[snapshot.work] = Dictionary(snapshot.drafts.compactMap { draft -> (Int, Int)? in
@@ -239,7 +250,7 @@ final class DraftProofRecoveryCoordinator {
             if let assessment = blocked?.assessment, assessment.drafts.contains(where: { $0.state != .valid }),
                let context = blocked?.context {
                 let request = Request(snapshot: snapshot, origin: origin, draftIDs: proposed,
-                    configuration: configuration, context: context, id: blocked?.id ?? key)
+                    configuration: configuration, context: context, id: blocked?.id ?? key, stoppedRepairRunIDs: stoppedIDs)
                 scheduleRepair(request, assessment: assessment)
             }
             return
@@ -249,7 +260,7 @@ final class DraftProofRecoveryCoordinator {
         let id = AICommentAssessmentStore.digest(key + "|" + fingerprint + "|" + selected.map(String.init).joined(separator: ",")
             + "|" + origin.verificationID.uuidString)
         let request = Request(snapshot: snapshot, origin: origin, draftIDs: selected,
-            configuration: configuration, context: context, id: id)
+            configuration: configuration, context: context, id: id, stoppedRepairRunIDs: stoppedIDs)
         let resume = previous.first {
             $0.id == id && $0.context?.key == context.key && $0.context?.originID == context.originID
                 && $0.context?.drafts == context.drafts && $0.context?.discussionFingerprint == context.discussionFingerprint
@@ -358,16 +369,21 @@ final class DraftProofRecoveryCoordinator {
         repairTasks[work] = Task { [weak self] in
             guard let self else { return }
             var notify = false
-            defer { repairTasks.removeValue(forKey: work); if notify { onChange?() } }
+            defer {
+                let superseded = states[work].map { $0.id != input.id } == true
+                repairTasks.removeValue(forKey: work)
+                if notify || superseded { onChange?() }
+            }
             do {
                 guard current(input), let launch = onNeedsRepair else { throw CancellationError() }
-                let live = try await ReadOnlyAssessmentRetry.run(isCurrent: { current(input) }, wait: retryWait) {
+                var live = try await ReadOnlyAssessmentRetry.run(isCurrent: { current(input) }, wait: retryWait) {
                     try await fetch(input.snapshot)
                 }
                 guard current(input), sameContext(input.snapshot, live),
                       matchesOwnership(live, origin: input.origin, draftIDs: input.draftIDs) else {
                     throw Blocked(reason: String(localized: .DraftProofRecovery.draftProofRecoveryChanged))
                 }
+                live.assessedStoppedRepairRunIDs = input.stoppedRepairRunIDs
                 let scoped = DraftProofRecoveryVerifier.Assessment(drafts: assessment.drafts.filter { input.draftIDs.contains($0.draftID) })
                 let result = await DraftReplyRepair.dispatch(snapshot: live, origin: input.origin, assessment: scoped,
                     settings: settings, directory: directory, launch: launch)
@@ -559,7 +575,22 @@ final class DraftProofRecoveryCoordinator {
         (try? JSONEncoder.sorted.encode(request.headPipeline)).map { String(decoding: $0, as: UTF8.self) } ?? "unknown"
     }
 
-    private func verdictContextKey(_ snapshot: Snapshot, configuration: AutomationSettings) throws -> String {
+    private func stoppedRepairRuns(snapshot: Snapshot, draftIDs: [Int]) -> [AssistantAutomationRunner.Handoff] {
+        settings.assistantHandoffs.filter { job in
+            guard job.key.work == snapshot.work, job.key.username == snapshot.user.username,
+                  job.workflow == .followUp, job.followUpPushAllowed == true,
+                  let repair = job.draftRepair, job.key.assistant == repair.assistant,
+                  job.expectedHeadSHA == repair.headSHA, let execution = job.execution,
+                  DraftReplyRepair.canAutomaticallyRecover(execution),
+                  execution.finishedAt != nil, draftIDs.contains(repair.draftID) else { return false }
+            return snapshot.drafts.contains { draft in
+                draft.id == repair.draftID && AICommentAssessmentStore.digest(draft.note ?? "") == repair.bodySHA256
+                    && repair.origin.owns(draft, request: snapshot.request, host: snapshot.host, user: snapshot.user)
+            }
+        }.sorted { $0.id.uuidString < $1.id.uuidString }
+    }
+
+    private func verdictContextKey(_ snapshot: Snapshot, configuration: AutomationSettings, stoppedRepairRevision: String) throws -> String {
         let folder = attemptFolder(work: snapshot.work, username: snapshot.user.username)
         let epoch = (try? Data(contentsOf: folder.appending(path: "retry-generation.json"))) ?? Data()
         let model = configuration.assistant == .codex ? configuration.codexVerificationModel.rawValue : configuration.claudeVerificationModel.rawValue
@@ -567,7 +598,8 @@ final class DraftProofRecoveryCoordinator {
         return AICommentAssessmentStore.digest("draft-verdict-v1|\(snapshot.host)|\(snapshot.user.id)|\(snapshot.user.username)"
             + "|\(snapshot.request.sha ?? "")|\(snapshot.branchHead)|\(snapshot.request.draftProofRecoveryContextFingerprint)"
             + "|\(configuration.assistant.rawValue)|\(model)|\(DraftProofRecoveryVerifier.criteriaVersion)"
-            + "|" + pipelineEvidence(snapshot.request) + "|" + AICommentAssessmentStore.digest(String(decoding: epoch, as: UTF8.self)))
+            + "|" + pipelineEvidence(snapshot.request) + "|" + AICommentAssessmentStore.digest(String(decoding: epoch, as: UTF8.self))
+            + (stoppedRepairRevision.isEmpty ? "" : "|stopped-repairs:" + AICommentAssessmentStore.digest(stoppedRepairRevision)))
     }
 
     private func discussionMatches(_ fingerprint: String, snapshot: Snapshot) -> Bool {

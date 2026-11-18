@@ -15,8 +15,8 @@ struct AssistantJobInvocationTests {
         #expect(instructions.contains("Do not repeat a delivered code change"))
     }
 
-    @MainActor @Test(arguments: AutomationAssistant.allCases)
-    func bothWorkersReceiveBoundedRequiredRuntimeRecoveryWithoutExtraPermissions(_ assistant: AutomationAssistant) async throws {
+    @MainActor @Test(arguments: AutomationAssistant.allCases, [false, true])
+    func bothWorkersReceiveBoundedRequiredRuntimeRecoveryWithoutExtraPermissions(_ assistant: AutomationAssistant, _ authored: Bool) async throws {
         // given
         let folder = FileManager.default.temporaryDirectory.appending(path: UUID().uuidString)
         try FileManager.default.createDirectory(at: folder, withIntermediateDirectories: true)
@@ -39,7 +39,7 @@ struct AssistantJobInvocationTests {
               'config get host') printf '%s' '\(host)' ;;
               'auth status') printf '%s' 'Logged in to \(host) as me' >&2 ;;
               'api /user '*) printf '%s' '{"id":1,"username":"me"}' ;;
-              'api /projects/7/merge_requests/11 '*) printf '%s' '{"project_id":7,"iid":11,"author":{"id":1,"username":"me","name":"Me"},"title":"Fixture","web_url":"https://\(host)/team/repo/-/merge_requests/11","state":"opened","sha":"\(sha)","source_branch":"feature","target_branch":"main","labels":[]}' ;;
+              'api /projects/7/merge_requests/11 '*) printf '%s' '{"project_id":7,"iid":11,"author":{"id":\(authored ? 1 : 2),"username":"\(authored ? "me" : "other")","name":"Author"},"title":"Fixture","web_url":"https://\(host)/team/repo/-/merge_requests/11","state":"opened","sha":"\(sha)","source_branch":"feature","target_branch":"main","labels":[]}' ;;
               *) exit 20 ;;
             esac
             """.utf8).write(to: glab)
@@ -67,7 +67,8 @@ struct AssistantJobInvocationTests {
             title: "Verify assigned code", prompt: "Task: verify assigned code. This task does not authorize GitLab writes.",
             createdAt: Date(), allowsPush: false, codingModel: assistant == .codex ? .astra : nil,
             codingThinking: assistant == .codex ? .high : .xhigh,
-            claudeCodingModel: assistant == .claude ? .sonnet : nil, followUpPushAllowed: true, workflow: .followUp,
+            claudeCodingModel: assistant == .claude ? .sonnet : nil, followUpPushAllowed: authored ? true : nil,
+            workflow: authored ? .followUp : .review,
             manual: true, expectedHeadSHA: sha)
         let run = InstallationStorage.current.runs.appending(path: handoff.id.uuidString)
         defer { try? FileManager.default.removeItem(at: run) }
@@ -81,6 +82,8 @@ struct AssistantJobInvocationTests {
         #expect(instructions.contains(handoff.prompt))
         #expect(instructions.contains("In generatedDrafts, list only private drafts you actually created"))
         #expect(instructions.contains("Do not list untouched, user-created or merely observed drafts"))
+        #expect(instructions.contains("If no incoming reviewer reply is owed, skip drafting and sealing") == authored)
+        if !authored { #expect(instructions.contains("save warranted private review findings")) }
         #expect(instructions.contains("never replaces a follow-up seal"))
         #expect(instructions.contains("as {id,bodySHA256,extraContext}"))
         #expect(instructions.contains("extraContext is optional app-only Markdown"))

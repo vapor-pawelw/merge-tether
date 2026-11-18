@@ -122,6 +122,10 @@ final class TodoMonitorService {
         todo.linkedNoteID.map { assessingMentionNoteIDs.contains($0) } == true
     }
     private let automation: TodoAutomationService
+    @ObservationIgnored var automaticRetryCoordinator: AssistantAutomaticRetryCoordinator?
+    @ObservationIgnored var automaticRetryStartupTask: Task<Void, Never>?
+    @ObservationIgnored var automaticRetryStartupID: UUID?
+    @ObservationIgnored var automaticRetryRuntimeStarted = false
     @ObservationIgnored private lazy var environmentRecovery = makeEnvironmentRecovery()
     /// The user's comment-origin verdicts and their undo windows.
     @ObservationIgnored private(set) lazy var commentOrigins = makeCommentOriginCenter()
@@ -153,15 +157,19 @@ final class TodoMonitorService {
                 mergeRequestURL: snapshot.request.webURL, prompt: prompt,
                 workspace: self.settings.automation.assistantWorkspace, access: original.key.access,
                 work: original.key.work, username: original.key.username, settings: self.settings,
-                feedbackNoteIDs: original.feedbackNoteIDs ?? [], feedbackTodos: original.feedbackTodos ?? [],
-                mrWorkflow: .followUp, manual: false, expectedHeadSHA: snapshot.request.sha)
+                feedbackNoteIDs: original.feedbackNoteIDs ?? [], verifiedFeedbackNotes: original.verifiedFeedbackNotes,
+                feedbackTodos: original.feedbackTodos ?? [],
+                mrWorkflow: .followUp, manual: false, expectedHeadSHA: snapshot.request.sha, glab: self.glab, retryOf: original.id,
+                taskIntent: original.taskIntent,
+                workflowEventKind: original.workflowEventKind
+                    ?? AssistantAutomationRunner.originatingWorkflowEvent(for: original, settings: self.settings))
         })
         recovery.onScheduled = { [weak self] oldID, replacement in
             self?.mrTodoRouter.rebindJob(oldID: oldID, replacement: replacement)
         }
         return recovery
     }
-    @ObservationIgnored private lazy var mrTodoRouter: MergeRequestTodoRouter = {
+    @ObservationIgnored lazy var mrTodoRouter: MergeRequestTodoRouter = {
         let router = MergeRequestTodoRouter(settings: settings, glab: glab, canAutomate: { [weak self] in
             guard let self else { return false }
             let configuration = self.settings.automation
@@ -230,7 +238,7 @@ final class TodoMonitorService {
         notifications: NotificationService = NotificationService(),
         automation: TodoAutomationService = TodoAutomationService(),
         cancelPolicyJob: @escaping @MainActor (UUID, SettingsManager) -> Void = {
-            AssistantAutomationRunner.cancel($0, settings: $1)
+            AssistantAutomationRunner.cancel($0, settings: $1, origin: .policy)
         },
         schedulePresentationNotification: @escaping PresentationNotificationScheduler = PresentationNotificationDelivery.schedule,
         assistantDependencies: AssistantDependencyMonitor = AssistantDependencyMonitor(),
@@ -305,6 +313,10 @@ final class TodoMonitorService {
         attention.onScopedAuthorFeedbackChecked = { [weak self] target, revision in
             Task { await self?.mrTodoRouter.refreshCompletionEvidence(for: target, accountRevision: revision) }
         }
+        assistantDependencies.onReady = { [weak self] assistant in
+            guard let self, self.settings.automation.assistant == assistant else { return }
+            self.wakeAutomaticRetries()
+        }
         assistantDependencies.onRecovered = { [weak self] assistant in
             guard let self, self.settings.automation.assistant == assistant else { return }
             self.attention.authorFeedbackCoordinator?.retryReadOnlyFailures()
@@ -330,6 +342,7 @@ final class TodoMonitorService {
             guard let self else { return }
             FollowUpVerificationStore.synchronizeRuns(settings: self.settings)
             self.authoredMergeRequests.workflow.synchronizeAssistantJobs()
+            self.wakeAutomaticRetries()
             Task { await self.refreshNow() }
         }
 
@@ -892,6 +905,8 @@ final class TodoMonitorService {
     }
 
     func restartTimer() {
+        automaticRetryRuntimeStarted = true
+        wakeAutomaticRetries()
         timer?.invalidate()
         let interval = settings.refreshInterval.seconds
         timer = Timer.scheduledTimer(withTimeInterval: interval, repeats: true) { [weak self] _ in
@@ -902,6 +917,7 @@ final class TodoMonitorService {
     }
 
     func stopTimer() {
+        stopAutomaticRetries()
         timer?.invalidate()
         timer = nil
     }
@@ -944,6 +960,7 @@ final class TodoMonitorService {
         refreshAssistantRelay()
         defer {
             todoStore.finishRefresh()
+            wakeAutomaticRetries()
             boardAttentionPresenter.updateAttention(pendingUserAttention)
             scheduleUserAttentionNotifications()
         }
@@ -1123,6 +1140,7 @@ final class TodoMonitorService {
     }
 
     func prepareForTermination() {
+        stopAutomaticRetries()
         attention.automationConfigurationChanged()
         automation.cancelRunningScripts()
         AssistantAutomationRunner.prepareForTermination(settings: settings)
@@ -1166,6 +1184,7 @@ final class TodoMonitorService {
         assistantDependencies.refresh(requireCLI: true, force: !scopeOnly)
         authoredMergeRequests.automationConfigurationChanged(outsideScope: scopeOnly ? cancellationScope : nil)
         authoredMergeRequests.workflow.synchronizeAssistantJobs()
+        wakeAutomaticRetries()
         if let host = glab.resolvedHost, let username = glab.currentUsername {
             attention.refresh(host: host, username: username, todos: visibleTodos)
             if current.hasEnabledAutomation && (!scopeOnly || executionChanged) {

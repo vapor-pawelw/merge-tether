@@ -207,6 +207,67 @@ struct ExistingPipelineWorkDetectorTests {
         #expect(try restarted.registerRun(for: key(pipelineID: 12)) == nil)
     }
 
+    @Test func mrWideReservationLookupDoesNotRequireTheOriginalPipelineIdentity() throws {
+        let root = temporaryDirectory()
+        defer { try? FileManager.default.removeItem(at: root) }
+        let detector = ExistingPipelineWorkDetector(directory: root)
+        let optionalClaim = try detector.registerRun(for: key(pipelineID: 12))
+        let claim = try #require(optionalClaim)
+        #expect(detector.hasActiveReservation(host: claim.host, projectID: claim.projectID, iid: claim.mergeRequestIID))
+        #expect(!detector.hasActiveReservation(host: claim.host, projectID: claim.projectID, iid: claim.mergeRequestIID + 1))
+        try detector.finishHandoff(for: claim)
+        #expect(!detector.hasActiveReservation(host: claim.host, projectID: claim.projectID, iid: claim.mergeRequestIID))
+        #expect(detector.status(for: claim) == .registered)
+    }
+
+    @Test("only a queued never-started run can recover a dead exact claim")
+    func staleNeverStartedRun() throws {
+        let root = temporaryDirectory()
+        defer { try? FileManager.default.removeItem(at: root) }
+        let owner = ExistingPipelineWorkDetector(directory: root, installationID: "com.test.local", processID: 700)
+        let optionalClaim = try owner.registerRun(for: key(pipelineID: 12))
+        let claim = try #require(optionalClaim)
+        let runID = UUID()
+        try owner.bindRun(runID, to: claim)
+        let restarted = ExistingPipelineWorkDetector(directory: root, installationID: "com.test.local", processState: { _ in .dead })
+        #expect(try !restarted.recoverUnstartedRun(runID, reservation: claim, execution: .init(state: .running)))
+        #expect(try !restarted.recoverUnstartedRun(runID, reservation: claim, execution: .init(state: .interrupted)))
+        #expect(try !restarted.recoverUnstartedRun(runID, reservation: claim, execution: .init(state: .queued, startedAt: .now)))
+        #expect(try !restarted.recoverUnstartedRun(UUID(), reservation: claim, execution: .init(state: .queued)))
+        let foreign = ExistingPipelineWorkDetector(directory: root, installationID: "com.test.other", processState: { _ in .dead })
+        #expect(try !foreign.recoverUnstartedRun(runID, reservation: claim, execution: .init(state: .queued)))
+        #expect(try restarted.recoverUnstartedRun(runID, reservation: claim, execution: .init(state: .queued)))
+        #expect(!restarted.hasActiveReservation(for: claim))
+        #expect(restarted.status(for: claim) == .registered)
+        #expect(try restarted.registerRun(for: claim, explicitRetry: true) != nil)
+    }
+
+    @Test(arguments: [ExistingPipelineWorkDetector.ProcessState.alive, .unknown])
+    func neverStartedRecoveryPreservesLiveAndUncertainOwners(_ state: ExistingPipelineWorkDetector.ProcessState) throws {
+        let root = temporaryDirectory()
+        defer { try? FileManager.default.removeItem(at: root) }
+        let owner = ExistingPipelineWorkDetector(directory: root, installationID: "com.test.local", processID: 700)
+        let optionalClaim = try owner.registerRun(for: key(pipelineID: 12))
+        let claim = try #require(optionalClaim)
+        let runID = UUID()
+        try owner.bindRun(runID, to: claim)
+        let restarted = ExistingPipelineWorkDetector(directory: root, installationID: "com.test.local", processState: { _ in state })
+        #expect(try !restarted.recoverUnstartedRun(runID, reservation: claim, execution: .init(state: .queued)))
+        #expect(restarted.hasActiveReservation(for: claim))
+    }
+
+    @Test func aDanglingActiveSymlinkRemainsAnUncertainReservation() throws {
+        let root = temporaryDirectory()
+        defer { try? FileManager.default.removeItem(at: root) }
+        let detector = ExistingPipelineWorkDetector(directory: root)
+        let candidate = key(pipelineID: 12)
+        let active = try detector.externalRegistrationURL(for: candidate)
+        try FileManager.default.createDirectory(at: active.deletingLastPathComponent(), withIntermediateDirectories: true)
+        try FileManager.default.createSymbolicLink(at: active, withDestinationURL: root.appending(path: "missing"))
+        #expect(detector.hasActiveReservation(for: candidate))
+        #expect(detector.activeReservationOwner(for: candidate) == nil)
+    }
+
     @Test("live, unknown or reused PIDs and a different installation never authorize recovery")
     func conservativeProcessOwnership() throws {
         let root = temporaryDirectory()

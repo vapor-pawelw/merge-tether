@@ -54,6 +54,26 @@ struct VerifiedAuthorFeedbackTests {
         }
     }
 
+    @Test(arguments: [AssistantJobExecution.State.failed, .interrupted, .cancelled],
+          [AssistantJobExecution.CancellationOrigin.user, .policy])
+    func cancellationOriginControlsFreshFeedbackContinuation(_ state: AssistantJobExecution.State,
+                                                              _ origin: AssistantJobExecution.CancellationOrigin) async throws {
+        try await withFixture { fixture in
+            fixture.settings.automation.allowAssistantTools = true
+            fixture.settings.automation.allowFollowUpPush = true
+            try await fixture.prepare()
+            try await fixture.waitForJob()
+            fixture.settings.assistantHandoffs[0].execution?.state = state
+            fixture.settings.assistantHandoffs[0].execution?.cancellationOrigin = origin
+            fixture.settings.automation.assistant = .claude
+            try await fixture.prepare(residual: .init(notes: [
+                .init(noteID: 20, state: .blocking, reason: "The assigned correction is still outstanding.")
+            ]))
+            try await fixture.waitForJob()
+            #expect(fixture.settings.assistantHandoffs.count == (origin == .policy ? 2 : 1))
+        }
+    }
+
     @Test(arguments: [AutomationAssistant.codex, .claude], [false, true])
     func cancelledFeedbackResumesOnlyAfterChangingProvider(provider: AutomationAssistant, changed: Bool) async throws {
         try await withFixture { fixture in
@@ -342,9 +362,12 @@ struct VerifiedAuthorFeedbackTests {
         }
     }
 
-    @Test(arguments: ["valid", "missing", "wrongRun", "wrongHead", "wrongBranch", "wrongUser"])
+    @Test(arguments: ["valid", "missing", "wrongRun", "wrongHead", "wrongBranch", "wrongUser",
+                     "preflight-valid", "preflight-wrongRun", "preflight-wrongHead", "preflight-wrongUser"])
     func deliveredChangesRequireMatchingRemoteContentProofForResidualRecovery(_ proofState: String) async throws {
         try await withFixture { fixture in
+            let preflight = proofState.hasPrefix("preflight-")
+            let state = preflight ? String(proofState.dropFirst("preflight-".count)) : proofState
             fixture.resultStatus = .succeeded
             fixture.settings.automation.allowFollowUpPush = true
             try await fixture.prepare()
@@ -352,14 +375,14 @@ struct VerifiedAuthorFeedbackTests {
             let original = try #require(fixture.settings.assistantHandoffs.first)
             let deliveredHead = String(repeating: "b", count: 40)
             try fixture.write("request.json", Fixture.request.replacingOccurrences(of: Fixture.sha, with: deliveredHead))
-            if proofState != "missing" {
+            if state != "missing" {
                 let proof = FollowUpVerification(version: 1, sealed: false, verificationID: UUID(),
-                    runID: proofState == "wrongRun" ? UUID() : original.id,
-                    host: Fixture.host, projectID: 1, iid: 2, username: "me", userID: proofState == "wrongUser" ? 99 : 3,
-                    headSHA: proofState == "wrongHead" ? Fixture.sha : deliveredHead,
-                    sourceProjectID: 1, sourceBranch: proofState == "wrongBranch" ? "other-branch" : "feature",
+                    runID: state == "wrongRun" ? UUID() : original.id,
+                    host: Fixture.host, projectID: 1, iid: 2, username: "me", userID: state == "wrongUser" ? 99 : 3,
+                    headSHA: state == "wrongHead" ? Fixture.sha : deliveredHead,
+                    sourceProjectID: 1, sourceBranch: state == "wrongBranch" ? "other-branch" : "feature",
                     files: [.init(path: "src/Details.swift", sha256: String(repeating: "c", count: 64))], drafts: [])
-                let url = FollowUpVerificationStore.recordURL(kind: "follow-up-verifications", work: fixture.work,
+                let url = FollowUpVerificationStore.recordURL(kind: preflight ? "follow-up-preflight" : "follow-up-verifications", work: fixture.work,
                     username: "me", in: fixture.directory)
                 try FileManager.default.createDirectory(at: url.deletingLastPathComponent(), withIntermediateDirectories: true)
                 try JSONEncoder().encode(proof).write(to: url)
@@ -371,8 +394,26 @@ struct VerifiedAuthorFeedbackTests {
                 ]))
             try await fixture.waitForJob()
 
-            #expect(fixture.settings.assistantHandoffs.count == (proofState == "valid" ? 2 : 1))
-            if proofState == "valid" { #expect(fixture.settings.assistantHandoffs.last?.expectedHeadSHA == deliveredHead) }
+            #expect(fixture.settings.assistantHandoffs.count == (state == "valid" ? 2 : 1))
+            if state == "valid" { #expect(fixture.settings.assistantHandoffs.last?.expectedHeadSHA == deliveredHead) }
+        }
+    }
+
+    @Test func explicitStopSurvivesARecoveredSuccessfulCheckpoint() async throws {
+        try await withFixture { fixture in
+            fixture.resultStatus = .succeeded
+            fixture.settings.automation.allowFollowUpPush = true
+            try await fixture.prepare()
+            try await fixture.waitForJob()
+            fixture.settings.assistantHandoffs[0].execution?.cancellationOrigin = .user
+            let original = try #require(fixture.settings.assistantHandoffs.first)
+            #expect(original.execution?.state == .succeeded)
+            try await fixture.prepare(residual: .init(assessedRunID: original.id, notes: [
+                .init(noteID: 20, state: .blocking, reason: "The saved result still needs a correction.")
+            ]))
+            try await fixture.waitForJob()
+            #expect(fixture.settings.assistantHandoffs.count == 1)
+            #expect(fixture.settings.assistantHandoffs.first?.execution == original.execution)
         }
     }
 

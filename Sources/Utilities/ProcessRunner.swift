@@ -39,7 +39,8 @@ enum ProcessRunner {
         input: Data? = nil,
         outputDirectory: URL? = nil,
         onOutput: (@Sendable (Output) -> Void)? = nil,
-        authorizeLaunch: (@MainActor @Sendable () -> Bool)? = nil
+        authorizeLaunch: (@MainActor @Sendable () -> Bool)? = nil,
+        onStarted: (@Sendable () -> Void)? = nil
     ) async throws -> Output {
         #if DEBUG
         guard permitsTestExecutable(executable, environment: ProcessInfo.processInfo.environment,
@@ -120,8 +121,8 @@ enum ProcessRunner {
                     do {
                         if authorizeLaunch != nil {
                             guard authorized else { throw CancellationError() }
-                            try state.launch { try process.run() }
-                        } else { try process.run() }
+                            try state.launch { try process.run(); onStarted?() }
+                        } else { try process.run(); onStarted?() }
                         tree.start(process.processIdentifier)
                         if authorizeLaunch == nil { startTimeout() }
                         if Task.isCancelled || (authorizeLaunch != nil && !state.permitsLaunch) {

@@ -15,7 +15,8 @@ enum AssistantUsageRunner {
                     outputDirectory: URL? = nil,
                     usage: Context, store: AssistantUsageStore = .shared,
                     healthStore: AssistantCLIHealthStore? = nil,
-                    beforeLaunch: (@Sendable () async throws -> Void)? = nil) async throws -> ProcessRunner.Output {
+                    beforeLaunch: (@Sendable () async throws -> Void)? = nil,
+                    authorizeLaunch: (@MainActor @Sendable () -> Bool)? = nil) async throws -> ProcessRunner.Output {
         let health = await MainActor.run { healthStore ?? AssistantCLIHealthStore.shared }
         if let hold = await health.hold(for: usage.assistant) { throw AccessError.temporarilyUnavailable(hold.issue.kind) }
         let startedAt = Date()
@@ -34,6 +35,7 @@ enum AssistantUsageRunner {
         }
         let capture = MeasurementCapture()
         let healthCapture = HealthCapture()
+        let launchCapture = LaunchCapture()
         do {
             let output = try await ProcessRunner.run(executable, arguments: arguments, environment: environment,
                 currentDirectory: currentDirectory, timeout: timeout, input: input, outputDirectory: outputDirectory, onOutput: {
@@ -43,7 +45,7 @@ enum AssistantUsageRunner {
                         Task { @MainActor in health.record(issue, assistant: usage.assistant, executable: executable,
                             startedAt: startedAt, observedAt: observedAt) }
                     }
-                })
+                }, authorizeLaunch: authorizeLaunch, onStarted: { launchCapture.markStarted() })
             if let issue = AssistantCLIHealthIssue.parse(output, assistant: usage.assistant) {
                 await health.record(issue, assistant: usage.assistant, executable: executable, startedAt: startedAt,
                     observedAt: Date())
@@ -54,9 +56,9 @@ enum AssistantUsageRunner {
             await finish(usage.id, capture: capture, complete: complete, store: store)
             return output
         } catch {
-            if let processError = error as? ProcessRunner.RunError, case .launchFailed = processError {
+            if !launchCapture.started {
                 do { try await store.discard(id: usage.id) }
-                catch { Log.monitor.error("Could not discard unstarted agent usage: \(String(describing: error), privacy: .private)") }
+                catch { Log.monitor.error("Could not discard an unstarted agent usage receipt") }
             } else {
                 await finish(usage.id, capture: capture, complete: false, store: store)
             }
@@ -71,6 +73,13 @@ enum AssistantUsageRunner {
         } catch {
             Log.monitor.error("Could not finish agent usage receipt: \(String(describing: error), privacy: .private)")
         }
+    }
+
+    private final class LaunchCapture: @unchecked Sendable {
+        private let lock = NSLock()
+        private var didStart = false
+        var started: Bool { lock.withLock { didStart } }
+        func markStarted() { lock.withLock { didStart = true } }
     }
 
     private final class MeasurementCapture: @unchecked Sendable {

@@ -30,7 +30,8 @@ final class AutomaticEnvironmentRecovery {
             let configuration = settings.automation
             do {
                 let first = try await fetch(original)
-                guard valid(first, for: original), eligible(original) else { continue }
+                guard let current = settings.assistantHandoffs.first(where: { $0.id == original.id }),
+                      valid(first, for: current), eligible(current) else { continue }
                 let fresh = try await fetch(original)
                 guard !Task.isCancelled, settings.automation == configuration,
                       valid(fresh, for: original), sameEvidence(first, fresh),
@@ -76,16 +77,16 @@ final class AutomaticEnvironmentRecovery {
               configuration.assistant == original.key.assistant, configuration.scope.resolve(target).active,
               original.key.access != .configuredTools || configuration.permitsAssistantTools(project: project),
               !settings.ignoredMergeRequests.contains(target), original.workflow == .followUp,
+              !original.allowsPush, original.pipelineReservation == nil, original.foreignPipelineDiagnosis == nil,
+              original.taskIntent != .pipelineDiagnosis, original.taskIntent != .conflictResolution, original.draftRepair == nil,
               original.followUpPushAllowed == true, original.execution?.state == .blocked,
+              original.execution?.cancellationOrigin != .user,
               original.environmentRecoveryAttempted != true, original.environmentRecoveryOf == nil,
               !settings.assistantHandoffs.contains(where: {
                   $0.key.work == original.key.work && $0.key.username == original.key.username
                       && ($0.execution?.state.isActive == true || $0.createdAt > original.createdAt)
               }) else { return false }
-        let rule = configuration.authorFeedback
-        let workflow = configuration.workflowRules[.newDiscussion]
-        guard (rule.isEnabled && rule.runner == .assistant && rule.isConfigured)
-                || workflow.mode == .assistant else { return false }
+        guard originPermission(for: original) else { return false }
         let diagnostics = [original.execution?.output, original.execution?.blocker, original.execution?.summary]
             .compactMap { $0 }.joined(separator: "\n").lowercased()
         return (diagnostics.contains("operation not permitted") || diagnostics.contains("permission denied"))
@@ -95,18 +96,21 @@ final class AutomaticEnvironmentRecovery {
     private func valid(_ snapshot: Snapshot, for original: AssistantAutomationRunner.Handoff) -> Bool {
         let request = snapshot.request
         let configuration = settings.automation
-        let rule = configuration.authorFeedback
-        let workflow = configuration.workflowRules[.newDiscussion]
-        let project = request.webURL.gitLabProjectPath
-        let triggerEnabled = (rule.isEnabled && rule.runner == .assistant && rule.isConfigured && rule.includes(project: project))
-            || (workflow.mode == .assistant && workflow.includes(request))
         return snapshot.user.username == original.key.username && request.author.id == snapshot.user.id
             && request.projectID == original.key.work.projectID && request.iid == original.key.work.iid
             && request.webURL.isGitLabMergeRequest(host: original.key.work.host, iid: request.iid)
             && request.state == "opened"
             && configuration.scope.permits(request, host: original.key.work.host, username: original.key.username)
             && request.sha != nil && request.sha == original.expectedHeadSHA
-            && triggerEnabled
+            && originPermission(for: original, request: request)
+    }
+
+    private func originPermission(for original: AssistantAutomationRunner.Handoff,
+                                  request: GitLabMergeRequest? = nil) -> Bool {
+        let origin = original.workflowEventKind
+            ?? AssistantAutomationRunner.originatingWorkflowEvent(for: original, settings: settings)
+        return AssistantAutomationRunner.automaticRetryPermission(for: original,
+            configuration: settings.automation, request: request, origin: origin)
     }
 
     private func sameEvidence(_ first: Snapshot, _ next: Snapshot) -> Bool {

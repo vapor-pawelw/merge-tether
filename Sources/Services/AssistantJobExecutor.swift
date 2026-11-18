@@ -3,7 +3,7 @@ import Foundation
 /// CLI subprocess adapter. Remote effects remain subject to MergeTether's existing evidence gates.
 enum AssistantJobExecutor {
     enum ExecutionError: String, Error, Equatable, CustomStringConvertible {
-        case cliUnavailable, wrongAccount, inactiveMergeRequest, missingResult, disabledPermission, headChanged
+        case cliUnavailable, wrongAccount, inactiveMergeRequest, missingResult, disabledPermission, headChanged, contextUnavailable
 
         var description: String {
             let message: LocalizedStringResource = switch self {
@@ -13,6 +13,7 @@ enum AssistantJobExecutor {
             case .missingResult: .AssistantJobs.assistantJobsErrorMissingResult
             case .disabledPermission: .AssistantJobs.assistantJobsErrorDisabledPermission
             case .headChanged: .AssistantJobs.assistantJobsErrorHeadChanged
+            case .contextUnavailable: .AssistantJobs.assistantJobsErrorContextUnavailable
             }
             return String(localized: message)
         }
@@ -36,6 +37,8 @@ enum AssistantJobExecutor {
 
     @MainActor
     static func execute(_ handoff: AssistantAutomationRunner.Handoff, settings: SettingsManager,
+                        glab injectedGlab: GlabService? = nil, pipelineWorkDetector: ExistingPipelineWorkDetector = .init(),
+                        followUpDirectory: URL = FollowUpVerificationStore.directory,
                         detectCLI: @MainActor (AutomationAssistant) async -> AssistantDependencyStatus) async throws -> AssistantJobCoordinator.Outcome {
         let workerTimeout = workerExecutionTimeout(for: handoff)
         try validatePersistence(settings)
@@ -45,7 +48,7 @@ enum AssistantJobExecutor {
             throw ExecutionError.cliUnavailable
         }
         try Task.checkCancellation()
-        let glab = GlabService()
+        let glab = injectedGlab ?? GlabService()
         if let executable = settings.glabPath { glab.glabPath = executable }
         else { glab.glabPath = await OnboardingDetector.findGlabExecutable() }
         guard await glab.recheck() == nil, glab.authStatus == .authenticated,
@@ -59,6 +62,7 @@ enum AssistantJobExecutor {
         try validateHeadSnapshot(expected: handoff.expectedHeadSHA, actual: request.sha)
         try validateReviewOwnership(isReview: handoff.workflow == .review || handoff.reviewModel != nil,
             authorID: request.author.id, userID: user.id)
+        try validateWorkerAdmission(handoff, settings: settings, request: request, detector: pipelineWorkDetector)
         if handoff.followUpPushAllowed == true {
             guard settings.automation.permitsFollowUpPush(manual: handoff.manual == true), request.author.id == user.id else { throw ExecutionError.disabledPermission }
         }
@@ -68,7 +72,7 @@ enum AssistantJobExecutor {
                   repair.matchesCodingPolicy(settings.automation) else { throw ExecutionError.disabledPermission }
             let snapshot = DraftProofRecoveryCoordinator.Snapshot(request: request, discussions: [], drafts: [],
                 user: user, host: handoff.key.work.host, branchHead: request.sha ?? "")
-            try await DraftReplyRepair.validate(repair, snapshot: snapshot, settings: settings, glab: glab, excludingRunID: handoff.id)
+            try await DraftReplyRepair.validate(repair, snapshot: snapshot, settings: settings, glab: glab, directory: followUpDirectory, excludingRunID: handoff.id)
         }
         if let reservation = handoff.pipelineReservation {
             guard request.author.id == user.id, request.headPipeline?.id == reservation.pipelineID,
@@ -80,7 +84,7 @@ enum AssistantJobExecutor {
         try validateConfiguration(handoff, automation: settings.automation)
         try validateIgnoredTarget(handoff, ignored: settings.ignoredMergeRequests)
         let project = request.webURL.gitLabProjectPath
-        guard settings.automation.assistant == handoff.key.assistant,
+        guard handoff.manual == true || settings.automation.assistant == handoff.key.assistant,
               handoff.manual == true || settings.automation.scope.permits(request, host: handoff.key.work.host, username: handoff.key.username),
               handoff.resolvesOwnThreads != true || settings.automation.permitsOwnThreadResolution(manual: handoff.manual == true),
               !handoff.allowsPush || settings.automation.permitsConflictPush(project: project, manual: handoff.manual == true),
@@ -105,6 +109,19 @@ enum AssistantJobExecutor {
         try invocation.prepareEvidenceDirectories()
         let generationBaseline = try? await glab.fetchOwnDraftNotes(projectID: request.projectID, iid: request.iid,
             host: handoff.key.work.host, userID: user.id)
+        if let repair = handoff.draftRepair {
+            try DraftReplyRepair.validateReservedDraft(repair, drafts: generationBaseline, request: request,
+                user: user, host: handoff.key.work.host)
+        }
+        let completionInstructions = request.author.id == user.id ? """
+            For an author follow-up that owes a reviewer reply, implementing and verifying the warranted fix and saving,
+            re-fetching and sealing its private reply completes the worker's part. Publication belongs to MergeTether's separate policy checks.
+            If no incoming reviewer reply is owed, skip drafting and sealing. Complete the assigned repair and required
+            remote-head and content verification, then report succeeded with the verified result in task history.
+            """ : """
+            On someone else's MR, save warranted private review findings even when no incoming reviewer reply is owed.
+            Review-only findings do not use author-follow-up sealing. Preserve the review's scope and separate publication permissions.
+            """
         let instructions = handoff.prompt + """
 
             This is a headless MergeTether run. Do not open coding-agent desktop apps, create GUI chats, or request interactive input.
@@ -133,6 +150,7 @@ enum AssistantJobExecutor {
             Do not add reactions or resolve purely informational threads in this worker, even if an installed
             general instruction grants that permission outside this headless run. Do not create courtesy reply drafts.
             Existing explicit permissions for resolving your own substantive review findings remain unchanged.
+            \(AssistantAutomationRunner.authorRepairReportingInstructions)
             A writable private temporary directory is supplied in TMPDIR, TMP and TEMP, and in JAVA_TOOL_OPTIONS
             as java.io.tmpdir. Preserve that JVM option when invoking Maven or Gradle; if a wrapper overrides it,
             pass -Djava.io.tmpdir with TMPDIR explicitly. Do not disable tests to work around temporary-file failures.
@@ -146,8 +164,7 @@ enum AssistantJobExecutor {
             The verified account is \(handoff.key.username) on \(handoff.key.work.host); recheck before remote writes.
             Use only the task's explicit permissions. If a command needs unavailable approval or evidence, stop with status blocked.
             In your final structured result, status succeeded means the assigned work finished; it never substitutes for remote verification receipts.
-            For an author follow-up, implementing and verifying the warranted fix and saving, re-fetching and sealing its
-            private reply completes the worker's part. Publication belongs to MergeTether's separate policy checks.
+            \(completionInstructions)
             When only publication, reviewer acceptance, approval or merge is pending, report succeeded with those next
             steps in summary; do not wait for publication or classify that wait as unfinished worker work.
             Return status blocked if assigned code, tests, remote delivery or reply preparation remains unfinished,
@@ -180,14 +197,41 @@ enum AssistantJobExecutor {
         let usageMergeRequest = AssistantUsageMergeRequest(host: handoff.key.work.host, username: handoff.key.username,
             projectID: handoff.key.work.projectID, iid: handoff.key.work.iid, title: request.title,
             url: request.webURL.absoluteString)
+        let authorization = WorkerLaunchAuthorization(request: request)
+        let accountRevision = glab.accountRevision
         let beforeLaunch: @Sendable () async throws -> Void = { @MainActor in
+            if requiresLiveWorkflowRule(handoff) || handoff.draftRepair != nil || handoff.pipelineReservation != nil {
+                let latest = try await glab.fetchMergeRequest(projectID: handoff.key.work.projectID,
+                    iid: handoff.key.work.iid, host: handoff.key.work.host)
+                _ = try validateMergeRequestContext(state: latest.state, head: latest.sha)
+                try validateHeadSnapshot(expected: handoff.expectedHeadSHA, actual: latest.sha)
+                try validateReviewOwnership(isReview: handoff.workflow == .review || handoff.reviewModel != nil,
+                    authorID: latest.author.id, userID: user.id)
+                authorization.request = latest
+            }
+            let latest = authorization.request
             if AssistantAutomationRunner.isForeignPipelineDiagnosis(for: handoff, history: settings.assistantHandoffs) {
                 guard let diagnosis = handoff.foreignPipelineDiagnosis else { throw AssistantAutomationRunner.HandoffError.legacyJob }
-                try await diagnosis.verify(request: request, user: user, host: handoff.key.work.host, glab: glab)
+                try await diagnosis.verify(request: latest, user: user, host: handoff.key.work.host, glab: glab)
             }
-            try validatePersistence(settings)
-            try validateConfiguration(handoff, automation: settings.automation)
-            try validateIgnoredTarget(handoff, ignored: settings.ignoredMergeRequests)
+            if let repair = handoff.draftRepair {
+                let drafts = try? await glab.fetchOwnDraftNotes(projectID: latest.projectID, iid: latest.iid,
+                    host: handoff.key.work.host, userID: user.id)
+                try DraftReplyRepair.validateReservedDraft(repair, drafts: drafts, request: latest,
+                    user: user, host: handoff.key.work.host)
+            }
+            try validateWorkerAdmission(handoff, settings: settings, request: latest, detector: pipelineWorkDetector)
+        }
+        let authorizeLaunch: @MainActor @Sendable () -> Bool = {
+            do {
+                guard glab.accountRevision == accountRevision, glab.resolvedHost == handoff.key.work.host,
+                      glab.currentUsername == handoff.key.username else { throw ExecutionError.wrongAccount }
+                try validateWorkerAdmission(handoff, settings: settings, request: authorization.request, detector: pipelineWorkDetector)
+                return true
+            } catch {
+                authorization.denial = error
+                return false
+            }
         }
         do {
         if handoff.key.assistant == .codex {
@@ -200,7 +244,7 @@ enum AssistantJobExecutor {
                                                   usage: .init(role: .codingAgent, assistant: handoff.key.assistant,
                                                     model: (handoff.codingModel ?? handoff.reviewModel)?.rawValue,
                                                     mergeRequest: usageMergeRequest),
-                                                  beforeLaunch: beforeLaunch)
+                                                  beforeLaunch: beforeLaunch, authorizeLaunch: authorizeLaunch)
             capturedOutput = output
             guard output.exitCode == 0 else { throw CLIProcessError(exitCode: output.exitCode, diagnostic: output.stderr) }
             try AssistantJobResult.validateCodexEvents(output.stdout)
@@ -214,12 +258,13 @@ enum AssistantJobExecutor {
                                                   usage: .init(role: .codingAgent, assistant: handoff.key.assistant,
                                                     model: handoff.claudeCodingModel?.rawValue,
                                                     mergeRequest: usageMergeRequest),
-                                                  beforeLaunch: beforeLaunch)
+                                                  beforeLaunch: beforeLaunch, authorizeLaunch: authorizeLaunch)
             capturedOutput = output
             guard output.exitCode == 0 else { throw CLIProcessError(exitCode: output.exitCode, diagnostic: output.stderr) }
             result = try AssistantJobResult.claude(output.stdout)
         }
         } catch {
+            if let denial = authorization.denial { throw denial }
             if let capturedOutput, !(error is CancellationError) {
                 throw AssistantJobFailure(error: error, output: capturedOutput)
             }
@@ -371,6 +416,58 @@ enum AssistantJobExecutor {
             && handoff.configurationSnapshot?.preservingScope(from: automation) == automation) else {
             throw ExecutionError.disabledPermission
         }
+    }
+
+    @MainActor
+    private final class WorkerLaunchAuthorization {
+        var request: GitLabMergeRequest
+        var denial: (any Error)?
+        init(request: GitLabMergeRequest) { self.request = request }
+    }
+
+    private static func requiresLiveWorkflowRule(_ handoff: AssistantAutomationRunner.Handoff) -> Bool {
+        handoff.manual != true && handoff.draftRepair == nil
+            && (handoff.workflowOriginKnown == true || handoff.workflowEventKind != nil
+                || handoff.automaticRetryIdentity != nil || handoff.retryOf != nil)
+    }
+
+    @MainActor
+    private static func validateWorkerAdmission(_ handoff: AssistantAutomationRunner.Handoff, settings: SettingsManager,
+        request: GitLabMergeRequest, detector: ExistingPipelineWorkDetector) throws {
+        try validatePersistence(settings)
+        try validateConfiguration(handoff, automation: settings.automation)
+        try validateIgnoredTarget(handoff, ignored: settings.ignoredMergeRequests)
+        let work = handoff.key.work, project = request.webURL.gitLabProjectPath
+        guard request.projectID == work.projectID, request.iid == work.iid,
+              request.webURL.isGitLabMergeRequest(host: work.host, iid: work.iid),
+              handoff.manual == true || settings.automation.assistant == handoff.key.assistant,
+              handoff.manual == true || settings.automation.scope.permits(request, host: work.host, username: handoff.key.username),
+              handoff.key.access != .configuredTools || settings.automation.permitsAssistantTools(project: project)
+        else { throw ExecutionError.disabledPermission }
+        if requiresLiveWorkflowRule(handoff) {
+            let origin = handoff.workflowEventKind ?? AssistantAutomationRunner.originatingWorkflowEvent(for: handoff, settings: settings)
+            let confirmedPipelineClaim = handoff.pipelineHandoffConfirmation?.matches(handoff, request: request) == true
+                && handoff.pipelineReservation.map { detector.ownsExclusiveReservation(for: $0)
+                    && detector.reservationOwner(for: $0)?.runID == handoff.id } == true
+            guard AssistantAutomationRunner.automaticRetryPermission(for: handoff, configuration: settings.automation,
+                request: request, origin: origin, confirmedPipelineClaim: confirmedPipelineClaim) else { throw ExecutionError.disabledPermission }
+        }
+        if let reservation = handoff.pipelineReservation {
+            guard reservation.host == work.host, reservation.projectID == work.projectID, reservation.mergeRequestIID == work.iid,
+                  detector.ownsExclusiveReservation(for: reservation),
+                  detector.reservationOwner(for: reservation)?.runID == handoff.id else {
+                throw AssistantAutomationRunner.HandoffError.mergeRequestBusy
+            }
+            try AssistantAutomationRunner.validateOwnedPipelineState(request, reservation: reservation)
+        } else if detector.hasActiveReservation(host: work.host, projectID: work.projectID, iid: work.iid) {
+            throw AssistantAutomationRunner.HandoffError.mergeRequestBusy
+        }
+    }
+
+    static func validateMergeRequestContext(state: String, head: String?) throws -> String {
+        if state == "closed" || state == "merged" { throw ExecutionError.inactiveMergeRequest }
+        guard state == "opened", let head, GlabService.isFullGitSHA(head) else { throw ExecutionError.contextUnavailable }
+        return head
     }
 
     static func validateHeadSnapshot(expected: String?, actual: String?) throws {

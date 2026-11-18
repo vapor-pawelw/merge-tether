@@ -3,6 +3,35 @@ import Testing
 @testable import GitLabTodos
 
 struct AutomaticPublicationPolicyTests {
+    @Test func publishAllIgnoresDormantFiltersForAGenuineAuthorReply() throws {
+        let request = try request()
+        let reply = try draft(authorID: request.author.id)
+        let incoming = GitLabMergeRequestDiscussion(id: "thread", notes: [note(10, author: 3)])
+        let restrictions = AutomaticPublicationRestrictions(sourceCommentAuthors: [identity(999)], requireAI: true)
+        let all = AutomaticPublicationPolicy(mode: .all, restrictions: restrictions)
+        let filtered = AutomaticPublicationPolicy(mode: .filtered, restrictions: restrictions)
+
+        #expect(all.allows(reply, request: request, discussions: [incoming], userID: request.author.id, host: host, aiNoteIDs: []))
+        #expect(!filtered.allows(reply, request: request, discussions: [incoming], userID: request.author.id, host: host, aiNoteIDs: []))
+    }
+
+    @Test(arguments: [AutomationPublicationMode.all, .filtered, .aiReplies])
+    func authorStatusNotesStayPrivateWhileIncomingFeedbackRepliesRemainEligible(_ mode: AutomationPublicationMode) throws {
+        let request = try request()
+        let policy = AutomaticPublicationPolicy(mode: mode, restrictions: .init(requireAI: true))
+        let status = try draft(reply: false, authorID: request.author.id)
+        let reply = try draft(authorID: request.author.id)
+        let incoming = GitLabMergeRequestDiscussion(id: "thread", notes: [note(10, author: 3)])
+
+        #expect(!policy.couldAllow(status, request: request, userID: request.author.id, host: host))
+        #expect(!policy.allows(status, request: request, discussions: [], userID: request.author.id, host: host, aiNoteIDs: []))
+        #expect(policy.allows(reply, request: request, discussions: [incoming], userID: request.author.id, host: host, aiNoteIDs: [10]))
+        #expect(!policy.allows(reply, request: request,
+            discussions: [.init(id: "thread", notes: [note(10, author: request.author.id)])],
+            userID: request.author.id, host: host, aiNoteIDs: [10]))
+        #expect(DraftPublicationSelection(selectingAll: [status]).selectedDrafts(from: [status]) == [status])
+    }
+
     let host = "gitlab.example.test"
     func identity(_ id: Int, host: String = "gitlab.example.test", label: String = "Label") -> PublicationIdentity {
         .init(host: host, entityID: id, label: label)

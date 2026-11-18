@@ -2,6 +2,7 @@ import Foundation
 
 /// Execution is reported separately from evidence that a GitLab action was verified.
 struct AssistantJobExecution: Codable, Equatable, Sendable {
+    enum CancellationOrigin: String, Codable, Sendable { case user, policy }
     enum State: String, Codable, Sendable {
         case queued, running, succeeded, blocked, failed, cancelled, interrupted
         var isActive: Bool { self == .queued || self == .running }
@@ -15,6 +16,7 @@ struct AssistantJobExecution: Codable, Equatable, Sendable {
     var error: String?
     var workingDirectory: String?
     var blocker: String? = nil
+    var cancellationOrigin: CancellationOrigin? = nil
 
     var errorExplanation: String? {
         error.map { GlabService.redactWorkflowEvidence(AssistantJobExecutor.ExecutionError.displayMessage(for: $0)) }

@@ -286,6 +286,17 @@
           }
         }
       }
+    },
+    "assistant.jobs.error.contextUnavailable": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "The current merge request state or source commit is unavailable. Automatic work will wait for complete GitLab evidence."
+          }
+        }
+      }
     }
   },
   "version": "1.0"

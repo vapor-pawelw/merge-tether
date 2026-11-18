@@ -34,7 +34,7 @@ final class MergeRequestTodoRouter {
     init(settings: SettingsManager, glab: GlabService,
          canAutomate: @escaping @MainActor () async -> Bool, launcher: Launcher? = nil,
          proofDirectory: URL = ReviewVerdictStore.directory,
-         cancelJob: @escaping @MainActor (UUID, SettingsManager) -> Void = { AssistantAutomationRunner.cancel($0, settings: $1) }) {
+         cancelJob: @escaping @MainActor (UUID, SettingsManager) -> Void = { AssistantAutomationRunner.cancel($0, settings: $1, origin: .policy) }) {
         self.settings = settings
         self.glab = glab
         self.canAutomate = canAutomate
@@ -141,7 +141,7 @@ final class MergeRequestTodoRouter {
         guard !Task.isCancelled, isCurrentPass() else { return acknowledged }
         for intent in settings.mrActionIntents where intent.target.host == host && intent.target.username == username
             && intent.state == .pending && intent.jobID == nil {
-            if shouldRunAutomatically(intent.kind, request: intent.request, target: intent.target), await canAutomate() {
+            if shouldRunAutomatically(intent.kind, request: intent.request, target: intent.target, workflowEventKind: intent.workflowEventKind), await canAutomate() {
                 await run(intent.id, manual: false)
             }
         }
@@ -218,7 +218,7 @@ final class MergeRequestTodoRouter {
             }
             return
         }
-        guard manual || shouldRunAutomatically(original.kind, request: original.request, target: original.target) else { return }
+        guard manual || shouldRunAutomatically(original.kind, request: original.request, target: original.target, workflowEventKind: original.workflowEventKind) else { return }
         do {
             let request: GitLabMergeRequest
             do {
@@ -233,7 +233,7 @@ final class MergeRequestTodoRouter {
                   request.projectID == original.target.projectID, request.iid == iid,
                   request.webURL.isGitLabMergeRequest(host: original.target.host, iid: iid),
                   let head = request.sha, !settings.ignoredMergeRequests.contains(original.target),
-                  manual || shouldRunAutomatically(original.kind, request: request, target: original.target) else {
+                  manual || shouldRunAutomatically(original.kind, request: request, target: original.target, workflowEventKind: original.workflowEventKind) else {
                 if manual {
                     settings.recordAutomationEvent(target: original.target, action: .retry, origin: .manual, state: .blocked,
                         message: String(localized: .TodoRouting.todoRoutingNeedsRecheck), intentID: id, jobID: original.jobID)
@@ -249,7 +249,7 @@ final class MergeRequestTodoRouter {
                             && !self.settings.ignoredMergeRequests.contains(original.target)
                             && invocationConfiguration.preservingScope(from: self.settings.automation) == self.settings.automation
                             && self.matchesCompletionSnapshot(original, job: originalJob)
-                            && (manual || self.shouldRunAutomatically(original.kind, request: request, target: original.target))
+                            && (manual || self.shouldRunAutomatically(original.kind, request: request, target: original.target, workflowEventKind: original.workflowEventKind))
                     })
                 if refreshed {
                     update(id, origin: origin) { $0.request = request; $0.state = .completed; $0.error = nil }
@@ -268,7 +268,7 @@ final class MergeRequestTodoRouter {
             guard isCurrentRun(),
                   !settings.ignoredMergeRequests.contains(original.target),
                   invocationConfiguration.preservingScope(from: settings.automation) == settings.automation,
-                  manual || shouldRunAutomatically(original.kind, request: request, target: original.target) else {
+                  manual || shouldRunAutomatically(original.kind, request: request, target: original.target, workflowEventKind: original.workflowEventKind) else {
                 cancelJob(jobID, settings)
                 update(id, origin: origin) { $0.jobID = jobID; $0.state = .failed; $0.error = String(localized: .TodoRouting.todoRoutingNeedsRecheck) }
                 return
@@ -374,9 +374,12 @@ final class MergeRequestTodoRouter {
 
     private func persist(_ todo: Todo, kind: MRTodoIntent.Kind, notes: Set<Int>, request: GitLabMergeRequest,
                          target: MRAutomationScope.Target, head: String, previousAttempt: Bool) -> UUID {
+        let workflowOrigin: MergeWorkflowTrigger? = kind == .followUp && !settings.automation.authorFeedback.isEnabled
+            && settings.automation.workflowRules[.newDiscussion].mode == .assistant
+            && settings.automation.workflowRules[.newDiscussion].includes(request) ? .newDiscussion : nil
         if let index = settings.mrActionIntents.firstIndex(where: {
             !previousAttempt && !launching.contains($0.id) && !hasAttemptOverlap($0)
-                && $0.target == target && $0.kind == kind && (kind == .review || $0.headSHA == head)
+                && $0.target == target && $0.kind == kind && $0.workflowEventKind == workflowOrigin && (kind == .review || $0.headSHA == head)
                 && $0.state == .pending && $0.jobID == nil
         }) {
             settings.mrActionIntents[index].todoIDs.insert(todo.id)
@@ -394,7 +397,7 @@ final class MergeRequestTodoRouter {
         let intent = MRTodoIntent(id: UUID(), target: target, kind: kind,
             state: kind == .refresh ? .completed : (previousAttempt ? .failed : .pending),
             todoIDs: [todo.id], noteIDs: notes, sourceEvents: [todo.feedbackIdentity], request: request, headSHA: head,
-            error: previousAttempt ? String(localized: .TodoRouting.todoRoutingPreviousAttempt) : nil, updatedAt: Date(), sourceTodo: todo)
+            error: previousAttempt ? String(localized: .TodoRouting.todoRoutingPreviousAttempt) : nil, updatedAt: Date(), sourceTodo: todo, workflowEventKind: workflowOrigin)
         settings.mrActionIntents.append(intent)
         settings.save()
         return intent.id
@@ -436,9 +439,12 @@ final class MergeRequestTodoRouter {
     }
 
     private func shouldRunAutomatically(_ kind: MRTodoIntent.Kind, request: GitLabMergeRequest,
-                                        target: MRAutomationScope.Target) -> Bool {
-        settings.automation.scope.permits(request, host: target.host, username: target.username)
-            && shouldAdoptAutomatically(kind, request: request, target: target)
+                                        target: MRAutomationScope.Target, workflowEventKind: MergeWorkflowTrigger? = nil) -> Bool {
+        guard settings.automation.scope.permits(request, host: target.host, username: target.username),
+              shouldAdoptAutomatically(kind, request: request, target: target) else { return false }
+        guard let workflowEventKind else { return true }
+        let rule = settings.automation.workflowRules[workflowEventKind]
+        return rule.mode == .assistant && rule.includes(request)
     }
 
     /// Tracking follows ordinary scope; execution separately applies the current Draft policy.
@@ -732,7 +738,7 @@ final class MergeRequestTodoRouter {
             feedbackNoteIDs: intent.noteIDs.sorted(), feedbackTodos: intent.sourceEvents, isReview: intent.kind == .review,
             mrWorkflow: workflow, manual: manual, expectedHeadSHA: foreignDiagnosis ? intent.headSHA : nil,
             glab: foreignDiagnosis ? glab.freshSession() : nil, taskIntent: taskIntent,
-            foreignPipeline: foreignDiagnosis ? intent.request.headPipeline : nil)
+            foreignPipeline: foreignDiagnosis ? intent.request.headPipeline : nil, workflowEventKind: intent.workflowEventKind)
         transferred = true
         return job.id
     }

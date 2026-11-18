@@ -39,6 +39,48 @@ struct AssistantUsageRunnerTests {
         #expect(snapshot.total(for: .codingAgent).runs == 0)
     }
 
+    @MainActor @Test func aRefusedAtomicSpawnDoesNotRunTheCLIOrCountAnAttempt() async throws {
+        let file = temporaryFile(), folder = file.deletingLastPathComponent()
+        defer { try? FileManager.default.removeItem(at: folder) }
+        try FileManager.default.createDirectory(at: folder, withIntermediateDirectories: true)
+        let script = folder.appending(path: "fixture-cli"), started = folder.appending(path: "started")
+        try Data("""
+        #!/bin/sh
+        /usr/bin/touch "$1"
+        """.utf8).write(to: script)
+        try FileManager.default.setAttributes([.posixPermissions: 0o700], ofItemAtPath: script.path)
+        let store = AssistantUsageStore(file: file)
+        await #expect(throws: CancellationError.self) {
+            _ = try await AssistantUsageRunner.run(script, arguments: [started.path], environment: [:],
+                usage: .init(role: .codingAgent, assistant: .codex), store: store, authorizeLaunch: { false })
+        }
+        #expect(!FileManager.default.fileExists(atPath: started.path))
+        #expect(try await store.snapshot().total(for: .codingAgent).runs == 0)
+    }
+
+    @MainActor @Test func cancellationBeforeTheAuthorizationTurnDoesNotCountAnUnstartedCLI() async throws {
+        let file = temporaryFile(), folder = file.deletingLastPathComponent()
+        defer { try? FileManager.default.removeItem(at: folder) }
+        try FileManager.default.createDirectory(at: folder, withIntermediateDirectories: true)
+        let script = folder.appending(path: "fixture-cli"), started = folder.appending(path: "started")
+        try Data("""
+        #!/bin/sh
+        /usr/bin/touch "$1"
+        """.utf8).write(to: script)
+        try FileManager.default.setAttributes([.posixPermissions: 0o700], ofItemAtPath: script.path)
+        let store = AssistantUsageStore(file: file)
+        var authorizations = 0
+        let task = Task {
+            try await AssistantUsageRunner.run(script, arguments: [started.path], environment: [:],
+                usage: .init(role: .codingAgent, assistant: .codex), store: store,
+                beforeLaunch: { withUnsafeCurrentTask { $0?.cancel() } },
+                authorizeLaunch: { authorizations += 1; return true })
+        }
+        do { _ = try await task.value; Issue.record("Expected cancellation before spawn") } catch is CancellationError {}
+        #expect(authorizations == 0 && !FileManager.default.fileExists(atPath: started.path))
+        #expect(try await store.snapshot().total(for: .codingAgent).runs == 0)
+    }
+
     @Test("MR request counts follow CLI attempts rather than internal completed turns", arguments: AssistantUsageRole.allCases)
     func mergeRequestAttempts(_ role: AssistantUsageRole) async throws {
         // given

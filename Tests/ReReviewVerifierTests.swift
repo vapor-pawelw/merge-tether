@@ -48,6 +48,7 @@ struct ReReviewVerifierTests {
         #expect(Set(result.readinessBlockers.map(\.noteID)) == [10, 20])
         let prompt = try String(contentsOf: URL(fileURLWithPath: script.path + ".prompt"), encoding: .utf8)
         #expect(prompt.contains("A conditional request to preserve"))
+        #expect(prompt.contains("A reviewer may explicitly allow documenting a provider limitation as an alternative"))
         #expect(prompt.contains("other independent corrections must continue"))
     }
 

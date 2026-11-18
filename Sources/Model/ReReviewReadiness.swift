@@ -18,6 +18,13 @@ enum ReReviewReadiness: Equatable, Sendable {
         return false
     }
 
+    var hasConcreteConcerns: Bool {
+        switch self {
+        case .blocked(let blockers), .uncertain(let blockers): !blockers.isEmpty
+        default: false
+        }
+    }
+
     var canConfirm: Bool {
         switch self {
         case .manual, .unavailable, .failed, .uncertain: true

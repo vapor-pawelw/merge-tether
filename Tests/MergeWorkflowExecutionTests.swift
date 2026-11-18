@@ -113,6 +113,96 @@ import Testing
         #expect(handoff.prompt.contains("Incremental re-review"))
     }
 
+    @Test(arguments: ["allowed", "late-claim", "user-stop", "late-user-stop", "late-account", "disabled", "workflow-allowed", "workflow-label", "workflow-branch", "review-off", "missing-head", "invalid-head", "unknown-state", "closed-context", "changed-head"])
+    func automaticRetryRetainsAutomaticPermissionsAndUsesCurrentProvider(_ gate: String) async throws {
+        let suite = "AutomaticRetryLaunch.\(UUID())"
+        let defaults = try #require(UserDefaults(suiteName: suite))
+        defer { defaults.removePersistentDomain(forName: suite) }
+        let settings = SettingsManager(defaults: defaults)
+        settings.automation.applyPreset(.trusted, for: .claude)
+        if gate == "disabled" { settings.automation.packageDecision = .disabled }
+        let workflowOrigin = gate.hasPrefix("workflow-")
+        if workflowOrigin {
+            settings.automation.workflowRules[.reviewUpdate].mode = .assistant
+            settings.automation.workflowRules[.reviewUpdate].requiredLabel = gate == "workflow-label" ? "eligible" : ""
+            settings.automation.workflowRules[.reviewUpdate].targetBranches = gate == "workflow-branch" ? "release" : "main"
+        }
+        if gate == "review-off" {
+            settings.automation.reviewRequested.isEnabled = false
+            settings.automation.autoReReviewEnabled = true
+        }
+        let host = "gitlab-\(UUID().uuidString.lowercased()).example.test"
+        let head = String(repeating: "a", count: 40)
+        let url = try #require(URL(string: "https://\(host)/team/repo/-/merge_requests/11"))
+        let original = AssistantAutomationRunner.Handoff(id: UUID(),
+            key: .init(assistant: .codex, work: .init(host: host, projectID: 7, iid: 11),
+                username: "me", workspace: "", access: .gitLabRead), title: "Review", prompt: "Review",
+            createdAt: Date(), allowsPush: false, execution: .init(state: .failed,
+                cancellationOrigin: gate == "user-stop" ? .user : nil),
+            taskPrompt: "Review", mergeRequestURL: url, workflow: .review, manual: false,
+            expectedHeadSHA: head, taskIntent: .review(configuredInstructions: "Check migration compatibility."),
+            workflowEventKind: workflowOrigin ? .reviewUpdate : nil, workflowOriginKnown: true)
+        settings.assistantHandoffs = [original]
+        let reservation = AssistantAutomaticRetryAttempt(id: UUID(), rootID: original.id,
+            parentJobID: original.id, target: .init(host: host, username: "me", projectID: 7, iid: 11),
+            family: "review", attempt: 1, reservedAt: Date())
+        settings.assistantAutomaticRetryAttempts = [reservation]
+        let gitlab = reviewRetryGitLab(host: host, url: url, currentHead: head)
+        defer { gitlab.close() }
+        let glab = gitlab.service(host: host, username: "me")
+        let detector = ExistingPipelineWorkDetector()
+        var lateClaim: ExistingPipelineWorkDetector.Key?
+        defer { if let lateClaim { try? detector.finishHandoff(for: lateClaim) } }
+        let handler = gitlab.handler
+        gitlab.handler = { call in
+            if gate == "late-user-stop", call.endpoint == "/projects/7/merge_requests/11" {
+                settings.assistantHandoffs[0].execution?.cancellationOrigin = .user
+            }
+            if gate == "late-account", call.endpoint == "/projects/7/merge_requests/11" { glab.currentUsername = "other" }
+            if gate == "late-claim", call.endpoint == "/projects/7/merge_requests/11", lateClaim == nil {
+                lateClaim = try detector.registerRun(for: .init(host: host, projectID: 7, mergeRequestIID: 11, pipelineID: 99))
+            }
+            let response = try await handler?(call) ?? gitlab.unexpected(call)
+            if call.endpoint == "/projects/7/merge_requests/11", ["missing-head", "invalid-head", "unknown-state", "closed-context", "changed-head"].contains(gate) {
+                var payload = try #require(JSONSerialization.jsonObject(with: response.stdout) as? [String: Any])
+                if gate == "missing-head" { payload["sha"] = NSNull() }
+                if gate == "invalid-head" { payload["sha"] = "incomplete" }
+                if gate == "unknown-state" { payload["state"] = "unknown" }
+                if gate == "closed-context" { payload["state"] = "closed" }
+                if gate == "changed-head" { payload["sha"] = String(repeating: "b", count: 40) }
+                return try InMemoryGitLab.json(payload)
+            }
+            return response
+        }
+        settings.glabPath = glab.glabPath
+        var sawPersistedIdentity = false
+        let coordinator = AssistantJobCoordinator(healthStore: AssistantCLIHealthStore(defaults: defaults), execute: { job, _ in
+            let persisted = SettingsManager(defaults: defaults).assistantHandoffs.first { $0.id == job.id }
+            sawPersistedIdentity = persisted?.automaticRetryIdentity == reservation.identity && persisted?.manual == false
+            return .init(result: .init(status: .blocked, summary: "Fixture complete"), output: "")
+        })
+        do {
+            let retry = try await AssistantAutomationRunner.retry(original.id, settings: settings,
+                expectedHeadSHA: head, jobCoordinator: coordinator, glab: glab,
+                manual: false, automaticRetryIdentity: reservation.identity)
+            await coordinator.waitForTermination()
+            #expect(["allowed", "workflow-allowed"].contains(gate))
+            #expect(retry.manual == false && retry.key.assistant == .claude)
+            #expect(retry.automaticRetryIdentity == reservation.identity && sawPersistedIdentity)
+            #expect(retry.retryOf == original.id)
+            #expect(retry.prompt.contains("Check migration compatibility."))
+            #expect(retry.configurationSnapshot == settings.automation)
+        } catch {
+            #expect(!["allowed", "workflow-allowed"].contains(gate))
+            #expect(settings.assistantHandoffs.count == 1)
+            if ["missing-head", "invalid-head", "unknown-state"].contains(gate) {
+                #expect(error as? AssistantJobExecutor.ExecutionError == .contextUnavailable)
+            }
+            if gate == "closed-context" { #expect(error as? AssistantJobExecutor.ExecutionError == .inactiveMergeRequest) }
+            if gate == "changed-head" { #expect(error as? AssistantJobExecutor.ExecutionError == .headChanged) }
+        }
+    }
+
     @Test(arguments: ["same-head", "new-head", "historical-mismatch"])
     func manualReviewRetryIncludesCurrentDiscussionsEvenAtTheSameHead(_ scenario: String) async throws {
         let suite = "WorkflowReviewRetry.\(UUID())"
@@ -1713,6 +1803,91 @@ import Testing
         await Task.yield()
     }
 
+    @Test func failedSquashTrainCanBeBoundToTheCurrentPlainMergeWithoutTrustingItsRefAlone() async throws {
+        try await exerciseFailedTrainEvidence()
+    }
+
+    @Test(arguments: ["wrongTrainParent", "wrongSourceParent", "wrongTargetParent", "oneMergeParent",
+                      "differentTrees", "timedOut", "missingTimeout", "wrongComparisonCommit", "invalidMergeSHA",
+                      "wrongProject", "wrongRef", "lateSource", "lateTarget", "latePipeline", "lateAccount",
+                      "changedTargetBranch", "successfulTrain"])
+    func trainPipelineProofRejectsUnrelatedIncompleteAndChangedEvidence(_ mutation: String) async throws {
+        try await exerciseFailedTrainEvidence(mutation: mutation)
+    }
+
+    private func exerciseFailedTrainEvidence(mutation: String? = nil) async throws {
+        let source = String(repeating: "a", count: 40)
+        let target = String(repeating: "b", count: 40)
+        let train = String(repeating: "c", count: 40)
+        let other = String(repeating: "d", count: 40)
+        let merged = String(repeating: "e", count: 40)
+        let host = "gitlab.example.test"
+        let ref = mutation == "wrongRef" ? "refs/merge-requests/12/train" : "refs/merge-requests/11/train"
+        let status = mutation == "successfulTrain" ? "success" : "failed"
+        let raw = """
+        {"project_id":7,"iid":11,"author":{"id":1,"username":"me","name":"Me"},
+         "title":"Train fixture","web_url":"https://\(host)/team/repo/-/merge_requests/11","state":"opened",
+         "sha":"\(source)","source_project_id":7,"source_branch":"feature","target_project_id":7,
+         "target_branch":"main","labels":[],"head_pipeline":{"id":100,"project_id":7,
+         "status":"\(status)","sha":"\(train)","ref":"\(ref)"}}
+        """
+        let request = try JSONDecoder().decode(GitLabMergeRequest.self, from: Data(raw.utf8))
+        let gitlab = InMemoryGitLab()
+        defer { gitlab.close() }
+        var sourceReads = 0, targetReads = 0, pipelineReads = 0, userReads = 0
+        gitlab.handler = { call in
+            #expect(call.method == "GET")
+            switch call.endpoint {
+            case "/user":
+                userReads += 1
+                return try InMemoryGitLab.json(["id": mutation == "lateAccount" && userReads > 1 ? 2 : 1, "username": "me"])
+            case "/projects/7/merge_requests/11":
+                return InMemoryGitLab.output(mutation == "changedTargetBranch"
+                    ? raw.replacingOccurrences(of: #""target_branch":"main""#, with: #""target_branch":"release""#) : raw)
+            case "/projects/7/pipelines/100":
+                pipelineReads += 1
+                return try InMemoryGitLab.json(["id": 100, "project_id": mutation == "wrongProject" ? 8 : 7,
+                    "status": mutation == "latePipeline" && pipelineReads > 1 ? "running" : status, "sha": train, "ref": ref])
+            case "/projects/7/repository/branches/feature":
+                sourceReads += 1
+                return try InMemoryGitLab.json(["commit": ["id": mutation == "lateSource" && sourceReads > 1 ? other : source]])
+            case "/projects/7/repository/branches/main":
+                targetReads += 1
+                return try InMemoryGitLab.json(["commit": ["id": mutation == "lateTarget" && targetReads > 1 ? other : target]])
+            case "/projects/7/merge_requests/11/merge_ref":
+                return try InMemoryGitLab.json(["commit_id": mutation == "invalidMergeSHA" ? "invalid" : merged])
+            case "/projects/7/repository/commits/\(train)":
+                return try InMemoryGitLab.json(["id": train, "parent_ids": [mutation == "wrongTrainParent" ? other : target]])
+            case "/projects/7/repository/commits/\(merged)":
+                let parents = mutation == "oneMergeParent" ? [target] : [
+                    mutation == "wrongTargetParent" ? other : target,
+                    mutation == "wrongSourceParent" ? other : source]
+                return try InMemoryGitLab.json(["id": merged, "parent_ids": parents])
+            case "/projects/7/repository/compare?from=\(merged)&to=\(train)&straight=true":
+                var result: [String: Any] = ["commit": ["id": mutation == "wrongComparisonCommit" ? other : train],
+                    "diffs": mutation == "differentTrees" ? [["new_path": "OtherMR.swift"]] : [],
+                    "compare_timeout": mutation == "timedOut", "compare_same_ref": false]
+                if mutation == "missingTimeout" { result.removeValue(forKey: "compare_timeout") }
+                return try InMemoryGitLab.json(result)
+            default: return try gitlab.unexpected(call)
+            }
+        }
+        let glab = gitlab.service(host: host, username: "me")
+        do {
+            let result = if mutation == "successfulTrain" {
+                try await glab.verifiedSuccessfulPipeline(for: request, host: host, expectedUser: .init(id: 1, username: "me"))
+            } else {
+                try await glab.verifiedFailedPipeline(for: request, host: host, expectedUser: .init(id: 1, username: "me"))
+            }
+            #expect(mutation == nil)
+            #expect(result.id == 100 && result.sha == train)
+        } catch {
+            #expect(mutation != nil)
+            #expect(error is CancellationError)
+        }
+        #expect(gitlab.requests.allSatisfy { $0.method == "GET" })
+    }
+
     @Test(arguments: ["feature", "refs/merge-requests/11/head", "refs/merge-requests/11/merge"])
     func explicitPipelineRetryAcceptsCurrentSourceAndMergedResultPipelines(ref: String) async throws {
         try await exercisePipelineRetry(ref: ref)
@@ -1723,7 +1898,21 @@ import Testing
         try await exercisePipelineRetry(ref: "refs/merge-requests/11/merge", mutation: mutation)
     }
 
-    private func exercisePipelineRetry(ref: String, mutation: String? = nil) async throws {
+    @Test func automaticPipelineRetryAdmitsTheCurrentVerifiedFailedPipeline() async throws {
+        try await exercisePipelineRetry(ref: "feature", automatic: true)
+    }
+
+    @Test(arguments: ["claim", "rule", "provider", "scope"])
+    func automaticPipelineRetryRechecksItsAdmissionPolicyBeforeClaiming(_ change: String) async throws {
+        try await exercisePipelineRetry(ref: "feature", mutation: "auto-" + change, automatic: true)
+    }
+
+    @Test(arguments: ["running", "pending", "passed", "replaced", "missing"])
+    func ownedPipelineRetryChecksTheFinalSnapshotBeforeRecordingAChild(_ state: String) async throws {
+        try await exercisePipelineRetry(ref: "feature", mutation: "launch-" + state, automatic: true)
+    }
+
+    private func exercisePipelineRetry(ref: String, mutation: String? = nil, automatic: Bool = false) async throws {
         let directory = FileManager.default.temporaryDirectory.appending(path: UUID().uuidString)
         try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
         defer { try? FileManager.default.removeItem(at: directory) }
@@ -1745,7 +1934,7 @@ import Testing
         let pipelineRef = mutation == "wrongRef" ? "refs/merge-requests/12/merge" : ref
         let request = """
         {"project_id":7,"iid":11,"author":{"id":1,"username":"me","name":"Me"},
-        "title":"Example","web_url":"https://\(host)/team/repo/-/merge_requests/11","state":"opened",
+        "title":"Example","web_url":"https://\(host)/team/repo/-/merge_requests/11","state":"opened","draft":false,
         "sha":"\(source)","source_project_id":7,"source_branch":"feature","target_project_id":7,
         "target_branch":"main","labels":[],"head_pipeline":{"id":100,"project_id":7,"status":"failed","sha":"\(pipelineSHA)","ref":"\(ref)"}}
         """
@@ -1756,6 +1945,17 @@ import Testing
         if mutation == "changedTarget" {
             changedRequest = changedRequest.replacingOccurrences(of: "\"target_branch\":\"main\"", with: "\"target_branch\":\"release\"")
         }
+        var launchRequest = request
+        if let mutation, mutation.hasPrefix("launch-") {
+            var object = try #require(JSONSerialization.jsonObject(with: Data(request.utf8)) as? [String: Any])
+            var pipeline = try #require(object["head_pipeline"] as? [String: Any])
+            let state = String(mutation.dropFirst("launch-".count))
+            pipeline["status"] = state == "passed" ? "success" : (state == "replaced" ? "failed" : state)
+            if state == "replaced" { pipeline["id"] = 101 }
+            object["head_pipeline"] = state == "missing" ? nil : pipeline
+            launchRequest = String(decoding: try JSONSerialization.data(withJSONObject: object), as: UTF8.self)
+        }
+        var requestReads = 0
         let gitlab = InMemoryGitLab()
         defer { gitlab.close() }
         gitlab.handler = { call in
@@ -1769,8 +1969,14 @@ import Testing
             case "/projects/7/merge_requests/11":
                 let changed = gitlab.has("request")
                 gitlab.write("request")
+                requestReads += 1
+                if mutation?.hasPrefix("launch-") == true, requestReads >= 3 { return InMemoryGitLab.output(launchRequest) }
                 return InMemoryGitLab.output(changed ? changedRequest : request)
             case "/projects/7/pipelines/100":
+                if mutation == "auto-claim" { settings.automation.autoClaimPipelineFailures = false }
+                if mutation == "auto-rule" { settings.automation.workflowRules[.pipelineFailure].mode = .off }
+                if mutation == "auto-provider" { settings.automation.assistant = .claude }
+                if mutation == "auto-scope" { settings.automation.scope[.init(host: host, username: "me", projectID: 7, iid: 11)] = .paused }
                 return try InMemoryGitLab.json(["id": 100, "project_id": pipelineProject, "status": "failed", "sha": pipelineSHA, "ref": pipelineRef])
             case "/projects/7/repository/branches/feature": return try InMemoryGitLab.json(["commit": ["id": branchSource]])
             case "/projects/7/repository/branches/main": return try InMemoryGitLab.json(["commit": ["id": target]])
@@ -1790,20 +1996,29 @@ import Testing
             pipelineReservation: .init(host: host, projectID: 7, mergeRequestIID: 11, pipelineID: 100),
             execution: .init(state: .failed), taskPrompt: "Diagnose CI", mergeRequestURL: url, workflow: .followUp,
             expectedHeadSHA: source)]
+        let retryRecord = AssistantAutomaticRetryAttempt(id: UUID(), rootID: id, parentJobID: id,
+            target: .init(host: host, username: "me", projectID: 7, iid: 11), family: "pipeline", attempt: 1, reservedAt: Date())
+        if automatic { settings.assistantAutomaticRetryAttempts = [retryRecord] }
         let coordinator = AssistantJobCoordinator(execute: { _, _ in
             try await Task.sleep(for: .seconds(60))
             return .init(result: .init(status: .succeeded, summary: "Done"), output: "")
         })
         let retry: AssistantAutomationRunner.Handoff
         do {
-            retry = try await AssistantAutomationRunner.retry(id, settings: settings, expectedHeadSHA: source, jobCoordinator: coordinator, glab: glab)
+            retry = try await AssistantAutomationRunner.retry(id, settings: settings, expectedHeadSHA: source, jobCoordinator: coordinator, glab: glab, manual: !automatic, automaticRetryIdentity: automatic ? retryRecord.identity : nil)
         } catch {
             guard mutation != nil else { throw error }
-            #expect(error is CancellationError || error is GitLabPipelineEvidenceError)
+            if mutation?.hasPrefix("launch-") == true {
+                #expect(requestReads >= 3)
+                #expect(error is AssistantAutomationRunner.HandoffError)
+            } else {
+                #expect(error is CancellationError || error is GitLabPipelineEvidenceError || automatic && error is AssistantJobExecutor.ExecutionError)
+            }
             #expect(settings.assistantHandoffs.count == 1)
             return
         }
         #expect(mutation == nil)
+        if automatic { #expect(retry.manual == false && retry.automaticRetryIdentity == retryRecord.identity) }
         #expect(retry.id != id)
         #expect(retry.pipelineReservation?.pipelineID == 100)
         #expect(retry.expectedHeadSHA == source)

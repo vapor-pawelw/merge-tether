@@ -20,6 +20,7 @@ struct MRTodoIntent: Codable, Identifiable, Sendable {
     var error: String?
     var updatedAt: Date
     var sourceTodo: Todo?
+    var workflowEventKind: MergeWorkflowTrigger? = nil
 
     var isAwaitingFollowUpVerification: Bool {
         kind == .followUp && (state == .verifying || (state == .running && jobID == nil))

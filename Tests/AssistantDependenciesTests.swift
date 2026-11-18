@@ -197,6 +197,33 @@ struct AssistantDependenciesTests {
         #expect(setup.status == .missingCLI && !setup.canCommit)
     }
 
+    @MainActor @Test func initialReadinessIsSeparateFromReadOnlyFailureRecovery() async throws {
+        var status: AssistantDependencyStatus = .ready(URL(fileURLWithPath: "/example/cli"))
+        let monitor = AssistantDependencyMonitor(probe: { _, _ in status })
+        var ready: [AutomationAssistant] = [], recovered: [AutomationAssistant] = []
+        monitor.onReady = { assistant in
+            #expect(monitor.available.contains(assistant))
+            ready.append(assistant)
+        }
+        monitor.onRecovered = { recovered.append($0) }
+        func refresh() async throws {
+            monitor.refresh(force: true)
+            for _ in 0..<1000 where monitor.isChecking { await Task.yield() }
+            try #require(!monitor.isChecking)
+        }
+
+        try await refresh()
+        #expect(Set(ready) == Set(AutomationAssistant.allCases) && recovered.isEmpty)
+        let initialCount = ready.count
+        try await refresh()
+        #expect(ready.count == initialCount && recovered.isEmpty)
+        status = .missingCLI
+        try await refresh()
+        status = .ready(URL(fileURLWithPath: "/example/cli"))
+        try await refresh()
+        #expect(ready.count == initialCount * 2 && Set(recovered) == Set(AutomationAssistant.allCases))
+    }
+
     @MainActor @Test func runtimeFailureAndRecoveryAreDetectedWithoutChangingSavedSelection() async throws {
         var status: AssistantDependencyStatus = .ready(URL(fileURLWithPath: "/example/cli"))
         let monitor = AssistantDependencyMonitor(probe: { _, requireCLI in requireCLI ? status : .desktopOnly })

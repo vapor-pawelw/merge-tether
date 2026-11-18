@@ -157,7 +157,7 @@ private struct CommandCenterMRDetailContent: View {
                             hidesBlockedActions: presentation.working, statusTrailer: {
                                 MREffectivePolicySummary(row: presentationRow, monitor: monitor,
                                     excluding: [presentation.humanAction?.explanation ?? ""], holdsOnly: true)
-                            }, additionalActions: { EmptyView() })
+                            }, additionalActions: { _ in EmptyView() })
                     }
                     if finishedState == nil { supplementaryActions(citationContext: citationContext).id(Anchor.actions) }
                     discussionThreads(discussions).id(Anchor.comments)

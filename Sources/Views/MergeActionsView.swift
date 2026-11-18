@@ -11,13 +11,14 @@ struct MergeActionsView<StatusTrailer: View, AdditionalActions: View>: View {
     var showsExplanations = true
     /// Details hides reply sources while its feedback check already lists them.
     var showsReplySources = true
+    var showsRecoveryActions = true
     var textFont: Font = .subheadline
     /// Blockers the card already lists as requirements.
     var coveredBlockers: Set<MergeRequestBlocker> = []
     /// Cards hide actions that would only show disabled while MergeTether is working.
     var hidesBlockedActions = false
     var statusTrailer: () -> StatusTrailer
-    var additionalActions: () -> AdditionalActions
+    var additionalActions: (Bool) -> AdditionalActions
     @Environment(\.openURL) private var openURL
     @State private var showingConfirmation = false
     @State private var working = false
@@ -28,13 +29,15 @@ struct MergeActionsView<StatusTrailer: View, AdditionalActions: View>: View {
     init(item: MergeRequestAttentionMonitor.Item, monitor: TodoMonitorService, evidenceMatchesCatalogContext: Bool = true,
          actionsBlocked: Bool = false, onReviewFeedback: (() -> Void)? = nil, showsExplanations: Bool = true,
          showsReplySources: Bool = true,
+         showsRecoveryActions: Bool = true,
          textFont: Font = .subheadline, coveredBlockers: Set<MergeRequestBlocker> = [],
          hidesBlockedActions: Bool = false, @ViewBuilder statusTrailer: @escaping () -> StatusTrailer,
-         @ViewBuilder additionalActions: @escaping () -> AdditionalActions) {
+         @ViewBuilder additionalActions: @escaping (Bool) -> AdditionalActions) {
         self.item = item; self.monitor = monitor
         self.evidenceMatchesCatalogContext = evidenceMatchesCatalogContext
         self.actionsBlocked = actionsBlocked; self.onReviewFeedback = onReviewFeedback
         self.showsExplanations = showsExplanations; self.showsReplySources = showsReplySources
+        self.showsRecoveryActions = showsRecoveryActions
         self.textFont = textFont
         self.coveredBlockers = coveredBlockers; self.hidesBlockedActions = hidesBlockedActions
         self.statusTrailer = statusTrailer; self.additionalActions = additionalActions
@@ -67,6 +70,11 @@ struct MergeActionsView<StatusTrailer: View, AdditionalActions: View>: View {
         hasDiscussionBlock && blocker != .prerequisite(.discussions) && !coveredBlockers.contains(.discussions)
     }
     private var hidesActions: Bool { hidesBlockedActions && actionsBlocked }
+    private var directMergeAction: MergeSubmissionAction? {
+        guard owned, state == .none, blocker == nil, !hidesActions,
+              item.reReviewReadiness?.hasConcreteConcerns != true else { return nil }
+        return status?.action
+    }
     private var needsGitLabCheck: Bool { state == .uncertain || state == .changed || status?.action == nil && status != nil }
     private var feedbackRecovery: ManualFeedbackRecovery? {
         guard evidenceMatchesCatalogContext, monitor.authoredMergeRequests.hasSyncedCurrentCatalog else { return nil }
@@ -89,7 +97,7 @@ struct MergeActionsView<StatusTrailer: View, AdditionalActions: View>: View {
             statusTrailer()
             HStack(spacing: 8) {
                 if owned {
-                    if state == .none, blocker == nil, !hidesActions, let action = status?.action {
+                    if let action = directMergeAction {
                         Button { prepared = nil; showingConfirmation = true } label: {
                             if working { ProgressView().controlSize(.small) }
                             else { Text(action.title) }
@@ -97,7 +105,7 @@ struct MergeActionsView<StatusTrailer: View, AdditionalActions: View>: View {
                         .buttonStyle(.borderedProminent).disabled(actionsBlocked || working)
                         .mrActionHelp(.merge)
                     }
-                    if hasDiscussionBlock, !hidesActions {
+                    if showsRecoveryActions, hasDiscussionBlock, !hidesActions {
                         Button { prepareResolution() } label: {
                             if working { ProgressView().controlSize(.small) }
                             else { MRActionLabel(title: .MergeActions.mergeActionsResolveAll, cta: .resolveThreads) }
@@ -105,10 +113,10 @@ struct MergeActionsView<StatusTrailer: View, AdditionalActions: View>: View {
                         .buttonStyle(.bordered).disabled(working || actionsBlocked)
                         .mrActionHelp(.resolveThreads, detail: .MergeActions.mergeActionsResolveScope)
                     }
-                    if !hidesActions { feedbackRecoveryAction }
+                    if showsRecoveryActions, !hidesActions { feedbackRecoveryAction }
                     if needsGitLabCheck { Link(destination: item.url) { Text(.MergeActions.mergeActionsCheckGitLab) } }
                 }
-                additionalActions()
+                additionalActions(directMergeAction != nil && !actionsBlocked && !working)
             }
         }
         .font(.caption)
@@ -279,7 +287,7 @@ extension MergeActionsView where StatusTrailer == EmptyView {
          textFont: Font = .subheadline, @ViewBuilder additionalActions: @escaping () -> AdditionalActions) {
         self.init(item: item, monitor: monitor, evidenceMatchesCatalogContext: evidenceMatchesCatalogContext,
             actionsBlocked: actionsBlocked, onReviewFeedback: onReviewFeedback, showsExplanations: showsExplanations,
-            textFont: textFont, statusTrailer: { EmptyView() }, additionalActions: additionalActions)
+            textFont: textFont, statusTrailer: { EmptyView() }, additionalActions: { _ in additionalActions() })
     }
 }
 
@@ -289,6 +297,6 @@ extension MergeActionsView where StatusTrailer == EmptyView, AdditionalActions =
          textFont: Font = .subheadline) {
         self.init(item: item, monitor: monitor, evidenceMatchesCatalogContext: evidenceMatchesCatalogContext,
             actionsBlocked: actionsBlocked, onReviewFeedback: onReviewFeedback, showsExplanations: showsExplanations,
-            textFont: textFont, statusTrailer: { EmptyView() }, additionalActions: { EmptyView() })
+            textFont: textFont, statusTrailer: { EmptyView() }, additionalActions: { _ in EmptyView() })
     }
 }

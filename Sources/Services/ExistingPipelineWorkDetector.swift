@@ -150,8 +150,19 @@ struct ExistingPipelineWorkDetector: Sendable {
     /// that another task still holds the MR's exclusive reservation.
     func hasActiveReservation(for key: Key) -> Bool {
         if legacyDetector?.hasActiveReservation(for: key) == true { return true }
-        guard let active = try? externalRegistrationURL(for: key) else { return true }
-        return FileManager.default.fileExists(atPath: active.path)
+        do {
+            let parent = try reservationParent(for: key, create: false)
+            defer { close(parent) }
+            var metadata = stat()
+            if fstatat(parent, "active", &metadata, AT_SYMLINK_NOFOLLOW) == 0 { return true }
+            return errno != ENOENT
+        } catch let error as POSIXError where error.code == .ENOENT { return false }
+        catch { return true }
+    }
+
+    func hasActiveReservation(host: String, projectID: Int, iid: Int) -> Bool {
+        // The exclusive path belongs to the MR, independently of a pipeline receipt.
+        hasActiveReservation(for: .init(host: host, projectID: projectID, mergeRequestIID: iid, pipelineID: 1))
     }
 
     func hasEmptyPipelineReceipt(for key: Key) -> Bool {
@@ -215,6 +226,12 @@ struct ExistingPipelineWorkDetector: Sendable {
         }
     }
 
+    /// The current token cannot waive a separate legacy worker's MR-wide claim.
+    func ownsExclusiveReservation(for key: Key) -> Bool {
+        guard legacyDetector?.hasActiveReservation(for: key) != true else { return false }
+        return ownsReservation(for: key)
+    }
+
     func ownsReservation(for key: Key) -> Bool {
         guard key.reservationID != nil else { return false }
         return (try? withOwner(key) { _, _, _ in true }) ?? false
@@ -268,8 +285,20 @@ struct ExistingPipelineWorkDetector: Sendable {
     /// terminal settings record alone cannot clear an active external process.
     @discardableResult
     func recoverTerminalRun(_ runID: UUID, reservation key: Key, state: AssistantJobExecution.State) throws -> Bool {
-        guard [.succeeded, .blocked, .failed, .cancelled].contains(state),
-              let recorded = reservationOwner(for: key),
+        guard [.succeeded, .blocked, .failed, .cancelled].contains(state) else { return false }
+        return try recoverDeadBoundOwner(runID, reservation: key)
+    }
+
+    @discardableResult
+    func recoverUnstartedRun(_ runID: UUID, reservation key: Key, execution: AssistantJobExecution) throws -> Bool {
+        // An interrupted record without a start time can be legacy data. Only
+        // the still-persisted queue state proves this executor never started.
+        guard execution.state == .queued, execution.startedAt == nil else { return false }
+        return try recoverDeadBoundOwner(runID, reservation: key)
+    }
+
+    private func recoverDeadBoundOwner(_ runID: UUID, reservation key: Key) throws -> Bool {
+        guard let recorded = reservationOwner(for: key),
               recorded.owner.installationID == installationID, recorded.runID == runID,
               processState(recorded.owner.processID) == .dead else { return false }
         return try release(key, expected: recorded)

@@ -28,6 +28,7 @@ final class MergeRequestAttentionMonitor {
         var automaticPublicationPolicy: AutomaticPublicationPolicy?
         /// Other participants of each draft reply thread, keyed by discussion ID.
         var replyRecipients: [String: [PersonIdentity]] = [:]
+        var incomingReplyDiscussionIDs: Set<String>? = nil
         var awaitingRemoteVerification = false
         var draftProofRecoveryChecking = false
         var draftProofRecoveryReadFailure = false
@@ -40,6 +41,7 @@ final class MergeRequestAttentionMonitor {
         var aiOriginChecking = false
         /// Text actually read for this row; semantic results must match both this and its source head.
         var observedDiscussionFingerprint: String?
+        var observedActiveDiscussionFingerprint: String?
         /// Presentation only; the shared human-action projection leaves raw safety evidence intact.
         var humanActionRequired: Bool?
         /// The assistant has no objections to the current head and the user has nothing open,
@@ -147,6 +149,7 @@ final class MergeRequestAttentionMonitor {
                   semanticContextFingerprint == nil
                     || semanticContextFingerprint == mergeRequest?.semanticContextFingerprint else {
                 observedDiscussionFingerprint = nil
+                observedActiveDiscussionFingerprint = nil
                 return
             }
         }
@@ -1090,6 +1093,9 @@ final class MergeRequestAttentionMonitor {
                             )
                         } else { nil as [GitLabMergeRequestDiscussion]? }
                         updated.observedDiscussionFingerprint = discussions.flatMap { ReviewVerdict.fingerprint($0) }
+                        updated.observedActiveDiscussionFingerprint = discussions.flatMap {
+                            ReviewVerdict.fingerprint(GitLabMergeRequestDiscussion.activeForReview($0))
+                        }
                         updated.ownPublishedReplies = discussions.map { DuplicateReplyDrafts.publishedReplies(in: $0, userID: user.id) }
                         let reviewers = try? await glab.fetchMergeRequestReviewers(projectID: item.id.projectID, iid: item.id.iid, host: host)
                         if let discussions, let request = item.mergeRequest {
@@ -1138,6 +1144,7 @@ final class MergeRequestAttentionMonitor {
                         }
                         if let draftCount { updated.draftCount = draftCount }
                         updated.replyRecipients = [:]
+                        updated.incomingReplyDiscussionIDs = AutomaticPublicationPolicy.incomingDiscussionIDs(in: discussions, userID: user.id)
                         if let discussions {
                             for discussion in discussions {
                                 if let id = discussion.id, case let recipients = discussion.replyRecipients(excluding: user.id), !recipients.isEmpty {
@@ -1185,9 +1192,14 @@ final class MergeRequestAttentionMonitor {
                                   settings.automation.scope.permits(request, host: host, username: user.username) else { return false }
                             return settings.automation.automaticPublicationPolicy.couldAllow(
                                 draft, request: request, userID: user.id, host: host)
+                                && AutomaticPublicationPolicy.sourceNotes(for: draft, discussions: discussions,
+                                    userID: user.id)?.isEmpty == false
                         }
                         let verificationCandidates = item.mergeRequest.map { request in
-                            DraftReplyRepair.preparationAllowed(request, configuration: settings.automation) ? item.drafts : candidates
+                            DraftReplyRepair.preparationAllowed(request, configuration: settings.automation)
+                                ? item.drafts.filter { AutomaticPublicationPolicy.sourceNotes(for: $0,
+                                    discussions: discussions, userID: user.id)?.isEmpty == false }
+                                : candidates
                         } ?? candidates
                         if feedbackDecision == nil,
                            automaticResume == nil || (automaticResume?.action == .commentPublication && automaticResume?.id == item.id),
@@ -1380,6 +1392,8 @@ final class MergeRequestAttentionMonitor {
     private nonisolated static func applyDiscussionFeedback(
         to item: inout Item, discussions: [GitLabMergeRequestDiscussion], userID: Int
     ) {
+        item.observedActiveDiscussionFingerprint = ReviewVerdict.fingerprint(
+            GitLabMergeRequestDiscussion.activeForReview(discussions))
         let aggregateBlocker = item.mergeRequest.map {
             $0.blockingDiscussionsResolved == false || $0.detailedMergeStatus == "discussions_not_resolved"
         } ?? item.needsDiscussion
@@ -2711,10 +2725,13 @@ final class MergeRequestAttentionMonitor {
                     host: account.host, username: user.username)
                 // Conditions that definitely exclude these drafts do not require
                 // automatic remote proof; they remain ordinary manual checkpoints.
-                let candidates = item.drafts.filter {
-                    settings.automation.scope.permits(request, host: account.host, username: account.username)
+                let candidates = item.drafts.filter { draft in
+                    let mayHaveSource = item.incomingReplyDiscussionIDs.map { ids in
+                        draft.discussionID.map(ids.contains) == true
+                    } ?? true
+                    return mayHaveSource && settings.automation.scope.permits(request, host: account.host, username: account.username)
                         && settings.automation.automaticPublicationPolicy.couldAllow(
-                            $0, request: request, userID: user.id, host: account.host)
+                            draft, request: request, userID: user.id, host: account.host)
                 }
                 item.awaitingRemoteVerification = !candidates.isEmpty && (
                     item.awaitingRemoteVerification || !settings.automation.allowFollowUpPush
@@ -2787,6 +2804,8 @@ final class MergeRequestAttentionMonitor {
             updateItem(item.id, skipUnchangedPendingDraftEvidence: true) {
                 $0.drafts = current; $0.draftCount = current.count
                 $0.commentReviewSnapshot = CommentReviewSnapshot(request: request, discussions: discussions)
+                $0.incomingReplyDiscussionIDs = contextMatches
+                    ? AutomaticPublicationPolicy.incomingDiscussionIDs(in: discussions, userID: user.id) : nil
                 if contextMatches, let discussions {
                     $0.ownPublishedReplies = DuplicateReplyDrafts.publishedReplies(in: discussions, userID: user.id)
                 }
@@ -2842,7 +2861,9 @@ final class MergeRequestAttentionMonitor {
         guard let account else { return }
         item.requiresCommentReview = commentReviewPending(item.id, account: account)
         if item.requiresCommentReview { item.canApprove = false; item.autoApproveReady = false }
-        let status = reReviewCoordinator?.status(for: reReviewContext(item.id, account: account), authorID: user?.id)
+        let status = reReviewCoordinator?.currentStatus(for: reReviewContext(item.id, account: account),
+            request: item.mergeRequest, fingerprint: item.observedDiscussionFingerprint,
+            activeFingerprint: item.observedActiveDiscussionFingerprint, authorID: user?.id)
         item.reReviewReadiness = status?.state
         item.reReviewFingerprint = status?.fingerprint
         item.canConfirmReReview = status?.state?.canConfirm == true && !unanswered && item.draftCount == 0 && !item.requiresCommentReview

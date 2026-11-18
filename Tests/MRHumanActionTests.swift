@@ -4,6 +4,60 @@ import Testing
 
 @MainActor
 struct MRHumanActionTests {
+    @Test(arguments: [false, true])
+    func reReviewConfirmationDistinguishesGenericReadinessFromAnOutstandingConcern(_ concrete: Bool) throws {
+        var item = item()
+        item.needsMerge = true
+        item.canConfirmReReview = true
+        item.reReviewReadiness = .uncertain(concrete ? [.init(noteID: 10, reason: "An explicit merge condition is unmet")] : [])
+
+        let action = try #require(MRHumanAction(row: row(item), assistantReady: false))
+
+        #expect(action.action == .reviewDecision)
+        #expect(item.reReviewReadiness?.hasConcreteConcerns == concrete)
+        #expect(action.sourceNoteID == (concrete ? 10 : nil))
+    }
+
+    @Test func aConcreteReReviewConditionTakesPriorityAfterTheGitLabThreadWasClosed() throws {
+        var item = item()
+        item.needsMerge = true
+        item.reReviewReadiness = .blocked([.init(noteID: 10, reason: "The explicit merge condition is still unmet")])
+
+        let action = try #require(MRHumanAction(row: row(item), assistantReady: true))
+
+        #expect(action.action == .reviewFeedback)
+        #expect(action.sourceNoteID == 10)
+    }
+
+    @Test func unresolvedFeedbackTakesPriorityOverMergeReadiness() throws {
+        var item = item()
+        item.needsMerge = true
+        item.authorFeedbackStatus = .init(head: "head", fingerprint: "comments", phase: .complete,
+            findings: [.init(id: 10, discussionID: "thread", reviewerID: 7, reviewerUsername: "reviewer",
+                state: .needsVerification, reason: "An existing requirement needs a decision", waitingForReviewers: [],
+                sourceNoteID: 10)])
+
+        let action = try #require(MRHumanAction(row: row(item), assistantReady: true))
+
+        #expect(action.action == .reviewFeedback)
+        #expect(action.sourceNoteID == 10)
+    }
+
+    @Test func anExternalDecisionRemainsReviewableWithoutAnAssistant() throws {
+        var item = item()
+        item.needsMerge = true
+        let note = try FeedbackManualDecisionFixture.note()
+        item.authorFeedbackStatus = .init(head: "head", fingerprint: "comments", phase: .complete,
+            findings: [.init(id: 10, discussionID: "thread", reviewerID: 7, reviewerUsername: "reviewer",
+                state: .needsVerification, reason: note.reason, waitingForReviewers: [],
+                sourceNoteID: 10, manualDecision: note.manualDecision)])
+
+        let action = try #require(MRHumanAction(row: row(item), assistantReady: false))
+
+        #expect(action.action == .reviewFeedback)
+        #expect(action.sourceNoteID == 10)
+    }
+
     @Test func aPrivateReReviewQuestionDoesNotFallBackToQuotingRawReviewerFeedback() throws {
         // given
         var item = item()

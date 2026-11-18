@@ -13,6 +13,7 @@ final class AssistantJobCoordinator {
 
     private var tasks: [UUID: Task<Void, Never>] = [:]
     private var work: [UUID: AssistantAutomationRunner.MergeRequestWork] = [:]
+    private var settingsByJob: [UUID: SettingsManager] = [:]
     private let execute: Executor
     private let maximumConcurrentJobs: Int
     private let healthStore: AssistantCLIHealthStore
@@ -52,6 +53,7 @@ final class AssistantJobCoordinator {
               !terminating, !handoff.isObsoleteReminder, handoff.execution?.state == .queued,
               !isWorking(on: handoff.key.work), tasks[handoff.id] == nil else { return false }
         work[handoff.id] = handoff.key.work
+        settingsByJob[handoff.id] = settings
         pending.append((handoff, settings))
         startPendingJobs()
         return true
@@ -119,15 +121,22 @@ final class AssistantJobCoordinator {
             }
             tasks[handoff.id] = nil
             work[handoff.id] = nil
+            settingsByJob[handoff.id] = nil
             if !terminating, let finished = settings.assistantHandoffs.first(where: { $0.id == handoff.id }) { onFinished?(finished) }
             startPendingJobs()
         }
     }
 
-    func cancel(_ id: UUID) {
+    func cancel(_ id: UUID, origin: AssistantJobExecution.CancellationOrigin = .user) {
+        if let settings = settingsByJob[id] {
+            update(id, settings: settings) {
+                if $0.cancellationOrigin != .user { $0.cancellationOrigin = origin }
+            }
+        }
         if let index = pending.firstIndex(where: { $0.handoff.id == id }) {
             let removed = pending.remove(at: index)
             work[id] = nil
+            settingsByJob[id] = nil
             update(id, settings: removed.settings) { $0.state = .cancelled; $0.finishedAt = Date() }
             if let finished = removed.settings.assistantHandoffs.first(where: { $0.id == id }) { onFinished?(finished) }
         } else { tasks[id]?.cancel() }
@@ -148,18 +157,21 @@ final class AssistantJobCoordinator {
         }
     }
 
-    func synchronizeInterruptedRuns(settings: SettingsManager) {
+    func synchronizeInterruptedRuns(settings: SettingsManager, pipelineWorkDetector: ExistingPipelineWorkDetector = .init()) {
+        let detector = pipelineWorkDetector
         var changed = false
         for index in settings.assistantHandoffs.indices {
             guard let execution = settings.assistantHandoffs[index].execution,
                   execution.state.isActive || execution.state == .interrupted,
                   work[settings.assistantHandoffs[index].id] == nil else { continue }
+            if let reservation = settings.assistantHandoffs[index].pipelineReservation {
+                try? detector.recoverUnstartedRun(settings.assistantHandoffs[index].id, reservation: reservation, execution: execution)
+            }
             let recovered = AssistantJobJournal.recover(settings.assistantHandoffs[index])
                 ?? execution.recoverAfterRestart()
             if recovered != execution { settings.assistantHandoffs[index].execution = recovered; changed = true }
         }
         if changed { settings.save() }
-        let detector = ExistingPipelineWorkDetector()
         for handoff in settings.assistantHandoffs {
             guard let execution = handoff.execution, !execution.state.isActive, execution.state != .interrupted,
                   work[handoff.id] == nil, let reservation = handoff.pipelineReservation else { continue }
@@ -174,7 +186,7 @@ final class AssistantJobCoordinator {
                 let ready = await AssistantJobJournal.loadKey()
                 guard let self, let settings else { return }
                 restoringCheckpointKey = false
-                if ready { synchronizeInterruptedRuns(settings: settings) }
+                if ready { synchronizeInterruptedRuns(settings: settings, pipelineWorkDetector: detector) }
             }
         }
     }

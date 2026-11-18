@@ -755,7 +755,7 @@ final class AuthoredMergeRequestMonitor {
         try await AssistantAutomationRunner.launch(input.assistant, title: input.title, stackPosition: input.stackPosition,
             mergeRequestURL: input.url, prompt: input.prompt, workspace: input.workspace, access: input.access,
             work: input.work, username: input.username, settings: settings, allowsPush: input.allowsPush,
-            expectedHeadSHA: input.head)
+            expectedHeadSHA: input.head, taskIntent: .conflictResolution)
     }
 
     private func conflictTitle(_ request: GitLabMergeRequest) -> String {

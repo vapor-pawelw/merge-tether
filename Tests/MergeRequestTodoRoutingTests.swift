@@ -1187,6 +1187,22 @@ import Testing
         #expect(!f.gitlab.has("acks"))
     }
 
+    @Test func aNewDiscussionFallbackPersistsItsAdmissionRule() async throws {
+        let f = try fixture(owned: true); defer { f.cleanup() }
+        try #"[{"id":"thread","notes":[{"id":42,"author":{"id":2,"username":"other"},"system":false,"resolvable":true,"resolved":false,"body":"Please fix this."}]}]"#.store(in: f.gitlab, as: "discussions")
+        f.settings.automation.authorFeedback.isEnabled = false
+        f.settings.automation.authorFeedback.runner = .assistant
+        f.settings.automation.workflowRules[.newDiscussion].mode = .assistant
+        let router = MergeRequestTodoRouter(settings: f.settings, glab: f.glab, canAutomate: { true }, launcher: { intent, _ in
+            #expect(intent.workflowEventKind == .newDiscussion)
+            return UUID()
+        })
+        _ = await router.process([todo(action: .mentioned, linked: true)], host: target.host, username: target.username, managed: [target])
+        let intent = try #require(f.settings.mrActionIntents.first)
+        #expect(intent.workflowEventKind == .newDiscussion)
+        #expect(SettingsManager(defaults: f.defaults).mrActionIntents.first?.workflowEventKind == .newDiscussion)
+    }
+
     @Test("configured assistant restrictions and title placeholders survive semantic routing", arguments: [MRTodoIntent.Kind.review, .followUp])
     func configuredInstructionsArePreserved(kind: MRTodoIntent.Kind) throws {
         let f = try fixture(owned: kind == .followUp); defer { f.cleanup() }
