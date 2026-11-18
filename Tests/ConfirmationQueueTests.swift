@@ -3474,6 +3474,92 @@ import MergeTetherRemote
         #expect(harness.log("re-review.log") == "requested\n")
     }
 
+    @Test func transientReReviewDiffFailureRecoversWithoutAnotherHeadOrDiscussion() async throws {
+        let harness = try makeHarness(assistantWorked: false, authored: true)
+        defer { harness.cleanUp() }
+        harness.settings.automation.autoReReviewEnabled = true
+        harness.settings.automation.autoVerifyReReview = true
+        try harness.write("reviewers.json", #"[{"user":{"id":9},"state":"unapproved"}]"#)
+        let original = try #require(harness.gitlab.handler)
+        var diffReads = 0
+        harness.gitlab.handler = { request in
+            if request.endpoint.hasSuffix("/raw_diffs") {
+                diffReads += 1
+                if diffReads == 1 { return InMemoryGitLab.output(error: "HTTP 503 Service Unavailable", code: 1) }
+            }
+            return try await original(request)
+        }
+
+        try await harness.poll()
+        try await harness.poll()
+
+        #expect(diffReads == 2)
+        #expect(harness.log("verification.log") == "verified\n")
+        #expect(harness.log("re-review.log") == "requested\n")
+        #expect(harness.log("re-review-targets.log").contains("userId=gid://gitlab/User/9"))
+        #expect(harness.settings.reReviewReceipts.values.filter { $0.requested == true }.count == 1)
+    }
+
+    @Test func exhaustedReReviewDiffReadsWaitForCooldownBeforeRequestingOnce() async throws {
+        let harness = try makeHarness(assistantWorked: false, authored: true)
+        defer { harness.cleanUp() }
+        harness.settings.automation.autoReReviewEnabled = true
+        harness.settings.automation.autoVerifyReReview = true
+        try harness.write("reviewers.json", #"[{"user":{"id":9},"state":"unapproved"}]"#)
+        let original = try #require(harness.gitlab.handler)
+        var diffReads = 0
+        var failDiffRead = true
+        harness.gitlab.handler = { request in
+            if request.endpoint.hasSuffix("/raw_diffs") {
+                diffReads += 1
+                if failDiffRead { return InMemoryGitLab.output(error: "HTTP 503 Service Unavailable", code: 1) }
+            }
+            return try await original(request)
+        }
+        var clock = Date()
+        var delays: [Duration] = []
+        var verified = 0
+        let coordinator = ReReviewCoordinator(settings: harness.settings, glab: harness.glab,
+            canAutomate: { _ in true }, verify: { _, _, _ in
+                verified += 1
+                return .init(notes: [])
+            }, retryWait: { delays.append($0) }, now: { clock })
+        let user = GitLabAuthenticatedUser(id: 3, username: "me")
+        let context = ReReviewCoordinator.Context(host: host, username: user.username,
+            revision: harness.glab.accountRevision, projectID: 1, iid: 2)
+        let request = try await harness.glab.fetchMergeRequest(projectID: 1, iid: 2, host: host)
+        let feedback = ReReviewFeedback(discussions: [], authorID: user.id)
+        @MainActor func refresh() async throws {
+            await coordinator.refresh(for: request, feedback: feedback, draftCount: 0,
+                context: context, user: user, discussions: [])
+            let deadline = ContinuousClock.now + .seconds(5)
+            while coordinator.isVerifying {
+                try #require(ContinuousClock.now < deadline)
+                try await Task.sleep(for: .milliseconds(5))
+            }
+        }
+
+        try await refresh()
+        #expect(diffReads == 3)
+        #expect(delays == [.seconds(2), .seconds(8)])
+        #expect(coordinator.status(for: context, authorID: user.id).state == .failed)
+        #expect(verified == 0 && harness.log("re-review.log").isEmpty)
+        #expect(harness.settings.reReviewReceipts.isEmpty)
+
+        failDiffRead = false
+        clock.addTimeInterval(ReadOnlyAssessmentRetry.cooldown - 1)
+        try await refresh()
+        #expect(diffReads == 3)
+        #expect(verified == 0 && harness.log("re-review.log").isEmpty)
+
+        clock.addTimeInterval(2)
+        try await refresh()
+        try await refresh()
+        #expect(diffReads == 4 && verified == 1)
+        #expect(harness.log("re-review.log") == "requested\n")
+        #expect(harness.settings.reReviewReceipts.values.filter { $0.requested == true }.count == 1)
+    }
+
     @Test func failedVerificationIsVisibleCachedAndCanBeRetriedWithoutPublishingAnything() async throws {
         let harness = try makeHarness(assistantWorked: true, authored: true)
         defer { harness.cleanUp() }
@@ -3789,25 +3875,81 @@ import MergeTetherRemote
         #expect(harness.monitor.currentItems.first?.drafts.map(\.id) == [11])
     }
 
-    @Test func successfulPublicationKeepsTheCheckpointWhenTheFinalReadFails() async throws {
+    @Test func successfulPublicationResumesTheCheckpointAfterTheFinalDraftReadFails() async throws {
         let harness = try makeHarness(assistantWorked: true, authored: true)
         defer { harness.cleanUp() }
         try prepareAuthoredFeedback(harness)
         harness.settings.automation.publishDraftsWithoutConfirmation = true
-        try harness.write("drafts.json", #"[{"id":12,"author_id":3,"note":"Fixed","discussion_id":"abc"}]"#)
+        try harness.write("drafts.json", #"[{"id":12,"author_id":3,"note":"Verified correction","discussion_id":"abc"}]"#)
         try await harness.poll()
         try harness.verifyFollowUpDrafts()
         try harness.assessFollowUpClaims()
         try harness.write("fail-read-after-publish", "yes")
         try await harness.poll()
-        #expect(harness.log("selected.log").contains("/draft_notes/12/publish"))
+        let sent = harness.log("selected.log")
+        try #require(sent.contains("/draft_notes/12/publish"))
         #expect(harness.log("re-review.log").isEmpty)
         #expect(harness.monitor.currentOpenItems.first?.requiresCommentReview == true)
         #expect(harness.monitor.confirmationStates[.init(projectID: 1, iid: 2)] == nil)
-        await harness.monitor.refreshPendingDrafts()
-        await harness.monitor.finishCommentReview(try #require(harness.monitor.currentOpenItems.first))
-        try await harness.settleVerification()
+
+        try await harness.poll()
+
+        #expect(harness.monitor.currentOpenItems.first?.requiresCommentReview == false)
+        #expect(harness.log("selected.log") == sent)
         #expect(harness.log("re-review.log") == "requested\n")
+    }
+
+    @Test(arguments: ["unchanged", "head", "discussion", "account"])
+    func checkpointRecoveryAfterRestartStillRequiresThePublishedReviewContext(_ change: String) async throws {
+        let harness = try makeHarness(assistantWorked: true)
+        defer { harness.cleanUp() }
+        harness.settings.automation.publishDraftsWithoutConfirmation = true
+        try harness.write("drafts.json", #"[{"id":11,"author_id":3,"note":"Handle nil here."}]"#)
+        try harness.write("discussions.json", #"[{"id":"review","notes":[{"id":20,"author":{"id":9},"body":"Original discussion","system":false}]}]"#)
+        try harness.write("published-discussions.json", #"[{"id":"review","notes":[{"id":20,"author":{"id":9},"body":"Original discussion","system":false}]},{"id":"new","notes":[{"id":21,"author":{"id":3},"body":"Handle nil here.","system":false}]}]"#)
+        try harness.recordVerdict("objections", head: head)
+        try await harness.poll()
+        let original = try #require(harness.gitlab.handler)
+        harness.gitlab.handler = { request in
+            if request.method == "PUT", request.endpoint.hasSuffix("/draft_notes/11/publish") {
+                let response = try await original(request)
+                harness.gitlab.write("fail-discussion-read")
+                return response
+            }
+            return try await original(request)
+        }
+
+        try await harness.poll()
+        let target = MRAutomationScope.Target(host: host, username: "me", projectID: 1, iid: 2)
+        try #require(harness.settings.canAutomaticallyFinishCommentReview(for: target))
+        try #require(harness.log("selected.log").contains("/draft_notes/11/publish"))
+        try #require(harness.monitor.currentOpenItems.first?.requiresCommentReview == true)
+        harness.gitlab.remove("fail-discussion-read")
+        if change == "head" {
+            for file in ["request.json", "reviewing.json"] {
+                try harness.write(file, harness.log(file).replacingOccurrences(of: head, with: String(repeating: "b", count: 40)))
+            }
+        } else if change == "discussion" {
+            try harness.write("discussions.json", harness.log("discussions.json")
+                .replacingOccurrences(of: "Original discussion", with: "Edited discussion"))
+        } else if change == "account" {
+            try harness.write("live-user.json", #"{"id":4,"username":"me"}"#)
+        }
+        let reloaded = SettingsManager(defaults: harness.defaults)
+        let glab = harness.gitlab.service(host: host, username: "me")
+        let monitor = MergeRequestAttentionMonitor(glab: glab, settings: reloaded,
+            verdictDirectory: harness.folder.appending(path: "verdicts"),
+            aiAssessmentDirectory: harness.folder.appending(path: "ai-assessments"), followUpDirectory: harness.folder,
+            provenanceDirectory: harness.folder.appending(path: "comment-origins"), canAutomate: { _ in false })
+        let restarted = Harness(folder: harness.folder, defaults: harness.defaults, suite: harness.suite,
+            settings: reloaded, glab: glab, gitlab: harness.gitlab, monitor: monitor)
+        harness.gitlab.requests.removeAll()
+
+        try await restarted.poll()
+
+        #expect(reloaded.pendingCommentReviews.contains(target) == (change != "unchanged"))
+        #expect(monitor.currentOpenItems.first?.requiresCommentReview == (change != "unchanged"))
+        #expect(harness.gitlab.requests.allSatisfy { $0.method == "GET" })
     }
 
     @Test(arguments: [false, true])

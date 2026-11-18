@@ -32,6 +32,7 @@ final class ReReviewCoordinator {
         let fingerprint: String
         var state: ReReviewReadiness
         var assessment: ReReviewAssessment?
+        var diffRetryAfter: Date?
     }
 
     private struct VerificationTask {
@@ -49,6 +50,8 @@ final class ReReviewCoordinator {
     private let glab: GlabService
     private let canAutomate: @MainActor (AutomationAssistant) async -> Bool
     private let verifyReReview: Verify
+    private let retryWait: ReadOnlyAssessmentRetry.Wait
+    private let now: ReadOnlyAssessmentRetry.Clock
     private let authorFeedbackStatus: @MainActor (GitLabMergeRequest) -> AuthorFeedbackStatus?
     private let authorFeedbackAssessment: @MainActor (GitLabMergeRequest, String) -> ReReviewAssessment?
     var onChange: ((Context, Bool) -> Void)?
@@ -58,11 +61,15 @@ final class ReReviewCoordinator {
          canAutomate: @escaping @MainActor (AutomationAssistant) async -> Bool,
          verify: @escaping Verify,
          authorFeedbackStatus: @escaping @MainActor (GitLabMergeRequest) -> AuthorFeedbackStatus? = { _ in nil },
-         authorFeedbackAssessment: @escaping @MainActor (GitLabMergeRequest, String) -> ReReviewAssessment? = { _, _ in nil }) {
+         authorFeedbackAssessment: @escaping @MainActor (GitLabMergeRequest, String) -> ReReviewAssessment? = { _, _ in nil },
+         retryWait: @escaping ReadOnlyAssessmentRetry.Wait = ReadOnlyAssessmentRetry.wait,
+         now: @escaping ReadOnlyAssessmentRetry.Clock = { Date() }) {
         self.settings = settings
         self.glab = glab
         self.canAutomate = canAutomate
         self.verifyReReview = verify
+        self.retryWait = retryWait
+        self.now = now
         self.authorFeedbackStatus = authorFeedbackStatus
         self.authorFeedbackAssessment = authorFeedbackAssessment
     }
@@ -255,6 +262,12 @@ final class ReReviewCoordinator {
         let activeIgnored = settings.feedbackSuggestionDecisions.applicable(in: discussions, for: target)
         let sharedAssessment = authorFeedbackAssessment(request, fingerprint)
         let key = reReviewKey(request, fingerprint: fingerprint, context: context)
+        func markReviewerReadFailed() {
+            if reReviewChecks[context]?.key != key || reReviewChecks[context]?.diffRetryAfter == nil {
+                reReviewChecks[context] = .init(key: key, fingerprint: fingerprint, state: .failed)
+            }
+            notify(context, unanswered: feedback.hasUnansweredFeedback)
+        }
         let reviewers: [GitLabMergeRequestReviewer]
         let approvers: Set<Int>
         do {
@@ -263,8 +276,7 @@ final class ReReviewCoordinator {
             (reviewers, approvers) = try await (states, approved)
             observeCurrentReviewers(reviewers, context: context)
         } catch {
-            reReviewChecks[context] = .init(key: key, fingerprint: fingerprint, state: .failed)
-            notify(context, unanswered: feedback.hasUnansweredFeedback)
+            markReviewerReadFailed()
             return
         }
         guard !Task.isCancelled, isCurrent(context), runtimePermitsReReview(context),
@@ -308,8 +320,7 @@ final class ReReviewCoordinator {
                       reReviewKey(request, fingerprint: fingerprint, context: context) == key,
                       settings.automation.scope.permits(request, host: host, username: context.username) else { return }
             } catch {
-                reReviewChecks[context] = ReReviewCheck(key: key, fingerprint: fingerprint, state: .failed)
-                notify(context, unanswered: feedback.hasUnansweredFeedback)
+                markReviewerReadFailed()
                 return
             }
         }
@@ -328,7 +339,8 @@ final class ReReviewCoordinator {
                 notify(context, unanswered: feedback.hasUnansweredFeedback)
                 return
             }
-            if reReviewChecks[context]?.key != key {
+            let diffRetryIsDue = reReviewChecks[context]?.diffRetryAfter.map { now() >= $0 } == true
+            if reReviewChecks[context]?.key != key || (diffRetryIsDue && reReviewTasks[context] == nil) {
                 reReviewTasks.removeValue(forKey: context)?.task.cancel()
                 reReviewChecks[context] = ReReviewCheck(key: key, fingerprint: fingerprint, state: .checking)
                 let assistant = settings.automation.assistant
@@ -340,13 +352,34 @@ final class ReReviewCoordinator {
                     defer {
                         if reReviewTasks[context]?.id == verificationID {
                             reReviewTasks.removeValue(forKey: context)
+                            if let check = reReviewChecks[context], check.key == key, check.state == .checking, check.assessment == nil {
+                                reReviewChecks.removeValue(forKey: context)
+                                notify(context, unanswered: feedback.hasUnansweredFeedback)
+                            }
                         }
                     }
+                    @MainActor func isCurrentVerification() -> Bool {
+                        !Task.isCancelled && isCurrent(context) && reReviewTasks[context]?.id == verificationID
+                            && reReviewChecks[context]?.key == key && reReviewChecks[context]?.assessment == nil
+                            && reReviewKey(request, fingerprint: fingerprint, context: context) == key
+                            && settings.automation.hasAutomaticActionConsent && settings.automation.autoReReviewEnabled
+                            && runtimePermitsReReview(context)
+                            && settings.automation.scope.permits(request, host: host, username: context.username)
+                    }
+                    let diff: Data
                     do {
-                        let diff: Data = try await glab.mergeRequestAPI("/projects/\(request.projectID)/merge_requests/\(request.iid)/raw_diffs", host: host, decode: { $0 })
-                        guard !Task.isCancelled, isCurrent(context), reReviewChecks[context]?.key == key,
-                              runtimePermitsReReview(context),
-                              settings.automation.scope.permits(request, host: host, username: context.username) else { return }
+                        diff = try await ReadOnlyAssessmentRetry.run(isCurrent: isCurrentVerification, wait: retryWait) {
+                            try await glab.mergeRequestAPI("/projects/\(request.projectID)/merge_requests/\(request.iid)/raw_diffs",
+                                host: host, decode: { $0 })
+                        }
+                    } catch {
+                        guard isCurrentVerification(), !(error is CancellationError) else { return }
+                        reReviewChecks[context]?.state = .failed
+                        reReviewChecks[context]?.diffRetryAfter = now().addingTimeInterval(ReadOnlyAssessmentRetry.cooldown)
+                        notify(context, unanswered: feedback.hasUnansweredFeedback)
+                        return
+                    }
+                    do {
                         let input = ReReviewVerifier.Input(authorID: user.id, headSHA: head, title: request.title,
                                                           description: request.description,
                                                           diff: String(decoding: diff, as: UTF8.self), discussions: discussions,
@@ -358,11 +391,10 @@ final class ReReviewCoordinator {
                         let assessment = try await verifyReReview(input, assistant, model)
                         _ = try assessment.reviewers(in: discussions, authorID: user.id, ignoredSuggestions: activeIgnored,
                             excludedReplyAuthorIDs: settings.reviewParticipationPreferences.excludedIDs(host: host, username: context.username))
-                        guard !Task.isCancelled, isCurrent(context), reReviewChecks[context]?.key == key,
-                              runtimePermitsReReview(context) else { return }
+                        guard isCurrentVerification() else { return }
                         reReviewChecks[context]?.assessment = assessment
                     } catch {
-                        guard !Task.isCancelled, isCurrent(context), reReviewChecks[context]?.key == key else { return }
+                        guard isCurrentVerification() else { return }
                         reReviewChecks[context]?.state = error as? ReReviewVerifier.VerificationError == .unavailable ? .unavailable : .failed
                     }
                     notify(context, unanswered: feedback.hasUnansweredFeedback)

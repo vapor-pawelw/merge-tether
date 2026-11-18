@@ -1355,6 +1355,10 @@ final class MergeRequestAttentionMonitor {
         }
         if owned != nil, assigned != nil, !explicitFetchFailed { syncedCatalogRevision = revision }
         if automaticResume == nil || automaticResume?.action == .commentPublication {
+            for item in results where item.drafts.isEmpty && item.requiresCommentReview
+                && (automaticResume == nil || automaticResume?.id == item.id) {
+                await resumeAutomaticCommentReview(for: item.id, account: account, user: user)
+            }
             await publishSettledDrafts(agentWorks: agentWorks, account: account, only: automaticResume?.id)
         }
         for item in results where item.autoApproveReady
@@ -1681,6 +1685,10 @@ final class MergeRequestAttentionMonitor {
         let eligible = candidates.filter { qualifies($0, in: discussions) }
         guard !eligible.isEmpty, isCurrent(account), !isConfirming(id) else { return }
         let generation = accountGeneration, revision = glab.accountRevision
+        let reviewTarget = commentReviewTarget(id, account: account)
+        let reviewRevision = settings?.commentReviewRevision(for: reviewTarget)
+        let completion = SettingsManager.CommentReviewProgress.AutomaticPublication(
+            request: item.mergeRequest, snapshot: item.commentReviewSnapshot, userID: user.id)
         confirmationStates[id] = .publishing
         defer {
             if generation == accountGeneration, confirmationStates[id] == .publishing { confirmationStates[id] = nil }
@@ -1708,11 +1716,11 @@ final class MergeRequestAttentionMonitor {
                 try await glab.publishDraftNote(projectID: id.projectID, iid: id.iid, draftID: draftID,
                     host: account.host, shouldProceed: admitted)
                 attemptedPublish = false
-                guard isCurrent(account) else { return }
+                guard generation == accountGeneration, revision == glab.accountRevision, isCurrent(account) else { return }
                 published = true
                 publishedDrafts[id, default: []].append(draft)
                 publishedNow.append(draft)
-                self.settings?.recordAutomaticCommentPublication([draft], for: commentReviewTarget(id, account: account))
+                self.settings?.recordAutomaticCommentPublication([draft], for: reviewTarget, revision: reviewRevision, evidence: completion)
                 updateItem(id) {
                     $0.drafts.removeAll { $0 == draft }
                     $0.draftCount = $0.drafts.count
@@ -1727,7 +1735,7 @@ final class MergeRequestAttentionMonitor {
         if published, isCurrent(account) {
             previousDrafts[id] = nil
             if publicationChecked, publishedNow.count == item.drafts.count {
-                await completeCommentReviewAfterPublication(id, snapshot: item.commentReviewSnapshot, published: publishedNow, account: account, user: user, automatic: true)
+                await completeAutomaticCommentReview(id, account: account, user: user)
             }
             await refreshReReviewAfterPublication(id, account: account, user: user)
         }
@@ -1827,10 +1835,79 @@ final class MergeRequestAttentionMonitor {
         }
     }
 
+    private func resumeAutomaticCommentReview(for id: Item.ID, account: Account, user: GitLabAuthenticatedUser) async {
+        guard !isConfirming(id), let settings,
+              settings.automaticCommentReviewCompletion(for: commentReviewTarget(id, account: account))?.userID == user.id,
+              !hasActiveWorker(for: id, account: account) else { return }
+        let generation = accountGeneration, revision = glab.accountRevision
+        confirmationStates[id] = .finishingCommentReview
+        defer {
+            if generation == accountGeneration, revision == glab.accountRevision,
+               confirmationStates[id] == .finishingCommentReview { confirmationStates[id] = nil }
+            signalAutomaticActionIdle()
+        }
+        if await completeAutomaticCommentReview(id, account: account, user: user) {
+            await refreshReReviewAfterPublication(id, account: account, user: user)
+        }
+    }
+
+    @discardableResult
+    private func completeAutomaticCommentReview(_ id: Item.ID, account: Account, user: GitLabAuthenticatedUser) async -> Bool {
+        let target = commentReviewTarget(id, account: account)
+        guard let settings, isCurrent(account), self.user == user, !hasActiveWorker(for: id, account: account),
+              let publication = settings.automaticCommentReviewCompletion(for: target),
+              publication.userID == user.id else { return false }
+        let generation = accountGeneration, revision = glab.accountRevision
+        let reviewRevision = settings.commentReviewRevision(for: target)
+        func current() -> Bool {
+            !Task.isCancelled && generation == accountGeneration && revision == glab.accountRevision
+                && isCurrent(account) && self.user == user && !hasActiveWorker(for: id, account: account)
+                && settings.commentReviewRevision(for: target) == reviewRevision
+                && settings.automaticCommentReviewCompletion(for: target) == publication
+        }
+        do {
+            async let authenticated = glab.fetchAuthenticatedUser(host: account.host, expectedUsername: account.username)
+            async let request = glab.fetchMergeRequest(projectID: id.projectID, iid: id.iid, host: account.host)
+            async let discussions = glab.fetchMergeRequestDiscussions(projectID: id.projectID, iid: id.iid, host: account.host)
+            let (liveUser, live, threads) = try await (authenticated, request, discussions)
+            guard current(), liveUser == user else { return false }
+            // Read drafts last so a new draft seen during the check keeps the checkpoint open.
+            let drafts = try await glab.fetchOwnDraftNotes(projectID: id.projectID, iid: id.iid, host: account.host, userID: user.id)
+            guard current() else { return false }
+            settings.observeCommentReview(drafts, for: target, revision: reviewRevision)
+
+            let liveSnapshot = CommentReviewSnapshot(request: live, discussions: threads)
+            let contextMatches = live.projectID == id.projectID && live.iid == id.iid
+                && live.webURL.isGitLabMergeRequest(host: account.host, iid: id.iid)
+                && live.draftProofRecoveryContextFingerprint == publication.requestContext
+            let currentRequest = settings.mrLifecycleLedger.request(for: target) ?? attentionRecords[id]?.evidence.mergeRequest
+            if contextMatches && !MRAttentionRecord.sameContext(currentRequest, live) { return false }
+            let finished = drafts.isEmpty && contextMatches && liveSnapshot != nil && publication.snapshot.matches(live,
+                discussions: threads, publishedBodyDigests: Array(publication.publishedBodyDigests.values), userID: user.id)
+            if finished {
+                settings.completeCommentReview(for: target)
+                confirmationStates[id] = nil
+            } else if !contextMatches || (drafts.isEmpty && liveSnapshot != nil) {
+                settings.invalidateAutomaticCommentReviewCompletion(for: target)
+                confirmationStates[id] = .changed
+            }
+            updateItem(id) {
+                $0.drafts = drafts; $0.draftCount = drafts.count
+                $0.commentReviewSnapshot = liveSnapshot
+            }
+            if finished { onCommentReviewFinished?(id) }
+            return finished
+        } catch {
+            if current() { confirmationStates[id] = .failed }
+            Log.monitor.error("Could not verify automatic comment publication: \(String(describing: error), privacy: .private)")
+            return false
+        }
+    }
+
     /// Only an actual, successful publication can complete the human checkpoint implicitly.
     private func completeCommentReviewAfterPublication(_ id: Item.ID, snapshot: CommentReviewSnapshot?,
                                                        published: [GitLabDraftNote], account: Account,
-                                                       user: GitLabAuthenticatedUser, automatic: Bool = false) async {
+                                                       user: GitLabAuthenticatedUser) async {
         guard let snapshot, !published.isEmpty, isCurrent(account),
               confirmationStates[id] != .failed, confirmationStates[id] != .changed else { return }
         let generation = accountGeneration, revision = glab.accountRevision
@@ -1847,8 +1924,7 @@ final class MergeRequestAttentionMonitor {
                 && live.webURL.isGitLabMergeRequest(host: account.host, iid: id.iid)
                 && snapshot.matches(live, discussions: threads, publishedDrafts: published, userID: user.id)
             let wasPending = commentReviewPending(id, account: account)
-            let automaticallyComplete = !automatic || settings?.canAutomaticallyFinishCommentReview(for: commentReviewTarget(id, account: account)) == true
-            if drafts.isEmpty && contextMatches && automaticallyComplete {
+            if drafts.isEmpty && contextMatches {
                 settings?.completeCommentReview(for: commentReviewTarget(id, account: account))
             } else {
                 settings?.beginCommentReview(for: commentReviewTarget(id, account: account))
@@ -1858,7 +1934,7 @@ final class MergeRequestAttentionMonitor {
                 $0.drafts = drafts; $0.draftCount = drafts.count
                 $0.commentReviewSnapshot = CommentReviewSnapshot(request: live, discussions: threads)
             }
-            if drafts.isEmpty, contextMatches, automaticallyComplete, wasPending { onCommentReviewFinished?(id) }
+            if drafts.isEmpty, contextMatches, wasPending { onCommentReviewFinished?(id) }
         } catch {
             if current() { confirmationStates[id] = .failed }
         }
@@ -2057,6 +2133,10 @@ final class MergeRequestAttentionMonitor {
         guard !checkedDraftIDs.isEmpty, !hasActiveWorker(for: id, account: account) else { return }
         let expected = displayed.drafts
         let generation = accountGeneration, revision = glab.accountRevision
+        let reviewTarget = commentReviewTarget(id, account: account)
+        let reviewRevision = settings?.commentReviewRevision(for: reviewTarget)
+        let completion = SettingsManager.CommentReviewProgress.AutomaticPublication(
+            request: displayed.mergeRequest, snapshot: displayed.commentReviewSnapshot, userID: user.id)
         confirmationStates[id] = .publishing
         defer {
             if generation == accountGeneration, confirmationStates[id] == .publishing { confirmationStates[id] = nil }
@@ -2094,10 +2174,10 @@ final class MergeRequestAttentionMonitor {
                 try await glab.publishDraftNote(projectID: id.projectID, iid: id.iid, draftID: draftID,
                     host: account.host, shouldProceed: admitted)
                 attemptedPublish = false
-                guard isCurrent(account) else { return }
+                guard generation == accountGeneration, revision == glab.accountRevision, isCurrent(account) else { return }
                 publishedDrafts[id, default: []].append(draft)
                 publishedNow.append(draft)
-                settings.recordAutomaticCommentPublication([draft], for: commentReviewTarget(id, account: account))
+                settings.recordAutomaticCommentPublication([draft], for: reviewTarget, revision: reviewRevision, evidence: completion)
                 updateItem(id) { $0.drafts.removeAll { $0 == draft }; $0.draftCount = $0.drafts.count }
                 await recordGeneratedPublication(origin, id: id, account: account, user: user)
             }
@@ -2106,7 +2186,6 @@ final class MergeRequestAttentionMonitor {
             updateItem(id) { $0.drafts = remaining; $0.draftCount = remaining.count }
             guard !publishedNow.isEmpty else { return }
             publicationChecked = true
-            confirmationStates[id] = nil
         } catch {
             if isCurrent(account) { confirmationStates[id] = attemptedPublish ? .failed : nil }
             Log.monitor.error("Could not publish drafts: \(String(describing: error), privacy: .private)")
@@ -2115,7 +2194,7 @@ final class MergeRequestAttentionMonitor {
         if !publishedNow.isEmpty, isCurrent(account) {
             previousDrafts[id] = nil
             if publicationChecked, publishedNow.count == expected.count {
-                await completeCommentReviewAfterPublication(id, snapshot: displayed.commentReviewSnapshot, published: publishedNow, account: account, user: user, automatic: true)
+                await completeAutomaticCommentReview(id, account: account, user: user)
             }
             await refreshReReviewAfterPublication(id, account: account, user: user)
         }

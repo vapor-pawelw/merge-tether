@@ -1,7 +1,7 @@
 import Foundation
 
 /// Completion evidence stays separate from the semantic feedback assessment.
-struct CommentReviewSnapshot: Equatable, Sendable {
+struct CommentReviewSnapshot: Codable, Equatable, Sendable {
     let headSHA: String
     let semanticContext: String
     let discussionFingerprint: String
@@ -16,12 +16,18 @@ struct CommentReviewSnapshot: Equatable, Sendable {
 
     func matches(_ request: GitLabMergeRequest, discussions: [GitLabMergeRequestDiscussion],
                  publishedDrafts: [GitLabDraftNote] = [], userID: Int) -> Bool {
+        matches(request, discussions: discussions,
+            publishedBodyDigests: publishedDrafts.compactMap(\.note).map(AICommentAssessmentStore.digest),
+            userID: userID)
+    }
+
+    func matches(_ request: GitLabMergeRequest, discussions: [GitLabMergeRequestDiscussion],
+                 publishedBodyDigests: [String], userID: Int) -> Bool {
         guard request.state == "opened", request.sha == headSHA,
               request.semanticContextFingerprint == semanticContext else { return false }
         if ReviewVerdict.fingerprint(discussions) == discussionFingerprint { return true }
         // Permit only the new own comments this publication actually sent.
-        var bodies = Dictionary(grouping: publishedDrafts.compactMap(\.note), by: AICommentAssessmentStore.digest)
-            .mapValues(\.count)
+        var bodies = Dictionary(grouping: publishedBodyDigests, by: { $0 }).mapValues(\.count)
         let ownPublished = discussions.flatMap(\.notes).compactMap { note -> (id: Int, digest: String)? in
             guard note.system != true, note.author?.id == userID, let body = note.body, let id = note.id else { return nil }
             let digest = AICommentAssessmentStore.digest(body)

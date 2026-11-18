@@ -2,8 +2,23 @@ import Foundation
 
 extension SettingsManager {
     struct CommentReviewProgress: Codable, Equatable {
+        struct AutomaticPublication: Codable, Equatable {
+            let userID: Int
+            let requestContext: String
+            let snapshot: CommentReviewSnapshot
+            var publishedBodyDigests: [Int: String] = [:]
+
+            init?(request: GitLabMergeRequest?, snapshot: CommentReviewSnapshot?, userID: Int) {
+                guard let request, let snapshot, snapshot.covers(request), userID > 0 else { return nil }
+                self.userID = userID
+                requestContext = request.draftProofRecoveryContextFingerprint
+                self.snapshot = snapshot
+            }
+        }
+
         var observedDraftIDs: Set<Int> = []
         var automaticallyPublishedDraftIDs: Set<Int> = []
+        var automaticPublication: AutomaticPublication?
     }
 
     func commentReviewRevision(for target: MRAutomationScope.Target) -> UInt64 {
@@ -20,13 +35,39 @@ extension SettingsManager {
         if inserted || progress != previous { save() }
     }
 
-    func recordAutomaticCommentPublication(_ drafts: [GitLabDraftNote], for target: MRAutomationScope.Target) {
-        guard pendingCommentReviews.contains(target) else { return }
+    func recordAutomaticCommentPublication(_ drafts: [GitLabDraftNote], for target: MRAutomationScope.Target,
+                                           revision: UInt64? = nil, evidence: CommentReviewProgress.AutomaticPublication? = nil) {
+        guard pendingCommentReviews.contains(target),
+              revision == nil || revision == commentReviewRevision(for: target) else { return }
         let previous = commentReviewProgress[target]
         var progress = previous ?? .init()
+        if let evidence {
+            // Keep the context from before the first successful write, including across batches.
+            if progress.automaticallyPublishedDraftIDs.isEmpty { progress.automaticPublication = evidence }
+            if progress.automaticPublication?.userID == evidence.userID,
+               progress.automaticPublication?.requestContext == evidence.requestContext {
+                for draft in drafts {
+                    guard let id = draft.id, let body = draft.note, draft.authorID == evidence.userID else { continue }
+                    progress.automaticPublication?.publishedBodyDigests[id] = AICommentAssessmentStore.digest(body)
+                }
+            }
+        }
         progress.automaticallyPublishedDraftIDs.formUnion(drafts.compactMap(\.id))
         commentReviewProgress[target] = progress
         if progress != previous { save() }
+    }
+
+    func automaticCommentReviewCompletion(for target: MRAutomationScope.Target) -> CommentReviewProgress.AutomaticPublication? {
+        guard canAutomaticallyFinishCommentReview(for: target), let progress = commentReviewProgress[target],
+              let evidence = progress.automaticPublication,
+              progress.observedDraftIDs.isSubset(of: Set(evidence.publishedBodyDigests.keys)) else { return nil }
+        return evidence
+    }
+
+    func invalidateAutomaticCommentReviewCompletion(for target: MRAutomationScope.Target) {
+        guard commentReviewProgress[target]?.automaticPublication != nil else { return }
+        commentReviewProgress[target]?.automaticPublication = nil
+        save()
     }
 
     func canAutomaticallyFinishCommentReview(for target: MRAutomationScope.Target) -> Bool {
