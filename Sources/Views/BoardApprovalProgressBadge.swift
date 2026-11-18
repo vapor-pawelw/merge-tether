@@ -45,30 +45,25 @@ struct BoardApprovalProgressBadge: View {
     var body: some View {
         if progress.map({ $0.required > 0 || $0.completed > 0 }) ?? true || viewerApproval != nil {
             Button { hoverTask?.cancel(); showingPeople = true } label: {
-                VStack(alignment: .leading, spacing: 2) {
-                    HStack(spacing: 4) {
-                        HStack(spacing: 3) {
-                            Image(systemName: satisfied ? "checkmark.seal.fill" : "checkmark.seal").accessibilityHidden(true)
-                            if let progress, progress.required == 0 {
-                                Text(verbatim: "\(progress.completed)")
-                            } else if let progress {
-                                Text(.Board.boardApprovalRatio(progress.completed, progress.required))
-                            } else { Text(.Board.boardApprovalsUnknownRatio) }
-                        }
-                        .font(.caption2).monospacedDigit().foregroundStyle(satisfied ? Color.green : .secondary)
-                        if let viewerApproval { viewerSegment(viewerApproval) }
+                HStack(spacing: 4) {
+                    HStack(spacing: 3) {
+                        Image(systemName: satisfied ? "checkmark.seal.fill" : "checkmark.seal").accessibilityHidden(true)
+                        if let progress, progress.required == 0 {
+                            Text(verbatim: "\(progress.completed)")
+                        } else if let progress {
+                            Text(.Board.boardApprovalRatio(progress.completed, progress.required))
+                        } else { Text(.Board.boardApprovalsUnknownRatio) }
                     }
-                    .fixedSize()
-                    if requiredApprovalPending {
-                        Text(.Board.boardApprovalsRequiredPending)
-                            .font(.caption2).fixedSize(horizontal: false, vertical: true)
-                    }
+                    .font(.caption2).monospacedDigit().foregroundStyle(satisfied ? Color.green : .secondary)
+                    if let viewerApproval { viewerSegment(viewerApproval) }
                 }
+                .fixedSize()
                 .padding(.horizontal, 5).padding(.vertical, 2)
                 .background(.secondary.opacity(0.08), in: RoundedRectangle(cornerRadius: 8))
             }
             .buttonStyle(.plain)
             .accessibilityLabel(label)
+            .help(label)
             .onHover { badgeHovered = $0; updateHover() }
             .popover(isPresented: $showingPeople, arrowEdge: .bottom) {
                 peopleList.onHover { peopleHovered = $0; updateHover() }

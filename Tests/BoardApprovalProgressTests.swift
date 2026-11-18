@@ -24,6 +24,15 @@ import Testing
         #expect(view.fittingSize.width > 0)
     }
 
+    @Test func aPendingRuleKeepsTheBadgeOnOneLine() throws {
+        var progress = try #require(MergeRequestApprovalProgress(completed: 5, required: 2))
+        progress.requirementsSatisfied = true
+        let satisfied = NSHostingView(rootView: BoardApprovalProgressBadge(progress: progress))
+        progress.requirementsSatisfied = false
+        let pending = NSHostingView(rootView: BoardApprovalProgressBadge(progress: progress))
+        #expect(pending.fittingSize.height <= satisfied.fittingSize.height + 1)
+    }
+
     private let me = Todo.Author(id: 7, username: "Me", name: "Me Myself", avatarURL: nil)
     private let other = Todo.Author(id: 9, username: "other", name: "Other", avatarURL: nil)
 

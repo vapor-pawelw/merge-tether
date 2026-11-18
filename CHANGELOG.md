@@ -341,7 +341,7 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 - Open draft warnings from the Mac board before publishing comments that can change a merge request or resolve a discussion.
 - Show when an iPhone approval confirmation expires and let the reviewer reload the current commit before confirming again.
 - Show when the inbox is unavailable and offer a retry on Mac and iPhone. Show the empty state after a successful sync.
-- Label approval badges on Mac and iPhone when a required approval remains pending.
+- Keep approval badges compact on Mac and iPhone. Indicate pending required approvals in VoiceOver and in the Mac tooltip.
 
 - Put the requested version in local release archives and report incomplete publication as a failure when workflow verification cannot finish after a tag push.
 
