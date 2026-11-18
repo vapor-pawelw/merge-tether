@@ -322,10 +322,11 @@ final class AuthoredMergeRequestMonitor {
             let pendingDraftCount = pendingDrafts?.count
             guard isCurrent(account), glab.accountRevision == revision else { return }
             if let pendingDrafts { settings.observeCommentReview(pendingDrafts, for: reviewTarget, revision: reviewRevision) }
-            var status = await evaluate(
+            let evaluation = await evaluate(
                 request, approvals: approvals, resolved: discussionsResolved, pendingDraftCount: pendingDraftCount,
                 account: account, user: user, revision: revision
             )
+            var status = evaluation.status
             guard isCurrent(account), glab.accountRevision == revision else { return }
 
             let work = AssistantAutomationRunner.MergeRequestWork(host: host, projectID: request.projectID, iid: request.iid)
@@ -355,7 +356,9 @@ final class AuthoredMergeRequestMonitor {
             }
 
             results.append(status)
-            if automaticMergeTarget == nil, status.submissionState == .none || status.request.mergeTrainConflict != nil {
+            let conflictAfterQueueDeparture = detail?.hasConflicts == true && evaluation.queueHasEnded
+            if automaticMergeTarget == nil,
+               status.submissionState == .none || status.request.mergeTrainConflict != nil || conflictAfterQueueDeparture {
                 await scheduleConflictIfNeeded(status.request, account: account, user: user)
             }
         }
@@ -441,7 +444,7 @@ final class AuthoredMergeRequestMonitor {
             async let approvals = glab.fetchMergeRequestApprovalState(projectID: request.projectID, iid: request.iid, host: host)
             async let resolved = glab.mergeRequestDiscussionsAreResolved(projectID: request.projectID, iid: request.iid, host: host)
             async let drafts = glab.fetchOwnDraftNoteCount(projectID: request.projectID, iid: request.iid, host: host, userID: user.id)
-            let status = try await evaluate(request, approvals: approvals, resolved: resolved, pendingDraftCount: drafts,
+            let (status, _) = try await evaluate(request, approvals: approvals, resolved: resolved, pendingDraftCount: drafts,
                 account: account, user: user, revision: revision)
             guard isCurrent(account), glab.accountRevision == revision else { return .changed }
             if let index = requests.firstIndex(where: { $0.id == status.id }) { requests[index] = status }
@@ -547,7 +550,7 @@ final class AuthoredMergeRequestMonitor {
         account: Account,
         user: GitLabAuthenticatedUser,
         revision: UInt64
-    ) async -> AuthoredMergeRequestStatus {
+    ) async -> (status: AuthoredMergeRequestStatus, queueHasEnded: Bool) {
         let host = account.host
         var request = request
         let autoMergeEnabled = settings.automation.permitsAutoMerge(project: request.webURL.gitLabProjectPath)
@@ -579,6 +582,11 @@ final class AuthoredMergeRequestMonitor {
         else { dependencyReadiness = .notChecked }
         var state = trainState.isDelegated ? trainState : submissionState(for: request, account: account)
         if state == .none, trainState == .uncertain { state = .uncertain }
+        // A still-active queue can also be shown as changed when discussion evidence drifts.
+        let queueHasEnded = if state == .changed, trainState == .none, policy?.action != nil,
+                               let receipt = receipt(for: request, account: account), receipt.userID == user.id {
+            receipt.state.isDelegated
+        } else { false }
         if state.isDelegated,
            !(await checkQueuedDiscussions(for: request, account: account, user: user, revision: revision)) {
             state = .changed
@@ -590,7 +598,7 @@ final class AuthoredMergeRequestMonitor {
         let requiresApprovalReset = settings.automation.permitsAssistantTools(project: project) || shellCanAct
             || settings.conflictReceipts.contains { $0.matches(request, host: host, userID: user.id) }
         let canVerifyFreshApprovals = !requiresApprovalReset || policy?.resetsApprovalsOnPush == true
-        return AuthoredMergeRequestStatus(
+        let status = AuthoredMergeRequestStatus(
             request: request, approvals: approvals, discussionsResolved: resolved,
             projectRequiresResolvedDiscussions: policy?.requiresResolvedDiscussions, autoMergeEnabled: autoMergeEnabled,
             dependencyReadiness: dependencyReadiness,
@@ -602,6 +610,7 @@ final class AuthoredMergeRequestMonitor {
                 username: user.username, projectID: request.projectID, iid: request.iid)),
             action: policy?.action, submissionState: state
         )
+        return (status, queueHasEnded)
     }
 
     private func checkQueuedDiscussions(for request: GitLabMergeRequest, account: Account,
@@ -710,7 +719,7 @@ final class AuthoredMergeRequestMonitor {
                         access: automation.permitsAssistantTools(project: request.webURL.gitLabProjectPath)
                             ? .configuredTools : .preparation,
                         work: work, username: user.username, allowsPush: allowPush, head: sourceSHA)
-                    // Once the launcher is entered, a thrown error cannot prove no external work began.
+                    // An ambiguous launcher error can follow external work.
                     enteredLauncher = true
                     let job = try await conflictLauncher(launch, settings)
                     if settings.conflictReceipts.contains(receipt) {
@@ -718,6 +727,9 @@ final class AuthoredMergeRequestMonitor {
                         settings.conflictReceipts.update(with: receipt)
                         settings.save()
                     }
+                } catch AssistantAutomationRunner.HandoffError.mergeRequestBusy {
+                    // The coordinator refused admission before a job was recorded.
+                    _ = restoreUnlaunchedConflict(receipt, replacing: replacedReceipts)
                 } catch {
                     if !(error is CancellationError) { failedConflicts.insert(receipt) }
                     Log.monitor.error("Merge conflict task failed: \(String(describing: error), privacy: .private)")

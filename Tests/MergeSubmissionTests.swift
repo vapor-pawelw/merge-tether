@@ -359,6 +359,75 @@ import Testing
         }
     }
 
+    @Test(arguments: ["ordinary", "train", "active-train", "unreadable-train"])
+    func confirmedQueueDepartureAllowsOrdinaryConflictRepairWithoutResubmission(_ queue: String) async throws {
+        try await fixture { glab, gitlab, _ in
+            let suite = "ConflictAfterQueue.\(UUID())"
+            let defaults = try #require(UserDefaults(suiteName: suite))
+            defer { defaults.removePersistentDomain(forName: suite) }
+            let settings = SettingsManager(defaults: defaults)
+            settings.onboardingCompleted = true; settings.notificationsEnabled = false
+            settings.automation.packageDecision = .enabled
+            settings.automation.conflictTasksEnabled = true
+            settings.automation.autoMergeEnabled = true
+            if queue == "ordinary" { gitlab.write("ordinary-project") }
+            gitlab.write("observed", queue == "ordinary" ? "queued" : "train-only")
+            let transport = try #require(gitlab.handler)
+            gitlab.handler = { call in
+                if queue == "unreadable-train", gitlab.has("ordinary-conflict"), call.endpoint.contains("/merge_trains?") {
+                    return InMemoryGitLab.output(error: "503 Service Unavailable", code: 1)
+                }
+                let response = try await transport(call)
+                guard gitlab.has("ordinary-conflict"), call.endpoint == "/projects/1/merge_requests/2" else { return response }
+                var detail = try #require(JSONSerialization.jsonObject(with: response.stdout) as? [String: Any])
+                detail["has_conflicts"] = true
+                detail["detailed_merge_status"] = "conflict"
+                return try InMemoryGitLab.json(detail)
+            }
+            var launchedHeads: [String] = []
+            let monitor = AuthoredMergeRequestMonitor(settings: settings, glab: glab, canAutomate: { _ in true },
+                conflictLauncher: { input, _ in
+                    launchedHeads.append(input.head)
+                    return .init(id: UUID(), key: .init(assistant: input.assistant, work: input.work,
+                        username: input.username, workspace: "", access: input.access), title: input.title,
+                        prompt: input.prompt, createdAt: Date(), allowsPush: input.allowsPush, expectedHeadSHA: input.head)
+                })
+            monitor.refreshIfNeeded()
+            while monitor.isLoading { await Task.yield() }
+            let receipt = try #require(settings.mergeSubmissions.first)
+            #expect(receipt.origin == .observedQueue)
+            #expect(monitor.requests.first?.submissionState == (queue == "ordinary" ? .queued : .inTrain))
+
+            if queue == "active-train" { gitlab.write("drift", "newFeedback") }
+            else { gitlab.remove("observed") }
+            gitlab.write("ordinary-conflict")
+            monitor.refreshIfNeeded()
+            while monitor.isLoading { await Task.yield() }
+
+            let conflicting = try #require(monitor.requests.first)
+            #expect(conflicting.submissionState == .changed)
+            #expect(conflicting.request.hasConflicts == true)
+            #expect(!conflicting.mayAutoMerge && !conflicting.mayMergeManually)
+            if queue == "ordinary" || queue == "train" {
+                let deadline = ContinuousClock.now + .seconds(3)
+                while launchedHeads.isEmpty, ContinuousClock.now < deadline { await Task.yield() }
+                let head = try #require(conflicting.request.sha)
+                #expect(launchedHeads == [head])
+                gitlab.remove("ordinary-conflict")
+                monitor.refreshIfNeeded()
+                while monitor.isLoading { await Task.yield() }
+                #expect(monitor.requests.first?.submissionState == .changed)
+                #expect(monitor.requests.first?.mayAutoMerge == false)
+                #expect(launchedHeads.count == 1)
+            } else {
+                #expect(settings.conflictReceipts.isEmpty)
+                #expect(launchedHeads.isEmpty)
+            }
+            #expect(settings.mergeSubmissions == [receipt])
+            #expect(gitlab.requests.allSatisfy { $0.method == "GET" })
+        }
+    }
+
     @Test(arguments: [false, true])
     func aQueueObservedWithoutDiscussionsIsRememberedAcrossRestart(_ stillQueued: Bool) async throws {
         try await fixture { glab, gitlab, _ in
@@ -491,6 +560,78 @@ import Testing
             monitor.refreshIfNeeded()
             while monitor.isLoading { await Task.yield() }
             #expect(settings.mergeSubmissions.isEmpty)
+            #expect(gitlab.requests.allSatisfy { $0.method == "GET" })
+        }
+    }
+
+    @Test(arguments: [false, true])
+    func aBusyConflictLauncherPreservesThePreviousPlanAndRetriesOnTheNextPoll(_ previousPlan: Bool) async throws {
+        try await fixture { glab, gitlab, _ in
+            let suite = "ConflictLauncherBusy.\(UUID())"
+            let defaults = try #require(UserDefaults(suiteName: suite))
+            defer { defaults.removePersistentDomain(forName: suite) }
+            let settings = SettingsManager(defaults: defaults)
+            settings.onboardingCompleted = true
+            settings.automation.packageDecision = .enabled
+            settings.automation.conflictTasksEnabled = true
+            settings.automation.allowAssistantTools = true
+            settings.automation.assistantToolProjects = "g/p"
+            settings.automation.conflictPushProjects = "g/p"
+            settings.automation.allowConflictPush = false
+            gitlab.write("ordinary-project")
+            let handler = try #require(gitlab.handler)
+            gitlab.handler = { call in
+                let response = try await handler(call)
+                guard call.endpoint == "/projects/1/merge_requests/2" else { return response }
+                var detail = try #require(JSONSerialization.jsonObject(with: response.stdout) as? [String: Any])
+                detail["has_conflicts"] = true
+                detail["detailed_merge_status"] = "conflict"
+                return try InMemoryGitLab.json(detail)
+            }
+            var busy = false
+            var launchAttempts: [Bool] = []
+            let monitor = AuthoredMergeRequestMonitor(settings: settings, glab: glab, canAutomate: { _ in true },
+                conflictLauncher: { input, settings in
+                    launchAttempts.append(input.allowsPush)
+                    if busy { throw AssistantAutomationRunner.HandoffError.mergeRequestBusy }
+                    let job = AssistantAutomationRunner.Handoff(id: UUID(), key: .init(assistant: input.assistant, work: input.work,
+                        username: input.username, workspace: "", access: input.access), title: input.title, prompt: input.prompt,
+                        createdAt: Date(), allowsPush: input.allowsPush, execution: .init(state: .blocked), expectedHeadSHA: input.head)
+                    settings.assistantHandoffs.append(job)
+                    settings.save()
+                    return job
+                })
+            @MainActor func poll() async throws {
+                monitor.refreshIfNeeded()
+                let deadline = ContinuousClock.now + .seconds(3)
+                while monitor.isLoading || monitor.requests.first.map({
+                    monitor.conflictAutomationState(for: $0.request) == .processing
+                }) == true {
+                    try #require(ContinuousClock.now < deadline)
+                    try await Task.sleep(for: .milliseconds(5))
+                }
+            }
+            if previousPlan { try await poll() }
+            let priorJob = settings.assistantHandoffs.last?.id
+            settings.automation.allowConflictPush = true
+            busy = true
+            try await poll()
+
+            #expect(launchAttempts == (previousPlan ? [false, true] : [true]))
+            #expect(settings.assistantHandoffs.count == (previousPlan ? 1 : 0))
+            let restoredReceipts = SettingsManager(defaults: defaults).conflictReceipts
+            #expect(restoredReceipts.count == (previousPlan ? 1 : 0))
+            #expect(restoredReceipts.first?.jobID == priorJob)
+            #expect(restoredReceipts.first?.allowsPush == (previousPlan ? false : nil))
+            let conflicting = try #require(monitor.requests.first?.request)
+            #expect(monitor.conflictAutomationState(for: conflicting) == .available)
+
+            busy = false
+            try await poll()
+            try await poll()
+            #expect(launchAttempts == (previousPlan ? [false, true, true] : [true, true]))
+            #expect(settings.assistantHandoffs.count == (previousPlan ? 2 : 1))
+            #expect(settings.conflictReceipts.first?.jobID == settings.assistantHandoffs.last?.id)
             #expect(gitlab.requests.allSatisfy { $0.method == "GET" })
         }
     }
