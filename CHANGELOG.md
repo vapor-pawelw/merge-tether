@@ -9,6 +9,7 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 - Set auto-merge to **Default**, **On** or **Off** for an individual MR from its lightning menu. **On** overrides the global auto-merge defaults for that MR.
 
 - Show when a merge request was automatically approved with findings still open in the approvals popover and the local automation event log.
+- On iPhone and iPad, show when an MR was automatically approved with findings still open inside the approval popover and the People and Rules sheet.
 
 - Resume verification and bounded repair of owned reply drafts when another follow-up is blocked on independent work. Recheck reply claims after writing tasks change, preserve existing rejection and Stop decisions, and keep publication waiting for current evidence.
 

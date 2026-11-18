@@ -4,6 +4,30 @@ import MergeTetherRemote
 @testable import GitLabTodos
 
 @MainActor @Suite struct RemoteHostDetailTests {
+    @Test(arguments: ["current", "otherHead", "otherAccount"])
+    func phoneApprovalsShowOpenFindingsOnlyForTheApprovedHeadAndAccount(_ scenario: String) async throws {
+        let f = try Fixture(); defer { f.clean() }
+        let target = MRAutomationScope.Target(host: "gitlab.example.test",
+            username: scenario == "otherAccount" ? "other" : "me", projectID: 1, iid: 2)
+        let head = scenario == "otherHead" ? String(repeating: "b", count: 40) : try #require(f.source.sha)
+        f.monitor.settings.recordAutomationEvent(target: target, action: .approval, origin: .automatic,
+            state: .completed, approvedHeadSHA: head)
+
+        let board = try await f.board()
+        let card = try #require(board.cards.first { $0.id == "mr:1:2" })
+        let presentation = try #require(card.presentation)
+        let payload = try JSONSerialization.jsonObject(with: JSONEncoder().encode(presentation)) as? [String: Any]
+        #expect(payload?["approvedWithOpenFindings"] as? Bool == (scenario == "current" ? true : nil))
+
+        // An older phone drops the new field before computing its detail request digest.
+        var olderCard = card
+        var olderPayload = try #require(payload)
+        olderPayload["approvedWithOpenFindings"] = nil
+        olderCard.presentation = try JSONDecoder().decode(RemoteCardText.self,
+            from: JSONSerialization.data(withJSONObject: olderPayload))
+        #expect(try RemoteDetailRequest(card: olderCard, board: board).matches(board))
+    }
+
     @Test(arguments: ["ready", "headChanged", "lostResponse"])
     func phoneMarkReadyUsesTheMacWorkflowAndNeverReplaysAnUncertainWrite(_ scenario: String) async throws {
         let f = try Fixture(draft: true); defer { f.clean() }

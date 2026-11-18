@@ -136,7 +136,8 @@ struct RemoteMRDetailContent: View {
             }
         }
         .sheet(isPresented: $showingApprovals) {
-            RemoteApprovalDetailsView(details: details.approvals ?? .init(progress: nil), mergeRequestURL: card.url)
+            RemoteApprovalDetailsView(details: details.approvals ?? .init(progress: nil), mergeRequestURL: card.url,
+                approvedWithOpenFindings: card.presentation?.approvedWithOpenFindings == true)
                 .presentationDetents([.medium, .large])
         }
     }

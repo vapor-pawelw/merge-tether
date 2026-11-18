@@ -1,6 +1,23 @@
 {
   "sourceLanguage": "en",
   "strings": {
+    "remoteDetail.approvedWithOpenFindings": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Automatically approved while findings were open."
+          }
+        },
+        "pl": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Zatwierdzono automatycznie mimo otwartych uwag."
+          }
+        }
+      }
+    },
     "remoteDetail.hideConversation": {
       "extractionState": "manual",
       "localizations": {

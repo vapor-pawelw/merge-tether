@@ -6,6 +6,7 @@ struct RemoteApprovalProgressBadge: View {
     var people: [RemoteApprovalPerson]? = nil
     var viewerApprovalID: Int? = nil
     var assignedReviewerCount: Int? = nil
+    var approvedWithOpenFindings = false
     @State private var showingPeople = false
 
     private var details: RemoteApprovalDetails {
@@ -77,6 +78,7 @@ struct RemoteApprovalProgressBadge: View {
                 ScrollView {
                     VStack(alignment: .leading, spacing: 12) {
                         Text(.RemoteDetail.remoteDetailPeople).font(.headline)
+                        if approvedWithOpenFindings { RemoteOpenFindingsApprovalNote() }
                         if progress == nil || people == nil {
                             Text(.Board.boardApprovalsUnavailable).font(.callout).foregroundStyle(.secondary)
                         }
@@ -89,7 +91,7 @@ struct RemoteApprovalProgressBadge: View {
                     }
                     .frame(maxWidth: .infinity, alignment: .leading).padding(16)
                 }
-                .frame(width: 300, height: min(380, CGFloat(max(people?.count ?? 0, 1)) * 80 + 60))
+                .frame(width: 300, height: min(380, CGFloat(max(people?.count ?? 0, 1)) * 80 + (approvedWithOpenFindings ? 120 : 60)))
                 .presentationCompactAdaptation(.popover)
                 .accessibilityIdentifier("remote.approvals.people")
             }

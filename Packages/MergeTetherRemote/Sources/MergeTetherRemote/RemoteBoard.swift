@@ -86,6 +86,8 @@ public struct RemoteCardText: Codable, Equatable, Sendable {
     public var viewerApprovalID: Int?
     /// GitLab's reviewer assignments, independent of approval or discussion participation.
     public var assignedReviewerCount: Int?
+    /// The paired Mac confirmed automatic approval of this head while findings were open.
+    public var approvedWithOpenFindings: Bool?
     public init(author: String? = nil, repository: String, draftBadge: String? = nil,
                 status: String? = nil, nextStep: String? = nil, working: Bool = false,
                 chips: [RemoteCardChip] = [], secondaryCTA: RemoteCardCTA? = nil,

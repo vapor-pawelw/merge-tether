@@ -4,16 +4,21 @@ import MergeTetherRemote
 struct RemoteApprovalDetailsView: View {
     let details: RemoteApprovalDetails
     let mergeRequestURL: URL?
+    let approvedWithOpenFindings: Bool
     @Environment(\.dismiss) private var dismiss
-    init(details: RemoteApprovalDetails, mergeRequestURL: URL? = nil) {
+    init(details: RemoteApprovalDetails, mergeRequestURL: URL? = nil, approvedWithOpenFindings: Bool = false) {
         self.details = details; self.mergeRequestURL = mergeRequestURL
+        self.approvedWithOpenFindings = approvedWithOpenFindings
     }
 
     var body: some View {
         NavigationStack {
             ScrollView {
                 VStack(alignment: .leading, spacing: 24) {
-                    RemoteApprovalSummary(details: details)
+                    VStack(alignment: .leading, spacing: 8) {
+                        RemoteApprovalSummary(details: details)
+                        if approvedWithOpenFindings { RemoteOpenFindingsApprovalNote() }
+                    }
                     if details.truncated { Text(.RemoteDetail.remoteDetailTruncated).font(.callout).foregroundStyle(.orange) }
                     VStack(alignment: .leading, spacing: 14) {
                         Text(.RemoteDetail.remoteDetailPeople).font(.headline).accessibilityAddTraits(.isHeader)
@@ -71,6 +76,15 @@ struct RemoteApprovalDetailsView: View {
         }
     }
     private var unavailable: some View { Text(.RemoteDetail.remoteDetailUnavailable).font(.callout).foregroundStyle(.secondary) }
+}
+
+struct RemoteOpenFindingsApprovalNote: View {
+    var body: some View {
+        Text(.RemoteDetail.remoteDetailApprovedWithOpenFindings)
+            .font(.callout)
+            .foregroundStyle(.secondary)
+            .fixedSize(horizontal: false, vertical: true)
+    }
 }
 
 struct RemoteApprovalSummary: View {

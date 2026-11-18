@@ -141,6 +141,12 @@ import MergeTetherRemote
                         item.authorFeedbackStatus?.fingerprint ?? ""] + feedbackIDs
                     card = self.card(item, account: account, extraActions: extras, context: context)
                     card = self.presentation(card, model: presentation)
+                    if let head = card.head, let host = monitor.glab.resolvedHost,
+                       let username = monitor.glab.currentUsername, account == "\(username)@\(host)",
+                       monitor.settings.hasAutomaticApprovalWithOpenFindings(
+                        for: .init(host: host, username: username, projectID: item.id.projectID, iid: item.id.iid), head: head) {
+                        card.presentation?.approvedWithOpenFindings = true
+                    }
                     if row.displayRequest?.state == "merged" || row.displayRequest?.state == "closed" {
                         card.actions = []
                         result.lanes[lane].cards[index] = card

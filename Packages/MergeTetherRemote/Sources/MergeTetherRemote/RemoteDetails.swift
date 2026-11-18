@@ -24,7 +24,7 @@ public struct RemoteDetailRequest: Codable, Equatable, Sendable {
     }
     /// Older phones drop fields they do not know before hashing the card they open:
     /// action links and discussion destinations, the pending-drafts line and reply recipients,
-    /// and before those the author identity.
+    /// and before those the author identity. Phones may also omit the automatic approval note.
     static func digests(_ card: RemoteCard) -> Set<String> {
         var withoutActions = card
         withoutActions.primaryCTA?.actionID = nil
@@ -48,7 +48,13 @@ public struct RemoteDetailRequest: Codable, Equatable, Sendable {
             if version.presentation?.secondaryCTA?.destination == .discussions { version.presentation?.secondaryCTA?.destination = .overview }
             return version
         }
-        return Set((versions + olderDestinations).compactMap { try? RemoteDigest.token($0) })
+        let supported = versions + olderDestinations
+        let withoutApprovalNote = supported.map { version in
+            var version = version
+            version.presentation?.approvedWithOpenFindings = nil
+            return version
+        }
+        return Set((supported + withoutApprovalNote).compactMap { try? RemoteDigest.token($0) })
     }
     public var isValid: Bool {
         cardID.utf8.count <= 128 && account.utf8.count <= 1_024 && cardDigest.utf8.count == 64
