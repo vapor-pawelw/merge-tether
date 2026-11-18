@@ -99,6 +99,41 @@ class ReviewEvidenceTests(unittest.TestCase):
         self.assertEqual(receipt["userID"], 3)
         self.assertEqual(receipt["runID"], run_id)
 
+    def test_non_blocking_duo_note_must_match_the_reviewed_thread_and_text(self):
+        source = self.discussions[0]["notes"][0]
+        source["author"]["username"] = "GitLabDuo"
+        source["resolvable"] = True
+        body_digest = hashlib.sha256(source["body"].encode()).hexdigest()
+        original = self.read
+
+        def authenticated(host, endpoint):
+            if endpoint == "/user":
+                return {"id": 3, "username": "reviewer"}
+            return original(host, endpoint)
+
+        recorder = ReviewEvidenceRecorder(self.root, authenticated)
+
+        def record(marker, verdict="no_objections"):
+            return recorder.record_verdict("gitlab.example.org", "1", "2", self.head, verdict,
+                                           username="reviewer", run_id=str(uuid.uuid4()),
+                                           non_blocking_duo_notes=[marker])
+
+        with self.assertRaises(ValueError):
+            record("11:" + "b" * 64)
+        with self.assertRaises(ValueError):
+            record(f"11:{body_digest}", verdict="objections")
+        with self.assertRaises(ValueError):
+            record(f"12:{body_digest}")
+        human = {"id": 12, "author": {"id": 5}, "body": "Separate open question", "system": False}
+        self.discussions[0]["notes"].append(human)
+        with self.assertRaises(ValueError):
+            record(f"11:{body_digest}")
+        self.discussions[0]["notes"].remove(human)
+
+        record(f"11:{body_digest}")
+        receipt = json.loads((self.root / "verdicts/gitlab.example.org/1-2.json").read_text())
+        self.assertEqual(receipt["nonBlockingDuoNotes"], {"11": body_digest})
+
     def test_account_switch_during_a_review_cannot_record_a_verdict(self):
         original = self.read
         reads = 0

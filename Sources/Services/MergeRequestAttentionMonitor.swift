@@ -48,7 +48,7 @@ final class MergeRequestAttentionMonitor {
         /// Deliberate automatic-approval opt-out is not a human checkpoint until
         /// every discussion permits that automatic action. Manual approval stays available.
         var approvalWaitingForReadiness = false
-        /// Automatic approval applies and every discussion is resolved.
+        /// Automatic approval applies and the discussions allow it.
         var autoApproveReady = false
         var needsDiscussion = false
         var hasOtherUnresolvedDiscussions = false
@@ -1057,7 +1057,8 @@ final class MergeRequestAttentionMonitor {
                            ReviewVerdictStore.verdict(
                                host: host, projectID: request.projectID, iid: request.iid, user: user, in: verdictDirectory
                            )?.headSHA == head {
-                            let check = await Self.approvalCheck(request, user: user, host: host, glab: glab)
+                            let check = await Self.approvalCheck(request, user: user, host: host,
+                                glab: glab, verdict: authenticatedVerdict)
                             let currentVerdict = check.discussions.map {
                                 ReviewVerdictStore.verdict(host: host, projectID: request.projectID, iid: request.iid, user: user, in: verdictDirectory)?
                                     .approves(head: head, discussions: $0, reviewerID: user.id,
@@ -1075,8 +1076,8 @@ final class MergeRequestAttentionMonitor {
                                 && authenticatedVerdict == ReviewVerdictStore.verdict(host: host, projectID: request.projectID,
                                     iid: request.iid, user: user, in: verdictDirectory)
                             updated.canApprove = currentVerdict && check.ownReady && !automatic
-                            updated.approvalWaitingForReadiness = updated.canApprove && approvalOptedOut && !check.allResolved
-                            updated.autoApproveReady = automaticContext && check.ownReady && check.allResolved && automatic
+                            updated.approvalWaitingForReadiness = updated.canApprove && approvalOptedOut && !check.discussionsReady
+                            updated.autoApproveReady = automaticContext && check.ownReady && check.discussionsReady && automatic
                         }
                         let hasDrafts = !(drafts ?? item.drafts).isEmpty
                         let discussions = if item.mergeRequest != nil || item.authoredRequest != nil || hasDrafts {
@@ -1103,16 +1104,18 @@ final class MergeRequestAttentionMonitor {
                             updated.reviewingActivity = discussions.map {
                                 ReviewingActivity(discussions: $0, reviewerID: user.id, authorID: request.author.id)
                             }
-                            updated.reviewingProgress = Self.reviewingProgress(for: item, request: request,
-                                discussions: discussions, host: host, user: user, verdictDirectory: verdictDirectory)
+                            updated.reviewingProgress = Self.reviewingProgress(for: updated, request: request,
+                                discussions: discussions, host: host, user: user, verdictDirectory: verdictDirectory,
+                                approvedHead: approvedHead)
                         }
                         if hasDrafts {
                             let requestReadStartedAt = Date()
                             let live = try? await glab.fetchMergeRequest(projectID: item.id.projectID, iid: item.id.iid, host: host)
                             recoveryRequest = live
                             if live != nil { recoveryReadStartedAt = requestReadStartedAt }
-                            updated.reviewingProgress = Self.reviewingProgress(for: item, request: live,
-                                discussions: discussions, host: host, user: user, verdictDirectory: verdictDirectory)
+                            updated.reviewingProgress = Self.reviewingProgress(for: updated, request: live,
+                                discussions: discussions, host: host, user: user, verdictDirectory: verdictDirectory,
+                                approvedHead: approvedHead)
                             updated.requiresDiscussionRecheck = !Self.draftContextIsCurrent(
                                 request: live, drafts: drafts, discussions: discussions, host: host, user: user,
                                 verdictDirectory: verdictDirectory, followUpReceipts: followUpReceipts
@@ -1364,7 +1367,7 @@ final class MergeRequestAttentionMonitor {
         for item in results where item.autoApproveReady
             && (automaticResume == nil || (automaticResume?.action == .approval && automaticResume?.id == item.id)) {
             guard let request = item.mergeRequest, let head = request.sha else { continue }
-            if await performApproval(of: item.id, head: head, requireAllResolved: true) {
+            if await performApproval(of: item.id, head: head, automatic: true) {
             }
         }
         scheduleDependencyRefresh(account: account, revision: revision)
@@ -1429,7 +1432,7 @@ final class MergeRequestAttentionMonitor {
 
     private nonisolated static func reviewingProgress(
         for item: Item, request: GitLabMergeRequest?, discussions: [GitLabMergeRequestDiscussion]?,
-        host: String, user: GitLabAuthenticatedUser, verdictDirectory: URL
+        host: String, user: GitLabAuthenticatedUser, verdictDirectory: URL, approvedHead: String?
     ) -> ReviewingProgress? {
         guard !item.isAuthored, let request, let displayed = item.mergeRequest,
               request.projectID == item.id.projectID, request.iid == item.id.iid,
@@ -1447,7 +1450,8 @@ final class MergeRequestAttentionMonitor {
         let ownOpen = discussions.flatMap(\.notes).contains {
             $0.system != true && $0.author?.id == user.id && $0.resolvable == true && $0.resolved != true
         }
-        return verdict?.verdict == .noObjections && !ownOpen && !allResolved(discussions)
+        let alreadyApproved = head == approvedHead || item.approvalProgress?.approvedBy.contains { $0.id == user.id } == true
+        return verdict?.verdict == .noObjections && !alreadyApproved && !ownOpen && !allResolved(discussions)
             ? .waitingForOtherDiscussions : .current
     }
 
@@ -1605,12 +1609,12 @@ final class MergeRequestAttentionMonitor {
         var discussions: [GitLabMergeRequestDiscussion]? = nil
         /// The user is a reviewer, has not approved yet and has no unresolved thread of their own.
         var ownReady = false
-        /// Every resolvable discussion on the MR is resolved, including other reviewers'.
-        var allResolved = false
+        var discussionsReady = false
     }
 
     private nonisolated static func approvalCheck(
-        _ request: GitLabMergeRequest, user: GitLabAuthenticatedUser, host: String, glab: GlabService
+        _ request: GitLabMergeRequest, user: GitLabAuthenticatedUser, host: String, glab: GlabService,
+        verdict: ReviewVerdict?
     ) async -> ApprovalCheck {
         async let reviewers = try? glab.fetchMergeRequestReviewers(projectID: request.projectID, iid: request.iid, host: host)
         async let discussions = try? glab.fetchMergeRequestDiscussions(projectID: request.projectID, iid: request.iid, host: host)
@@ -1620,7 +1624,23 @@ final class MergeRequestAttentionMonitor {
             guard let first = discussion.notes.first else { return false }
             return first.author?.id == user.id && first.resolvable == true && first.resolved == false
         }
-        return ApprovalCheck(discussions: discussions, ownReady: !ownOpen, allResolved: allResolved(discussions))
+        let ready = try? await approvalDiscussionsReady(discussions, verdict: verdict, user: user, host: host, glab: glab)
+        return ApprovalCheck(discussions: discussions, ownReady: !ownOpen, discussionsReady: ready == true)
+    }
+
+    private nonisolated static func approvalDiscussionsReady(
+        _ discussions: [GitLabMergeRequestDiscussion], verdict: ReviewVerdict?,
+        user: GitLabAuthenticatedUser, host: String, glab: GlabService
+    ) async throws -> Bool {
+        var duoAuthors: Set<Int> = []
+        for discussion in discussions where discussion.notes.contains(where: { $0.resolvable == true && $0.resolved != true }) {
+            guard let author = verdict?.duoAuthorID(for: discussion, reviewerID: user.id) else { return false }
+            duoAuthors.insert(author)
+        }
+        for author in duoAuthors.sorted() {
+            guard try await glab.isGitLabDuo(userID: author, host: host) else { return false }
+        }
+        return true
     }
 
     private nonisolated static func allResolved(_ discussions: [GitLabMergeRequestDiscussion]) -> Bool {
@@ -2440,7 +2460,7 @@ final class MergeRequestAttentionMonitor {
     func approve(_ id: Item.ID) async {
         guard let item = (items + openItems).first(where: { $0.id == id }), item.canApprove,
               let head = item.mergeRequest?.sha else { return }
-        _ = await performApproval(of: id, head: head, requireAllResolved: false)
+        _ = await performApproval(of: id, head: head, automatic: false)
     }
 
     enum RemotePublicationResult { case completed, changed, uncertain, partial }
@@ -2528,11 +2548,11 @@ final class MergeRequestAttentionMonitor {
     func approveRemotely(_ id: Item.ID, expectedHead: String) async -> Bool {
         guard let item = (currentItems + currentOpenItems).first(where: { $0.id == id }), item.canApprove,
               item.mergeRequest?.sha == expectedHead else { return false }
-        return await performApproval(of: id, head: expectedHead, requireAllResolved: false)
+        return await performApproval(of: id, head: expectedHead, automatic: false)
     }
 
     /// Re-checks the live MR, approves at `head` and reports whether GitLab confirmed it.
-    private func performApproval(of id: Item.ID, head: String, requireAllResolved: Bool) async -> Bool {
+    private func performApproval(of id: Item.ID, head: String, automatic: Bool) async -> Bool {
         guard let account, isCurrent(account), let user, !isConfirming(id) else { return false }
         let generation = accountGeneration
         let revision = glab.accountRevision
@@ -2541,13 +2561,14 @@ final class MergeRequestAttentionMonitor {
             discussionFingerprint: ReviewVerdictStore.verdict(host: account.host, projectID: id.projectID,
                 iid: id.iid, user: user, in: verdictDirectory)?.discussionFingerprint,
             semanticContext: displayed?.semanticContextFingerprint, configuration: settings?.automation)
-        if requireAllResolved, let failure = approvalReadFailures[id], failure.context == readContext,
+        if automatic, let failure = approvalReadFailures[id], failure.context == readContext,
            approvalReadClock() < failure.retryAfter { return false }
         var submitted = false
         var checkedFingerprint: String?
         var checkedSemanticContext: String?
         typealias Evidence = (request: GitLabMergeRequest, drafts: [GitLabDraftNote],
-                              discussions: [GitLabMergeRequestDiscussion], user: GitLabAuthenticatedUser, approvers: Set<Int>)
+                              discussions: [GitLabMergeRequestDiscussion], user: GitLabAuthenticatedUser,
+                              approvers: Set<Int>, discussionsReady: Bool, checkedVerdict: ReviewVerdict?)
         let currentAccount: @MainActor @Sendable () -> Bool = {
             generation == self.accountGeneration && revision == self.glab.accountRevision && self.isCurrent(account)
         }
@@ -2557,13 +2578,17 @@ final class MergeRequestAttentionMonitor {
             let discussions = try await glab.fetchMergeRequestDiscussions(projectID: id.projectID, iid: id.iid, host: account.host)
             let currentUser = try await glab.fetchAuthenticatedUser(host: account.host, expectedUsername: account.username)
             let approved = try await glab.fetchMergeRequestApproverIDs(projectID: id.projectID, iid: id.iid, host: account.host)
-            return (current, drafts, discussions, currentUser, approved)
+            let checkedVerdict = automatic ? ReviewVerdictStore.authenticatedVerdict(host: account.host,
+                projectID: id.projectID, iid: id.iid, user: user, settings: settings, in: verdictDirectory) : nil
+            let ready = automatic ? try await Self.approvalDiscussionsReady(discussions, verdict: checkedVerdict,
+                user: user, host: account.host, glab: glab) : true
+            return (current, drafts, discussions, currentUser, approved, ready, checkedVerdict)
         }
         let permits: @MainActor @Sendable (Evidence) -> Bool = { evidence in
             let current = evidence.request
             let verdict = ReviewVerdictStore.verdict(host: account.host, projectID: id.projectID, iid: id.iid, user: user, in: self.verdictDirectory)
             let covered: Bool
-            if requireAllResolved, let verdict {
+            if automatic, let verdict {
                 covered = ReviewVerdictStore.automaticallyApproves(verdict, head: head,
                     discussions: evidence.discussions, user: user, in: self.verdictDirectory)
             } else {
@@ -2572,20 +2597,24 @@ final class MergeRequestAttentionMonitor {
                         iid: id.iid, in: self.verdictDirectory)) == true
             }
             return currentAccount() && !self.commentReviewPending(id, account: account)
-                && (!requireAllResolved || (verdict != nil && verdict == ReviewVerdictStore.authenticatedVerdict(
+                && (!automatic || (verdict != nil && verdict == evidence.checkedVerdict && verdict == ReviewVerdictStore.authenticatedVerdict(
                     host: account.host, projectID: id.projectID, iid: id.iid, user: user,
                     settings: self.settings, in: self.verdictDirectory)))
                 && evidence.user == user && current.state == "opened" && current.draft != nil
                 && current.sha == head && current.author.id != user.id && evidence.drafts.isEmpty
                 && covered
-                && (!requireAllResolved || (Self.allResolved(evidence.discussions)
+                && (!automatic || (evidence.discussionsReady
                     && self.autoApproveApplies(to: current, host: account.host, username: account.username)))
         }
         @MainActor func confirmed() -> Bool {
             approvedHeads[id] = head
             failedApprovalHeads[id] = nil
             approvalReadFailures.removeValue(forKey: id)
-            updateItem(id) { $0.canApprove = false }
+            updateItem(id) {
+                $0.canApprove = false
+                $0.autoApproveReady = false
+                if $0.reviewingProgress == .waitingForOtherDiscussions { $0.reviewingProgress = .current }
+            }
             confirmationStates[id] = nil
             return true
         }
@@ -2600,14 +2629,14 @@ final class MergeRequestAttentionMonitor {
             guard permits(evidence) else {
                 guard currentAccount() else { return false }
                 updateItem(id) { $0.canApprove = false }
-                confirmationStates[id] = requireAllResolved ? nil : .changed
+                confirmationStates[id] = automatic ? nil : .changed
                 return false
             }
             checkedFingerprint = ReviewVerdict.fingerprint(evidence.discussions)
             checkedSemanticContext = evidence.request.semanticContextFingerprint
             // The previous POST may already have succeeded despite a lost response.
             if evidence.approvers.contains(user.id) { return confirmed() }
-            if requireAllResolved {
+            if automatic {
                 guard await permitsAssistantAutomation(for: account),
                       currentAccount(), autoApproveApplies(to: evidence.request, host: account.host, username: account.username) else {
                     if currentAccount() {
@@ -2632,7 +2661,7 @@ final class MergeRequestAttentionMonitor {
             guard currentAccount() else { return false }
             // Pure GET failures cannot establish that GitLab rejected a write.
             // An attempted, unconfirmed POST keeps the existing deliberate retry fence.
-            if requireAllResolved && !submitted {
+            if automatic && !submitted {
                 approvalReadFailures[id] = (readContext, approvalReadClock().addingTimeInterval(ReadOnlyAssessmentRetry.cooldown))
                 confirmationStates[id] = nil
             } else {
@@ -2739,7 +2768,8 @@ final class MergeRequestAttentionMonitor {
                     $0.ownPublishedReplies = DuplicateReplyDrafts.publishedReplies(in: discussions, userID: user.id)
                 }
                 $0.reviewingProgress = contextMatches ? Self.reviewingProgress(for: item, request: request,
-                    discussions: discussions, host: account.host, user: user, verdictDirectory: verdictDirectory) : nil
+                    discussions: discussions, host: account.host, user: user, verdictDirectory: verdictDirectory,
+                    approvedHead: approvedHeads[item.id]) : nil
                 if !$0.isAuthored, let request {
                     $0.reviewingActivity = discussions.map {
                         ReviewingActivity(discussions: $0, reviewerID: user.id, authorID: request.author.id)

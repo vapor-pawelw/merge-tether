@@ -379,7 +379,8 @@ import MergeTetherRemote
             gitlab.write(name, text)
         }
 
-        func recordVerdict(_ verdict: String, head: String, authenticated: Bool = true) throws {
+        func recordVerdict(_ verdict: String, head: String, authenticated: Bool = true,
+                           nonBlockingDuoNotes: [String: String]? = nil) throws {
             let folder = self.folder.appending(path: "verdicts/gitlab.example.org")
             try FileManager.default.createDirectory(at: folder, withIntermediateDirectories: true)
             let discussions = try JSONDecoder().decode([GitLabMergeRequestDiscussion].self, from: gitlab.data("discussions.json"))
@@ -387,10 +388,13 @@ import MergeTetherRemote
                 work: .init(host: "gitlab.example.org", projectID: 1, iid: 2), username: "me", workspace: "", access: .gitLabRead)
             let run = AssistantAutomationRunner.Handoff(id: UUID(), key: key, title: "Review", prompt: "", createdAt: Date(),
                 allowsPush: false, execution: .init(state: .succeeded), workflow: .review, expectedHeadSHA: head)
-            let value = ReviewVerdict(version: 1, host: "gitlab.example.org", projectID: 1, iid: 2, headSHA: head,
+            let base = ReviewVerdict(version: 1, host: "gitlab.example.org", projectID: 1, iid: 2, headSHA: head,
                                       verdict: try #require(ReviewVerdict.Kind(rawValue: verdict)),
                                       discussionFingerprint: ReviewVerdict.fingerprint(discussions),
                                       username: "me", userID: 3, runID: run.id)
+            var record = try #require(JSONSerialization.jsonObject(with: JSONEncoder().encode(base)) as? [String: Any])
+            record["nonBlockingDuoNotes"] = nonBlockingDuoNotes
+            let value = try JSONDecoder().decode(ReviewVerdict.self, from: JSONSerialization.data(withJSONObject: record))
             try JSONEncoder().encode(value).write(to: folder.appending(path: "1-2.json"))
             if authenticated {
                 settings.assistantHandoffs.append(run)
@@ -1860,6 +1864,75 @@ import MergeTetherRemote
     private let othersThread = #"""
         [{"notes":[{"id":40,"author":{"id":8},"system":false,"body":"Please check this","resolvable":true,"resolved":false}]}]
         """#
+
+    private let missingFileClaim = "The configured route catalog was absent from my diff. Please confirm it is included."
+
+    @Test(arguments: ["verified", "unmarked", "spoof", "edited", "humanReply", "otherThread", "preflight"])
+    func autoApprovalCanProceedPastOnlyTheVerifiedDuoFalsePositive(_ scenario: String) async throws {
+        // given
+        let harness = try makeHarness(assistantWorked: true)
+        defer { harness.cleanUp() }
+        let source = #"{"id":40,"body":"\#(missingFileClaim)","author":{"id":8,"username":"GitLabDuo"},"system":false,"resolvable":true,"resolved":false}"#
+        let human = #"{"id":41,"body":"There is still a missing resource.","author":{"id":9,"username":"reviewer"},"system":false,"resolvable":true,"resolved":false}"#
+        let reply = scenario == "humanReply" ? "," + human : ""
+        let other = scenario == "otherThread" ? #",{"id":"other","notes":[\#(human)]}"# : ""
+        let discussions = #"[{"id":"duo","notes":[\#(source)\#(reply)]}\#(other)]"#
+        try harness.write("discussions.json", discussions)
+        if scenario == "spoof" {
+            try harness.write("duo.json", #"{"id":8,"username":"GitLabDuo","bot":false}"#)
+        }
+        try harness.recordVerdict("no_objections", head: head, nonBlockingDuoNotes:
+            scenario == "unmarked" ? nil : ["40": AICommentAssessmentStore.digest(missingFileClaim)])
+        if scenario == "edited" {
+            try harness.write("discussions.json", discussions.replacingOccurrences(of: missingFileClaim, with: "The new route crashes."))
+        }
+        if scenario == "preflight" {
+            let original = try #require(harness.gitlab.handler)
+            harness.gitlab.handler = { request in
+                if request.endpoint == "/users/8", !harness.monitor.confirmationStates.isEmpty {
+                    harness.gitlab.write("duo-preflight-checked")
+                    return InMemoryGitLab.output(#"{"id":8,"username":"GitLabDuo","bot":false}"#)
+                }
+                return try await original(request)
+            }
+        }
+
+        // when
+        try await harness.poll()
+
+        // then
+        #expect(harness.log("approve.log").contains("sha=\(head)") == (scenario == "verified"))
+        #expect(harness.gitlab.requests.filter { $0.method != "GET" }.allSatisfy { $0.endpoint.hasSuffix("/approve") })
+        if scenario == "preflight" { #expect(harness.gitlab.has("duo-preflight-checked")) }
+        if scenario == "verified" {
+            try await harness.poll()
+            #expect(harness.monitor.currentOpenItems.first?.reviewingProgress == .current)
+            #expect(harness.log("approve.log").split(separator: "\n").count == 1)
+        }
+    }
+
+    @Test func optionalDuoClarificationCanBePublishedBeforeApproval() async throws {
+        // given
+        let harness = try makeHarness(assistantWorked: true)
+        defer { harness.cleanUp() }
+        harness.settings.automation.publicationMode = .aiReplies
+        let source = #"{"id":40,"body":"\#(missingFileClaim)","author":{"id":8,"username":"GitLabDuo"},"system":false,"resolvable":true,"resolved":false}"#
+        let reply = "The generated catalog is included in this diff."
+        try harness.write("discussions.json", #"[{"id":"duo","notes":[\#(source)]}]"#)
+        try harness.write("drafts.json", #"[{"id":11,"author_id":3,"note":"\#(reply)","discussion_id":"duo"}]"#)
+        try harness.write("published-discussions.json", #"[{"id":"duo","notes":[\#(source),{"id":42,"body":"\#(reply)","author":{"id":3,"username":"me"},"system":false,"resolvable":true,"resolved":false}]}]"#)
+        try harness.recordVerdict("no_objections", head: head,
+            nonBlockingDuoNotes: ["40": AICommentAssessmentStore.digest(missingFileClaim)])
+
+        // when
+        try await harness.poll()
+        try await harness.poll()
+        try await harness.poll()
+
+        // then
+        let writes = harness.gitlab.requests.filter { $0.method != "GET" }.map(\.endpoint)
+        #expect(writes == ["/projects/1/merge_requests/2/draft_notes/11/publish", "/projects/1/merge_requests/2/approve"])
+    }
 
     @Test func pendingDraftsLeaveReadyWhenDiscussionContentChanges() async throws {
         let harness = try makeHarness(assistantWorked: true)

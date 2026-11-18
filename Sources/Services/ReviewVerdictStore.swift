@@ -17,6 +17,19 @@ struct ReviewVerdict: Codable, Equatable, Sendable {
     var username: String? = nil
     var userID: Int? = nil
     var runID: UUID? = nil
+    var nonBlockingDuoNotes: [String: String]? = nil
+
+    /// A verified false positive can exempt only its own thread, including any replies from this reviewer.
+    func duoAuthorID(for discussion: GitLabMergeRequestDiscussion, reviewerID: Int) -> Int? {
+        let notes = discussion.notes.filter { $0.system != true }
+        guard verdict == .noObjections, let source = notes.first, source.resolvable == true,
+              let noteID = source.id, noteID > 0, let body = source.body,
+              let digest = nonBlockingDuoNotes?[String(noteID)], digest == AICommentAssessmentStore.digest(body),
+              let author = source.author, author.id > 0, author.id != reviewerID,
+              author.username?.lowercased() == "gitlabduo",
+              notes.dropFirst().allSatisfy({ $0.author?.id == reviewerID }) else { return nil }
+        return author.id
+    }
 
     /// `reviewerID` and `publishedDrafts` let comments the reviewer published from drafts after the
     /// verdict keep it valid: the verdict is recorded while its drafts still wait for confirmation.
@@ -226,7 +239,13 @@ enum ReviewVerdictStore {
         let command = InstallationStorage.current.helperEnvironmentPrefix + " /usr/bin/python3 -B '"
             + helper.replacingOccurrences(of: "'", with: "'\\''") + "'"
         return """
-            When your review of the current head and all current discussions is finished and every warranted draft is saved, record your verdict for that exact head SHA: `no_objections` if you have no open findings, otherwise `objections`. MergeTether approves on my behalf only after a current `no_objections` verdict, with no pending drafts and every discussion resolved. A new comment or edited discussion invalidates the verdict even without a new commit. Record a new verdict after every re-review. Run the bundled standalone helper `\(command) record-verdict \(host) \(projectID) \(iid) <HEAD_SHA> <VERDICT> --username \(username) --run-id \(runID.uuidString.lowercased())` with placeholders filled in. It reads GitLab using the signed-in glab account, rechecks the account and MR head and binds the current discussion content. Its success response must include `discussionFingerprint`. No assistant plugin or MCP tool is needed. Do not hand-write a receipt without discussion evidence. Automatic approval also requires MergeTether to authenticate this exact verdict when this run finishes successfully.
+            Check factual concerns raised by other reviewers against the current MR head. For a claim that a file is missing from the change, verify its exact path in the full changed-file list or a Git diff pinned to the MR's base and head. Generated, collapsed or omitted diff output can hide a file that is included. Check the actual file at that head when its content matters.
+
+            When live evidence disproves a GitLab Duo concern and the entire thread has no unresolved concern, treat it as a non-issue. This applies to a resolvable thread started by the verified GitLab Duo bot that contains only the source note and any replies from my account. Verify the author via `/users/<id>` (`bot: true`, username `GitLabDuo`). Leave Duo's thread open.
+
+            A reply is optional. If it adds useful context, save a brief private reply in the required review language. Answer the specific concern first, link directly to the verified evidence at the reviewed commit, and say explicitly that this concern requires no change. For example: “`RouteCatalog.swift` is included in this MR’s diff. No change is needed for this concern.” Link the relevant diff or file in the actual reply. Mention why the reviewer may have missed it only when that detail is verified and helps explain the result.
+
+            When your review of the current head and all current discussions is finished and every warranted draft is saved, record your verdict for that exact head SHA: `no_objections` if you have no open findings, otherwise `objections`. MergeTether requires a current `no_objections` verdict and no pending drafts to approve. A verified Duo false positive marked in that verdict can stay open. A new comment or edited discussion invalidates the verdict even without a new commit. Record a new verdict after every re-review. Run the bundled standalone helper `\(command) record-verdict \(host) \(projectID) \(iid) <HEAD_SHA> <VERDICT> --username \(username) --run-id \(runID.uuidString.lowercased())` with placeholders filled in. For each verified Duo false positive in a `no_objections` verdict, append `--non-blocking-duo-note <NOTE_ID>:<BODY_SHA256>`. Hash the exact decoded body you reviewed, for example by piping the source note JSON through `jq -jr '.body' | shasum -a 256` and using the first field. Report the evidence that disproved it in the run summary. Leave uncertain or actionable concerns unmarked. The helper reads GitLab using the signed-in glab account, rechecks the account and MR head and binds the current discussion content. Its success response must include `discussionFingerprint`. No assistant plugin or MCP tool is needed. Do not hand-write a receipt without discussion evidence. Automatic approval also requires MergeTether to authenticate this exact verdict when this run finishes successfully.
             """
     }
 }

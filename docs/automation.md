@@ -12,7 +12,7 @@ Worker output is written to private files throughout execution. Validated comple
 2. Drafts wait on the relevant MR card. Open **Review and confirm** to read the complete discussion and private drafts, then publish the reviewed set or edit it in GitLab. Publication can also run automatically under the selected profile and publication mode.
 3. New commits or author replies trigger a new re-review task. The first poll establishes a baseline; later events are deduplicated across restarts.
 4. With **Resolve my verified findings during re-review** enabled, the agent checks each concern against the current remote head and resolves only threads whose first non-system note belongs to you. Unaddressed or uncertain concerns stay open with private draft replies. Turning the option off leaves resolution to you.
-5. Automatic approval requires a current no-objections verdict, no pending drafts and every discussion resolved, in addition to your automation scope and CLI readiness.
+5. Automatic approval requires a current no-objections verdict, no pending drafts and resolved discussions, with an exception for verified GitLab Duo false positives. Automation scope and CLI readiness also apply.
 
 **When you are the author**
 
@@ -355,11 +355,13 @@ Review and follow-up workers may attach optional app-only Markdown (`extraContex
 
 - a no-objections verdict for the current MR head and discussion content, bound to the authenticated account and exact app-managed review run and matching its authenticated successful completion;
 - no pending drafts;
-- every discussion resolved, including other reviewers’;
+- every discussion resolved, except a verified GitLab Duo false positive marked in that review verdict;
 - an open MR you review, within the effective Draft/automation policy, which you have not approved yet;
 - the selected CLI ready for automation.
 
 Approval is pinned to the checked source SHA. A new or edited comment invalidates the verdict; resolution-only changes preserve it. If GitLab refuses automatic approval, the app stops retrying that commit and retains the manual **Approve** action. Disable approval for an individual reviewed MR in its detail controls or automation scope settings. On someone else's MR, resolution remains limited to your own verified review findings; accepted-feedback resolution applies only when you own the MR.
+
+The reviewer checks factual claims against the current commit and full changed-file list, including generated or collapsed files. If that evidence disproves a Duo concern, the reviewer can mark the exact note and body in the verdict. MergeTether verifies Duo's bot identity and checks that the thread contains only the marked note and any replies from your account. The thread can stay open. An optional reply answers the concern directly, links to the checked evidence and states that the concern requires no change. Pending replies and other unresolved discussions still go through the usual approval checks.
 
 Publishing an unchanged draft captured in that authenticated review completion can preserve the verdict. The app confirms the exact newly published notes and unchanged existing discussion text before authenticating the resulting fingerprint. Later or edited drafts, direct comments and unsigned draft-history caches cannot extend automatic approval under an older review.
 

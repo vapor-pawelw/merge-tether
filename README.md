@@ -75,7 +75,7 @@ Choose a profile, coding agent and scope in **Settings → Automation**. Install
 | Failed pipeline | Trusted and Max check ownership and diagnose unclaimed failures. If a merged-result pipeline tested an older target commit, request fresh MR CI before attempting a code fix. Safe keeps external CI actions manual. |
 | Conflict resolution | Prepare an isolated resolution; pushing it has a separate permission from ordinary follow-ups. |
 | Re-review requests | Request another review after feedback is addressed and no unpublished replies remain. |
-| Approval | Approve a reviewed commit only after a no-objections verdict, no pending drafts and resolved discussions. |
+| Approval | Approve a reviewed commit after a current no-objections verdict, with no pending drafts and no unresolved discussions except verified GitLab Duo false positives. |
 | Merge | Max enables it; checks ownership, approvals, threads, pipeline and the source commit. |
 
 **Choose how much to automate.** Each profile explains what it handles and what remains yours:
