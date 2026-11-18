@@ -17,7 +17,8 @@ from installation_storage import storage_root
 ROOT = storage_root() / "Codex Desktop Relay"
 GLAB_PATH = str(Path.home() / ".local/bin") + ":/opt/homebrew/bin:/usr/local/bin:/opt/local/bin:/usr/bin:/bin"
 HOST_PATTERN = re.compile(r"[A-Za-z0-9][A-Za-z0-9.-]{0,252}(?::[0-9]{1,5})?")
-VERDICTS = ("no_objections", "objections")
+VERDICTS = ("no_objections", "objections", "classified_findings")
+FINDING_LEVELS = ("none", "non_code", "minor_code", "major")
 
 
 def gitlab_get(host, endpoint):
@@ -74,7 +75,7 @@ class ReviewEvidenceRecorder:
             finally: fcntl.flock(lock.fileno(), fcntl.LOCK_UN)
 
     def record_verdict(self, host, projectID, iid, headSHA, verdict, *, username=None, run_id=None,
-                       non_blocking_duo_notes=()):
+                       findings=None, non_blocking_duo_notes=()):
         number = re.compile(r"[1-9][0-9]{0,11}")
         if not (isinstance(host, str) and HOST_PATTERN.fullmatch(host) and ".." not in host):
             raise ValueError("Invalid host")
@@ -88,6 +89,19 @@ class ReviewEvidenceRecorder:
             try: run_id = str(uuid.UUID(run_id))
             except (ValueError, TypeError, AttributeError) as error:
                 raise ValueError("Invalid review run") from error
+        if verdict == "classified_findings":
+            if (run_id is None or not isinstance(findings, dict) or set(findings) != {"general", "discussions", "drafts"}
+                    or findings["general"] not in FINDING_LEVELS):
+                raise ValueError("A classified verdict requires complete findings for the review run")
+            for field, limit in (("discussions", 2_000), ("drafts", 100)):
+                levels = findings[field]
+                if (not isinstance(levels, dict) or len(levels) > limit
+                        or any(not isinstance(key, str) or not number.fullmatch(key) or level not in FINDING_LEVELS
+                               for key, level in levels.items())):
+                    raise ValueError("Invalid finding levels or note IDs")
+        elif findings is not None:
+            raise ValueError("Finding levels require a classified verdict")
+
         marked_notes = {}
         if non_blocking_duo_notes:
             if run_id is None or verdict != "no_objections" or len(non_blocking_duo_notes) > 20:
@@ -113,9 +127,19 @@ class ReviewEvidenceRecorder:
             if (not isinstance(request, dict) or request.get("sha") != headSHA or request.get("state") != "opened"
                     or request.get("project_id") != int(projectID) or request.get("iid") != int(iid)):
                 raise ValueError("The reviewed MR head, state or identity has changed")
+            if findings is None:
+                return None
+            title, body = request.get("title"), request.get("description")
+            if not isinstance(title, str) or (body is not None and not isinstance(body, str)):
+                raise ValueError("Incomplete MR metadata")
+            title_bytes, body_bytes = title.encode(), (body or "").encode()
+            return hashlib.sha256(
+                str(len(title_bytes)).encode() + b":" + title_bytes + str(len(body_bytes)).encode() + b":" + body_bytes
+            ).hexdigest()
 
-        check_head()
+        context = check_head()
         notes = []
+        active_roots = set()
         checked_markers = {}
         for page in range(1, 101):
             discussions = self.read(host, f"{endpoint}/discussions?per_page=100&page={page}")
@@ -124,6 +148,7 @@ class ReviewEvidenceRecorder:
             for discussion in discussions:
                 if not isinstance(discussion, dict) or not isinstance(discussion.get("notes"), list):
                     raise ValueError("Incomplete discussion data")
+                root = None
                 thread = []
                 for note in discussion["notes"]:
                     if not isinstance(note, dict): raise ValueError("Incomplete comment data")
@@ -132,9 +157,12 @@ class ReviewEvidenceRecorder:
                     if (type(note.get("id")) is not int or note["id"] <= 0 or not isinstance(author, dict)
                             or type(author.get("id")) is not int or author["id"] <= 0 or not isinstance(note.get("body"), str)):
                         raise ValueError("Incomplete comment identity or text")
-                    digest = hashlib.sha256(note["body"].encode()).hexdigest()
-                    notes.append((note["id"], author["id"], digest))
+                    if root is None:
+                        root = note
+                    notes.append((note["id"], author["id"], hashlib.sha256(note["body"].encode()).hexdigest()))
                     thread.append(note)
+                if root is not None and root.get("resolved") is not True:
+                    active_roots.add(str(root["id"]))
                 if marked_notes and thread and str(thread[0]["id"]) in marked_notes:
                     source, *replies = thread
                     note_id = str(source["id"])
@@ -152,7 +180,29 @@ class ReviewEvidenceRecorder:
         if checked_markers != marked_notes:
             raise ValueError("A marked Duo note is missing or is not the first comment in its discussion")
         fingerprint = hashlib.sha256("".join(f"{note}:{author}:{body}\n" for note, author, body in sorted(notes)).encode()).hexdigest()
-        check_head()
+        if findings is not None and active_roots != set(findings["discussions"]):
+            raise ValueError("Classify the exact current active discussions")
+        draft_digests = {}
+        if findings is not None and findings["drafts"]:
+            for page in (1, 2):
+                drafts = self.read(host, f"{endpoint}/draft_notes?per_page=100&page={page}")
+                if not isinstance(drafts, list):
+                    raise ValueError("Could not verify current drafts")
+                for draft in drafts:
+                    if not isinstance(draft, dict):
+                        raise ValueError("Incomplete draft")
+                    if draft.get("author_id") != account["userID"]:
+                        continue
+                    draft_id, body = draft.get("id"), draft.get("note")
+                    if type(draft_id) is not int or draft_id <= 0 or not isinstance(body, str) or str(draft_id) in draft_digests:
+                        raise ValueError("Incomplete draft identity or text")
+                    draft_digests[str(draft_id)] = hashlib.sha256(body.encode()).hexdigest()
+                if len(drafts) < 100:
+                    break
+            if set(draft_digests) != set(findings["drafts"]):
+                raise ValueError("Classify the exact current private drafts")
+        if check_head() != context:
+            raise ValueError("The reviewed MR title or description has changed")
         if check_account() != account:
             raise ValueError("The authenticated review account has changed")
         with self.exclusive():
@@ -162,6 +212,8 @@ class ReviewEvidenceRecorder:
                 "version": 1, "host": host, "projectID": int(projectID), "iid": int(iid),
                 "headSHA": headSHA, "verdict": verdict, "discussionFingerprint": fingerprint,
                 **(account or {}),
+                **({"findings": findings, "semanticContextFingerprint": context,
+                    "draftBodyDigests": draft_digests} if findings is not None else {}),
                 **({"nonBlockingDuoNotes": checked_markers} if checked_markers else {}),
             })
         return {"recorded": True, "discussionFingerprint": fingerprint}
@@ -177,12 +229,13 @@ def main():
     parser.add_argument("verdict", choices=VERDICTS)
     parser.add_argument("--username")
     parser.add_argument("--run-id")
+    parser.add_argument("--findings-json", type=json.loads)
     parser.add_argument("--non-blocking-duo-note", action="append", default=[], metavar="NOTE_ID:BODY_SHA256")
     args = parser.parse_args()
     try:
         result = ReviewEvidenceRecorder(ROOT).record_verdict(args.host, args.project_id, args.iid, args.head_sha, args.verdict,
                                                             username=args.username, run_id=args.run_id,
-                                                            non_blocking_duo_notes=args.non_blocking_duo_note)
+                                                            findings=args.findings_json, non_blocking_duo_notes=args.non_blocking_duo_note)
         print(json.dumps(result))
     except (ValueError, OSError, KeyError, TypeError) as error:
         parser.exit(1, f"Review evidence could not be recorded: {error}\nNo approval is authorized.\n")

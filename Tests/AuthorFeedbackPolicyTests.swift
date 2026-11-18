@@ -273,13 +273,13 @@ struct AuthorFeedbackPolicyTests {
     }
 
     @Test(arguments: [ReReviewAssessment.Note.State.blocking, .uncertain])
-    func resolvedThreadKeepsItsOwnUnfulfilledExpectationWithoutBlockingAnother(_ state: ReReviewAssessment.Note.State) throws {
+    func resolvedThreadIsExcludedEvenIfAnOlderAssessmentFoundAnIssue(_ state: ReReviewAssessment.Note.State) throws {
         let closed = thread("old", note(20, by: 7, "Still add regression coverage", resolvable: true, resolved: true))
         let findings = try evaluate([alicesThread, closed], [fixedA,
             .init(noteID: 20, state: state, reason: "The requested regression test is missing")], approved: [7])
-        #expect(findings.map(\.id) == [10, 20])
-        #expect(findings.map(\.state) == [.ready, state == .blocking ? .needsChanges : .needsVerification])
-        #expect(findings[0].canResolve && !findings[1].canResolve)
+        #expect(findings.map(\.id) == [10])
+        #expect(findings.map(\.state) == [.ready])
+        #expect(findings.first?.canResolve == true)
     }
 
     @Test func draftsDisabledResolvedSystemAndAuthorRootsAreUntouched() throws {

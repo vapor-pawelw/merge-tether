@@ -12,11 +12,11 @@ Worker output is written to private files throughout execution. Validated comple
 2. Drafts wait on the relevant MR card. Open **Review and confirm** to read the complete discussion and private drafts, then publish the reviewed set or edit it in GitLab. Publication can also run automatically under the selected profile and publication mode.
 3. New commits or author replies trigger a new re-review task. The first poll establishes a baseline; later events are deduplicated across restarts.
 4. With **Resolve my verified findings during re-review** enabled, the agent checks each concern against the current remote head and resolves only threads whose first non-system note belongs to you. Unaddressed or uncertain concerns stay open with private draft replies. Turning the option off leaves resolution to you.
-5. Automatic approval requires a current no-objections verdict, no pending drafts and resolved discussions, with an exception for verified GitLab Duo false positives. Automation scope and CLI readiness also apply.
+5. Automatic approval requires a current review that meets your selected approval threshold, completed comment review, and no pending drafts, in addition to your automation scope and CLI readiness.
 
 **When you are the author**
 
-The feedback verifier first identifies whether each comment asks for a change, answer or other action. Pure no-findings reviews, praise and acknowledgements are informational; prose requests, questions and conditions remain actionable. It reads the complete thread before classifying it. For large inputs, the verifier drops the inline diff first and retains descriptions and discussions whenever they fit. It lists exactly which inline fields were omitted for size, then reads live GitLab evidence using the exact supplied MR and external note IDs. These checks have a bounded ten-minute deadline per attempt for live evidence reads; fully inline checks retain the three-minute deadline. Intentional omission is not evidence of missing or changed discussions; failed live reads still leave verification uncertain.
+The feedback verifier first identifies whether each comment asks for a change, answer or other action. Pure no-findings reviews, praise and acknowledgements are informational; prose requests, questions and conditions remain actionable. It reads each active thread before classifying it. Resolved threads and their replies are excluded from verification and follow-up. For large inputs, the verifier drops the inline diff first and retains descriptions and discussions whenever they fit. It lists exactly which inline fields were omitted for size, then reads live GitLab evidence using the exact supplied MR and external note IDs. These checks have a bounded ten-minute deadline per attempt for live evidence reads; fully inline checks retain the three-minute deadline. Intentional omission is not evidence of missing or changed discussions; failed live reads still leave verification uncertain.
 
 1. Review feedback arrives. The agent handles existing incoming reviewer comments and verifies the relevant fixes and replies; it does not perform a fresh general review of your own MR or create merge requests. The comment verifier can privately escalate a specific technical question to this same stronger reviewer/fixer, including a potentially important defect incidentally noticed in the relevant code path. The agent independently confirms or disproves that hypothesis before making a warranted correction. It implements warranted fixes in an isolated worktree, tests, commits and pushes when follow-up push is enabled. It is instructed to keep work inside its run directory and leave other checkouts alone; this is a workflow rule, not a filesystem sandbox.
 2. Before saving completion replies, the worker re-fetches the MR HEAD and verifies the remote source/test content. With push off, pending or failed, the proposal stays in the task result and no completion drafts are created.
@@ -351,21 +351,30 @@ Review and follow-up workers may attach optional app-only Markdown (`extraContex
 
 ## Automatic approval
 
-**Approve merge requests automatically** is enabled by Trusted and Max and disabled by Safe and Manual. Approval requires:
+**Approve merge requests automatically** is enabled by Trusted and Max and disabled by Safe and Manual. Set **Automatically approve when** in **Settings → Automation → Profile & permissions**. Changing presets keeps your selected threshold.
 
-- a no-objections verdict for the current MR head and discussion content, bound to the authenticated account and exact app-managed review run and matching its authenticated successful completion;
-- no pending drafts;
-- every discussion resolved, except a verified GitLab Duo false positive marked in that review verdict;
-- an open MR you review, within the effective Draft/automation policy, which you have not approved yet;
-- the selected CLI ready for automation.
+| Threshold | Remaining issues allowed |
+| --- | --- |
+| **No major issues remain** (default) | Minor code suggestions and editorial feedback. |
+| **No code-related issues remain** | Editorial feedback, such as wording in the MR description. |
+| **No issues remain** | Approval requires no remaining issues. |
+
+Each threshold considers active discussions from every participant, including general comments. Substantive issues, explicit approval requirements and unresolved uncertainty about major issues block automatic approval. A resolved thread and all its replies are excluded. Resolved discussions remain visible in GitLab. An existing private reply in a resolved thread stays private until you handle it.
+
+Automatic approval also has these requirements.
+
+- A review verdict that meets the threshold and covers the current MR head, title, description and discussion content, bound to the authenticated account and a successful app-managed review.
+- No pending drafts and a completed comment-review checkpoint when one is pending.
+- An open MR you review, within the effective Draft and automation policy, which you have yet to approve.
+- The selected CLI is ready for automation.
 
 Approval is pinned to the checked source SHA. A new or edited comment invalidates the verdict; resolution-only changes preserve it. If GitLab refuses automatic approval, the app stops retrying that commit and retains the manual **Approve** action. Disable approval for an individual reviewed MR in its detail controls or automation scope settings. On someone else's MR, resolution remains limited to your own verified review findings; accepted-feedback resolution applies only when you own the MR.
 
-The reviewer checks factual claims against the current commit and full changed-file list, including generated or collapsed files. If that evidence disproves a Duo concern, the reviewer can mark the exact note and body in the verdict. MergeTether verifies Duo's bot identity and checks that the thread contains only the marked note and any replies from your account. The thread can stay open. An optional reply answers the concern directly, links to the checked evidence and states that the concern requires no change. Pending replies and other unresolved discussions still go through the usual approval checks.
+The reviewer checks factual claims against the current commit and full changed-file list, including generated or collapsed files. A wholly disproved GitLab Duo finding can be classified as having no remaining issue after the reviewer verifies the bot identity and the complete active thread. The thread can stay open. An optional reply links to the checked evidence and states that the concern requires no change.
 
 Publishing an unchanged draft captured in that authenticated review completion can preserve the verdict. The app confirms the exact newly published notes and unchanged existing discussion text before authenticating the resulting fingerprint. Later or edited drafts, direct comments and unsigned draft-history caches cannot extend automatic approval under an older review.
 
-Old account-less or unbound verdict files do not acquire automatic-approval authority during migration. They require a current app-managed review. This authenticates the origin of the review result; it does not add an independent second review or make the review worker's judgment infallible.
+Old account-less or unbound verdict files require a current app-managed review. An older objections verdict or unclassified active feedback requires a fresh review before the thresholds can apply. A verified GitLab Duo false positive from an authenticated earlier review can still qualify when live bot identity and exact thread evidence match. This authenticates the origin of the review result; it does not add an independent second review or make the review worker's judgment infallible.
 
 ## What each action may do
 

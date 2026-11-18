@@ -110,14 +110,20 @@ struct ReReviewAssessment: Codable, Sendable {
 
     func normalizingCoveredReviewSummaries(in discussions: [GitLabMergeRequestDiscussion], authorID: Int,
                                           ignoredSuggestions: [IgnoredFeedbackSuggestion] = [], excludedReplyAuthorIDs: Set<Int> = []) throws -> Self {
-        _ = try reviewers(in: discussions, authorID: authorID, ignoredSuggestions: ignoredSuggestions, excludedReplyAuthorIDs: excludedReplyAuthorIDs)
-        let summaries = coveredReviewSummaryIDs(in: discussions, authorID: authorID, excludedReplyAuthorIDs: excludedReplyAuthorIDs)
-        return .init(notes: notes.map { note in
+        let active = GitLabMergeRequestDiscussion.activeForReview(discussions)
+        let closedIDs = Set(discussions.filter(\.isResolvedForReview).flatMap(\.notes).compactMap(\.id))
+        let assessment = Self(notes: notes.filter { !closedIDs.contains($0.noteID) },
+            completedBlockedRunIDs: completedBlockedRunIDs, codeReviewRequests: codeReviewRequests?.filter {
+                !closedIDs.contains($0.sourceNoteID)
+            })
+        _ = try assessment.reviewers(in: active, authorID: authorID, ignoredSuggestions: ignoredSuggestions, excludedReplyAuthorIDs: excludedReplyAuthorIDs)
+        let summaries = assessment.coveredReviewSummaryIDs(in: active, authorID: authorID, excludedReplyAuthorIDs: excludedReplyAuthorIDs)
+        return .init(notes: assessment.notes.map { note in
             guard summaries.contains(note.noteID) else { return note }
             return .init(noteID: note.noteID, state: .informational, reason: note.reason, summary: note.summary,
                 informationalAcknowledgementSafe: note.informationalAcknowledgementSafe,
                 informationalPurpose: note.informationalPurpose, reviewSummaryCoverage: note.reviewSummaryCoverage)
-        }, completedBlockedRunIDs: completedBlockedRunIDs, codeReviewRequests: codeReviewRequests)
+        }, completedBlockedRunIDs: completedBlockedRunIDs, codeReviewRequests: assessment.codeReviewRequests)
     }
 
     var readinessBlockers: [ReReviewReadiness.Blocker] {
@@ -137,10 +143,11 @@ struct ReReviewAssessment: Codable, Sendable {
     /// Includes actionable general comments; private drafts never prove publication.
     func missingPublishedReplyNoteIDs(in discussions: [GitLabMergeRequestDiscussion], authorID: Int,
                                      excludedReplyAuthorIDs: Set<Int> = []) -> Set<Int> {
-        let owed = repliesOwedByAddressedNotes(in: discussions, authorID: authorID, excludedReplyAuthorIDs: excludedReplyAuthorIDs)
+        let active = GitLabMergeRequestDiscussion.activeForReview(discussions)
+        let owed = repliesOwedByAddressedNotes(in: active, authorID: authorID, excludedReplyAuthorIDs: excludedReplyAuthorIDs)
         return owed
-            .subtracting(coveredReviewSummaryIDs(in: discussions, authorID: authorID, excludedReplyAuthorIDs: excludedReplyAuthorIDs))
-            .subtracting(answeredReviewOverviewIDs(in: discussions, authorID: authorID, owed: owed))
+            .subtracting(coveredReviewSummaryIDs(in: active, authorID: authorID, excludedReplyAuthorIDs: excludedReplyAuthorIDs))
+            .subtracting(answeredReviewOverviewIDs(in: active, authorID: authorID, owed: owed))
     }
 
     /// A non-resolvable overview comment published in the same review submission as a resolvable
@@ -252,14 +259,16 @@ struct ReReviewAssessment: Codable, Sendable {
 
     func hasNoRemainingAuthorWork(in discussions: [GitLabMergeRequestDiscussion], authorID: Int,
                                  ignoredSuggestions: [IgnoredFeedbackSuggestion] = [], excludedReplyAuthorIDs: Set<Int> = []) -> Bool {
-        guard reviewRequests.isEmpty,
-              (try? reviewers(in: discussions, authorID: authorID, ignoredSuggestions: ignoredSuggestions, excludedReplyAuthorIDs: excludedReplyAuthorIDs)) != nil else { return false }
-        return notes.allSatisfy { [.addressed, .rejected, .informational, .ignoredByUser].contains($0.state) }
-            && missingPublishedReplyNoteIDs(in: discussions, authorID: authorID, excludedReplyAuthorIDs: excludedReplyAuthorIDs).isEmpty
+        guard let assessment = try? normalizingCoveredReviewSummaries(in: discussions, authorID: authorID,
+            ignoredSuggestions: ignoredSuggestions, excludedReplyAuthorIDs: excludedReplyAuthorIDs),
+              assessment.reviewRequests.isEmpty else { return false }
+        return assessment.notes.allSatisfy { [.addressed, .rejected, .informational, .ignoredByUser].contains($0.state) }
+            && assessment.missingPublishedReplyNoteIDs(in: discussions, authorID: authorID, excludedReplyAuthorIDs: excludedReplyAuthorIDs).isEmpty
     }
 
     func reviewers(in discussions: [GitLabMergeRequestDiscussion], authorID: Int,
                    ignoredSuggestions: [IgnoredFeedbackSuggestion] = [], excludedReplyAuthorIDs: Set<Int> = []) throws -> [Int: Int] {
+        let discussions = GitLabMergeRequestDiscussion.activeForReview(discussions)
         let external = discussions.flatMap(\.notes).filter { $0.system != true && $0.author?.id != authorID }
         guard external.allSatisfy({ ($0.id ?? 0) > 0 && ($0.author?.id ?? 0) > 0 && $0.body != nil }),
               Set(external.compactMap(\.id)).count == external.count,

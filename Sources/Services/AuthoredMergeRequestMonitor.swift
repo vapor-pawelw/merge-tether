@@ -491,7 +491,8 @@ final class AuthoredMergeRequestMonitor {
         let discussions = try await glab.fetchMergeRequestDiscussions(projectID: request.projectID, iid: request.iid, host: account.host)
         guard let fingerprint = ReviewVerdict.fingerprint(discussions), permits(),
               !hasUnfinishedAssistantWork(on: work, username: user.username, currentRequest: request, discussions: discussions) else { throw CancellationError() }
-        let hasFeedback = discussions.flatMap(\.notes).contains { $0.system != true && $0.author?.id != user.id }
+        let hasFeedback = GitLabMergeRequestDiscussion.activeForReview(discussions)
+            .flatMap(\.notes).contains { $0.system != true && $0.author?.id != user.id }
         if hasFeedback, authorFeedbackAllowsMerge?(request, discussions, user.id) != true {
             guard !automatic else { throw CancellationError() }
             let assessment = try await ManualFeedbackVerification.assess(request: request, discussions: discussions,

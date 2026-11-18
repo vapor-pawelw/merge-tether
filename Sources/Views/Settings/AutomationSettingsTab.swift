@@ -271,6 +271,14 @@ struct AutomationSettingsTab: View {
         Section {
             checkpointToggle($draft.autoApproveEnabled, .Settings.settingsAutomationCheckpointAutoApprove,
                              help: .Settings.settingsAutomationCheckpointAutoApproveHelp, reset: .approval)
+            Picker(selection: $draft.autoApprovalThreshold) {
+                Text(.Settings.settingsAutomationApprovalNoMajorIssues).tag(AutoApprovalThreshold.noMajorIssues)
+                Text(.Settings.settingsAutomationApprovalNoCodeIssues).tag(AutoApprovalThreshold.noCodeIssues)
+                Text(.Settings.settingsAutomationApprovalNoIssues).tag(AutoApprovalThreshold.noIssues)
+            } label: {
+                Text(.Settings.settingsAutomationApprovalThreshold)
+            }
+            .help(Text(.Settings.settingsAutomationApprovalThresholdHelp))
             checkpointToggle($draft.autoResolveAcceptedFeedback, .AuthorFeedback.authorFeedbackSetting,
                              help: .AuthorFeedback.authorFeedbackSettingHelp, reset: .acceptedFeedbackResolution)
             VStack(alignment: .leading, spacing: 4) {

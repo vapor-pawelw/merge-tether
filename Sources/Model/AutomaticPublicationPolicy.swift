@@ -50,6 +50,8 @@ struct AutomaticPublicationPolicy: Equatable, Sendable {
                 discussions: [GitLabMergeRequestDiscussion]?, userID: Int, host: String,
                 aiNoteIDs: Set<Int>, botNoteIDs: Set<Int> = []) -> Bool {
         guard couldAllow(draft, request: request, userID: userID, host: host) else { return false }
+        if let discussionID = draft.discussionID,
+           discussions?.contains(where: { $0.id == discussionID && $0.isResolvedForReview }) == true { return false }
         guard requiresSources else { return true }
         guard let sources = Self.sourceNotes(for: draft, discussions: discussions, userID: userID),
               !sources.isEmpty else { return false }

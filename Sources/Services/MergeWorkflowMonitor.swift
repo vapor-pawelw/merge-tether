@@ -437,7 +437,7 @@ final class MergeWorkflowMonitor {
             let reviewed = reviewer.map { ["reviewed", "approved", "requested_changes"].contains($0.state) } ?? false
             let discussions = try? await glab.fetchMergeRequestDiscussions(projectID: request.projectID, iid: request.iid, host: account.host)
             let replies = discussions.map { threads in
-                Set(threads.flatMap { thread -> [Int] in
+                Set(GitLabMergeRequestDiscussion.activeForReview(threads).flatMap { thread -> [Int] in
                     let firstMine = thread.notes.filter { $0.system != true && $0.author?.id == account.userID }.compactMap(\.id).min()
                     guard let firstMine else { return [] }
                     return thread.notes.filter { $0.system != true && $0.author?.id == request.author.id && ($0.id ?? 0) > firstMine }.compactMap(\.id)
@@ -483,7 +483,8 @@ final class MergeWorkflowMonitor {
                 previous.reviewWasCovered = covered
             }
             if covered == true, let discussions {
-                let revisions = MergeRequestDiffDigest.noteRevisions(discussions, excludingAuthor: account.userID)
+                let revisions = MergeRequestDiffDigest.noteRevisions(GitLabMergeRequestDiscussion.activeForReview(discussions),
+                        excludingAuthor: account.userID)
                 // A failed read leaves no digest, so a later head change is never mistaken for a rebase.
                 if previous.reviewedDiff?.headSHA != head {
                     previous.reviewedDiff = try? await glab.fetchReviewDiffSnapshot(for: request, host: account.host)
@@ -540,7 +541,8 @@ final class MergeWorkflowMonitor {
                 }
                 if let reviewedNotes = previous.reviewedNoteRevisions, let discussions {
                     scope.changedNoteIDs = MergeRequestDiffDigest.changedNotes(from: reviewedNotes,
-                        to: MergeRequestDiffDigest.noteRevisions(discussions, excludingAuthor: account.userID))
+                        to: MergeRequestDiffDigest.noteRevisions(GitLabMergeRequestDiscussion.activeForReview(discussions),
+                        excludingAuthor: account.userID))
                 }
                 var parts: [String] = []
                 if changedHead {
@@ -578,6 +580,8 @@ final class MergeWorkflowMonitor {
     private func reviewCoverage(_ request: GitLabMergeRequest, discussions: [GitLabMergeRequestDiscussion]?,
                                 account: Account, verdict: ReviewVerdict?) -> Bool? {
         guard let head = request.sha, let discussions, ReviewVerdict.fingerprint(discussions) != nil else { return nil }
+        guard verdict?.verdict != .classifiedFindings || verdict?.semanticContextFingerprint == request.semanticContextFingerprint
+        else { return false }
         return verdict?.covers(head: head, discussions: discussions, reviewerID: account.userID,
                 publishedDrafts: ReviewVerdictStore.seenDrafts(host: account.host, projectID: request.projectID,
                     iid: request.iid, in: verdictDirectory)) == true
@@ -588,12 +592,13 @@ final class MergeWorkflowMonitor {
                                    account: Account, verdict: ReviewVerdict?) async -> String? {
         guard let head = request.sha, let discussions, let fingerprint = ReviewVerdict.fingerprint(discussions),
               let verdict, verdict.version == 1, verdict.headSHA == head,
-              !verdict.covers(head: head, discussions: discussions, reviewerID: account.userID,
-                  publishedDrafts: ReviewVerdictStore.seenDrafts(host: account.host, projectID: request.projectID,
-                      iid: request.iid, in: verdictDirectory)),
-              !discussions.flatMap(\.notes).contains(where: {
-                  $0.system != true && $0.author?.id == account.userID && $0.resolvable == true && $0.resolved != true
-              }),
+              reviewCoverage(request, discussions: discussions, account: account, verdict: verdict) == false else { return nil }
+        let metadataChanged = verdict.verdict == .classifiedFindings
+            && verdict.semanticContextFingerprint != request.semanticContextFingerprint
+        let hasOwnOpenDiscussion = GitLabMergeRequestDiscussion.activeForReview(discussions).contains {
+            $0.reviewRoot.map { $0.author?.id == account.userID && $0.resolvable == true } == true
+        }
+        guard metadataChanged || !hasOwnOpenDiscussion,
               !AssistantAutomationRunner.isWorking(on: .init(host: account.host, projectID: request.projectID, iid: request.iid)),
               let draftCount = try? await glab.fetchOwnDraftNoteCount(projectID: request.projectID, iid: request.iid,
                   host: account.host, userID: account.userID), draftCount == 0 else { return nil }

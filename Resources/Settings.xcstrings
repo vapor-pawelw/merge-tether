@@ -1464,13 +1464,68 @@
         }
       }
     },
+    "settings.automation.approval.threshold": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Automatically approve when"
+          }
+        }
+      }
+    },
+    "settings.automation.approval.noMajorIssues": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "No major issues remain"
+          }
+        }
+      }
+    },
+    "settings.automation.approval.noCodeIssues": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "No code-related issues remain"
+          }
+        }
+      }
+    },
+    "settings.automation.approval.noIssues": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "No issues remain"
+          }
+        }
+      }
+    },
+    "settings.automation.approval.thresholdHelp": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Applies to findings from all reviewers. Resolved discussions are ignored."
+          }
+        }
+      }
+    },
     "settings.automation.checkpoint.autoApproveHelp": {
       "extractionState": "manual",
       "localizations": {
         "en": {
           "stringUnit": {
             "state": "translated",
-            "value": "Once the coding agent has no objections to the latest commit and every discussion is resolved. You can turn this off for a single MR on its Reviewing card."
+            "value": "After the coding agent reviews the latest commit and active discussions and the selected approval threshold is met. You can turn this off for a single MR on its Reviewing card."
           }
         }
       }

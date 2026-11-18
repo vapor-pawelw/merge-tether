@@ -18,6 +18,10 @@ import Foundation
     static func assess(request: GitLabMergeRequest, discussions: [GitLabMergeRequestDiscussion],
                        user: GitLabAuthenticatedUser, host: String, settings: SettingsManager,
                        glab: GlabService) async throws -> ReReviewAssessment {
+        let discussions = GitLabMergeRequestDiscussion.activeForReview(discussions)
+        guard discussions.flatMap(\.notes).contains(where: { $0.system != true && $0.author?.id != user.id }) else {
+            return .init(notes: [])
+        }
         let configuration = settings.automation
         let diff: Data = try await glab.mergeRequestAPI(
             "/projects/\(request.projectID)/merge_requests/\(request.iid)/raw_diffs", host: host, decode: { $0 })

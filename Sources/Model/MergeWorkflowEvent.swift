@@ -72,6 +72,13 @@ struct GitLabMergeRequestDiscussion: Codable, Sendable {
         }
     }
 
+    var reviewRoot: Note? { notes.first { $0.system != true } }
+    var isResolvedForReview: Bool { reviewRoot?.resolved == true }
+
+    static func activeForReview(_ discussions: [Self]) -> [Self] {
+        discussions.filter { !$0.isResolvedForReview }
+    }
+
     /// Other human-visible participants, in thread order, for showing who a reply answers.
     func replyRecipients(excluding userID: Int) -> [PersonIdentity] {
         var seen: Set<String> = []
@@ -84,7 +91,7 @@ struct GitLabMergeRequestDiscussion: Codable, Sendable {
     }
 
     static func unresolvedFeedback(in discussions: [Self], excluding userID: Int) -> [Note] {
-        discussions.flatMap(\.notes).filter {
+        activeForReview(discussions).flatMap(\.notes).filter {
             guard let id = $0.id, id > 0, let author = $0.author, author.id > 0 else { return false }
             return author.id != userID && $0.system == false && $0.resolvable == true && $0.resolved == false
         }
@@ -99,6 +106,7 @@ struct ReReviewFeedback: Sendable {
 
     init(discussions: [GitLabMergeRequestDiscussion], authorID: Int) {
         for discussion in discussions {
+            guard !discussion.isResolvedForReview else { continue }
             let comments = discussion.notes.filter { $0.system == false }
             let latestReply = comments.filter { $0.author?.id == authorID }.compactMap(\.id).max() ?? 0
             for note in comments {

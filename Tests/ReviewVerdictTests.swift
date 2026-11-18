@@ -104,6 +104,32 @@ import Testing
             user: .init(id: reviewer, username: "reviewer"), in: directory) == nil)
     }
 
+    @MainActor @Test func aMajorDraftBlocksUntilItsPublishedDiscussionIsResolved() throws {
+        let directory = FileManager.default.temporaryDirectory.appending(path: UUID().uuidString)
+        defer { try? FileManager.default.removeItem(at: directory) }
+        let user = GitLabAuthenticatedUser(id: reviewer, username: "reviewer")
+        let draft = GitLabDraftNote(id: 5, authorID: user.id, note: "Fix the validation failure.", discussionID: nil, position: nil)
+        let verdict = ReviewVerdict(version: 1, host: "gitlab.example.org", projectID: 1, iid: 2, headSHA: head,
+            verdict: .classifiedFindings, discussionFingerprint: ReviewVerdict.fingerprint([]), username: user.username,
+            userID: user.id, runID: UUID(), findings: .init(general: .none, discussions: [:], drafts: ["5": .major]),
+            semanticContextFingerprint: "metadata")
+        func published(resolved: Bool) -> [GitLabMergeRequestDiscussion] {
+            [.init(id: "thread", notes: [.init(id: 20, author: .init(id: user.id, username: user.username, name: nil),
+                system: false, resolvable: true, resolved: resolved, resolvedBy: nil, body: draft.note)])]
+        }
+        func approves(_ discussions: [GitLabMergeRequestDiscussion]) -> Bool {
+            ReviewVerdictStore.automaticallyApproves(verdict, head: head, discussions: discussions, user: user,
+                semanticContextFingerprint: "metadata", in: directory)
+        }
+
+        #expect(!approves([]))
+        let capture = try #require(ReviewVerdictStore.capturePublication([draft], verdict: verdict, before: [],
+            reviewedDrafts: [draft], user: user, in: directory))
+        try ReviewVerdictStore.recordPublication(capture, after: published(resolved: false), user: user, in: directory)
+        #expect(!approves(published(resolved: false)))
+        #expect(approves(published(resolved: true)))
+    }
+
     @MainActor @Test func automaticApprovalIgnoresUnsignedDraftHistoryButAcceptsExactConfirmedPublications() throws {
         let directory = FileManager.default.temporaryDirectory.appending(path: UUID().uuidString)
         defer { try? FileManager.default.removeItem(at: directory) }

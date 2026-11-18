@@ -1024,6 +1024,7 @@ final class MergeRequestAttentionMonitor {
                     let autoApproves = item.mergeRequest.map {
                         autoApproveApplies(to: $0, host: host, username: account.username)
                     } ?? false
+                    let approvalThreshold = settings?.automation.autoApprovalThreshold ?? .noMajorIssues
                     let approvalOptedOut = settings?.actionIsAutomatic(.approval,
                         for: .init(host: host, username: account.username, projectID: item.id.projectID, iid: item.id.iid)) == false
                     let followUpReceipts = contextReceipts(projectID: item.id.projectID, iid: item.id.iid,
@@ -1069,15 +1070,18 @@ final class MergeRequestAttentionMonitor {
                             let automaticContext: Bool
                             if let authenticatedVerdict, let discussions = check.discussions {
                                 automaticContext = await ReviewVerdictStore.automaticallyApproves(authenticatedVerdict,
-                                    head: head, discussions: discussions, user: user, in: verdictDirectory)
+                                    head: head, discussions: discussions, user: user, threshold: approvalThreshold,
+                                    semanticContextFingerprint: request.semanticContextFingerprint,
+                                    legacyDuoThreadsVerified: check.discussionsReady, in: verdictDirectory)
                             } else { automaticContext = false }
                             // After GitLab refused an automatic approval, offer the button instead of retrying.
                             let automatic = autoApproves && head != failedHead && automaticContext
                                 && authenticatedVerdict == ReviewVerdictStore.verdict(host: host, projectID: request.projectID,
                                     iid: request.iid, user: user, in: verdictDirectory)
-                            updated.canApprove = currentVerdict && check.ownReady && !automatic
-                            updated.approvalWaitingForReadiness = updated.canApprove && approvalOptedOut && !check.discussionsReady
-                            updated.autoApproveReady = automaticContext && check.ownReady && check.discussionsReady && automatic
+                            let classifiedReviewAllowsApproval = authenticatedVerdict?.verdict == .classifiedFindings && automaticContext
+                            updated.canApprove = ((currentVerdict && check.ownReady) || classifiedReviewAllowsApproval) && !automatic
+                            updated.approvalWaitingForReadiness = updated.canApprove && (approvalOptedOut || autoApproves) && !automaticContext && !check.discussionsReady
+                            updated.autoApproveReady = automatic
                         }
                         let hasDrafts = !(drafts ?? item.drafts).isEmpty
                         let discussions = if item.mergeRequest != nil || item.authoredRequest != nil || hasDrafts {
@@ -1444,7 +1448,8 @@ final class MergeRequestAttentionMonitor {
               let discussions, ReviewVerdict.fingerprint(discussions) != nil else { return nil }
         let verdict = ReviewVerdictStore.verdict(host: host, projectID: request.projectID,
             iid: request.iid, user: user, in: verdictDirectory)
-        guard verdict?.covers(head: head, discussions: discussions, reviewerID: user.id,
+        guard verdict?.verdict != .classifiedFindings || verdict?.semanticContextFingerprint == request.semanticContextFingerprint,
+              verdict?.covers(head: head, discussions: discussions, reviewerID: user.id,
             publishedDrafts: ReviewVerdictStore.seenDrafts(host: host, projectID: request.projectID,
                 iid: request.iid, in: verdictDirectory)) == true else { return .needsReview }
         let ownOpen = discussions.flatMap(\.notes).contains {
@@ -1633,7 +1638,8 @@ final class MergeRequestAttentionMonitor {
         user: GitLabAuthenticatedUser, host: String, glab: GlabService
     ) async throws -> Bool {
         var duoAuthors: Set<Int> = []
-        for discussion in discussions where discussion.notes.contains(where: { $0.resolvable == true && $0.resolved != true }) {
+        for discussion in GitLabMergeRequestDiscussion.activeForReview(discussions)
+            where discussion.notes.contains(where: { $0.resolvable == true && $0.resolved != true }) {
             guard let author = verdict?.duoAuthorID(for: discussion, reviewerID: user.id) else { return false }
             duoAuthors.insert(author)
         }
@@ -2578,9 +2584,9 @@ final class MergeRequestAttentionMonitor {
             let discussions = try await glab.fetchMergeRequestDiscussions(projectID: id.projectID, iid: id.iid, host: account.host)
             let currentUser = try await glab.fetchAuthenticatedUser(host: account.host, expectedUsername: account.username)
             let approved = try await glab.fetchMergeRequestApproverIDs(projectID: id.projectID, iid: id.iid, host: account.host)
-            let checkedVerdict = automatic ? ReviewVerdictStore.authenticatedVerdict(host: account.host,
-                projectID: id.projectID, iid: id.iid, user: user, settings: settings, in: verdictDirectory) : nil
-            let ready = automatic ? try await Self.approvalDiscussionsReady(discussions, verdict: checkedVerdict,
+            let checkedVerdict = ReviewVerdictStore.authenticatedVerdict(host: account.host,
+                projectID: id.projectID, iid: id.iid, user: user, settings: settings, in: verdictDirectory)
+            let ready = automatic && checkedVerdict?.verdict == .noObjections ? try await Self.approvalDiscussionsReady(discussions, verdict: checkedVerdict,
                 user: user, host: account.host, glab: glab) : true
             return (current, drafts, discussions, currentUser, approved, ready, checkedVerdict)
         }
@@ -2588,23 +2594,27 @@ final class MergeRequestAttentionMonitor {
             let current = evidence.request
             let verdict = ReviewVerdictStore.verdict(host: account.host, projectID: id.projectID, iid: id.iid, user: user, in: self.verdictDirectory)
             let covered: Bool
-            if automatic, let verdict {
+            let requiresAuthenticatedVerdict = automatic || verdict?.verdict == .classifiedFindings
+            if requiresAuthenticatedVerdict, let verdict {
                 covered = ReviewVerdictStore.automaticallyApproves(verdict, head: head,
-                    discussions: evidence.discussions, user: user, in: self.verdictDirectory)
+                    discussions: evidence.discussions, user: user,
+                    threshold: self.settings?.automation.autoApprovalThreshold ?? .noMajorIssues,
+                    semanticContextFingerprint: current.semanticContextFingerprint,
+                    legacyDuoThreadsVerified: evidence.discussionsReady, in: self.verdictDirectory)
             } else {
                 covered = verdict?.approves(head: head, discussions: evidence.discussions, reviewerID: user.id,
                     publishedDrafts: ReviewVerdictStore.seenDrafts(host: account.host, projectID: id.projectID,
                         iid: id.iid, in: self.verdictDirectory)) == true
             }
             return currentAccount() && !self.commentReviewPending(id, account: account)
-                && (!automatic || (verdict != nil && verdict == evidence.checkedVerdict && verdict == ReviewVerdictStore.authenticatedVerdict(
+                && (!requiresAuthenticatedVerdict || (verdict != nil && verdict == evidence.checkedVerdict
+                    && verdict == ReviewVerdictStore.authenticatedVerdict(
                     host: account.host, projectID: id.projectID, iid: id.iid, user: user,
                     settings: self.settings, in: self.verdictDirectory)))
                 && evidence.user == user && current.state == "opened" && current.draft != nil
                 && current.sha == head && current.author.id != user.id && evidence.drafts.isEmpty
                 && covered
-                && (!automatic || (evidence.discussionsReady
-                    && self.autoApproveApplies(to: current, host: account.host, username: account.username)))
+                && (!automatic || self.autoApproveApplies(to: current, host: account.host, username: account.username))
         }
         @MainActor func confirmed() -> Bool {
             approvedHeads[id] = head
@@ -2624,7 +2634,7 @@ final class MergeRequestAttentionMonitor {
             signalAutomaticActionIdle()
         }
         do {
-            let evidence = try await ReadOnlyAssessmentRetry.run(isCurrent: currentAccount, wait: approvalReadWait, operation: readEvidence)
+            var evidence = try await ReadOnlyAssessmentRetry.run(isCurrent: currentAccount, wait: approvalReadWait, operation: readEvidence)
             approvalReadFailures.removeValue(forKey: id)
             guard permits(evidence) else {
                 guard currentAccount() else { return false }
@@ -2632,8 +2642,6 @@ final class MergeRequestAttentionMonitor {
                 confirmationStates[id] = automatic ? nil : .changed
                 return false
             }
-            checkedFingerprint = ReviewVerdict.fingerprint(evidence.discussions)
-            checkedSemanticContext = evidence.request.semanticContextFingerprint
             // The previous POST may already have succeeded despite a lost response.
             if evidence.approvers.contains(user.id) { return confirmed() }
             if automatic {
@@ -2646,9 +2654,18 @@ final class MergeRequestAttentionMonitor {
                     return false
                 }
             }
+            if automatic, ReviewVerdictStore.verdict(host: account.host, projectID: id.projectID, iid: id.iid,
+                    user: user, in: verdictDirectory)?.verdict == .classifiedFindings {
+                evidence = try await ReadOnlyAssessmentRetry.run(isCurrent: currentAccount, wait: approvalReadWait, operation: readEvidence)
+                guard permits(evidence) else { return false }
+                if evidence.approvers.contains(user.id) { return confirmed() }
+            }
+            let checkedEvidence = evidence
+            checkedFingerprint = ReviewVerdict.fingerprint(checkedEvidence.discussions)
+            checkedSemanticContext = checkedEvidence.request.semanticContextFingerprint
             try await glab.approveMergeRequest(projectID: id.projectID, iid: id.iid, headSHA: head,
                 host: account.host, userID: user.id, willSubmit: { submitted = true },
-                shouldProceed: { permits(evidence) })
+                shouldProceed: { permits(checkedEvidence) })
             guard currentAccount() else { return false }
             return confirmed()
         } catch {
@@ -2755,7 +2772,13 @@ final class MergeRequestAttentionMonitor {
                     host: account.host, username: user.username))
             let approvalCurrent = contextMatches && (request.flatMap { request in
                 discussions.map { discussions in
-                    ReviewVerdictStore.verdict(host: account.host, projectID: item.id.projectID, iid: item.id.iid, user: user, in: verdictDirectory)?
+                    if let verdict = ReviewVerdictStore.authenticatedVerdict(host: account.host, projectID: item.id.projectID,
+                        iid: item.id.iid, user: user, settings: settings, in: verdictDirectory), verdict.verdict == .classifiedFindings {
+                        return request.state == "opened" && ReviewVerdictStore.automaticallyApproves(verdict, head: request.sha ?? "",
+                            discussions: discussions, user: user, threshold: settings?.automation.autoApprovalThreshold ?? .noMajorIssues,
+                            semanticContextFingerprint: request.semanticContextFingerprint, in: verdictDirectory)
+                    }
+                    return ReviewVerdictStore.verdict(host: account.host, projectID: item.id.projectID, iid: item.id.iid, user: user, in: verdictDirectory)?
                         .approves(head: request.sha ?? "", discussions: discussions, reviewerID: user.id,
                             publishedDrafts: ReviewVerdictStore.seenDrafts(host: account.host, projectID: item.id.projectID,
                                 iid: item.id.iid, in: verdictDirectory)) == true && request.state == "opened"

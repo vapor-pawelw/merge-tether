@@ -5,6 +5,27 @@ struct ReviewVerdict: Codable, Equatable, Sendable {
     enum Kind: String, Codable, Sendable {
         case noObjections = "no_objections"
         case objections
+        case classifiedFindings = "classified_findings"
+    }
+
+    enum FindingLevel: String, Codable, Sendable {
+        case none, nonCode = "non_code", minorCode = "minor_code", major
+
+        func allows(_ threshold: AutoApprovalThreshold) -> Bool {
+            switch self {
+            case .none: true
+            case .nonCode: threshold != .noIssues
+            case .minorCode: threshold == .noMajorIssues
+            case .major: false
+            }
+        }
+    }
+
+    struct Findings: Codable, Equatable, Sendable {
+        let general: FindingLevel
+        /// Each active discussion is classified as a whole, including replies from every participant.
+        let discussions: [String: FindingLevel]
+        let drafts: [String: FindingLevel]
     }
 
     let version: Int
@@ -30,6 +51,23 @@ struct ReviewVerdict: Codable, Equatable, Sendable {
               notes.dropFirst().allSatisfy({ $0.author?.id == reviewerID }) else { return nil }
         return author.id
     }
+    var findings: Findings? = nil
+    var semanticContextFingerprint: String? = nil
+    var draftBodyDigests: [String: String]? = nil
+
+    func hasCompleteFindings(in discussions: [GitLabMergeRequestDiscussion], drafts: [GitLabDraftNote]) -> Bool {
+        guard verdict == .classifiedFindings else { return true }
+        guard let findings, let draftBodyDigests, drafts.count == findings.drafts.count,
+              drafts.allSatisfy({ draft in
+                  guard let id = draft.id, let body = draft.note else { return false }
+                  return findings.drafts[String(id)] != nil && draftBodyDigests[String(id)] == AICommentAssessmentStore.digest(body)
+              }) else { return false }
+        return GitLabMergeRequestDiscussion.activeForReview(discussions).allSatisfy { thread in
+            guard let root = thread.reviewRoot else { return true }
+            return root.id.map { findings.discussions[String($0)] != nil } == true
+        }
+    }
+
 
     /// `reviewerID` and `publishedDrafts` let comments the reviewer published from drafts after the
     /// verdict keep it valid: the verdict is recorded while its drafts still wait for confirmation.
@@ -41,7 +79,7 @@ struct ReviewVerdict: Codable, Equatable, Sendable {
             reviewerID: reviewerID, publishedDrafts: publishedDrafts)
     }
 
-    /// Both outcomes prove the review ran; approval additionally requires no objections.
+    /// The verdict covers the checked head and the discussion evidence, regardless of findings.
     func covers(head: String, discussions: [GitLabMergeRequestDiscussion],
                 reviewerID: Int? = nil, publishedDrafts: Set<String> = []) -> Bool {
         guard version == 1 && headSHA == head,
@@ -89,10 +127,12 @@ enum ReviewVerdictStore {
         fileprivate let drafts: [GitLabDraftNote]
         fileprivate let beforeIDs: Set<Int>
         fileprivate let beforeFingerprint: String
+        fileprivate let publishedDraftRoots: [String: Int]
     }
     private struct NormalizedPublication: Codable {
         let verdict: ReviewVerdict
         let fingerprint: String
+        var publishedDraftRoots: [String: Int]? = nil
     }
     nonisolated static let directory = InstallationStorage.current.evidence
         .appending(path: "verdicts", directoryHint: .isDirectory)
@@ -103,7 +143,7 @@ enum ReviewVerdictStore {
 
     nonisolated static func verdict(host: String, projectID: Int, iid: Int, in directory: URL = directory) -> ReviewVerdict? {
         let url = fileURL(host: host, projectID: projectID, iid: iid, in: directory)
-        guard let data = try? Data(contentsOf: url), data.count < 4096,
+        guard let data = try? Data(contentsOf: url), data.count < 65_536,
               let verdict = try? JSONDecoder().decode(ReviewVerdict.self, from: data),
               verdict.host == host, verdict.projectID == projectID, verdict.iid == iid
         else { return nil }
@@ -139,8 +179,37 @@ enum ReviewVerdictStore {
 
     @MainActor
     static func automaticallyApproves(_ verdict: ReviewVerdict, head: String,
-        discussions: [GitLabMergeRequestDiscussion], user: GitLabAuthenticatedUser, in directory: URL = directory) -> Bool {
-        verdict.verdict == .noObjections && contentMatches(verdict, head: head, discussions: discussions, user: user, in: directory)
+        discussions: [GitLabMergeRequestDiscussion], user: GitLabAuthenticatedUser,
+        threshold: AutoApprovalThreshold = .noMajorIssues, semanticContextFingerprint: String? = nil,
+        legacyDuoThreadsVerified: Bool = false,
+        in directory: URL = directory) -> Bool {
+        guard contentMatches(verdict, head: head, discussions: discussions, user: user, in: directory) else { return false }
+        let active = GitLabMergeRequestDiscussion.activeForReview(discussions)
+        switch verdict.verdict {
+        case .objections:
+            return false
+        case .noObjections:
+            // Older verdicts did not classify other participants' general comments or open findings.
+            return active.allSatisfy { thread in
+                thread.notes.allSatisfy { $0.system == true || ($0.author?.id == user.id && $0.resolvable != true) }
+                    || (legacyDuoThreadsVerified && verdict.duoAuthorID(for: thread, reviewerID: user.id) != nil)
+            }
+        case .classifiedFindings:
+            guard let findings = verdict.findings, findings.general.allows(threshold),
+                  let semanticContextFingerprint, verdict.semanticContextFingerprint == semanticContextFingerprint else { return false }
+            let publication = normalizedPublication(verdict, in: directory)
+            let publishedDraftRoots = publication?.fingerprint == ReviewVerdict.fingerprint(discussions)
+                ? publication?.publishedDraftRoots ?? [:] : [:]
+            guard findings.drafts.allSatisfy({ publishedDraftRoots[$0.key] != nil || $0.value.allows(threshold) }) else { return false }
+            let draftsByRoot = Dictionary(grouping: publishedDraftRoots, by: \.value)
+            return active.allSatisfy { thread in
+                guard let root = thread.reviewRoot else { return true }
+                guard let id = root.id else { return false }
+                let draftLevels = (draftsByRoot[id] ?? []).compactMap { findings.drafts[$0.key] }
+                let levels = (findings.discussions[String(id)].map { [$0] } ?? []) + draftLevels
+                return !levels.isEmpty && levels.allSatisfy { $0.allows(threshold) }
+            }
+        }
     }
 
     @MainActor
@@ -149,14 +218,18 @@ enum ReviewVerdictStore {
         guard verdict.version == 1, verdict.headSHA == head,
               verdict.username == user.username, verdict.userID == user.id, verdict.runID != nil,
               let fingerprint = ReviewVerdict.fingerprint(discussions) else { return false }
-        if fingerprint == verdict.discussionFingerprint { return true }
+        return fingerprint == verdict.discussionFingerprint || normalizedPublication(verdict, in: directory)?.fingerprint == fingerprint
+    }
+
+    @MainActor
+    private static func normalizedPublication(_ verdict: ReviewVerdict, in directory: URL) -> NormalizedPublication? {
         let path = publicationURL(verdict, in: directory)
-        guard let size = try? path.resourceValues(forKeys: [.fileSizeKey]).fileSize, size < 16_384,
+        guard let size = try? path.resourceValues(forKeys: [.fileSizeKey]).fileSize, size < 131_072,
               let data = try? Data(contentsOf: path),
               let payload = AssistantJobJournal.authenticatedEvidence(data, context: "review-publication-normalization"),
               let record = try? JSONDecoder().decode(NormalizedPublication.self, from: payload),
-              record.verdict == verdict else { return false }
-        return record.fingerprint == fingerprint
+              record.verdict == verdict else { return nil }
+        return record
     }
 
     @MainActor
@@ -170,7 +243,9 @@ enum ReviewVerdictStore {
               drafts.allSatisfy({ ($0.id ?? 0) > 0 && $0.authorID == user.id && $0.note?.isEmpty == false }),
               ids.count == notes.count, ids.allSatisfy({ $0 > 0 }), Set(ids).count == ids.count,
               let fingerprint = ReviewVerdict.fingerprint(before) else { return nil }
-        return .init(verdict: verdict, drafts: drafts, beforeIDs: Set(ids), beforeFingerprint: fingerprint)
+        let publication = normalizedPublication(verdict, in: directory)
+        return .init(verdict: verdict, drafts: drafts, beforeIDs: Set(ids), beforeFingerprint: fingerprint,
+            publishedDraftRoots: publication?.fingerprint == fingerprint ? publication?.publishedDraftRoots ?? [:] : [:])
     }
 
     @MainActor
@@ -184,6 +259,7 @@ enum ReviewVerdictStore {
         let added = notes.filter { $0.1.system != true && $0.1.id.map { !publication.beforeIDs.contains($0) } == true }
         guard added.count == publication.drafts.count else { return }
         var matched: Set<Int> = []
+        var publishedDraftRoots = publication.publishedDraftRoots
         for draft in publication.drafts {
             let candidates = added.filter { threadID, note in
                 note.author?.id == user.id && note.author?.username == user.username && note.body == draft.note
@@ -191,10 +267,16 @@ enum ReviewVerdictStore {
                     && draft.position == note.position
             }
             guard candidates.count == 1, let id = candidates.first?.1.id, matched.insert(id).inserted else { return }
+            if publication.verdict.verdict == .classifiedFindings {
+                guard let draftID = draft.id, publication.verdict.findings?.drafts[String(draftID)] != nil,
+                      let root = after.first(where: { $0.notes.contains { $0.id == id } })?.reviewRoot?.id else { return }
+                publishedDraftRoots[String(draftID)] = root
+            }
         }
         guard ReviewVerdict.fingerprint(after, excluding: matched) == publication.beforeFingerprint,
               let fingerprint = ReviewVerdict.fingerprint(after) else { return }
-        let record = NormalizedPublication(verdict: publication.verdict, fingerprint: fingerprint)
+        let record = NormalizedPublication(verdict: publication.verdict, fingerprint: fingerprint,
+            publishedDraftRoots: publishedDraftRoots.isEmpty ? nil : publishedDraftRoots)
         let data = try AssistantJobJournal.sealEvidence(JSONEncoder().encode(record), context: "review-publication-normalization")
         let path = publicationURL(publication.verdict, in: directory)
         try FileManager.default.createDirectory(at: path.deletingLastPathComponent(), withIntermediateDirectories: true,
@@ -241,11 +323,11 @@ enum ReviewVerdictStore {
         return """
             Check factual concerns raised by other reviewers against the current MR head. For a claim that a file is missing from the change, verify its exact path in the full changed-file list or a Git diff pinned to the MR's base and head. Generated, collapsed or omitted diff output can hide a file that is included. Check the actual file at that head when its content matters.
 
-            When live evidence disproves a GitLab Duo concern and the entire thread has no unresolved concern, treat it as a non-issue. This applies to a resolvable thread started by the verified GitLab Duo bot that contains only the source note and any replies from my account. Verify the author via `/users/<id>` (`bot: true`, username `GitLabDuo`). Leave Duo's thread open.
+            For an active GitLab Duo thread, classify it as `none` only when evidence disproves its claims and the entire thread has no remaining concern. This applies to a resolvable thread started by the verified GitLab Duo bot that contains only the source note and any replies from my account. Verify the author via `/users/<id>` (`bot: true`, username `GitLabDuo`). Leave Duo's thread open. An optional private reply answers the specific concern in the required review language, links directly to the checked evidence at the reviewed commit and says explicitly that the concern requires no change.
 
-            A reply is optional. If it adds useful context, save a brief private reply in the required review language. Answer the specific concern first, link directly to the verified evidence at the reviewed commit, and say explicitly that this concern requires no change. For example: “`RouteCatalog.swift` is included in this MR’s diff. No change is needed for this concern.” Link the relevant diff or file in the actual reply. Mention why the reviewer may have missed it only when that detail is verified and helps explain the result.
-
-            When your review of the current head and all current discussions is finished and every warranted draft is saved, record your verdict for that exact head SHA: `no_objections` if you have no open findings, otherwise `objections`. MergeTether requires a current `no_objections` verdict and no pending drafts to approve. A verified Duo false positive marked in that verdict can stay open. A new comment or edited discussion invalidates the verdict even without a new commit. Record a new verdict after every re-review. Run the bundled standalone helper `\(command) record-verdict \(host) \(projectID) \(iid) <HEAD_SHA> <VERDICT> --username \(username) --run-id \(runID.uuidString.lowercased())` with placeholders filled in. For each verified Duo false positive in a `no_objections` verdict, append `--non-blocking-duo-note <NOTE_ID>:<BODY_SHA256>`. Hash the exact decoded body you reviewed, for example by piping the source note JSON through `jq -jr '.body' | shasum -a 256` and using the first field. Report the evidence that disproved it in the run summary. Leave uncertain or actionable concerns unmarked. The helper reads GitLab using the signed-in glab account, rechecks the account and MR head and binds the current discussion content. Its success response must include `discussionFingerprint`. No assistant plugin or MCP tool is needed. Do not hand-write a receipt without discussion evidence. Automatic approval also requires MergeTether to authenticate this exact verdict when this run finishes successfully.
+            Record the verdict after reviewing the exact head, MR title and description, and every active discussion from all participants. Check earlier findings and replies only in active threads. A resolved thread is closed: skip the whole thread, even if its wording is still visible. Never re-open it, reply to it, verify its concern, or repeat it as a new finding. Independently review the assigned code changes.
+            Save every warranted finding as a private draft. Record `classified_findings` with `--findings-json` and a JSON object containing `general`, `discussions`, and `drafts`. Classify each active discussion, including general comments and any reviewer's comments, by its first non-system note ID. Read the whole active thread and classify its strongest remaining concern. Classify each current private draft by draft ID. Use `general` for the strongest remaining concern that has no discussion or draft, or `none` when there is no such concern. Use `none` for discussion text or draft replies without an outstanding issue, `non_code` for minor editorial or MR metadata issues, `minor_code` for nonessential code changes, and `major` for substantive issues or uncertainty about whether they are ruled out. Correctness, security, regressions, missing essential verification, or an explicit requirement before approval remain major even when raised outside the diff. A reviewer report requires checking its actual claims, including general comments. When you cannot safely assess the complete active evidence, record `objections`.
+            Run the bundled helper `\(command) record-verdict \(host) \(projectID) \(iid) <HEAD_SHA> <VERDICT> --username \(username) --run-id \(runID.uuidString.lowercased())` with placeholders filled in and the findings JSON when classifying. Recheck the active discussion text and drafts before recording. The helper checks the live account, head and discussions. Its success response must include `discussionFingerprint`. Record a fresh verdict after each re-review. MergeTether authenticates the successful review and applies the user's approval setting. Do not approve directly or hand-write a receipt.
             """
     }
 }

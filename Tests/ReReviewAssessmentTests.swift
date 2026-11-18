@@ -144,7 +144,7 @@ struct ReReviewAssessmentTests {
 
     @Test(arguments: [ReReviewAssessment.Note.State.addressed, .blocking, .uncertain])
     func aGeneralReviewWithAnIndependentExpectationRetainsItsReplyOrWorkObligation(_ state: ReReviewAssessment.Note.State) throws {
-        let threads = try JSONDecoder().decode([GitLabMergeRequestDiscussion].self, from: Data(#"[{"id":"finding","notes":[{"id":10,"author":{"id":7},"system":false,"resolvable":true,"resolved":true,"body":"Correct the retry path."},{"id":30,"author":{"id":3},"system":false,"body":"The correction and regression are verified."}]},{"id":"report","notes":[{"id":20,"author":{"id":7},"system":false,"resolvable":false,"body":"The review raised retries. Please also explain the chosen limit in this thread."}]}]"#.utf8))
+        let threads = try JSONDecoder().decode([GitLabMergeRequestDiscussion].self, from: Data(#"[{"id":"finding","notes":[{"id":10,"author":{"id":7},"system":false,"resolvable":true,"resolved":false,"body":"Correct the retry path."},{"id":30,"author":{"id":3},"system":false,"body":"The correction and regression are verified."}]},{"id":"report","notes":[{"id":20,"author":{"id":7},"system":false,"resolvable":false,"body":"The review raised retries. Please also explain the chosen limit in this thread."}]}]"#.utf8))
         let assessment = ReReviewAssessment(notes: [
             .init(noteID: 10, state: .addressed, reason: "The correction and answer are verified."),
             .init(noteID: 20, state: state, reason: "The general report includes an independent expectation.",
@@ -276,8 +276,8 @@ struct ReReviewAssessmentTests {
         let replyAuthor = scenario == "replyByReviewer" ? 7 : 3
         let threads = try JSONDecoder().decode([GitLabMergeRequestDiscussion].self, from: Data("""
             [{"id":"overview","notes":[{"id":10,"author":{"id":7},"system":false,"resolvable":\(scenario == "resolvableOverview"),"resolved":false\(created),"body":"I left one recommendation, on the title filter."}]},
-             {"id":"finding","notes":[{"id":11,"author":{"id":\(findingAuthor)},"system":false,"resolvable":true,"resolved":true,"created_at":"\(findingTime)","body":"Bound the title filter."},
-                                      {"id":14,"author":{"id":\(replyAuthor)},"system":false,"resolvable":true,"resolved":true,"created_at":"2026-11-05T07:40:33.959Z","body":"Added a 255-code-point limit."}]}]
+             {"id":"finding","notes":[{"id":11,"author":{"id":\(findingAuthor)},"system":false,"resolvable":true,"resolved":false,"created_at":"\(findingTime)","body":"Bound the title filter."},
+                                      {"id":14,"author":{"id":\(replyAuthor)},"system":false,"resolvable":true,"resolved":false,"created_at":"2026-11-05T07:40:33.959Z","body":"Added a 255-code-point limit."}]}]
             """.utf8))
         let assessment = ReReviewAssessment(notes: [
             .init(noteID: 10, state: .addressed, reason: "The same correction is explained in reply 14.",

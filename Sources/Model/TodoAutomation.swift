@@ -160,6 +160,10 @@ enum AutomationPublicationMode: String, CaseIterable, Codable, Hashable, Sendabl
     case all, filtered, aiReplies, manual
 }
 
+enum AutoApprovalThreshold: String, Codable, Sendable {
+    case noMajorIssues, noCodeIssues, noIssues
+}
+
 struct AutomationSettings: Codable, Equatable, Sendable {
     var publicationRestrictions = AutomaticPublicationRestrictions()
     var baselinePreset: AutomationPreset?
@@ -231,8 +235,8 @@ struct AutomationSettings: Codable, Equatable, Sendable {
     var publishAIRepliesWithoutConfirmation = true {
         didSet { publicationPolicyMode = nil }
     }
-    /// On by default: approve once the assistant has no objections and every discussion is resolved.
     var autoApproveEnabled = true
+    var autoApprovalThreshold: AutoApprovalThreshold = .noMajorIssues
     var autoResolveOwnReviewThreads = true
     var autoResolveAcceptedFeedback = true
     var autoMergeProjects = ""
@@ -367,6 +371,9 @@ struct AutomationSettings: Codable, Equatable, Sendable {
         autoResolveOwnReviewThreads = try values.decodeIfPresent(Bool.self, forKey: .autoResolveOwnReviewThreads) ?? true
         autoResolveAcceptedFeedback = try values.decodeIfPresent(Bool.self, forKey: .autoResolveAcceptedFeedback) ?? true
         autoApproveEnabled = try values.decodeIfPresent(Bool.self, forKey: .autoApproveEnabled) ?? true
+        if let threshold = try values.decodeIfPresent(String.self, forKey: .autoApprovalThreshold) {
+            autoApprovalThreshold = AutoApprovalThreshold(rawValue: threshold) ?? .noIssues
+        }
         autoMergeProjects = try values.decodeIfPresent(String.self, forKey: .autoMergeProjects) ?? ""
         conflictTasksEnabled = try values.decodeIfPresent(Bool.self, forKey: .conflictTasksEnabled) ?? false
         allowFollowUpPush = try values.decodeIfPresent(Bool.self, forKey: .allowFollowUpPush) ?? true
@@ -473,6 +480,7 @@ struct AutomationSettings: Codable, Equatable, Sendable {
         try values.encodeIfPresent(publishDraftsWithoutConfirmation, forKey: .publishDraftsWithoutConfirmation)
         try values.encodeIfPresent(publishAIRepliesWithoutConfirmation, forKey: .publishAIRepliesWithoutConfirmation)
         try values.encodeIfPresent(autoApproveEnabled, forKey: .autoApproveEnabled)
+        try values.encode(autoApprovalThreshold, forKey: .autoApprovalThreshold)
         try values.encodeIfPresent(autoResolveOwnReviewThreads, forKey: .autoResolveOwnReviewThreads)
         try values.encodeIfPresent(codexReviewModel, forKey: .codexReviewModel)
         try values.encodeIfPresent(codexReviewThinking, forKey: .codexReviewThinking)
@@ -498,6 +506,7 @@ struct AutomationSettings: Codable, Equatable, Sendable {
     private enum CodingKeys: String, CodingKey {
         case assistant, assistantWorkspace, reuseAssistantChats, codexRelayEnabled, codexUseTemplate, autoMergeEnabled, conflictTasksEnabled, reviewRequested, authorFeedback
         case allowAssistantTools, assistantToolProjects, packageDecision, workflowRules, allowAutomaticPublicActions
+        case autoApprovalThreshold
         case autoMergeProjects, allowConflictPush, allowFollowUpPush, conflictPushProjects, autoReReviewEnabled, publishDraftsWithoutConfirmation, publishAIRepliesWithoutConfirmation, autoApproveEnabled, autoResolveOwnReviewThreads
         case codexReviewModel, codexReviewThinking, claudeCodingModel, claudeCodingThinking, assistantDefaultsVersion, scope
         case workerExecutionTimeout

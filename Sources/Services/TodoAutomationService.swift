@@ -253,7 +253,8 @@ final class TodoAutomationService {
             ? Set(AssistantAutomationRunner.unhandledFeedback(noteIDs, work: work, username: username, settings: settings)) : Set(noteIDs)
         let candidates = verifiedFingerprint == nil
             ? GitLabMergeRequestDiscussion.unresolvedFeedback(in: discussions, excluding: request.author.id)
-            : discussions.flatMap(\.notes).filter { $0.system == false && $0.author?.id != request.author.id }
+            : GitLabMergeRequestDiscussion.activeForReview(discussions).flatMap(\.notes)
+                .filter { $0.system == false && $0.author?.id != request.author.id }
         func revision(_ note: GitLabMergeRequestDiscussion.Note) -> String {
             UserAttentionSnapshot.digest("\(note.author?.id ?? 0)\n" + (note.body ?? ""))
         }
@@ -297,8 +298,9 @@ final class TodoAutomationService {
         if let verifiedFingerprint {
             let latest = try await glab.fetchMergeRequest(projectID: work.projectID, iid: work.iid, host: work.host)
             let latestDiscussions = try await glab.fetchMergeRequestDiscussions(projectID: work.projectID, iid: work.iid, host: work.host)
+            let activeIDs = Set(GitLabMergeRequestDiscussion.activeForReview(latestDiscussions).flatMap(\.notes).compactMap(\.id))
             guard latest.sha == expectedHeadSHA, latest.state == "opened", latest.author == request.author,
-                  ReviewVerdict.fingerprint(latestDiscussions) == verifiedFingerprint else { return .notAdmitted(.contextChanged) }
+                  ReviewVerdict.fingerprint(latestDiscussions) == verifiedFingerprint, Set(ids).isSubset(of: activeIDs) else { return .notAdmitted(.contextChanged) }
             if let verifiedResidual, verifiedResidual.semanticContextFingerprint != latest.semanticContextFingerprint { return .notAdmitted(.contextChanged) }
         }
         guard shouldProceed(), settings.automation == configuration,

@@ -5,7 +5,7 @@ import Foundation
 enum ReReviewVerifier {
     typealias ExecutableResolver = @MainActor (AutomationAssistant) async -> URL?
     enum VerificationError: Error, Equatable { case unavailable, failed, incompleteEvidence }
-    static let policyVersion = "feedback-disposition-13"
+    static let policyVersion = "feedback-disposition-14"
 
     static let schema = #"{"type":"object","additionalProperties":false,"properties":{"notes":{"type":"array","items":{"type":"object","additionalProperties":false,"properties":{"noteID":{"type":"integer"},"state":{"type":"string","enum":["addressed","rejected","informational","blocking","uncertain"]},"reason":{"type":"string"},"summary":{"type":"string","minLength":1,"maxLength":200},"acceptanceNoteID":{"type":["integer","null"]},"publishedReplyNoteID":{"type":["integer","null"]},"informationalAcknowledgementSafe":{"type":"boolean"},"informationalPurpose":{"type":"string","enum":["concreteCodeReviewFeedback","reviewSummary","automatedReviewReport","other"]},"manualDecision":{"type":["object","null"],"additionalProperties":false,"properties":{"context":{"type":"string","minLength":1,"maxLength":2000},"verifiedFacts":{"type":"string","minLength":1,"maxLength":2000},"missingEvidence":{"type":"string","minLength":1,"maxLength":2000},"question":{"type":"string","minLength":1,"maxLength":1000},"mergeImpact":{"type":"string","minLength":1,"maxLength":1000}},"required":["context","verifiedFacts","missingEvidence","question","mergeImpact"]}},"required":["noteID","state","reason","summary","acceptanceNoteID","publishedReplyNoteID","informationalAcknowledgementSafe","informationalPurpose","manualDecision"]}}},"required":["notes"]}"#
 
@@ -82,7 +82,7 @@ enum ReReviewVerifier {
         let title: String
         var description: String? = nil
         let diff: String
-        let discussions: [GitLabMergeRequestDiscussion]
+        var discussions: [GitLabMergeRequestDiscussion]
         var target: Target? = nil
         var semanticContextFingerprint: String? = nil
         var thinking: VerificationThinking = .high
@@ -93,6 +93,24 @@ enum ReReviewVerifier {
         /// Notes an earlier pass already assessed, with unchanged text. A later pass may cite them but
         /// must not raise new concerns about them.
         var priorAssessment: PriorAssessment? = nil
+
+        var activeEvidence: Self {
+            var input = self
+            input.discussions = GitLabMergeRequestDiscussion.activeForReview(discussions)
+            let closedIDs = Set(discussions.filter(\.isResolvedForReview).flatMap(\.notes).compactMap(\.id))
+            input.ignoredSuggestions = ignoredSuggestions.filter { !closedIDs.contains($0.sourceNoteID) }
+            input.blockedFollowUps = blockedFollowUps.filter { closedIDs.isDisjoint(with: $0.selectedFeedbackIDs) }
+            if let completedFollowUp, !closedIDs.isDisjoint(with: completedFollowUp.selectedFeedbackIDs) {
+                input.completedFollowUp = nil
+            }
+            if let priorAssessment {
+                let notes = priorAssessment.notes.filter { !closedIDs.contains($0.noteID) }
+                input.priorAssessment = notes.isEmpty ? nil : .init(notes: notes,
+                    codeReviewRequests: priorAssessment.codeReviewRequests.filter { !closedIDs.contains($0.sourceNoteID) },
+                    codeChangedSincePrior: priorAssessment.codeChangedSincePrior)
+            }
+            return input
+        }
 
         struct PriorAssessment: Encodable, Sendable, Equatable {
             struct Note: Encodable, Sendable, Equatable {
@@ -146,7 +164,8 @@ enum ReReviewVerifier {
         }
     }
 
-    private static func runOnce(_ input: Input, assistant: AutomationAssistant, model: String, executable: URL) async throws -> ReReviewAssessment {
+    private static func runOnce(_ original: Input, assistant: AutomationAssistant, model: String, executable: URL) async throws -> ReReviewAssessment {
+        let input = original.activeEvidence
         guard input.target == nil || input.target?.isValid == true else { throw VerificationError.incompleteEvidence }
         guard input.excludedReplyAuthorIDs.allSatisfy({ $0 > 0 }),
               Set(input.excludedReplyAuthorIDs).count == input.excludedReplyAuthorIDs.count,
@@ -250,14 +269,16 @@ enum ReReviewVerifier {
             and --hostname target.host to read /user and verify its username is expectedUsername
             and its ID is authorID. Read /projects/projectID/merge_requests/iid for current metadata,
             title, description and SHA. Read every page of its discussions using --paginate and
-            per_page=100. Read raw_diffs and relevant source files only as needed to judge concerns.
+            per_page=100. Discard any thread whose first non-system note is marked resolved, including
+            its replies. Never assess a resolved thread, cite it as a source, or return a verdict for it.
+            Use the same active-thread filter for inline and live evidence. Read raw_diffs and relevant
+            source files only as needed to judge active concerns.
             inlineEvidence describes transport, not MR state. included means inline content is supplied.
             omittedForSize means only the fields named in omittedInlineFields were deliberately omitted
             to fit the input budget. Retained inline fields remain available as supplementary evidence.
             This is not an empty discussion snapshot, missing GitLab threads
             or a changed MR. Fetch the current metadata and complete paginated discussions from target;
-            fetch diffs or source only for an actionable concern that needs them. Compare live external
-            note IDs against requiredExternalNoteIDs, not against absent inline discussions. Do not
+            fetch diffs or source only for an actionable concern that needs them. Compare live external note IDs against requiredExternalNoteIDs, not against absent inline discussions. Do not
             require omitted inline content to be restored or reconciled with live text. A failed live
             read remains uncertain; intentional omission alone does not. Finish within verificationBudgetSeconds
             seconds, including live reads, and return the structured assessment before that deadline. Prioritize
@@ -314,7 +335,7 @@ enum ReReviewVerifier {
             concern by itself. Check the relevant current source and replies. Do not repeat a disproved or
             corrected hypothesis without contrary current evidence. A completed original comment does not
             erase a separately confirmed unresolved defect or the actual blocked-run obligation.
-            Classify EVERY non-system note by someone other than authorID, including general comments.
+            Classify EVERY active non-system note by someone other than authorID, including general comments.
             Return its exact noteID, state and a concise English reason (at most 600 characters).
             First determine whether the note contains an actionable expectation after reading its complete
             thread: a requested change, question, expected answer or outstanding condition. An actionable
@@ -373,7 +394,7 @@ enum ReReviewVerifier {
             the correction in that current GitLab metadata instead. Questions requesting only an explanation,
             without a code correction, can be addressed by a substantive supported answer.
             Local changes, unpushed commits, private drafts and claims of completion do not prove a remote correction.
-            A resolved thread or a published reply does not establish that requested code changes reached GitLab.
+            A published reply does not establish that requested code changes reached GitLab.
             Keep a verified remote correction addressed even when its reply is still a private draft or is absent;
             reply publication and reviewer acceptance are separate obligations.
             rejected: current evidence supports declining the requested change because it is invalid, unnecessary
@@ -435,7 +456,7 @@ enum ReReviewVerifier {
             assistant can still perform, and notes with remaining implementable fixes or private code questions.
             A manual decision is source-bound: it neither waives the concern, requests publication nor
             transfers its blocker to unrelated threads by the same reviewer.
-            Correlate review summaries with the concrete findings they reference across ALL discussions.
+            Correlate review summaries with the concrete findings they reference across all active discussions.
             A substantive author answer or verified correction in another thread can address the same
             concern; do not require a duplicate answer in the summary's own thread. A summary that only
             reports or repeats findings already addressed elsewhere is informational, even when it

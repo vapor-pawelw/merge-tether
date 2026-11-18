@@ -239,7 +239,7 @@ struct ReReviewVerifierTests {
             else: print(json.dumps({'is_error':False,'structured_output':result}))
             """.utf8).write(to: script)
         try FileManager.default.setAttributes([.posixPermissions: 0o700], ofItemAtPath: script.path)
-        let threads = try JSONDecoder().decode([GitLabMergeRequestDiscussion].self, from: Data(#"[{"id":"finding","notes":[{"id":10,"author":{"id":7},"system":false,"resolvable":true,"resolved":true,"body":"Correct the retry path."},{"id":50,"author":{"id":3},"system":false,"body":"The retry correction and its regression are verified."}]},{"id":"report","notes":[{"id":20,"author":{"id":7},"system":false,"resolvable":false,"body":"The earlier review raised retries. Please explain the chosen limit here."}]},{"id":"duplicate","notes":[{"id":40,"author":{"id":7},"system":false,"resolvable":false,"body":"Correct the retry path and respond to this finding."}]}]"#.utf8))
+        let threads = try JSONDecoder().decode([GitLabMergeRequestDiscussion].self, from: Data(#"[{"id":"finding","notes":[{"id":10,"author":{"id":7},"system":false,"resolvable":true,"resolved":false,"body":"Correct the retry path."},{"id":50,"author":{"id":3},"system":false,"body":"The retry correction and its regression are verified."}]},{"id":"report","notes":[{"id":20,"author":{"id":7},"system":false,"resolvable":false,"body":"The earlier review raised retries. Please explain the chosen limit here."}]},{"id":"duplicate","notes":[{"id":40,"author":{"id":7},"system":false,"resolvable":false,"body":"Correct the retry path and respond to this finding."}]}]"#.utf8))
         let input = ReReviewVerifier.Input(authorID: 3, headSHA: String(repeating: "a", count: 40),
             title: "Synthetic retry correction", diff: "Verified correction", discussions: threads)
         let result = try await ReReviewVerifier.run(input, assistant: assistant, model: "fixture", executable: script, retryWait: { _ in })
@@ -566,7 +566,7 @@ struct ReReviewVerifierTests {
         let discussions = try JSONDecoder().decode([GitLabMergeRequestDiscussion].self, from: Data("""
             [{"id":"summary","notes":[{"id":10,"author":{"id":7},"system":false,"resolvable":false,
               "body":"I left a question about the supported release in the inline review."}]},
-             {"id":"release-finding","notes":[{"id":20,"author":{"id":7},"system":false,"resolvable":true,"resolved":true,
+             {"id":"release-finding","notes":[{"id":20,"author":{"id":7},"system":false,"resolvable":true,"resolved":false,
               "body":"Please confirm the supported release."},{"id":21,"author":{"id":3},"system":false,
               "body":"The published release tag contains the endpoint; the rollout section matches it."}]},
              {"id":"mixed-summary","notes":[{"id":30,"author":{"id":7},"system":false,"resolvable":false,
@@ -582,7 +582,7 @@ struct ReReviewVerifierTests {
         let captured = try #require(JSONSerialization.jsonObject(with: Data(contentsOf: URL(fileURLWithPath: script.path + ".capture"))) as? [String: Any])
         let instructions = try #require(captured["instructions"] as? String)
             .split(whereSeparator: \.isWhitespace).joined(separator: " ")
-        #expect(instructions.contains("Correlate review summaries with the concrete findings they reference across ALL discussions"))
+        #expect(instructions.contains("Correlate review summaries with the concrete findings they reference across all active discussions"))
         #expect(instructions.contains("do not require a duplicate answer in the summary's own thread"))
         #expect(instructions.contains("A summary's distinct request, changed expectation or remaining condition stays blocking or uncertain"))
         #expect(instructions.contains("Identify the matching finding and evidence in reason"))
@@ -809,7 +809,7 @@ struct ReReviewVerifierTests {
     }
 
     @Test(arguments: AutomationAssistant.allCases)
-    func constrainedProviderCannotSilentlyOmitAResolvedComment(_ assistant: AutomationAssistant) async throws {
+    func verifierOmitsTheEntireResolvedDiscussion(_ assistant: AutomationAssistant) async throws {
         let folder = FileManager.default.temporaryDirectory.appending(path: UUID().uuidString)
         try FileManager.default.createDirectory(at: folder, withIntermediateDirectories: false)
         defer { try? FileManager.default.removeItem(at: folder) }
@@ -818,28 +818,29 @@ struct ReReviewVerifierTests {
             #!/usr/bin/python3
             import json,sys
             args=sys.argv[1:]
-            sys.stdin.read()
+            incoming=sys.stdin.read()
             codex=args[0]=='exec'
             schema=json.load(open(args[args.index('--output-schema')+1])) if codex else json.loads(args[args.index('--json-schema')+1])
             notes=schema['properties']['notes']
-            required=list(range(100,111))
-            exact=notes.get('minItems')==11 and notes.get('maxItems')==11 and notes['items']['properties']['noteID'].get('enum')==required
-            result={'notes':[{'noteID':n,'state':'addressed','reason':'Verified current correction','acceptanceNoteID':None} for n in (required if exact else required[1:])]}
+            assert notes['items']['properties']['noteID']['enum']==[110]
+            assert 'Closed concern' not in incoming and 'Closed reply' not in incoming
+            result={'notes':[{'noteID':110,'state':'blocking','reason':'The live finding still requires a fix.'}]}
             if codex: json.dump(result,open(args[args.index('-o')+1],'w'))
             else: print(json.dumps({'is_error':False,'structured_output':result}))
             """.utf8).write(to: script)
         try FileManager.default.setAttributes([.posixPermissions: 0o700], ofItemAtPath: script.path)
-        let notes = (100...110).map { id in
-            "{\"id\":\(id),\"author\":{\"id\":7},\"system\":false,\"resolvable\":true,\"resolved\":\(id == 100),\"body\":\"Concern \(id)\"}"
-        }.joined(separator: ",")
-        let discussions = try JSONDecoder().decode([GitLabMergeRequestDiscussion].self,
-            from: Data("[{\"notes\":[\(notes)]}]".utf8))
+        let threads = try JSONDecoder().decode([GitLabMergeRequestDiscussion].self, from: Data("""
+            [{"id":"closed","notes":[
+              {"id":100,"author":{"id":7},"system":false,"resolvable":true,"resolved":true,"body":"Closed concern"},
+              {"id":101,"author":{"id":8},"system":false,"body":"Closed reply"}]},
+             {"id":"open","notes":[{"id":110,"author":{"id":8},"system":false,"body":"Please fix the active concern."}]}]
+            """.utf8))
         let input = ReReviewVerifier.Input(authorID: 3, headSHA: String(repeating: "a", count: 40),
-            title: "Synthetic review", diff: "Verified corrections", discussions: discussions)
+            title: "Synthetic review", diff: "", discussions: threads)
         let assessment = try await ReReviewVerifier.run(input, assistant: assistant, model: "fixture", executable: script, retryWait: { _ in })
-        #expect(Set(assessment.notes.map(\.noteID)) == Set(100...110))
-        #expect(try assessment.reviewers(in: discussions, authorID: 3) == [7: 110])
+        #expect(assessment.readinessBlockers.map(\.noteID) == [110])
     }
+
     @Test(arguments: AutomationAssistant.allCases)
     func readsStructuredResultAndRedactsEvidenceBeforeSendingIt(_ assistant: AutomationAssistant) async throws {
         let folder = FileManager.default.temporaryDirectory.appending(path: UUID().uuidString)

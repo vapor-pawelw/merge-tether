@@ -13,23 +13,14 @@ extension GlabService {
                 case diff
             }
         }
-        struct Discussion: Decodable {
-            struct Note: Decodable {
-                let id: Int?
-                let body: String?
-                let system: Bool?
-            }
-            let notes: [Note]
-        }
-
         let endpoint = "/projects/\(projectID)/merge_requests/\(iid)"
         async let changes: [Diff]? = try? mergeRequestAPI("\(endpoint)/diffs?per_page=10", host: host)
-        async let discussions: [Discussion]? = noteIDs.isEmpty ? nil
+        async let discussions: [GitLabMergeRequestDiscussion]? = noteIDs.isEmpty ? nil
             : try? mergeRequestAPI("\(endpoint)/discussions?per_page=100", host: host, arguments: ["--paginate"],
-                                   decode: { try GlabPaginatedJSON.decode(Discussion.self, from: $0) })
+                                   decode: { try GlabPaginatedJSON.decode(GitLabMergeRequestDiscussion.self, from: $0) })
         let (diffs, threads) = await (changes, discussions)
         let snippets = (diffs ?? []).map { "\($0.newPath)\n\($0.diff?.prefix(1600) ?? "")" }
-        let notes = (threads ?? []).flatMap(\.notes).compactMap { note -> String? in
+        let notes = GitLabMergeRequestDiscussion.activeForReview(threads ?? []).flatMap(\.notes).compactMap { note -> String? in
             guard let id = note.id, noteIDs.contains(id), note.system == false, let body = note.body else { return nil }
             return "Note \(id): \(body.prefix(900))"
         }

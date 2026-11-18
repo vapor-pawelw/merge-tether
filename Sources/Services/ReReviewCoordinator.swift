@@ -113,10 +113,10 @@ final class ReReviewCoordinator {
         onChange?(context, unanswered)
     }
 
-    private func reReviewKey(_ request: GitLabMergeRequest, fingerprint: String, context: Context) -> String {
+    private func reReviewKey(_ request: GitLabMergeRequest, fingerprint: String, activeFingerprint: String, context: Context) -> String {
         let configuration = settings.automation
         return [ReReviewVerifier.policyVersion, context.host, context.username, String(request.projectID), String(request.iid), request.sha ?? "",
-            fingerprint, request.semanticContextFingerprint, configuration.assistant.rawValue, configuration.autoVerifyReReview.description,
+            fingerprint, activeFingerprint, request.semanticContextFingerprint, configuration.assistant.rawValue, configuration.autoVerifyReReview.description,
             configuration.assistant == .codex ? configuration.codexVerificationModel.rawValue : configuration.claudeVerificationModel.rawValue,
             configuration.verificationThinking.rawValue,
             settings.feedbackSuggestionDecisions.revision(for: context.target),
@@ -194,13 +194,14 @@ final class ReReviewCoordinator {
             async let threads = glab.fetchMergeRequestDiscussions(projectID: context.projectID, iid: context.iid, host: context.host)
             async let pending = glab.fetchOwnDraftNoteCount(projectID: context.projectID, iid: context.iid, host: context.host, userID: user.id)
             let (request, discussions, draftCount) = try await (current, threads, pending)
-            guard isCurrent(context), request.sha == head, request.author.id == user.id, draftCount == 0,
+            guard let activeFingerprint = ReviewVerdict.fingerprint(GitLabMergeRequestDiscussion.activeForReview(discussions)),
+                  isCurrent(context), request.sha == head, request.author.id == user.id, draftCount == 0,
                   reReviewChecks[context]?.key == displayedKey,
-                  reReviewKey(request, fingerprint: fingerprint, context: context) == displayedKey,
+                  reReviewKey(request, fingerprint: fingerprint, activeFingerprint: activeFingerprint, context: context) == displayedKey,
                   ReviewVerdict.fingerprint(discussions) == fingerprint else { return .changed }
             let feedback = ReReviewFeedback(discussions: discussions, authorID: user.id)
             guard !feedback.hasUnansweredFeedback else { return .unansweredFeedback }
-            manualReReviewApprovals[context] = reReviewKey(request, fingerprint: fingerprint, context: context)
+            manualReReviewApprovals[context] = reReviewKey(request, fingerprint: fingerprint, activeFingerprint: activeFingerprint, context: context)
             defer { manualReReviewApprovals.removeValue(forKey: context) }
             await refresh(for: request, feedback: feedback, draftCount: 0, context: context,
                 user: user, discussions: discussions)
@@ -258,10 +259,18 @@ final class ReReviewCoordinator {
         }
         guard !Task.isCancelled, isCurrent(context), runtimePermitsReReview(context),
               settings.automation.scope.permits(request, host: host, username: context.username) else { return }
-        guard let fingerprint = ReviewVerdict.fingerprint(discussions) else { return }
-        let activeIgnored = settings.feedbackSuggestionDecisions.applicable(in: discussions, for: target)
-        let sharedAssessment = authorFeedbackAssessment(request, fingerprint)
-        let key = reReviewKey(request, fingerprint: fingerprint, context: context)
+        let activeDiscussions = GitLabMergeRequestDiscussion.activeForReview(discussions)
+        guard let fingerprint = ReviewVerdict.fingerprint(discussions),
+              let activeFingerprint = ReviewVerdict.fingerprint(activeDiscussions) else { return }
+        let activeIgnored = settings.feedbackSuggestionDecisions.applicable(in: activeDiscussions, for: target)
+        let hasActiveFeedback = activeDiscussions.flatMap(\.notes).contains { $0.system != true && $0.author?.id != user.id }
+        let onlyResolvedFeedback = !hasActiveFeedback && discussions.contains(where: \.isResolvedForReview)
+        let sharedAssessment = authorFeedbackAssessment(request, fingerprint).flatMap { assessment in
+            (try? assessment.reviewers(in: activeDiscussions, authorID: user.id, ignoredSuggestions: activeIgnored,
+                excludedReplyAuthorIDs: settings.reviewParticipationPreferences.excludedIDs(host: host, username: context.username))) != nil
+                ? assessment : nil
+        } ?? (onlyResolvedFeedback ? ReReviewAssessment(notes: []) : nil)
+        let key = reReviewKey(request, fingerprint: fingerprint, activeFingerprint: activeFingerprint, context: context)
         func markReviewerReadFailed() {
             if reReviewChecks[context]?.key != key || reReviewChecks[context]?.diffRetryAfter == nil {
                 reReviewChecks[context] = .init(key: key, fingerprint: fingerprint, state: .failed)
@@ -282,7 +291,7 @@ final class ReReviewCoordinator {
         guard !Task.isCancelled, isCurrent(context), runtimePermitsReReview(context),
               settings.automation.scope.permits(request, host: host, username: context.username),
               usedAssistant || observedPublication || manualReReviewApprovals[context] != nil
-                || sharedAssessment != nil || reviewers.contains(where: { $0.state == "unapproved" }) else { return }
+                || (!onlyResolvedFeedback && sharedAssessment != nil) || reviewers.contains(where: { $0.state == "unapproved" }) else { return }
         let history = MergeRequestReviewHistory(reviewers: reviewers, discussions: discussions, authorID: user.id)
         let earlierReviewers = Set(reviewers.filter {
             $0.state == "reviewed" || $0.state == "unapproved"
@@ -317,7 +326,7 @@ final class ReReviewCoordinator {
                     pendingReviewers[reviewerID] = noteID
                 }
                 guard !Task.isCancelled, isCurrent(context), runtimePermitsReReview(context),
-                      reReviewKey(request, fingerprint: fingerprint, context: context) == key,
+                      reReviewKey(request, fingerprint: fingerprint, activeFingerprint: activeFingerprint, context: context) == key,
                       settings.automation.scope.permits(request, host: host, username: context.username) else { return }
             } catch {
                 markReviewerReadFailed()
@@ -361,7 +370,7 @@ final class ReReviewCoordinator {
                     @MainActor func isCurrentVerification() -> Bool {
                         !Task.isCancelled && isCurrent(context) && reReviewTasks[context]?.id == verificationID
                             && reReviewChecks[context]?.key == key && reReviewChecks[context]?.assessment == nil
-                            && reReviewKey(request, fingerprint: fingerprint, context: context) == key
+                            && reReviewKey(request, fingerprint: fingerprint, activeFingerprint: activeFingerprint, context: context) == key
                             && settings.automation.hasAutomaticActionConsent && settings.automation.autoReReviewEnabled
                             && runtimePermitsReReview(context)
                             && settings.automation.scope.permits(request, host: host, username: context.username)
@@ -382,7 +391,7 @@ final class ReReviewCoordinator {
                     do {
                         let input = ReReviewVerifier.Input(authorID: user.id, headSHA: head, title: request.title,
                                                           description: request.description,
-                                                          diff: String(decoding: diff, as: UTF8.self), discussions: discussions,
+                                                          diff: String(decoding: diff, as: UTF8.self), discussions: activeDiscussions,
                                                           target: .init(host: host, projectID: request.projectID, iid: request.iid,
                                                               url: request.webURL, expectedUsername: context.username),
                                                           semanticContextFingerprint: request.semanticContextFingerprint,
@@ -466,7 +475,8 @@ final class ReReviewCoordinator {
                 guard liveDraftCount == 0, !settings.pendingCommentReviews.contains(target), current.state == "opened", current.sha == head,
                       current.author.id == user.id, current.webURL.isGitLabMergeRequest(host: host, iid: current.iid),
                       ReviewVerdict.fingerprint(liveDiscussions) == fingerprint,
-                      reReviewKey(current, fingerprint: fingerprint, context: context) == key,
+                      ReviewVerdict.fingerprint(GitLabMergeRequestDiscussion.activeForReview(liveDiscussions)) == activeFingerprint,
+                      reReviewKey(current, fingerprint: fingerprint, activeFingerprint: activeFingerprint, context: context) == key,
                       try await glab.fetchAuthenticatedUser(host: host, expectedUsername: context.username) == user,
                       isCurrent(context), settings.automation.autoReReviewEnabled,
                       runtimePermitsReReview(context),
@@ -477,7 +487,7 @@ final class ReReviewCoordinator {
                       settings.automation.autoReReviewEnabled, !settings.pendingCommentReviews.contains(target),
                       settings.automation.scope.permits(current, host: host, username: context.username),
                       runtimePermitsReReview(context), reReviewChecks[context]?.key == key,
-                      reReviewKey(current, fingerprint: fingerprint, context: context) == key,
+                      reReviewKey(current, fingerprint: fingerprint, activeFingerprint: activeFingerprint, context: context) == key,
                       !excludedReviewers(context, key: key, discussions: liveDiscussions, authorID: user.id).contains(reviewerID),
                       let reviewer = liveReviewers.first(where: { $0.user.id == reviewerID }) else { continue }
                 if reviewer.state == "unreviewed" || reviewer.state == "review_started" {
@@ -488,7 +498,7 @@ final class ReReviewCoordinator {
                 guard settings.reReviewReceipts[receiptKey]?.covers(noteID: noteID, headSHA: head) != true else { continue }
                 if !manual {
                     guard await permitsAssistantAutomation(for: context),
-                          reReviewKey(current, fingerprint: fingerprint, context: context) == key,
+                          reReviewKey(current, fingerprint: fingerprint, activeFingerprint: activeFingerprint, context: context) == key,
                           settings.automation.autoReReviewEnabled,
                           settings.automation.scope.permits(current, host: host, username: context.username) else {
                         if isCurrent(context) { reReviewChecks[context]?.state = .unavailable }
@@ -514,7 +524,8 @@ final class ReReviewCoordinator {
                       checkedMR.sha == head, checkedMR.author.id == user.id,
                       checkedMR.webURL.isGitLabMergeRequest(host: host, iid: request.iid),
                       ReviewVerdict.fingerprint(checkedThreads) == fingerprint,
-                      reReviewKey(checkedMR, fingerprint: fingerprint, context: context) == key,
+                      ReviewVerdict.fingerprint(GitLabMergeRequestDiscussion.activeForReview(checkedThreads)) == activeFingerprint,
+                      reReviewKey(checkedMR, fingerprint: fingerprint, activeFingerprint: activeFingerprint, context: context) == key,
                       reReviewChecks[context]?.key == key,
                       settings.automation.scope.permits(checkedMR, host: host, username: context.username) else { return }
                 guard settings.reReviewReceipts[receiptKey]?.covers(noteID: noteID, headSHA: head) != true else { continue }
@@ -524,7 +535,7 @@ final class ReReviewCoordinator {
                       settings.automation == finalConfiguration, runtimePermitsReReview(context),
                       !settings.pendingCommentReviews.contains(target),
                       reReviewChecks[context]?.key == key,
-                      reReviewKey(checkedMR, fingerprint: fingerprint, context: context) == key,
+                      reReviewKey(checkedMR, fingerprint: fingerprint, activeFingerprint: activeFingerprint, context: context) == key,
                       let checkedReviewer = checkedReviewers.first(where: { $0.user.id == reviewerID }),
                       !checkedApprovers.contains(reviewerID), checkedReviewer.state != "approved",
                       !excludedReviewers(context, key: key, discussions: checkedThreads, authorID: user.id).contains(reviewerID),
@@ -542,7 +553,7 @@ final class ReReviewCoordinator {
                         && self.settings.automation == finalConfiguration && self.settings.automation.autoReReviewEnabled
                         && self.runtimePermitsReReview(context)
                         && self.reReviewChecks[context]?.key == key
-                        && self.reReviewKey(checkedMR, fingerprint: fingerprint, context: context) == key
+                        && self.reReviewKey(checkedMR, fingerprint: fingerprint, activeFingerprint: activeFingerprint, context: context) == key
                         && !self.settings.pendingCommentReviews.contains(target)
                         && self.settings.automation.scope.permits(checkedMR, host: host, username: context.username)
                         && self.currentReviewerIDs[context]?.contains(reviewerID) == true

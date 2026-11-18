@@ -73,6 +73,16 @@ struct AutomaticPublicationPolicyTests {
         #expect(try !allows(.init(mode: .aiReplies, restrictions: restrictions), notes: notes, bots: [40]))
     }
 
+    @Test(arguments: [AutomationPublicationMode.all, .aiReplies])
+    func resolvedDiscussionDoesNotReceiveAnAutomaticDraftReply(_ mode: AutomationPublicationMode) throws {
+        let discussions = try JSONDecoder().decode([GitLabMergeRequestDiscussion].self, from: Data("""
+            [{"id":"thread","notes":[{"id":40,"author":{"id":8},"body":"Earlier finding",
+              "system":false,"resolvable":true,"resolved":true}]}]
+            """.utf8))
+        let policy = AutomaticPublicationPolicy(mode: mode, restrictions: .init())
+        #expect(try !policy.allows(draft(), request: request(), discussions: discussions, userID: 3, host: host, aiNoteIDs: [40]))
+    }
+
     @Test func unrestrictedAllModePreservesGeneralDraftsButManualNeverPublishes() throws {
         #expect(try allows(.init(mode: .all, restrictions: .init()), reply: false))
         #expect(try !allows(.init(mode: .manual, restrictions: .init()), reply: false))

@@ -72,7 +72,7 @@ struct AuthorFeedbackPolicy {
         return discussions.compactMap { discussion in
             let relevant = discussion.notes.filter { $0.system != true }
             let external = relevant.filter { $0.author?.id != authorID }
-            guard discussion.notes.first?.resolved != true, !external.isEmpty, relevant.allSatisfy({
+            guard !discussion.isResolvedForReview, !external.isEmpty, relevant.allSatisfy({
                 ($0.id ?? 0) > 0 && ($0.author?.id ?? 0) > 0 && $0.body != nil
             }), external.allSatisfy({ note in
                 guard let verdict = verdicts[note.id ?? 0] else { return false }
@@ -140,6 +140,7 @@ struct AuthorFeedbackPolicy {
         let gate: State? = !enabled ? .disabled : pendingDraftCount > 0 ? .waitingPublication : nil
         let verified = assessment.flatMap { try? $0.normalizingCoveredReviewSummaries(in: discussions,
             authorID: authorID, ignoredSuggestions: ignoredSuggestions, excludedReplyAuthorIDs: excludedReplyAuthorIDs) }
+        let discussions = GitLabMergeRequestDiscussion.activeForReview(discussions)
         let verdicts = Dictionary(uniqueKeysWithValues: (verified?.notes ?? []).map { ($0.noteID, $0) })
         let pureOptOuts = verified?.pureReviewerOptOutNoteIDs(in: discussions, authorID: authorID) ?? []
         let missingReplies = verified?.missingPublishedReplyNoteIDs(in: discussions, authorID: authorID,
@@ -245,9 +246,14 @@ struct AuthorFeedbackPolicy {
                                   authorID: Int, approvedReviewerIDs: Set<Int>,
                                   ignoredSuggestions: [IgnoredFeedbackSuggestion] = [], excludedReplyAuthorIDs: Set<Int> = [],
                                   accountKinds: [Int: AccountKind] = [:]) -> Set<Int> {
-        guard let assessment = try? assessment.normalizingCoveredReviewSummaries(in: discussions,
+        guard let active = try? assessment.normalizingCoveredReviewSummaries(in: discussions,
             authorID: authorID, ignoredSuggestions: ignoredSuggestions, excludedReplyAuthorIDs: excludedReplyAuthorIDs) else { return [] }
-        let verdicts = Dictionary(uniqueKeysWithValues: assessment.notes.map { ($0.noteID, $0) })
+        let closedIDs = Set(discussions.filter(\.isResolvedForReview).flatMap(\.notes).compactMap(\.id))
+        let earlierAcceptance = assessment.notes.filter {
+            closedIDs.contains($0.noteID) && [.addressed, .rejected].contains($0.state)
+        }
+        let verdicts = Dictionary((active.notes + earlierAcceptance).map { ($0.noteID, $0) },
+            uniquingKeysWith: { first, _ in first })
         let external = discussions.flatMap(\.notes).filter { $0.system == false && $0.author?.id != authorID }
         let byID = Dictionary(uniqueKeysWithValues: external.compactMap { note in note.id.map { ($0, note) } })
         return Set(Dictionary(grouping: external, by: { $0.author!.id }).compactMap { reviewer, notes in

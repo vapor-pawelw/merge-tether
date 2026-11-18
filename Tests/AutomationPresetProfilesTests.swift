@@ -224,6 +224,24 @@ struct AutomationPresetProfilesTests {
         #expect(NSDictionary(dictionary: encoded) == NSDictionary(dictionary: json))
     }
 
+    @MainActor @Test func approvalThresholdSurvivesRestartAndPresetChanges() throws {
+        let suite = "ApprovalThreshold.\(UUID())"
+        let defaults = try #require(UserDefaults(suiteName: suite))
+        defer { defaults.removePersistentDomain(forName: suite) }
+        #expect(try JSONDecoder().decode(AutomationSettings.self, from: Data("{}".utf8)).autoApprovalThreshold == .noMajorIssues)
+        let settings = SettingsManager(defaults: defaults)
+        settings.automation.autoApprovalThreshold = .noCodeIssues
+        settings.automation.applyPreset(.full, for: .codex)
+        #expect(settings.automation.matchingPreset == .full)
+        #expect(settings.save())
+        let restarted = SettingsManager(defaults: defaults)
+        #expect(restarted.automation.autoApprovalThreshold == .noCodeIssues)
+        restarted.automation.applyPreset(.manual, for: .codex)
+        restarted.automation.applyPreset(.trusted, for: .codex)
+        #expect(restarted.automation.autoApprovalThreshold == .noCodeIssues)
+        #expect(restarted.automation.matchingPreset == .trusted)
+    }
+
     @Test func changingPermissionsMarksAChosenProfileCustomizedWithoutReapplyingIt() {
         var settings = AutomationSettings()
         settings.applyPreset(.trusted, for: .codex)

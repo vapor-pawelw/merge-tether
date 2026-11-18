@@ -40,6 +40,32 @@ class ReviewEvidenceTests(unittest.TestCase):
         self.assertEqual(receipt["discussionFingerprint"], expected)
         self.assertEqual(receipt["verdict"], "no_objections")
 
+    def test_classified_verdict_requires_each_active_discussion_and_skips_resolved_threads(self):
+        self.mr.update(title="Żółć", description="Current description")
+        self.discussions.append({"notes": [{"id": 20, "author": {"id": 5}, "resolved": True, "body": "Closed issue"}]})
+
+        def read(host, endpoint):
+            if endpoint == "/user":
+                return {"id": 3, "username": "reviewer"}
+            return self.read(host, endpoint)
+
+        recorder = ReviewEvidenceRecorder(self.root, read)
+        finding_levels = {"general": "none", "discussions": {}, "drafts": {}}
+
+        def record():
+            return recorder.record_verdict("gitlab.example.org", "1", "2", self.head, "classified_findings",
+                                           username="reviewer", run_id="e2b62734-da40-4379-afa3-f2bc1dcd7ecb",
+                                           findings=finding_levels)
+
+        with self.assertRaisesRegex(ValueError, "exact current active discussions"):
+            record()
+        finding_levels["discussions"] = {"11": "minor_code"}
+        record()
+        receipt = json.loads((self.root / "verdicts/gitlab.example.org/1-2.json").read_text())
+        self.assertEqual(receipt["findings"], finding_levels)
+        self.assertEqual(receipt["semanticContextFingerprint"],
+                         hashlib.sha256("8:Żółć19:Current description".encode()).hexdigest())
+
     def test_rejects_changed_head_closed_request_and_wrong_identity(self):
         for field, value in (("sha", "b" * 40), ("state", "closed"), ("project_id", 3), ("iid", 4)):
             with self.subTest(field=field):

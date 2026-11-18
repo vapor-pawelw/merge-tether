@@ -792,6 +792,8 @@ struct AuthorFeedbackCoordinatorTests {
     @Test(arguments: [false, true])
     func completedFollowUpReadFailureKeepsCooldownWithoutItsSuccessfulAssessmentCache(priorAssessment: Bool) async throws {
         try await withFixture { fixture in
+            fixture.settings.automation.autoResolveAcceptedFeedback = false
+            fixture.settings.automation.authorFeedback.isEnabled = true
             let state = RetryState()
             state.recovered = priorAssessment
             let coordinator = AuthorFeedbackCoordinator(settings: fixture.settings, glab: fixture.glab,
@@ -960,9 +962,10 @@ struct AuthorFeedbackCoordinatorTests {
             try fixture.write("fail-discussions-after-resolution", "yes")
             let coordinator = fixture.coordinator()
             try await fixture.run(coordinator)
-            try await fixture.run(coordinator)
             #expect(coordinator.status(projectID: 1, iid: 2)?.phase == .failed)
             #expect(coordinator.status(projectID: 1, iid: 2)?.isReadOnlyFailure == false)
+            try await fixture.run(coordinator)
+            #expect(coordinator.status(projectID: 1, iid: 2) == nil)
             #expect(fixture.inputs.count == 1)
             #expect(fixture.resolutionPosts == 1)
         }
@@ -1307,7 +1310,9 @@ struct AuthorFeedbackCoordinatorTests {
             let coordinator = fixture.coordinator(assessment: .init(notes: [
                 .init(noteID: 10, state: .informational, reason: "A closed historical acknowledgement", informationalAcknowledgementSafe: true, informationalPurpose: .reviewSummary)
             ]))
-            try await fixture.run(coordinator)
+            try fixture.start(coordinator)
+            #expect(fixture.inputs.isEmpty)
+            #expect(coordinator.status(projectID: 1, iid: 2) == nil)
             #expect(fixture.reactionPosts == 0 && fixture.awardReads == 0 && fixture.userReads == 0)
             #expect(fixture.resolutionPosts == 0)
         }
@@ -1425,15 +1430,18 @@ struct AuthorFeedbackCoordinatorTests {
             try fixture.start(coordinator)
             try await Task.sleep(for: .milliseconds(250))
             #expect(fixture.resolutionPosts == 1)
-            let refreshed = try #require(coordinator.status(projectID: 1, iid: 2))
-            #expect(refreshed.needsAttention == (scenario == "denied"))
-            #expect(refreshed.findings.first?.state == (scenario == "denied" ? .needsVerification : nil))
             if scenario == "denied" {
+                let refreshed = try #require(coordinator.status(projectID: 1, iid: 2))
+                #expect(refreshed.needsAttention)
+                #expect(refreshed.findings.first?.state == .needsVerification)
                 fixture.gitlab.remove("deny-resolve")
                 coordinator.invalidate(projectID: 1, iid: 2)
                 try await fixture.run(coordinator)
                 #expect(fixture.resolutionPosts == 2 && fixture.resolved)
                 #expect(coordinator.status(projectID: 1, iid: 2)?.needsAttention == false)
+            } else {
+                #expect(coordinator.status(projectID: 1, iid: 2) == nil)
+                #expect(fixture.inputs.count == 1)
             }
         }
     }
@@ -1590,6 +1598,13 @@ struct AuthorFeedbackCoordinatorTests {
             ]))
             var requestedWork: Set<Int> = []
             coordinator.onNeedsWork = { _, notes, _, _ in requestedWork = notes }
+            if scenario == "resolved" {
+                try fixture.start(coordinator, requestJSON: draft)
+                #expect(fixture.inputs.isEmpty)
+                #expect(coordinator.status(projectID: 1, iid: 2) == nil)
+                #expect(requestedWork.isEmpty)
+                return
+            }
             try await fixture.run(coordinator, requestJSON: draft)
             let request = try JSONDecoder().decode(GitLabMergeRequest.self, from: Data(draft.utf8))
             let status = try #require(coordinator.status(projectID: 1, iid: 2))
@@ -1829,7 +1844,7 @@ struct AuthorFeedbackCoordinatorTests {
         }
     }
 
-    @Test func resolvedThreadStillTriggersWorkWhenTheVerifierFindsAnUnfulfilledCondition() async throws {
+    @Test func resolvedThreadDoesNotVerifyOrDispatchWork() async throws {
         try await withFixture { fixture in
             try fixture.write("discussions.json", "[\(Fixture.thread.replacingOccurrences(of: "\"resolved\":false", with: "\"resolved\":true"))]")
             let coordinator = fixture.coordinator(assessment: .init(notes: [
@@ -1837,11 +1852,10 @@ struct AuthorFeedbackCoordinatorTests {
             ]))
             var requested: Set<Int> = []
             coordinator.onNeedsWork = { _, notes, _, _ in requested = notes }
-            try await fixture.run(coordinator)
-            #expect(fixture.verified)
-            #expect(!fixture.resolved)
-            #expect(requested == [10])
-            #expect(coordinator.status(projectID: 1, iid: 2)?.needsAttention == true)
+            try fixture.start(coordinator)
+            #expect(fixture.inputs.isEmpty)
+            #expect(requested.isEmpty)
+            #expect(coordinator.status(projectID: 1, iid: 2) == nil)
         }
     }
 
@@ -1986,35 +2000,27 @@ struct AuthorFeedbackCoordinatorTests {
         }
     }
 
-    @Test(arguments: [false, true])
-    func resolutionOnlyChangesRefreshSettledFeedbackWithoutAnotherAssessment(initiallyResolved: Bool) async throws {
-        try await withFixture { f in
-            try f.write("approvals.json", #"{"approved_by":[]}"#)
-            if initiallyResolved { f.gitlab.write("resolved") }
-            let original = try f.discussions()
-            let coordinator = f.coordinator()
+    @Test func closedFeedbackIsSkippedAndBecomesEligibleAgainWhenReopened() async throws {
+        try await withFixture { fixture in
+            try fixture.write("approvals.json", #"{"approved_by":[]}"#)
+            fixture.gitlab.write("resolved")
+            let coordinator = fixture.coordinator()
             defer { coordinator.cancel() }
 
-            try f.start(coordinator, approvalRevision: "0/0:")
-            try await f.waitForPass(1)
-            try f.start(coordinator, approvalRevision: "0/0:")
-            try await f.waitForPass(2)
-            #expect(coordinator.status(projectID: 1, iid: 2)?.waitingForReviewer == !initiallyResolved)
+            try fixture.start(coordinator, approvalRevision: "0/0:")
+            #expect(fixture.inputs.isEmpty && fixture.diffReads == 0)
+            #expect(coordinator.status(projectID: 1, iid: 2) == nil)
 
-            if initiallyResolved { f.gitlab.remove("resolved") }
-            else { f.gitlab.write("resolved") }
-            let current = try f.discussions()
-            #expect(ReviewVerdict.fingerprint(original) == ReviewVerdict.fingerprint(current))
-            try f.start(coordinator, initialDiscussions: current, approvalRevision: "0/0:")
-            let deadline = ContinuousClock.now + .seconds(5)
-            while coordinator.status(projectID: 1, iid: 2)?.waitingForReviewer != initiallyResolved,
-                  ContinuousClock.now < deadline {
-                try await Task.sleep(for: .milliseconds(10))
-            }
+            fixture.gitlab.remove("resolved")
+            try await fixture.run(coordinator)
+            #expect(fixture.inputs.count == 1)
+            #expect(coordinator.status(projectID: 1, iid: 2)?.waitingForReviewer == true)
 
-            #expect(coordinator.status(projectID: 1, iid: 2)?.waitingForReviewer == initiallyResolved)
-            #expect(f.inputs.count == 1)
-            #expect(f.resolutionPosts == 0)
+            fixture.gitlab.write("resolved")
+            try fixture.start(coordinator, approvalRevision: "0/0:")
+            #expect(coordinator.status(projectID: 1, iid: 2) == nil)
+            #expect(fixture.inputs.count == 1)
+            #expect(fixture.resolutionPosts == 0)
         }
     }
 
@@ -2248,7 +2254,11 @@ struct AuthorFeedbackCoordinatorTests {
                 inputs.append(input)
                 duringVerification?()
                 verified = true
-                return assessment ?? .init(notes: [.init(noteID: 10, state: .addressed, reason: "Current diff fixes A")])
+                let result = assessment ?? .init(notes: [.init(noteID: 10, state: .addressed, reason: "Current diff fixes A")])
+                let closedIDs = Set(try discussions().filter(\.isResolvedForReview).flatMap(\.notes).compactMap(\.id))
+                return .init(notes: result.notes.filter { !closedIDs.contains($0.noteID) },
+                    completedBlockedRunIDs: result.completedBlockedRunIDs,
+                    codeReviewRequests: result.codeReviewRequests?.filter { !closedIDs.contains($0.sourceNoteID) })
             }, retryWait: { [self] in retryDelays.append($0) }, now: now, assessmentDirectory: assessmentDirectory)
         }
 

@@ -380,7 +380,7 @@ import MergeTetherRemote
         }
 
         func recordVerdict(_ verdict: String, head: String, authenticated: Bool = true,
-                           nonBlockingDuoNotes: [String: String]? = nil) throws {
+                           nonBlockingDuoNotes: [String: String]? = nil, findingLevels: [String: String]? = nil) throws {
             let folder = self.folder.appending(path: "verdicts/gitlab.example.org")
             try FileManager.default.createDirectory(at: folder, withIntermediateDirectories: true)
             let discussions = try JSONDecoder().decode([GitLabMergeRequestDiscussion].self, from: gitlab.data("discussions.json"))
@@ -392,8 +392,15 @@ import MergeTetherRemote
                                       verdict: try #require(ReviewVerdict.Kind(rawValue: verdict)),
                                       discussionFingerprint: ReviewVerdict.fingerprint(discussions),
                                       username: "me", userID: 3, runID: run.id)
-            var record = try #require(JSONSerialization.jsonObject(with: JSONEncoder().encode(base)) as? [String: Any])
+            let encoder = JSONEncoder()
+            var record = try #require(JSONSerialization.jsonObject(with: encoder.encode(base)) as? [String: Any])
             record["nonBlockingDuoNotes"] = nonBlockingDuoNotes
+            if let findingLevels {
+                record["findings"] = ["general": "none", "discussions": findingLevels, "drafts": [:]]
+                let request = try JSONDecoder().decode(GitLabMergeRequest.self, from: gitlab.data("request.json"))
+                record["semanticContextFingerprint"] = request.semanticContextFingerprint
+                record["draftBodyDigests"] = [:] as [String: String]
+            }
             let value = try JSONDecoder().decode(ReviewVerdict.self, from: JSONSerialization.data(withJSONObject: record))
             try JSONEncoder().encode(value).write(to: folder.appending(path: "1-2.json"))
             if authenticated {
@@ -2510,6 +2517,68 @@ import MergeTetherRemote
         try harness.write("discussions.json", othersThread.replacingOccurrences(of: "\"resolved\":false", with: "\"resolved\":true"))
         try await harness.poll()
         #expect(harness.log("approve.log").contains("sha=\(head)"))
+    }
+
+    @Test(arguments: [
+        ("noMajorIssues", "major", false), ("noMajorIssues", "minor_code", true),
+        ("noCodeIssues", "minor_code", false), ("noCodeIssues", "non_code", true),
+        ("noIssues", "non_code", false), ("noIssues", "none", true)
+    ])
+    func approvalThresholdAppliesToTheOtherReviewersFindings(_ threshold: String, _ level: String, _ approves: Bool) async throws {
+        let harness = try makeHarness(assistantWorked: true)
+        defer { harness.cleanUp() }
+        harness.settings.automation.autoApprovalThreshold = try #require(AutoApprovalThreshold(rawValue: threshold))
+        try harness.write("discussions.json", othersThread)
+        try harness.recordVerdict("classified_findings", head: head, findingLevels: ["40": level])
+
+        try await harness.poll()
+
+        #expect(harness.log("approve.log").contains("sha=\(head)") == approves)
+        if !approves {
+            try harness.write("discussions.json", othersThread.replacingOccurrences(of: #""resolved":false"#, with: #""resolved":true"#))
+            try await harness.poll()
+            #expect(harness.log("approve.log").contains("sha=\(head)"))
+        }
+    }
+
+    @Test(arguments: ["edited", "metadata", "lateMajor", "stricterPolicy", "unsigned"])
+    func approvalRechecksTheCurrentFindingsAndThreshold(_ change: String) async throws {
+        var settings: SettingsManager?
+        weak var monitor: MergeRequestAttentionMonitor?
+        let harness = try makeHarness(assistantWorked: true, duringAutomationCheck: { gitlab in
+            guard monitor?.confirmationStates[.init(projectID: 1, iid: 2)] == .approving else { return }
+            if change == "stricterPolicy" { settings?.automation.autoApprovalThreshold = .noIssues }
+            if change == "lateMajor" {
+                gitlab.write("discussions.json", #"[{"notes":[{"id":41,"author":{"id":8},"system":false,"body":"Validation is broken."}]}]"#)
+            }
+        })
+        defer { harness.cleanUp() }
+        settings = harness.settings
+        monitor = harness.monitor
+        let editorial = #"[{"notes":[{"id":40,"author":{"id":3},"system":false,"body":"Clarify the MR title.","resolvable":true,"resolved":false}]}]"#
+        try harness.write("discussions.json", editorial)
+        try harness.recordVerdict("classified_findings", head: head, authenticated: change != "unsigned", findingLevels: ["40": "non_code"])
+        if change == "edited" {
+            try harness.write("discussions.json", editorial.replacingOccurrences(of: "Clarify the MR title.", with: "Fix the validation regression."))
+        }
+        if change == "metadata" {
+            try harness.write("request.json", harness.log("request.json").replacingOccurrences(of: #""title":"Fix""#, with: #""title":"An edited title""#))
+        }
+
+        try await harness.poll()
+
+        #expect(harness.log("approve.log").isEmpty)
+    }
+
+    @Test func unassessedDiscussionCannotAuthorizeAutomaticApproval() async throws {
+        let harness = try makeHarness(assistantWorked: true)
+        defer { harness.cleanUp() }
+        try harness.write("discussions.json", othersThread)
+        try harness.recordVerdict("classified_findings", head: head, findingLevels: [:])
+
+        try await harness.poll()
+
+        #expect(harness.log("approve.log").isEmpty)
     }
 
     @Test func optingOutOneMergeRequestFallsBackToManualApproval() async throws {
