@@ -47,6 +47,50 @@ struct ReReviewCoordinatorTests {
         #expect(coordinator.status(for: f.context, authorID: f.user.id).state == nil)
     }
 
+    @Test(arguments: ["/projects/1/merge_requests/2/reviewers?per_page=100",
+                      "/projects/1/merge_requests/2/approvals", "/users/8"])
+    func temporaryReviewerEvidenceFailureRecoversOnTheNextPoll(_ endpoint: String) async throws {
+        let f = try Fixture()
+        defer { f.close() }
+        f.settings.automation.autoVerifyReReview = true
+        f.gitlab.write("discussions", "[]")
+        let handler = try #require(f.gitlab.handler)
+        var failRead = true
+        f.gitlab.handler = { call in
+            if failRead, call.endpoint == endpoint {
+                return InMemoryGitLab.output(error: "HTTP 503 Service Unavailable", code: 1)
+            }
+            return try await handler(call)
+        }
+        var verifications = 0
+        let coordinator = f.coordinator(verify: { _, _, _ in
+            verifications += 1
+            return .init(notes: [])
+        })
+        defer { coordinator.reset() }
+        let request = try f.request()
+        let feedback = try f.feedback()
+
+        await coordinator.refresh(for: request, feedback: feedback, draftCount: 0, context: f.context, user: f.user)
+        #expect(coordinator.status(for: f.context, authorID: f.user.id).state == .failed)
+        #expect(verifications == 0 && f.gitlab.text("requested").isEmpty)
+        #expect(f.settings.reReviewReceipts.isEmpty)
+
+        failRead = false
+        await coordinator.refresh(for: request, feedback: feedback, draftCount: 0, context: f.context, user: f.user)
+        let deadline = ContinuousClock.now + .seconds(5)
+        while coordinator.isVerifying {
+            try #require(ContinuousClock.now < deadline)
+            try await Task.sleep(for: .milliseconds(5))
+        }
+        await coordinator.refresh(for: request, feedback: feedback, draftCount: 0, context: f.context, user: f.user)
+
+        #expect(verifications == 1)
+        #expect(f.gitlab.text("requested") == "review\n")
+        let receipt = try #require(f.settings.reReviewReceipts.values.first)
+        #expect(f.settings.reReviewReceipts.count == 1 && receipt.requested == true && !receipt.unconfirmed)
+    }
+
     @Test(arguments: [false, true])
     func localAutomationDesignationSuppressesHumanReReviewUntilRemoved(_ automatic: Bool) async throws {
         let f = try Fixture()

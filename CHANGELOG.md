@@ -8,9 +8,9 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 
 - Choose when automatic approval can proceed. The default allows minor issues. Stricter choices require no code-related issues or no issues at all. All three consider feedback from every participant and skip resolved threads, which the verifier also skips.
 - Allow automatic approval when a fresh review disproves a GitLab Duo concern, even while that thread is open. Optional replies link to the evidence and state when the concern requires no change.
-- Resume queued reviews and re-review readiness checks after temporary GitLab read failures. Keep re-review updates waiting when the workflow queue fills, including across a restart.
+- Resume reviews after temporary GitLab read failures, including the final reads before a worker starts and the reviewer and approval checks before a re-review request. Keep queued re-reviews across restarts and when the workflow queue fills.
 - Resume the final comment-review check after successful automatic draft publication when a GitLab read fails. Match the saved publication evidence against the current account, merge request, discussions and draft list before closing the checkpoint.
-- Schedule re-review after a completed review without findings and when a branch returns to an earlier commit that the latest verdict no longer covers.
+- Schedule re-review after a completed review without findings, including when the author pushes before the next poll. Re-review when a branch returns to an earlier commit that the latest verdict no longer covers.
 - Retry conflict preparation after a worker temporarily holds the merge request. Allow repair of a confirmed conflict after a GitLab merge queue disappears while preserving the merge submission checkpoint.
 - Diagnose new failed jobs in the same pipeline after a confirmed infrastructure retry, with the original single-retry limit intact.
 

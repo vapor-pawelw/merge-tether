@@ -32,7 +32,7 @@ final class ReReviewCoordinator {
         let fingerprint: String
         var state: ReReviewReadiness
         var assessment: ReReviewAssessment?
-        var diffRetryAfter: Date?
+        var readRetryAfter: Date?
     }
 
     private struct VerificationTask {
@@ -284,8 +284,15 @@ final class ReReviewCoordinator {
         } ?? (onlyResolvedFeedback ? ReReviewAssessment(notes: []) : nil)
         let key = reReviewKey(request, fingerprint: fingerprint, activeFingerprint: activeFingerprint, context: context)
         func markReviewerReadFailed() {
-            if reReviewChecks[context]?.key != key || reReviewChecks[context]?.diffRetryAfter == nil {
-                reReviewChecks[context] = .init(key: key, fingerprint: fingerprint, state: .failed)
+            guard !Task.isCancelled, isCurrent(context), runtimePermitsReReview(context),
+                  reReviewKey(request, fingerprint: fingerprint, activeFingerprint: activeFingerprint, context: context) == key,
+                  settings.automation.scope.permits(request, host: host, username: context.username) else { return }
+            let check = reReviewChecks[context]
+            if check?.key != key {
+                // The next poll re-fetches reviewer evidence before it can start verification.
+                reReviewChecks[context] = .init(key: key, fingerprint: fingerprint, state: .failed, readRetryAfter: now())
+            } else if check?.readRetryAfter == nil, reReviewTasks[context] == nil || check?.assessment != nil {
+                reReviewChecks[context]?.state = .failed
             }
             notify(context, unanswered: feedback.hasUnansweredFeedback)
         }
@@ -369,8 +376,8 @@ final class ReReviewCoordinator {
                 notify(context, unanswered: feedback.hasUnansweredFeedback)
                 return
             }
-            let diffRetryIsDue = reReviewChecks[context]?.diffRetryAfter.map { now() >= $0 } == true
-            if reReviewChecks[context]?.key != key || (diffRetryIsDue && reReviewTasks[context] == nil) {
+            let readRetryIsDue = reReviewChecks[context]?.readRetryAfter.map { now() >= $0 } == true
+            if reReviewChecks[context]?.key != key || (readRetryIsDue && reReviewTasks[context] == nil) {
                 reReviewTasks.removeValue(forKey: context)?.task.cancel()
                 reReviewChecks[context] = ReReviewCheck(key: key, fingerprint: fingerprint, state: .checking)
                 let assistant = settings.automation.assistant
@@ -405,7 +412,7 @@ final class ReReviewCoordinator {
                     } catch {
                         guard isCurrentVerification(), !(error is CancellationError) else { return }
                         reReviewChecks[context]?.state = .failed
-                        reReviewChecks[context]?.diffRetryAfter = now().addingTimeInterval(ReadOnlyAssessmentRetry.cooldown)
+                        reReviewChecks[context]?.readRetryAfter = now().addingTimeInterval(ReadOnlyAssessmentRetry.cooldown)
                         notify(context, unanswered: feedback.hasUnansweredFeedback)
                         return
                     }
