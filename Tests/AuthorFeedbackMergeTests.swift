@@ -325,9 +325,21 @@ struct AuthorFeedbackMergeTests {
             let request = try #require(monitor.requests.first?.request)
             #expect(!gitlab.has("merged"))
             #expect(monitor.requests.first?.mayMergeManually == true)
-            let result = await monitor.mergeManually(request)
+            let result = await monitor.mergeManually(request, action: .mergeNow)
             #expect(result == .merged)
             #expect(gitlab.has("merged"))
+        }
+    }
+
+    @Test func manualMergeDoesNotPrepareAnAssistantCheckWithoutProviderConsent() async throws {
+        try await withFixture(configure: { $0.automation.autoMergeEnabled = false }) { monitor, gitlab, _ in
+            monitor.setVisible(true)
+            try await refresh(monitor)
+            let status = try #require(monitor.requests.first)
+            #expect(status.mayMergeManually)
+            #expect(await monitor.mergeManually(status.request, action: .mergeNow) == .changed)
+            #expect(!gitlab.requests.contains { $0.endpoint.hasSuffix("/raw_diffs") })
+            #expect(gitlab.requests.allSatisfy { $0.method == "GET" })
         }
     }
 
@@ -339,8 +351,8 @@ struct AuthorFeedbackMergeTests {
             monitor.setVisible(true)
             try await refresh(monitor)
             let request = try #require(monitor.requests.first?.request)
-            #expect(await monitor.mergeManually(request) == .uncertain)
-            #expect(await monitor.mergeManually(request) == .uncertain)
+            #expect(await monitor.mergeManually(request, action: .mergeNow) == .uncertain)
+            #expect(await monitor.mergeManually(request, action: .mergeNow) == .uncertain)
             let saved = try #require(settings)
             saved.automation.autoMergeEnabled = true
             let restarted = AuthoredMergeRequestMonitor(settings: saved, glab: glab, canAutomate: { _ in true })

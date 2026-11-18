@@ -12,6 +12,8 @@ enum MRActionEffect: Equatable, Sendable {
     case aiCheck
     /// Performs a deterministic GitLab change.
     case gitLab
+    /// Submits a GitLab merge and may first run a read-only AI check.
+    case gitLabWithAICheck
     /// Changes only MergeTether state or reloads data.
     case local
 
@@ -20,7 +22,7 @@ enum MRActionEffect: Equatable, Sendable {
         switch self {
         case .agent: "sparkles"
         case .aiCheck: "sparkle.magnifyingglass"
-        case .gitLab, .local: nil
+        case .gitLab, .gitLabWithAICheck, .local: nil
         }
     }
 
@@ -29,6 +31,7 @@ enum MRActionEffect: Equatable, Sendable {
         case .agent: .ActionEffects.kindAgent
         case .aiCheck: .ActionEffects.kindAICheck
         case .gitLab: .ActionEffects.kindGitLab
+        case .gitLabWithAICheck: .ActionEffects.kindMerge
         case .local: .ActionEffects.kindLocal
         }
     }
@@ -71,7 +74,8 @@ enum MRActionCTA: CaseIterable, Sendable {
         case .runReview, .retryRun, .handleFeedback, .diagnosePipeline, .resolveConflicts,
              .confirmPipelineHandoff, .addAndHandle: .agent
         case .verifyFeedback, .verifyReReview, .retryDraftVerification, .resolveThreads: .aiCheck
-        case .publishComments, .approve, .merge, .markReady, .requestReReview: .gitLab
+        case .publishComments, .approve, .markReady, .requestReReview: .gitLab
+        case .merge: .gitLabWithAICheck
         case .finishCommentReview, .refreshFromGitLab, .ignoreSuggestion: .local
         }
     }

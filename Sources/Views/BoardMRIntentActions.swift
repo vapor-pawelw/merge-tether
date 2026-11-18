@@ -47,7 +47,7 @@ struct BoardMRIntentActions: View {
                                 starting.insert(intent.id)
                                 Task {
                                     defer { starting.remove(intent.id) }
-                                    await monitor.runMRTodoIntent(id: intent.id)
+                                    await runConfirmedIntent(intent, monitor: monitor)
                                 }
                             } label: {
                                 let title = intent.state == .failed ? LocalizedStringResource.Board.boardIntentRetry : Self.action(intent.kind)

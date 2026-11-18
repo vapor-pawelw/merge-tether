@@ -32,6 +32,12 @@ enum ReReviewReadiness: Equatable, Sendable {
         }
     }
 
+    var manualConfirmationDetails: [String] {
+        let status = String(localized: message)
+        guard case .uncertain(let blockers) = self else { return [status] }
+        return [status] + blockers.map { $0.summary ?? $0.reason }
+    }
+
     var message: LocalizedStringResource {
         switch self {
         case .checking: .Menu.menuReReviewChecking

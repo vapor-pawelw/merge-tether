@@ -3,6 +3,19 @@ import Testing
 @testable import GitLabTodos
 
 struct AutomationPackageTests {
+    @Test(arguments: [AutomationPreset.trusted, .full])
+    func reducingPermissionsDoesNotRequireAssistantSetup(_ preset: AutomationPreset) {
+        var current = AutomationSettings()
+        current.applyPreset(preset, for: .codex)
+        var edited = current
+        edited.allowFollowUpPush = false
+        edited.autoApproveEnabled = false
+
+        #expect(edited.usesAssistant)
+        #expect(!edited.requiresAssistantSetup(comparedTo: current))
+        #expect(current.requiresAssistantSetup(comparedTo: edited))
+    }
+
     @Test func inactivePresentationFollowsAutomationRatherThanDraftStatus() {
         let target = MRAutomationScope.Target(host: "gitlab.example.test", username: "me", projectID: 1, iid: 42)
         var settings = AutomationSettings()

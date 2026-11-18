@@ -4,6 +4,59 @@ import Testing
 
 @MainActor struct MergeSubmissionTests {
     @Test(arguments: [false, true])
+    func sameHeadPipelineTransitionRequiresAnotherConfirmation(_ initiallyRunning: Bool) async throws {
+        try await fixture { glab, gitlab, request in
+            gitlab.write("ordinary-project")
+            if initiallyRunning { gitlab.write("pipeline-running") }
+            let suite = "ManualMergeMode.\(UUID())"
+            let defaults = try #require(UserDefaults(suiteName: suite))
+            defer { defaults.removePersistentDomain(forName: suite) }
+            let settings = SettingsManager(defaults: defaults)
+            settings.onboardingCompleted = true
+            settings.notificationsEnabled = false
+            let monitor = AuthoredMergeRequestMonitor(settings: settings, glab: glab, canAutomate: { _ in true })
+            monitor.setVisible(true)
+            while monitor.isLoading { await Task.yield() }
+            let confirmed = try #require(monitor.requests.first?.action)
+            #expect(confirmed == (initiallyRunning ? .enqueue : .mergeNow))
+
+            if initiallyRunning { gitlab.remove("pipeline-running") }
+            else { gitlab.write("pipeline-running") }
+            #expect(await monitor.mergeManually(request, action: confirmed) == .changed)
+            #expect(monitor.requests.first?.action == (initiallyRunning ? .mergeNow : .enqueue))
+            #expect(gitlab.requests.allSatisfy { $0.method == "GET" })
+            #expect(settings.mergeSubmissions.isEmpty)
+        }
+    }
+
+    @Test func pipelineCompletionDuringTheFinalReadCannotSubmitAnOrdinaryAutoMerge() async throws {
+        try await fixture { glab, gitlab, request in
+            gitlab.write("ordinary-project")
+            gitlab.write("pipeline-running")
+            let handler = try #require(gitlab.handler)
+            var detailReads = 0
+            gitlab.handler = { call in
+                if call.endpoint == "/projects/1/merge_requests/2" {
+                    detailReads += 1
+                    if detailReads == 2 { gitlab.remove("pipeline-running") }
+                }
+                return try await handler(call)
+            }
+            let queuePolicy = GitLabMergeActionPolicy(action: .enqueue, requiresResolvedDiscussions: true,
+                resetsApprovalsOnPush: true)
+
+            await #expect(throws: CancellationError.self) {
+                _ = try await glab.mergeMergeRequest(projectID: 1, iid: 2, headSHA: request.sha!, host: host,
+                    expectedUser: user, expectedContext: .init(request), action: .enqueue,
+                    expectedPolicy: queuePolicy, beforeWrite: { _ in Issue.record("Stale queue reached the write boundary") },
+                    shouldProceed: { true })
+            }
+            #expect(detailReads == 2)
+            #expect(gitlab.requests.allSatisfy { $0.method == "GET" })
+        }
+    }
+
+    @Test(arguments: [false, true])
     func corruptRequiredReceiptStoreDeniesManualMergeAndEnqueueAtTheWriteBoundary(_ train: Bool) async throws {
         try await fixture { glab, gitlab, request in
             let suite = "CorruptManualMergeReceipt.\(UUID())"
@@ -22,7 +75,7 @@ import Testing
             let ready = try #require(monitor.requests.first)
             #expect(ready.mayMergeManually)
             #expect(ready.action == (train ? .enqueue : .mergeNow))
-            let outcome = await monitor.mergeManually(request)
+            let outcome = await monitor.mergeManually(request, action: train ? .enqueue : .mergeNow)
             #expect(![MergeSubmissionState.merged, .queued, .inTrain].contains(outcome))
             #expect(gitlab.requests.allSatisfy { $0.method == "GET" })
             #expect(defaults.data(forKey: "mergeSubmissions") == raw)
@@ -164,7 +217,7 @@ import Testing
             }
 
             // when
-            #expect(await monitor.mergeManually(request) == .changed)
+            #expect(await monitor.mergeManually(request, action: .enqueue) == .changed)
             while monitor.isLoading { await Task.yield() }
 
             // then
@@ -173,7 +226,7 @@ import Testing
             #expect(receipt.trainNoteIDBeforeAttempt == 0)
             #expect(receipt.confirmedTrainRejection?.noteID == 10)
             #expect(monitor.requests.first?.request.mergeTrainConflict?.noteID == 10)
-            #expect(await monitor.mergeManually(request) == .uncertain)
+            #expect(await monitor.mergeManually(request, action: .enqueue) == .uncertain)
             #expect(gitlab.requests.filter { $0.method != "GET" }.count == 1)
         }
     }
@@ -281,7 +334,7 @@ import Testing
             let restored = SettingsManager(defaults: defaults)
             #expect(restored.mergeSubmissions.first?.trainNoteIDBeforeAttempt == (hasBaseline ? 0 : nil))
             #expect((restored.mergeSubmissions.first?.confirmedTrainRejection != nil) == hasBaseline)
-            #expect(await monitor.mergeManually(request) == .uncertain)
+            #expect(await monitor.mergeManually(request, action: .enqueue) == .uncertain)
             #expect(gitlab.requests.allSatisfy { $0.method == "GET" })
             gitlab.write("current-head", String(repeating: "c", count: 40))
             monitor.refreshIfNeeded()

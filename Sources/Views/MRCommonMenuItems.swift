@@ -63,10 +63,11 @@ struct MRCommonMenuItems: View {
         }
         if !isFinished, monitor.canRunReview(for: item) {
             Button {
+                guard let consent = confirmManualReview(for: item, monitor: monitor) else { return }
                 startingReview = true
                 Task {
                     defer { startingReview = false }
-                    await monitor.runReview(for: item)
+                    await monitor.runReview(for: item, confirmed: consent)
                 }
             } label: {
                 MRActionLabel(title: .CommandCenter.commandCenterReviewRun, cta: .runReview)
@@ -100,5 +101,33 @@ struct AssistantJobPreflightNotice: View {
             Text(verbatim: notice).font(.caption).foregroundStyle(.secondary)
                 .fixedSize(horizontal: false, vertical: true)
         }
+    }
+}
+
+@MainActor
+func confirmManualReview(for item: MergeRequestAttentionMonitor.Item,
+                         monitor: TodoMonitorService) -> TodoMonitorService.ManualReviewConsent? {
+    confirmManualReview(for: item.mergeRequest, monitor: monitor)
+}
+
+@MainActor
+func confirmManualReview(for request: GitLabMergeRequest?, monitor: TodoMonitorService) -> TodoMonitorService.ManualReviewConsent? {
+    let consent = monitor.manualReviewConsent(for: request)
+    let alert = NSAlert()
+    alert.messageText = String(localized: .CommandCenter.commandCenterReviewRun)
+    alert.informativeText = String(localized: .ActionEffects.runReview) + "\n\n"
+        + String(localized: consent.publicationMode.reviewConfirmation)
+    alert.addButton(withTitle: String(localized: .CommandCenter.commandCenterReviewRun))
+    alert.addButton(withTitle: String(localized: .Menu.menuScopeCancel))
+    return alert.runModal() == .alertFirstButtonReturn ? consent : nil
+}
+
+@MainActor
+func runConfirmedIntent(_ intent: MRTodoIntent, monitor: TodoMonitorService) async {
+    if intent.kind == .review {
+        guard let consent = confirmManualReview(for: monitor.reviewRequest(for: intent), monitor: monitor) else { return }
+        await monitor.runMRTodoIntent(id: intent.id, confirmedReview: consent)
+    } else {
+        await monitor.runMRTodoIntent(id: intent.id)
     }
 }

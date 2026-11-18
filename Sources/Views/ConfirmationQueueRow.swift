@@ -66,7 +66,24 @@ struct ConfirmationQueueRow<AdditionalActions: View>: View {
             } else if item.requiresCommentReview {
                 Text(.CommentReview.commentReviewPending)
             } else if item.canApprove {
-                Text(.Menu.menuConfirmApproveReady)
+                if let threshold = item.metApprovalThreshold {
+                    Text(.Menu.menuConfirmApprovalThreshold(String(localized: threshold.title)))
+                } else {
+                    Text(.Menu.menuConfirmApproveReady)
+                }
+                ForEach(Array(item.remainingApprovalFindings.enumerated()), id: \.offset) { _, finding in
+                    if let title = finding.level.title {
+                        if let id = finding.noteID,
+                           let url = URL(string: "#note_\(id)", relativeTo: item.url) {
+                            Link(destination: url) { Text(title) }
+                        } else {
+                            Text(title)
+                        }
+                        if let summary = finding.summary {
+                            Text(verbatim: summary).foregroundStyle(.secondary)
+                        }
+                    }
+                }
             }
 
             let rejected = PreparedReplyContext.rejected(in: item)

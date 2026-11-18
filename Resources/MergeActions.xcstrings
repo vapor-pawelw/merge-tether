@@ -627,6 +627,17 @@
           }
         }
       }
+    },
+    "mergeActions.verifyBeforeSubmit.%@": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "If the current feedback needs verification, MergeTether sends the merge request diff, description, and discussions to %@ for a read-only check before submitting."
+          }
+        }
+      }
     }
   },
   "version": "1.0"

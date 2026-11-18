@@ -821,7 +821,7 @@
         "en": {
           "stringUnit": {
             "state": "translated",
-            "value": "The agent has no objections to this commit, and your review threads are resolved. Approve it?"
+            "value": "Review completed. Approval is available."
           }
         }
       }
@@ -1107,7 +1107,7 @@
         "en": {
           "stringUnit": {
             "state": "translated",
-            "value": "Verify again"
+            "value": "Verify re-review readiness again"
           }
         }
       }
@@ -1184,7 +1184,7 @@
         "en": {
           "stringUnit": {
             "state": "translated",
-            "value": "Auto follows repository and general rules, including the draft default. Always on/off keeps your choice across draft and ready states. Global action permissions still apply; Draft merge requests never merge automatically."
+            "value": "Follow repository default applies repository and general rules, including the draft default. Always on and Always off keep your choice across draft and ready states. Global action permissions still apply. Draft merge requests are excluded from automatic merge."
           }
         }
       }
@@ -1350,6 +1350,72 @@
           "stringUnit": {
             "state": "translated",
             "value": "Tip: Option-click the bolt to switch automation without opening this panel."
+          }
+        }
+      }
+    },
+    "menu.scope.followRepository": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Follow repository default"
+          }
+        }
+      }
+    },
+    "menu.scope.individualOptIn": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Individually enabled"
+          }
+        }
+      }
+    },
+    "menu.confirm.approvalThreshold.%@": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Review met the approval threshold “%@”."
+          }
+        }
+      }
+    },
+    "menu.confirm.findingEditorial": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Editorial finding remains"
+          }
+        }
+      }
+    },
+    "menu.confirm.findingMinorCode": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Minor code finding remains"
+          }
+        }
+      }
+    },
+    "menu.confirm.findingMajor": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Major finding remains"
           }
         }
       }

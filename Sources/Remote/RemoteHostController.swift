@@ -431,7 +431,9 @@ extension RemoteConnection: RemoteHostTransport {}
                 ? .completed : .changed
         }
         if action.id.hasPrefix("intent:"), let id = UUID(uuidString: String(action.id.dropFirst(7))) {
-            await monitor.runMRTodoIntent(id: id)
+            guard let intent = monitor.currentMRTodoIntents.first(where: { $0.id == id }) else { return .changed }
+            let consent = intent.kind == .review ? monitor.manualReviewConsent(for: monitor.reviewRequest(for: intent)) : nil
+            await monitor.runMRTodoIntent(id: id, confirmedReview: consent)
             return monitor.currentMRTodoIntents.first(where: { $0.id == id })?.state == .failed ? .failed : .completed
         }
         if action.kind == .retryJob, let id = UUID(uuidString: String(action.id.dropFirst(4))) {
@@ -474,7 +476,9 @@ extension RemoteConnection: RemoteHostTransport {}
             catch { return .uncertain }
         case .merge, .enqueueMerge:
             guard phoneSupportsMergeActions, let request = item.authoredRequest else { return .changed }
-            let outcome = await monitor.authoredMergeRequests.mergeManually(request)
+            let mode: MergeSubmissionAction = action.kind == .merge ? .mergeNow : .enqueue
+            let outcome = await monitor.authoredMergeRequests.mergeManually(request,
+                action: mode, verificationAssistant: monitor.settings.automation.assistant)
             switch outcome {
             case .merged: return .completed
             case .queued: return .queued
@@ -519,7 +523,8 @@ extension RemoteConnection: RemoteHostTransport {}
             if await monitor.attention.approveRemotely(item.id, expectedHead: head) { return .completed }
             return monitor.attention.confirmationStates[item.id] == .failed ? .uncertain : .changed
         case .prepare:
-            await monitor.runAttentionFeedback(for: item)
+            guard action.id == "prepare" else { return .changed }
+            await monitor.handleFeedbackManually(for: item)
             return monitor.attentionFeedbackAction(for: item) == .failed ? .failed : .completed
         case .handoff:
             monitor.confirmPipelineHandoff(for: item.id); return .completed
@@ -528,11 +533,13 @@ extension RemoteConnection: RemoteHostTransport {}
             await monitor.attention.confirmReReview(item.id, head: head, fingerprint: fingerprint)
             return monitor.attention.currentOpenItems.first(where: { $0.id == item.id })?.reReviewRequested == true ? .completed : .uncertain
         case .verify:
-            if item.draftProofRecoveryFailure != nil {
-                monitor.attention.retryDraftProofRecovery(item.id)
-                return .completed
+            guard let retry = MRVerificationRetry(rawValue: action.id), retry.isAvailable(for: item) else { return .changed }
+            switch retry {
+            case .authorFeedback: monitor.attention.retryAuthorFeedback(item.id)
+            case .drafts: monitor.attention.retryDraftProofRecovery(item.id)
+            case .reReview: await monitor.attention.retryReReview(item.id)
             }
-            await monitor.attention.retryReReview(item.id); return .completed
+            return .completed
         default: return .changed
         }
     }
@@ -586,7 +593,7 @@ extension RemoteConnection: RemoteHostTransport {}
             return .completed
         case .runReview:
             guard action.id == "runReview", monitor.canRunReview(for: item) else { return .changed }
-            await monitor.runReview(for: item)
+            await monitor.runReview(for: item, confirmed: monitor.manualReviewConsent(for: item))
             return monitor.assistantJobActionError == nil ? .completed : .failed
         case .publishDraft:
             guard let id = suffix("publishDraft:").flatMap(Int.init),

@@ -23,6 +23,7 @@ struct MRActionEffectTests {
     @Test func deterministicActionsSaySoAndResumedAutomationShowsTheBolt() {
         #expect(MRActionCTA.approve.symbol == nil)
         #expect(MRActionCTA.merge.symbol == nil)
+        #expect(MRActionCTA.merge.effect == .gitLabWithAICheck)
         #expect(MRActionCTA.markReady.symbol == "bolt")
         #expect(MRActionCTA.finishCommentReview.symbol == "bolt")
         #expect(MRActionCTA.publishComments.effect == .gitLab)

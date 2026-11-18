@@ -10,6 +10,12 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 
 - Resume verification and bounded repair of owned reply drafts when another follow-up is blocked on independent work. Recheck reply claims after writing tasks change, preserve existing rejection and Stop decisions, and keep publication waiting for current evidence.
 
+- Show the current publication policy before starting queued Mac reviews. On iPhone, retry author feedback, draft checks, and re-review readiness independently.
+
+- Keep the confirmed merge mode through the GitLab submission and ask for a new confirmation when the available mode changes. Show when the selected assistant may check feedback before merging.
+- Bind Mac and iPhone task buttons to the exact retry or feedback work they describe. Show the effective draft publication policy before starting a review, remaining findings beside Mac approval, and the readiness decision before requesting re-review from iPhone.
+- Identify individual automation opt-ins and let an MR follow its repository default. Save permission reductions without requiring assistant sign-in.
+
 - Choose when automatic approval can proceed. The default allows minor issues. Stricter choices require no code-related issues or no issues at all. All three consider feedback from every participant and skip resolved threads, which the verifier also skips.
 - Allow automatic approval when a fresh review disproves a GitLab Duo concern, even while that thread is open. Optional replies link to the evidence and state when the concern requires no change.
 - Resume reviews after temporary GitLab read failures, including the final reads before a worker starts and the reviewer and approval checks before a re-review request. Keep queued re-reviews across restarts and when the workflow queue fills.

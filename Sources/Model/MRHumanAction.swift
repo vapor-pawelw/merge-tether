@@ -1,5 +1,36 @@
 import Foundation
 
+enum MRVerificationRetry: String, CaseIterable {
+    case authorFeedback = "verifyAuthorFeedback"
+    case drafts = "verifyDrafts"
+    case reReview = "verifyReReview"
+
+    var label: LocalizedStringResource {
+        switch self {
+        case .authorFeedback: .MRHumanAction.mrHumanActionActionVerifyFeedback
+        case .drafts: .MRHumanAction.mrHumanActionActionRetryDraftVerification
+        case .reReview: .Menu.menuReReviewRetry
+        }
+    }
+
+    var effect: MRActionCTA {
+        switch self {
+        case .authorFeedback: .verifyFeedback
+        case .drafts: .retryDraftVerification
+        case .reReview: .verifyReReview
+        }
+    }
+
+    func isAvailable(for item: MergeRequestAttentionMonitor.Item) -> Bool {
+        guard let request = item.mergeRequest, request.state == "opened", request.sha?.isEmpty == false else { return false }
+        switch self {
+        case .authorFeedback: return item.isAuthored && item.authorFeedbackStatus?.phase == .failed
+        case .drafts: return item.draftProofRecoveryFailure != nil
+        case .reReview: return item.reReviewReadiness == .failed || item.reReviewReadiness == .unavailable
+        }
+    }
+}
+
 @MainActor
 struct PreparedReplyContext {
     let draftID: Int
@@ -106,6 +137,19 @@ struct MRHumanAction {
     let detail: String?
     let summary: String?
     let preparedReply: PreparedReplyContext?
+    private(set) var retryIntent: MRTodoIntent?
+    private(set) var retryJob: AssistantAutomationRunner.Handoff?
+
+    var executableActionID: String? {
+        switch action {
+        case .retryIntent: retryIntent.map { "intent:\($0.id)" }
+        case .retryRun: retryJob.map { "job:\($0.id)" }
+        case .handleFeedback: "prepare"
+        case .verifyFeedback: MRVerificationRetry.authorFeedback.rawValue
+        case .retryDraftVerification: MRVerificationRetry.drafts.rawValue
+        default: nil
+        }
+    }
     /// Exact source of the displayed concern, which can differ from its thread root.
     var sourceNoteID: Int? {
         switch source {
@@ -129,7 +173,7 @@ struct MRHumanAction {
         if preparedReply != nil { return .PreparedReplies.preparedRepliesReviewAction }
         return switch action {
         case .reviewRun: .MRHumanAction.mrHumanActionActionReviewRun
-        case .retryRun: .MRHumanAction.mrHumanActionActionRetryRun
+        case .retryRun: retryJob.map(Self.retryLabel) ?? .MRHumanAction.mrHumanActionActionRetryRun
         case .reviewDrafts: .MRHumanAction.mrHumanActionActionReviewDrafts
         case .verifyFeedback: .MRHumanAction.mrHumanActionActionVerifyFeedback
         case .retryDraftVerification: .MRHumanAction.mrHumanActionActionRetryDraftVerification
@@ -139,7 +183,7 @@ struct MRHumanAction {
         case .reviewHandoff: .MRHumanAction.mrHumanActionActionReviewHandoff
         case .reviewMerge: .MRHumanAction.mrHumanActionActionReviewMerge
         case .handleFeedback: .MRHumanAction.mrHumanActionActionHandleFeedback
-        case .retryIntent: .MRHumanAction.mrHumanActionActionRetryIntent
+        case .retryIntent: retryIntent.map(Self.intentLabel) ?? .MRHumanAction.mrHumanActionActionRetryIntent
         case .reviewFeedback: .MRHumanAction.mrHumanActionActionReviewFeedback
         case .reviewIssue: .MRHumanAction.mrHumanActionActionReviewIssue
         }
@@ -184,6 +228,7 @@ struct MRHumanAction {
             self.init(kind: interrupted ? .interruptedRun : .blockedRun, action: executable ? .retryRun : .reviewRun,
                       message: interrupted ? .MRHumanAction.mrHumanActionInterruptedRun : .MRHumanAction.mrHumanActionBlockedRun,
                       detail: execution.attentionExplanation, summary: currentSummary)
+            if executable { retryJob = row.latestJob }
             if let remaining, let status = item.authorFeedbackStatus { source = .finding(remaining, EvidenceContext(status)) }
             return
         }
@@ -199,6 +244,7 @@ struct MRHumanAction {
             guard let intent = row.attentionIntents.first(where: { $0.state == .failed && !row.isReconciling($0) }) else { return nil }
             self.init(kind: .intent, action: .retryIntent, message: Self.intentMessage(intent),
                       detail: intent.error.map(GlabService.redactWorkflowEvidence))
+            retryIntent = intent
             if intent.kind == .followUp { source = .followUp(intent, item.observedDiscussionFingerprint) }
             return
         }
@@ -262,6 +308,7 @@ struct MRHumanAction {
         } else if let intent {
             self.init(kind: .intent, action: .retryIntent, message: Self.intentMessage(intent),
                       detail: intent.error.map(GlabService.redactWorkflowEvidence))
+            retryIntent = intent
             if intent.kind == .followUp { source = .followUp(intent, item.observedDiscussionFingerprint) }
         } else if item.hasConflict {
             self.init(kind: .intent, action: .reviewIssue, message: .MRHumanAction.mrHumanActionConflictIntent)
@@ -373,6 +420,32 @@ struct MRHumanAction {
         case .blocked: .MRHumanAction.mrHumanActionFeedback
         case .uncertain: .MRHumanAction.mrHumanActionFeedbackUnverified
         default: .MRHumanAction.mrHumanActionReviewDecision
+        }
+    }
+
+    static func retryLabel(_ job: AssistantAutomationRunner.Handoff) -> LocalizedStringResource {
+        switch job.taskIntent {
+        case .pipelineDiagnosis: return .MRHumanAction.mrHumanActionRetryPipeline
+        case .conflictResolution: return .MRHumanAction.mrHumanActionRetryConflict
+        case .review: return .MRHumanAction.mrHumanActionRetryReview
+        case nil: break
+        }
+        switch job.workflow {
+        case .review: return .MRHumanAction.mrHumanActionRetryReview
+        case .followUp: return .MRHumanAction.mrHumanActionRetryFollowUp
+        case .draftReply: return .MRHumanAction.mrHumanActionRetryDraftReply
+        case nil: return .MRHumanAction.mrHumanActionActionRetryRun
+        }
+    }
+
+    static func intentLabel(_ intent: MRTodoIntent) -> LocalizedStringResource {
+        let failed = intent.state == .failed
+        switch intent.kind {
+        case .review: return failed ? .MRHumanAction.mrHumanActionRetryReview : .CommandCenter.commandCenterReviewRun
+        case .followUp: return failed ? .MRHumanAction.mrHumanActionRetryFollowUp : .MRHumanAction.mrHumanActionRunFollowUp
+        case .pipeline: return failed ? .MRHumanAction.mrHumanActionRetryPipeline : .MRHumanAction.mrHumanActionRunPipeline
+        case .conflict: return failed ? .MRHumanAction.mrHumanActionRetryConflict : .MRHumanAction.mrHumanActionRunConflict
+        case .refresh: return failed ? .MRHumanAction.mrHumanActionRetryRefresh : .MRHumanAction.mrHumanActionRunRefresh
         }
     }
 

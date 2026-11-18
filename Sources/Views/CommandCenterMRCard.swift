@@ -38,9 +38,6 @@ private struct CommandCenterMRCardContent: View {
     }
     let presentation: MRCardPresentation
     private var busy: Bool { presentation.busy }
-    private var nextIntent: MRTodoIntent? {
-        row.attentionIntents.first { $0.state == .failed } ?? row.attentionIntents.first { $0.state == .pending }
-    }
     private var needsCLI: Bool { !monitor.assistantDependencies.available.contains(monitor.settings.automation.assistant) }
     private var humanAction: MRHumanAction? { presentation.humanAction }
 
@@ -265,7 +262,8 @@ private struct CommandCenterMRCardContent: View {
                     primary(.Board.boardCompactSetupCli) { openSettings() }
                 } else {
                     primary(label, cta: .runReview, enabled: monitor.canRunReview(for: item)) {
-                        start { await monitor.runReview(for: item) }
+                        guard let consent = confirmManualReview(for: item, monitor: monitor) else { return }
+                        start { await monitor.runReview(for: item, confirmed: consent) }
                     }
                 }
             case .setupAgent: primary(label) { openSettings() }
@@ -283,12 +281,13 @@ private struct CommandCenterMRCardContent: View {
         case .reviewRun:
             primary(action.actionLabel) { openAttention(.assistantRuns) }
         case .retryRun:
-            if let job = row.latestJob {
+            if let job = action.retryJob {
                 primary(action.actionLabel, cta: .retryRun,
                         enabled: job.execution?.state.isActive == false
                             && monitor.availableAssistants.contains(job.key.assistant)
                             && !AssistantAutomationRunner.isWorking(on: job.key.work)) {
                     guard !isStarting else { return }
+                    if job.workflow == .review, confirmManualReview(for: item, monitor: monitor) == nil { return }
                     retryError = nil
                     start {
                         guard monitor.assistantHandoffs.contains(where: { $0.id == job.id }) else { return }
@@ -329,18 +328,12 @@ private struct CommandCenterMRCardContent: View {
             primary(action.actionLabel) { openAttention(.overview) }
         case .handleFeedback:
             primary(action.actionLabel, cta: .handleFeedback) {
-                start {
-                    if let status = item.authorFeedbackStatus, !status.followUpNoteIDs.isEmpty,
-                       let request = item.authoredRequest {
-                        await monitor.runVerifiedAuthorFeedback(request: request, noteIDs: status.followUpNoteIDs,
-                                                               fingerprint: status.fingerprint)
-                    } else { await monitor.runAttentionFeedback(for: item) }
-                }
+                start { await monitor.handleFeedbackManually(for: item) }
             }
         case .retryIntent:
-            if let intent = nextIntent {
+            if let intent = action.retryIntent {
                 primary(action.actionLabel, cta: MRActionCTA(intent: intent.kind)) {
-                    start { await monitor.runMRTodoIntent(id: intent.id) }
+                    start { await runConfirmedIntent(intent, monitor: monitor) }
                 }
             } else {
                 primary(action.actionLabel) { openAttention(.overview) }

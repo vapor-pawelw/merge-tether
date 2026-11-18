@@ -60,11 +60,56 @@ import MergeTetherRemote
     @Test func markReadyDoesNotDisconnectThePrimaryFeedbackAction() {
         let card = RemoteCard(id: "mr:1:2", title: "Draft: MR", project: "g/p", url: nil,
             actions: [.init(id: "prepare", kind: .prepare, token: "feedback"),
+                      .init(id: "intent:conflict", kind: .prepare, token: "conflict"),
                       .init(id: "markReady", kind: .markReady, token: "ready")],
             primaryCTA: .init(title: "Handle feedback", destination: .feedback))
-        let bound = RemoteBoardAdapter.bindingPrimaryAction(card, humanAction: .handleFeedback, nextStep: .monitoring)
+        let bound = RemoteBoardAdapter.bindingPrimaryAction(card, humanAction: .handleFeedback, actionID: "prepare", nextStep: .monitoring)
         #expect(bound.primaryCTA?.actionID == "prepare")
         #expect(bound.presentation?.secondaryCTA?.actionID == "markReady")
+    }
+
+    @Test func verificationRetriesHaveDistinctActionsWhenFailuresOverlap() throws {
+        var item = try self.item()
+        let request = try MRDependencyPresentationTests().request(2, project: 1)
+        item.mergeRequest = request
+        item.isAuthored = true
+        item.authorFeedbackStatus = .init(head: request.sha!, fingerprint: "feedback", phase: .failed)
+        item.draftProofRecoveryFailure = "Draft check failed"
+        item.reReviewReadiness = .failed
+        let card = RemoteBoardAdapter.card(item, account: "author7@\(request.webURL.host!)")
+        let actions = card.actions.filter { $0.kind == .verify }
+
+        #expect(Set(actions.map(\.id)) == ["verifyAuthorFeedback", "verifyDrafts", "verifyReReview"])
+        #expect(Set(actions.compactMap(\.label)).count == 3)
+        #expect(Set(actions.map(\.token)).count == 3)
+
+        var presented = card
+        presented.primaryCTA = .init(title: "Verify feedback again", destination: .feedback)
+        let selected = RemoteBoardAdapter.bindingPrimaryAction(presented, humanAction: .verifyFeedback,
+            actionID: "verifyAuthorFeedback", nextStep: .monitoring)
+        #expect(selected.primaryCTA?.actionID == "verifyAuthorFeedback")
+
+        item.draftProofRecoveryFailure = nil
+        item.reReviewReadiness = nil
+        let feedbackOnly = RemoteBoardAdapter.card(item, account: "author7@\(request.webURL.host!)")
+        #expect(feedbackOnly.actions.filter { $0.kind == .verify }.map(\.id) == ["verifyAuthorFeedback"])
+    }
+
+    @Test func manualReReviewConfirmationDescribesTheUncertaintyAndBindsItToTheAction() throws {
+        var item = MergeRequestAttentionMonitor.Item(id: .init(projectID: 1, iid: 2), title: "MR",
+            url: URL(string: "https://gitlab.example.test/g/p/-/merge_requests/2")!, isAuthored: true)
+        item.mergeRequest = try MRDependencyPresentationTests().request(2, project: 1)
+        item.canConfirmReReview = true
+        item.reReviewFingerprint = "current"
+        item.reReviewReadiness = .uncertain([.init(noteID: 42, reason: "The required test could not be verified.")])
+        let action = try #require(RemoteBoardAdapter.card(item, account: "me").actions.first { $0.kind == .reReview })
+        #expect(action.confirmationText?.contains("The required test could not be verified.") == true)
+        #expect(action.confirmationText?.contains(String(localized: .Menu.menuReReviewConfirmMessage)) == true)
+
+        item.reReviewReadiness = .failed
+        let failed = try #require(RemoteBoardAdapter.card(item, account: "me").actions.first { $0.kind == .reReview })
+        #expect(failed.token != action.token)
+        #expect(failed.confirmationText?.contains(String(localized: .Menu.menuReReviewFailed)) == true)
     }
 
     @Test(arguments: ["none", "overview", "drafts"])
@@ -88,33 +133,34 @@ import MergeTetherRemote
         #expect(RemoteBoardAdapter.bindingPrimaryAction(card, humanAction: nil, nextStep: .runReview) == card)
     }
 
-    @Test(arguments: ["retry", "verify", "draftVerification", "feedback", "intent", "review", "missing", "ambiguous"])
+    @Test(arguments: ["retry", "verify", "draftVerification", "feedback", "intent", "review", "missing", "different"])
     func executableCTAsBindTheExactAvailableActionRatherThanOpeningGenericDetails(_ scenario: String) {
         // given
         let human: MRHumanAction.Action? = switch scenario {
-        case "retry", "missing", "ambiguous": .retryRun
+        case "retry", "missing", "different": .retryRun
         case "verify": .verifyFeedback
         case "draftVerification": .retryDraftVerification
         case "feedback": .handleFeedback
         case "intent": .retryIntent
         default: nil
         }
-        let kind: RemoteActionKind = scenario == "retry" || scenario == "missing" || scenario == "ambiguous" ? .retryJob
+        let kind: RemoteActionKind = scenario == "retry" || scenario == "missing" || scenario == "different" ? .retryJob
             : scenario == "verify" || scenario == "draftVerification" ? .verify
             : scenario == "review" ? .runReview : .prepare
-        let id = scenario == "intent" ? "intent:fixture" : "exact"
+        let id = scenario == "intent" ? "intent:fixture" : scenario == "review" ? "runReview" : "exact"
         var actions = [RemoteAction(id: id, kind: kind, token: "current")]
         if scenario == "missing" { actions = [] }
-        if scenario == "ambiguous" { actions.append(.init(id: "another", kind: kind, token: "other")) }
+        if scenario == "different" { actions = [.init(id: "another", kind: kind, token: "other")] }
+        if scenario == "retry" { actions.append(.init(id: "another", kind: kind, token: "other")) }
         if scenario == "intent" { actions.append(.init(id: "feedback", kind: .prepare, token: "other")) }
         let card = RemoteCard(id: "mr:1:2", title: "MR", project: "g/p", url: nil, actions: actions,
             primaryCTA: .init(title: "Run", destination: .overview))
         // when
-        let bound = RemoteBoardAdapter.bindingPrimaryAction(card, humanAction: human, nextStep: .runReview)
+        let bound = RemoteBoardAdapter.bindingPrimaryAction(card, humanAction: human, actionID: human == nil ? nil : id, nextStep: .runReview)
         // then
         #expect(bound.primaryCTA?.destination == .actions)
-        #expect(bound.primaryCTA?.actionID == (["missing", "ambiguous"].contains(scenario) ? nil : id))
-        if ["missing", "ambiguous"].contains(scenario) {
+        #expect(bound.primaryCTA?.actionID == (["missing", "different"].contains(scenario) ? nil : id))
+        if ["missing", "different"].contains(scenario) {
             #expect(bound.primaryCTA?.title == String(localized: .Remote.remoteActionOnMac))
         }
         #expect(bound.actions == actions)
@@ -246,7 +292,8 @@ import MergeTetherRemote
                 #expect(card.primaryCTA?.destination == .feedback || card.presentation?.secondaryCTA?.destination == .feedback)
                 #expect(!card.actions.contains { [.verify, .merge, .enqueueMerge, .resolveThreads].contains($0.kind) })
             }
-            #expect(!card.actions.contains { $0.kind == .verify })
+            #expect(card.actions.filter { $0.kind == .verify }.map(\.id)
+                == (gate == "failed" ? ["verifyAuthorFeedback"] : []))
             if gate == "train" { #expect(card.detail == request.mergeTrainConflict?.noteURL.absoluteString) }
         }
     }

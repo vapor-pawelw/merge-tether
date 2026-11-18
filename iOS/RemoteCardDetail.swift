@@ -140,7 +140,21 @@ struct RemoteCardDetail: View {
                     let approval = approvalID
                     confirmation = nil; confirmationCard = nil; approvalID = nil
                     Task { await model.perform(card: card, action: action, approvalID: approval) }
-                } label: { Text(confirmation?.kind == .deleteDraft ? .CommentReview.commentReviewDelete : .Remote.remoteConfirm) }
+                } label: {
+                    switch confirmation?.kind {
+                    case .deleteDraft: Text(.CommentReview.commentReviewDelete)
+                    case .reReview, .merge, .enqueueMerge: Text(confirmation?.kind.title ?? .Remote.remoteConfirm)
+                    case .prepare, .retryJob, .verify:
+                        if let label = confirmation?.label {
+                            Text(verbatim: label)
+                        } else if let cta = confirmationCard?.primaryCTA, cta.actionID == confirmation?.id {
+                            Text(verbatim: cta.title)
+                        } else {
+                            Text(.Remote.remoteConfirm)
+                        }
+                    default: Text(.Remote.remoteConfirm)
+                    }
+                }
                 Button(.Remote.remoteCancel, role: .cancel) { confirmation = nil; confirmationCard = nil; approvalID = nil; model.cancelApproval() }
             } message: {
                 if confirmation?.kind == .approve, let card = confirmationCard {
@@ -149,6 +163,7 @@ struct RemoteCardDetail: View {
                         + Text(.RemoteSecurity.remoteSecurityCommit) + Text(verbatim: " " + (card.head ?? "") + "\n")
                         + Text(.RemoteSecurity.remoteSecurityAccount) + Text(verbatim: " " + confirmationAccount)
                 } else if let text = confirmation?.confirmationText { Text(verbatim: text) }
+                else if confirmation?.kind == .reReview { Text(.Remote.remoteReReviewConfirmation) }
                 else { Text(confirmation?.kind == .deleteDraft ? .CommentReview.commentReviewDeleteHelp : .Remote.remoteConfirmHelp) }
             }
             .onDisappear { model.cancelApproval(); model.cancelDetails() }

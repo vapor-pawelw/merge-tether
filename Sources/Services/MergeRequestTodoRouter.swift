@@ -148,7 +148,7 @@ final class MergeRequestTodoRouter {
         return acknowledged
     }
 
-    func run(_ id: UUID, manual: Bool) async {
+    func run(_ id: UUID, manual: Bool, reviewIsConfirmed: (GitLabMergeRequest) -> Bool = { _ in true }) async {
         guard launching.insert(id).inserted else { return }
         defer { launching.remove(id) }
         guard manual || settings.automaticWritesAllowed else { return }
@@ -233,6 +233,7 @@ final class MergeRequestTodoRouter {
                   request.projectID == original.target.projectID, request.iid == iid,
                   request.webURL.isGitLabMergeRequest(host: original.target.host, iid: iid),
                   let head = request.sha, !settings.ignoredMergeRequests.contains(original.target),
+                  !manual || original.kind != .review || reviewIsConfirmed(request),
                   manual || shouldRunAutomatically(original.kind, request: request, target: original.target, workflowEventKind: original.workflowEventKind) else {
                 if manual {
                     settings.recordAutomationEvent(target: original.target, action: .retry, origin: .manual, state: .blocked,
@@ -267,6 +268,7 @@ final class MergeRequestTodoRouter {
             else { jobID = try await launch(current, manual: manual) }
             guard isCurrentRun(),
                   !settings.ignoredMergeRequests.contains(original.target),
+                  !manual || original.kind != .review || reviewIsConfirmed(request),
                   invocationConfiguration.preservingScope(from: settings.automation) == settings.automation,
                   manual || shouldRunAutomatically(original.kind, request: request, target: original.target, workflowEventKind: original.workflowEventKind) else {
                 cancelJob(jobID, settings)

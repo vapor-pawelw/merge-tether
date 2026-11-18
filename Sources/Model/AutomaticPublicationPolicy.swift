@@ -73,11 +73,18 @@ struct AutomaticPublicationPolicy: Equatable, Sendable {
               request.author.id > 0, request.webURL.isGitLabMergeRequest(host: host, iid: request.iid) else { return false }
         // A standalone status report becomes an unresolved self-discussion in GitLab.
         if request.author.id == userID, draft.discussionID?.isEmpty != false { return false }
-        if mode == .all { return true }
-        guard mode != .filtered || restrictions.hasConditions,
-              matches(restrictions.repositories, host: host, id: request.projectID),
-              matches(restrictions.mergeRequestAuthors, host: host, id: request.author.id) else { return false }
-        return !requiresSources || draft.discussionID.map { !$0.isEmpty } == true
+        return covers(request, host: host) && (!requiresSources || draft.discussionID.map { !$0.isEmpty } == true)
+    }
+
+    func covers(_ request: GitLabMergeRequest, host: String) -> Bool {
+        switch mode {
+        case .manual: return false
+        case .all: return true
+        case .filtered where !restrictions.hasConditions: return false
+        case .filtered, .aiReplies:
+            return matches(restrictions.repositories, host: host, id: request.projectID)
+                && matches(restrictions.mergeRequestAuthors, host: host, id: request.author.id)
+        }
     }
 
     var requiresAI: Bool { mode == .aiReplies || (mode == .filtered && restrictions.requireAI) }

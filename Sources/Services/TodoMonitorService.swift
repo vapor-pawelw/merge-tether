@@ -597,11 +597,15 @@ final class TodoMonitorService {
         currentMRTodoIntents.filter { $0.target.projectID == item.id.projectID && $0.target.iid == item.id.iid && $0.state != .completed }
     }
 
-    func runMRTodoIntent(id: UUID) async {
-        await mrTodoRouter.run(id, manual: true)
+    func runMRTodoIntent(id: UUID, confirmedReview: ManualReviewConsent? = nil) async {
+        guard let intent = currentMRTodoIntents.first(where: { $0.id == id }),
+              intent.kind != .review || confirmedReview == manualReviewConsent(for: reviewRequest(for: intent)) else { return }
+        await mrTodoRouter.run(id, manual: true) { request in
+            confirmedReview == self.manualReviewConsent(for: request)
+        }
     }
 
-    func adoptMRTodoProposal(_ todo: Todo) async {
+    func adoptMRTodoProposal(_ todo: Todo, confirmReview: (MRTodoIntent) -> ManualReviewConsent? = { _ in nil }) async {
         guard let iid = todo.target.iid, let host = glab.resolvedHost,
               let canonical = todo.targetURL.gitLabTodoMergeRequestURL(host: host, iid: iid),
               let target = scopeTarget(projectID: todo.project.id, iid: iid, url: canonical) else { return }
@@ -620,7 +624,12 @@ final class TodoMonitorService {
         await routeMRTodos(host: target.host, username: target.username, manuallyAdopting: target)
         guard !Task.isCancelled else { return }
         for intent in currentMRTodoIntents where intent.target == target && intent.state != .completed {
-            await mrTodoRouter.run(intent.id, manual: true)
+            if intent.kind == .review {
+                guard let consent = confirmReview(intent) else { continue }
+                await runMRTodoIntent(id: intent.id, confirmedReview: consent)
+            } else {
+                await runMRTodoIntent(id: intent.id)
+            }
         }
         await refreshNow()
     }
@@ -1080,6 +1089,14 @@ final class TodoMonitorService {
 
     func runAttentionFeedback(for item: MergeRequestAttentionMonitor.Item, manual: Bool = true) async {
         await feedbackLaunches.runAttentionFeedback(for: item, manual: manual)
+    }
+
+    func handleFeedbackManually(for item: MergeRequestAttentionMonitor.Item) async {
+        if let status = item.authorFeedbackStatus, !status.followUpNoteIDs.isEmpty, let request = item.authoredRequest {
+            await runVerifiedAuthorFeedback(request: request, noteIDs: status.followUpNoteIDs, fingerprint: status.fingerprint)
+        } else {
+            await runAttentionFeedback(for: item)
+        }
     }
 
     func runVerifiedAuthorFeedback(request: GitLabMergeRequest, noteIDs: Set<Int>, fingerprint: String,
