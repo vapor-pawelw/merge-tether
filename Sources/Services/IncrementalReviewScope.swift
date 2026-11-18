@@ -53,6 +53,13 @@ extension GlabService {
 /// What a reviewer's follow-up pass on another author's MR may cover. A review pass assesses the MR once;
 /// later passes look only at what changed since, so unrelated edits never reopen the whole MR.
 struct IncrementalReviewScope: Equatable, Sendable {
+    static let manualReviewIntroduction = "Perform an explicit user-requested review or re-review of this merge request."
+    static let fullReviewInstructions = """
+        Full review from scratch, explicitly requested by the user: review the entire current diff and every current \
+        discussion as if for the first time. Earlier verdicts and scope limits do not apply. Still avoid duplicating \
+        existing findings, published comments or drafts.
+        """
+
     var reviewedHead: String?
     var currentHead: String?
     /// True when the MR's own changes are identical to the reviewed head's (a rebase or target merge only).
@@ -61,13 +68,7 @@ struct IncrementalReviewScope: Equatable, Sendable {
     var fullReview = false
 
     var instructions: String {
-        if fullReview {
-            return """
-                Full review from scratch, explicitly requested by the user: review the entire current diff and every current \
-                discussion as if for the first time. Earlier verdicts and scope limits do not apply. Still avoid duplicating \
-                existing findings, published comments or drafts.
-                """
-        }
+        if fullReview { return Self.fullReviewInstructions }
         var parts: [String] = []
         if let reviewedHead, currentHead == nil {
             parts.append("""

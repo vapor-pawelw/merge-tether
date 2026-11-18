@@ -119,8 +119,8 @@ enum AssistantAutomationRunner {
         /// Durable lineage for the single automatic reconciliation of a reviewer revision.
         var feedbackRecoveryRootID: UUID? = nil
         var feedbackDecisionRevision: String? = nil
-        /// The commit for which the saved task instructions were selected.
-        var reviewScopeHeadSHA: String? = nil
+        /// An explicitly requested full review keeps its scope across retries.
+        var reviewFromScratch: Bool? = nil
 
         var deliveredFeedbackTodos: [Todo.FeedbackIdentity] {
             if let execution { return execution.state == .succeeded ? feedbackTodos ?? [] : [] }
@@ -246,7 +246,8 @@ enum AssistantAutomationRunner {
         glab: GlabService? = nil,
         draftRepair: DraftReplyRepair.Context? = nil,
         retryOf: UUID? = nil,
-        feedbackRecoveryRootID: UUID? = nil
+        feedbackRecoveryRootID: UUID? = nil,
+        reviewFromScratch: Bool = false
     ) async throws -> Handoff {
         guard mrWorkflow != .draftReply else { throw AssistantJobExecutor.ExecutionError.disabledPermission }
         let automaticConfiguration = configurationSnapshot ?? settings.automation
@@ -270,6 +271,8 @@ enum AssistantAutomationRunner {
                 $0.id == retryOf && $0.key.work == work && $0.key.username == username
             }
         } else { nil }
+        let fullReview = review && manual && (reviewFromScratch
+            || reviewRetry.map { requestedFullReview($0, history: settings.assistantHandoffs) } == true)
         let headSHA: String?
         var reviewer: GitLabAuthenticatedUser?
         if jobCoordinator == nil || configurationSnapshot != nil || (reviewRetry != nil && glab != nil) {
@@ -284,12 +287,9 @@ enum AssistantAutomationRunner {
         let taskPrompt: String
         if let reviewRetry {
             guard let headSHA, !headSHA.isEmpty else { throw AssistantJobExecutor.ExecutionError.headChanged }
-            if reviewRetry.reviewScopeHeadSHA == headSHA, reviewRetry.expectedHeadSHA == headSHA {
-                taskPrompt = prompt
-            } else {
-                taskPrompt = retryTaskPrompt(currentReviewTask(work: work, head: headSHA, user: reviewer, settings: settings),
-                    previous: reviewRetry)
-            }
+            // The head can remain unchanged while the discussions have moved on.
+            taskPrompt = retryTaskPrompt(currentReviewTask(work: work, head: headSHA, user: reviewer,
+                settings: settings, fullReview: fullReview), previous: reviewRetry)
         } else {
             taskPrompt = prompt
         }
@@ -396,7 +396,7 @@ enum AssistantAutomationRunner {
             resolvesOwnThreads: (isReview || mrWorkflow == .review) ? resolveOwnThreads : nil,
             manual: manual, expectedHeadSHA: headSHA, configurationSnapshot: manual ? settings.automation : automaticConfiguration,
             retryOf: retryOf, feedbackRecoveryRootID: feedbackRecoveryRootID, feedbackDecisionRevision: decisionContext,
-            reviewScopeHeadSHA: review && pipelineReservation == nil && (expectedHeadSHA != nil || reviewRetry != nil) ? headSHA : nil
+            reviewFromScratch: fullReview ? true : nil
         )
         for (noteID, revision) in verifiedFeedbackNotes ?? [:] {
             settings.authorFeedbackAttempts.insert(.init(target: target, noteID: noteID, revision: revision,
@@ -501,26 +501,51 @@ enum AssistantAutomationRunner {
     }
 
     private static func currentReviewTask(work: MergeRequestWork, head: String, user: GitLabAuthenticatedUser?,
-                                          settings: SettingsManager) -> String {
-        let reviewedHead = user.flatMap {
+                                          settings: SettingsManager, fullReview: Bool) -> String {
+        let reviewedHead = fullReview ? nil : user.flatMap {
             ReviewVerdictStore.authenticatedVerdict(host: work.host, projectID: work.projectID, iid: work.iid,
                 user: $0, settings: settings)?.headSHA
         }
-        let scope = IncrementalReviewScope(reviewedHead: reviewedHead, currentHead: head).instructions
+        let scope = IncrementalReviewScope(reviewedHead: reviewedHead, currentHead: head, fullReview: fullReview).instructions
         let task = """
             Re-review the merge request at the checked current head.
-            Review the current diff and discussions, verify earlier findings and author replies, and
-            prepare warranted private GitLab draft findings or replies without duplicates.
+            Review the current diff and discussions, including all new or edited notes even when the commit is unchanged.
+            Verify earlier findings and author replies, and prepare warranted private GitLab draft findings or replies without duplicates.
             """
         return scope.isEmpty ? task : task + "\n\n" + scope
+    }
+
+    private static func requestedFullReview(_ stopped: Handoff, history: [Handoff]) -> Bool {
+        var current = stopped
+        var visited: Set<UUID> = []
+        while visited.insert(current.id).inserted {
+            if current.reviewFromScratch == true { return true }
+            if current.manual == true, let prompt = current.taskPrompt {
+                let task = originalTaskPrompt(prompt)
+                if task.hasPrefix(IncrementalReviewScope.manualReviewIntroduction + "\nExpected remote HEAD at preflight: "),
+                   task.hasSuffix("\n" + IncrementalReviewScope.fullReviewInstructions) { return true }
+            }
+            guard let priorID = current.retryOf,
+                  let prior = history.first(where: {
+                      $0.id == priorID && $0.key == stopped.key && $0.pipelineReservation == nil
+                          && ($0.workflow == .review || $0.reviewModel != nil)
+                  })
+            else { return false }
+            current = prior
+        }
+        return false
+    }
+
+    private static let retryContextMarker = "\n\nMergeTether retry context:\n"
+
+    private static func originalTaskPrompt(_ prompt: String) -> String {
+        prompt.components(separatedBy: retryContextMarker).first ?? prompt
     }
 
     /// Reconcile previous effects without accumulating obsolete retry instructions.
     static func retryTaskPrompt(_ prompt: String, previous: Handoff) -> String {
         let directory = previous.execution?.workingDirectory ?? "(no local workspace was created)"
-        let marker = "\n\nMergeTether retry context:\n"
-        let original = prompt.components(separatedBy: marker).first ?? prompt
-        return original + marker + """
+        return originalTaskPrompt(prompt) + retryContextMarker + """
             This is a deliberate retry of run \(previous.id.uuidString). It may already have performed some actions before stopping.
             Previous run files: \(directory)
             Read its instructions, cli-output, completion record if present, and local git status/log before changing anything.
