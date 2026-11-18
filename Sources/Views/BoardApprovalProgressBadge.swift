@@ -2,7 +2,7 @@ import SwiftUI
 
 struct BoardApprovalProgressBadge: View {
     let progress: MergeRequestApprovalProgress?
-    var reviewers: [Todo.Author] = []
+    var reviewers: [Todo.Author]? = nil
     /// Signed-in username; the viewer's own approval is shown only on MRs they review.
     var viewerUsername: String? = nil
     var isOwnMergeRequest = true
@@ -12,13 +12,15 @@ struct BoardApprovalProgressBadge: View {
     @State private var hoverTask: Task<Void, Never>?
 
     private var people: [MergeRequestApprovalProgress.Participant] {
+        let reviewers = reviewers ?? []
         let all = progress?.participants(reviewers: reviewers) ?? MergeRequestApprovalProgress.participants(reviewers: reviewers)
         guard let viewer = viewerApproval?.author else { return all }
         return all.filter { $0.id == viewer.id } + all.filter { $0.id != viewer.id }
     }
     private var viewerApproval: MergeRequestApprovalProgress.ViewerApproval? {
-        progress?.viewerApproval(username: viewerUsername, reviewers: reviewers, isOwnMergeRequest: isOwnMergeRequest)
+        progress?.viewerApproval(username: viewerUsername, reviewers: reviewers ?? [], isOwnMergeRequest: isOwnMergeRequest)
     }
+    private var assignedReviewerCount: Int? { MergeRequestApprovalProgress.assignedReviewerCount(reviewers) }
     private var satisfied: Bool {
         progress?.isSatisfied ?? false
     }
@@ -32,9 +34,12 @@ struct BoardApprovalProgressBadge: View {
         else { Text(.Board.boardApprovalsUnavailable) }
     }
     private var label: Text {
+        let count = assignedReviewerCount.map {
+            approvalCount + Text(verbatim: " · ") + Text(.Board.boardApprovalsAssignedReviewers($0))
+        } ?? approvalCount
         let explanation = requiredApprovalPending
-            ? approvalCount + Text(verbatim: " · ") + Text(.Board.boardApprovalsRequiredPending)
-            : approvalCount
+            ? count + Text(verbatim: " · ") + Text(.Board.boardApprovalsRequiredPending)
+            : count
         switch viewerApproval {
         case .approved: return Text(.Board.boardApprovalsViewerApproved) + Text(verbatim: " · ") + explanation
         case .noLongerCounts: return Text(.Board.boardApprovalsViewerNoLongerCounts) + Text(verbatim: " · ") + explanation
@@ -43,7 +48,8 @@ struct BoardApprovalProgressBadge: View {
     }
 
     var body: some View {
-        if progress.map({ $0.required > 0 || $0.completed > 0 }) ?? true || viewerApproval != nil {
+        let assigned = assignedReviewerCount
+        if progress.map({ $0.required > 0 || $0.completed > 0 }) ?? true || viewerApproval != nil || assigned != nil {
             Button { hoverTask?.cancel(); showingPeople = true } label: {
                 HStack(spacing: 4) {
                     HStack(spacing: 3) {
@@ -53,6 +59,7 @@ struct BoardApprovalProgressBadge: View {
                         } else if let progress {
                             Text(.Board.boardApprovalRatio(progress.completed, progress.required))
                         } else { Text(.Board.boardApprovalsUnknownRatio) }
+                        if let assigned { Text(.Board.boardApprovalsReviewerCountBadge(assigned)) }
                     }
                     .font(.caption2).monospacedDigit().foregroundStyle(satisfied ? Color.green : .secondary)
                     if let viewerApproval { viewerSegment(viewerApproval) }

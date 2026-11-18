@@ -328,7 +328,8 @@ struct RemoteCardView: View {
             }
             if card.id.hasPrefix("mr:") {
                 RemoteApprovalProgressBadge(progress: card.approvals, people: card.presentation?.approvalPeople,
-                    viewerApprovalID: card.presentation?.viewerApprovalID)
+                    viewerApprovalID: card.presentation?.viewerApprovalID,
+                    assignedReviewerCount: card.presentation?.assignedReviewerCount)
             }
         }
     }

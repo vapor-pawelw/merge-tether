@@ -89,7 +89,8 @@ import MergeTetherRemote
                 isOwnMergeRequest: item.isAuthored || item.mergeRequest == nil
                     || item.mergeRequest?.author.username.lowercased() == username.lowercased())
             card.presentation = .init(repository: card.project.split(separator: "/").last.map(String.init) ?? card.project,
-                approvalPeople: approvals.people, viewerApprovalID: approvals.viewerApprovalID)
+                approvalPeople: approvals.people, viewerApprovalID: approvals.viewerApprovalID,
+                assignedReviewerCount: MergeRequestApprovalProgress.assignedReviewerCount(item.mergeRequest?.reviewers))
         }
         return card
     }
@@ -449,7 +450,8 @@ import MergeTetherRemote
         card.mergeRequestIID = job.key.work.iid
         card.presentation = .init(repository: card.project.split(separator: "/").last.map(String.init) ?? "",
             status: job.progressStatus(intents: intents, conflictReceipts: conflictReceipts),
-            working: true, statusSymbol: MRActionEffect.agent.symbol)
+            working: true, statusSymbol: MRActionEffect.agent.symbol,
+            assignedReviewerCount: original.presentation?.assignedReviewerCount)
         return card
     }
 
@@ -519,7 +521,8 @@ import MergeTetherRemote
             steps: steps, currentStep: model.stepChain?.current,
             pendingDrafts: pendingDrafts, statusSymbol: model.activityEffect?.symbol,
             approvalPeople: model.row.evidenceMatchesCatalogContext ? original.presentation?.approvalPeople : nil,
-            viewerApprovalID: model.row.evidenceMatchesCatalogContext ? original.presentation?.viewerApprovalID : nil)
+            viewerApprovalID: model.row.evidenceMatchesCatalogContext ? original.presentation?.viewerApprovalID : nil,
+            assignedReviewerCount: MergeRequestApprovalProgress.assignedReviewerCount(model.row.displayRequest?.reviewers))
         if model.actionsBlocked { card.actions = [] }
         return card
     }

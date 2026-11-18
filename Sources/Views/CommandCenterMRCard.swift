@@ -195,7 +195,7 @@ private struct CommandCenterMRCardContent: View {
             if let finishedState { FinishedMergeRequestBadge(state: finishedState) }
             else if isDraft { BoardDraftBadge() }
             if finishedState == nil {
-                BoardApprovalProgressBadge(progress: row.displayItem.approvalProgress, reviewers: row.displayRequest?.reviewers ?? [],
+                BoardApprovalProgressBadge(progress: row.displayItem.approvalProgress, reviewers: row.displayRequest?.reviewers,
                     viewerUsername: monitor.glab.currentUsername, isOwnMergeRequest: row.isOwnMergeRequest(viewer: monitor.glab.currentUsername))
             }
             HStack(spacing: 0) {

@@ -33,6 +33,12 @@ import Testing
         #expect(pending.fittingSize.height <= satisfied.fittingSize.height + 1)
     }
 
+    @Test func showsAssignedReviewersEvenWithoutRequiredApprovals() {
+        let badge = BoardApprovalProgressBadge(progress: MergeRequestApprovalProgress(completed: 0, required: 0),
+            reviewers: [me, other])
+        #expect(NSHostingView(rootView: badge).fittingSize.width > 0)
+    }
+
     private let me = Todo.Author(id: 7, username: "Me", name: "Me Myself", avatarURL: nil)
     private let other = Todo.Author(id: 9, username: "other", name: "Other", avatarURL: nil)
 

@@ -27,6 +27,10 @@ struct MergeRequestApprovalProgress: Equatable, Sendable {
         Self.participants(approvedBy: approvedBy, reviewers: reviewers, history: reviewHistory, approvalDates: approvalDates)
     }
 
+    static func assignedReviewerCount(_ reviewers: [Todo.Author]?) -> Int? {
+        reviewers.map { Set($0.map(\.id)).count }
+    }
+
     /// The signed-in reviewer's own approval on someone else's MR. Returns nil for the
     /// viewer's own MR, an unknown viewer, or a viewer who never approved.
     enum ViewerApproval: Equatable {

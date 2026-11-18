@@ -84,14 +84,18 @@ public struct RemoteCardText: Codable, Equatable, Sendable {
     public var pendingDrafts: String?
     public var approvalPeople: [RemoteApprovalPerson]?
     public var viewerApprovalID: Int?
+    /// GitLab's reviewer assignments, independent of approval or discussion participation.
+    public var assignedReviewerCount: Int?
     public init(author: String? = nil, repository: String, draftBadge: String? = nil,
                 status: String? = nil, nextStep: String? = nil, working: Bool = false,
                 chips: [RemoteCardChip] = [], secondaryCTA: RemoteCardCTA? = nil,
                 authorUsername: String? = nil, authorAvatarURL: URL? = nil,
                 requirements: [String]? = nil, steps: [String]? = nil, currentStep: Int? = nil,
                 pendingDrafts: String? = nil, statusSymbol: String? = nil,
-                approvalPeople: [RemoteApprovalPerson]? = nil, viewerApprovalID: Int? = nil) {
+                approvalPeople: [RemoteApprovalPerson]? = nil, viewerApprovalID: Int? = nil,
+                assignedReviewerCount: Int? = nil) {
         self.approvalPeople = approvalPeople; self.viewerApprovalID = viewerApprovalID
+        self.assignedReviewerCount = assignedReviewerCount
         self.pendingDrafts = pendingDrafts
         self.requirements = requirements; self.steps = steps; self.currentStep = currentStep
         self.author = author; self.authorUsername = authorUsername; self.authorAvatarURL = authorAvatarURL

@@ -5,6 +5,7 @@ struct RemoteApprovalProgressBadge: View {
     let progress: RemoteApprovalProgress?
     var people: [RemoteApprovalPerson]? = nil
     var viewerApprovalID: Int? = nil
+    var assignedReviewerCount: Int? = nil
     @State private var showingPeople = false
 
     private var details: RemoteApprovalDetails {
@@ -23,9 +24,12 @@ struct RemoteApprovalProgressBadge: View {
         let count = if let progress, progress.required == 0 { Text(.Board.boardApprovalsReceived(received)) }
             else if let progress { Text(.Board.boardApprovalsHelp(received, progress.required)) }
             else { Text(.Board.boardApprovalsUnavailable) }
+        let reviewerDetails = assignedReviewerCount.map {
+            count + Text(verbatim: " · ") + Text(.Board.boardApprovalsAssignedReviewers($0))
+        } ?? count
         let status = requiredApprovalPending
-            ? count + Text(verbatim: " · ") + Text(.Board.boardApprovalsRequiredPending)
-            : count
+            ? reviewerDetails + Text(verbatim: " · ") + Text(.Board.boardApprovalsRequiredPending)
+            : reviewerDetails
         if let viewer {
             return Text(viewer.status == .approved ? .Board.boardApprovalsViewerApproved : .Board.boardApprovalsViewerNoLongerCounts)
                 + Text(verbatim: " · ") + status
@@ -34,7 +38,7 @@ struct RemoteApprovalProgressBadge: View {
     }
 
     var body: some View {
-        if progress.map({ $0.required > 0 || received > 0 }) ?? true || viewer != nil {
+        if progress.map({ $0.required > 0 || received > 0 }) ?? true || viewer != nil || assignedReviewerCount != nil {
             Button { showingPeople = true } label: {
                 HStack(spacing: 4) {
                     HStack(spacing: 3) {
@@ -42,6 +46,9 @@ struct RemoteApprovalProgressBadge: View {
                         if let progress, progress.required == 0 { Text(verbatim: "\(received)") }
                         else if let progress { Text(.Board.boardApprovalRatio(received, progress.required)) }
                         else { Text(.Board.boardApprovalsUnknownRatio) }
+                        if let assignedReviewerCount {
+                            Text(.Board.boardApprovalsReviewerCountBadge(assignedReviewerCount))
+                        }
                     }
                     .font(.caption2).monospacedDigit().foregroundStyle(complete ? Color.green : .secondary)
                     if let viewer {

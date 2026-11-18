@@ -4,6 +4,31 @@ import MergeTetherRemote
 @testable import GitLabTodos
 
 @MainActor @Suite struct RemoteBoardAdapterTests {
+    @Test(arguments: ["assigned", "none", "unavailable"])
+    func phoneCardCountsAssignedReviewersSeparatelyFromApprovalParticipants(_ scenario: String) throws {
+        var item = try item()
+        let request = try MRDependencyPresentationTests().request(2, project: 1, author: 30)
+        let me = Todo.Author(id: 7, username: "me", name: "Reviewer", avatarURL: nil)
+        let assigned = Todo.Author(id: 8, username: "assigned", name: "Assigned", avatarURL: nil)
+        let outside = Todo.Author(id: 9, username: "outside", name: "Outside approver", avatarURL: nil)
+        var json = try #require(JSONSerialization.jsonObject(with: JSONEncoder().encode(request)) as? [String: Any])
+        if scenario != "unavailable" {
+            json["reviewers"] = try JSONSerialization.jsonObject(with: JSONEncoder().encode(scenario == "assigned" ? [me, assigned, me] : []))
+        } else { json.removeValue(forKey: "reviewers") }
+        item.mergeRequest = try JSONDecoder().decode(GitLabMergeRequest.self, from: JSONSerialization.data(withJSONObject: json))
+        item.approvalProgress = .init(completed: 2, required: 2, approvedBy: [me, outside])
+        let card = RemoteBoardAdapter.card(item, account: "me@host")
+        let projected = RemoteBoardAdapter.presentation(card, row: .init(item: item, latestJob: nil, intents: []))
+        let expected: Int? = scenario == "assigned" ? 2 : (scenario == "none" ? 0 : nil)
+        for candidate in [card, projected] {
+            let encoded = try JSONEncoder().encode(candidate)
+            let wire = try #require(JSONSerialization.jsonObject(with: encoded) as? [String: Any])
+            let presentation = try #require(wire["presentation"] as? [String: Any])
+            #expect(presentation["assignedReviewerCount"] as? Int == expected)
+            #expect(try JSONDecoder().decode(RemoteCard.self, from: encoded).presentation?.assignedReviewerCount == expected)
+        }
+    }
+
     @Test(arguments: ["approved", "reset", "commented", "own", "unknown"])
     func phoneCardCarriesTheMacApprovalPeopleAndViewerState(_ scenario: String) throws {
         var item = try item()

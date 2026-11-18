@@ -44,6 +44,20 @@
         "pl": { "stringUnit": { "state": "translated", "value": "Otrzymane zatwierdzenia: %lld" } }
       }
     },
+    "board.approvals.assignedReviewers.%lld": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": { "stringUnit": { "state": "translated", "value": "Assigned reviewers: %lld" } },
+        "pl": { "stringUnit": { "state": "translated", "value": "Przypisani reviewerzy: %lld" } }
+      }
+    },
+    "board.approvals.reviewerCountBadge.%lld": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": { "stringUnit": { "state": "translated", "value": "(%lld)" } },
+        "pl": { "stringUnit": { "state": "translated", "value": "(%lld)" } }
+      }
+    },
     "board.approvals.requiredPending": {
       "extractionState": "manual",
       "localizations": {
