@@ -48,21 +48,18 @@ struct ReReviewControls: View {
                     Text(.Menu.menuConfirmFailed).font(.caption).foregroundStyle(.red)
                 }
                 HStack {
-                    if item.canConfirmReReview {
-                        Button { confirm = true } label: { Text(.Menu.menuReReviewConfirm) }
-                            .buttonStyle(.borderedProminent)
-                            .mrActionHelp(.requestReReview)
-                    }
-                    if readiness != .checking {
-                        Button {
-                            isWorking = true
-                            Task { await monitor.retryReReview(item.id); isWorking = false }
-                        } label: {
-                            // Manual readiness re-reads GitLab only; the AI verifier is off.
-                            if readiness == .manual { Text(.Settings.settingsAssistantSetupRecheck) }
-                            else { MRActionLabel(title: .Menu.menuReReviewRetry, cta: .verifyReReview) }
-                        }
-                        .mrActionHelp(readiness == .manual ? nil : .verifyReReview)
+                    if let blocker = blockers(for: readiness)?.first {
+                        Link(destination: noteURL(blocker.noteID)) {
+                            Text(blocker.isPrivateCodeQuestion ? .AuthorFeedback.authorFeedbackCodeReviewContext
+                                : .FeedbackSuggestions.feedbackSuggestionsOpenComment)
+                        }.buttonStyle(.borderedProminent)
+                        retryButton(readiness).buttonStyle(.bordered)
+                    } else if readiness == .manual {
+                        if item.canConfirmReReview { confirmationButton.buttonStyle(.borderedProminent) }
+                        retryButton(readiness).buttonStyle(.bordered)
+                    } else if readiness != .checking {
+                        retryButton(readiness).buttonStyle(.borderedProminent)
+                        if item.canConfirmReReview { confirmationButton.buttonStyle(.bordered) }
                     }
                 }
                 .controlSize(.small)
@@ -83,6 +80,22 @@ struct ReReviewControls: View {
                 } label: { Text(.Menu.menuReReviewConfirm) }
             } message: { Text(.Menu.menuReReviewConfirmMessage) }
         }
+    }
+
+    private var confirmationButton: some View {
+        Button { confirm = true } label: { Text(.Menu.menuReReviewConfirm) }
+            .mrActionHelp(.requestReReview)
+    }
+
+    private func retryButton(_ readiness: ReReviewReadiness) -> some View {
+        Button {
+            isWorking = true
+            Task { await monitor.retryReReview(item.id); isWorking = false }
+        } label: {
+            if readiness == .manual { Text(.Settings.settingsAssistantSetupRecheck) }
+            else { MRActionLabel(title: .Menu.menuReReviewRetry, cta: .verifyReReview) }
+        }
+        .mrActionHelp(readiness == .manual ? nil : .verifyReReview)
     }
 
     private func noteURL(_ id: Int) -> URL {

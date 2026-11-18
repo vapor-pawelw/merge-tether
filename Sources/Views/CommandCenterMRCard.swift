@@ -248,7 +248,7 @@ private struct CommandCenterMRCardContent: View {
     private func actionWaitsForRefresh(_ action: MRHumanAction) -> Bool {
         switch action.action {
         case .reviewDrafts where action.draftPublicationShortcut(for: item.drafts) == .publishAll: true
-        case .retryRun, .verifyFeedback, .retryDraftVerification, .handleFeedback, .retryIntent: true
+        case .retryRun, .verifyFeedback, .retryDraftVerification, .retryReReview, .handleFeedback, .retryIntent: true
         default: false // Opening existing discussions/results never authorizes a GitLab action.
         }
     }
@@ -320,6 +320,10 @@ private struct CommandCenterMRCardContent: View {
             primary(action.actionLabel, cta: .verifyFeedback) { monitor.attention.retryAuthorFeedback(item.id) }
         case .retryDraftVerification:
             primary(action.actionLabel, cta: .retryDraftVerification) { monitor.attention.retryDraftProofRecovery(item.id) }
+        case .retryReReview:
+            primary(action.actionLabel, cta: .verifyReReview) {
+                start { await monitor.attention.retryReReview(item.id) }
+            }
         case .setupAssistant:
             primary(action.actionLabel) { openSettings() }
         case .reviewDecision, .reviewFeedback:

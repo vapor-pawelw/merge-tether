@@ -1079,6 +1079,17 @@
         }
       }
     },
+    "menu.reReview.uncertain": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Some feedback still needs verification."
+          }
+        }
+      }
+    },
     "menu.reReview.confirm": {
       "extractionState": "manual",
       "localizations": {

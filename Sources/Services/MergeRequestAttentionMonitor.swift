@@ -60,6 +60,8 @@ final class MergeRequestAttentionMonitor {
         var needsChanges = false
         /// nil means the current reviewer states could not be read.
         var changeRequestReviewers: Set<String>?
+        /// Current reviewer states matched to confirmed receipts on this head.
+        var confirmedPendingReReviewers: Set<String> = []
         var approvalProgress: MergeRequestApprovalProgress?
         var needsMerge = false
         var failedPipeline = false
@@ -132,11 +134,14 @@ final class MergeRequestAttentionMonitor {
             if visible.feedback.count != feedback.count && visible.feedback.isEmpty {
                 visible.needsDiscussion = hasOtherUnresolvedDiscussions
             }
+            let waitingReviewers = Set(status.findings.filter { $0.state == .waitingAcceptance }.flatMap(\.waitingForReviewers))
+            let reviewsHandedOff = changeRequestReviewers.map { requesters in
+                requesters.isEmpty ? waitingReviewers.isSubset(of: confirmedPendingReReviewers)
+                    : requesters.isSubset(of: waitingReviewers)
+            } ?? false
             if status.semanticContextFingerprint == mergeRequest?.semanticContextFingerprint,
                status.semanticContextFingerprint != nil,
-               status.waitingForReviewer, status.ignoredNoteIDs.isEmpty,
-               let changeRequestReviewers, !changeRequestReviewers.isEmpty,
-               changeRequestReviewers.isSubset(of: Set(status.findings.filter { $0.state == .waitingAcceptance }.flatMap(\.waitingForReviewers))),
+               !waitingReviewers.isEmpty, reviewsHandedOff, status.ignoredNoteIDs.isEmpty,
                visible.feedback.isEmpty, !status.needsAttention,
                status.followUpNoteIDs.isEmpty, status.replyNoteIDs.isEmpty,
                status.pendingDraftCount == 0, draftCount == 0, drafts.isEmpty {
@@ -1110,16 +1115,24 @@ final class MergeRequestAttentionMonitor {
                         }
                         updated.ownPublishedReplies = discussions.map { DuplicateReplyDrafts.publishedReplies(in: $0, userID: user.id) }
                         let reviewers = try? await glab.fetchMergeRequestReviewers(projectID: item.id.projectID, iid: item.id.iid, host: host)
-                        if let discussions, let request = item.mergeRequest {
-                            updated.approvalProgress?.reviewHistory = MergeRequestReviewHistory(
-                                reviewers: reviewers ?? [], discussions: discussions, authorID: request.author.id)
+                        let reviewHistory = discussions.flatMap { discussions in
+                            item.mergeRequest.map { MergeRequestReviewHistory(
+                                reviewers: reviewers ?? [], discussions: discussions, authorID: $0.author.id) }
                         }
+                        if let reviewHistory { updated.approvalProgress?.reviewHistory = reviewHistory }
                         updated.commentReviewSnapshot = CommentReviewSnapshot(request: item.mergeRequest, discussions: discussions)
                         updated.changeRequestReviewers = nil
+                        updated.confirmedPendingReReviewers = []
                         if item.isAuthored, item.needsChanges, let reviewers {
                             let requests = reviewers.filter { $0.state == "requested_changes" }
-                            if !requests.isEmpty, requests.allSatisfy({ $0.user.id > 0 && $0.user.username?.isEmpty == false }) {
+                            if requests.allSatisfy({ $0.user.id > 0 && $0.user.username?.isEmpty == false }) {
                                 updated.changeRequestReviewers = Set(requests.compactMap(\.user.username))
+                            }
+                            if requests.isEmpty, let reviewHistory, let request = item.mergeRequest {
+                                updated.confirmedPendingReReviewers = await self.reReviewCoordinator?.confirmedPendingReviewers(
+                                    for: request, reviewers: reviewers, history: reviewHistory,
+                                    context: .init(host: host, username: account.username, revision: revision,
+                                        projectID: item.id.projectID, iid: item.id.iid), authorID: user.id) ?? []
                             }
                         }
                         if !item.isAuthored, let request = item.mergeRequest {
@@ -2909,7 +2922,12 @@ final class MergeRequestAttentionMonitor {
 
     func retryReReview(_ id: Item.ID) async {
         guard let account, let user, isCurrent(account) else { return }
-        await reReviewCoordinator?.retry(reReviewContext(id, account: account), user: user)
+        let context = reReviewContext(id, account: account)
+        if reReviewCoordinator?.hasSharedFeedbackConcern(context) == true {
+            retryAuthorFeedback(id)
+        } else {
+            await reReviewCoordinator?.retry(context, user: user)
+        }
     }
 
     func cancelRuntimePreparation(outsideScope scope: MRAutomationScope) {

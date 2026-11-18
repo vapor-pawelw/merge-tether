@@ -127,6 +127,11 @@ struct ReReviewAssessment: Codable, Sendable {
         }, completedBlockedRunIDs: completedBlockedRunIDs, codeReviewRequests: assessment.codeReviewRequests)
     }
 
+    var readiness: ReReviewReadiness {
+        let blockers = readinessBlockers
+        return notes.contains { $0.state == .blocking } ? .blocked(blockers) : .uncertain(blockers)
+    }
+
     var readinessBlockers: [ReReviewReadiness.Blocker] {
         let concerns = notes.filter { $0.state == .blocking } + notes.filter { $0.state == .uncertain }
         var blockers = concerns.map {

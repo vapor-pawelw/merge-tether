@@ -195,7 +195,7 @@ private struct CommandCenterMRDetailContent: View {
                     historyNavigationID = UUID()
                     pendingInitialAnchor = .assistantRuns
                 case .feedback:
-                    if item.canConfirmReReview {
+                    if item.canConfirmReReview || item.reReviewReadiness?.hasConcreteConcerns == true {
                         pendingInitialAnchor = showsDecisions ? .drafts : .actions
                     } else if item.authorFeedbackStatus != nil {
                         feedbackExpanded = true

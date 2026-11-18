@@ -13,9 +13,21 @@ struct MRHumanActionTests {
 
         let action = try #require(MRHumanAction(row: row(item), assistantReady: false))
 
-        #expect(action.action == .reviewDecision)
+        #expect(action.action == (concrete ? .reviewFeedback : .reviewDecision))
         #expect(item.reReviewReadiness?.hasConcreteConcerns == concrete)
         #expect(action.sourceNoteID == (concrete ? 10 : nil))
+    }
+
+    @Test func verifierFailureOffersARetryBeforeManualConfirmation() throws {
+        var item = item()
+        item.mergeRequest = try MRDependencyPresentationTests().request(2, project: 1)
+        item.isAuthored = true
+        item.reReviewReadiness = .failed
+        item.canConfirmReReview = true
+        let action = try #require(MRHumanAction(row: row(item), assistantReady: true))
+
+        #expect(action.action == .retryReReview)
+        #expect(action.executableActionID == MRVerificationRetry.reReview.rawValue)
     }
 
     @Test func aConcreteReReviewConditionTakesPriorityAfterTheGitLabThreadWasClosed() throws {

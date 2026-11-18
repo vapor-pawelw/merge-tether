@@ -51,7 +51,7 @@ import MergeTetherRemote
             if item.draftCount == drafts.count, !publishable.isEmpty, !item.requiresDiscussionRecheck,
                item.drafts.allSatisfy({ $0.id != nil && AICommentAssessmentStore.safeForAutomaticPublication($0) }) { kinds.append(.publish) }
             if item.canApprove { kinds.append(.approve) }
-            if item.canConfirmReReview { kinds.append(.reReview) }
+            if item.canConfirmReReview, item.reReviewReadiness?.canConfirm == true { kinds.append(.reReview) }
             if item.canFinishCommentReview { kinds.append(.finishCommentReview) }
         }
         let metadata = item.drafts.flatMap { draft in
@@ -587,7 +587,7 @@ import MergeTetherRemote
         let kind: RemoteActionKind
         switch humanAction {
         case .retryRun: kind = .retryJob
-        case .verifyFeedback, .retryDraftVerification: kind = .verify
+        case .verifyFeedback, .retryDraftVerification, .retryReReview: kind = .verify
         case .handleFeedback, .retryIntent: kind = .prepare
         case nil where nextStep == .runReview: kind = .runReview
         default: return original
@@ -631,7 +631,7 @@ private extension MRHumanAction {
         case .reviewRun, .retryRun: .assistantRuns
         case .retryDraftVerification: .drafts
         case .setupAssistant: .setup
-        case .reviewDecision, .reviewFeedback, .handleFeedback, .verifyFeedback: .feedback
+        case .reviewDecision, .reviewFeedback, .handleFeedback, .verifyFeedback, .retryReReview: .feedback
         case .reviewHandoff, .reviewMerge, .retryIntent: .actions
         case .reviewIssue: .overview
         }

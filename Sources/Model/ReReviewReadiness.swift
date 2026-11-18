@@ -27,7 +27,8 @@ enum ReReviewReadiness: Equatable, Sendable {
 
     var canConfirm: Bool {
         switch self {
-        case .manual, .unavailable, .failed, .uncertain: true
+        case .manual, .unavailable, .failed: true
+        case .uncertain(let blockers): blockers.isEmpty
         default: false
         }
     }
@@ -45,7 +46,7 @@ enum ReReviewReadiness: Equatable, Sendable {
         case .unavailable: .Menu.menuReReviewUnavailable
         case .failed: .Menu.menuReReviewFailed
         case .blocked: .Menu.menuReReviewBlocked
-        case .uncertain: .Menu.menuReReviewFailed
+        case .uncertain(let blockers): blockers.isEmpty ? .Menu.menuReReviewFailed : .Menu.menuReReviewUncertain
         }
     }
 }

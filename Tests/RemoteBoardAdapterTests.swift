@@ -95,21 +95,26 @@ import MergeTetherRemote
         #expect(feedbackOnly.actions.filter { $0.kind == .verify }.map(\.id) == ["verifyAuthorFeedback"])
     }
 
-    @Test func manualReReviewConfirmationDescribesTheUncertaintyAndBindsItToTheAction() throws {
+    @Test func manualReReviewConfirmationIsLimitedToTheCurrentNonConcreteFailure() throws {
         var item = MergeRequestAttentionMonitor.Item(id: .init(projectID: 1, iid: 2), title: "MR",
             url: URL(string: "https://gitlab.example.test/g/p/-/merge_requests/2")!, isAuthored: true)
         item.mergeRequest = try MRDependencyPresentationTests().request(2, project: 1)
         item.canConfirmReReview = true
         item.reReviewFingerprint = "current"
         item.reReviewReadiness = .uncertain([.init(noteID: 42, reason: "The required test could not be verified.")])
-        let action = try #require(RemoteBoardAdapter.card(item, account: "me").actions.first { $0.kind == .reReview })
-        #expect(action.confirmationText?.contains("The required test could not be verified.") == true)
-        #expect(action.confirmationText?.contains(String(localized: .Menu.menuReReviewConfirmMessage)) == true)
+        #expect(!RemoteBoardAdapter.card(item, account: "me").actions.contains { $0.kind == .reReview })
 
         item.reReviewReadiness = .failed
-        let failed = try #require(RemoteBoardAdapter.card(item, account: "me").actions.first { $0.kind == .reReview })
-        #expect(failed.token != action.token)
+        let card = RemoteBoardAdapter.card(item, account: "me")
+        let failed = try #require(card.actions.first { $0.kind == .reReview })
         #expect(failed.confirmationText?.contains(String(localized: .Menu.menuReReviewFailed)) == true)
+        #expect(failed.confirmationText?.contains(String(localized: .Menu.menuReReviewConfirmMessage)) == true)
+
+        var presented = card
+        presented.primaryCTA = .init(title: "Retry re-review verification", destination: .feedback)
+        let bound = RemoteBoardAdapter.bindingPrimaryAction(presented, humanAction: .retryReReview,
+            actionID: MRVerificationRetry.reReview.rawValue, nextStep: .monitoring)
+        #expect(bound.primaryCTA?.actionID == "verifyReReview")
     }
 
     @Test(arguments: ["none", "overview", "drafts"])

@@ -6,6 +6,47 @@ import MergeTetherRemote
 
 @MainActor
 @Suite struct ConfirmationQueueTests {
+    @Test(arguments: ["pending", "started", "old-head", "old-activity", "unconfirmed", "other-reviewer", "still-requested"])
+    func verifiedFeedbackHandoffRemainsVisibleWhenGitLabKeepsTheMergeHold(_ evidence: String) async throws {
+        let assessment = ReReviewAssessment(notes: [.init(noteID: 40, state: .addressed,
+            reason: "The current change and published reply cover the request.")])
+        let harness = try makeHarness(assistantWorked: false, authored: true, assessment: assessment)
+        defer { harness.cleanUp() }
+        harness.settings.automation.authorFeedback.isEnabled = true
+        harness.settings.automation.autoReReviewEnabled = false
+        try harness.write("duo.json", #"{"id":8,"username":"reviewer","bot":false,"state":"active"}"#)
+        let requestJSON = harness.log("request.json")
+            .replacingOccurrences(of: #""detailed_merge_status":"mergeable""#, with: #""detailed_merge_status":"requested_changes""#)
+            .replacingOccurrences(of: #""blocking_discussions_resolved":true"#, with: #""blocking_discussions_resolved":false"#)
+        try harness.write("request.json", requestJSON)
+        try harness.write("authored.json", "[\(requestJSON)]")
+        let state = evidence == "started" ? "review_started" : "unreviewed"
+        let other = evidence == "still-requested"
+            ? #",{"user":{"id":9,"username":"other"},"state":"requested_changes"}"# : ""
+        try harness.write("reviewers.json", #"[{"user":{"id":8,"username":"reviewer","name":"Reviewer"},"state":"\#(state)"}\#(other)]"#)
+        try harness.write("discussions.json", #"[{"id":"thread","notes":[{"id":40,"author":{"id":8,"username":"reviewer","name":"Reviewer"},"system":false,"resolvable":true,"resolved":false,"body":"Cover retries"},{"id":41,"author":{"id":3},"system":false,"body":"Implemented and verified."}]}]"#)
+        let receipt = ReReviewReceipt.Key(host: host, authorID: 3, projectID: 1, iid: 2,
+            reviewerID: evidence == "other-reviewer" ? 9 : 8)
+        harness.settings.reReviewReceipts[receipt] = .init(noteID: evidence == "old-activity" ? 39 : 40,
+            unconfirmed: evidence == "unconfirmed", requested: true, headSHA: evidence == "old-head" ? "older" : head)
+
+        try await completeSharedAuthorFeedback(harness)
+        try await harness.poll()
+        let coordinator = try #require(harness.monitor.authorFeedbackCoordinator)
+        let deadline = ContinuousClock.now + .seconds(5)
+        while coordinator.status(projectID: 1, iid: 2)?.phase == .checking {
+            try #require(ContinuousClock.now < deadline)
+            try await Task.sleep(for: .milliseconds(5))
+        }
+
+        let item = try #require(harness.monitor.currentOpenItems.first)
+        let waiting = evidence == "pending" || evidence == "started"
+        #expect(item.mergeRequest?.detailedMergeStatus == "requested_changes")
+        #expect(item.authorFeedbackStatus?.waitingForReviewer == true)
+        #expect(item.needsChanges != waiting)
+        #expect(harness.log("re-review.log").isEmpty)
+    }
+
     @Test(arguments: ["reply", "question", "clean"])
     func semanticFeedbackOnAResolvedMRReachesTheBoardAndPhoneWithoutRawAttentionFlags(_ outcome: String) async throws {
         let question = ReReviewAssessment.CodeReviewRequest(sourceNoteID: 20, sourceQuote: "Cover retries",

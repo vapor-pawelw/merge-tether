@@ -32,7 +32,15 @@ final class ReReviewCoordinator {
         let fingerprint: String
         var state: ReReviewReadiness
         var assessment: ReReviewAssessment?
+        var usesSharedAssessment = false
         var readRetryAfter: Date?
+
+        var presentedState: ReReviewReadiness {
+            if state.canConfirm, let readiness = assessment?.readiness, readiness.hasConcreteConcerns {
+                return readiness
+            }
+            return state
+        }
     }
 
     private struct VerificationTask {
@@ -84,7 +92,7 @@ final class ReReviewCoordinator {
                 && $0.key.projectID == context.projectID && $0.key.iid == context.iid
                 && currentReviewerIDs[context]?.contains($0.key.reviewerID) == true
         }.values
-        return .init(state: check?.state, fingerprint: check?.fingerprint,
+        return .init(state: check?.presentedState, fingerprint: check?.fingerprint,
             requested: receipts.contains { $0.requested == true }, unconfirmed: receipts.contains { $0.unconfirmed })
     }
 
@@ -98,6 +106,27 @@ final class ReReviewCoordinator {
             return result
         }
         return result
+    }
+
+    func confirmedPendingReviewers(for request: GitLabMergeRequest, reviewers: [GitLabMergeRequestReviewer],
+                                   history: MergeRequestReviewHistory, context: Context, authorID: Int) -> Set<String> {
+        guard isCurrent(context), request.projectID == context.projectID, request.iid == context.iid,
+              request.author.id == authorID, let head = request.sha, !head.isEmpty else { return [] }
+        return Set(reviewers.compactMap { reviewer in
+            let id = reviewer.user.id
+            let key = ReReviewReceipt.Key(host: context.host, authorID: authorID, projectID: context.projectID,
+                                          iid: context.iid, reviewerID: id)
+            guard id > 0, id != authorID, let username = reviewer.user.username, !username.isEmpty,
+                  reviewer.state == "unreviewed" || reviewer.state == "review_started",
+                  let receipt = settings.reReviewReceipts[key], receipt.requested == true, !receipt.unconfirmed,
+                  receipt.covers(noteID: max(history.activities[id]?.noteID ?? 0, 1), headSHA: head) else { return nil }
+            return username
+        })
+    }
+
+    func hasSharedFeedbackConcern(_ context: Context) -> Bool {
+        isCurrent(context) && reReviewChecks[context]?.usesSharedAssessment == true
+            && reReviewChecks[context]?.presentedState.hasConcreteConcerns == true
     }
 
     func reset() {
@@ -198,7 +227,7 @@ final class ReReviewCoordinator {
 
     /// A one-shot human decision stays bound to the displayed head, text and account revision.
     func confirm(_ context: Context, user: GitLabAuthenticatedUser, head: String, fingerprint: String) async -> ConfirmationResult {
-        guard isCurrent(context), reReviewChecks[context]?.state.canConfirm == true,
+        guard isCurrent(context), reReviewChecks[context]?.presentedState.canConfirm == true,
               reReviewChecks[context]?.fingerprint == fingerprint,
               let displayedKey = reReviewChecks[context]?.key else { return .ignored }
         do {
@@ -211,6 +240,8 @@ final class ReReviewCoordinator {
                   reReviewChecks[context]?.key == displayedKey,
                   reReviewKey(request, fingerprint: fingerprint, activeFingerprint: activeFingerprint, context: context) == displayedKey,
                   ReviewVerdict.fingerprint(discussions) == fingerprint else { return .changed }
+            guard reReviewChecks[context]?.presentedState.canConfirm == true,
+                  authorFeedbackAssessment(request, fingerprint)?.readiness.hasConcreteConcerns != true else { return .changed }
             let feedback = ReReviewFeedback(discussions: discussions, authorID: user.id)
             guard !feedback.hasUnansweredFeedback else { return .unansweredFeedback }
             manualReReviewApprovals[context] = reReviewKey(request, fingerprint: fingerprint, activeFingerprint: activeFingerprint, context: context)
@@ -331,11 +362,12 @@ final class ReReviewCoordinator {
         for reviewerID in earlierReviewers {
             candidates[reviewerID] = max(candidates[reviewerID] ?? 0, history.activities[reviewerID]?.noteID ?? 1, 1)
         }
-        let existingCheck = reReviewChecks[context]
-        let failedWithoutAssessment = existingCheck?.assessment == nil
-            && (existingCheck?.state == .failed || existingCheck?.state == .unavailable)
-        if let assessment = sharedAssessment, existingCheck?.key != key || existingCheck?.assessment == nil || failedWithoutAssessment {
-            reReviewChecks[context] = .init(key: key, fingerprint: fingerprint, state: .checking, assessment: assessment)
+        if let sharedAssessment {
+            reReviewTasks.removeValue(forKey: context)?.task.cancel()
+            reReviewChecks[context] = .init(key: key, fingerprint: fingerprint, state: .checking,
+                assessment: sharedAssessment, usesSharedAssessment: true)
+        } else if reReviewChecks[context]?.usesSharedAssessment == true {
+            reReviewChecks.removeValue(forKey: context)
         }
         var pendingReviewers: [Int: Int] = [:]
         for (reviewerID, noteID) in candidates {
@@ -366,13 +398,16 @@ final class ReReviewCoordinator {
             notify(context, unanswered: feedback.hasUnansweredFeedback)
             return
         }
-        let manual = manualReReviewApprovals[context] == key
+        let manual = manualReReviewApprovals[context] == key && sharedAssessment?.readiness.hasConcreteConcerns != true
         var recipients = pendingReviewers
         if !manual {
             if !settings.automation.autoVerifyReReview {
                 reReviewTasks.removeValue(forKey: context)?.task.cancel()
-                let assessment = reReviewChecks[context]?.key == key ? reReviewChecks[context]?.assessment : nil
-                reReviewChecks[context] = ReReviewCheck(key: key, fingerprint: fingerprint, state: .manual, assessment: assessment)
+                if reReviewChecks[context]?.key == key {
+                    reReviewChecks[context]?.state = .manual
+                } else {
+                    reReviewChecks[context] = .init(key: key, fingerprint: fingerprint, state: .manual)
+                }
                 notify(context, unanswered: feedback.hasUnansweredFeedback)
                 return
             }
@@ -433,6 +468,7 @@ final class ReReviewCoordinator {
                     } catch {
                         guard isCurrentVerification() else { return }
                         reReviewChecks[context]?.state = error as? ReReviewVerifier.VerificationError == .unavailable ? .unavailable : .failed
+                        reReviewChecks[context]?.readRetryAfter = now().addingTimeInterval(ReadOnlyAssessmentRetry.cooldown)
                     }
                     notify(context, unanswered: feedback.hasUnansweredFeedback)
                     await refreshAfterPublication(context, user: user)
@@ -455,8 +491,7 @@ final class ReReviewCoordinator {
                 feedback.addressedByReviewer[$0.key] != nil && assessed[$0.key] != nil
                     || allFeedbackReady && earlierReviewers.contains($0.key)
             }
-            let blockers = assessment.readinessBlockers
-            reReviewChecks[context]?.state = assessment.notes.contains { $0.state == .blocking } ? .blocked(blockers) : .uncertain(blockers)
+            reReviewChecks[context]?.state = assessment.readiness
             let informationalReviewers = pendingReviewers.keys.filter { reviewerID in
                 let theirNotes = discussions.flatMap(\.notes).filter { $0.author?.id == reviewerID && $0.system != true }
                 return !theirNotes.isEmpty && history.activities[reviewerID]?.previouslyApproved != true && theirNotes.allSatisfy { note in

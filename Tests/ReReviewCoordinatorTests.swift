@@ -4,6 +4,98 @@ import Testing
 
 @MainActor
 struct ReReviewCoordinatorTests {
+    @Test(arguments: [ReReviewAssessment.Note.State.uncertain, .blocking])
+    func currentAuthorAssessmentSupersedesAnOlderStandaloneVerdict(_ initialState: ReReviewAssessment.Note.State) async throws {
+        let fixture = try Fixture()
+        defer { fixture.close() }
+        fixture.settings.automation.autoVerifyReReview = true
+        var authorAssessment: ReReviewAssessment?
+        let coordinator = ReReviewCoordinator(settings: fixture.settings, glab: fixture.glab,
+            canAutomate: { _ in true },
+            verify: { _, _, _ in
+                .init(notes: [.init(noteID: 40, state: initialState, reason: "The earlier check could not establish readiness.")])
+            },
+            authorFeedbackAssessment: { _, _ in authorAssessment })
+        defer { coordinator.reset() }
+        let request = try fixture.request()
+        let feedback = try fixture.feedback()
+
+        await coordinator.refresh(for: request, feedback: feedback, draftCount: 0, context: fixture.context, user: fixture.user)
+        let deadline = ContinuousClock.now + .seconds(5)
+        while coordinator.isVerifying {
+            try #require(ContinuousClock.now < deadline)
+            try await Task.sleep(for: .milliseconds(5))
+        }
+        try #require(coordinator.status(for: fixture.context, authorID: fixture.user.id).state?.hasConcreteConcerns == true)
+
+        authorAssessment = .init(notes: [.init(noteID: 40, state: .addressed,
+            reason: "Current remote code and the published reply address this feedback.")])
+        for _ in 0..<2 {
+            await coordinator.refresh(for: request, feedback: feedback, draftCount: 0, context: fixture.context, user: fixture.user)
+        }
+
+        #expect(coordinator.status(for: fixture.context, authorID: fixture.user.id).state == nil)
+        #expect(fixture.gitlab.text("requested") == "review\n")
+    }
+
+    @Test func aConcreteUncertaintyCannotBeManuallyConfirmed() async throws {
+        let fixture = try Fixture()
+        defer { fixture.close() }
+        fixture.settings.automation.autoVerifyReReview = true
+        let coordinator = fixture.coordinator(sharedAssessment: .init(notes: [
+            .init(noteID: 40, state: .uncertain, reason: "The required behavior cannot yet be verified.")
+        ]))
+        await coordinator.refresh(for: try fixture.request(), feedback: try fixture.feedback(), draftCount: 0,
+            context: fixture.context, user: fixture.user)
+        let state = try #require(coordinator.status(for: fixture.context, authorID: fixture.user.id).state)
+        try #require(state.hasConcreteConcerns)
+
+        let result = await coordinator.confirm(fixture.context, user: fixture.user, head: "head",
+            fingerprint: try fixture.fingerprint())
+
+        #expect(!state.canConfirm)
+        #expect(result == .ignored)
+        #expect(fixture.gitlab.text("requested").isEmpty)
+    }
+
+    @Test func aFailedVerifierRecoversOnAPollAfterCooldown() async throws {
+        let fixture = try Fixture()
+        defer { fixture.close() }
+        fixture.settings.automation.autoVerifyReReview = true
+        var time = Date()
+        var attempts = 0
+        let coordinator = ReReviewCoordinator(settings: fixture.settings, glab: fixture.glab,
+            canAutomate: { _ in true }, verify: { _, _, _ in
+                attempts += 1
+                if attempts == 1 { throw ReReviewVerifier.VerificationError.failed }
+                return .init(notes: [.init(noteID: 40, state: .addressed, reason: "Verified the current correction.")])
+            }, now: { time })
+        defer { coordinator.reset() }
+        let request = try fixture.request()
+        let feedback = try fixture.feedback()
+
+        func poll() async throws {
+            await coordinator.refresh(for: request, feedback: feedback, draftCount: 0, context: fixture.context, user: fixture.user)
+            let deadline = ContinuousClock.now + .seconds(5)
+            while coordinator.isVerifying {
+                try #require(ContinuousClock.now < deadline)
+                try await Task.sleep(for: .milliseconds(5))
+            }
+        }
+
+        try await poll()
+        #expect(coordinator.status(for: fixture.context, authorID: fixture.user.id).state == .failed)
+        try await poll()
+        #expect(attempts == 1)
+        #expect(fixture.gitlab.text("requested").isEmpty)
+
+        time.addTimeInterval(ReadOnlyAssessmentRetry.cooldown)
+        try await poll()
+        try await poll()
+        #expect(attempts == 2)
+        #expect(fixture.gitlab.text("requested") == "review\n")
+    }
+
     @Test(arguments: ["current", "head", "discussion", "settings", "resolved"])
     func presentationOnlyUsesTheCurrentReReviewContext(_ change: String) async throws {
         let f = try Fixture()

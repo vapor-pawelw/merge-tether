@@ -130,7 +130,7 @@ struct MRHumanAction {
     }
 
     enum Kind: Equatable { case blockedRun, interruptedRun, publication, commentReview, uncheckedDrafts, duplicateDrafts, verificationFailure, setupAssistant, reviewDecision, approval, pipelineHandoff, merge, feedback, intent }
-    enum Action: Equatable { case reviewRun, retryRun, reviewDrafts, verifyFeedback, retryDraftVerification, setupAssistant, reviewDecision, reviewApproval, reviewHandoff, reviewMerge, handleFeedback, retryIntent, reviewFeedback, reviewIssue }
+    enum Action: Equatable { case reviewRun, retryRun, reviewDrafts, verifyFeedback, retryDraftVerification, retryReReview, setupAssistant, reviewDecision, reviewApproval, reviewHandoff, reviewMerge, handleFeedback, retryIntent, reviewFeedback, reviewIssue }
     let kind: Kind
     let action: Action
     let message: LocalizedStringResource
@@ -147,6 +147,7 @@ struct MRHumanAction {
         case .handleFeedback: "prepare"
         case .verifyFeedback: MRVerificationRetry.authorFeedback.rawValue
         case .retryDraftVerification: MRVerificationRetry.drafts.rawValue
+        case .retryReReview: MRVerificationRetry.reReview.rawValue
         default: nil
         }
     }
@@ -177,6 +178,7 @@ struct MRHumanAction {
         case .reviewDrafts: .MRHumanAction.mrHumanActionActionReviewDrafts
         case .verifyFeedback: .MRHumanAction.mrHumanActionActionVerifyFeedback
         case .retryDraftVerification: .MRHumanAction.mrHumanActionActionRetryDraftVerification
+        case .retryReReview: MRVerificationRetry.reReview.label
         case .setupAssistant: .MRHumanAction.mrHumanActionActionSetupAssistant
         case .reviewDecision: .MRHumanAction.mrHumanActionActionReviewDecision
         case .reviewApproval: .MRHumanAction.mrHumanActionActionReviewApproval
@@ -288,7 +290,9 @@ struct MRHumanAction {
             || item.authorFeedbackStatus?.needsAttention == true || item.autoApproveReady
         let hasOutstandingFeedback = item.authorFeedbackStatus?.needsAttention == true
             || item.needsChanges || !item.feedback.isEmpty || item.reReviewReadiness?.hasConcreteConcerns == true
-        if item.canConfirmReReview {
+        if assistantReady, MRVerificationRetry.reReview.isAvailable(for: item), item.authorFeedbackStatus?.needsAttention != true {
+            self.init(kind: .verificationFailure, action: .retryReReview, message: .MRHumanAction.mrHumanActionVerificationFailure)
+        } else if item.canConfirmReReview, item.reReviewReadiness?.hasConcreteConcerns != true {
             self.init(kind: .reviewDecision, action: .reviewDecision, message: Self.reviewDecisionMessage(item),
                       detail: Self.feedbackDetail(item), summary: Self.feedbackSummary(item))
         } else if item.canApprove && !item.approvalWaitingForReadiness {
@@ -300,7 +304,8 @@ struct MRHumanAction {
         } else if item.authorFeedbackStatus?.phase == .failed {
             self.init(kind: .verificationFailure, action: assistantReady ? .verifyFeedback : .setupAssistant,
                       message: .MRHumanAction.mrHumanActionVerificationFailure)
-        } else if !assistantReady && needsAssistant && item.authorFeedbackStatus?.primaryFinding?.manualDecision == nil {
+        } else if !assistantReady && needsAssistant && item.authorFeedbackStatus?.primaryFinding?.manualDecision == nil
+            && item.reReviewReadiness?.hasConcreteConcerns != true {
             self.init(kind: .setupAssistant, action: .setupAssistant, message: .MRHumanAction.mrHumanActionSetupAssistant)
         } else if item.authorFeedbackStatus?.needsAttention == true {
             self.init(kind: .feedback, action: Self.feedbackAction(item), message: Self.feedbackMessage(item),
