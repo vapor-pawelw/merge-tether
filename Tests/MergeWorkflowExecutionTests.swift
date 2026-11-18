@@ -1242,6 +1242,72 @@ import Testing
         await coordinator.waitForTermination()
     }
 
+    @Test(arguments: ["both-queued", "first-in-progress", "second-head-changed"])
+    func ordinaryQueuedReReviewsSurviveRestart(_ scenario: String) async throws {
+        let suite = "WorkflowRestartReviewQueue.\(UUID())"
+        let defaults = try #require(UserDefaults(suiteName: suite))
+        defer { defaults.removePersistentDomain(forName: suite) }
+        let settings = SettingsManager(defaults: defaults)
+        settings.automation.applyPreset(.full, for: .codex)
+        let host = "gitlab-\(UUID().uuidString.lowercased()).example.test"
+        let user = GitLabAuthenticatedUser(id: 1, username: "me")
+        let head = String(repeating: "a", count: 40)
+        let firstURL = try #require(URL(string: "https://\(host)/team/repo/-/merge_requests/11"))
+        let gitlab = reviewRetryGitLab(host: host, url: firstURL, currentHead: head)
+        defer { gitlab.close() }
+        let baseHandler = try #require(gitlab.handler)
+        var secondHead = head
+        gitlab.handler = { call in
+            if call.endpoint == "/projects/7/merge_requests/12" {
+                #expect(call.method == "GET")
+                return InMemoryGitLab.output("""
+                    {"project_id":7,"iid":12,"author":{"id":2,"username":"author","name":"Author"},
+                     "title":"Second review","web_url":"https://\(host)/team/repo/-/merge_requests/12",
+                     "state":"opened","draft":false,"sha":"\(secondHead)","source_branch":"second",
+                     "target_branch":"main","labels":[]}
+                    """)
+            }
+            return try await baseHandler(call)
+        }
+        let glab = gitlab.service(host: host, username: user.username)
+        settings.glabPath = glab.glabPath
+        let coordinator = AssistantJobCoordinator(healthStore: AssistantCLIHealthStore(defaults: defaults), execute: { _, _ in
+            .init(result: .init(status: .succeeded, summary: "Review fixture"), output: "")
+        })
+        let original = MergeWorkflowAutomation(settings: settings, glab: glab, jobCoordinator: coordinator)
+        for iid in [11, 12] {
+            let request = try await glab.fetchMergeRequest(projectID: 7, iid: iid, host: host)
+            original.receive(.init(kind: .reviewUpdate, mergeRequest: request, identity: "review-\(iid)", context: "New commit"),
+                host: host, user: user)
+        }
+        #expect(original.entries.map(\.state) == [.queued, .queued])
+        #expect(settings.assistantHandoffs.isEmpty)
+        if scenario == "first-in-progress" {
+            let first = try #require(settings.workflowActivity.firstIndex { $0.id == "review-11" })
+            settings.workflowActivity[first].state = .running
+            settings.save()
+        }
+        if scenario == "second-head-changed" { secondHead = String(repeating: "b", count: 40) }
+
+        let restored = SettingsManager(defaults: defaults)
+        let resumed = MergeWorkflowAutomation(settings: restored, glab: glab, jobCoordinator: coordinator)
+        resumed.startNext()
+        let activeStates: Set<MergeWorkflowActivityState> = [.queued, .running, .waitingForAssistant]
+        let deadline = ContinuousClock.now + .seconds(5)
+        while resumed.entries.contains(where: { activeStates.contains($0.state) }),
+              ContinuousClock.now < deadline { try await Task.sleep(for: .milliseconds(5)) }
+
+        let expectedStates: [String: MergeWorkflowActivityState] = [
+            "review-11": scenario == "first-in-progress" ? .skipped : .completed,
+            "review-12": scenario == "second-head-changed" ? .skipped : .completed,
+        ]
+        #expect(Dictionary(uniqueKeysWithValues: resumed.entries.map { ($0.id, $0.state) }) == expectedStates)
+        let expectedIIDs = scenario == "first-in-progress" ? [12] : (scenario == "second-head-changed" ? [11] : [11, 12])
+        #expect(restored.assistantHandoffs.map(\.key.work.iid) == expectedIIDs)
+        #expect(restored.assistantHandoffs.allSatisfy { $0.expectedHeadSHA == head })
+        await coordinator.waitForTermination()
+    }
+
     @Test(arguments: [MergeWorkflowActivityState.queued, .running])
     func restoredAdmissionIsDurablySkippedWithoutDispatch(_ state: MergeWorkflowActivityState) throws {
         let suite = "WorkflowStartupAdmission.\(UUID())"

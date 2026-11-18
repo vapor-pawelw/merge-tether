@@ -191,10 +191,10 @@ final class MergeWorkflowAutomation {
         var changed = false
         for index in settings.workflowActivity.indices where [.queued, .running].contains(settings.workflowActivity[index].state) {
             let entry = settings.workflowActivity[index]
-            // Only a confirmed wait before admission is safe to resume after restart.
-            if entry.state == .queued, entry.event.kind != .pipelineFailure,
-               entry.deferredForWorker == true || entry.deferredForCapacity == true,
-               entry.assistantJobID == nil, entry.chatURL == nil { continue }
+            // Review admission persists .running before the launcher can create a handoff.
+            if entry.state == .queued, entry.assistantJobID == nil, entry.chatURL == nil,
+               entry.event.kind != .pipelineFailure,
+               entry.event.kind == .reviewUpdate || entry.deferredForWorker == true || entry.deferredForCapacity == true { continue }
             settings.workflowActivity[index].state = .skipped
             settings.workflowActivity[index].deferredForWorker = nil
             settings.workflowActivity[index].deferredForCapacity = nil
