@@ -1,6 +1,35 @@
 import Foundation
 
+extension AutomationPublicationMode {
+    var reviewConfirmation: LocalizedStringResource {
+        switch self {
+        case .manual: .ActionEffects.reviewPublicationManual
+        case .all: .ActionEffects.reviewPublicationAll
+        case .filtered: .ActionEffects.reviewPublicationFiltered
+        case .aiReplies: .ActionEffects.reviewPublicationAIReplies
+        }
+    }
+}
+
 extension TodoMonitorService {
+    struct ManualReviewConsent: Equatable {
+        let accountRevision: UInt64
+        let assistant: AutomationAssistant
+        let publicationMode: AutomationPublicationMode
+    }
+
+    func manualReviewConsent(for item: MergeRequestAttentionMonitor.Item) -> ManualReviewConsent {
+        let mode: AutomationPublicationMode
+        if let request = item.mergeRequest, let target = scopeTarget(projectID: item.id.projectID, iid: item.id.iid, url: item.url),
+           settings.permitsAutomaticAction(.commentPublication, for: request, target: target),
+           settings.automation.automaticPublicationPolicy.covers(request, host: target.host) {
+            mode = settings.automation.publicationMode
+        } else {
+            mode = .manual
+        }
+        return .init(accountRevision: glab.accountRevision, assistant: settings.automation.assistant, publicationMode: mode)
+    }
+
     func canRunReview(for item: MergeRequestAttentionMonitor.Item) -> Bool {
         guard let target = manualReviewTarget(for: item), let request = item.mergeRequest,
               target.accepts(request), availableAssistants.contains(settings.automation.assistant) else { return false }
@@ -8,9 +37,12 @@ extension TodoMonitorService {
     }
 
     /// `fromScratch` is the emergency reset: it ignores earlier review passes and reviews the whole current MR.
-    func runReview(for item: MergeRequestAttentionMonitor.Item, fromScratch: Bool = false) async {
+    func runReview(for item: MergeRequestAttentionMonitor.Item, fromScratch: Bool = false,
+                   confirmed: ManualReviewConsent? = nil) async {
         assistantJobActionError = nil
-        guard canRunReview(for: item), let target = manualReviewTarget(for: item) else {
+        let consent = confirmed ?? manualReviewConsent(for: item)
+        guard consent == manualReviewConsent(for: item), canRunReview(for: item),
+              let target = manualReviewTarget(for: item) else {
             assistantJobActionError = String(localized: .AssistantJobs.assistantJobsActionFailed)
             return
         }
@@ -26,6 +58,10 @@ extension TodoMonitorService {
             guard dependency.isReady, target.matchesAccount(host: glab.resolvedHost, username: glab.currentUsername),
                   glab.accountRevision == accountRevision,
                   settings.automation.assistant == assistant else { throw CancellationError() }
+            var current = item
+            current.mergeRequest = request
+            guard consent == manualReviewConsent(for: current),
+                  confirmed == nil || item.mergeRequest?.sha == request.sha else { throw CancellationError() }
             guard let head = request.sha, !head.isEmpty else { throw AssistantJobExecutor.ExecutionError.headChanged }
             let work = AssistantAutomationRunner.MergeRequestWork(host: target.host, projectID: target.projectID, iid: target.iid)
             let task = AssistantAutomationRunner.currentReviewTask(work: work, head: head, user: user,

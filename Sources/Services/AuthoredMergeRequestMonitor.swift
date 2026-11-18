@@ -424,8 +424,10 @@ final class AuthoredMergeRequestMonitor {
 
     /// An explicit action has its own authorization; automatic scope and global
     /// switches still apply exclusively to background execution.
-    func mergeManually(_ expected: GitLabMergeRequest) async -> MergeSubmissionState {
+    func mergeManually(_ expected: GitLabMergeRequest, action: MergeSubmissionAction,
+                       verificationAssistant: AutomationAssistant? = nil) async -> MergeSubmissionState {
         guard let host = glab.resolvedHost, let username = glab.currentUsername,
+              verificationAssistant == nil || verificationAssistant == settings.automation.assistant,
               !isMerging(expected) else { return .changed }
         let account = Account(host: host, username: username)
         let revision = glab.accountRevision
@@ -448,13 +450,17 @@ final class AuthoredMergeRequestMonitor {
                 account: account, user: user, revision: revision)
             guard isCurrent(account), glab.accountRevision == revision else { return .changed }
             if let index = requests.firstIndex(where: { $0.id == status.id }) { requests[index] = status }
-            guard status.mayMergeManually else { return .changed }
+            guard status.mayMergeManually, status.action == action else { return .changed }
             let outcome = try await performSubmission(status.request, account: account, user: user,
-                revision: revision, configuration: configuration, automatic: false)
+                revision: revision, configuration: configuration, automatic: false,
+                confirmedAction: action, verificationAssistant: verificationAssistant)
             if outcome == .merged { requests.removeAll { $0.id == status.id } }
             else if let index = requests.firstIndex(where: { $0.id == status.id }) { requests[index].submissionState = outcome }
             return outcome
-        } catch is CancellationError { return .changed }
+        } catch is CancellationError {
+            refreshIfNeeded()
+            return .changed
+        }
         catch is MergeTrainPreparationConflict {
             refreshIfNeeded()
             return .changed
@@ -470,7 +476,8 @@ final class AuthoredMergeRequestMonitor {
 
     private func performSubmission(_ request: GitLabMergeRequest, account: Account, user: GitLabAuthenticatedUser,
                                    revision: UInt64, configuration: AutomationSettings,
-                                   automatic: Bool) async throws -> MergeSubmissionState {
+                                   automatic: Bool, confirmedAction: MergeSubmissionAction? = nil,
+                                   verificationAssistant: AutomationAssistant? = nil) async throws -> MergeSubmissionState {
         let work = AssistantAutomationRunner.MergeRequestWork(host: account.host, projectID: request.projectID, iid: request.iid)
         let configurationID = configurationFingerprint()
         let participationRevision = settings.reviewParticipationPreferences.revision(host: account.host, username: account.username)
@@ -491,10 +498,12 @@ final class AuthoredMergeRequestMonitor {
         let discussions = try await glab.fetchMergeRequestDiscussions(projectID: request.projectID, iid: request.iid, host: account.host)
         guard let fingerprint = ReviewVerdict.fingerprint(discussions), permits(),
               !hasUnfinishedAssistantWork(on: work, username: user.username, currentRequest: request, discussions: discussions) else { throw CancellationError() }
+        let policy = try await glab.fetchMergeActionPolicy(projectID: request.projectID, host: account.host, request: request)
+        guard let action = policy.action, automatic || action == confirmedAction, permits() else { throw CancellationError() }
         let hasFeedback = GitLabMergeRequestDiscussion.activeForReview(discussions)
             .flatMap(\.notes).contains { $0.system != true && $0.author?.id != user.id }
         if hasFeedback, authorFeedbackAllowsMerge?(request, discussions, user.id) != true {
-            guard !automatic else { throw CancellationError() }
+            guard !automatic, verificationAssistant == configuration.assistant else { throw CancellationError() }
             let assessment = try await ManualFeedbackVerification.assess(request: request, discussions: discussions,
                 user: user, host: account.host, settings: settings, glab: glab)
             let target = MRAutomationScope.Target(host: account.host, username: user.username, projectID: request.projectID, iid: request.iid)
@@ -502,8 +511,7 @@ final class AuthoredMergeRequestMonitor {
                 ignoredSuggestions: settings.feedbackSuggestionDecisions.applicable(in: discussions, for: target),
                 excludedReplyAuthorIDs: settings.reviewParticipationPreferences.excludedIDs(host: account.host, username: user.username)) else { throw CancellationError() }
         }
-        let policy = try await glab.fetchMergeActionPolicy(projectID: request.projectID, host: account.host, request: request)
-        guard let action = policy.action, permits() else { throw CancellationError() }
+        guard permits() else { throw CancellationError() }
         var receipt = MergeSubmissionReceipt(target: .init(host: account.host, username: user.username,
             projectID: request.projectID, iid: request.iid), userID: user.id, context: .init(request),
             semanticFingerprint: request.semanticContextFingerprint, discussionFingerprint: fingerprint,

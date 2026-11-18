@@ -540,6 +540,10 @@ extension GlabService {
         let final = try await finalRequest
         guard MergeRequestDependencySummary.Context(final) == context, final.isReadyForMergeSubmission(action),
               final.author.id == expectedUser.id else { throw CancellationError() }
+        // Outside merge trains, a successful pipeline changes the offered action to Merge now.
+        if action == .enqueue, expectedPolicy?.usesMergeTrain == false, final.isReadyForMergeSubmission(.mergeNow) {
+            throw CancellationError()
+        }
         guard glabPath == executable, accountRevision == revision, resolvedHost == host,
               currentUsername == expectedUser.username else { throw GlabError.notAuthenticated }
         try Task.checkCancellation()

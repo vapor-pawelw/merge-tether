@@ -2547,6 +2547,23 @@ import MergeTetherRemote
         }
     }
 
+    @Test func manualApprovalShowsTheMetThresholdAndTheOpenMinorFinding() async throws {
+        let harness = try makeHarness(assistantWorked: true)
+        defer { harness.cleanUp() }
+        harness.settings.automation.autoApproveEnabled = false
+        try harness.write("discussions.json", othersThread)
+        try harness.recordVerdict("classified_findings", head: head, findingLevels: ["40": "minor_code"])
+
+        try await harness.poll()
+
+        let item = try #require(harness.monitor.currentOpenItems.first)
+        #expect(item.canApprove)
+        #expect(item.metApprovalThreshold == .noMajorIssues)
+        #expect(item.remainingApprovalFindings.map(\.noteID) == [40])
+        #expect(item.remainingApprovalFindings.map(\.level) == [.minorCode])
+        #expect(harness.log("approve.log").isEmpty)
+    }
+
     @Test(arguments: ["edited", "metadata", "lateMajor", "stricterPolicy", "unsigned"])
     func approvalRechecksTheCurrentFindingsAndThreshold(_ change: String) async throws {
         var settings: SettingsManager?

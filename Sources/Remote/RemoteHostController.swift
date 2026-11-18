@@ -474,7 +474,9 @@ extension RemoteConnection: RemoteHostTransport {}
             catch { return .uncertain }
         case .merge, .enqueueMerge:
             guard phoneSupportsMergeActions, let request = item.authoredRequest else { return .changed }
-            let outcome = await monitor.authoredMergeRequests.mergeManually(request)
+            let mode: MergeSubmissionAction = action.kind == .merge ? .mergeNow : .enqueue
+            let outcome = await monitor.authoredMergeRequests.mergeManually(request,
+                action: mode, verificationAssistant: monitor.settings.automation.assistant)
             switch outcome {
             case .merged: return .completed
             case .queued: return .queued
@@ -519,7 +521,8 @@ extension RemoteConnection: RemoteHostTransport {}
             if await monitor.attention.approveRemotely(item.id, expectedHead: head) { return .completed }
             return monitor.attention.confirmationStates[item.id] == .failed ? .uncertain : .changed
         case .prepare:
-            await monitor.runAttentionFeedback(for: item)
+            guard action.id == "prepare" else { return .changed }
+            await monitor.handleFeedbackManually(for: item)
             return monitor.attentionFeedbackAction(for: item) == .failed ? .failed : .completed
         case .handoff:
             monitor.confirmPipelineHandoff(for: item.id); return .completed
@@ -586,7 +589,7 @@ extension RemoteConnection: RemoteHostTransport {}
             return .completed
         case .runReview:
             guard action.id == "runReview", monitor.canRunReview(for: item) else { return .changed }
-            await monitor.runReview(for: item)
+            await monitor.runReview(for: item, confirmed: monitor.manualReviewConsent(for: item))
             return monitor.assistantJobActionError == nil ? .completed : .failed
         case .publishDraft:
             guard let id = suffix("publishDraft:").flatMap(Int.init),

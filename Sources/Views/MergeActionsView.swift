@@ -20,7 +20,16 @@ struct MergeActionsView<StatusTrailer: View, AdditionalActions: View>: View {
     var statusTrailer: () -> StatusTrailer
     var additionalActions: (Bool) -> AdditionalActions
     @Environment(\.openURL) private var openURL
+    private struct MergeConfirmation {
+        let request: GitLabMergeRequest
+        let action: MergeSubmissionAction
+        let verificationAssistant: AutomationAssistant
+        let accountRevision: UInt64
+    }
+
     @State private var showingConfirmation = false
+    @State private var mergeConfirmation: MergeConfirmation?
+    @State private var attemptedAction: MergeSubmissionAction?
     @State private var working = false
     @State private var result: MergeSubmissionState?
     @State private var prepared: ManualDiscussionResolution.Prepared?
@@ -71,7 +80,8 @@ struct MergeActionsView<StatusTrailer: View, AdditionalActions: View>: View {
     }
     private var hidesActions: Bool { hidesBlockedActions && actionsBlocked }
     private var directMergeAction: MergeSubmissionAction? {
-        guard owned, state == .none, blocker == nil, !hidesActions,
+        let canConfirmChangedAction = state == .changed && status?.action != attemptedAction
+        guard owned, state == .none || canConfirmChangedAction, blocker == nil, !hidesActions,
               item.reReviewReadiness?.hasConcreteConcerns != true else { return nil }
         return status?.action
     }
@@ -97,8 +107,13 @@ struct MergeActionsView<StatusTrailer: View, AdditionalActions: View>: View {
             statusTrailer()
             HStack(spacing: 8) {
                 if owned {
-                    if let action = directMergeAction {
-                        Button { prepared = nil; showingConfirmation = true } label: {
+                    if let action = directMergeAction, let request = item.mergeRequest {
+                        Button {
+                            prepared = nil
+                            mergeConfirmation = .init(request: request, action: action,
+                                verificationAssistant: monitor.settings.automation.assistant, accountRevision: monitor.glab.accountRevision)
+                            showingConfirmation = true
+                        } label: {
                             if working { ProgressView().controlSize(.small) }
                             else { Text(action.title) }
                         }
@@ -126,18 +141,23 @@ struct MergeActionsView<StatusTrailer: View, AdditionalActions: View>: View {
                 if !prepared.plan.eligibleIDs.isEmpty {
                     Button { resolve(prepared) } label: { Text(.MergeActions.mergeActionsResolveConfirm) }
                 }
-            } else {
-                Button { merge() } label: { Text(status?.action?.title ?? .MergeActions.mergeActionsMergeNow) }
+            } else if let mergeConfirmation {
+                Button { merge(mergeConfirmation) } label: { Text(mergeConfirmation.action.title) }
             }
-            Button(role: .cancel) { prepared = nil } label: { Text(.MergeActions.mergeActionsCancel) }
+            Button(role: .cancel) { prepared = nil; mergeConfirmation = nil } label: { Text(.MergeActions.mergeActionsCancel) }
         } message: {
             if let prepared {
                 Text(.MergeActions.mergeActionsResolvePreview(prepared.plan.eligibleIDs.count, prepared.plan.heldIDs.count))
                 + Text(verbatim: "\n\n" + prepared.plan.confirmationDetails + "\n\n")
                 + Text(.MergeActions.mergeActionsResolveHelp)
-            } else { Text(.MergeActions.mergeActionsConfirmHelp) }
+            } else if let mergeConfirmation {
+                Text(.MergeActions.mergeActionsConfirmHelp) + Text("\n\n")
+                    + Text(mergeConfirmation.verificationAssistant.manualMergeVerificationDisclosure)
+            }
         }
-        .onChange(of: item.mergeRequest?.sha) { _, _ in result = nil; prepared = nil; showingConfirmation = false }
+        .onChange(of: item.mergeRequest?.sha) { _, _ in
+            result = nil; prepared = nil; mergeConfirmation = nil; showingConfirmation = false
+        }
         .onChange(of: monitor.authoredMergeRequests.lastRefresh) { _, _ in result = nil }
     }
 
@@ -250,12 +270,14 @@ struct MergeActionsView<StatusTrailer: View, AdditionalActions: View>: View {
         }
     }
 
-    private func merge() {
-        guard let request = item.mergeRequest, !working else { return }
+    private func merge(_ confirmation: MergeConfirmation) {
+        guard !working, monitor.glab.accountRevision == confirmation.accountRevision else { return }
         working = true
+        attemptedAction = confirmation.action
         Task { @MainActor in
             defer { working = false }
-            result = await monitor.authoredMergeRequests.mergeManually(request)
+            result = await monitor.authoredMergeRequests.mergeManually(confirmation.request,
+                action: confirmation.action, verificationAssistant: confirmation.verificationAssistant)
             if result == .merged || result?.isDelegated == true { await monitor.refreshNow() }
         }
     }

@@ -10,7 +10,7 @@ enum MRAutomationControl {
 
     static func summary(_ scope: MRAutomationScope, target: MRAutomationScope.Target, isDraft: Bool) -> Summary {
         let status = scope.resolve(target, isDraft: isDraft)
-        return .init(active: status.active, source: status.source, choice: scope.manualChoice(for: target))
+        return .init(active: status.active, source: status.source, choice: target.iid == nil ? scope.manualChoice(for: target) : scope[target])
     }
 
     static func sourceLabel(_ source: MRAutomationScope.Source) -> LocalizedStringResource {

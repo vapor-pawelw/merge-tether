@@ -63,10 +63,11 @@ struct MRCommonMenuItems: View {
         }
         if !isFinished, monitor.canRunReview(for: item) {
             Button {
+                guard let consent = confirmManualReview(for: item, monitor: monitor) else { return }
                 startingReview = true
                 Task {
                     defer { startingReview = false }
-                    await monitor.runReview(for: item)
+                    await monitor.runReview(for: item, confirmed: consent)
                 }
             } label: {
                 MRActionLabel(title: .CommandCenter.commandCenterReviewRun, cta: .runReview)
@@ -101,4 +102,17 @@ struct AssistantJobPreflightNotice: View {
                 .fixedSize(horizontal: false, vertical: true)
         }
     }
+}
+
+@MainActor
+func confirmManualReview(for item: MergeRequestAttentionMonitor.Item,
+                         monitor: TodoMonitorService) -> TodoMonitorService.ManualReviewConsent? {
+    let consent = monitor.manualReviewConsent(for: item)
+    let alert = NSAlert()
+    alert.messageText = String(localized: .CommandCenter.commandCenterReviewRun)
+    alert.informativeText = String(localized: .ActionEffects.runReview) + "\n\n"
+        + String(localized: consent.publicationMode.reviewConfirmation)
+    alert.addButton(withTitle: String(localized: .CommandCenter.commandCenterReviewRun))
+    alert.addButton(withTitle: String(localized: .Menu.menuScopeCancel))
+    return alert.runModal() == .alertFirstButtonReturn ? consent : nil
 }

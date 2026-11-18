@@ -47,6 +47,8 @@ final class MergeRequestAttentionMonitor {
         /// The assistant has no objections to the current head and the user has nothing open,
         /// but automatic approval does not apply, so the user approves in Ready for your OK.
         var canApprove = false
+        var metApprovalThreshold: AutoApprovalThreshold?
+        var remainingApprovalFindings: [ReviewVerdictStore.RemainingFinding] = []
         /// Deliberate automatic-approval opt-out is not a human checkpoint until
         /// every discussion permits that automatic action. Manual approval stays available.
         var approvalWaitingForReadiness = false
@@ -1053,6 +1055,8 @@ final class MergeRequestAttentionMonitor {
                                                               iid: item.id.iid, in: verdictDirectory)
                         }
                         updated.canApprove = false
+                        updated.metApprovalThreshold = nil
+                        updated.remainingApprovalFindings = []
                         updated.approvalWaitingForReadiness = false
                         updated.autoApproveReady = false
                         if drafts?.isEmpty == true, !item.isAuthored,
@@ -1085,6 +1089,11 @@ final class MergeRequestAttentionMonitor {
                             updated.canApprove = ((currentVerdict && check.ownReady) || classifiedReviewAllowsApproval) && !automatic
                             updated.approvalWaitingForReadiness = updated.canApprove && (approvalOptedOut || autoApproves) && !automaticContext && !check.discussionsReady
                             updated.autoApproveReady = automatic
+                            if classifiedReviewAllowsApproval, let verdict = authenticatedVerdict, let discussions = check.discussions {
+                                updated.metApprovalThreshold = approvalThreshold
+                                updated.remainingApprovalFindings = await ReviewVerdictStore.remainingFindings(verdict,
+                                    discussions: discussions, in: verdictDirectory)
+                            }
                         }
                         let hasDrafts = !(drafts ?? item.drafts).isEmpty
                         let discussions = if item.mergeRequest != nil || item.authoredRequest != nil || hasDrafts {

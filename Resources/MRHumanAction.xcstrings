@@ -518,6 +518,116 @@
           }
         }
       }
+    },
+    "mrHumanAction.retryReview": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Retry code review"
+          }
+        }
+      }
+    },
+    "mrHumanAction.retryFollowUp": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Retry author follow-up"
+          }
+        }
+      }
+    },
+    "mrHumanAction.retryPipeline": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Retry pipeline investigation"
+          }
+        }
+      }
+    },
+    "mrHumanAction.retryConflict": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Retry conflict resolution"
+          }
+        }
+      }
+    },
+    "mrHumanAction.retryRefresh": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Retry GitLab refresh"
+          }
+        }
+      }
+    },
+    "mrHumanAction.retryDraftReply": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Retry reply preparation"
+          }
+        }
+      }
+    },
+    "mrHumanAction.runFollowUp": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Run author follow-up"
+          }
+        }
+      }
+    },
+    "mrHumanAction.runPipeline": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Investigate pipeline failure"
+          }
+        }
+      }
+    },
+    "mrHumanAction.runConflict": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Resolve merge conflict"
+          }
+        }
+      }
+    },
+    "mrHumanAction.runRefresh": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Refresh from GitLab"
+          }
+        }
+      }
     }
   }
 }

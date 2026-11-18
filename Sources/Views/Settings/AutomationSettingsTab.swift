@@ -114,9 +114,7 @@ struct AutomationSettingsTab: View {
                     .disabled(draft == saveState.accepted && sessionCustom == settings.automationProfileHistory.available(for: saveState.accepted) && !saveState.failed)
 
                     Button {
-                        if draft != settings.automation.ignoringGlobalSuspension && (draft.usesAssistant || draft.autoReReviewEnabled || draft.autoMergeEnabled
-                            || draft.autoApproveEnabled || draft.publishDraftsWithoutConfirmation
-                            || draft.publishAIRepliesWithoutConfirmation) { setupAction = .apply }
+                        if draft.requiresAssistantSetup(comparedTo: settings.acceptedAutomation) { setupAction = .apply }
                         else { applyDraft() }
                     } label: {
                         Text(.Settings.settingsAutomationApply)

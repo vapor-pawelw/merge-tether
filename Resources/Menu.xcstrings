@@ -821,7 +821,7 @@
         "en": {
           "stringUnit": {
             "state": "translated",
-            "value": "The agent has no objections to this commit, and your review threads are resolved. Approve it?"
+            "value": "Review completed. Approval is available."
           }
         }
       }
@@ -1350,6 +1350,72 @@
           "stringUnit": {
             "state": "translated",
             "value": "Tip: Option-click the bolt to switch automation without opening this panel."
+          }
+        }
+      }
+    },
+    "menu.scope.followRepository": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Follow repository default"
+          }
+        }
+      }
+    },
+    "menu.scope.individualOptIn": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Individually enabled"
+          }
+        }
+      }
+    },
+    "menu.confirm.approvalThreshold.%@": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Review met the approval threshold “%@”."
+          }
+        }
+      }
+    },
+    "menu.confirm.findingEditorial": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Editorial finding remains"
+          }
+        }
+      }
+    },
+    "menu.confirm.findingMinorCode": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Minor code finding remains"
+          }
+        }
+      }
+    },
+    "menu.confirm.findingMajor": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Major finding remains"
           }
         }
       }

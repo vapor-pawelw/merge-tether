@@ -7,6 +7,21 @@ import Testing
 struct MRAutomationScopeEditorTests {
     private let target = MRAutomationScope.Target(host: "gitlab.example.test", username: "me", projectID: 7, iid: 42)
 
+    @Test func followingRepositoryClearsAnIndividualOptInAcrossRestart() async throws {
+        let (defaults, settings, monitor) = try makeMonitor()
+        defer { monitor.stopTimer() }
+        settings.automation.scope[target.repository] = .paused
+        settings.automation.scope[target] = .active
+        settings.save()
+        let editor = MRAutomationScopeEditor(monitor: monitor, target: target)
+        #expect(editor.summary == .init(active: true, source: .mergeRequest, choice: .active))
+
+        await editor.choose(.inherit)
+
+        #expect(editor.summary == .init(active: false, source: .repository, choice: .inherit))
+        #expect(SettingsManager(defaults: defaults).automation.scope[target] == .inherit)
+    }
+
     @Test func toggleOnReadyMRPausesItPersistsAndAnnouncesWithoutConfirmation() async throws {
         // given
         let (defaults, settings, monitor) = try makeMonitor()

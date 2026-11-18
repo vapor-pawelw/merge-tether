@@ -162,6 +162,14 @@ enum AutomationPublicationMode: String, CaseIterable, Codable, Hashable, Sendabl
 
 enum AutoApprovalThreshold: String, Codable, Sendable {
     case noMajorIssues, noCodeIssues, noIssues
+
+    var title: LocalizedStringResource {
+        switch self {
+        case .noMajorIssues: .Settings.settingsAutomationApprovalNoMajorIssues
+        case .noCodeIssues: .Settings.settingsAutomationApprovalNoCodeIssues
+        case .noIssues: .Settings.settingsAutomationApprovalNoIssues
+        }
+    }
 }
 
 struct AutomationSettings: Codable, Equatable, Sendable {
@@ -677,6 +685,23 @@ struct AutomationSettings: Codable, Equatable, Sendable {
         hasAutomaticActionConsent && (usesAssistant || reviewRequested.isEnabled || authorFeedback.isEnabled || !workflowRules.enabled.isEmpty
             || autoMergeEnabled || autoReReviewEnabled || autoApproveEnabled || autoResolveAcceptedFeedback
             || publicationMode != .manual)
+    }
+
+    func requiresAssistantSetup(comparedTo current: Self) -> Bool {
+        let features = [
+            (usesAssistant, current.usesAssistant),
+            (autoVerifyReReview, current.autoVerifyReReview),
+            (autoReReviewEnabled, current.autoReReviewEnabled),
+            (autoMergeEnabled, current.autoMergeEnabled),
+            (autoApproveEnabled, current.autoApproveEnabled),
+            (publishDraftsWithoutConfirmation, current.publishDraftsWithoutConfirmation),
+            (publishAIRepliesWithoutConfirmation, current.publishAIRepliesWithoutConfirmation)
+        ]
+        guard features.contains(where: { $0.0 }) else { return false }
+        if assistant != current.assistant || (hasAutomaticActionConsent && !current.hasAutomaticActionConsent) {
+            return true
+        }
+        return features.contains { enabled, wasEnabled in enabled && !wasEnabled }
     }
 
     func preservingScope(from current: Self) -> Self {

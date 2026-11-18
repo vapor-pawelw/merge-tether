@@ -70,6 +70,13 @@ import MergeTetherRemote
                     guard let publicationToken = try? RemoteDigest.token([token] + draftIDs) else { return nil }
                     return RemoteAction(id: raw, kind: kind, token: publicationToken)
                 }
+                if kind == .reReview {
+                    let message = ([String(localized: .Menu.menuReReviewConfirmMessage)]
+                        + (item.reReviewReadiness?.manualConfirmationDetails ?? [])).joined(separator: "\n\n")
+                    guard let readinessToken = try? RemoteDigest.token([token, message]) else { return nil }
+                    return RemoteAction(id: raw, kind: kind, token: readinessToken, confirmationText: message,
+                        label: String(localized: .Menu.menuReReviewConfirm))
+                }
                 return RemoteAction(id: raw, kind: kind, token: token)
             }
             card.actions += item.drafts.compactMap { draft in
@@ -123,8 +130,13 @@ import MergeTetherRemote
                     }
                     if item.reReviewReadiness == .failed || item.reReviewReadiness == .unavailable
                         || item.draftProofRecoveryFailure != nil { extras.append(.verify) }
-                    card = self.card(item, account: account, extraActions: extras, context: handoffs.map(\.id).sorted() + [(try? RemoteDigest.token(monitor.settings.automation)) ?? ""])
                     let presentation = MRCardPresentation(row: row, monitor: monitor, allowsRemoval: result.lanes[lane].id == .reviewed)
+                    let humanAction = presentation.humanAction
+                    let feedbackIDs = item.authorFeedbackStatus?.followUpNoteIDs.sorted().map(String.init) ?? []
+                    if humanAction?.action == .handleFeedback, !feedbackIDs.isEmpty { extras.append(.prepare) }
+                    let context = handoffs.map(\.id).sorted() + [(try? RemoteDigest.token(monitor.settings.automation)) ?? "",
+                        item.authorFeedbackStatus?.fingerprint ?? ""] + feedbackIDs
+                    card = self.card(item, account: account, extraActions: extras, context: context)
                     card = self.presentation(card, model: presentation)
                     if row.displayRequest?.state == "merged" || row.displayRequest?.state == "closed" {
                         card.actions = []
@@ -140,23 +152,37 @@ import MergeTetherRemote
                     let busy = presentation.actionsBlocked
                     if busy { card.actions = [] }
                     else {
+                        let mode = monitor.manualReviewConsent(for: item).publicationMode
                         card = mergeActions(card, item: item, status: mergeStatus, monitor: monitor, account: account,
                             evidenceMatchesCatalogContext: row.evidenceMatchesCatalogContext)
-                        let intent = row.attentionIntents.first { $0.state == .failed } ?? row.attentionIntents.first { $0.state == .pending }
-                        if let intent, intent.kind == .refresh || monitor.availableAssistants.contains(monitor.settings.automation.assistant),
-                           let token = try? RemoteDigest.token([account, try RemoteDigest.token(intent), try RemoteDigest.token(monitor.settings.automation)]) {
-                            card.actions.append(.init(id: "intent:\(intent.id)", kind: .prepare, token: token))
+                        let intent = humanAction?.retryIntent
+                            ?? row.attentionIntents.first { $0.state == .failed && !row.isReconciling($0) }
+                            ?? row.attentionIntents.first { $0.state == .pending && !$0.isDeferredReview }
+                        if let intent,
+                           intent.kind == .refresh || monitor.availableAssistants.contains(monitor.settings.automation.assistant),
+                           let token = try? RemoteDigest.token([account, try RemoteDigest.token(intent),
+                               try RemoteDigest.token(monitor.settings.automation), mode.rawValue]) {
+                            let label = String(localized: MRHumanAction.intentLabel(intent))
+                            let confirmation = intent.kind == .review
+                                ? label + "\n\n" + String(localized: mode.reviewConfirmation) : label
+                            card.actions.append(.init(id: "intent:\(intent.id)", kind: .prepare, token: token,
+                                confirmationText: confirmation, label: label))
                         }
-                        if let job = row.latestJob, row.stoppedJobNeedsAttention,
+                        if let job = humanAction?.retryJob ?? row.latestJob, row.stoppedJobNeedsAttention,
                            job.taskPrompt != nil, job.mergeRequestURL != nil,
-                           let token = try? RemoteDigest.token([account, try RemoteDigest.token(job), try RemoteDigest.token(monitor.settings.automation)]) {
-                            card.actions.append(.init(id: "job:\(job.id)", kind: .retryJob, token: token))
+                           let token = try? RemoteDigest.token([account, try RemoteDigest.token(job),
+                               try RemoteDigest.token(monitor.settings.automation), mode.rawValue]) {
+                            let label = String(localized: MRHumanAction.retryLabel(job))
+                            let confirmation = job.workflow == .review
+                                ? label + "\n\n" + String(localized: mode.reviewConfirmation) : label
+                            card.actions.append(.init(id: "job:\(job.id)", kind: .retryJob, token: token,
+                                confirmationText: confirmation, label: label))
                         }
                     }
                     card.actions += mrControls(item: item, row: row, monitor: monitor, account: account, busy: busy)
                     if let control = commentOriginControl(item: item, monitor: monitor, account: account) { card.actions.append(control) }
-                    card = bindingPrimaryAction(card, humanAction: presentation.humanAction?.action,
-                        nextStep: presentation.reviewingContext.nextStep)
+                    card = bindingPrimaryAction(card, humanAction: humanAction?.action,
+                        actionID: humanAction?.executableActionID, nextStep: presentation.reviewingContext.nextStep)
                 } else if let todo = board.otherTodos.first(where: { "todo:\($0.id)" == card.id }),
                           monitor.isAssessingNotice(todo) {
                     card.needsAttention = false
@@ -288,7 +314,8 @@ import MergeTetherRemote
         if evidenceMatchesCatalogContext, let status, item.canOfferManualMerge(using: status), let action = status.action {
             let kind: RemoteActionKind = action == .mergeNow ? .merge : .enqueueMerge
             card.actions.append(.init(id: kind.rawValue, kind: kind, token: token,
-                confirmationText: String(localized: .MergeActions.mergeActionsConfirmHelp)))
+                confirmationText: String(localized: .MergeActions.mergeActionsConfirmHelp) + "\n\n"
+                    + String(localized: monitor.settings.automation.assistant.manualMergeVerificationDisclosure)))
         }
         if item.draftCount == 0, item.drafts.isEmpty, !item.requiresDiscussionRecheck,
            item.needsDiscussion || item.hasOtherUnresolvedDiscussions || request.blockingDiscussionsResolved == false {
@@ -328,9 +355,11 @@ import MergeTetherRemote
             actions.append(.init(id: "markReady", kind: .markReady, token: token,
                 confirmationText: String(localized: .Remote.remoteMarkReadyHelp)))
         }
-        if monitor.canRunReview(for: item), let token = token(["review", request.sha ?? ""]) {
+        let reviewConsent = monitor.manualReviewConsent(for: item)
+        if monitor.canRunReview(for: item), let token = token(["review", request.sha ?? "", reviewConsent.publicationMode.rawValue]) {
             actions.append(.init(id: "runReview", kind: .runReview, token: token,
-                confirmationText: String(localized: .Remote.remoteRunReviewHelp)))
+                confirmationText: String(localized: .Remote.remoteRunReviewHelp) + "\n\n"
+                    + String(localized: reviewConsent.publicationMode.reviewConfirmation)))
         }
         if item.commentReviewSnapshot != nil {
             for draft in item.drafts {
@@ -528,8 +557,8 @@ import MergeTetherRemote
     }
 
     static func bindingPrimaryAction(_ original: RemoteCard, humanAction: MRHumanAction.Action?,
-                                     nextStep: ReviewingContext.NextStep) -> RemoteCard {
-        var card = bindingExecutableAction(original, humanAction: humanAction, nextStep: nextStep)
+                                     actionID: String? = nil, nextStep: ReviewingContext.NextStep) -> RemoteCard {
+        var card = bindingExecutableAction(original, humanAction: humanAction, actionID: actionID, nextStep: nextStep)
         if let ready = card.actions.first(where: { $0.kind == .markReady }) {
             let cta = RemoteCardCTA(title: String(localized: .Remote.remoteMarkReady), destination: .actions, actionID: ready.id)
             if card.primaryCTA == nil || card.primaryCTA?.destination == .overview { card.primaryCTA = cta }
@@ -542,7 +571,7 @@ import MergeTetherRemote
     }
 
     private static func bindingExecutableAction(_ original: RemoteCard, humanAction: MRHumanAction.Action?,
-                                                nextStep: ReviewingContext.NextStep) -> RemoteCard {
+                                                actionID: String?, nextStep: ReviewingContext.NextStep) -> RemoteCard {
         guard let cta = original.primaryCTA, cta.destination != .setup else { return original }
         let kind: RemoteActionKind
         switch humanAction {
@@ -553,7 +582,8 @@ import MergeTetherRemote
         default: return original
         }
         var card = original
-        let matches = card.actions.filter { $0.kind == kind && (humanAction != .retryIntent || $0.id.hasPrefix("intent:")) }
+        let expectedID = actionID ?? (humanAction == nil && nextStep == .runReview ? "runReview" : nil)
+        let matches = card.actions.filter { $0.kind == kind && $0.id == expectedID }
         card.primaryCTA?.destination = .actions
         if matches.count == 1 {
             card.primaryCTA?.actionID = matches[0].id

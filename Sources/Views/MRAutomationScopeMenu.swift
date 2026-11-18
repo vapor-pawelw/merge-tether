@@ -205,6 +205,9 @@ struct MRAutomationPopover: View {
             Picker(selection: Binding(get: { editor.summary.choice }, set: { choice in
                 Task { await editor.choose(choice) }
             })) {
+                if editor.summary.choice == .active {
+                    Text(scopeChoiceLabel(.active)).tag(MRAutomationScope.Choice.active)
+                }
                 ForEach([MRAutomationScope.Choice.inherit, .forceOn, .paused], id: \.self) { choice in
                     Text(scopeChoiceLabel(choice)).tag(choice)
                 }
@@ -277,6 +280,7 @@ struct MRAutomationScopeMenu: View {
             let summary = editor.summary
             Menu {
                 if target.iid != nil {
+                    if summary.choice == .active { Text(scopeChoiceLabel(.active)) }
                     choiceButton(.inherit, current: summary.choice)
                     choiceButton(.forceOn, current: summary.choice)
                     choiceButton(.paused, current: summary.choice)
@@ -341,7 +345,8 @@ private func scopeHelp(_ summary: MRAutomationControl.Summary, hasActionExceptio
 
 private func scopeChoiceLabel(_ choice: MRAutomationScope.Choice) -> LocalizedStringResource {
     switch choice {
-    case .inherit, .active: .Menu.menuScopeAuto
+    case .inherit: .Menu.menuScopeFollowRepository
+    case .active: .Menu.menuScopeIndividualOptIn
     case .forceOn: .Menu.menuScopeAlwaysOn
     case .paused: .Menu.menuScopeAlwaysOff
     }

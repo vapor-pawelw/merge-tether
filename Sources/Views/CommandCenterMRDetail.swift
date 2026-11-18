@@ -273,7 +273,12 @@ private struct CommandCenterMRDetailContent: View {
             .confirmationDialog(Text(.ReviewReset.reviewResetConfirmTitle), isPresented: $confirmReviewReset, titleVisibility: .visible) {
                 Button(role: .destructive) { resetReviewState() } label: { Text(.ReviewReset.reviewResetConfirm) }
             } message: {
-                Text(item.isAuthored ? .ReviewReset.reviewResetHelpAuthored : .ReviewReset.reviewResetHelpReviewed)
+                if item.isAuthored {
+                    Text(.ReviewReset.reviewResetHelpAuthored)
+                } else {
+                    Text(.ReviewReset.reviewResetHelpReviewed) + Text("\n\n")
+                        + Text(monitor.manualReviewConsent(for: item).publicationMode.reviewConfirmation)
+                }
             }
             .confirmationDialog(Text(.Board.boardRemove), isPresented: $confirmRemoval, titleVisibility: .visible) {
                 Button(role: .destructive) { monitor.removeReviewedMergeRequest(item) } label: { Text(.Board.boardRemove) }
@@ -679,12 +684,13 @@ private struct CommandCenterMRDetailContent: View {
         }
         if !item.isAuthored && !monitor.mrTodoIntents(for: item).contains(where: { $0.kind == .review }) {
             Button {
+                guard let consent = confirmManualReview(for: item, monitor: monitor) else { return }
                 isStartingReview = true
                 reviewStartError = nil
                 let expectedTarget = discussionTarget
                 Task {
                     defer { isStartingReview = false }
-                    await monitor.runReview(for: item)
+                    await monitor.runReview(for: item, confirmed: consent)
                     if discussionTarget == expectedTarget { reviewStartError = monitor.assistantJobActionError }
                 }
             } label: {

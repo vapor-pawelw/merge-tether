@@ -11,6 +11,15 @@ struct ReviewVerdict: Codable, Equatable, Sendable {
     enum FindingLevel: String, Codable, Sendable {
         case none, nonCode = "non_code", minorCode = "minor_code", major
 
+        var title: LocalizedStringResource? {
+            switch self {
+            case .none: nil
+            case .nonCode: .Menu.menuConfirmFindingEditorial
+            case .minorCode: .Menu.menuConfirmFindingMinorCode
+            case .major: .Menu.menuConfirmFindingMajor
+            }
+        }
+
         func allows(_ threshold: AutoApprovalThreshold) -> Bool {
             switch self {
             case .none: true
@@ -122,6 +131,12 @@ struct ReviewVerdict: Codable, Equatable, Sendable {
 
 /// Raw helper records are candidates; automatic approval additionally requires the authenticated completion.
 enum ReviewVerdictStore {
+    struct RemainingFinding: Sendable, Equatable {
+        let level: ReviewVerdict.FindingLevel
+        var noteID: Int? = nil
+        var summary: String? = nil
+    }
+
     struct Publication: Sendable {
         let verdict: ReviewVerdict
         fileprivate let drafts: [GitLabDraftNote]
@@ -197,19 +212,50 @@ enum ReviewVerdictStore {
         case .classifiedFindings:
             guard let findings = verdict.findings, findings.general.allows(threshold),
                   let semanticContextFingerprint, verdict.semanticContextFingerprint == semanticContextFingerprint else { return false }
-            let publication = normalizedPublication(verdict, in: directory)
-            let publishedDraftRoots = publication?.fingerprint == ReviewVerdict.fingerprint(discussions)
-                ? publication?.publishedDraftRoots ?? [:] : [:]
+            let publishedDraftRoots = Self.publishedDraftRoots(verdict, matching: discussions, in: directory)
             guard findings.drafts.allSatisfy({ publishedDraftRoots[$0.key] != nil || $0.value.allows(threshold) }) else { return false }
             let draftsByRoot = Dictionary(grouping: publishedDraftRoots, by: \.value)
             return active.allSatisfy { thread in
                 guard let root = thread.reviewRoot else { return true }
                 guard let id = root.id else { return false }
-                let draftLevels = (draftsByRoot[id] ?? []).compactMap { findings.drafts[$0.key] }
-                let levels = (findings.discussions[String(id)].map { [$0] } ?? []) + draftLevels
+                let levels = findingLevels(findings, noteID: id, draftsByRoot: draftsByRoot)
                 return !levels.isEmpty && levels.allSatisfy { $0.allows(threshold) }
             }
         }
+    }
+
+    @MainActor
+    static func remainingFindings(_ verdict: ReviewVerdict, discussions: [GitLabMergeRequestDiscussion],
+                                  in directory: URL = directory) -> [RemainingFinding] {
+        guard let findings = verdict.findings else { return [] }
+        let publishedDraftRoots = Self.publishedDraftRoots(verdict, matching: discussions, in: directory)
+        let draftsByRoot = Dictionary(grouping: publishedDraftRoots, by: \.value)
+        var remaining: [RemainingFinding] = findings.general == .none ? [] : [.init(level: findings.general)]
+        for thread in GitLabMergeRequestDiscussion.activeForReview(discussions) {
+            guard let note = thread.reviewRoot, let id = note.id else { continue }
+            let levels = findingLevels(findings, noteID: id, draftsByRoot: draftsByRoot)
+            for level in [ReviewVerdict.FindingLevel.major, .minorCode, .nonCode] where levels.contains(level) {
+                remaining.append(.init(level: level, noteID: id,
+                    summary: AgentExplanation.summary(note.body.map { String($0.prefix(AgentExplanation.maximumLength)) })))
+            }
+        }
+        for id in findings.drafts.keys.sorted() where publishedDraftRoots[id] == nil {
+            if let level = findings.drafts[id], level != .none { remaining.append(.init(level: level)) }
+        }
+        return remaining
+    }
+
+    @MainActor
+    private static func publishedDraftRoots(_ verdict: ReviewVerdict, matching discussions: [GitLabMergeRequestDiscussion],
+                                            in directory: URL) -> [String: Int] {
+        let publication = normalizedPublication(verdict, in: directory)
+        return publication?.fingerprint == ReviewVerdict.fingerprint(discussions) ? publication?.publishedDraftRoots ?? [:] : [:]
+    }
+
+    private static func findingLevels(_ findings: ReviewVerdict.Findings, noteID: Int,
+                                      draftsByRoot: [Int: [Dictionary<String, Int>.Element]]) -> [ReviewVerdict.FindingLevel] {
+        let draftLevels = (draftsByRoot[noteID] ?? []).compactMap { findings.drafts[$0.key] }
+        return (findings.discussions[String(noteID)].map { [$0] } ?? []) + draftLevels
     }
 
     @MainActor

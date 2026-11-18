@@ -1082,6 +1082,14 @@ final class TodoMonitorService {
         await feedbackLaunches.runAttentionFeedback(for: item, manual: manual)
     }
 
+    func handleFeedbackManually(for item: MergeRequestAttentionMonitor.Item) async {
+        if let status = item.authorFeedbackStatus, !status.followUpNoteIDs.isEmpty, let request = item.authoredRequest {
+            await runVerifiedAuthorFeedback(request: request, noteIDs: status.followUpNoteIDs, fingerprint: status.fingerprint)
+        } else {
+            await runAttentionFeedback(for: item)
+        }
+    }
+
     func runVerifiedAuthorFeedback(request: GitLabMergeRequest, noteIDs: Set<Int>, fingerprint: String,
                                   residual: AuthorFeedbackResidual? = nil, manual: Bool = true) async {
         await feedbackLaunches.runVerifiedAuthorFeedback(request: request, noteIDs: noteIDs,

@@ -12,6 +12,12 @@ import Foundation
     }
 }
 
+extension AutomationAssistant {
+    var manualMergeVerificationDisclosure: LocalizedStringResource {
+        .MergeActions.mergeActionsVerifyBeforeSubmit(String(localized: displayName))
+    }
+}
+
 /// Explicit manual checks can run when background automation is off. They use the
 /// same read-only verifier and never grant a coding job, push or publication.
 @MainActor enum ManualFeedbackVerification {

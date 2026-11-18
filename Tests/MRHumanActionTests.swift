@@ -142,6 +142,23 @@ struct MRHumanActionTests {
         #expect(action.feedbackEvidence(for: item) == (kind == .followUp ? .unavailable(42) : .none))
     }
 
+    @Test func aNewerDeferredReviewCannotReplaceThePipelineTaskDescribedOnTheCard() throws {
+        let request = try MRDependencyPresentationTests().request(2, project: 1, draft: true)
+        let target = MRAutomationScope.Target(host: "gitlab.example.test", username: "author7", projectID: 1, iid: 2)
+        let item = MergeRequestAttentionMonitor.Item(id: .init(projectID: 1, iid: 2), title: request.title,
+            url: request.webURL, mergeRequest: request)
+        let review = MRTodoIntent(id: UUID(), target: target, kind: .review, state: .pending,
+            todoIDs: [], noteIDs: [], sourceEvents: [], request: request, headSHA: request.sha!, updatedAt: .now)
+        let pipeline = MRTodoIntent(id: UUID(), target: target, kind: .pipeline, state: .pending,
+            todoIDs: [], noteIDs: [], sourceEvents: [], request: request, headSHA: request.sha!, updatedAt: .distantPast)
+
+        let action = try #require(MRHumanAction(row: .init(item: item, latestJob: nil, intents: [review, pipeline]), assistantReady: true))
+
+        #expect(action.retryIntent?.id == pipeline.id)
+        #expect(action.executableActionID == "intent:\(pipeline.id)")
+        #expect(String(localized: action.actionLabel) == String(localized: .MRHumanAction.mrHumanActionRunPipeline))
+    }
+
     @Test func aFollowUpWithoutLinkedCommentsExplicitlyReportsMissingEvidence() throws {
         // given
         let request = try MRDependencyPresentationTests().request(2, project: 1)

@@ -460,13 +460,13 @@
         "en": {
           "stringUnit": {
             "state": "translated",
-            "value": "Request re-review"
+            "value": "Confirm readiness and request re-review"
           }
         },
         "pl": {
           "stringUnit": {
             "state": "translated",
-            "value": "Poproś o ponowny przegląd"
+            "value": "Potwierdź gotowość i poproś o ponowny przegląd"
           }
         }
       }
@@ -1480,13 +1480,13 @@
         "en": {
           "stringUnit": {
             "state": "translated",
-            "value": "The Mac starts an agent review of the current head. It prepares private draft comments only; nothing is published without your confirmation."
+            "value": "The Mac starts an agent review of the current head and prepares draft comments."
           }
         },
         "pl": {
           "stringUnit": {
             "state": "translated",
-            "value": "Mac uruchomi przegląd bieżącej wersji przez agenta. Przygotuje tylko prywatne szkice komentarzy; nic nie zostanie opublikowane bez Twojego potwierdzenia."
+            "value": "Mac uruchomi przegląd bieżącej wersji przez agenta i przygotuje szkice komentarzy."
           }
         }
       }
@@ -1623,6 +1623,17 @@
           "stringUnit": {
             "state": "translated",
             "value": "Oznacza ten roboczy merge request jako gotowy w GitLabie. Skonfigurowana automatyzacja może zostać wznowiona. Ta akcja nie scala zmian."
+          }
+        }
+      }
+    },
+    "remote.reReviewConfirmation": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Confirm that you have addressed or explained the feedback and that the merge request is ready for another review."
           }
         }
       }

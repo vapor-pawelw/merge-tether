@@ -139,7 +139,7 @@
         "en": {
           "stringUnit": {
             "state": "translated",
-            "value": "Checks the merge request again, then merges it or sets auto-merge in GitLab."
+            "value": "Checks the merge request again and submits the merge action you confirmed."
           }
         }
       }
@@ -227,7 +227,7 @@
         "en": {
           "stringUnit": {
             "state": "translated",
-            "value": "Starts an agent with the selected CLI to review this merge request. Findings stay private drafts until you publish them."
+            "value": "Starts an agent with the selected CLI to review this merge request."
           }
         }
       }
@@ -294,6 +294,61 @@
           "stringUnit": {
             "state": "translated",
             "value": "Checks again with the selected CLI whether the feedback is addressed. The check itself changes nothing."
+          }
+        }
+      }
+    },
+    "reviewPublicationManual": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Review comments stay private until you publish them."
+          }
+        }
+      }
+    },
+    "reviewPublicationAll": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Eligible drafts can be published automatically after two unchanged polls."
+          }
+        }
+      }
+    },
+    "reviewPublicationFiltered": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Drafts that meet your publication filters can be published automatically after two unchanged polls. Other drafts require your approval."
+          }
+        }
+      }
+    },
+    "reviewPublicationAIReplies": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Eligible replies to AI comments or allowed bots can be published automatically after two unchanged polls. Standalone findings require your approval."
+          }
+        }
+      }
+    },
+    "kindMerge": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "GitLab merge with a possible AI check"
           }
         }
       }
