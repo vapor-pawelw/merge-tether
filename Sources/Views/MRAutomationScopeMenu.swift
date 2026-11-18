@@ -43,6 +43,11 @@ struct MRAutomationScopeEditor {
         }
     }
 
+    var boltColor: Color {
+        guard choice == .default else { return .orange }
+        return summary.active ? .accentColor : .secondary
+    }
+
     var hasActionExceptions: Bool { choice == .on && hasSavedActionOverrides }
 
     func displayedPreference(for action: MRAutomaticAction) -> MRAutomationPreference {
@@ -161,6 +166,8 @@ struct BoardAutomationToggle: View {
     var body: some View {
         if editor.isAvailable {
             let summary = editor.summary
+            let choice = editor.choice
+            let help = Text(summary.active ? .Menu.menuScopeButtonHelpActive : .Menu.menuScopeButtonHelpPaused)
             Button {
                 if NSEvent.modifierFlags.contains(.option) {
                     Task { await editor.toggle() }
@@ -170,20 +177,20 @@ struct BoardAutomationToggle: View {
             } label: {
                 Image(systemName: summary.active ? "bolt.fill" : "bolt.slash")
                     .font(.system(size: 11, weight: .medium))
-                    .foregroundStyle(summary.active ? Color.accentColor : Color.secondary)
+                    .foregroundStyle(editor.boltColor)
                     .frame(width: 24, height: 24)
                     .contentShape(Rectangle())
             }
             .buttonStyle(.plain)
             .boardHeaderControlHover()
-            .help(Text(summary.active ? .Menu.menuScopeButtonHelpActive : .Menu.menuScopeButtonHelpPaused))
+            .help(Text(choice.title) + Text(verbatim: " · ") + help)
             .popover(isPresented: $showingDetails, arrowEdge: .bottom) {
                 MRAutomationPopover(editor: editor, policy: policy)
                     .onExitCommand { showingDetails = false }
             }
             .preference(key: BoardDetailPopoverPresentedKey.self, value: showingDetails)
             .accessibilityLabel(Text(.Menu.menuScopeTitle))
-            .accessibilityValue(Text(scopeChoiceLabel(summary.choice)) + Text(", ")
+            .accessibilityValue(Text(choice.title) + Text(", ")
                 + Text(summary.active ? .Menu.menuScopeActive : .Menu.menuScopePaused))
             .accessibilityHint(Text(.Menu.menuScopeButtonAccessibilityHint))
         }
@@ -233,7 +240,7 @@ struct MRAutomationPopover: View {
     private func header(_ summary: MRAutomationControl.Summary) -> some View {
         HStack(alignment: .firstTextBaseline, spacing: 8) {
             Image(systemName: summary.active ? "bolt.fill" : "bolt.slash")
-                .foregroundStyle(summary.active ? Color.accentColor : Color.secondary)
+                .foregroundStyle(editor.boltColor)
             VStack(alignment: .leading, spacing: 2) {
                 Text(summary.active ? .Menu.menuScopeActive : .Menu.menuScopePaused).font(.headline)
                 Text(.Menu.menuScopePopoverSource(String(localized: MRAutomationControl.sourceLabel(summary.source))))

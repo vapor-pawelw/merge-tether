@@ -7,6 +7,7 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 ## Unreleased
 
 - Use **Default**, **On**, and **Off** for MR automation, comment publication, auto-approval, and auto-merge on Mac. The lightning panel remembers the choices saved under **On**.
+- Tint the Mac automation bolt orange when an MR uses a manual On or Off override.
 
 - Set auto-merge to **Default**, **On** or **Off** for an individual MR from its lightning menu. **On** overrides the global auto-merge defaults for that MR.
 
