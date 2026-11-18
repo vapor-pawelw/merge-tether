@@ -119,7 +119,7 @@ struct MRAutomaticActionPolicyTests {
             let other = MRAutomationScope.Target(host: target.host, username: "other", projectID: 1, iid: 2)
 
             #expect(settings.autoMergePreference(for: target) == .off)
-            for preference in [MRAutoMergePreference.on, .default, .off] {
+            for preference in [MRAutomationPreference.on, .default, .off] {
                 await monitor.setAutoMergePreference(preference, for: target)
 
                 let restored = SettingsManager(defaults: defaults)
@@ -151,6 +151,33 @@ struct MRAutomaticActionPolicyTests {
             settings.automation.allowAutomaticPublicActions = true
             settings.automation.scope.setManualChoice(.paused, for: target)
             #expect(!settings.permitsAutomaticAction(.merge, for: ready, target: target))
+        }
+    }
+
+    @Test func publicationAndApprovalOnOverrideGlobalDefaultsOnlyForThatMR() async throws {
+        try await fixture { settings, defaults in
+            settings.automation.applyPreset(.full, for: .codex)
+            settings.automation.publicationMode = .manual
+            settings.automation.autoApproveEnabled = false
+            let restrictions = settings.automation.publicationRestrictions
+            let reviewed = try request()
+            for action in [MRAutomaticAction.commentPublication, .approval] {
+                settings.setActionPreference(.on, for: action, target: target)
+            }
+            #expect(settings.save())
+
+            let restored = SettingsManager(defaults: defaults)
+            #expect(restored.permitsAutomaticAction(.approval, for: reviewed, target: target))
+            #expect(restored.permitsAutomaticAction(.commentPublication, for: reviewed, target: target))
+            #expect(restored.publicationPolicy(for: target) == .init(mode: .aiReplies, restrictions: restrictions))
+            let other = MRAutomationScope.Target(host: target.host, username: target.username, projectID: 1, iid: 3)
+            #expect(restored.actionPreference(.approval, for: other) == .default)
+            #expect(restored.publicationPolicy(for: other).mode == .manual)
+            #expect(restored.automation.publicationMode == .manual && !restored.automation.autoApproveEnabled)
+
+            restored.automation.allowAutomaticPublicActions = false
+            #expect(!restored.permitsAutomaticAction(.approval, for: reviewed, target: target))
+            #expect(!restored.permitsAutomaticAction(.commentPublication, for: reviewed, target: target))
         }
     }
 

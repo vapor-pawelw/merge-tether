@@ -31,9 +31,9 @@ extension TodoMonitorService {
         let target = request.flatMap { scopeTarget(projectID: $0.projectID, iid: $0.iid, url: $0.webURL) }
         let mode: AutomationPublicationMode
         if let request, let target,
-           settings.permitsAutomaticAction(.commentPublication, for: request, target: target),
-           settings.automation.automaticPublicationPolicy.covers(request, host: target.host) {
-            mode = settings.automation.publicationMode
+           settings.permitsAutomaticAction(.commentPublication, for: request, target: target) {
+            let policy = settings.publicationPolicy(for: target)
+            mode = policy.covers(request, host: target.host) ? policy.mode : .manual
         } else {
             mode = .manual
         }

@@ -180,8 +180,10 @@ final class DraftProofRecoveryCoordinator {
         let work = AssistantAutomationRunner.MergeRequestWork(host: host, projectID: request.projectID, iid: request.iid)
         guard let context = presentationContexts[work], let username = attemptAccounts[work],
               let workRevision = FollowUpVerificationStore.recoveryWorkRevision(work: work, username: username, settings: settings) else { return false }
+        let target = MRAutomationScope.Target(host: host, username: username, projectID: request.projectID, iid: request.iid)
         return configuration == settings.automation && configuration.allowFollowUpPush
-            && (configuration.publicationMode != .manual || DraftReplyRepair.preparationAllowed(request, configuration: configuration))
+            && (settings.publicationPolicy(for: target).mode != .manual
+                || DraftReplyRepair.preparationAllowed(request, configuration: configuration))
             && context == presentationContext(request: request, fingerprint: fingerprint, configuration: configuration, workRevision: workRevision)
     }
 
@@ -556,14 +558,16 @@ final class DraftProofRecoveryCoordinator {
     }
 
     private func permitted(_ snapshot: Snapshot, configuration: AutomationSettings) -> Bool {
-        settings.automaticWritesAllowed && accountIsCurrent(snapshot) && configuration.preservingScope(from: settings.automation) == settings.automation
+        let target = MRAutomationScope.Target(host: snapshot.host, username: snapshot.user.username,
+            projectID: snapshot.request.projectID, iid: snapshot.request.iid)
+        return settings.automaticWritesAllowed && accountIsCurrent(snapshot)
+            && configuration.preservingScope(from: settings.automation) == settings.automation
             && settings.automation.hasAutomaticActionConsent
             && settings.automation.allowFollowUpPush
-            && (settings.automation.publicationMode != .manual
+            && (settings.publicationPolicy(for: target).mode != .manual
                 || DraftReplyRepair.preparationAllowed(snapshot.request, configuration: settings.automation))
             && settings.automation.scope.permits(snapshot.request, host: snapshot.host, username: snapshot.user.username)
-            && !settings.ignoredMergeRequests.contains(.init(host: snapshot.host, username: snapshot.user.username,
-                projectID: snapshot.request.projectID, iid: snapshot.request.iid))
+            && !settings.ignoredMergeRequests.contains(target)
     }
 
     private func matchesOwnership(_ snapshot: Snapshot, origin: FollowUpVerification, draftIDs: [Int]) -> Bool {

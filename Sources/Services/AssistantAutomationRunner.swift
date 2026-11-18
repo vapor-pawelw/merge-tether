@@ -538,17 +538,18 @@ enum AssistantAutomationRunner {
             ? "\n\n" + ReviewVerdictStore.recordingInstructions(host: work.host, projectID: work.projectID, iid: work.iid,
                 username: username, runID: id)
             : ""
-        let aiAssessment = settings.automation.needsAIAssessment
+        let publication = settings.publicationPolicy(for: target)
+        let aiAssessment = publication.requiresAI
             && (mrWorkflow != .followUp || followUpPush)
             ? "\n\n" + AICommentAssessmentStore.recordingInstructions(host: work.host, projectID: work.projectID, iid: work.iid)
             : ""
         let publicationPolicy: String
         if mrWorkflow == .followUp && !followUpPush {
             publicationPolicy = "This unfinished author-follow-up run saves no response drafts and publishes nothing, regardless of publication settings."
-        } else if settings.automation.hasAutomaticPublicActionConsent && settings.automation.publishDraftsWithoutConfirmation {
+        } else if settings.automation.hasAutomaticPublicActionConsent && (publication.mode == .all || publication.mode == .filtered) {
             publicationPolicy = "Publish comments without confirmation is ON. Save and re-fetch private drafts; MergeTether publishes eligible drafts automatically after its checks. Do not ask for routine publication approval or publish directly yourself."
-        } else if settings.automation.hasAutomaticPublicActionConsent && settings.automation.publishAIRepliesWithoutConfirmation {
-            let botException = settings.automation.publicationRestrictions.allowBotReplies
+        } else if settings.automation.hasAutomaticPublicActionConsent && publication.mode == .aiReplies {
+            let botException = publication.allowsBotReplies
                 ? " unless they come from a verified bot account: the separate bot-reply permission allows that source without an AI assessment"
                 : ""
             publicationPolicy = "AI reply publication is ON. Save and re-fetch warranted private reply drafts. MergeTether may publish eligible replies to feedback assessed as AI-assisted, including comments posted by a person. Account identity alone does not establish how a comment was written. For likely manual, unclassified or uncertain source comments, leave drafts private\(botException). For other nonqualifying replies, ask for approval on the MR card and describe that pending decision in the run result. Do not publish directly yourself."

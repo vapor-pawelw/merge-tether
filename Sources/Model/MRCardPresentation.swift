@@ -72,7 +72,7 @@ struct MRCardPresentation {
         let automatic = row.evidenceMatchesCatalogContext ? target.map {
             row.item.draftIDsHandledAutomatically(automation: monitor.settings.configuredAutomation, target: $0,
                 assistantPreparing: ready || input.assistantChecking,
-                publicationAutomatic: monitor.settings.actionIsAutomatic(.commentPublication, for: $0))
+                publicationPolicy: monitor.settings.publicationPolicy(for: $0))
         } ?? [] : []
         self.init(row: row, reviewingContext: MRBoardProjector.reviewingContext(for: row, input: input), allowsRemoval: allowsRemoval,
             assistantReady: ready, confirmationState: monitor.attention.confirmationStates[row.id],

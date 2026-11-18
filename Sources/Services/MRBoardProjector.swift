@@ -134,7 +134,7 @@ struct MRBoardProjector {
         var assistantReady = false
         var reviewAssistantReady = false
         var assistantChecking = false
-        var publicationAutomaticTargets: Set<MRAutomationScope.Target> = []
+        var publicationPolicies: [MRAutomationScope.Target: AutomaticPublicationPolicy] = [:]
         var ignoredTargets: Set<MRAutomationScope.Target> = []
         var hiddenTargets: Set<MRAutomationScope.Target> = []
         var mrCatalogReadFailed = false
@@ -316,15 +316,18 @@ struct MRBoardProjector {
         var catalogReadFailed = false
         var workflowReadFailed = false
         var aiOriginReadFailed = false
+        var publicationRequiresAI: Bool?
     }
     func rowInput(for row: MergeRequestBoardSnapshot.Row) -> RowInput {
         let facts = facts(for: row.item.mergeRequest)
+        let target = scopeTarget(projectID: row.id.projectID, iid: row.id.iid, url: row.item.url)
         return .init(account: input.account, automation: input.automation, workflowEntries: input.workflowEntries,
             assistantReady: input.reviewAssistantReady, assistantChecking: input.assistantChecking,
             confirmationBusy: input.confirmationStates[row.id]?.isBusy == true,
             conflictProcessing: facts?.conflictProcessing == true, pipelineProcessing: facts?.pipelineProcessing == true,
             catalogLoading: input.catalogLoading, catalogReadFailed: input.catalogReadFailed,
-            workflowReadFailed: facts?.workflowReadFailed == true, aiOriginReadFailed: facts?.aiOriginReadFailed == true)
+            workflowReadFailed: facts?.workflowReadFailed == true, aiOriginReadFailed: facts?.aiOriginReadFailed == true,
+            publicationRequiresAI: target.map { input.publicationPolicies[$0]?.requiresAI == true })
     }
     static func reviewingContext(for row: MergeRequestBoardSnapshot.Row, input: RowInput) -> ReviewingContext {
         ReviewingContext(row: row, workflowState: ReviewingContext.workflowState(for: row, entries: input.workflowEntries),
@@ -343,7 +346,8 @@ struct MRBoardProjector {
     static func attentionRefreshFailures(for row: MergeRequestBoardSnapshot.Row, input: RowInput) -> [RefreshFailure] {
         BoardAttentionPresenter.attentionRefreshFailures(row: rowState(row, input: input), refresh: .init(
             catalogReadFailed: input.catalogReadFailed, workflowReadFailed: input.workflowReadFailed,
-            needsAIAssessment: input.automation.needsAIAssessment, aiOriginReadFailed: input.aiOriginReadFailed))
+            needsAIAssessment: input.publicationRequiresAI ?? input.automation.needsAIAssessment,
+            aiOriginReadFailed: input.aiOriginReadFailed))
     }
     static func isRecheckingAttention(for row: MergeRequestBoardSnapshot.Row, input: RowInput) -> Bool {
         BoardAttentionPresenter.isRecheckingAttention(row: rowState(row, input: input), refresh: .init(
@@ -406,9 +410,10 @@ struct MRBoardProjector {
                 || (!recoveryWaitsForHuman && (row.item.authorFeedbackStatus?.phase == .checking || row.item.draftProofRecoveryChecking))
                 || facts?.conflictProcessing == true || facts?.pipelineProcessing == true
                 || (!recoveryWaitsForHuman && !row.item.isAuthored && reviewingContext(for: row).isAutomaticProcessing)
-            let automaticDrafts = row.evidenceMatchesCatalogContext ? item.draftIDsHandledAutomatically(
-                automation: input.automation, target: target, assistantPreparing: preparing,
-                publicationAutomatic: input.publicationAutomaticTargets.contains(target)) : []
+            let automaticDrafts = row.evidenceMatchesCatalogContext ? input.publicationPolicies[target].map {
+                item.draftIDsHandledAutomatically(automation: input.automation, target: target,
+                    assistantPreparing: preparing, publicationPolicy: $0)
+            } ?? [] : []
             rows.append(.init(row: row, item: item, confirmationState: state, busy: busy,
                 automaticDraftIDs: automaticDrafts, checking: isRecheckingAttention(for: row) || attentionRefreshFailed(for: row),
                 automaticIntentIDs: Set(row.attentionIntents.filter { attentionIntentIsAutomatic($0, ready: preparing) }.map(\.id))))

@@ -66,6 +66,8 @@ final class TodoMonitorService {
         }
         let request = row.item.mergeRequest
         let workflowEntries = authoredMergeRequests.workflow.entries
+        let publication = scopeTarget(projectID: row.id.projectID, iid: row.id.iid, url: row.item.url)
+            .map { settings.publicationPolicy(for: $0) }
         let aiFailure = account.map {
             attention.aiOriginCoordinator.failure(work: .init(host: $0.host, projectID: row.id.projectID, iid: row.id.iid)) != nil
         } == true
@@ -78,7 +80,7 @@ final class TodoMonitorService {
             catalogLoading: isLoading || attention.isLoading || authoredMergeRequests.isLoading,
             catalogReadFailed: lastError != nil || attention.hasError || authoredMergeRequests.hasError,
             workflowReadFailed: request.map { authoredMergeRequests.workflow.hasReadOnlyFailure(for: $0) } == true,
-            aiOriginReadFailed: aiFailure)
+            aiOriginReadFailed: aiFailure, publicationRequiresAI: publication?.requiresAI)
     }
 
     private let todoStore: InboxTodoStore
@@ -525,7 +527,8 @@ final class TodoMonitorService {
         for request in requests {
             let target = MRAutomationScope.Target(host: host, username: username, projectID: request.projectID, iid: request.iid)
             if trackedReviewTarget(target) { input.trackedReviewedTargets.insert(target) }
-            if settings.actionIsAutomatic(.commentPublication, for: target) { input.publicationAutomaticTargets.insert(target) }
+            let publication = settings.publicationPolicy(for: target)
+            if publication.mode != .manual { input.publicationPolicies[target] = publication }
             requestFacts.insert(request) {
                 let work = AssistantAutomationRunner.MergeRequestWork(host: host, projectID: request.projectID, iid: request.iid)
                 input.feedbackDecisionRevisions[.init(projectID: request.projectID, iid: request.iid)] =
@@ -875,10 +878,11 @@ final class TodoMonitorService {
 
     var unavailableAssistant: AutomationAssistant? {
         let assistant = settings.automation.assistant
-        let hasMergeOptIn = settings.automation.hasAutomaticPublicActionConsent
-            && settings.hasAutoMergeOptIn(host: glab.resolvedHost, username: glab.currentUsername)
+        let hasActionOptIn = settings.automation.hasAutomaticPublicActionConsent
+            && glab.resolvedHost != nil && glab.currentUsername != nil
+            && settings.hasAutomaticActionOptIn(host: glab.resolvedHost, username: glab.currentUsername)
         if (settings.automation.usesAssistant || settings.automation.autoReReviewEnabled
-            || settings.automation.autoMergeEnabled || hasMergeOptIn || settings.automation.autoApproveEnabled
+            || settings.automation.autoMergeEnabled || hasActionOptIn || settings.automation.autoApproveEnabled
             || settings.automation.publishDraftsWithoutConfirmation || settings.automation.publishAIRepliesWithoutConfirmation),
            let status = assistantDependencies.statuses[assistant], !status.isReady { return assistant }
         return assistantHandoffs.first { handoff in

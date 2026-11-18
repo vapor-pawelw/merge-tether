@@ -3,31 +3,35 @@
   "strings": {
     "automaticActions.publication": {
       "extractionState": "manual",
-      "localizations": { "en": { "stringUnit": { "state": "translated", "value": "Comment publication: follow global rules" } } }
+      "localizations": { "en": { "stringUnit": { "state": "translated", "value": "Comment publication" } } }
     },
     "automaticActions.merge": {
       "extractionState": "manual",
       "localizations": { "en": { "stringUnit": { "state": "translated", "value": "Auto-merge" } } }
     },
-    "automaticActions.mergeOn": {
+    "automaticActions.on": {
       "extractionState": "manual",
       "localizations": { "en": { "stringUnit": { "state": "translated", "value": "On" } } }
     },
-    "automaticActions.mergeOff": {
+    "automaticActions.off": {
       "extractionState": "manual",
       "localizations": { "en": { "stringUnit": { "state": "translated", "value": "Off" } } }
     },
     "automaticActions.mergeHelp": {
       "extractionState": "manual",
-      "localizations": { "en": { "stringUnit": { "state": "translated", "value": "Default follows global auto-merge settings. On enables auto-merge for this MR. Off pauses it. Automation scope, public action permissions and merge checks still apply." } } }
+      "localizations": { "en": { "stringUnit": { "state": "translated", "value": "On enables auto-merge after the usual checks." } } }
     },
     "automaticActions.approval": {
       "extractionState": "manual",
-      "localizations": { "en": { "stringUnit": { "state": "translated", "value": "Approval: follow global rules" } } }
+      "localizations": { "en": { "stringUnit": { "state": "translated", "value": "Auto-approval" } } }
     },
-    "automaticActions.inheritHelp": {
+    "automaticActions.publicationHelp": {
       "extractionState": "manual",
-      "localizations": { "en": { "stringUnit": { "state": "translated", "value": "Checked: follow global permissions and this MR’s automation scope. Unchecked: automatic action paused for this MR. Globally disabled actions stay off; manual actions remain available." } } }
+      "localizations": { "en": { "stringUnit": { "state": "translated", "value": "If automatic publication is off in Settings, On allows eligible replies to AI feedback." } } }
+    },
+    "automaticActions.approvalHelp": {
+      "extractionState": "manual",
+      "localizations": { "en": { "stringUnit": { "state": "translated", "value": "On uses the approval threshold in Settings." } } }
     },
     "automaticActions.exceptionsHelp": {
       "extractionState": "manual",

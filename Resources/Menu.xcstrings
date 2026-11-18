@@ -1184,7 +1184,7 @@
         "en": {
           "stringUnit": {
             "state": "translated",
-            "value": "Default applies repository and general rules, including the draft default. Always on and Always off keep your choice across draft and ready states. Global action permissions still apply. Draft merge requests are excluded from automatic merge."
+            "value": "Default follows Settings. On restores this MR’s choices."
           }
         }
       }
@@ -1306,17 +1306,6 @@
           "stringUnit": {
             "state": "translated",
             "value": "Turn on for this repository"
-          }
-        }
-      }
-    },
-    "menu.scope.popoverMergeRequest": {
-      "extractionState": "manual",
-      "localizations": {
-        "en": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "This merge request"
           }
         }
       }

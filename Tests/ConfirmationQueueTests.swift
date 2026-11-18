@@ -4638,13 +4638,13 @@ import MergeTetherRemote
         #expect(harness.monitor.currentItems.first?.awaitingRemoteVerification == true)
     }
 
-    @Test func restoringAutomaticPublicationResumesOnlyEligibleAIRepliesWithoutAnotherPoll() async throws {
+    @Test(arguments: [false, true])
+    func enablingAutomaticPublicationResumesOnlyEligibleAIRepliesWithoutAnotherPoll(overrideGlobal: Bool) async throws {
         let harness = try makeHarness(assistantWorked: true)
         defer { harness.cleanUp() }
         let target = MRAutomationScope.Target(host: host, username: "me", projectID: 1, iid: 2)
         harness.settings.autoPublishOptOuts.insert(target)
-        harness.settings.automation.publishDraftsWithoutConfirmation = false
-        harness.settings.automation.publishAIRepliesWithoutConfirmation = true
+        harness.settings.automation.publicationMode = overrideGlobal ? .manual : .aiReplies
         try harness.write("drafts.json", draftJSON)
         try harness.write("discussions.json", duoDiscussion)
         try harness.recordVerdict("objections", head: head)
@@ -4653,7 +4653,7 @@ import MergeTetherRemote
         #expect(harness.log("selected.log").isEmpty && harness.log("publish.log").isEmpty)
         #expect(harness.monitor.currentItems.first?.drafts.count == 2)
 
-        harness.settings.autoPublishOptOuts.remove(target)
+        harness.settings.setActionPreference(overrideGlobal ? .on : .default, for: .commentPublication, target: target)
         harness.settings.save()
         await harness.monitor.resumeAutomaticAction(.commentPublication, for: target)
         #expect(harness.log("selected.log").contains("/draft_notes/12/publish"))
@@ -4662,15 +4662,17 @@ import MergeTetherRemote
         #expect(harness.monitor.currentItems.first?.drafts.map(\.id) == [11])
     }
 
-    @Test func restoringAutomaticApprovalRechecksAndApprovesWithoutAnotherPoll() async throws {
+    @Test(arguments: [false, true])
+    func enablingAutomaticApprovalRechecksAndApprovesWithoutAnotherPoll(overrideGlobal: Bool) async throws {
         let harness = try makeHarness(assistantWorked: true)
         defer { harness.cleanUp() }
         let target = MRAutomationScope.Target(host: host, username: "me", projectID: 1, iid: 2)
         harness.settings.autoApproveOptOuts.insert(target)
+        if overrideGlobal { harness.settings.automation.autoApproveEnabled = false }
         try harness.recordVerdict("no_objections", head: head)
         try await harness.poll()
         #expect(harness.monitor.currentItems.first?.canApprove == true)
-        harness.settings.autoApproveOptOuts.remove(target)
+        harness.settings.setActionPreference(overrideGlobal ? .on : .default, for: .approval, target: target)
         harness.settings.save()
         await harness.monitor.resumeAutomaticAction(.approval, for: target)
         #expect(harness.log("approve.log").contains("sha=\(head)"))

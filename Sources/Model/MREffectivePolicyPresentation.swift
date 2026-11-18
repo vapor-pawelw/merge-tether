@@ -62,13 +62,13 @@ struct MREffectivePolicyPresentation {
             let automation = settings.configuredAutomation
             packageDecision = automation.packageDecision
             publicActionsAllowed = automation.allowAutomaticPublicActions
-            enabled = automation.hasEnabledAutomation || (automation.hasAutomaticPublicActionConsent
-                && target.map { settings.autoMergePreference(for: $0) == .on } == true)
+            enabled = target.map { settings.hasConfiguredAutomation(for: $0) } ?? automation.hasEnabledAutomation
             let scope = target.map { automation.scope.resolve($0, isDraft: bound?.draft == true || bound?.detailedMergeStatus == "draft_status") }
             scopeActive = scope?.active == true
             draftPaused = scope?.source == .draft
-            publicationMode = automation.publicationMode
-            publicationAllowed = (automation.publicationMode != .filtered || automation.publicationRestrictions.hasConditions) && bound.flatMap { request in
+            let publication = target.map { settings.publicationPolicy(for: $0) } ?? automation.automaticPublicationPolicy
+            publicationMode = publication.mode
+            publicationAllowed = (publication.mode != .filtered || publication.restrictions.hasConditions) && bound.flatMap { request in
                 target.map { settings.permitsAutomaticAction(.commentPublication, for: request, target: $0, ignoringGlobalSuspension: true) }
             } == true
             mergeAllowed = bound.flatMap { request in

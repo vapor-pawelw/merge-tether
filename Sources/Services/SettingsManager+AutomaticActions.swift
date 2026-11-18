@@ -88,47 +88,89 @@ extension SettingsManager {
         save()
     }
 
-    func autoMergePreference(for target: MRAutomationScope.Target) -> MRAutoMergePreference {
-        if autoMergeOptOuts.contains(target) { return .off }
-        return autoMergeOptIns.contains(target) ? .on : .default
+    func storedActionPreference(_ action: MRAutomaticAction, for target: MRAutomationScope.Target) -> MRAutomationPreference {
+        let optedOut = switch action {
+        case .commentPublication: autoPublishOptOuts.contains(target)
+        case .merge: autoMergeOptOuts.contains(target)
+        case .approval: autoApproveOptOuts.contains(target)
+        }
+        if optedOut { return .off }
+        let optedIn = action == .merge ? autoMergeOptIns.contains(target) : automaticActionOptIns[action]?.contains(target) == true
+        return optedIn ? .on : .default
     }
 
-    func setAutoMergePreference(_ preference: MRAutoMergePreference, for target: MRAutomationScope.Target) {
+    func actionPreference(_ action: MRAutomaticAction, for target: MRAutomationScope.Target) -> MRAutomationPreference {
+        if automation.scope[target] == .paused { return .off }
+        if automation.scope.followsActionDefaults(for: target) { return .default }
+        return storedActionPreference(action, for: target)
+    }
+
+    func autoMergePreference(for target: MRAutomationScope.Target) -> MRAutomationPreference {
+        actionPreference(.merge, for: target)
+    }
+
+    func setAutoMergePreference(_ preference: MRAutomationPreference, for target: MRAutomationScope.Target) {
+        setActionPreference(preference, for: .merge, target: target)
+    }
+
+    func setActionPreference(_ preference: MRAutomationPreference, for action: MRAutomaticAction, target: MRAutomationScope.Target) {
         guard target.iid != nil else { return }
-        autoMergeOptIns.remove(target)
-        autoMergeOptOuts.remove(target)
-        switch preference {
-        case .default: break
-        case .on: autoMergeOptIns.insert(target)
-        case .off: autoMergeOptOuts.insert(target)
+        func update(_ targets: inout Set<MRAutomationScope.Target>, when selected: MRAutomationPreference) {
+            if preference == selected { targets.insert(target) }
+            else { targets.remove(target) }
         }
+        switch action {
+        case .commentPublication: update(&autoPublishOptOuts, when: .off)
+        case .approval: update(&autoApproveOptOuts, when: .off)
+        case .merge:
+            update(&autoMergeOptOuts, when: .off)
+            update(&autoMergeOptIns, when: .on)
+            return
+        }
+        var optedIn = automaticActionOptIns[action] ?? []
+        update(&optedIn, when: .on)
+        automaticActionOptIns[action] = optedIn.isEmpty ? nil : optedIn
     }
 
     func hasAutoMergeOptIn(host: String?, username: String?) -> Bool {
-        autoMergeOptIns.contains {
-            $0.host == host && $0.username == username && $0.iid != nil && !autoMergeOptOuts.contains($0)
+        guard let host, let username else { return false }
+        return autoMergeOptIns.contains {
+            $0.host == host && $0.username == username && $0.iid != nil && actionPreference(.merge, for: $0) == .on
         }
+    }
+
+    func hasAutomaticActionOptIn(host: String? = nil, username: String? = nil) -> Bool {
+        MRAutomaticAction.allCases.contains { action in
+            let optedIn = action == .merge ? autoMergeOptIns : automaticActionOptIns[action] ?? []
+            return optedIn.contains { target in
+                target.iid != nil && (host == nil || host == target.host) && (username == nil || username == target.username)
+                    && actionPreference(action, for: target) == .on
+            }
+        }
+    }
+
+    func hasConfiguredAutomation(for target: MRAutomationScope.Target) -> Bool {
+        configuredAutomation.hasEnabledAutomation || (configuredAutomation.hasAutomaticPublicActionConsent
+            && MRAutomaticAction.allCases.contains { actionPreference($0, for: target) == .on })
     }
 
     /// Action preference only. Automatic writes also require consent, scope and fresh evidence.
     func actionIsAutomatic(_ action: MRAutomaticAction, for target: MRAutomationScope.Target) -> Bool {
-        switch action {
-        case .commentPublication: !autoPublishOptOuts.contains(target)
-        case .merge: autoMergePreference(for: target) != .off
-        case .approval: !autoApproveOptOuts.contains(target)
-        }
+        actionPreference(action, for: target) != .off
     }
 
     func setActionAutomatic(_ action: MRAutomaticAction, enabled: Bool, for target: MRAutomationScope.Target) {
-        guard target.iid != nil else { return }
-        switch action {
-        case .commentPublication:
-            if enabled { autoPublishOptOuts.remove(target) } else { autoPublishOptOuts.insert(target) }
-        case .merge:
-            setAutoMergePreference(enabled ? .default : .off, for: target)
-        case .approval:
-            if enabled { autoApproveOptOuts.remove(target) } else { autoApproveOptOuts.insert(target) }
+        setActionPreference(enabled ? .default : .off, for: action, target: target)
+    }
+
+    func publicationPolicy(for target: MRAutomationScope.Target) -> AutomaticPublicationPolicy {
+        let mode = automation.publicationMode
+        let effectiveMode: AutomationPublicationMode = switch actionPreference(.commentPublication, for: target) {
+        case .default: mode
+        case .on: mode == .manual ? .aiReplies : mode
+        case .off: .manual
         }
+        return .init(mode: effectiveMode, restrictions: automation.publicationRestrictions)
     }
 
     /// Policy admission only. Action executors retain their current fresh evidence checks.
@@ -143,13 +185,13 @@ extension SettingsManager {
               actionIsAutomatic(action, for: target),
               automation.scope.permits(request, host: target.host, username: target.username) else { return false }
         return switch action {
-        case .commentPublication: automation.publicationMode != .manual
+        case .commentPublication: publicationPolicy(for: target).mode != .manual
         case .merge:
             request.author.username == target.username && request.draft == false
                 && request.detailedMergeStatus != "draft_status"
                 && automation.permitsAutoMerge(project: request.webURL.gitLabProjectPath,
                     optedIn: autoMergePreference(for: target) == .on)
-        case .approval: automation.autoApproveEnabled
+        case .approval: automation.autoApproveEnabled || actionPreference(.approval, for: target) == .on
         }
     }
 }

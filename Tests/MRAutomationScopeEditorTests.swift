@@ -8,6 +8,60 @@ import Testing
 struct MRAutomationScopeEditorTests {
     private let target = MRAutomationScope.Target(host: "gitlab.example.test", username: "me", projectID: 7, iid: 42)
 
+    @Test func defaultAndOffSuspendSavedActionsUntilAutomationIsTurnedBackOn() async throws {
+        let (defaults, settings, monitor) = try makeMonitor()
+        defer { monitor.stopTimer() }
+        settings.automation.autoMergeEnabled = false
+        settings.automation.scope.setManualChoice(.forceOn, for: target)
+        settings.setAutoMergePreference(.on, for: target)
+        settings.setActionAutomatic(.commentPublication, enabled: false, for: target)
+        settings.save()
+        let editor = MRAutomationScopeEditor(monitor: monitor, target: target)
+
+        await editor.choose(.inherit)
+        let inherited = SettingsManager(defaults: defaults)
+        #expect(editor.choice == .default)
+        #expect(editor.displayedPreference(for: .merge) == .off)
+        #expect(editor.displayedPreference(for: .commentPublication) == .on)
+        await editor.choose(.off, for: .merge)
+        #expect(inherited.autoMergePreference(for: target) == .default)
+        #expect(inherited.actionIsAutomatic(.commentPublication, for: target))
+
+        await editor.choose(.paused)
+        let paused = SettingsManager(defaults: defaults)
+        #expect(editor.choice == .off)
+        #expect(MRAutomaticAction.allCases.allSatisfy { editor.displayedPreference(for: $0) == .off })
+        #expect(MRAutomaticAction.allCases.allSatisfy { !paused.actionIsAutomatic($0, for: target) })
+
+        await editor.choose(.forceOn)
+        let restored = SettingsManager(defaults: defaults)
+        #expect(editor.choice == .on)
+        #expect(editor.displayedPreference(for: .merge) == .on)
+        #expect(editor.displayedPreference(for: .commentPublication) == .off)
+        #expect(restored.autoMergePreference(for: target) == .on)
+        #expect(!restored.actionIsAutomatic(.commentPublication, for: target))
+    }
+
+    @Test func legacyActionOverrideStaysActiveUntilChoosingDefault() async throws {
+        let (defaults, settings, monitor) = try makeMonitor()
+        defer { monitor.stopTimer() }
+        settings.setActionAutomatic(.approval, enabled: false, for: target)
+        settings.save()
+        let editor = MRAutomationScopeEditor(monitor: monitor, target: target)
+
+        #expect(editor.summary.choice == .inherit)
+        #expect(editor.choice == .on)
+        #expect(editor.displayedPreference(for: .approval) == .off)
+        #expect(!SettingsManager(defaults: defaults).actionIsAutomatic(.approval, for: target))
+
+        await editor.choose(.inherit)
+        settings.automation.scope.adoptAutomatically(target)
+        settings.save()
+
+        #expect(editor.choice == .default)
+        #expect(SettingsManager(defaults: defaults).actionIsAutomatic(.approval, for: target))
+    }
+
     @Test func followingRepositoryClearsAnIndividualOptInAcrossRestart() async throws {
         let (defaults, settings, monitor) = try makeMonitor()
         defer { monitor.stopTimer() }

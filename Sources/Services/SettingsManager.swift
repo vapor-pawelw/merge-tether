@@ -44,6 +44,7 @@ final class SettingsManager {
     var autoPublishOptOuts: Set<MRAutomationScope.Target> = []
     var autoMergeOptOuts: Set<MRAutomationScope.Target> = []
     var autoMergeOptIns: Set<MRAutomationScope.Target> = []
+    var automaticActionOptIns: [MRAutomaticAction: Set<MRAutomationScope.Target>] = [:]
     var mergeSubmissions: [MergeSubmissionReceipt] = []
     var ignoredMergeRequests: Set<MRAutomationScope.Target>
     var automation: AutomationSettings {
@@ -62,7 +63,7 @@ final class SettingsManager {
     /// Whether the killswitch has any configured automation to control.
     var configuredAutomationAvailable: Bool {
         configuredAutomation.hasEnabledAutomation
-            || (configuredAutomation.hasAutomaticPublicActionConsent && !autoMergeOptIns.isEmpty)
+            || (configuredAutomation.hasAutomaticPublicActionConsent && hasAutomaticActionOptIn())
     }
     var automationGloballyActive: Bool { automationGloballyEnabled && configuredAutomationAvailable }
     var automationReceipts: Set<TodoAutomationReceipt>
@@ -159,6 +160,7 @@ final class SettingsManager {
         self.autoPublishOptOuts = store.load(Key.autoPublishOptOuts, fallback: [])
         self.autoMergeOptOuts = store.load(Key.autoMergeOptOuts, fallback: [])
         self.autoMergeOptIns = store.load(Key.autoMergeOptIns, fallback: [])
+        self.automaticActionOptIns = store.load(Key.automaticActionOptIns, fallback: [:])
 
         if let pathString = defaults.string(forKey: Key.glabPath), !pathString.isEmpty {
             self.glabPath = URL(fileURLWithPath: pathString)
@@ -239,6 +241,7 @@ final class SettingsManager {
         persistenceStore.save(mergeSubmissions, forKey: Key.mergeSubmissions)
         persistenceStore.save(autoMergeOptOuts, forKey: Key.autoMergeOptOuts)
         persistenceStore.save(autoMergeOptIns, forKey: Key.autoMergeOptIns)
+        persistenceStore.save(automaticActionOptIns, forKey: Key.automaticActionOptIns)
         let synchronized = persistenceStore.synchronize()
         if !synchronized {
             changedHistoryKeys.formUnion([Key.assistantHandoffs, Key.assistantChats, Key.workflowActivity,
@@ -424,6 +427,7 @@ final class SettingsManager {
         static let mergeSubmissions = "mergeSubmissions"
         static let autoMergeOptOuts = "autoMergeOptOuts"
         static let autoMergeOptIns = "autoMergeOptIns"
+        static let automaticActionOptIns = "automaticActionOptIns"
         static let ignoredMergeRequests = "ignoredMergeRequests"
         static let feedbackSuggestionDecisions = "feedbackSuggestionDecisions"
         static let reviewParticipationPreferences = "reviewParticipationPreferences"

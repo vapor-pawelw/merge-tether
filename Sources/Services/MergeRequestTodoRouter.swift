@@ -115,7 +115,7 @@ final class MergeRequestTodoRouter {
                 && request.author.id != user.id
             guard alreadyManaged || autoAdopt || informationalMention else { continue }
             if !alreadyManaged && autoAdopt {
-                settings.automation.scope[target] = .active
+                settings.automation.scope.adoptAutomatically(target)
                 settings.automation.scope.rememberRepository(request.webURL.gitLabProjectPath, for: target)
                 settings.save()
                 guard settings.automaticActionsAllowed, isCurrentPass() else { return acknowledged }

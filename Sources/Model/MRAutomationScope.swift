@@ -24,6 +24,7 @@ struct MRAutomationScope: Codable, Equatable, Sendable {
     private var overrides: [Target: Choice] = [:]
     private var managedTargets: Set<Target>?
     private var repositoryLabels: [Target: String]?
+    private var targetsFollowingActionDefaults: Set<Target>?
     var pauseDraftsByDefault = true
     /// Runtime-only global killswitch. It is never encoded, so stored overrides and presets stay unchanged.
     var isGloballySuspended = false
@@ -31,7 +32,7 @@ struct MRAutomationScope: Codable, Equatable, Sendable {
     init() {}
 
     private enum CodingKeys: String, CodingKey {
-        case mode, overrides, managedTargets, repositoryLabels, pauseDraftsByDefault
+        case mode, overrides, managedTargets, repositoryLabels, pauseDraftsByDefault, targetsFollowingActionDefaults
     }
 
     init(from decoder: Decoder) throws {
@@ -40,6 +41,7 @@ struct MRAutomationScope: Codable, Equatable, Sendable {
         overrides = try values.decodeIfPresent([Target: Choice].self, forKey: .overrides) ?? [:]
         managedTargets = try values.decodeIfPresent(Set<Target>.self, forKey: .managedTargets)
         repositoryLabels = try values.decodeIfPresent([Target: String].self, forKey: .repositoryLabels)
+        targetsFollowingActionDefaults = try values.decodeIfPresent(Set<Target>.self, forKey: .targetsFollowingActionDefaults)
         pauseDraftsByDefault = try values.decodeIfPresent(Bool.self, forKey: .pauseDraftsByDefault) ?? true
     }
 
@@ -49,6 +51,20 @@ struct MRAutomationScope: Codable, Equatable, Sendable {
 
     mutating func setManualChoice(_ choice: Choice, for target: Target) {
         self[target] = choice == .active ? .forceOn : choice
+        if target.iid != nil, choice == .inherit {
+            if targetsFollowingActionDefaults == nil { targetsFollowingActionDefaults = [] }
+            targetsFollowingActionDefaults?.insert(target)
+        }
+    }
+
+    /// Older installations could inherit scope and still override individual actions.
+    func followsActionDefaults(for target: Target) -> Bool {
+        self[target] == .inherit && targetsFollowingActionDefaults?.contains(target) == true
+    }
+
+    mutating func adoptAutomatically(_ target: Target) {
+        if followsActionDefaults(for: target) { rememberManaged(target) }
+        else { self[target] = .active }
     }
 
     subscript(target: Target) -> Choice {

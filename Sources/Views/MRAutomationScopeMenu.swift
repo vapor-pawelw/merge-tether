@@ -23,23 +23,64 @@ struct MRAutomationScopeEditor {
     var isAvailable: Bool {
         let automation = settings.configuredAutomation
         return automation.hasEnabledAutomation
-            || (automation.hasAutomaticPublicActionConsent && applicableActions.contains(.merge))
+            || (automation.hasAutomaticPublicActionConsent && request != nil)
     }
 
-    var hasActionExceptions: Bool {
-        target.iid != nil && (settings.autoMergePreference(for: target) != .default
-            || !settings.actionIsAutomatic(.commentPublication, for: target)
-            || !settings.actionIsAutomatic(.approval, for: target))
+    private var hasSavedActionOverrides: Bool {
+        MRAutomaticAction.allCases.contains { settings.storedActionPreference($0, for: target) != .default }
+    }
+
+    private var hasLegacyActionOverrides: Bool {
+        summary.choice == .inherit && !settings.configuredAutomation.scope.followsActionDefaults(for: target)
+            && hasSavedActionOverrides
+    }
+
+    var choice: MRAutomationPreference {
+        switch summary.choice {
+        case .inherit: hasLegacyActionOverrides ? .on : .default
+        case .active, .forceOn: .on
+        case .paused: .off
+        }
+    }
+
+    var hasActionExceptions: Bool { choice == .on && hasSavedActionOverrides }
+
+    func displayedPreference(for action: MRAutomaticAction) -> MRAutomationPreference {
+        switch choice {
+        case .on: return settings.storedActionPreference(action, for: target)
+        case .off: return .off
+        case .default:
+            let automation = settings.configuredAutomation
+            guard summary.active, automation.hasAutomaticPublicActionConsent else { return .off }
+            let enabled = switch action {
+            case .commentPublication:
+                automation.publicationMode != .manual
+                    && (automation.publicationMode != .filtered || automation.publicationRestrictions.hasConditions)
+            case .merge:
+                !isDraft && automation.permitsAutoMerge(project: projectPath ?? request?.webURL.gitLabProjectPath ?? "")
+            case .approval: automation.autoApproveEnabled
+            }
+            return enabled ? .on : .off
+        }
+    }
+
+    func choose(_ preference: MRAutomationPreference, for action: MRAutomaticAction) async {
+        guard choice == .on else { return }
+        await monitor.setAutomaticActionPreference(preference, for: action, target: target)
     }
 
     /// Cached, account-bound metadata only: rendering a menu or popover never starts a read.
-    var applicableActions: [MRAutomaticAction] {
+    private var request: GitLabMergeRequest? {
         guard let iid = target.iid, monitor.glab.resolvedHost == target.host,
-              monitor.glab.currentUsername == target.username,
-              let request = monitor.boardDisplayRequests.first(where: {
-                  $0.projectID == target.projectID && $0.iid == iid
-                      && $0.webURL.isGitLabMergeRequest(host: target.host, iid: iid)
-              }), !request.author.username.isEmpty else { return [.commentPublication] }
+              monitor.glab.currentUsername == target.username else { return nil }
+        return monitor.boardDisplayRequests.first {
+            $0.projectID == target.projectID && $0.iid == iid && !$0.author.username.isEmpty
+                && $0.webURL.isGitLabMergeRequest(host: target.host, iid: iid)
+        }
+    }
+
+    var applicableActions: [MRAutomaticAction] {
+        guard let request else { return [.commentPublication] }
         return [.commentPublication, request.author.username == target.username ? .merge : .approval]
     }
 
@@ -52,7 +93,7 @@ struct MRAutomationScopeEditor {
     }
 
     func choose(_ choice: MRAutomationScope.Choice) async {
-        guard choice != summary.choice else { return }
+        guard choice != summary.choice || (choice == .inherit && hasLegacyActionOverrides) else { return }
         await apply(changing: target,
             message: draftAutomationMessage(target: target, projectPath: projectPath, followsDefaults: choice == .inherit)) {
             $0.setManualChoice(choice, for: target)
@@ -131,11 +172,6 @@ struct BoardAutomationToggle: View {
                     .font(.system(size: 11, weight: .medium))
                     .foregroundStyle(summary.active ? Color.accentColor : Color.secondary)
                     .frame(width: 24, height: 24)
-                    .overlay(alignment: .bottomTrailing) {
-                        if summary.choice == .forceOn || summary.choice == .paused {
-                            Circle().fill(.secondary).frame(width: 3, height: 3)
-                        }
-                    }
                     .contentShape(Rectangle())
             }
             .buttonStyle(.plain)
@@ -209,27 +245,24 @@ struct MRAutomationPopover: View {
 
     private var mergeRequestSection: some View {
         VStack(alignment: .leading, spacing: 8) {
-            sectionTitle(.Menu.menuScopePopoverMergeRequest)
-            Picker(selection: Binding(get: { editor.summary.choice }, set: { choice in
-                Task { await editor.choose(choice) }
-            })) {
-                if editor.summary.choice == .active {
-                    Text(scopeChoiceLabel(.active)).tag(MRAutomationScope.Choice.active)
+            Grid(alignment: .leading, horizontalSpacing: 8, verticalSpacing: 6) {
+                GridRow {
+                    sectionTitle(.Menu.menuScopeTitle)
+                    AutomationPreferencePicker(title: .Menu.menuScopeTitle,
+                        selection: Binding(get: { editor.choice }, set: { preference in
+                            Task { await editor.choose(preference.scopeChoice) }
+                        }))
                 }
-                ForEach([MRAutomationScope.Choice.inherit, .forceOn, .paused], id: \.self) { choice in
-                    Text(scopeChoiceLabel(choice)).tag(choice)
-                }
-            } label: { Text(.Menu.menuScopePopoverMergeRequest) }
-            .pickerStyle(.radioGroup)
-            .labelsHidden()
-            caption(.Menu.menuScopeDraftSafetyHelp)
-            VStack(alignment: .leading, spacing: 4) {
                 ForEach(editor.applicableActions, id: \.self) { action in
-                    MRAutomaticActionControl(action: action, editor: editor)
+                    GridRow {
+                        Text(action.title)
+                        MRAutomaticActionControl(action: action, editor: editor)
+                    }
                 }
             }
-            .toggleStyle(.checkbox)
             .pickerStyle(.segmented)
+            .labelsHidden()
+            caption(.Menu.menuScopeDraftSafetyHelp)
         }
     }
 
@@ -284,10 +317,9 @@ struct MRAutomationScopeMenu: View {
             let summary = editor.summary
             Menu {
                 if target.iid != nil {
-                    if summary.choice == .active { Text(scopeChoiceLabel(.active)) }
-                    choiceButton(.inherit, current: summary.choice)
-                    choiceButton(.forceOn, current: summary.choice)
-                    choiceButton(.paused, current: summary.choice)
+                    ForEach(MRAutomationPreference.allCases, id: \.self) { choice in
+                        choiceButton(choice)
+                    }
                     Divider()
                     ForEach(editor.applicableActions, id: \.self) { action in
                         MRAutomaticActionControl(action: action, editor: editor)
@@ -316,10 +348,10 @@ struct MRAutomationScopeMenu: View {
         }
     }
 
-    private func choiceButton(_ choice: MRAutomationScope.Choice, current: MRAutomationScope.Choice) -> some View {
-        Button { Task { await editor.choose(choice) } } label: {
-            Label { Text(scopeChoiceLabel(choice)) } icon: {
-                if current == choice { Image(systemName: "checkmark") }
+    private func choiceButton(_ choice: MRAutomationPreference) -> some View {
+        Button { Task { await editor.choose(choice.scopeChoice) } } label: {
+            Label { Text(choice.title) } icon: {
+                if editor.choice == choice { Image(systemName: "checkmark") }
             }
         }
     }
@@ -330,36 +362,63 @@ private struct MRAutomaticActionControl: View {
     let editor: MRAutomationScopeEditor
 
     var body: some View {
-        if action == .merge {
-            Picker(selection: Binding(get: {
-                editor.settings.autoMergePreference(for: editor.target)
-            }, set: { preference in
-                Task { await editor.monitor.setAutoMergePreference(preference, for: editor.target) }
-            })) {
-                ForEach(MRAutoMergePreference.allCases, id: \.self) { preference in
-                    Text(label(for: preference)).tag(preference)
-                }
-            } label: {
-                Text(.AutomaticActions.automaticActionsMerge)
+        AutomationPreferencePicker(title: action.title, selection: Binding(get: {
+            editor.displayedPreference(for: action)
+        }, set: { preference in
+            Task { await editor.choose(preference, for: action) }
+        }))
+        .disabled(editor.choice != .on)
+        .help(Text(action.help))
+    }
+}
+
+private struct AutomationPreferencePicker: View {
+    let title: LocalizedStringResource
+    @Binding var selection: MRAutomationPreference
+
+    var body: some View {
+        Picker(selection: $selection) {
+            ForEach(MRAutomationPreference.allCases, id: \.self) { preference in
+                Text(preference.title).tag(preference)
             }
-            .help(Text(.AutomaticActions.automaticActionsMergeHelp))
-        } else {
-            Toggle(isOn: Binding(get: {
-                editor.settings.actionIsAutomatic(action, for: editor.target)
-            }, set: { enabled in
-                Task { await editor.monitor.setAutomaticAction(action, enabled: enabled, for: editor.target) }
-            })) {
-                Text(action == .commentPublication ? .AutomaticActions.automaticActionsPublication : .AutomaticActions.automaticActionsApproval)
-            }
-            .help(Text(.AutomaticActions.automaticActionsInheritHelp))
+        } label: {
+            Text(title)
+        }
+    }
+}
+
+private extension MRAutomaticAction {
+    var title: LocalizedStringResource {
+        switch self {
+        case .commentPublication: .AutomaticActions.automaticActionsPublication
+        case .merge: .AutomaticActions.automaticActionsMerge
+        case .approval: .AutomaticActions.automaticActionsApproval
         }
     }
 
-    private func label(for preference: MRAutoMergePreference) -> LocalizedStringResource {
-        switch preference {
+    var help: LocalizedStringResource {
+        switch self {
+        case .commentPublication: .AutomaticActions.automaticActionsPublicationHelp
+        case .merge: .AutomaticActions.automaticActionsMergeHelp
+        case .approval: .AutomaticActions.automaticActionsApprovalHelp
+        }
+    }
+}
+
+private extension MRAutomationPreference {
+    var title: LocalizedStringResource {
+        switch self {
         case .default: .Menu.menuScopeDefault
-        case .on: .AutomaticActions.automaticActionsMergeOn
-        case .off: .AutomaticActions.automaticActionsMergeOff
+        case .on: .AutomaticActions.automaticActionsOn
+        case .off: .AutomaticActions.automaticActionsOff
+        }
+    }
+
+    var scopeChoice: MRAutomationScope.Choice {
+        switch self {
+        case .default: .inherit
+        case .on: .forceOn
+        case .off: .paused
         }
     }
 }

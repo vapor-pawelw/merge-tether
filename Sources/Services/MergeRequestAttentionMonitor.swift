@@ -103,9 +103,11 @@ final class MergeRequestAttentionMonitor {
         }
 
         func draftIDsHandledAutomatically(automation: AutomationSettings, target: MRAutomationScope.Target,
-                                          assistantPreparing: Bool, publicationAutomatic: Bool = true) -> Set<Int> {
-            guard automation.hasAutomaticPublicActionConsent, publicationAutomatic, assistantPreparing, automation.publicationMode != .manual, let request = mergeRequest,
-                  automaticPublicationPolicy == automation.automaticPublicationPolicy,
+                                          assistantPreparing: Bool, publicationAutomatic: Bool = true,
+                                          publicationPolicy: AutomaticPublicationPolicy? = nil) -> Set<Int> {
+            let policy = publicationPolicy ?? automation.automaticPublicationPolicy
+            guard automation.hasAutomaticPublicActionConsent, publicationAutomatic, assistantPreparing, policy.mode != .manual,
+                  let request = mergeRequest, automaticPublicationPolicy == policy,
                   automation.scope.permits(request, host: target.host, username: target.username),
                   !isAuthored || automation.allowFollowUpPush else { return [] }
             return automaticDraftIDs
@@ -417,8 +419,7 @@ final class MergeRequestAttentionMonitor {
             }, isCurrent: { target, assistant, model, thinking in
                 guard let settings, glab.resolvedHost == target.host, glab.currentUsername == target.username,
                       settings.automation.hasAutomaticActionConsent,
-                      settings.automation.assistant == assistant, settings.automation.publicationMode != .manual,
-                      settings.automation.automaticPublicationPolicy.requiresAI,
+                      settings.automation.assistant == assistant, settings.publicationPolicy(for: target).requiresAI,
                       settings.automation.scope.resolve(target).active else { return false }
                 let configured = assistant == .codex ? settings.automation.codexVerificationModel.rawValue
                     : settings.automation.claudeVerificationModel.rawValue
@@ -1030,8 +1031,10 @@ final class MergeRequestAttentionMonitor {
                         autoApproveApplies(to: $0, host: host, username: account.username)
                     } ?? false
                     let approvalThreshold = settings?.automation.autoApprovalThreshold ?? .noMajorIssues
-                    let approvalOptedOut = settings?.actionIsAutomatic(.approval,
-                        for: .init(host: host, username: account.username, projectID: item.id.projectID, iid: item.id.iid)) == false
+                    let target = commentReviewTarget(item.id, account: account)
+                    let approvalOptedOut = settings.map {
+                        $0.automation.scope[target] != .paused && $0.actionPreference(.approval, for: target) == .off
+                    } == true
                     let followUpReceipts = contextReceipts(projectID: item.id.projectID, iid: item.id.iid,
                         host: host, username: user.username)
                     let authenticatedVerdict = ReviewVerdictStore.authenticatedVerdict(host: host,
@@ -1199,7 +1202,7 @@ final class MergeRequestAttentionMonitor {
                         let candidates = item.drafts.filter { draft in
                             guard let request = item.mergeRequest,
                                   settings.automation.scope.permits(request, host: host, username: user.username) else { return false }
-                            return settings.automation.automaticPublicationPolicy.couldAllow(
+                            return settings.publicationPolicy(for: lifecycleTarget).couldAllow(
                                 draft, request: request, userID: user.id, host: host)
                                 && AutomaticPublicationPolicy.sourceNotes(for: draft, discussions: discussions,
                                     userID: user.id)?.isEmpty == false
@@ -1246,7 +1249,7 @@ final class MergeRequestAttentionMonitor {
                     if success, let settings, let request = item.mergeRequest,
                        agentWorks.contains(work), settings.automation.scope.permits(request, host: host, username: user.username),
                        item.isAuthored || (!item.awaitingRemoteVerification && !item.requiresDiscussionRecheck) {
-                        let policy = settings.automation.automaticPublicationPolicy
+                        let policy = settings.publicationPolicy(for: lifecycleTarget)
                         if policy.mode != .manual {
                             let evidence = await publicationNoteEvidence(in: discussions ?? [], policy: policy, host: host,
                                                        projectID: item.id.projectID, iid: item.id.iid)
@@ -1690,19 +1693,20 @@ final class MergeRequestAttentionMonitor {
     ) async {
         let earlier = previousDrafts
         previousDrafts = Dictionary(uniqueKeysWithValues: items.filter { !$0.drafts.isEmpty }.map { ($0.id, $0.drafts) })
-        guard let settings, settings.automation.publishDraftsWithoutConfirmation || settings.automation.publishAIRepliesWithoutConfirmation else { return }
+        guard let settings else { return }
         for item in items where !item.drafts.isEmpty && earlier[item.id] == item.drafts && (id == nil || id == item.id) {
             let work = AssistantAutomationRunner.MergeRequestWork(host: account.host, projectID: item.id.projectID, iid: item.id.iid)
             guard agentWorks.contains(work), !hasActiveWorker(for: item.id, account: account), let request = item.mergeRequest,
                   permitsAutomaticPublication(of: request, account: account)
             else { continue }
             let checkedDraftIDs = item.automaticDraftIDs
-            guard item.automaticPublicationPolicy == settings.automation.automaticPublicationPolicy,
+            let policy = settings.publicationPolicy(for: commentReviewTarget(item.id, account: account))
+            guard item.automaticPublicationPolicy == policy,
                   !checkedDraftIDs.isEmpty else { continue }
-            if settings.automation.publishDraftsWithoutConfirmation {
-                await publishDrafts(of: item.id, automatic: true, checkedDraftIDs: checkedDraftIDs)
-            } else {
+            if policy.mode == .aiReplies {
                 await publishAIReplies(of: item, account: account, checkedDraftIDs: checkedDraftIDs)
+            } else {
+                await publishDrafts(of: item.id, automatic: true, checkedDraftIDs: checkedDraftIDs)
             }
         }
     }
@@ -1723,8 +1727,10 @@ final class MergeRequestAttentionMonitor {
             Log.monitor.error("Could not check AI reply eligibility: \(String(describing: error), privacy: .private)")
             return
         }
-        guard let configuration = settings?.automation, let request = item.mergeRequest else { return }
-        let policy = configuration.automaticPublicationPolicy
+        guard let settings, let request = item.mergeRequest else { return }
+        let reviewTarget = commentReviewTarget(id, account: account)
+        let policy = settings.publicationPolicy(for: reviewTarget)
+        guard policy.mode == .aiReplies else { return }
         let evidence = await publicationNoteEvidence(in: discussions, policy: policy, host: account.host,
                                    projectID: id.projectID, iid: id.iid)
         func qualifies(_ draft: GitLabDraftNote, in threads: [GitLabMergeRequestDiscussion]) -> Bool {
@@ -1734,8 +1740,7 @@ final class MergeRequestAttentionMonitor {
         let eligible = candidates.filter { qualifies($0, in: discussions) }
         guard !eligible.isEmpty, isCurrent(account), !isConfirming(id) else { return }
         let generation = accountGeneration, revision = glab.accountRevision
-        let reviewTarget = commentReviewTarget(id, account: account)
-        let reviewRevision = settings?.commentReviewRevision(for: reviewTarget)
+        let reviewRevision = settings.commentReviewRevision(for: reviewTarget)
         let completion = SettingsManager.CommentReviewProgress.AutomaticPublication(
             request: item.mergeRequest, snapshot: item.commentReviewSnapshot, userID: user.id)
         confirmationStates[id] = .publishing
@@ -1749,18 +1754,17 @@ final class MergeRequestAttentionMonitor {
         var publicationChecked = false
         do {
             for draft in eligible {
-                guard isCurrent(account), let settings, settings.automation.publishAIRepliesWithoutConfirmation,
-                      let request = item.mergeRequest,
+                guard isCurrent(account), settings.publicationPolicy(for: reviewTarget) == policy,
                       permitsAutomaticPublication(of: request, account: account)
                 else { break }
                 let liveDiscussions = try await glab.fetchMergeRequestDiscussions(projectID: id.projectID, iid: id.iid, host: account.host)
                 let origin = await captureGeneratedPublication([draft], id: id, account: account, user: user, before: liveDiscussions)
                 let latest = try await glab.fetchOwnDraftNotes(projectID: id.projectID, iid: id.iid, host: account.host, userID: user.id)
                 guard latest.contains(draft), let draftID = draft.id, qualifies(draft, in: liveDiscussions),
-                      isCurrent(account), settings.automation.publishAIRepliesWithoutConfirmation,
+                      isCurrent(account), settings.publicationPolicy(for: reviewTarget) == policy,
                       permitsAutomaticPublication(of: request, account: account) else { continue }
                 guard let admitted = await automaticPublicationAdmission(draft, id: id, account: account,
-                    request: request, aiRepliesOnly: true, generation: generation, revision: revision) else { continue }
+                    request: request, policy: policy, generation: generation, revision: revision) else { continue }
                 attemptedPublish = true
                 try await glab.publishDraftNote(projectID: id.projectID, iid: id.iid, draftID: draftID,
                     host: account.host, shouldProceed: admitted)
@@ -2202,23 +2206,25 @@ final class MergeRequestAttentionMonitor {
                 confirmationStates[id] = nil
                 return
             }
-            guard let settings, settings.automation.publishDraftsWithoutConfirmation,
+            guard let settings,
                   let request = openItems.first(where: { $0.id == id })?.mergeRequest,
                   permitsAutomaticPublication(of: request, account: account) else {
                 confirmationStates[id] = nil
                 return
             }
+            let policy = settings.publicationPolicy(for: reviewTarget)
+            guard policy.mode == .all || policy.mode == .filtered else { return }
             // Live evidence may narrow this frozen preview, never add an ID.
             for draft in current where draft.id.map(checkedDraftIDs.contains) == true {
                 let origin = await captureGeneratedPublication([draft], id: id, account: account, user: user)
                 let latest = try await glab.fetchOwnDraftNotes(projectID: id.projectID, iid: id.iid, host: account.host, userID: user.id)
                 guard latest.contains(draft), let draftID = draft.id, isCurrent(account),
-                      settings.automation.publishDraftsWithoutConfirmation,
+                      settings.publicationPolicy(for: reviewTarget) == policy,
                       let request = openItems.first(where: { $0.id == id })?.mergeRequest,
                       permitsAutomaticPublication(of: request, account: account),
                       AICommentAssessmentStore.safeForAutomaticPublication(draft),
                       let admitted = await automaticPublicationAdmission(draft, id: id, account: account,
-                        request: request, aiRepliesOnly: false, generation: generation, revision: revision) else { continue }
+                        request: request, policy: policy, generation: generation, revision: revision) else { continue }
                 attemptedPublish = true
                 try await glab.publishDraftNote(projectID: id.projectID, iid: id.iid, draftID: draftID,
                     host: account.host, shouldProceed: admitted)
@@ -2252,13 +2258,15 @@ final class MergeRequestAttentionMonitor {
     /// Bind every mutable authorization input after the live proof checks, then recheck
     /// the same envelope when the transport is ready to launch the individual PUT.
     private func automaticPublicationAdmission(_ draft: GitLabDraftNote, id: Item.ID, account: Account,
-        request: GitLabMergeRequest, aiRepliesOnly: Bool, generation: Int, revision: UInt64) async -> (@MainActor @Sendable () -> Bool)? {
+        request: GitLabMergeRequest, policy: AutomaticPublicationPolicy,
+        generation: Int, revision: UInt64) async -> (@MainActor @Sendable () -> Bool)? {
         guard let settings, let user else { return nil }
         let configuration = settings.automation
+        let target = commentReviewTarget(id, account: account)
         guard await permitsAssistantAutomation(for: account),
               await permitsAutomaticPublication(draft, id: id, account: account),
               isCurrent(account), settings.automation == configuration,
-              aiRepliesOnly ? settings.automation.publishAIRepliesWithoutConfirmation : settings.automation.publishDraftsWithoutConfirmation,
+              settings.publicationPolicy(for: target) == policy,
               permitsAutomaticPublication(of: request, account: account),
               !hasActiveWorker(for: id, account: account) else { return nil }
         let proofVerdict = ReviewVerdictStore.verdict(host: account.host, projectID: id.projectID, iid: id.iid, user: user, in: verdictDirectory)
@@ -2269,7 +2277,7 @@ final class MergeRequestAttentionMonitor {
             !Task.isCancelled && generation == self.accountGeneration && revision == self.glab.accountRevision
                 && self.isCurrent(account) && settings.automaticPublicWritesAllowed
                 && settings.automation == configuration
-                && (aiRepliesOnly ? settings.automation.publishAIRepliesWithoutConfirmation : settings.automation.publishDraftsWithoutConfirmation)
+                && settings.publicationPolicy(for: target) == policy
                 && self.openItems.first(where: { $0.id == id })?.mergeRequest?.sha == request.sha
                 && self.openItems.first(where: { $0.id == id })?.mergeRequest?.semanticContextFingerprint == request.semanticContextFingerprint
                 && ReviewVerdictStore.verdict(host: account.host, projectID: id.projectID, iid: id.iid, user: user, in: self.verdictDirectory) == proofVerdict
@@ -2288,10 +2296,9 @@ final class MergeRequestAttentionMonitor {
                                   becomingAI: Set<Int>) async -> Int {
         guard !becomingAI.isEmpty, let settings, let account, isCurrent(account), let user,
               settings.automaticPublicWritesAllowed,
-              settings.automation.publishDraftsWithoutConfirmation || settings.automation.publishAIRepliesWithoutConfirmation,
               let item = items.first(where: { $0.id == id }), !item.drafts.isEmpty, let request = item.mergeRequest,
               permitsAutomaticPublication(of: request, account: account) else { return 0 }
-        let policy = settings.automation.automaticPublicationPolicy
+        let policy = settings.publicationPolicy(for: commentReviewTarget(id, account: account))
         guard policy.mode != .manual, policy.requiresAI else { return 0 }
         let current = await publicationNoteEvidence(in: discussions, policy: policy, host: account.host, projectID: id.projectID, iid: id.iid)
         let widened = current.ai.union(becomingAI)
@@ -2348,7 +2355,8 @@ final class MergeRequestAttentionMonitor {
                                         user: GitLabAuthenticatedUser) async {
         guard let settings, isCurrent(account), !Task.isCancelled else { return }
         let configuration = settings.automation
-        let policy = configuration.automaticPublicationPolicy
+        let target = commentReviewTarget(.init(projectID: request.projectID, iid: request.iid), account: account)
+        let policy = settings.publicationPolicy(for: target)
         guard configuration.hasAutomaticActionConsent, policy.mode != .manual, policy.requiresAI,
               configuration.scope.permits(request, host: account.host, username: account.username) else { return }
         var sources: [Int: GitLabMergeRequestDiscussion.Note] = [:]
@@ -2410,10 +2418,11 @@ final class MergeRequestAttentionMonitor {
         }
         guard let live, let discussions, let settings else { return false }
         guard permitsParticipantReply(draft, request: live, discussions: discussions, account: account) else { return false }
-        let policy = settings.automation.automaticPublicationPolicy
+        let target = commentReviewTarget(id, account: account)
+        let policy = settings.publicationPolicy(for: target)
         let evidence = await publicationNoteEvidence(in: discussions, policy: policy, host: account.host,
                                    projectID: id.projectID, iid: id.iid)
-        guard isCurrent(account), settings.automation.automaticPublicationPolicy == policy,
+        guard isCurrent(account), settings.publicationPolicy(for: target) == policy,
               permitsAutomaticPublication(of: live, account: account),
               policy.allows(draft, request: live, discussions: discussions, userID: user.id,
                             host: account.host, aiNoteIDs: evidence.ai, botNoteIDs: evidence.bots) else { return false }
@@ -2471,11 +2480,11 @@ final class MergeRequestAttentionMonitor {
                                                                host: account.host, userID: currentUser.id)
             guard finalDrafts.contains(draft), AutomaticPublicationPolicy.safeForAutomaticPublication(draft),
                   permitsParticipantReply(draft, request: currentMR, discussions: freshDiscussions, account: account),
-                  isCurrent(account), settings.automation.automaticPublicationPolicy == policy,
+                  isCurrent(account), settings.publicationPolicy(for: target) == policy,
                   settings.automation.allowFollowUpPush,
                   publicationReceipts(projectID: id.projectID, iid: id.iid, host: account.host, username: user.username).contains(receipt),
                   permitsAutomaticPublication(of: currentMR, account: account) else { return false }
-            guard isCurrent(account), settings.automation.automaticPublicationPolicy == policy,
+            guard isCurrent(account), settings.publicationPolicy(for: target) == policy,
                   policy.allows(draft, request: currentMR, discussions: freshDiscussions, userID: currentUser.id,
                                 host: account.host, aiNoteIDs: freshEvidence.ai, botNoteIDs: freshEvidence.bots) else { return false }
             permitted = true
@@ -2752,7 +2761,7 @@ final class MergeRequestAttentionMonitor {
                         draft.discussionID.map(ids.contains) == true
                     } ?? true
                     return mayHaveSource && settings.automation.scope.permits(request, host: account.host, username: account.username)
-                        && settings.automation.automaticPublicationPolicy.couldAllow(
+                        && settings.publicationPolicy(for: commentReviewTarget(id, account: account)).couldAllow(
                             draft, request: request, userID: user.id, host: account.host)
                 }
                 item.awaitingRemoteVerification = !candidates.isEmpty && (

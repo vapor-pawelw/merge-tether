@@ -1,12 +1,8 @@
 import Foundation
 
 extension TodoMonitorService {
-    func setAutoMergePreference(_ preference: MRAutoMergePreference, for target: MRAutomationScope.Target) async {
-        guard target.iid != nil, settings.autoMergePreference(for: target) != preference else { return }
-        settings.setAutoMergePreference(preference, for: target)
-        guard settings.save(), preference != .off, settings.automaticPublicWritesAllowed,
-              glab.resolvedHost == target.host, glab.currentUsername == target.username else { return }
-        await authoredMergeRequests.resumeAutomaticMerge(for: target)
+    func setAutoMergePreference(_ preference: MRAutomationPreference, for target: MRAutomationScope.Target) async {
+        await setAutomaticActionPreference(preference, for: .merge, target: target)
     }
 
     /// Restoring inheritance immediately checks this action under automatic permissions.
@@ -14,15 +10,16 @@ extension TodoMonitorService {
     /// background work continues without using the manual publication bypass.
     func setAutomaticAction(_ action: MRAutomaticAction, enabled: Bool,
                             for target: MRAutomationScope.Target) async {
-        if action == .merge {
-            await setAutoMergePreference(enabled ? .default : .off, for: target)
-            return
-        }
-        let changed = settings.actionIsAutomatic(action, for: target) != enabled
-        settings.setActionAutomatic(action, enabled: enabled, for: target)
-        settings.save()
-        guard settings.automaticWritesAllowed, changed, enabled,
+        await setAutomaticActionPreference(enabled ? .default : .off, for: action, target: target)
+    }
+
+    func setAutomaticActionPreference(_ preference: MRAutomationPreference, for action: MRAutomaticAction,
+                                      target: MRAutomationScope.Target) async {
+        guard target.iid != nil, settings.storedActionPreference(action, for: target) != preference else { return }
+        settings.setActionPreference(preference, for: action, target: target)
+        guard settings.save(), preference != .off, settings.automaticPublicWritesAllowed,
               glab.resolvedHost == target.host, glab.currentUsername == target.username else { return }
-        await attention.resumeAutomaticAction(action, for: target)
+        if action == .merge { await authoredMergeRequests.resumeAutomaticMerge(for: target) }
+        else { await attention.resumeAutomaticAction(action, for: target) }
     }
 }

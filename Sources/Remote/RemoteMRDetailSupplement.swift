@@ -6,7 +6,7 @@ import MergeTetherRemote
     static func automationStatus(settings: SettingsManager, target: MRAutomationScope.Target,
                                  request: GitLabMergeRequest) -> RemoteAutomationStatus? {
         let automation = settings.configuredAutomation
-        guard automation.hasEnabledAutomation, request.state == "opened" else { return nil }
+        guard settings.hasConfiguredAutomation(for: target), request.state == "opened" else { return nil }
         let isDraft = request.draft == true || request.detailedMergeStatus == "draft_status"
         let summary = MRAutomationControl.summary(automation.scope, target: target, isDraft: isDraft)
         let state = String(localized: summary.active ? .Menu.menuScopeActive : .Menu.menuScopePaused)

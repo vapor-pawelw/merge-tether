@@ -59,7 +59,9 @@ struct MRBoardProjectorTests {
         let catalog = item(try request(["draft": true]))
         var input = input(evidence: evidence, catalog: catalog)
         input.automation.applyPreset(.full, for: .codex)
-        input.publicationAutomaticTargets = input.trackedReviewedTargets
+        input.publicationPolicies = Dictionary(uniqueKeysWithValues: input.trackedReviewedTargets.map {
+            ($0, input.automation.automaticPublicationPolicy)
+        })
         evidence.automaticPublicationPolicy = input.automation.automaticPublicationPolicy
         input.attention = .init(host: account.host, username: account.username, revision: account.revision,
             evidence: [evidence], attention: [evidence], catalog: [catalog])
