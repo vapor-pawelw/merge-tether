@@ -450,12 +450,14 @@ final class MergeWorkflowMonitor {
                 reportedHeads: [head], seenAuthorReplies: replies)
             let candidate = ReviewVerdictStore.verdict(host: account.host, projectID: request.projectID,
                 iid: request.iid, user: .init(id: account.userID, username: username), in: verdictDirectory)
-            let diagnosedHead = candidate.flatMap { verdict -> String? in
-                guard let run = reviewHistory.first(where: {
+            let verdictRun = candidate.flatMap { verdict in
+                reviewHistory.first {
                     $0.id == verdict.runID && $0.key.work.host == account.host && $0.key.username == username
                         && $0.key.work.projectID == request.projectID && $0.key.work.iid == request.iid
-                }), AssistantAutomationRunner.isForeignPipelineDiagnosis(for: run, history: reviewHistory) else { return nil }
-                return verdict.headSHA
+                }
+            }
+            let diagnosedHead = verdictRun.flatMap { run in
+                AssistantAutomationRunner.isForeignPipelineDiagnosis(for: run, history: reviewHistory) ? candidate?.headSHA : nil
             }
             let verdict = diagnosedHead == nil ? candidate : nil
             if let diagnosedHead, previous.reviewedHead == diagnosedHead {
@@ -492,12 +494,24 @@ final class MergeWorkflowMonitor {
                 previous.reviewedHead = head
                 previous.reviewedNoteRevisions = revisions
             }
+            // A no-findings review may finish and lose its current head between two polls.
+            // Its authenticated completion can establish earlier coverage without borrowing the live diff or notes.
+            var recoveredReview = false
+            if !previous.hasReviewed, !hasReviewEvidence, previous.reviewedHead == nil,
+               let verdict, verdict.version == 1, verdict.headSHA != head,
+               let verdictRun, verdictRun.execution?.state == .succeeded,
+               AssistantJobJournal.reviewVerdict(for: verdictRun) == verdict {
+                previous.reviewedHead = verdict.headSHA
+                previous.reviewedDiff = nil
+                previous.reviewedNoteRevisions = nil
+                recoveredReview = true
+            }
             let epoch = previous.reviewCoverageEpoch ?? 0
             let staleContext = await staleReviewContext(request, discussions: discussions, glab: glab,
                 account: account, verdict: verdict)
                 .map { epoch == 0 ? $0 : $0 + "-coverage-\(epoch)" }
             let hasReviewed = previous.hasReviewed || hasReviewEvidence || previous.reviewedHead != nil || staleContext != nil
-            if firstObservation {
+            if firstObservation && !recoveredReview {
                 previous.hasReviewed = hasReviewed
                 previous.reportedEvidenceContexts = staleContext.map { Set([$0]) }
                 baselines.reviews[key] = previous
@@ -511,16 +525,19 @@ final class MergeWorkflowMonitor {
             let newReplies = replies.flatMap { current in previous.seenAuthorReplies.map { current.subtracting($0) } } ?? []
             if let replies { previous.seenAuthorReplies = (previous.seenAuthorReplies ?? []).union(replies) }
             let movedToUncoveredHead = hasReviewed && previous.head != head && covered != true
-            let firstHeadReport = movedToUncoveredHead && previous.reportedHeads.insert(head).inserted
+            let firstHeadReport = recoveredReview || (movedToUncoveredHead && !previous.reportedHeads.contains(head))
             // A prior report at this SHA used older review evidence. A fresh event needs its own admission ID.
             let returnToken: String? = if movedToUncoveredHead, !firstHeadReport, verdict?.headSHA != head,
                 let savedVerdictDigest, previous.reportedHeadVerdicts?[head] != savedVerdictDigest {
                 head + "-return-" + savedVerdictDigest
             } else { nil }
             let changedHead = firstHeadReport || returnToken != nil
-            if changedHead, let savedVerdictDigest {
-                previous.reportedHeadVerdicts = previous.reportedHeadVerdicts ?? [:]
-                previous.reportedHeadVerdicts?[head] = savedVerdictDigest
+            if changedHead {
+                previous.reportedHeads.insert(head)
+                if let savedVerdictDigest {
+                    previous.reportedHeadVerdicts = previous.reportedHeadVerdicts ?? [:]
+                    previous.reportedHeadVerdicts?[head] = savedVerdictDigest
+                }
             }
             let staleUnreported = staleContext.map { !(previous.reportedEvidenceContexts ?? []).contains($0) } == true
             if hasReviewed && (changedHead || !newReplies.isEmpty || staleUnreported) {

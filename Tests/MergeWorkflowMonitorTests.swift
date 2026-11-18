@@ -325,6 +325,88 @@ struct MergeWorkflowMonitorTests {
         #expect(event.context.contains(reviewed))
     }
 
+    @Test(arguments: ["push-before-poll", "first-observation", "completion-observed-later", "unsigned", "diagnosis"])
+    func completedNoFindingsReviewSchedulesPushBeforeMonitorObservesReviewedHead(_ scenario: String) async throws {
+        let suite = "UnobservedReviewCompletion.\(UUID())"
+        let defaults = try #require(UserDefaults(suiteName: suite))
+        defer { defaults.removePersistentDomain(forName: suite) }
+        let settings = SettingsManager(defaults: defaults)
+        let directory = FileManager.default.temporaryDirectory.appending(path: UUID().uuidString)
+        defer { try? FileManager.default.removeItem(at: directory) }
+        let host = "gitlab.example.test"
+        let user = GitLabAuthenticatedUser(id: 1, username: "owner")
+        let reviewed = String(repeating: "a", count: 40)
+        let pushed = String(repeating: "b", count: 40)
+        let gitlab = InMemoryGitLab()
+        defer { gitlab.close() }
+        gitlab.write("request", mergeRequest(13, sha: reviewed, author: 2))
+        gitlab.handler = { call in
+            #expect(call.method == "GET")
+            switch call.endpoint {
+            case let path where path.contains("reviewer_id=1"):
+                return InMemoryGitLab.output("[\(gitlab.text("request"))]")
+            case let path where path.contains("/reviewers?"):
+                return InMemoryGitLab.output(#"[{"user":{"id":1},"state":"unreviewed"}]"#)
+            case let path where path.contains("/discussions?"):
+                return InMemoryGitLab.output("[]")
+            default:
+                return try gitlab.unexpected(call)
+            }
+        }
+        let glab = gitlab.service(host: host, username: user.username)
+        func pollAfterRestart() async -> [MergeWorkflowEvent] {
+            let monitor = MergeWorkflowMonitor(defaults: defaults, verdictDirectory: directory)
+            var events: [MergeWorkflowEvent] = []
+            await monitor.poll(glab: glab, host: host, user: user, authored: [], enabled: [.reviewUpdate],
+                reviewSLA: 3_600, reviewHistory: SettingsManager(defaults: defaults).assistantHandoffs) {
+                events.append($0)
+            }
+            return events
+        }
+
+        if scenario != "first-observation" {
+            #expect(await pollAfterRestart().isEmpty)
+        }
+
+        let work = AssistantAutomationRunner.MergeRequestWork(host: host, projectID: 7, iid: 13)
+        let run = AssistantAutomationRunner.Handoff(id: UUID(),
+            key: .init(assistant: .codex, work: work, username: user.username, workspace: "", access: .gitLabRead),
+            title: "Completed review", prompt: "Review", createdAt: Date(), allowsPush: false,
+            execution: .init(state: .succeeded), workflow: .review, expectedHeadSHA: reviewed,
+            taskIntent: scenario == "diagnosis" ? .pipelineDiagnosis : .review())
+        defer { try? FileManager.default.removeItem(at: AssistantJobJournal.checkpointURL(for: run.id)) }
+        let verdict = ReviewVerdict(version: 1, host: host, projectID: work.projectID, iid: work.iid, headSHA: reviewed,
+            verdict: .noObjections, discussionFingerprint: ReviewVerdict.fingerprint([]),
+            username: user.username, userID: user.id, runID: run.id)
+        let file = ReviewVerdictStore.fileURL(host: host, projectID: work.projectID, iid: work.iid, in: directory)
+        try FileManager.default.createDirectory(at: file.deletingLastPathComponent(), withIntermediateDirectories: true)
+        try JSONEncoder().encode(verdict).write(to: file)
+        if scenario != "unsigned" {
+            try await AssistantJobJournal.save(.init(result: .init(status: .succeeded, summary: "Reviewed"), output: ""),
+                for: run, reviewVerdict: verdict)
+        }
+
+        // No poll sees the completed review at the head it covered.
+        gitlab.write("request", mergeRequest(13, sha: pushed, author: 2))
+        if scenario == "completion-observed-later" {
+            #expect(await pollAfterRestart().isEmpty)
+        }
+
+        settings.assistantHandoffs = [run]
+        settings.save()
+        let events = await pollAfterRestart()
+        if scenario == "unsigned" || scenario == "diagnosis" {
+            #expect(events.isEmpty)
+        } else {
+            #expect(events.count == 1)
+            let event = try #require(events.first)
+            #expect(event.kind == .reviewUpdate)
+            #expect(event.mergeRequest.sha == pushed)
+            #expect(event.context.contains("earlier review covered head \(reviewed)"))
+        }
+        #expect(await pollAfterRestart().isEmpty)
+    }
+
     @Test(arguments: ["baseline", "candidate", "legacy"])
     func reReviewRequiresDiffEvidenceForTheComparedHeads(_ wrongDiff: String) async throws {
         let suite = "ReviewDiffHeadRace.\(UUID())"
