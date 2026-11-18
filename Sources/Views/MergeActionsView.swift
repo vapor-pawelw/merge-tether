@@ -93,8 +93,10 @@ struct MergeActionsView<StatusTrailer: View, AdditionalActions: View>: View {
     private var feedbackRecheckRoute: ManualFeedbackRecheckRoute {
         guard let request = item.mergeRequest, let host = monitor.glab.resolvedHost,
               let username = monitor.glab.currentUsername else { return .review }
+        let target = MRAutomationScope.Target(host: host, username: username, projectID: request.projectID, iid: request.iid)
         return .init(backgroundCheckAllowed: AuthorFeedbackCoordinator.permitsBackgroundCheck(for: request,
-            configuration: monitor.settings.automation, host: host, username: username))
+            configuration: monitor.settings.automation, host: host, username: username,
+            mergeOptedIn: monitor.settings.autoMergePreference(for: target) == .on))
     }
 
     var body: some View {

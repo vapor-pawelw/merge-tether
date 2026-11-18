@@ -183,8 +183,10 @@ final class AuthoredMergeRequestMonitor {
     func refreshIfNeeded() {
         if isLoading { refreshAfterLoad = true; return }
         let automation = settings.automation
+        let hasMergeOptIn = automation.hasAutomaticPublicActionConsent
+            && settings.hasAutoMergeOptIn(host: glab.resolvedHost, username: glab.currentUsername)
         guard settings.onboardingCompleted,
-              isVisible || automation.autoMergeEnabled || automation.conflictTasksEnabled
+              isVisible || automation.autoMergeEnabled || hasMergeOptIn || automation.conflictTasksEnabled
                 || !automation.workflowRules.enabled.isEmpty || wasWatchingWorkflow
         else { return }
 
@@ -240,8 +242,10 @@ final class AuthoredMergeRequestMonitor {
         while isLoading {
             await withCheckedContinuation { automaticMergeIdleWaiters.append($0) }
         }
+        let preference = settings.autoMergePreference(for: key.target)
         guard settings.onboardingCompleted, isCurrent(account), glab.accountRevision == key.revision,
-              settings.actionIsAutomatic(.merge, for: key.target), settings.automation.autoMergeEnabled else { return }
+              settings.automaticPublicWritesAllowed, preference != .off,
+              preference == .on || settings.automation.autoMergeEnabled else { return }
         if lastAccount != account {
             syncedCatalogRevision = nil
             requests = []
@@ -562,7 +566,9 @@ final class AuthoredMergeRequestMonitor {
     ) async -> (status: AuthoredMergeRequestStatus, queueHasEnded: Bool) {
         let host = account.host
         var request = request
-        let autoMergeEnabled = settings.automation.permitsAutoMerge(project: request.webURL.gitLabProjectPath)
+        let target = MRAutomationScope.Target(host: host, username: account.username, projectID: request.projectID, iid: request.iid)
+        let autoMergeEnabled = settings.automation.permitsAutoMerge(project: request.webURL.gitLabProjectPath,
+            optedIn: settings.autoMergePreference(for: target) == .on)
             && settings.automation.scope.permits(request, host: host, username: account.username)
         let policy = try? await glab.fetchMergeActionPolicy(projectID: request.projectID, host: host, request: request)
         var trainState: MergeSubmissionState = .none

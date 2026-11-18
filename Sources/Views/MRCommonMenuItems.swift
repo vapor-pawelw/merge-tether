@@ -77,11 +77,10 @@ struct MRCommonMenuItems: View {
         }
         AssistantContextMenu(mergeRequestURL: item.url, title: item.title,
                              settings: monitor.settings)
-        if !isFinished, monitor.settings.configuredAutomation.hasEnabledAutomation,
+        if !isFinished,
            let target = monitor.scopeTarget(projectID: item.id.projectID, iid: item.id.iid, url: item.url) {
-            Divider()
             MRAutomationScopeMenu(monitor: monitor, target: target, projectPath: item.url.gitLabProjectPath,
-                isDraft: item.section == .draftMergeRequests)
+                isDraft: item.section == .draftMergeRequests, showsLeadingDivider: true)
         }
         if !isFinished, let onRemove {
             Divider()

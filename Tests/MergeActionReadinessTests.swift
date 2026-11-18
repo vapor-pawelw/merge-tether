@@ -240,7 +240,7 @@ struct MergeActionReadinessTests {
         #expect(listed.manualMergeBlocker(using: checked) == .feedback(.assessmentMissing))
     }
 
-    @MainActor @Test(arguments: ["manual", "undecided", "disabled", "paused", "featuresOff", "automatic"])
+    @MainActor @Test(arguments: ["manual", "undecided", "disabled", "paused", "featuresOff", "automatic", "mergeOptIn"])
     func feedbackRecheckExecutesReviewInsteadOfANoopWhenBackgroundChecksCannotRun(_ profile: String) throws {
         let request = try status().request
         let target = MRAutomationScope.Target(host: "gitlab.example.test", username: "me", projectID: 1, iid: 2)
@@ -251,7 +251,7 @@ struct MergeActionReadinessTests {
         case "undecided": configuration.packageDecision = .undecided
         case "disabled": configuration.packageDecision = .disabled
         case "paused": configuration.scope[target] = .paused
-        case "featuresOff":
+        case "featuresOff", "mergeOptIn":
             configuration.autoResolveAcceptedFeedback = false
             configuration.autoMergeEnabled = false
             configuration.authorFeedback.isEnabled = false
@@ -260,7 +260,7 @@ struct MergeActionReadinessTests {
         }
         let before = configuration
         let permitted = AuthorFeedbackCoordinator.permitsBackgroundCheck(for: request, configuration: configuration,
-            host: target.host, username: target.username)
+            host: target.host, username: target.username, mergeOptedIn: profile == "mergeOptIn")
         let route = ManualFeedbackRecheckRoute(backgroundCheckAllowed: permitted)
         let displayed = try item(status())
         var executed: [String] = []
@@ -269,10 +269,11 @@ struct MergeActionReadinessTests {
             executed.append("review")
             destination = .init(item: displayed)
         })
-        #expect(executed == [profile == "automatic" ? "verify" : "review"])
-        #expect(route.recoveryAction == (profile == "automatic" ? .verifyFeedback : .reviewFeedback))
+        let expectsVerification = profile == "automatic" || profile == "mergeOptIn"
+        #expect(executed == [expectsVerification ? "verify" : "review"])
+        #expect(route.recoveryAction == (expectsVerification ? .verifyFeedback : .reviewFeedback))
         #expect(displayed.authorFeedbackStatus == nil)
-        #expect(destination == (profile == "automatic" ? nil : .gitLab(displayed.url)))
+        #expect(destination == (expectsVerification ? nil : .gitLab(displayed.url)))
         #expect(configuration == before)
     }
 

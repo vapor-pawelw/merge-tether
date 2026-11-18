@@ -20,8 +20,16 @@ struct MRAutomationScopeEditor {
 
     var globallySuspended: Bool { !settings.automationGloballyEnabled }
 
+    var isAvailable: Bool {
+        let automation = settings.configuredAutomation
+        return automation.hasEnabledAutomation
+            || (automation.hasAutomaticPublicActionConsent && applicableActions.contains(.merge))
+    }
+
     var hasActionExceptions: Bool {
-        target.iid != nil && MRAutomaticAction.allCases.contains { !settings.actionIsAutomatic($0, for: target) }
+        target.iid != nil && (settings.autoMergePreference(for: target) != .default
+            || !settings.actionIsAutomatic(.commentPublication, for: target)
+            || !settings.actionIsAutomatic(.approval, for: target))
     }
 
     /// Cached, account-bound metadata only: rendering a menu or popover never starts a read.
@@ -110,7 +118,7 @@ struct BoardAutomationToggle: View {
     }
 
     var body: some View {
-        if monitor.settings.configuredAutomation.hasEnabledAutomation {
+        if editor.isAvailable {
             let summary = editor.summary
             Button {
                 if NSEvent.modifierFlags.contains(.option) {
@@ -217,17 +225,11 @@ struct MRAutomationPopover: View {
             caption(.Menu.menuScopeDraftSafetyHelp)
             VStack(alignment: .leading, spacing: 4) {
                 ForEach(editor.applicableActions, id: \.self) { action in
-                    Toggle(isOn: Binding(get: {
-                        editor.settings.actionIsAutomatic(action, for: editor.target)
-                    }, set: { enabled in
-                        Task { await editor.monitor.setAutomaticAction(action, enabled: enabled, for: editor.target) }
-                    })) {
-                        Text(actionLabel(action))
-                    }
-                    .toggleStyle(.checkbox)
-                    .help(Text(.AutomaticActions.automaticActionsInheritHelp))
+                    MRAutomaticActionControl(action: action, editor: editor)
                 }
             }
+            .toggleStyle(.checkbox)
+            .pickerStyle(.segmented)
         }
     }
 
@@ -270,13 +272,15 @@ struct MRAutomationScopeMenu: View {
     let target: MRAutomationScope.Target
     var projectPath: String? = nil
     var isDraft = false
+    var showsLeadingDivider = false
 
     private var editor: MRAutomationScopeEditor {
         .init(monitor: monitor, target: target, projectPath: projectPath, isDraft: isDraft)
     }
 
     var body: some View {
-        if monitor.settings.configuredAutomation.hasEnabledAutomation {
+        if editor.isAvailable {
+            if showsLeadingDivider { Divider() }
             let summary = editor.summary
             Menu {
                 if target.iid != nil {
@@ -286,14 +290,8 @@ struct MRAutomationScopeMenu: View {
                     choiceButton(.paused, current: summary.choice)
                     Divider()
                     ForEach(editor.applicableActions, id: \.self) { action in
-                        Toggle(isOn: Binding(get: {
-                            monitor.settings.actionIsAutomatic(action, for: target)
-                        }, set: { enabled in
-                            Task { await monitor.setAutomaticAction(action, enabled: enabled, for: target) }
-                        })) {
-                            Text(actionLabel(action))
-                        }
-                        .help(Text(.AutomaticActions.automaticActionsInheritHelp))
+                        MRAutomaticActionControl(action: action, editor: editor)
+                            .pickerStyle(.menu)
                     }
                     Divider()
                 }
@@ -327,11 +325,42 @@ struct MRAutomationScopeMenu: View {
     }
 }
 
-private func actionLabel(_ action: MRAutomaticAction) -> LocalizedStringResource {
-    switch action {
-    case .commentPublication: .AutomaticActions.automaticActionsPublication
-    case .merge: .AutomaticActions.automaticActionsMerge
-    case .approval: .AutomaticActions.automaticActionsApproval
+private struct MRAutomaticActionControl: View {
+    let action: MRAutomaticAction
+    let editor: MRAutomationScopeEditor
+
+    var body: some View {
+        if action == .merge {
+            Picker(selection: Binding(get: {
+                editor.settings.autoMergePreference(for: editor.target)
+            }, set: { preference in
+                Task { await editor.monitor.setAutoMergePreference(preference, for: editor.target) }
+            })) {
+                ForEach(MRAutoMergePreference.allCases, id: \.self) { preference in
+                    Text(label(for: preference)).tag(preference)
+                }
+            } label: {
+                Text(.AutomaticActions.automaticActionsMerge)
+            }
+            .help(Text(.AutomaticActions.automaticActionsMergeHelp))
+        } else {
+            Toggle(isOn: Binding(get: {
+                editor.settings.actionIsAutomatic(action, for: editor.target)
+            }, set: { enabled in
+                Task { await editor.monitor.setAutomaticAction(action, enabled: enabled, for: editor.target) }
+            })) {
+                Text(action == .commentPublication ? .AutomaticActions.automaticActionsPublication : .AutomaticActions.automaticActionsApproval)
+            }
+            .help(Text(.AutomaticActions.automaticActionsInheritHelp))
+        }
+    }
+
+    private func label(for preference: MRAutoMergePreference) -> LocalizedStringResource {
+        switch preference {
+        case .default: .Menu.menuScopeDefault
+        case .on: .AutomaticActions.automaticActionsMergeOn
+        case .off: .AutomaticActions.automaticActionsMergeOff
+        }
     }
 }
 
@@ -345,7 +374,7 @@ private func scopeHelp(_ summary: MRAutomationControl.Summary, hasActionExceptio
 
 private func scopeChoiceLabel(_ choice: MRAutomationScope.Choice) -> LocalizedStringResource {
     switch choice {
-    case .inherit: .Menu.menuScopeFollowRepository
+    case .inherit: .Menu.menuScopeDefault
     case .active: .Menu.menuScopeIndividualOptIn
     case .forceOn: .Menu.menuScopeAlwaysOn
     case .paused: .Menu.menuScopeAlwaysOff

@@ -875,8 +875,10 @@ final class TodoMonitorService {
 
     var unavailableAssistant: AutomationAssistant? {
         let assistant = settings.automation.assistant
+        let hasMergeOptIn = settings.automation.hasAutomaticPublicActionConsent
+            && settings.hasAutoMergeOptIn(host: glab.resolvedHost, username: glab.currentUsername)
         if (settings.automation.usesAssistant || settings.automation.autoReReviewEnabled
-            || settings.automation.autoMergeEnabled || settings.automation.autoApproveEnabled
+            || settings.automation.autoMergeEnabled || hasMergeOptIn || settings.automation.autoApproveEnabled
             || settings.automation.publishDraftsWithoutConfirmation || settings.automation.publishAIRepliesWithoutConfirmation),
            let status = assistantDependencies.statuses[assistant], !status.isReady { return assistant }
         return assistantHandoffs.first { handoff in

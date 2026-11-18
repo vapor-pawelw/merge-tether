@@ -1,4 +1,5 @@
 import Foundation
+import SwiftUI
 import Testing
 @testable import GitLabTodos
 
@@ -76,7 +77,7 @@ struct MRAutomationScopeEditorTests {
         #expect(monitor.automationToggleNotices.current?.kind == .mergeRequest(iid: 42, projectPath: nil, active: true))
     }
 
-    @Test func choosingAutoReturnsToDefaultsAndChoosingAlwaysOnForDraftNeedsConfirmation() async throws {
+    @Test func choosingDefaultRestoresScopeAndChoosingAlwaysOnForDraftNeedsConfirmation() async throws {
         // given
         let (_, settings, monitor) = try makeMonitor()
         defer { monitor.stopTimer() }
@@ -146,6 +147,36 @@ struct MRAutomationScopeEditorTests {
         // then
         #expect(settings.configuredAutomation.scope.manualChoice(for: target) == .paused)
         #expect(!settings.automation.scope.resolve(target).active)
+    }
+
+    @Test func ownMRCanExposeAutoMergeWithGlobalFeaturesOffUsingCachedOwnership() throws {
+        let name = "MRAutomationScopeEditor-\(UUID().uuidString)"
+        let defaults = try #require(UserDefaults(suiteName: name))
+        defer { defaults.removePersistentDomain(forName: name) }
+        let settings = SettingsManager(defaults: defaults)
+        settings.automation.applyPreset(.manual, for: .codex)
+        settings.automation.packageDecision = .enabled
+        settings.automation.allowAutomaticPublicActions = true
+        let gitlab = InMemoryGitLab()
+        defer { gitlab.close() }
+        let glab = gitlab.service(host: target.host, username: target.username)
+        settings.glabPath = glab.glabPath
+        settings.resolvedHost = target.host
+        let monitor = TodoMonitorService(settings: settings, glab: glab)
+        defer { monitor.stopTimer() }
+        let editor = MRAutomationScopeEditor(monitor: monitor, target: target)
+        #expect(!settings.configuredAutomation.hasEnabledAutomation && !editor.isAvailable)
+        let request = try JSONDecoder().decode(GitLabMergeRequest.self, from: Data("""
+        {"project_id":7,"iid":42,"author":{"id":3,"username":"me","name":"Me"},"title":"Feature",
+        "web_url":"https://gitlab.example.test/group/app/-/merge_requests/42","state":"opened","draft":false,
+        "source_branch":"feature","target_branch":"main","labels":[]}
+        """.utf8))
+        monitor.recordBoardDisplayRequest(request, for: target, url: request.webURL,
+            accountRevision: glab.accountRevision, readStartedAt: Date())
+
+        #expect(editor.isAvailable && editor.applicableActions == [.commentPublication, .merge])
+        let view = NSHostingView(rootView: MRAutomationPopover(editor: editor))
+        #expect(view.fittingSize.height > 0 && gitlab.requests.isEmpty)
     }
 
     private func makeMonitor() throws -> (UserDefaults, SettingsManager, TodoMonitorService) {

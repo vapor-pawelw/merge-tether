@@ -7,7 +7,19 @@
     },
     "automaticActions.merge": {
       "extractionState": "manual",
-      "localizations": { "en": { "stringUnit": { "state": "translated", "value": "Merge: follow global rules" } } }
+      "localizations": { "en": { "stringUnit": { "state": "translated", "value": "Auto-merge" } } }
+    },
+    "automaticActions.mergeOn": {
+      "extractionState": "manual",
+      "localizations": { "en": { "stringUnit": { "state": "translated", "value": "On" } } }
+    },
+    "automaticActions.mergeOff": {
+      "extractionState": "manual",
+      "localizations": { "en": { "stringUnit": { "state": "translated", "value": "Off" } } }
+    },
+    "automaticActions.mergeHelp": {
+      "extractionState": "manual",
+      "localizations": { "en": { "stringUnit": { "state": "translated", "value": "Default follows global auto-merge settings. On enables auto-merge for this MR. Off pauses it. Automation scope, public action permissions and merge checks still apply." } } }
     },
     "automaticActions.approval": {
       "extractionState": "manual",
@@ -19,7 +31,7 @@
     },
     "automaticActions.exceptionsHelp": {
       "extractionState": "manual",
-      "localizations": { "en": { "stringUnit": { "state": "translated", "value": "Some automatic actions are off for this MR. Review Automation in the … menu." } } }
+      "localizations": { "en": { "stringUnit": { "state": "translated", "value": "This MR has automatic action overrides. Review Automation in the … menu." } } }
     }
   },
   "version": "1.0"

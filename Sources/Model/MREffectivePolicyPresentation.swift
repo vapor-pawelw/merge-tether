@@ -62,7 +62,8 @@ struct MREffectivePolicyPresentation {
             let automation = settings.configuredAutomation
             packageDecision = automation.packageDecision
             publicActionsAllowed = automation.allowAutomaticPublicActions
-            enabled = automation.hasEnabledAutomation
+            enabled = automation.hasEnabledAutomation || (automation.hasAutomaticPublicActionConsent
+                && target.map { settings.autoMergePreference(for: $0) == .on } == true)
             let scope = target.map { automation.scope.resolve($0, isDraft: bound?.draft == true || bound?.detailedMergeStatus == "draft_status") }
             scopeActive = scope?.active == true
             draftPaused = scope?.source == .draft

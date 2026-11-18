@@ -88,12 +88,33 @@ extension SettingsManager {
         save()
     }
 
-    /// The user's two-state MR preference only; callers must still check global permission,
-    /// whole-MR scope and current action evidence before performing an automatic write.
+    func autoMergePreference(for target: MRAutomationScope.Target) -> MRAutoMergePreference {
+        if autoMergeOptOuts.contains(target) { return .off }
+        return autoMergeOptIns.contains(target) ? .on : .default
+    }
+
+    func setAutoMergePreference(_ preference: MRAutoMergePreference, for target: MRAutomationScope.Target) {
+        guard target.iid != nil else { return }
+        autoMergeOptIns.remove(target)
+        autoMergeOptOuts.remove(target)
+        switch preference {
+        case .default: break
+        case .on: autoMergeOptIns.insert(target)
+        case .off: autoMergeOptOuts.insert(target)
+        }
+    }
+
+    func hasAutoMergeOptIn(host: String?, username: String?) -> Bool {
+        autoMergeOptIns.contains {
+            $0.host == host && $0.username == username && $0.iid != nil && !autoMergeOptOuts.contains($0)
+        }
+    }
+
+    /// Action preference only. Automatic writes also require consent, scope and fresh evidence.
     func actionIsAutomatic(_ action: MRAutomaticAction, for target: MRAutomationScope.Target) -> Bool {
         switch action {
         case .commentPublication: !autoPublishOptOuts.contains(target)
-        case .merge: !autoMergeOptOuts.contains(target)
+        case .merge: autoMergePreference(for: target) != .off
         case .approval: !autoApproveOptOuts.contains(target)
         }
     }
@@ -104,7 +125,7 @@ extension SettingsManager {
         case .commentPublication:
             if enabled { autoPublishOptOuts.remove(target) } else { autoPublishOptOuts.insert(target) }
         case .merge:
-            if enabled { autoMergeOptOuts.remove(target) } else { autoMergeOptOuts.insert(target) }
+            setAutoMergePreference(enabled ? .default : .off, for: target)
         case .approval:
             if enabled { autoApproveOptOuts.remove(target) } else { autoApproveOptOuts.insert(target) }
         }
@@ -123,7 +144,11 @@ extension SettingsManager {
               automation.scope.permits(request, host: target.host, username: target.username) else { return false }
         return switch action {
         case .commentPublication: automation.publicationMode != .manual
-        case .merge: automation.permitsAutoMerge(project: request.webURL.gitLabProjectPath)
+        case .merge:
+            request.author.username == target.username && request.draft == false
+                && request.detailedMergeStatus != "draft_status"
+                && automation.permitsAutoMerge(project: request.webURL.gitLabProjectPath,
+                    optedIn: autoMergePreference(for: target) == .on)
         case .approval: automation.autoApproveEnabled
         }
     }

@@ -220,11 +220,12 @@ final class AuthorFeedbackCoordinator {
     }
 
     static func permitsBackgroundCheck(for request: GitLabMergeRequest, configuration: AutomationSettings,
-                                       host: String, username: String) -> Bool {
+                                       host: String, username: String, mergeOptedIn: Bool = false) -> Bool {
         let workflow = configuration.workflowRules[.newDiscussion]
         let followsFeedback = configuration.authorFeedback.isEnabled
             || (workflow.mode == .assistant && workflow.includes(request))
-        return (configuration.autoResolveAcceptedFeedback || configuration.autoMergeEnabled || followsFeedback)
+        let checksForMerge = configuration.autoMergeEnabled || (mergeOptedIn && configuration.hasAutomaticPublicActionConsent)
+        return (configuration.autoResolveAcceptedFeedback || checksForMerge || followsFeedback)
             && configuration.hasAutomaticActionConsent
             && configuration.scope.permits(request, host: host, username: username)
     }
@@ -235,7 +236,8 @@ final class AuthorFeedbackCoordinator {
         let target = MRAutomationScope.Target(host: host, username: user.username, projectID: request.projectID, iid: request.iid)
         let configuration = settings.automation
         guard request.author.id == user.id, request.state == "opened", request.draft != nil,
-              Self.permitsBackgroundCheck(for: request, configuration: configuration, host: host, username: user.username),
+              Self.permitsBackgroundCheck(for: request, configuration: configuration, host: host, username: user.username,
+                  mergeOptedIn: settings.autoMergePreference(for: target) == .on),
               let fingerprint = ReviewVerdict.fingerprint(discussions), let head = request.sha else { return }
         let activeDiscussions = GitLabMergeRequestDiscussion.activeForReview(discussions)
         guard let activeFingerprint = ReviewVerdict.fingerprint(activeDiscussions) else { return }

@@ -710,8 +710,9 @@ struct AutomationSettings: Codable, Equatable, Sendable {
         return updated
     }
 
-    func permitsAutoMerge(project: String) -> Bool {
-        hasAutomaticPublicActionConsent && autoMergeEnabled && matchesOptionalProjectRestriction(project, paths: autoMergeProjects)
+    func permitsAutoMerge(project: String, optedIn: Bool = false) -> Bool {
+        hasAutomaticPublicActionConsent
+            && (optedIn || (autoMergeEnabled && matchesOptionalProjectRestriction(project, paths: autoMergeProjects)))
     }
 
     func permitsAssistantTools(project: String) -> Bool {

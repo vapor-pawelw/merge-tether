@@ -300,6 +300,25 @@ struct AuthorFeedbackMergeTests {
         }
     }
 
+    @Test(arguments: ["poll", "resume", "discussion", "paused"])
+    func savedMergeOptInRunsWithGlobalMergeDisabled(_ path: String) async throws {
+        let target = MRAutomationScope.Target(host: "gitlab.example.org", username: "me", projectID: 1, iid: 2)
+        try await withFixture(configure: {
+            $0.automation.autoMergeEnabled = false
+            $0.automation.autoMergeProjects = "another/project"
+            if path == "paused" { $0.automation.scope.setManualChoice(.paused, for: target) }
+        }, seedDefaults: {
+            $0.set(try JSONEncoder().encode(Set([target])), forKey: "autoMergeOptIns")
+        }) { monitor, gitlab, _ in
+            monitor.authorFeedbackAllowsMerge = { _, _, _ in path != "discussion" }
+
+            if path == "poll" { try await refresh(monitor) }
+            else { await monitor.resumeAutomaticMerge(for: target) }
+
+            #expect(gitlab.has("merged") == (path == "poll" || path == "resume"))
+        }
+    }
+
     @Test func mergeOptOutDuringFinalSemanticReadPreventsTheAutomaticWrite() async throws {
         var state: SettingsManager?
         try await withFixture(configure: { state = $0 }) { monitor, gitlab, _ in
@@ -370,6 +389,7 @@ struct AuthorFeedbackMergeTests {
     }
 
     private func withFixture(configure: (SettingsManager) -> Void = { _ in },
+                             seedDefaults: (UserDefaults) throws -> Void = { _ in },
                              _ body: (AuthoredMergeRequestMonitor, InMemoryGitLab, GlabService) async throws -> Void) async throws {
         let gitlab = InMemoryGitLab()
         let suite = "AuthorFeedbackMergeTests.\(UUID())"
@@ -420,6 +440,7 @@ struct AuthorFeedbackMergeTests {
             }
         }
         let glab = gitlab.service(host: "gitlab.example.org", username: "me")
+        try seedDefaults(defaults)
         let settings = SettingsManager(defaults: defaults)
         settings.automation.packageDecision = .enabled
         settings.onboardingCompleted = true; settings.notificationsEnabled = false

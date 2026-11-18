@@ -107,6 +107,53 @@ struct MRAutomaticActionPolicyTests {
         }
     }
 
+    @Test func autoMergeChoicesPersistAndLegacyOptOutIsOff() async throws {
+        try await fixture { _, defaults in
+            defaults.set(try JSONEncoder().encode(Set([target])), forKey: "autoMergeOptOuts")
+            let settings = SettingsManager(defaults: defaults)
+            settings.automation.applyPreset(.full, for: .codex)
+            settings.automation.autoMergeEnabled = false
+            let monitor = TodoMonitorService(settings: settings, glab: GlabService())
+            defer { monitor.stopTimer() }
+            let ready = try request()
+            let other = MRAutomationScope.Target(host: target.host, username: "other", projectID: 1, iid: 2)
+
+            #expect(settings.autoMergePreference(for: target) == .off)
+            for preference in [MRAutoMergePreference.on, .default, .off] {
+                await monitor.setAutoMergePreference(preference, for: target)
+
+                let restored = SettingsManager(defaults: defaults)
+                #expect(restored.autoMergePreference(for: target) == preference)
+                #expect(restored.permitsAutomaticAction(.merge, for: ready, target: target) == (preference == .on))
+                #expect(restored.autoMergePreference(for: other) == .default)
+                #expect(!restored.automation.autoMergeEnabled && !restored.automation.scope.isManaged(target))
+            }
+        }
+    }
+
+    @Test func autoMergeOnStillRequiresPublicActionConsentScopeAndReadiness() async throws {
+        try await fixture { settings, _ in
+            settings.automation.applyPreset(.full, for: .codex)
+            settings.automation.autoMergeEnabled = false
+            settings.setAutoMergePreference(.on, for: target)
+            let ready = try request()
+            #expect(settings.permitsAutomaticAction(.merge, for: ready, target: target))
+
+            settings.automation.scope.setManualChoice(.forceOn, for: target)
+            #expect(!settings.permitsAutomaticAction(.merge, for: try request(draft: true), target: target))
+            #expect(settings.setAutomationGloballyEnabled(false))
+            #expect(!settings.permitsAutomaticAction(.merge, for: ready, target: target))
+            #expect(settings.permitsAutomaticAction(.merge, for: ready, target: target, ignoringGlobalSuspension: true))
+            #expect(settings.setAutomationGloballyEnabled(true))
+
+            settings.automation.allowAutomaticPublicActions = false
+            #expect(!settings.permitsAutomaticAction(.merge, for: ready, target: target))
+            settings.automation.allowAutomaticPublicActions = true
+            settings.automation.scope.setManualChoice(.paused, for: target)
+            #expect(!settings.permitsAutomaticAction(.merge, for: ready, target: target))
+        }
+    }
+
     @Test(arguments: MRAutomaticAction.allCases)
     func autoAlwaysInheritsGlobalScopeAndDraftRules(_ action: MRAutomaticAction) async throws {
         try await fixture { settings, _ in
