@@ -918,8 +918,8 @@ import Testing
         #expect(launches == 1)
     }
 
-    @Test(arguments: ["/user", "/projects/7/merge_requests/11"])
-    func acknowledgedReviewSurvivesAReadFailureInsideTheRealLaunch(_ failingEndpoint: String) async throws {
+    @Test(arguments: ["/user", "/projects/7/merge_requests/11", "auth-timeout", "wrong-account"])
+    func acknowledgedReviewSurvivesAReadFailureInsideTheRealLaunch(_ failure: String) async throws {
         let f = try fixture(); defer { f.cleanup() }
         f.settings.automation.applyPreset(.full, for: .codex)
         f.settings.automation.scope[target] = .active
@@ -931,9 +931,17 @@ import Testing
             if call.arguments == ["config", "get", "host"] { return InMemoryGitLab.output("gitlab.example.test") }
             if call.arguments == ["auth", "status"] {
                 inAdmission = true
+                if failures == 0, failure == "auth-timeout" {
+                    failures += 1
+                    throw ProcessRunner.RunError.timedOut
+                }
+                if failures == 0, failure == "wrong-account" {
+                    failures += 1
+                    return InMemoryGitLab.output(error: "Logged in to gitlab.example.test as someone-else")
+                }
                 return InMemoryGitLab.output(error: "Logged in to gitlab.example.test as me")
             }
-            if inAdmission, call.endpoint == failingEndpoint, failures == 0 {
+            if inAdmission, call.endpoint == failure, failures == 0 {
                 failures += 1
                 return InMemoryGitLab.output(error: "HTTP 503 Service Unavailable", code: 1)
             }
@@ -960,7 +968,8 @@ import Testing
         #expect(failures == 1)
         #expect(f.settings.assistantHandoffs.isEmpty)
         let initial = try #require(f.settings.mrActionIntents.first)
-        #expect(initial.state == .pending && initial.jobID == nil)
+        let expectedState: MRTodoIntent.State = failure == "wrong-account" ? .failed : .pending
+        #expect(initial.state == expectedState && initial.jobID == nil)
 
         let restored = SettingsManager(defaults: f.defaults)
         restored.glabPath = f.glab.glabPath
@@ -968,10 +977,16 @@ import Testing
         _ = await restarted.process([], host: target.host, username: target.username, managed: [target])
         await coordinator.waitForTermination()
 
-        let job = try #require(restored.assistantHandoffs.first)
-        #expect(restored.assistantHandoffs.map(\.id) == [job.id])
         #expect(restored.mrActionIntents.map(\.id) == [initial.id])
-        #expect(restored.mrActionIntents.first?.jobID == job.id)
+        if failure == "wrong-account" {
+            #expect(restored.mrActionIntents.first?.state == .failed)
+            #expect(restored.assistantHandoffs.isEmpty)
+            #expect(f.gitlab.requests.filter { $0.arguments == ["auth", "status"] }.count == 1)
+        } else {
+            let job = try #require(restored.assistantHandoffs.first)
+            #expect(restored.assistantHandoffs.map(\.id) == [job.id])
+            #expect(restored.mrActionIntents.first?.jobID == job.id)
+        }
         #expect(f.gitlab.requests.filter { $0.method != "GET" }.map(\.endpoint) == ["/todos/\(event.id)/mark_as_done"])
     }
 

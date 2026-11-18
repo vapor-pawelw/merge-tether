@@ -217,6 +217,16 @@ enum AssistantAutomationRunner {
         let cause: GlabError
     }
 
+    struct PreparedWorkflowReview {
+        let jobID: UUID
+        let user: GitLabAuthenticatedUser
+
+        @MainActor static func hasExecutionEvidence(for jobID: UUID) -> Bool {
+            let workspace = InstallationStorage.current.runs.appending(path: jobID.uuidString, directoryHint: .isDirectory)
+            return AssistantJobJournal.hasCheckpoint(jobID) || FileManager.default.fileExists(atPath: workspace.path)
+        }
+    }
+
     enum HandoffError: LocalizedError {
         case desktopUnavailable
         case cannotBuildLink
@@ -340,7 +350,8 @@ enum AssistantAutomationRunner {
         taskIntent: TaskIntent? = nil,
         foreignPipeline: GitLabMergeRequest.Pipeline? = nil,
         workflowEventKind: MergeWorkflowTrigger? = nil,
-        pipelineHandoffConfirmation: PipelineHandoffConfirmation? = nil
+        pipelineHandoffConfirmation: PipelineHandoffConfirmation? = nil,
+        preparedWorkflowReview: PreparedWorkflowReview? = nil
     ) async throws -> Handoff {
         guard mrWorkflow != .draftReply else { throw AssistantJobExecutor.ExecutionError.disabledPermission }
         let automaticConfiguration = configurationSnapshot ?? settings.automation
@@ -403,6 +414,12 @@ enum AssistantAutomationRunner {
         let diagnosesPipeline = intent == .pipelineDiagnosis
         let foreignDiagnosis = review && diagnosesPipeline
         let recordsReviewVerdict = review && !diagnosesPipeline
+        if preparedWorkflowReview != nil {
+            guard !manual, retryOf == nil, recordsReviewVerdict, workflowEventKind == .reviewUpdate,
+                  expectedHeadSHA != nil, configurationSnapshot != nil else {
+                throw AssistantJobExecutor.ExecutionError.contextUnavailable
+            }
+        }
         let headSHA: String?
         var reviewer: GitLabAuthenticatedUser?
         var pipelineDiagnosis: ForeignPipelineDiagnosis?
@@ -416,6 +433,9 @@ enum AssistantAutomationRunner {
             }
             guard manual || settings.automation.scope.permits(snapshot.request, host: work.host, username: username) else {
                 throw AssistantJobExecutor.ExecutionError.disabledPermission
+            }
+            if let preparedWorkflowReview, snapshot.user != preparedWorkflowReview.user {
+                throw AssistantJobExecutor.ExecutionError.wrongAccount
             }
             if !manual, automaticRetryIdentity != nil, let retryOf,
                let parent = settings.assistantHandoffs.first(where: { $0.id == retryOf }) {
@@ -484,7 +504,13 @@ enum AssistantAutomationRunner {
         let key = ChatKey(assistant: assistant, work: work, username: username, workspace: directory, access: access)
         let prefixedTitle = title.hasPrefix("[MT] ") ? title : "[MT] " + title
         let name = MergeRequestStackSnapshot.title(prefixedTitle, iid: work.iid, position: stackPosition)
-        let id = UUID()
+        let id = preparedWorkflowReview?.jobID ?? UUID()
+        if preparedWorkflowReview != nil {
+            try Task.checkCancellation()
+            guard !settings.assistantHandoffs.contains(where: { $0.id == id }), !PreparedWorkflowReview.hasExecutionEvidence(for: id) else {
+                throw HandoffError.executionUnavailable
+            }
+        }
         // A job the user starts uses the configured job permissions even in Manual or with automation switched off.
         let followUpPush = settings.automation.permitsFollowUpPush(manual: manual)
         let resolveOwnThreads = settings.automation.permitsOwnThreadResolution(manual: manual)
@@ -858,7 +884,9 @@ enum AssistantAutomationRunner {
         let glab = glab ?? GlabService()
         if let executable = settings.glabPath { glab.glabPath = executable }
         else { glab.glabPath = await OnboardingDetector.findGlabExecutable() }
-        guard await glab.recheck() == nil, glab.authStatus == .authenticated,
+        let probeError = await glab.recheck()
+        if let probeError, probeError.isTransientReadFailure { throw probeError }
+        guard probeError == nil, glab.authStatus == .authenticated,
               glab.resolvedHost == work.host, glab.currentUsername == username else {
             throw AssistantJobExecutor.ExecutionError.wrongAccount
         }
