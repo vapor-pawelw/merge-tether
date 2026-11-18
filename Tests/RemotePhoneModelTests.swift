@@ -536,6 +536,40 @@ import MergeTetherRemote
         #expect(fixture.saved.isEmpty)
     }
 
+    @Test(arguments: ["ignoreSuggestion:10", "restoreSuggestion:8E309183-A550-48D5-88EC-6FDBCEE90796", "markDone"],
+                    [false, true])
+    func commandCompletionUsesTheAppropriateRefresh(_ actionID: String, recovered: Bool) async throws {
+        let fixture = try PhoneFixture(), model = fixture.model
+        model.connect(); await model.refresh()
+        var board = fixture.board
+        let kind = try #require(RemoteActionKind(rawValue: String(actionID.prefix { $0 != ":" })))
+        let action = RemoteAction(id: actionID, kind: kind, token: "token")
+        board.lanes[0].cards[0].actions = [action]
+        await fixture.reply(board: board)
+        let transport = fixture.transports[0], card = try #require(board.cards.first)
+        transport.onCommand = { command in
+            if recovered { transport.onStatus?(false, false) }
+            else { await transport.onMessage?(.init(type: .result, result: .init(id: command.id, status: .completed))) }
+        }
+        await model.perform(card: card, action: action)
+        if recovered {
+            model.disconnect()
+            let restarted = fixture.makeModel()
+            restarted.connect(); await restarted.refresh(); await fixture.reply(board: board)
+            let current = try #require(fixture.transports.last)
+            let receipt = try #require(current.sent.last)
+            try #require(receipt.type == .receipt)
+            let command = try #require(receipt.command)
+            await current.onMessage?(.init(type: .receiptResult, challenge: receipt.challenge,
+                result: .init(id: command.id, status: .completed)))
+            #expect(restarted.state.result?.status == .completed)
+        } else {
+            #expect(model.state.result?.status == .completed)
+        }
+        let hello = try #require(fixture.transports.last?.sent.last)
+        #expect(hello.type == .hello && hello.refresh == (kind == .markDone))
+    }
+
     @Test func phoneRestartQueriesTheDurableCommandWithoutSendingItAgainAndRetainsItUntilAcknowledged() async throws {
         let fixture = try PhoneFixture(), model = fixture.model
         model.connect(); await model.refresh(); await fixture.reply()

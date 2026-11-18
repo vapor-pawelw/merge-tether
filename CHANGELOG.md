@@ -322,7 +322,7 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 
 - Use the same duplicate-filtered **Publish all** selection on Mac and iPhone, while keeping individual draft selection available.
 
-- Refresh feedback status when a thread is resolved or reopened without rerunning its assessment. Refresh only the affected merge request after a suggestion decision.
+- Refresh feedback status when a thread is resolved or reopened without rerunning its assessment. Refresh only the affected merge request after a suggestion decision from Mac or iPhone.
 
 - Use the same verified scope for **Run review** and **Retry**. Keep pipeline diagnoses separate from code review in review history and verify that the original failed pipeline is still current before retrying a diagnosis.
 

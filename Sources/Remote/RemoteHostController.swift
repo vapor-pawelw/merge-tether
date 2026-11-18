@@ -209,16 +209,16 @@ extension RemoteConnection: RemoteHostTransport {}
             phoneSupportsOriginUpdates = phoneSupportsDetails && message.capabilities?.contains(RemoteMessage.detailOriginsCapability) == true
             if !phoneSupportsOriginUpdates { clearOriginSubscription() }
             let fresh: Bool
-            if message.refresh == true || monitor.lastRefresh == nil {
+            if message.refresh == true || (message.refresh == nil && monitor.lastRefresh == nil) {
                 // An explicit refresh, or a Mac that has not loaded GitLab yet, waits for current data.
                 fresh = await refreshSource(force: message.refresh == true, deadline: .now + .seconds(35))
             } else {
-                // Connecting and lease renewal answer from the current board. Commands still refresh
-                // and re-check their tokens before any write, so this never widens what the phone may do.
-                fresh = await RemoteRefreshBarrier.refresh(deadline: .now + .seconds(4), isRefreshing: {
+                // A snapshot-only hello after a suggestion decision does not trigger a stale-board poll.
+                let settled = await RemoteRefreshBarrier.refresh(deadline: .now + .seconds(4), isRefreshing: {
                     self.monitor.isLoading || self.monitor.attention.isLoading || self.monitor.authoredMergeRequests.isLoading
                 }, refresh: {}, validate: { true })
-                refreshInBackgroundIfStale()
+                fresh = settled && monitor.lastRefresh != nil
+                if message.refresh == nil { refreshInBackgroundIfStale() }
             }
             guard connection === active else { return }
             var board = snapshot()
@@ -241,7 +241,10 @@ extension RemoteConnection: RemoteHostTransport {}
             }
         case .command:
             guard let command = message.command, let pairing else { return }
-            let fresh = await refreshSource(force: true, deadline: .now + .seconds(35))
+            // Suggestion decisions validate live evidence for their own MR before saving locally.
+            let fresh = if command.isFeedbackSuggestionDecision { true } else {
+                await refreshSource(force: true, deadline: .now + .seconds(35))
+            }
             var board = snapshot()
             if !fresh { board.partial = true }
             guard connection === active else { return }
@@ -568,7 +571,7 @@ extension RemoteConnection: RemoteHostTransport {}
         }
     }
 
-    /// Runs one MR control after the gate matched its token against a freshly refreshed board.
+    /// Runs one MR control after the gate matched its token against the host board.
     private func executeControl(_ action: RemoteAction, item: MergeRequestAttentionMonitor.Item,
                                 row: MergeRequestBoardSnapshot.Row?) async -> RemoteCommandResult.Status {
         func suffix(_ prefix: String) -> String? {
@@ -601,24 +604,25 @@ extension RemoteConnection: RemoteHostTransport {}
         case .ignoreSuggestion:
             guard let findingID = suffix("ignoreSuggestion:").flatMap(Int.init),
                   let suggestion = RemoteBoardAdapter.ignorableSuggestions(item).first(where: { $0.findingID == findingID }),
+                  let request = item.mergeRequest,
                   let fingerprint = item.authorFeedbackStatus?.fingerprint else { return .changed }
             do {
-                // The phone never saw the comment body; bind it to the conversation the verdict was made on.
-                let discussions = try await monitor.glab.fetchMergeRequestDiscussions(
-                    projectID: item.id.projectID, iid: item.id.iid, host: target.host)
-                guard ReviewVerdict.fingerprint(discussions) == fingerprint,
-                      let note = discussions.flatMap(\.notes).first(where: { $0.id == suggestion.noteID }) else { return .changed }
-                try await monitor.ignoreFeedbackSuggestion(note, concernSummary: suggestion.summary,
-                    concernReason: suggestion.reason, for: target)
+                try await monitor.ignoreFeedbackSuggestion(noteID: suggestion.noteID, concernSummary: suggestion.summary,
+                    concernReason: suggestion.reason, for: target,
+                    confirmation: .init(request: request, discussionFingerprint: fingerprint))
                 return .completed
             } catch let error as FeedbackSuggestionDecisionError {
                 return error == .unavailable ? .failed : .changed
             } catch { return .failed }
         case .restoreSuggestion:
             guard let id = suffix("restoreSuggestion:").flatMap(UUID.init(uuidString:)),
-                  monitor.settings.feedbackSuggestionDecisions.entries(for: target).contains(where: { $0.id == id }) else { return .changed }
+                  let request = item.mergeRequest, let fingerprint = item.observedDiscussionFingerprint,
+                  monitor.settings.feedbackSuggestionDecisions.entries(for: target).contains(where: { $0.id == id }) else {
+                return .changed
+            }
             do {
-                try await monitor.restoreFeedbackSuggestion(id, for: target)
+                try await monitor.restoreFeedbackSuggestion(id, for: target,
+                    confirmation: .init(request: request, discussionFingerprint: fingerprint))
                 return .completed
             } catch { return .changed }
         default: return .changed

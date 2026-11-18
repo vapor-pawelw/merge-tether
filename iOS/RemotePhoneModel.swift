@@ -158,7 +158,7 @@ enum RemotePhoneConnectionStatus { case unpaired, connecting, connected, offline
                     self.receiptChallenge = nil; self.receiptRevision = nil
                     self.state.recoverResult(result)
                     self.shouldRecoverCommand = result.status == .running
-                    if result.status != .running { await self.refreshAfterAction() }
+                    if result.status != .running { await self.refreshAfterAction(self.recovery?.command) }
                     return
                 }
                 if message.type == .details {
@@ -198,7 +198,8 @@ enum RemotePhoneConnectionStatus { case unpaired, connecting, connected, offline
                 }
                 if accepted, message.type == .result, let result = message.result, result.status != .running {
                     self.shouldRecoverCommand = false
-                    await self.refreshAfterAction()
+                    let command = self.recovery?.command
+                    await self.refreshAfterAction(command?.id == result.id ? command : nil)
                 }
             }
             self.connection = connection; connection.start()
@@ -212,15 +213,15 @@ enum RemotePhoneConnectionStatus { case unpaired, connecting, connected, offline
         contentRefresh?.cancel(); contentRefresh = nil
         shouldRecoverCommand = recovery != nil; receiptChallenge = nil; receiptRevision = nil
     }
-    /// `fromGitLab` is for the user's Refresh: the Mac reads GitLab first. Other hellos return its current board.
-    func refresh(force: Bool = false, fromGitLab: Bool = false) async {
+    /// An explicit false requests the host snapshot after an action that already refreshed its MR.
+    func refresh(force: Bool = false, fromGitLab: Bool? = nil) async {
         let requestState = state
-        guard let connection, let challenge = requestState.beginRefresh(force: force || fromGitLab, now: now()) else { return }
+        guard let connection, let challenge = requestState.beginRefresh(force: force || fromGitLab == true, now: now()) else { return }
         do { try await connection.send(.init(type: .hello, challenge: challenge,
             capabilities: [RemoteMessage.commentReviewCapability, RemoteMessage.mergeActionsCapability, RemoteMessage.detailsCapability,
                            RemoteMessage.detailOriginsCapability, RemoteMessage.mrControlsCapability,
                            RemoteMessage.commentOriginCapability, RemoteMessage.markReadyCapability],
-            refresh: fromGitLab ? true : nil)) }
+            refresh: fromGitLab)) }
         catch {
             guard !Task.isCancelled, self.connection === connection, self.state === requestState else { return }
             if requestState.refreshFailed(challenge: challenge) {
@@ -250,12 +251,12 @@ enum RemotePhoneConnectionStatus { case unpaired, connecting, connected, offline
         if !task.isCancelled { contentRefresh = nil }
     }
 
-    private func refreshAfterAction() async {
+    private func refreshAfterAction(_ command: RemoteCommand?) async {
         needsDetailReload = viewedCardID != nil
         isSynchronizingDetails = viewedCardID != nil
         detailRecoveryAttempts = 0
         detailState.prepareToReload()
-        await refresh(force: true, fromGitLab: true)
+        await refresh(force: true, fromGitLab: command?.isFeedbackSuggestionDecision != true)
     }
 
     private func refreshViewedDetails() async {

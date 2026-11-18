@@ -197,6 +197,16 @@ struct RemoteHostStartupTests {
 
 @MainActor
 struct RemoteHostSessionTests {
+    @Test func aSnapshotOnlyHelloDoesNotStartTheInitialGitLabRefresh() async throws {
+        let f = try Fixture(); defer { f.clean() }
+        await f.host.startupLoadTask?.value
+        f.gitlab.requests.removeAll()
+        await f.transport.onMessage?(.init(type: .hello, challenge: UUID(), refresh: false))
+        #expect(f.gitlab.requests.isEmpty)
+        #expect(f.transport.messages.last?.board?.partial == true)
+        #expect(f.monitor.lastRefresh == nil)
+    }
+
     @Test func anOrdinaryHelloAnswersFromTheCurrentBoardWhileRefreshReadsGitLabFirst() async throws {
         let f = try Fixture()
         defer { f.clean() }

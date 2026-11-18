@@ -1,4 +1,5 @@
 import Foundation
+import MergeTetherRemote
 import Testing
 @testable import GitLabTodos
 
@@ -71,7 +72,7 @@ struct FeedbackSuggestionDecisionActionTests {
         }
     }
 
-    @Test(arguments: ["ignore", "restore", "reset"])
+    @Test(arguments: ["ignore", "restore", "reset", "phone-restore", "phone-stale-head", "phone-stale-discussions"])
     func feedbackDecisionRefreshesOnlyItsMergeRequestAndKeepsTheInbox(_ action: String) async throws {
         let suite = "FeedbackDecisionScopedRefresh.\(UUID())"
         let defaults = try #require(UserDefaults(suiteName: suite))
@@ -124,7 +125,9 @@ struct FeedbackSuggestionDecisionActionTests {
         try #require(monitor.attention.currentOpenItems.first { $0.id == unrelated }?.title == "Unrelated before decision")
         try #require(monitor.currentAccountTodos.map(\.id) == [401])
 
-        gitlab.write("selected", mergeRequest(projectID: 1, iid: 2, title: "Selected updated"))
+        let phone = action.hasPrefix("phone-")
+        let stale = action.hasPrefix("phone-stale-")
+        if !phone { gitlab.write("selected", mergeRequest(projectID: 1, iid: 2, title: "Selected updated")) }
         gitlab.write("unrelated", mergeRequest(projectID: 7, iid: 9, title: "Unrelated updated"))
         gitlab.requests.removeAll()
         if action == "ignore" {
@@ -133,7 +136,46 @@ struct FeedbackSuggestionDecisionActionTests {
             let savedDecision = settings.feedbackSuggestionDecisions.ignore(source, concernSummary: "Confirm the rollout",
                 concernReason: "Needs confirmation", for: target)
             let decision = try #require(savedDecision)
-            if action == "restore" {
+            if phone {
+                let pair = try RemotePairing.generate(origin: #require(URL(string: "https://relay.example.test")),
+                    access: String(repeating: "a", count: 43))
+                let transport = FeedbackDecisionTransport()
+                let host = RemoteHostController(monitor: monitor, relayConfiguration: .init(rawOrigin: pair.origin.absoluteString),
+                    loadPairing: { pair }, savePairing: { _ in }, removePairing: {},
+                    commandGate: RemoteCommandGate(store: nil), makeConnection: { _ in transport })
+                defer { host.disable() }
+                await host.startupLoadTask?.value
+                await transport.onMessage?(.init(type: .hello, challenge: UUID(), capabilities: [RemoteMessage.mrControlsCapability]))
+                let board = try #require(transport.messages.last(where: { $0.type == .snapshot })?.board)
+                let card = try #require(board.cards.first { $0.id == "mr:1:2" })
+                let restore = try #require(card.actions.first { $0.kind == .restoreSuggestion })
+                if action == "phone-stale-head" {
+                    let changed = gitlab.text("selected").replacingOccurrences(of: String(repeating: "a", count: 40),
+                        with: String(repeating: "b", count: 40))
+                    gitlab.write("selected", changed)
+                } else if action == "phone-stale-discussions" {
+                    let changed = try note("The original reviewer changed the suggestion.")
+                    let encoded = try JSONSerialization.jsonObject(with: JSONEncoder().encode([changed]))
+                    let original = try #require(gitlab.handler)
+                    gitlab.handler = { request in
+                        if request.endpoint.hasPrefix("/projects/1/merge_requests/2/discussions") {
+                            return try InMemoryGitLab.json([["id": "discussion", "notes": encoded]])
+                        }
+                        return try await original(request)
+                    }
+                }
+                gitlab.requests.removeAll()
+                let command = RemoteCommand(hostSession: board.hostSession, account: board.account,
+                    cardID: card.id, actionID: restore.id, token: restore.token)
+                await transport.onMessage?(.init(type: .command, command: command))
+                #expect(transport.messages.last?.result?.status == (stale ? .changed : .completed))
+                #expect(settings.feedbackSuggestionDecisions.entries(for: target) == (stale ? [decision] : []))
+                if !stale {
+                    await transport.onMessage?(.init(type: .hello, challenge: UUID(), refresh: false))
+                    let updated = try #require(transport.messages.last?.board?.cards.first { $0.id == card.id })
+                    #expect(!updated.actions.contains { $0.id == restore.id })
+                }
+            } else if action == "restore" {
                 try await monitor.restoreFeedbackSuggestion(decision.id, for: target)
             } else {
                 try await monitor.resetFeedbackSuggestionDecisions(for: target)
@@ -142,13 +184,14 @@ struct FeedbackSuggestionDecisionActionTests {
         try await waitForRefresh(monitor.attention)
 
         let requests = gitlab.requests
-        #expect(requests.filter { $0.endpoint.hasPrefix("/projects/1/merge_requests/2/draft_notes") }.count == 1)
+        #expect(requests.filter { $0.endpoint.hasPrefix("/projects/1/merge_requests/2/draft_notes") }.count == (stale ? 0 : 1))
         #expect(!requests.contains { $0.endpoint.hasPrefix("/merge_requests?") || $0.arguments.contains(where: { $0.hasPrefix("/todos?") })
             || $0.endpoint.hasPrefix("/projects/7/merge_requests/9/draft_notes") })
         #expect(requests.allSatisfy { $0.method == "GET" })
         #expect(monitor.currentAccountTodos.map(\.id) == [401])
         #expect(monitor.attention.currentOpenItems.first { $0.id == unrelated }?.title == "Unrelated before decision")
-        #expect(monitor.attention.currentOpenItems.first { $0.id == selected }?.title == "Selected updated")
+        #expect(monitor.attention.currentOpenItems.first { $0.id == selected }?.title
+            == (phone ? "Selected before decision" : "Selected updated"))
     }
 
     private func waitForRefresh(_ monitor: MergeRequestAttentionMonitor) async throws {
@@ -208,4 +251,14 @@ struct FeedbackSuggestionDecisionActionTests {
         let monitor = TodoMonitorService(settings: settings, glab: glab)
         try await body(monitor, settings, directory)
     }
+}
+
+@MainActor private final class FeedbackDecisionTransport: RemoteHostTransport {
+    var onPairingEstablished: (@MainActor (RemotePairing) throws -> Void)?
+    var onMessage: (@MainActor (RemoteMessage) async -> Void)?
+    var onStatus: (@MainActor (Bool, Bool) -> Void)?
+    var messages: [RemoteMessage] = []
+    func start() { onStatus?(true, false) }
+    func stop() { onStatus?(false, false) }
+    func send(_ message: RemoteMessage) async throws { messages.append(message) }
 }

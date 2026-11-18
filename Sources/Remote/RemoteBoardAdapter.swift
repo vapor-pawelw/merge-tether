@@ -341,7 +341,8 @@ import MergeTetherRemote
                     confirmationText: String(localized: .Remote.remotePublishDraftHelp)))
             }
         }
-        guard let target = monitor.scopeTarget(projectID: item.id.projectID, iid: item.id.iid, url: item.url) else { return actions }
+        guard request.sha?.isEmpty == false, item.observedDiscussionFingerprint != nil,
+              let target = monitor.scopeTarget(projectID: item.id.projectID, iid: item.id.iid, url: item.url) else { return actions }
         let ignored = monitor.settings.feedbackSuggestionDecisions.entries(for: target)
         for suggestion in ignorableSuggestions(item) where !ignored.contains(where: { $0.sourceNoteID == suggestion.noteID }) {
             guard let token = token(["ignore", String(suggestion.findingID), String(suggestion.noteID),

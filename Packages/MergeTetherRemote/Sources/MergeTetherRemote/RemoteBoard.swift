@@ -205,6 +205,9 @@ public struct RemoteCommand: Codable, Equatable, Sendable {
     public var token: String
     /// Parameters for an action that takes them, such as `RemoteCommentOriginRequest`. The host validates them itself.
     public var argument: String?
+    public var isFeedbackSuggestionDecision: Bool {
+        actionID.hasPrefix("ignoreSuggestion:") || actionID.hasPrefix("restoreSuggestion:")
+    }
     public init(id: UUID = UUID(), hostSession: UUID, account: String, cardID: String, actionID: String, token: String,
                 argument: String? = nil) {
         self.id = id; self.hostSession = hostSession; self.account = account; self.cardID = cardID; self.actionID = actionID; self.token = token
@@ -238,8 +241,8 @@ public struct RemoteMessage: Codable, Sendable {
     public var detailRequest: RemoteDetailRequest?
     public var detailResponse: RemoteDetailResponse?
     public var detailOrigins: RemoteDetailOrigins?
-    /// A hello the user started with Refresh: the host reads GitLab before answering.
-    /// Without it the host answers from its current board, so connecting and lease renewals stay fast.
+    /// True reads GitLab before answering. False reads only the host's current board.
+    /// When omitted, initial connections and stale boards may cause a GitLab refresh.
     public var refresh: Bool?
     public init(type: Kind, challenge: UUID? = nil, board: RemoteBoard? = nil,
                 command: RemoteCommand? = nil, result: RemoteCommandResult? = nil, capabilities: [String]? = nil,
