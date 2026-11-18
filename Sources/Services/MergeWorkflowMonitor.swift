@@ -15,6 +15,7 @@ final class MergeWorkflowMonitor {
 
     private struct Snapshot: Codable, Equatable {
         var failedPipelineIDs: Set<Int>?
+        var reportedPipelineFailures: [String: Set<String>]?
         var discussionNoteIDs: Set<Int>?
         var changesRequested: Bool?
         var blocker: BlockerCheckpoint?
@@ -23,7 +24,10 @@ final class MergeWorkflowMonitor {
         var overdueAssignments: Set<String>?
 
         mutating func retain(_ enabled: Set<MergeWorkflowTrigger>) {
-            if !enabled.contains(.pipelineFailure) { failedPipelineIDs = nil }
+            if !enabled.contains(.pipelineFailure) {
+                failedPipelineIDs = nil
+                reportedPipelineFailures = nil
+            }
             if !enabled.contains(.newDiscussion) {
                 discussionNoteIDs = nil
                 changesRequested = nil
@@ -84,13 +88,13 @@ final class MergeWorkflowMonitor {
         func event(
             _ kind: MergeWorkflowTrigger, token: String, context: String,
             pipelineProjectID: Int? = nil, pipelineID: Int? = nil, jobID: Int? = nil,
-            isInfrastructureFailure: Bool = false, noteIDs: [Int] = []
+            isInfrastructureFailure: Bool = false, noteIDs: [Int] = [], failedPipelineJobIDs: [Int]? = nil
         ) -> MergeWorkflowEvent {
             MergeWorkflowEvent(
                 kind: kind, mergeRequest: request,
                 identity: "\(account.host)|\(account.userID)|\(kind.rawValue)|\(request.projectID)!\(request.iid)|\(token)",
                 context: context, pipelineProjectID: pipelineProjectID, pipelineID: pipelineID, jobID: jobID,
-                isInfrastructureFailure: isInfrastructureFailure, noteIDs: noteIDs
+                isInfrastructureFailure: isInfrastructureFailure, noteIDs: noteIDs, failedPipelineJobIDs: failedPipelineJobIDs
             )
         }
     }
@@ -209,13 +213,20 @@ final class MergeWorkflowMonitor {
             return nil
         }
         guard let id = pipeline.id, id > 0, let projectID = pipeline.projectID, projectID > 0 else { return nil }
-        let seen = snapshot.failedPipelineIDs ?? []
-        guard !seen.contains(id),
-              let jobs = try? await observation.glab.fetchPipelineFailedJobs(
-                projectID: projectID, pipelineID: id, host: observation.account.host
-              ) else { return nil }
+        guard let jobs = try? await observation.glab.fetchPipelineFailedJobs(
+            projectID: projectID, pipelineID: id, host: observation.account.host
+        ) else { return nil }
 
-        snapshot.failedPipelineIDs = seen.union([id])
+        let blockingIDs = GitLabPipelineJob.blockingFailureIDs(jobs)
+        let pipelineKey = "\(projectID)/\(id)"
+        let signature = UserAttentionSnapshot.digest(blockingIDs.map(String.init).joined(separator: ","))
+        var reported = snapshot.reportedPipelineFailures ?? [:]
+        let isFirstObservation = reported[pipelineKey] == nil
+        guard !blockingIDs.isEmpty || isFirstObservation,
+              reported[pipelineKey, default: []].insert(signature).inserted else { return nil }
+        snapshot.reportedPipelineFailures = reported
+        // Old checkpoints knew only that the pipeline had already been reported.
+        if isFirstObservation, snapshot.failedPipelineIDs?.contains(id) == true { return nil }
         let failed = jobs.filter { $0.status == "failed" && $0.id > 0 }
         let hardFailures = failed.filter { $0.allowFailure != true }
         let onlyFailure = hardFailures.count == 1 ? hardFailures.first : nil
@@ -230,9 +241,10 @@ final class MergeWorkflowMonitor {
             return reason.map { "\(job.id) (\($0))" } ?? String(job.id)
         }.joined(separator: ", ")
         return observation.event(
-            .pipelineFailure, token: String(id),
+            .pipelineFailure, token: blockingIDs.isEmpty ? String(id) : "\(id)-\(projectID)-jobs-\(signature)",
             context: "Latest MR pipeline \(id) in project \(projectID) failed. Failed job IDs: \(ids.isEmpty ? "unavailable" : ids).",
-            pipelineProjectID: projectID, pipelineID: id, jobID: onlyFailure?.id, isInfrastructureFailure: infrastructure
+            pipelineProjectID: projectID, pipelineID: id, jobID: onlyFailure?.id, isInfrastructureFailure: infrastructure,
+            failedPipelineJobIDs: blockingIDs.isEmpty ? nil : blockingIDs
         )
     }
 

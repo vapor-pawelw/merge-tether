@@ -21,6 +21,7 @@ struct MergeWorkflowEvent: Codable, Sendable {
     var jobID: Int? = nil
     var isInfrastructureFailure = false
     var noteIDs: [Int] = []
+    var failedPipelineJobIDs: [Int]? = nil
 }
 
 struct GitLabMergeRequestReviewer: Decodable, Sendable {
@@ -202,6 +203,10 @@ struct GitLabPipelineJob: Decodable, Sendable {
     let status: String
     let allowFailure: Bool?
     let failureReason: String?
+
+    static func blockingFailureIDs(_ jobs: [Self]) -> [Int] {
+        Set(jobs.lazy.filter { $0.status == "failed" && $0.id > 0 && $0.allowFailure != true }.map(\.id)).sorted()
+    }
 
     enum CodingKeys: String, CodingKey {
         case id, status

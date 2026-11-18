@@ -1723,6 +1723,124 @@ import Testing
         try await exercisePipelineRefresh(ambiguousResponse: false, infrastructureRetry: true, persistenceOnJobRead: true)
     }
 
+    @Test(arguments: ["script", "runner", "ambiguous", "legacy"])
+    func refreshedJobsInSamePipelineAllowOneDiagnosisAfterConfirmedInfrastructureRetry(_ outcome: String) async throws {
+        let directory = FileManager.default.temporaryDirectory.appending(path: UUID().uuidString)
+        defer { try? FileManager.default.removeItem(at: directory) }
+        let suite = "SamePipelineNewJobs.\(UUID())"
+        let defaults = try #require(UserDefaults(suiteName: suite))
+        defer { defaults.removePersistentDomain(forName: suite) }
+        let host = "gitlab-\(UUID().uuidString.lowercased()).example.test"
+        let user = GitLabAuthenticatedUser(id: 1, username: "me")
+        let source = String(repeating: "a", count: 40)
+        let pipeline = """
+        {"id":100,"project_id":7,"status":"failed","sha":"\(source)","ref":"refs/merge-requests/11/head"}
+        """
+        let requestJSON = """
+        {"project_id":7,"iid":11,"author":{"id":1,"username":"me","name":"Me"},
+        "title":"Fixture","web_url":"https://\(host)/team/repo/-/merge_requests/11","state":"opened","draft":false,
+        "sha":"\(source)","source_project_id":7,"source_branch":"feature","target_project_id":7,
+        "target_branch":"main","has_conflicts":false,"labels":[],"head_pipeline":\(pipeline)}
+        """
+        let request = try JSONDecoder().decode(GitLabMergeRequest.self, from: Data(requestJSON.utf8))
+        let claims = directory.appending(path: "claims")
+        let legacy = directory.appending(path: "legacy")
+        let detector = ExistingPipelineWorkDetector(directory: claims, legacyDirectory: legacy)
+        let key = ExistingPipelineWorkDetector.Key(host: host, projectID: 7, mergeRequestIID: 11, pipelineID: 100)
+        let gitlab = InMemoryGitLab()
+        defer { gitlab.close() }
+        let glab = gitlab.service(host: host, username: user.username)
+        var jobID = 200
+        gitlab.handler = { call in
+            if call.arguments == ["config", "get", "host"] { return InMemoryGitLab.output(host) }
+            if call.arguments == ["auth", "status"] { return InMemoryGitLab.output(error: "Logged in to \(host) as me") }
+            switch call.endpoint {
+            case "/user": return InMemoryGitLab.output(#"{"id":1,"username":"me"}"#)
+            case "/projects/7/merge_requests/11": return InMemoryGitLab.output(requestJSON)
+            case "/projects/7/pipelines/100": return InMemoryGitLab.output(pipeline)
+            case "/projects/7/repository/branches/feature": return try InMemoryGitLab.json(["commit": ["id": source]])
+            case let path where path.hasPrefix("/projects/7/pipelines/100/jobs?"):
+                return try InMemoryGitLab.json([["id": jobID, "status": "failed", "allow_failure": false,
+                    "failure_reason": jobID == 200 || outcome == "runner" ? "runner_system_failure" : "script_failure"]])
+            case "/projects/7/jobs/200":
+                return try InMemoryGitLab.json(["id": 200, "status": "failed", "allow_failure": false,
+                    "failure_reason": "runner_system_failure", "pipeline": ["id": 100]])
+            case "/projects/7/jobs/200/retry":
+                #expect(call.method == "POST")
+                if outcome == "ambiguous" { return InMemoryGitLab.output(error: "network response lost", code: 1) }
+                return try InMemoryGitLab.json(["id": 201, "status": "pending"])
+            case "/projects/7": return InMemoryGitLab.output(#"{"default_branch":"main"}"#)
+            case let path where path.contains("/diffs?") || path.contains("/blocks?")
+                || path.contains("/merge_requests?") || path.contains("/discussions?"):
+                return InMemoryGitLab.output("[]")
+            default: return try gitlab.unexpected(call)
+            }
+        }
+        let initial = SettingsManager(defaults: defaults)
+        initial.automation.applyPreset(.full, for: .codex)
+        initial.automation.workflowRules[.pipelineFailure].projects = "team/repo"
+        initial.automation.workflowRules[.pipelineFailure].retryInfrastructureFailure = true
+        initial.glabPath = glab.glabPath
+        initial.save()
+        var launched: [AssistantAutomationRunner.Handoff] = []
+        let coordinator = AssistantJobCoordinator(execute: { handoff, _ in
+            #expect(handoff.pipelineReservation.map { detector.ownsReservation(for: $0) } == true)
+            launched.append(handoff)
+            return .init(result: .init(status: .blocked, summary: "Diagnosed fixture", blocker: "Fixture"), output: "")
+        })
+        coordinator.onFinished = { handoff in
+            if let reservation = handoff.pipelineReservation { try? detector.finishHandoff(for: reservation) }
+        }
+
+        @MainActor func poll(_ settings: SettingsManager) async throws -> [MergeWorkflowEvent] {
+            let automation = MergeWorkflowAutomation(settings: settings, glab: glab, detector: detector, jobCoordinator: coordinator)
+            let monitor = MergeWorkflowMonitor(persistenceStore: settings.persistenceStore)
+            var events: [MergeWorkflowEvent] = []
+            await monitor.poll(glab: glab, host: host, user: user, authored: [request], enabled: [.pipelineFailure],
+                reviewSLA: 3_600, automationScope: settings.automation.scope) {
+                events.append($0)
+                automation.receive($0, host: host, user: user)
+            }
+            automation.startNext()
+            for _ in 0..<300 where automation.entries.contains(where: { [.queued, .running, .waitingForAssistant].contains($0.state) }) {
+                try await Task.sleep(for: .milliseconds(10))
+            }
+            return events
+        }
+
+        let first = try await poll(initial)
+        #expect(first.map(\.jobID) == [200])
+        #expect(detector.status(for: key) == .registered)
+        #expect(launched.isEmpty)
+        #expect(initial.workflowActivity.first?.state == (outcome == "ambiguous" ? .failed : .completed))
+
+        if outcome == "legacy" {
+            let inherited = ExistingPipelineWorkDetector(directory: legacy)
+            try #require(try inherited.registerHandoff(for: key))
+            try inherited.finishHandoff(for: key)
+        }
+        jobID = 201
+        let restored = SettingsManager(defaults: defaults)
+        let second = try await poll(restored)
+        #expect(second.map(\.jobID) == [201])
+        #expect(second.first?.identity != first.first?.identity)
+
+        let restarted = SettingsManager(defaults: defaults)
+        let repeated = try await poll(restarted)
+        #expect(repeated.isEmpty)
+
+        jobID = 202
+        let later = try await poll(SettingsManager(defaults: defaults))
+        #expect(later.map(\.jobID) == [202])
+        let shouldDiagnose = outcome == "script" || outcome == "runner"
+        #expect(launched.count == (shouldDiagnose ? 1 : 0))
+        if shouldDiagnose {
+            #expect(launched.first?.prompt.contains("Failed job IDs: 201") == true)
+        }
+        #expect(gitlab.requests.filter { $0.method == "POST" }.map(\.endpoint) == ["/projects/7/jobs/200/retry"])
+        #expect(!detector.hasActiveReservation(for: key))
+    }
+
     private func exercisePipelineRefresh(
         ambiguousResponse: Bool, wrongCreatedParents: Bool = false, priorReceipt: Bool = false, ownershipRace: Bool = false,
         prelaunchFailures: Int = 0, draftAfterRead: Int? = nil, infrastructureRetry: Bool = false,

@@ -77,6 +77,15 @@ extension GlabService {
         else { throw CancellationError() }
         try await beforeRetry()
         guard shouldProceed() else { throw CancellationError() }
-        let _: Job = try await mergeRequestWriteAPI("\(path)/retry", host: host, arguments: ["--method", "POST"], shouldProceed: shouldProceed)
+        struct Replacement: Decodable {
+            let id: Int
+            let pipeline: Job.Pipeline?
+        }
+        let replacement: Replacement = try await mergeRequestWriteAPI("\(path)/retry", host: host,
+            arguments: ["--method", "POST"], shouldProceed: shouldProceed)
+        guard replacement.id > 0, replacement.id != jobID,
+              replacement.pipeline.map({ $0.id == pipelineID }) != false else {
+            throw GlabError.decoding("GitLab did not confirm a replacement for the retried job")
+        }
     }
 }

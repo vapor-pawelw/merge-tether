@@ -279,7 +279,8 @@ final class MergeWorkflowAutomation {
               configuredRule(for: entry.event)?.mode == .assistant
         else { return }
 
-        guard detector.status(for: key) == .unverified, !AssistantAutomationRunner.isWorking(on: workKey(entry)) else {
+        guard detector.status(for: key) == .unverified || canDiagnoseAfterInfrastructureRetry(entry, key: key),
+              !detector.hasActiveReservation(for: key), !hasActiveWorker(entry) else {
             update(id, .alreadyRegistered)
             return
         }
@@ -294,8 +295,9 @@ final class MergeWorkflowAutomation {
                   configuredRule(for: entry.event)?.mode == .assistant
             else { continue }
             // A new failure may check for a stale target despite a receipt.
-            // Reconsideration resumes only once the registration is gone.
+            // A matching local retry receipt can admit one different failed job set.
             let state: MergeWorkflowActivityState = detector.status(for: key) == .registered
+                && !canDiagnoseAfterInfrastructureRetry(entry, key: key)
                 ? .alreadyRegistered : pipelineDisposition(entry, key: key)
             if state != entry.state { update(entry.id, state) }
         }
@@ -321,7 +323,7 @@ final class MergeWorkflowAutomation {
                 identity: entry.event.identity, context: entry.event.context,
                 pipelineProjectID: entry.event.pipelineProjectID, pipelineID: entry.event.pipelineID,
                 jobID: entry.event.jobID, isInfrastructureFailure: entry.event.isInfrastructureFailure,
-                noteIDs: entry.event.noteIDs)
+                noteIDs: entry.event.noteIDs, failedPipelineJobIDs: entry.event.failedPipelineJobIDs)
             guard let rule = configuredRule(for: event), rule.mode == .assistant, rule.includes(current),
                   !settings.ignoredMergeRequests.contains(.init(host: entry.host, username: entry.user.username,
                                                                 projectID: key.projectID, iid: key.mergeRequestIID)),
@@ -329,7 +331,7 @@ final class MergeWorkflowAutomation {
             else { continue }
             guard !hasRecordedPipelineEffects(entry, key: key),
                   settings.workflowActivity.lazy.filter({ $0.state == .queued }).prefix(24).count < 24 else { continue }
-            if detector.status(for: key) == .unverified {
+            if detector.status(for: key) == .unverified || canDiagnoseAfterInfrastructureRetry(entry, key: key) {
                 if let index = settings.workflowActivity.firstIndex(where: { $0.id == entry.id }) { settings.workflowActivity[index].event = event }
                 update(entry.id, .queued)
             } else if !detector.hasActiveReservation(for: key), detector.hasEmptyPipelineReceipt(for: key),
@@ -517,9 +519,10 @@ final class MergeWorkflowAutomation {
         // Pipeline refresh, reservations, job retries and worker launch remain outside the read retry boundary.
 
         var handoff: ExistingPipelineWorkDetector.Key?
+        var failureAfterInfrastructureRetry: ExistingPipelineWorkDetector.FailedJobs?
         if event.kind == .pipelineFailure {
             guard let key = pipelineKey(entry), latest.author.id == entry.user.id,
-                  !AssistantAutomationRunner.isWorking(on: workKey(entry)),
+                  !hasActiveWorker(entry),
                   latest.headPipeline?.id == key.pipelineID,
                   latest.headPipeline?.status == "failed"
             else { throw CancellationError() }
@@ -530,6 +533,13 @@ final class MergeWorkflowAutomation {
                 assessmentTargetSHA = try await glab.fetchBranchHeadSHA(projectID: targetProject, branch: latest.targetBranch, host: entry.host)
                 guard mayAssessClaim(entry, current: latest, configuration: assessmentConfiguration),
                       glab.accountRevision == assessmentAccountRevision else { throw CancellationError() }
+            } else if let jobs = failureJobs(entry, request: latest), detector.permitsDiagnosisAfterInfrastructureRetry(jobs, for: key) {
+                _ = try await glab.verifiedFailedPipeline(for: latest, host: entry.host, expectedUser: entry.user)
+                guard try await matchesFailedJobs(jobs.jobIDs, pipelineID: jobs.pipelineID,
+                                                  projectID: jobs.pipelineProjectID, host: entry.host) else {
+                    throw CancellationError()
+                }
+                failureAfterInfrastructureRetry = jobs
             } else if settings.automation.autoClaimPipelineFailures && settings.automaticPublicWritesAllowed {
                 if try await glab.refreshStaleFailedPipeline(for: latest, host: entry.host, expectedUser: entry.user,
                     settings: settings, detector: detector, shouldProceed: { self.shouldProceed(entry) }) {
@@ -542,7 +552,12 @@ final class MergeWorkflowAutomation {
             }
             guard shouldProceed(entry) else { throw CancellationError() }
 
-            guard let ownedReservation = try detector.registerRun(for: key, explicitRetry: entry.pipelineClaimAssessment != nil) else {
+            let reservation = if let failureAfterInfrastructureRetry {
+                try detector.registerDiagnosisAfterInfrastructureRetry(failureAfterInfrastructureRetry, for: key)
+            } else {
+                try detector.registerRun(for: key, explicitRetry: entry.pipelineClaimAssessment != nil)
+            }
+            guard let ownedReservation = reservation else {
                 update(entry.id, .alreadyRegistered)
                 return
             }
@@ -552,7 +567,8 @@ final class MergeWorkflowAutomation {
             if let handoff { try? detector.finishHandoff(for: handoff) }
         }
 
-        if settings.automaticPublicWritesAllowed, entry.pipelineClaimAssessment == nil, event.isInfrastructureFailure, let handoff, let jobID = event.jobID,
+        if settings.automaticPublicWritesAllowed, entry.pipelineClaimAssessment == nil, failureAfterInfrastructureRetry == nil,
+           event.isInfrastructureFailure, let handoff, let jobID = event.jobID,
            let pipelineProjectID = event.pipelineProjectID,
            latest.headPipeline?.projectID == pipelineProjectID,
            mayRetryInfrastructure(for: event) {
@@ -570,9 +586,20 @@ final class MergeWorkflowAutomation {
                           self.glab.accountRevision == assessmentAccountRevision,
                           self.settings.automation.scope.permits(current, host: entry.host, username: entry.user.username),
                           self.configuredRule(for: event)?.includes(current) == true else { throw CancellationError() }
+                    if let expectedJobs = event.failedPipelineJobIDs {
+                        guard try await self.matchesFailedJobs(expectedJobs, pipelineID: handoff.pipelineID,
+                                                               projectID: pipelineProjectID, host: entry.host)
+                        else { throw CancellationError() }
+                    }
                 },
-                shouldProceed: { self.settings.automaticPublicWritesAllowed && self.shouldProceed(entry) && self.mayRetryInfrastructure(for: event) }
+                shouldProceed: {
+                    self.glab.accountRevision == assessmentAccountRevision && self.settings.automaticPublicWritesAllowed
+                        && self.shouldProceed(entry) && self.mayRetryInfrastructure(for: event)
+                }
             )
+            if let retry = ExistingPipelineWorkDetector.FailedJobs(request: latest, user: entry.user, jobIDs: [jobID]) {
+                try detector.recordInfrastructureRetry(retry, for: handoff)
+            }
             update(entry.id, .completed)
             return
         }
@@ -670,6 +697,16 @@ final class MergeWorkflowAutomation {
         let isolation = mrWorkflow == .followUp ? "\n\n\(AssistantAutomationRunner.isolatedFixInstructions)" : ""
         let suppliedEvidence = readsInCodex ? "" : "\n\n<gitlab-evidence>\n" + evidence + "\n</gitlab-evidence>"
         let bindLaunchSnapshot = event.kind == .reviewUpdate || entry.pipelineClaimAssessment != nil
+            || failureAfterInfrastructureRetry != nil
+        if let failureAfterInfrastructureRetry, let handoff {
+            guard failureJobs(entry, request: current) == failureAfterInfrastructureRetry,
+                  try await matchesFailedJobs(failureAfterInfrastructureRetry.jobIDs, pipelineID: handoff.pipelineID,
+                                              projectID: failureAfterInfrastructureRetry.pipelineProjectID, host: entry.host),
+                  glab.accountRevision == assessmentAccountRevision, shouldProceed(entry), !hasActiveWorker(entry),
+                  settingsBeforeLaunch.preservingScope(from: settings.automation) == settings.automation,
+                  try detector.recordDiagnosisAfterInfrastructureRetry(failureAfterInfrastructureRetry, for: handoff)
+            else { throw CancellationError() }
+        }
         let job = try await AssistantAutomationRunner.launch(
             settingsBeforeLaunch.assistant,
             title: "\(repository) !\(latest.iid) (\(latest.author.assistantTitleName(viewerUsername: entry.user.username)))",
@@ -761,11 +798,33 @@ final class MergeWorkflowAutomation {
     private func pipelineDisposition(
         _ entry: MergeWorkflowActivityEntry, key: ExistingPipelineWorkDetector.Key
     ) -> MergeWorkflowActivityState {
-        if detector.hasActiveReservation(for: key) || AssistantAutomationRunner.isWorking(on: workKey(entry)) {
+        if detector.hasActiveReservation(for: key) || hasActiveWorker(entry) {
             return .alreadyRegistered
         }
         if settings.automation.autoClaimPipelineFailures { return .queued }
-        return detector.status(for: key) == .registered ? .alreadyRegistered : .awaitingPipelineHandoff
+        return detector.status(for: key) == .unverified || canDiagnoseAfterInfrastructureRetry(entry, key: key)
+            ? .awaitingPipelineHandoff : .alreadyRegistered
+    }
+
+    private func failureJobs(_ entry: MergeWorkflowActivityEntry, request: GitLabMergeRequest) -> ExistingPipelineWorkDetector.FailedJobs? {
+        guard let jobIDs = entry.event.failedPipelineJobIDs,
+              MergeRequestDependencySummary.Context(entry.event.mergeRequest) == .init(request),
+              entry.event.pipelineID == request.headPipeline?.id,
+              entry.event.pipelineProjectID == request.headPipeline?.projectID,
+              entry.event.mergeRequest.headPipeline?.sha == request.headPipeline?.sha else { return nil }
+        return .init(request: request, user: entry.user, jobIDs: jobIDs)
+    }
+
+    private func canDiagnoseAfterInfrastructureRetry(_ entry: MergeWorkflowActivityEntry,
+                                                      key: ExistingPipelineWorkDetector.Key) -> Bool {
+        guard entry.pipelineClaimAssessment == nil,
+              let jobs = failureJobs(entry, request: entry.event.mergeRequest) else { return false }
+        return detector.permitsDiagnosisAfterInfrastructureRetry(jobs, for: key)
+    }
+
+    private func matchesFailedJobs(_ expected: [Int], pipelineID: Int, projectID: Int, host: String) async throws -> Bool {
+        let jobs = try await glab.fetchPipelineFailedJobs(projectID: projectID, pipelineID: pipelineID, host: host)
+        return GitLabPipelineJob.blockingFailureIDs(jobs) == expected
     }
 
     private func isCurrent(host: String, user: GitLabAuthenticatedUser) -> Bool {

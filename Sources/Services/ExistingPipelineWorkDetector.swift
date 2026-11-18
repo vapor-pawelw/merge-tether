@@ -10,6 +10,32 @@ struct ExistingPipelineWorkDetector: Sendable {
         var reservationID: UUID?
     }
 
+    struct FailedJobs: Codable, Equatable, Sendable {
+        let user: GitLabAuthenticatedUser
+        let request: MergeRequestDependencySummary.Context
+        let pipelineProjectID: Int
+        let pipelineID: Int
+        let pipelineSHA: String
+        let jobIDs: [Int]
+
+        init?(request: GitLabMergeRequest, user: GitLabAuthenticatedUser, jobIDs: [Int]) {
+            guard let pipeline = request.headPipeline, let projectID = pipeline.projectID,
+                  let id = pipeline.id, let sha = pipeline.sha, !jobIDs.isEmpty else { return nil }
+            self.user = user
+            self.request = .init(request)
+            pipelineProjectID = projectID
+            pipelineID = id
+            pipelineSHA = sha
+            self.jobIDs = jobIDs
+        }
+
+        func supersedesRetriedJob(in original: Self) -> Bool {
+            original.jobIDs.count == 1 && Set(original.jobIDs).isDisjoint(with: jobIDs)
+                && user == original.user && request == original.request && pipelineProjectID == original.pipelineProjectID
+                && pipelineID == original.pipelineID && pipelineSHA == original.pipelineSHA
+        }
+    }
+
     enum Status: Equatable {
         case registered
         case unverified
@@ -73,6 +99,8 @@ struct ExistingPipelineWorkDetector: Sendable {
         }
     }
 
+    private static let infrastructureRetryReceipt = "infrastructure-retry.json"
+    private static let infrastructureDiagnosisReceipt = "diagnosis-after-infrastructure-retry.json"
     private struct RunBinding: Codable { let runID: UUID }
     private static let sessionID = UUID()
     let directory: URL
@@ -133,6 +161,58 @@ struct ExistingPipelineWorkDetector: Sendable {
               values.isDirectory == true, values.isSymbolicLink != true,
               let contents = try? FileManager.default.contentsOfDirectory(atPath: receipt.path) else { return false }
         return contents.isEmpty
+    }
+
+    func permitsDiagnosisAfterInfrastructureRetry(_ jobs: FailedJobs, for key: Key) -> Bool {
+        guard !legacyBlocks(key, explicitRetry: false), let parent = try? reservationParent(for: key, create: false) else {
+            return false
+        }
+        defer { close(parent) }
+        return (try? withReceipt(key, in: parent) { canDiagnose(jobs, in: $0) }) == true
+    }
+
+    func registerDiagnosisAfterInfrastructureRetry(_ jobs: FailedJobs, for key: Key) throws -> Key? {
+        var owned = key
+        owned.reservationID = UUID()
+        return try registerHandoff(for: owned, explicitRetry: false, afterInfrastructureRetry: jobs) ? owned : nil
+    }
+
+    func recordInfrastructureRetry(_ job: FailedJobs, for key: Key) throws {
+        try withOwnedReceipt(key) { receipt in
+            _ = try writeExclusive(job, name: Self.infrastructureRetryReceipt, in: receipt)
+        }
+    }
+
+    func recordDiagnosisAfterInfrastructureRetry(_ jobs: FailedJobs, for key: Key) throws -> Bool {
+        guard !legacyBlocks(key, explicitRetry: false) else { return false }
+        return try withOwnedReceipt(key) { receipt in
+            guard canDiagnose(jobs, in: receipt) else { return false }
+            try writeExclusive(jobs, name: Self.infrastructureDiagnosisReceipt, in: receipt)
+            return true
+        }
+    }
+
+    private func canDiagnose(_ jobs: FailedJobs, in receipt: Int32) -> Bool {
+        guard let previous = try? read(FailedJobs.self, name: Self.infrastructureRetryReceipt, in: receipt),
+              jobs.supersedesRetriedJob(in: previous) else { return false }
+        var existing = stat()
+        return fstatat(receipt, Self.infrastructureDiagnosisReceipt, &existing, AT_SYMLINK_NOFOLLOW) != 0 && errno == ENOENT
+    }
+
+    private func withReceipt<T>(_ key: Key, in parent: Int32, body: (Int32) throws -> T) throws -> T {
+        let receipt = openat(parent, "pipeline-\(key.pipelineID)", O_RDONLY | O_DIRECTORY | O_NOFOLLOW | O_CLOEXEC)
+        guard receipt >= 0 else { throw posixError() }
+        defer { close(receipt) }
+        return try body(receipt)
+    }
+
+    private func withOwnedReceipt<T>(_ key: Key, body: (Int32) throws -> T) throws -> T {
+        try withOwner(key) { descriptor, _, parent in
+            let owner = try readOwner(descriptor, key: key).owner
+            guard owner.installationID == installationID, owner.sessionID == Self.sessionID,
+                  owner.processID == processID else { throw ClaimError.ownershipConflict }
+            return try withReceipt(key, in: parent, body: body)
+        }
     }
 
     func ownsReservation(for key: Key) -> Bool {
@@ -225,7 +305,7 @@ struct ExistingPipelineWorkDetector: Sendable {
         return try registerHandoff(for: owned, explicitRetry: explicitRetry) ? owned : nil
     }
 
-    private func registerHandoff(for key: Key, explicitRetry: Bool) throws -> Bool {
+    private func registerHandoff(for key: Key, explicitRetry: Bool, afterInfrastructureRetry: FailedJobs? = nil) throws -> Bool {
         guard !legacyBlocks(key, explicitRetry: explicitRetry) else { return false }
         let active = try externalRegistrationURL(for: key)
         try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true,
@@ -278,6 +358,10 @@ struct ExistingPipelineWorkDetector: Sendable {
                 writer: admissionIO.writeMetadata)
         }
         guard !legacyBlocks(key, explicitRetry: explicitRetry) else { return false }
+        if let afterInfrastructureRetry {
+            retained = (try? withReceipt(key, in: parent) { canDiagnose(afterInfrastructureRetry, in: $0) }) == true
+            return retained
+        }
         let receiptName = receiptURL(for: key, active: active).lastPathComponent
         if mkdirat(parent, receiptName, 0o700) == 0 { retained = true }
         else if errno == EEXIST, explicitRetry {
