@@ -855,7 +855,9 @@ enum AssistantAutomationRunner {
         let glab = glab ?? GlabService()
         if let executable = settings.glabPath { glab.glabPath = executable }
         else { glab.glabPath = await OnboardingDetector.findGlabExecutable() }
-        guard await glab.recheck() == nil, glab.authStatus == .authenticated,
+        let probeError = await glab.recheck()
+        if let probeError, probeError.isTransientReadFailure { throw probeError }
+        guard probeError == nil, glab.authStatus == .authenticated,
               glab.resolvedHost == work.host, glab.currentUsername == username else {
             throw AssistantJobExecutor.ExecutionError.wrongAccount
         }

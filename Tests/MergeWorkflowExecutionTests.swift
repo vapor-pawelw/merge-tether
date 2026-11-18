@@ -670,8 +670,8 @@ import Testing
         #expect(gitlab.requests.allSatisfy { $0.method == "GET" })
     }
 
-    @Test(arguments: ["/user", "/projects/7/merge_requests/11"])
-    func reReviewResumesAfterAReadFailureInsideTheRealLaunch(_ failingEndpoint: String) async throws {
+    @Test(arguments: ["/user", "/projects/7/merge_requests/11", "auth-timeout", "wrong-account"])
+    func reReviewResumesAfterAReadFailureInsideTheRealLaunch(_ failure: String) async throws {
         let suite = "WorkflowLaunchRead.\(UUID())"
         let defaults = try #require(UserDefaults(suiteName: suite))
         defer { defaults.removePersistentDomain(forName: suite) }
@@ -692,8 +692,18 @@ import Testing
         var available = false
         var failures = 0
         gitlab.handler = { call in
-            if call.arguments == ["auth", "status"] { inAdmission = true }
-            if inAdmission, !available, call.endpoint == failingEndpoint {
+            if call.arguments == ["auth", "status"] {
+                inAdmission = true
+                if !available, failure == "auth-timeout" {
+                    failures += 1
+                    throw ProcessRunner.RunError.timedOut
+                }
+                if !available, failure == "wrong-account" {
+                    failures += 1
+                    return InMemoryGitLab.output(error: "Logged in to \(host) as someone-else")
+                }
+            }
+            if inAdmission, !available, call.endpoint == failure {
                 failures += 1
                 return InMemoryGitLab.output(error: "HTTP 503 Service Unavailable", code: 1)
             }
@@ -719,7 +729,7 @@ import Testing
         initial.startNext()
         try await settle(initial)
         #expect(failures > 0)
-        #expect(initial.hasReadOnlyFailure(for: request))
+        #expect(initial.hasReadOnlyFailure(for: request) == (failure != "wrong-account"))
         #expect(settings.assistantHandoffs.isEmpty)
 
         let restored = SettingsManager(defaults: defaults)
@@ -733,8 +743,14 @@ import Testing
         try await settle(restarted)
         await coordinator.waitForTermination()
         #expect(restarted.entries.map(\.id) == [event.identity])
-        #expect(restarted.entries.first?.state == .completed)
-        #expect(restored.assistantHandoffs.map(\.expectedHeadSHA) == [head])
+        if failure == "wrong-account" {
+            #expect(restarted.entries.first?.state == .failed)
+            #expect(restored.assistantHandoffs.isEmpty)
+            #expect(gitlab.requests.filter { $0.arguments == ["auth", "status"] }.count == 1)
+        } else {
+            #expect(restarted.entries.first?.state == .completed)
+            #expect(restored.assistantHandoffs.map(\.expectedHeadSHA) == [head])
+        }
         #expect(gitlab.requests.allSatisfy { $0.method == "GET" })
     }
 
