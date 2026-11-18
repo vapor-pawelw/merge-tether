@@ -856,6 +856,44 @@ import Testing
         #expect(restored.mrActionIntents.count == 1)
     }
 
+    @Test func acknowledgedReviewResumesAfterItsPrelaunchReadFails() async throws {
+        let f = try fixture(); defer { f.cleanup() }
+        f.settings.automation.reviewRequested.isEnabled = true
+        f.settings.automation.scope[target] = .active
+        let handler = try #require(f.gitlab.handler)
+        f.gitlab.handler = { request in
+            if request.endpoint == "/projects/7/merge_requests/11",
+               f.gitlab.requests.filter({ $0.endpoint == request.endpoint }).count == 3 {
+                return InMemoryGitLab.output(error: "HTTP 503 Service Unavailable", code: 1)
+            }
+            return try await handler(request)
+        }
+        let jobID = UUID()
+        var launches = 0
+        let launcher: MergeRequestTodoRouter.Launcher = { _, manual in
+            #expect(!manual)
+            launches += 1
+            return jobID
+        }
+        let router = MergeRequestTodoRouter(settings: f.settings, glab: f.glab, canAutomate: { true }, launcher: launcher)
+
+        let event = todo()
+        #expect(await router.process([event], host: target.host, username: target.username, managed: [target]) == [event.id])
+        let pending = try #require(f.settings.mrActionIntents.first)
+        #expect(pending.state == .pending && pending.jobID == nil)
+        #expect(launches == 0)
+
+        let restored = SettingsManager(defaults: f.defaults)
+        let restarted = MergeRequestTodoRouter(settings: restored, glab: f.glab, canAutomate: { true }, launcher: launcher)
+        _ = await restarted.process([], host: target.host, username: target.username, managed: [target])
+
+        #expect(restored.mrActionIntents.map(\.id) == [pending.id])
+        #expect(restored.mrActionIntents.first?.jobID == jobID)
+        #expect(restored.mrActionIntents.first?.state == .running)
+        #expect(f.gitlab.requests.filter { $0.method != "GET" }.map(\.endpoint) == ["/todos/\(event.id)/mark_as_done"])
+        #expect(launches == 1)
+    }
+
     @Test func pendingReviewRequestsAcrossHeadsBecomeOneCurrentReviewAction() async throws {
         let f = try fixture(); defer { f.cleanup() }
         let router = MergeRequestTodoRouter(settings: f.settings, glab: f.glab, canAutomate: { false })

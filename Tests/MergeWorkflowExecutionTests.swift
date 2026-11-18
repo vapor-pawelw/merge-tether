@@ -508,6 +508,78 @@ import Testing
         return gitlab
     }
 
+    @Test(arguments: [false, true])
+    func reReviewPrelaunchReadResumesWithoutAnotherEvent(exhaustsRetries: Bool) async throws {
+        let suite = "WorkflowFinalReadRetry.\(UUID())"
+        let defaults = try #require(UserDefaults(suiteName: suite))
+        defer { defaults.removePersistentDomain(forName: suite) }
+        let settings = SettingsManager(defaults: defaults)
+        settings.automation.applyPreset(.full, for: .codex)
+        let host = "gitlab-\(UUID().uuidString.lowercased()).example.test"
+        let user = GitLabAuthenticatedUser(id: 1, username: "me")
+        let url = try #require(URL(string: "https://\(host)/team/repo/-/merge_requests/11"))
+        let head = String(repeating: "a", count: 40)
+        let gitlab = reviewRetryGitLab(host: host, url: url, currentHead: head)
+        defer { gitlab.close() }
+        let glab = gitlab.service(host: host, username: user.username)
+        settings.glabPath = glab.glabPath
+        let request = try await glab.fetchMergeRequest(projectID: 7, iid: 11, host: host)
+        let event = MergeWorkflowEvent(kind: .reviewUpdate, mergeRequest: request, identity: "prelaunch-read", context: "Source updated")
+        let handler = try #require(gitlab.handler)
+        var detailReads = 0
+        var available = false
+        gitlab.handler = { call in
+            if call.endpoint == "/projects/7/merge_requests/11" {
+                detailReads += 1
+                if !available && (detailReads == 2 || (detailReads > 2 && exhaustsRetries)) {
+                    return InMemoryGitLab.output(error: "HTTP 503 Service Unavailable", code: 1)
+                }
+            }
+            return try await handler(call)
+        }
+        let coordinator = AssistantJobCoordinator(healthStore: AssistantCLIHealthStore(defaults: defaults), execute: { _, _ in
+            .init(result: .init(status: .succeeded, summary: "Review fixture"), output: "")
+        })
+        let clock = ReadRetryClock()
+        func automation(for state: SettingsManager) -> MergeWorkflowAutomation {
+            MergeWorkflowAutomation(settings: state, glab: glab, jobCoordinator: coordinator,
+                retryWait: { _ in await Task.yield() }, now: { clock.date })
+        }
+        func settle(_ automation: MergeWorkflowAutomation) async throws {
+            let deadline = ContinuousClock.now + .seconds(5)
+            while automation.entries.first.map({ [.queued, .running, .waitingForAssistant].contains($0.state) }) == true,
+                  ContinuousClock.now < deadline {
+                try await Task.sleep(for: .milliseconds(5))
+            }
+        }
+        let initial = automation(for: settings)
+        initial.receive(event, host: host, user: user)
+        initial.startNext()
+        try await settle(initial)
+
+        if exhaustsRetries {
+            #expect(detailReads == 4)
+            #expect(initial.hasReadOnlyFailure(for: request))
+            #expect(settings.assistantHandoffs.isEmpty)
+            let restored = SettingsManager(defaults: defaults)
+            restored.glabPath = glab.glabPath
+            let restarted = automation(for: restored)
+            restarted.startNext()
+            #expect(restarted.entries.first?.state == .failed)
+            available = true
+            clock.date = clock.date.addingTimeInterval(ReadOnlyAssessmentRetry.cooldown + 1)
+            restarted.startNext()
+            try await settle(restarted)
+            #expect(restarted.entries.first?.state == .completed)
+            #expect(restored.assistantHandoffs.map(\.expectedHeadSHA) == [head])
+        } else {
+            #expect(initial.entries.first?.state == .completed)
+            #expect(settings.assistantHandoffs.map(\.expectedHeadSHA) == [head])
+        }
+        await coordinator.waitForTermination()
+        #expect(gitlab.requests.allSatisfy { $0.method == "GET" })
+    }
+
     @Test(arguments: ["cooldown", "dependency", "account-change"])
     func purePrelaunchFailurePreservesRestartAccountHeadAndRetryBoundaries(_ recovery: String) async throws {
         let suite = "WorkflowReadRetry.\(UUID())"
@@ -958,6 +1030,58 @@ import Testing
         #expect(resumed.entries.first(where: { $0.id == blocked.identity })?.state == expectedState)
         #expect(resumedSettings.assistantHandoffs.filter { $0.key.work == existing.key.work }.count == (scenario == "new-head" ? 1 : 2))
         #expect(gitlab.requests.dropFirst(callsBeforeRelease).contains { $0.endpoint == "/projects/7/merge_requests/11" })
+    }
+
+    @Test(arguments: ["live", "restart", "new-head", "disabled"])
+    func fullQueueDefersReReviewUntilCapacityOpens(_ scenario: String) async throws {
+        let suite = "WorkflowReviewOverflow.\(UUID())"
+        let defaults = try #require(UserDefaults(suiteName: suite))
+        defer { defaults.removePersistentDomain(forName: suite) }
+        let settings = SettingsManager(defaults: defaults)
+        settings.automation.applyPreset(.full, for: .codex)
+        let host = "gitlab-\(UUID().uuidString.lowercased()).example.test"
+        let user = GitLabAuthenticatedUser(id: 1, username: "me")
+        let url = try #require(URL(string: "https://\(host)/team/repo/-/merge_requests/11"))
+        let oldHead = String(repeating: "a", count: 40)
+        let head = String(repeating: "b", count: 40)
+        let gitlab = reviewRetryGitLab(host: host, url: url, currentHead: oldHead)
+        defer { gitlab.close() }
+        let glab = gitlab.service(host: host, username: user.username)
+        settings.glabPath = glab.glabPath
+        let coordinator = AssistantJobCoordinator(healthStore: AssistantCLIHealthStore(defaults: defaults), execute: { _, _ in
+            .init(result: .init(status: .succeeded, summary: "Review fixture"), output: "")
+        })
+        let automation = MergeWorkflowAutomation(settings: settings, glab: glab, jobCoordinator: coordinator)
+        let olderRequest = try await glab.fetchMergeRequest(projectID: 7, iid: 11, host: host)
+        for index in 0..<24 {
+            automation.receive(.init(kind: .reviewUpdate, mergeRequest: olderRequest, identity: "old-\(index)",
+                context: "Review an earlier reply"), host: host, user: user)
+        }
+        try #require(automation.entries.filter { $0.state == .queued }.count == 24)
+        gitlab.write("current-head", head)
+        let request = try await glab.fetchMergeRequest(projectID: 7, iid: 11, host: host)
+        let deferred = MergeWorkflowEvent(kind: .reviewUpdate, mergeRequest: request, identity: "overflow",
+            context: "Review the current commit and author reply", noteIDs: [42])
+        automation.receive(deferred, host: host, user: user)
+        automation.receive(deferred, host: host, user: user)
+        try #require(automation.entries.filter { $0.id == deferred.identity }.map(\.state) == [.queued])
+        #expect(settings.assistantHandoffs.isEmpty)
+
+        let resumedSettings = scenario == "restart" ? SettingsManager(defaults: defaults) : settings
+        let resumed = scenario == "restart"
+            ? MergeWorkflowAutomation(settings: resumedSettings, glab: glab, jobCoordinator: coordinator) : automation
+        if scenario == "new-head" { gitlab.write("current-head", String(repeating: "c", count: 40)) }
+        if scenario == "disabled" { resumedSettings.automation.workflowRules[.reviewUpdate].mode = .off }
+        resumed.startNext()
+
+        let expected: MergeWorkflowActivityState = scenario == "live" || scenario == "restart" ? .completed : .skipped
+        let deadline = ContinuousClock.now + .seconds(5)
+        while resumed.entries.first(where: { $0.id == deferred.identity })?.state != expected,
+              ContinuousClock.now < deadline { try await Task.sleep(for: .milliseconds(5)) }
+        #expect(resumed.entries.first { $0.id == deferred.identity }?.state == expected)
+        #expect(resumedSettings.assistantHandoffs.map(\.expectedHeadSHA) == (expected == .completed ? [head] : []))
+        #expect(gitlab.requests.allSatisfy { $0.method == "GET" })
+        await coordinator.waitForTermination()
     }
 
     @Test(arguments: [MergeWorkflowActivityState.queued, .running])

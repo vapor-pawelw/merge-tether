@@ -55,6 +55,7 @@ struct MergeWorkflowActivityEntry: Codable, Identifiable {
     var pipelineClaimAssessment: PipelineClaimAssessmentLineage? = nil
     var readOnlyFailure: MergeWorkflowReadFailure? = nil
     var deferredForWorker: Bool? = nil
+    var deferredForCapacity: Bool? = nil
     var isReadOnlyFailure: Bool { readOnlyFailure != nil }
 }
 
@@ -64,6 +65,10 @@ final class MergeWorkflowAutomation {
     private var currentAdmissions: [MergeWorkflowActivityEntry] {
         settings.workflowActivity.filter { isCurrent(host: $0.host, user: $0.user) }
     }
+    private var hasQueueCapacity: Bool {
+        currentAdmissions.lazy.filter { $0.state == .queued && $0.deferredForCapacity != true }.prefix(24).count < 24
+    }
+
     // Another installation can own the reservation, independently of observable app state.
     var needsLivePipelinePresentation: Bool {
         currentAdmissions.contains { entry in
@@ -187,10 +192,12 @@ final class MergeWorkflowAutomation {
         for index in settings.workflowActivity.indices where [.queued, .running].contains(settings.workflowActivity[index].state) {
             let entry = settings.workflowActivity[index]
             // Only a confirmed wait before admission is safe to resume after restart.
-            if entry.state == .queued, entry.deferredForWorker == true, entry.event.kind != .pipelineFailure,
+            if entry.state == .queued, entry.event.kind != .pipelineFailure,
+               entry.deferredForWorker == true || entry.deferredForCapacity == true,
                entry.assistantJobID == nil, entry.chatURL == nil { continue }
             settings.workflowActivity[index].state = .skipped
             settings.workflowActivity[index].deferredForWorker = nil
+            settings.workflowActivity[index].deferredForCapacity = nil
             changed = true
         }
         if changed { settings.save() }
@@ -329,8 +336,7 @@ final class MergeWorkflowAutomation {
                                                                 projectID: key.projectID, iid: key.mergeRequestIID)),
                   !AssistantAutomationRunner.isWorking(on: workKey(entry))
             else { continue }
-            guard !hasRecordedPipelineEffects(entry, key: key),
-                  settings.workflowActivity.lazy.filter({ $0.state == .queued }).prefix(24).count < 24 else { continue }
+            guard !hasRecordedPipelineEffects(entry, key: key), hasQueueCapacity else { continue }
             if detector.status(for: key) == .unverified || canDiagnoseAfterInfrastructureRetry(entry, key: key) {
                 if let index = settings.workflowActivity.firstIndex(where: { $0.id == entry.id }) { settings.workflowActivity[index].event = event }
                 update(entry.id, .queued)
@@ -396,8 +402,13 @@ final class MergeWorkflowAutomation {
             }
         }
 
-        if entry.state == .queued, settings.workflowActivity.lazy.filter({ $0.state == .queued }).prefix(24).count == 24 {
-            entry.state = .skipped
+        if entry.state == .queued, !hasQueueCapacity {
+            if event.kind == .reviewUpdate {
+                // The monitor has already recorded this update, so a later poll won't emit it again.
+                entry.deferredForCapacity = true
+            } else {
+                entry.state = .skipped
+            }
         }
         settings.workflowActivity.insert(entry, at: 0)
         pruneHistory()
@@ -420,9 +431,11 @@ final class MergeWorkflowAutomation {
                 mutate(next.id, ifCurrent: next) {
                     $0.state = mode == .notify || mode == .preview ? .preview : .skipped
                     $0.deferredForWorker = nil
+                    $0.deferredForCapacity = nil
                 }
                 continue
             }
+            if next.deferredForCapacity == true, !hasQueueCapacity { continue }
             if next.event.kind != .pipelineFailure, hasActiveWorker(next) {
                 if next.deferredForWorker != true { deferForActiveWorker(next) }
                 continue
@@ -430,6 +443,7 @@ final class MergeWorkflowAutomation {
             mutate(next.id, ifCurrent: next) {
                 $0.state = .running
                 $0.deferredForWorker = nil
+                $0.deferredForCapacity = nil
             }
             work = Task {
                 defer {
@@ -449,7 +463,7 @@ final class MergeWorkflowAutomation {
                     update(next.id, .alreadyRegistered, ifCurrent: next)
                 } catch PipelineClaimAssessmentError.ownershipReserved {
                     update(next.id, .alreadyRegistered, ifCurrent: next)
-                } catch let failure as InitialReadFailure {
+                } catch let failure as PrelaunchReadFailure {
                     mutate(next.id, ifCurrent: next) {
                         $0.state = .failed
                         $0.readOnlyFailure = .init(date: now(), configuration: failure.configuration)
@@ -481,7 +495,7 @@ final class MergeWorkflowAutomation {
         return jobCoordinator?.isWorking(on: target) ?? AssistantAutomationRunner.isWorking(on: target)
     }
 
-    private struct InitialReadFailure: Error {
+    private struct PrelaunchReadFailure: Error {
         let cause: any Error
         let configuration: AutomationSettings
     }
@@ -511,7 +525,7 @@ final class MergeWorkflowAutomation {
                 return current
             }
         } catch is CancellationError { throw CancellationError() }
-        catch { throw InitialReadFailure(cause: error, configuration: assessmentConfiguration) }
+        catch { throw PrelaunchReadFailure(cause: error, configuration: assessmentConfiguration) }
         guard ownsAdmission(entry) else { throw CancellationError() }
         if settings.workflowActivity.first(where: { $0.id == entry.id })?.readOnlyFailure != nil {
             mutate(entry.id, ifCurrent: entry) { $0.readOnlyFailure = nil; $0.summary = nil }
@@ -619,7 +633,23 @@ final class MergeWorkflowAutomation {
             noteIDs: event.kind == .newDiscussion ? feedbackIDs : event.noteIDs, jobID: event.jobID
         )
         let stackPosition = await glab.stackPosition(for: workKey(entry))
-        let current = try await glab.fetchMergeRequest(projectID: latest.projectID, iid: latest.iid, host: entry.host)
+        let current: GitLabMergeRequest
+        if event.kind == .reviewUpdate {
+            do {
+                current = try await ReadOnlyAssessmentRetry.run(isCurrent: {
+                    self.shouldProceed(entry) && self.glab.accountRevision == assessmentAccountRevision
+                        && settingsBeforeLaunch.preservingScope(from: self.settings.automation) == self.settings.automation
+                }, wait: retryWait) {
+                    try await self.glab.fetchMergeRequest(projectID: latest.projectID, iid: latest.iid, host: entry.host)
+                }
+            } catch is CancellationError { throw CancellationError() }
+            catch { throw PrelaunchReadFailure(cause: error, configuration: settingsBeforeLaunch) }
+            if current.state == "opened", current.sha != latest.sha {
+                throw AssistantJobExecutor.ExecutionError.headChanged
+            }
+        } else {
+            current = try await glab.fetchMergeRequest(projectID: latest.projectID, iid: latest.iid, host: entry.host)
+        }
         guard current.state == "opened", current.sha == latest.sha,
               settings.automation.scope.permits(current, host: entry.host, username: entry.user.username),
               configuredRule(for: event)?.includes(current) == true,

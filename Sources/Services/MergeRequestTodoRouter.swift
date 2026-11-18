@@ -220,7 +220,14 @@ final class MergeRequestTodoRouter {
         }
         guard manual || shouldRunAutomatically(original.kind, request: original.request, target: original.target) else { return }
         do {
-            let request = try await glab.fetchMergeRequest(projectID: original.target.projectID, iid: iid, host: original.target.host)
+            let request: GitLabMergeRequest
+            do {
+                request = try await glab.fetchMergeRequest(projectID: original.target.projectID, iid: iid, host: original.target.host)
+            } catch where !manual && original.state == .pending && original.jobID == nil {
+                // Only this read can fail here. The persisted intent is still eligible on the next poll.
+                Log.monitor.debug("Could not refresh the queued MR action: \(String(describing: error), privacy: .private)")
+                return
+            }
             guard invocationConfiguration.preservingScope(from: settings.automation) == settings.automation,
                   isCurrentRun(), request.state == "opened",
                   request.projectID == original.target.projectID, request.iid == iid,
