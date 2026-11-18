@@ -278,7 +278,7 @@ final class ReReviewCoordinator {
         let hasActiveFeedback = activeDiscussions.flatMap(\.notes).contains { $0.system != true && $0.author?.id != user.id }
         let onlyResolvedFeedback = !hasActiveFeedback && discussions.contains(where: \.isResolvedForReview)
         let sharedAssessment = authorFeedbackAssessment(request, fingerprint).flatMap { assessment in
-            (try? assessment.reviewers(in: activeDiscussions, authorID: user.id, ignoredSuggestions: activeIgnored,
+            (try? assessment.reviewers(in: discussions, authorID: user.id, ignoredSuggestions: activeIgnored,
                 excludedReplyAuthorIDs: settings.reviewParticipationPreferences.excludedIDs(host: host, username: context.username))) != nil
                 ? assessment : nil
         } ?? (onlyResolvedFeedback ? ReReviewAssessment(notes: []) : nil)
@@ -419,13 +419,13 @@ final class ReReviewCoordinator {
                     do {
                         let input = ReReviewVerifier.Input(authorID: user.id, headSHA: head, title: request.title,
                                                           description: request.description,
-                                                          diff: String(decoding: diff, as: UTF8.self), discussions: activeDiscussions,
+                                                          diff: String(decoding: diff, as: UTF8.self), discussions: discussions,
                                                           target: .init(host: host, projectID: request.projectID, iid: request.iid,
                                                               url: request.webURL, expectedUsername: context.username),
                                                           semanticContextFingerprint: request.semanticContextFingerprint,
                                                           thinking: thinking, ignoredSuggestions: activeIgnored,
                                                           excludedReplyAuthorIDs: settings.reviewParticipationPreferences.excludedIDs(host: host, username: context.username).sorted())
-                        let assessment = try await verifyReReview(input, assistant, model)
+                        let assessment = try await verifyReReview(input.activeEvidence, assistant, model)
                         _ = try assessment.reviewers(in: discussions, authorID: user.id, ignoredSuggestions: activeIgnored,
                             excludedReplyAuthorIDs: settings.reviewParticipationPreferences.excludedIDs(host: host, username: context.username))
                         guard isCurrentVerification() else { return }

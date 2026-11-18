@@ -594,9 +594,11 @@ final class AuthorFeedbackCoordinator {
         }.sorted().joined(separator: "\n")
         let diffText = String(decoding: diff, as: UTF8.self)
         let diffDigest = MergeRequestDiffDigest.normalized(diffText)
+        let replyEvidence = ReReviewAssessment.resolvedOverviewReplyEvidence(in: input.discussions, authorID: input.user.id)
+        let replyFingerprint = ReviewVerdict.fingerprint(replyEvidence) ?? ""
         // Content-bound rather than commit-bound: a rebase that keeps the MR's changes reuses the assessment.
         let key = ReReviewVerifier.policyVersion + "|" + input.activeFingerprint + "|" + request.semanticContextFingerprint
-            + "|" + diffDigest
+            + "|" + diffDigest + "|" + replyFingerprint
             + "|" + (input.completedFollowUpJobID?.uuidString ?? "")
             + "|" + String(decoding: try encoder.encode(VerifierConfiguration(input.configuration)), as: UTF8.self)
             + "|" + UserAttentionSnapshot.digest(String(decoding: try encoder.encode(blockedContexts), as: UTF8.self))
@@ -620,15 +622,16 @@ final class AuthorFeedbackCoordinator {
             let model = input.configuration.assistant == .codex
                 ? input.configuration.codexVerificationModel.rawValue : input.configuration.claudeVerificationModel.rawValue
             let prior = Self.priorInput(priorPass(for: input.target), revisions: revisions, diffDigest: diffDigest)
-            assessment = Self.constrained(try await verify(.init(authorID: input.user.id, headSHA: request.sha ?? "", title: request.title,
+            let verificationInput = ReReviewVerifier.Input(authorID: input.user.id, headSHA: request.sha ?? "", title: request.title,
                 description: request.description,
-                diff: diffText, discussions: activeDiscussions,
+                diff: diffText, discussions: input.discussions,
                 target: .init(host: host, projectID: request.projectID, iid: request.iid,
                     url: request.webURL, expectedUsername: input.user.username),
                 semanticContextFingerprint: request.semanticContextFingerprint,
                 thinking: input.configuration.verificationThinking, blockedFollowUps: blockedContexts,
                 ignoredSuggestions: input.ignoredSuggestions, completedFollowUp: completedFollowUp,
-                excludedReplyAuthorIDs: excludedReplyAuthors(input).sorted(), priorAssessment: prior),
+                excludedReplyAuthorIDs: excludedReplyAuthors(input).sorted(), priorAssessment: prior)
+            assessment = Self.constrained(try await verify(verificationInput.activeEvidence,
                 input.configuration.assistant, model), prior: prior)
             _ = try assessment.reviewers(in: input.discussions, authorID: input.user.id, ignoredSuggestions: input.ignoredSuggestions,
                 excludedReplyAuthorIDs: excludedReplyAuthors(input))

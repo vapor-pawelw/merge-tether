@@ -5,7 +5,7 @@ import Foundation
 enum ReReviewVerifier {
     typealias ExecutableResolver = @MainActor (AutomationAssistant) async -> URL?
     enum VerificationError: Error, Equatable { case unavailable, failed, incompleteEvidence }
-    static let policyVersion = "feedback-disposition-14"
+    static let policyVersion = "feedback-disposition-15"
 
     static let schema = #"{"type":"object","additionalProperties":false,"properties":{"notes":{"type":"array","items":{"type":"object","additionalProperties":false,"properties":{"noteID":{"type":"integer"},"state":{"type":"string","enum":["addressed","rejected","informational","blocking","uncertain"]},"reason":{"type":"string"},"summary":{"type":"string","minLength":1,"maxLength":200},"acceptanceNoteID":{"type":["integer","null"]},"publishedReplyNoteID":{"type":["integer","null"]},"informationalAcknowledgementSafe":{"type":"boolean"},"informationalPurpose":{"type":"string","enum":["concreteCodeReviewFeedback","reviewSummary","automatedReviewReport","other"]},"manualDecision":{"type":["object","null"],"additionalProperties":false,"properties":{"context":{"type":"string","minLength":1,"maxLength":2000},"verifiedFacts":{"type":"string","minLength":1,"maxLength":2000},"missingEvidence":{"type":"string","minLength":1,"maxLength":2000},"question":{"type":"string","minLength":1,"maxLength":1000},"mergeImpact":{"type":"string","minLength":1,"maxLength":1000}},"required":["context","verifiedFacts","missingEvidence","question","mergeImpact"]}},"required":["noteID","state","reason","summary","acceptanceNoteID","publishedReplyNoteID","informationalAcknowledgementSafe","informationalPurpose","manualDecision"]}}},"required":["notes"]}"#
 
@@ -93,11 +93,19 @@ enum ReReviewVerifier {
         /// Notes an earlier pass already assessed, with unchanged text. A later pass may cite them but
         /// must not raise new concerns about them.
         var priorAssessment: PriorAssessment? = nil
+        var resolvedOverviewReplyEvidence: [GitLabMergeRequestDiscussion]? = nil
+
+        var discussionsWithReplyEvidence: [GitLabMergeRequestDiscussion] {
+            discussions + (resolvedOverviewReplyEvidence ?? [])
+        }
 
         var activeEvidence: Self {
             var input = self
-            input.discussions = GitLabMergeRequestDiscussion.activeForReview(discussions)
-            let closedIDs = Set(discussions.filter(\.isResolvedForReview).flatMap(\.notes).compactMap(\.id))
+            let allDiscussions = discussionsWithReplyEvidence
+            input.discussions = GitLabMergeRequestDiscussion.activeForReview(allDiscussions)
+            let evidence = ReReviewAssessment.resolvedOverviewReplyEvidence(in: allDiscussions, authorID: authorID)
+            input.resolvedOverviewReplyEvidence = evidence.isEmpty ? nil : evidence
+            let closedIDs = Set(allDiscussions.filter(\.isResolvedForReview).flatMap(\.notes).compactMap(\.id))
             input.ignoredSuggestions = ignoredSuggestions.filter { !closedIDs.contains($0.sourceNoteID) }
             input.blockedFollowUps = blockedFollowUps.filter { closedIDs.isDisjoint(with: $0.selectedFeedbackIDs) }
             if let completedFollowUp, !closedIDs.isDisjoint(with: completedFollowUp.selectedFeedbackIDs) {
@@ -199,17 +207,19 @@ enum ReReviewVerifier {
         guard !noteIDs.isEmpty else { return .init(notes: []) }
         let constrainedSchema = try outputSchema(noteIDs: noteIDs, blockedRunIDs: input.blockedFollowUps.map(\.runID),
             decisionIDs: input.ignoredSuggestions.map(\.id))
-        let discussions = input.discussions.map { discussion in
-            GitLabMergeRequestDiscussion(id: discussion.id, notes: discussion.notes.map { note in
-                var sanitized = note
-                sanitized.body = note.body.map(GlabService.redactWorkflowEvidence)
-                return sanitized
-            })
+        func redactedDiscussions(_ discussions: [GitLabMergeRequestDiscussion]) -> [GitLabMergeRequestDiscussion] {
+            discussions.map { discussion in
+                GitLabMergeRequestDiscussion(id: discussion.id, notes: discussion.notes.map { note in
+                    var sanitized = note
+                    sanitized.body = note.body.map(GlabService.redactWorkflowEvidence)
+                    return sanitized
+                })
+            }
         }
         let sanitized = Input(authorID: input.authorID, headSHA: input.headSHA,
                               title: GlabService.redactWorkflowEvidence(input.title),
                               description: input.description.map(GlabService.redactWorkflowEvidence),
-                              diff: GlabService.redactWorkflowEvidence(input.diff), discussions: discussions,
+                              diff: GlabService.redactWorkflowEvidence(input.diff), discussions: redactedDiscussions(input.discussions),
                               target: input.target, semanticContextFingerprint: input.semanticContextFingerprint,
                               thinking: input.thinking,
                               blockedFollowUps: input.blockedFollowUps.map { .init(runID: $0.runID,
@@ -230,7 +240,7 @@ enum ReReviewVerifier {
                                   .init(notes: prior.notes.map { .init(noteID: $0.noteID, state: $0.state,
                                           reason: String(GlabService.redactWorkflowEvidence($0.reason).prefix(600))) },
                                       codeReviewRequests: prior.codeReviewRequests, codeChangedSincePrior: prior.codeChangedSincePrior)
-                              })
+                              }, resolvedOverviewReplyEvidence: input.resolvedOverviewReplyEvidence.map(redactedDiscussions))
         guard var payload = try JSONSerialization.jsonObject(with: JSONEncoder().encode(sanitized)) as? [String: Any] else {
             throw VerificationError.incompleteEvidence
         }
@@ -247,7 +257,7 @@ enum ReReviewVerifier {
             payload["inlineEvidence"] = "omittedForSize"
             payload["verificationBudgetSeconds"] = verificationBudgetSeconds
             var omitted: [String] = []
-            for key in ["diff", "description", "discussions"] {
+            for key in ["diff", "description", "discussions", "resolvedOverviewReplyEvidence"] {
                 guard payload.removeValue(forKey: key) != nil else { continue }
                 omitted.append(key)
                 payload["omittedInlineFields"] = omitted
@@ -269,9 +279,13 @@ enum ReReviewVerifier {
             and --hostname target.host to read /user and verify its username is expectedUsername
             and its ID is authorID. Read /projects/projectID/merge_requests/iid for current metadata,
             title, description and SHA. Read every page of its discussions using --paginate and
-            per_page=100. Discard any thread whose first non-system note is marked resolved, including
-            its replies. Never assess a resolved thread, cite it as a source, or return a verdict for it.
-            Use the same active-thread filter for inline and live evidence. Read raw_diffs and relevant
+            per_page=100. Assess only threads whose first non-system note is not marked resolved.
+            For an active, non-resolvable review overview, a resolved finding by the same reviewer posted
+            within 60 seconds can supply reply evidence. See resolvedOverviewReplyEvidence, or identify
+            the same candidate in live discussions. Use it only to verify that a published MR-author reply
+            after both notes covers the entire active overview against current code. Resolution, timing
+            and authorship alone never prove coverage. Never return verdicts for resolved threads.
+            Use the same active-thread filter for inline and live assessment. Read raw_diffs and relevant
             source files only as needed to judge active concerns.
             inlineEvidence describes transport, not MR state. included means inline content is supplied.
             omittedForSize means only the fields named in omittedInlineFields were deliberately omitted
@@ -500,6 +514,9 @@ enum ReReviewVerifier {
             carry the author-response obligation, so do not require a duplicate reply to that report. Keep
             a verified correction addressed while its local reply is still owed. The worker can prepare
             a brief reply linking the original feedback or published explanation, without repeating code work.
+            If reply evidence from a resolved finding of the same submission answers the full active
+            overview and there is no independent obligation, return addressed or rejected with
+            informationalPurpose reviewSummary, the exact publishedReplyNoteID, and null reviewSummaryCoverage.
             Identify the matching concern and reply in reason. A link or claim of completion alone
             is insufficient. Never cite a private draft, system note, another person's comment,
             an unrelated answer or a promise of future work. Return null when no such reply is proven,
@@ -548,8 +565,8 @@ enum ReReviewVerifier {
             may continue only when every ordinary live approval, pipeline, scope, Draft, head and discussion check passes.
 
             Required external note IDs: \(noteIDs.map(String.init).joined(separator: ", ")).
-            Return exactly one assessment for each listed ID, including resolved and informational
-            notes. Do not omit a note because its thread is closed. Do not repeat IDs.
+            Return exactly one assessment for each listed active ID, including informational notes.
+            Do not add IDs from resolved context or repeat IDs.
             """
         let folder = FileManager.default.temporaryDirectory.appending(path: UUID().uuidString)
         try FileManager.default.createDirectory(at: folder, withIntermediateDirectories: false, attributes: [.posixPermissions: 0o700])
@@ -597,7 +614,12 @@ enum ReReviewVerifier {
     }
 
     private static func validatedAssessment(_ assessment: ReReviewAssessment, input: Input) throws -> ReReviewAssessment {
-        let normalized = try assessment.normalizingCoveredReviewSummaries(in: input.discussions,
+        let contextIDs = Set((input.resolvedOverviewReplyEvidence ?? []).flatMap(\.notes).compactMap(\.id))
+        guard contextIDs.isDisjoint(with: assessment.notes.map(\.noteID)),
+              contextIDs.isDisjoint(with: assessment.reviewRequests.map(\.sourceNoteID)) else {
+            throw VerificationError.incompleteEvidence
+        }
+        let normalized = try assessment.normalizingCoveredReviewSummaries(in: input.discussionsWithReplyEvidence,
             authorID: input.authorID, ignoredSuggestions: input.ignoredSuggestions, excludedReplyAuthorIDs: Set(input.excludedReplyAuthorIDs))
         try validateBlockedRunProof(normalized, input: input)
         return redactingReasons(in: normalized)
@@ -612,7 +634,7 @@ enum ReReviewVerifier {
         let addressed = Set(assessment.notes.filter { $0.state == .addressed || $0.state == .rejected || $0.state == .ignoredByUser }.map(\.noteID))
             .union(assessment.pureReviewerOptOutNoteIDs(in: input.discussions, authorID: input.authorID))
             .subtracting(assessment.reviewRequests.map(\.sourceNoteID))
-        let missingReplies = assessment.missingPublishedReplyNoteIDs(in: input.discussions, authorID: input.authorID,
+        let missingReplies = assessment.missingPublishedReplyNoteIDs(in: input.discussionsWithReplyEvidence, authorID: input.authorID,
             excludedReplyAuthorIDs: Set(input.excludedReplyAuthorIDs))
         guard input.blockedFollowUps.filter({ completed.contains($0.runID) }).allSatisfy({
             Set($0.selectedFeedbackIDs).isSubset(of: addressed) && Set($0.selectedFeedbackIDs).isDisjoint(with: missingReplies)

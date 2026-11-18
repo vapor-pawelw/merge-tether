@@ -140,9 +140,6 @@ struct AuthorFeedbackPolicy {
         let gate: State? = !enabled ? .disabled : pendingDraftCount > 0 ? .waitingPublication : nil
         let verified = assessment.flatMap { try? $0.normalizingCoveredReviewSummaries(in: discussions,
             authorID: authorID, ignoredSuggestions: ignoredSuggestions, excludedReplyAuthorIDs: excludedReplyAuthorIDs) }
-        let discussions = GitLabMergeRequestDiscussion.activeForReview(discussions)
-        let verdicts = Dictionary(uniqueKeysWithValues: (verified?.notes ?? []).map { ($0.noteID, $0) })
-        let pureOptOuts = verified?.pureReviewerOptOutNoteIDs(in: discussions, authorID: authorID) ?? []
         let missingReplies = verified?.missingPublishedReplyNoteIDs(in: discussions, authorID: authorID,
             excludedReplyAuthorIDs: excludedReplyAuthorIDs) ?? []
         let informationalThreads = Set(verified.map {
@@ -150,6 +147,9 @@ struct AuthorFeedbackPolicy {
                 ignoredSuggestions: ignoredSuggestions, excludedReplyAuthorIDs: excludedReplyAuthorIDs)
                 .filter(\.canResolve).compactMap(\.discussionID)
         } ?? [])
+        let discussions = GitLabMergeRequestDiscussion.activeForReview(discussions)
+        let verdicts = Dictionary(uniqueKeysWithValues: (verified?.notes ?? []).map { ($0.noteID, $0) })
+        let pureOptOuts = verified?.pureReviewerOptOutNoteIDs(in: discussions, authorID: authorID) ?? []
         let published = discussions.flatMap(\.notes).filter { $0.system == false }
         let notesByID = Dictionary(published.compactMap { note in note.id.map { ($0, note) } }, uniquingKeysWith: { first, _ in first })
         func accepted(_ concern: Note) -> Bool {

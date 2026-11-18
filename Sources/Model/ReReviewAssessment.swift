@@ -60,7 +60,7 @@ struct ReReviewAssessment: Codable, Sendable {
         var informationalPurpose: InformationalPurpose? = nil
         var ignoredDecisionIDs: [UUID]? = nil
         /// A semantically verified, published author reply covering this exact concern,
-        /// including supporting evidence in another discussion. Never waives this thread's reply.
+        /// including supporting evidence in another discussion. Reply obligations are evaluated separately.
         var publishedReplyNoteID: Int? = nil
         /// Within the enclosing head/text/discussion-bound assessment, this summary adds no obligation beyond the named findings.
         var reviewSummaryCoverage: ReviewSummaryCoverage? = nil
@@ -116,7 +116,8 @@ struct ReReviewAssessment: Codable, Sendable {
             completedBlockedRunIDs: completedBlockedRunIDs, codeReviewRequests: codeReviewRequests?.filter {
                 !closedIDs.contains($0.sourceNoteID)
             })
-        _ = try assessment.reviewers(in: active, authorID: authorID, ignoredSuggestions: ignoredSuggestions, excludedReplyAuthorIDs: excludedReplyAuthorIDs)
+        _ = try assessment.reviewers(in: discussions, authorID: authorID, ignoredSuggestions: ignoredSuggestions,
+            excludedReplyAuthorIDs: excludedReplyAuthorIDs)
         let summaries = assessment.coveredReviewSummaryIDs(in: active, authorID: authorID, excludedReplyAuthorIDs: excludedReplyAuthorIDs)
         return .init(notes: assessment.notes.map { note in
             guard summaries.contains(note.noteID) else { return note }
@@ -147,7 +148,7 @@ struct ReReviewAssessment: Codable, Sendable {
         let owed = repliesOwedByAddressedNotes(in: active, authorID: authorID, excludedReplyAuthorIDs: excludedReplyAuthorIDs)
         return owed
             .subtracting(coveredReviewSummaryIDs(in: active, authorID: authorID, excludedReplyAuthorIDs: excludedReplyAuthorIDs))
-            .subtracting(answeredReviewOverviewIDs(in: active, authorID: authorID, owed: owed))
+            .subtracting(answeredReviewOverviewIDs(in: discussions, authorID: authorID, owed: owed))
     }
 
     /// A non-resolvable overview comment published in the same review submission as a resolvable
@@ -160,16 +161,17 @@ struct ReReviewAssessment: Codable, Sendable {
         return Set(owed.compactMap { id -> Int? in
             guard let assessment = byID[id], let replyID = assessment.publishedReplyNoteID,
                   (assessment.ignoredDecisionIDs ?? []).isEmpty, !questions.contains(id),
+                  let overview = discussions.first(where: { $0.reviewRoot?.id == id })?.reviewRoot,
                   hasPublishedReply(for: assessment, in: discussions, authorID: authorID),
-                  let overviewThread = discussions.first(where: { $0.notes.first?.id == id }),
-                  let overview = overviewThread.notes.first, overview.resolvable == false,
-                  let reviewer = overview.author?.id, let submitted = Self.date(overview.createdAt),
                   let replyThread = discussions.first(where: { $0.notes.contains { $0.id == replyID } }),
-                  replyThread.notes.first?.id != id else { return nil }
+                  replyThread.reviewRoot?.id != id else { return nil }
+            if replyThread.isResolvedForReview {
+                return Self.isResolvedOverviewReply(replyThread, replyID: replyID,
+                    assessment: assessment, overview: overview) ? id : nil
+            }
             let answersSiblingFinding = replyThread.notes.contains { finding in
-                guard let findingID = finding.id, findingID < replyID, finding.system == false,
-                      finding.resolvable == true, finding.author?.id == reviewer,
-                      let posted = Self.date(finding.createdAt), abs(posted.timeIntervalSince(submitted)) <= 60,
+                guard let findingID = finding.id, findingID < replyID,
+                      Self.isSameReviewFinding(finding, as: overview),
                       let verified = byID[findingID], [.addressed, .rejected, .informational].contains(verified.state),
                       (verified.ignoredDecisionIDs ?? []).isEmpty, !questions.contains(findingID),
                       !owed.contains(findingID) else { return false }
@@ -177,6 +179,37 @@ struct ReReviewAssessment: Codable, Sendable {
             }
             return answersSiblingFinding ? id : nil
         })
+    }
+
+    /// Include only resolved findings that could contain a published answer to an active overview.
+    static func resolvedOverviewReplyEvidence(in discussions: [GitLabMergeRequestDiscussion],
+                                              authorID: Int) -> [GitLabMergeRequestDiscussion] {
+        let overviews = GitLabMergeRequestDiscussion.activeForReview(discussions).compactMap(\.reviewRoot).filter {
+            $0.resolvable == false && $0.author?.id != authorID
+        }
+        return discussions.filter { thread in
+            guard thread.isResolvedForReview, let finding = thread.reviewRoot, let findingID = finding.id else { return false }
+            return overviews.contains { overview in
+                guard let overviewID = overview.id, isSameReviewFinding(finding, as: overview) else { return false }
+                return thread.notes.contains { isAuthorReply($0, after: max(findingID, overviewID), authorID: authorID) }
+            }
+        }
+    }
+
+    private static func isSameReviewFinding(_ finding: GitLabMergeRequestDiscussion.Note,
+                                            as overview: GitLabMergeRequestDiscussion.Note) -> Bool {
+        guard overview.system == false, overview.resolvable == false, let reviewer = overview.author?.id, reviewer > 0,
+              finding.system == false, finding.resolvable == true, finding.author?.id == reviewer,
+              let submitted = date(overview.createdAt), let posted = date(finding.createdAt) else { return false }
+        return abs(posted.timeIntervalSince(submitted)) <= 60
+    }
+
+    private static func isResolvedOverviewReply(_ thread: GitLabMergeRequestDiscussion, replyID: Int,
+                                                assessment: Note, overview: GitLabMergeRequestDiscussion.Note) -> Bool {
+        guard thread.isResolvedForReview, assessment.informationalPurpose == .reviewSummary,
+              let finding = thread.reviewRoot, let findingID = finding.id, findingID < replyID,
+              isSameReviewFinding(finding, as: overview) else { return false }
+        return thread.notes.contains { $0.id == replyID }
     }
 
     private static func date(_ raw: String?) -> Date? {
@@ -250,11 +283,15 @@ struct ReReviewAssessment: Codable, Sendable {
     enum ValidationError: Error { case incompleteEvidence }
 
     private func hasPublishedReply(for note: Note, in discussions: [GitLabMergeRequestDiscussion], authorID: Int) -> Bool {
-        guard [.addressed, .rejected].contains(note.state), let replyID = note.publishedReplyNoteID, replyID > note.noteID else { return false }
+        guard [.addressed, .rejected].contains(note.state), let replyID = note.publishedReplyNoteID else { return false }
         let matching = discussions.flatMap(\.notes).filter { $0.id == replyID }
-        guard matching.count == 1, let reply = matching.first, reply.system == false, reply.author?.id == authorID,
-              let body = reply.body, !body.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else { return false }
-        return true
+        guard matching.count == 1, let reply = matching.first else { return false }
+        return Self.isAuthorReply(reply, after: note.noteID, authorID: authorID)
+    }
+
+    private static func isAuthorReply(_ note: GitLabMergeRequestDiscussion.Note, after sourceID: Int, authorID: Int) -> Bool {
+        note.system == false && note.author?.id == authorID && (note.id ?? 0) > sourceID
+            && note.body?.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty == false
     }
 
     func hasNoRemainingAuthorWork(in discussions: [GitLabMergeRequestDiscussion], authorID: Int,
@@ -266,9 +303,9 @@ struct ReReviewAssessment: Codable, Sendable {
             && assessment.missingPublishedReplyNoteIDs(in: discussions, authorID: authorID, excludedReplyAuthorIDs: excludedReplyAuthorIDs).isEmpty
     }
 
-    func reviewers(in discussions: [GitLabMergeRequestDiscussion], authorID: Int,
+    func reviewers(in allDiscussions: [GitLabMergeRequestDiscussion], authorID: Int,
                    ignoredSuggestions: [IgnoredFeedbackSuggestion] = [], excludedReplyAuthorIDs: Set<Int> = []) throws -> [Int: Int] {
-        let discussions = GitLabMergeRequestDiscussion.activeForReview(discussions)
+        let discussions = GitLabMergeRequestDiscussion.activeForReview(allDiscussions)
         let external = discussions.flatMap(\.notes).filter { $0.system != true && $0.author?.id != authorID }
         guard external.allSatisfy({ ($0.id ?? 0) > 0 && ($0.author?.id ?? 0) > 0 && $0.body != nil }),
               Set(external.compactMap(\.id)).count == external.count,
@@ -307,6 +344,14 @@ struct ReReviewAssessment: Codable, Sendable {
                 }
             }
             let ignoredIDs = assessment.ignoredDecisionIDs ?? []
+            let validPublishedReply = assessment.publishedReplyNoteID.map { replyID in
+                if hasPublishedReply(for: assessment, in: discussions, authorID: authorID) { return true }
+                return discussions.contains { $0.reviewRoot?.id == id }
+                    && allDiscussions.contains {
+                        Self.isResolvedOverviewReply($0, replyID: replyID, assessment: assessment, overview: note)
+                    }
+                    && hasPublishedReply(for: assessment, in: allDiscussions, authorID: authorID)
+            } ?? true
             if let proof = assessment.reviewerOptOut {
                 guard !proof.sourceQuote.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty,
                       proof.sourceQuote.count <= 500, note.body?.contains(proof.sourceQuote) == true,
@@ -322,7 +367,7 @@ struct ReReviewAssessment: Codable, Sendable {
                   assessment.state != .ignoredByUser || !ignoredIDs.isEmpty,
                   assessment.state != .ignoredByUser || (assessment.acceptanceNoteID == nil && assessment.informationalAcknowledgementSafe != true),
                   ignoredIDs.isEmpty || [.ignoredByUser, .addressed, .rejected, .blocking, .uncertain].contains(assessment.state),
-                  assessment.publishedReplyNoteID == nil || hasPublishedReply(for: assessment, in: discussions, authorID: authorID),
+                  validPublishedReply,
                   ignoredSuggestions.filter({ ignoredIDs.contains($0.id) }).allSatisfy({ $0.matches(note) })
             else { throw ValidationError.incompleteEvidence }
             switch assessment.state {

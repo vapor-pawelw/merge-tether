@@ -810,6 +810,62 @@ struct ReReviewVerifierTests {
     }
 
     @Test(arguments: AutomationAssistant.allCases)
+    func verifierUsesAResolvedFindingReplyForItsActiveReviewOverview(_ assistant: AutomationAssistant) async throws {
+        let folder = FileManager.default.temporaryDirectory.appending(path: UUID().uuidString)
+        try FileManager.default.createDirectory(at: folder, withIntermediateDirectories: false)
+        defer { try? FileManager.default.removeItem(at: folder) }
+        let script = folder.appending(path: "cli")
+        try Data("""
+            #!/usr/bin/python3
+            import json,sys
+            args=sys.argv[1:]
+            incoming=sys.stdin.read()
+            codex=args[0]=='exec'
+            schema=json.load(open(args[args.index('--output-schema')+1])) if codex else json.loads(args[args.index('--json-schema')+1])
+            assert schema['properties']['notes']['items']['properties']['noteID']['enum']==[10,20]
+            assert 'Published answer in closed finding' in incoming
+            assert 'Unrelated closed content' not in incoming
+            result={'notes':[
+                {'noteID':10,'state':'addressed','reason':'The verified correction and published reply fully answer the overview.',
+                 'informationalPurpose':'reviewSummary','publishedReplyNoteID':12},
+                {'noteID':20,'state':'addressed','reason':'The separate documentation request was implemented.'}]}
+            if codex: json.dump(result,open(args[args.index('-o')+1],'w'))
+            else: print(json.dumps({'is_error':False,'structured_output':result}))
+            """.utf8).write(to: script)
+        try FileManager.default.setAttributes([.posixPermissions: 0o700], ofItemAtPath: script.path)
+        let discussions = try JSONDecoder().decode([GitLabMergeRequestDiscussion].self, from: Data("""
+            [{"id":"overview","notes":[
+              {"id":10,"author":{"id":7},"system":false,"resolvable":false,"created_at":"2026-01-01T10:00:00.000Z","body":"I left a question about accepting the general contact number."}]},
+             {"id":"finding","notes":[
+              {"id":11,"author":{"id":7},"system":false,"resolvable":true,"resolved":true,"created_at":"2026-01-01T10:00:00.120Z","body":"Keep this update limited to the verification number."},
+              {"id":12,"author":{"id":3},"system":false,"body":"Published answer in closed finding: the update now ignores the general number."}]},
+             {"id":"separate","notes":[{"id":20,"author":{"id":7},"system":false,"resolvable":false,"created_at":"2026-01-01T11:00:00Z","body":"Please document the retry limit."}]},
+             {"id":"unrelated","notes":[
+              {"id":21,"author":{"id":7},"system":false,"resolvable":true,"resolved":true,"created_at":"2026-01-01T08:00:00Z","body":"Unrelated closed content"},
+              {"id":22,"author":{"id":3},"system":false,"body":"I documented that older behavior."}]}]
+            """.utf8))
+        let input = ReReviewVerifier.Input(authorID: 3, headSHA: String(repeating: "a", count: 40),
+            title: "Synthetic review", diff: "The update ignores the general number.", discussions: discussions)
+
+        let prepared = input.activeEvidence
+        #expect(prepared.discussions.compactMap(\.id) == ["overview", "separate"])
+        let assessment = try await ReReviewVerifier.run(prepared, assistant: assistant, model: "fixture", executable: script, retryWait: { _ in })
+
+        #expect(assessment.notes.map(\.noteID) == [10, 20])
+        #expect(assessment.missingPublishedReplyNoteIDs(in: discussions, authorID: 3) == [20])
+        let findings = AuthorFeedbackPolicy.evaluate(discussions: discussions, assessment: assessment, authorID: 3, approvedReviewerIDs: [7])
+        #expect(findings.filter { $0.state == .needsReply }.map(\.id) == [20])
+        let overviewAssessment = ReReviewAssessment(notes: assessment.notes.filter { $0.noteID == 10 })
+        #expect(overviewAssessment.hasNoRemainingAuthorWork(in: discussions.filter { $0.id != "separate" }, authorID: 3))
+
+        let withoutReply = discussions.filter { $0.id != "finding" }
+        #expect(assessment.missingPublishedReplyNoteIDs(in: withoutReply, authorID: 3) == [10, 20])
+        #expect(throws: ReReviewAssessment.ValidationError.self) {
+            _ = try assessment.reviewers(in: withoutReply, authorID: 3)
+        }
+    }
+
+    @Test(arguments: AutomationAssistant.allCases)
     func verifierOmitsTheEntireResolvedDiscussion(_ assistant: AutomationAssistant) async throws {
         let folder = FileManager.default.temporaryDirectory.appending(path: UUID().uuidString)
         try FileManager.default.createDirectory(at: folder, withIntermediateDirectories: false)
