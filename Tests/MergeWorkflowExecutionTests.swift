@@ -1324,6 +1324,92 @@ import Testing
         await coordinator.waitForTermination()
     }
 
+    @Test(arguments: ["during-read", "handoff-saved", "changed-head", "changed-account"])
+    func inFlightReReviewRecoversFromItsLastDurableBoundary(_ scenario: String) async throws {
+        let suite = "WorkflowReviewAdmission.\(UUID())"
+        let defaults = try #require(UserDefaults(suiteName: suite))
+        let restoredSuite = suite + ".restored"
+        let restoredDefaults = try #require(UserDefaults(suiteName: restoredSuite))
+        defer {
+            defaults.removePersistentDomain(forName: suite)
+            restoredDefaults.removePersistentDomain(forName: restoredSuite)
+        }
+        let settings = SettingsManager(defaults: defaults)
+        settings.automation.applyPreset(.full, for: .codex)
+        let host = "gitlab-\(UUID().uuidString.lowercased()).example.test"
+        let user = GitLabAuthenticatedUser(id: 1, username: "me")
+        let head = String(repeating: "a", count: 40)
+        let url = try #require(URL(string: "https://\(host)/team/repo/-/merge_requests/11"))
+        let gitlab = reviewRetryGitLab(host: host, url: url, currentHead: head)
+        defer { gitlab.close() }
+        let glab = gitlab.service(host: host, username: user.username)
+        settings.glabPath = glab.glabPath
+        let request = try await glab.fetchMergeRequest(projectID: 7, iid: 11, host: host)
+        let event = MergeWorkflowEvent(kind: .reviewUpdate, mergeRequest: request, identity: "interrupted-admission", context: "Source updated")
+        var preparation: [String: Any]?
+        gitlab.beforeCommand = { call in
+            if call.arguments == ["auth", "status"], preparation == nil {
+                #expect(settings.workflowActivity.first?.state == .running)
+                #expect(settings.assistantHandoffs.isEmpty)
+                preparation = defaults.persistentDomain(forName: suite)
+            }
+        }
+        let originalCoordinator = AssistantJobCoordinator(healthStore: AssistantCLIHealthStore(defaults: defaults), execute: { _, _ in
+            .init(result: .init(status: .succeeded, summary: "Review fixture"), output: "")
+        })
+        let original = MergeWorkflowAutomation(settings: settings, glab: glab, jobCoordinator: originalCoordinator)
+        @MainActor func settle(_ automation: MergeWorkflowAutomation) async throws {
+            let deadline = ContinuousClock.now + .seconds(5)
+            while automation.entries.first.map({ [.queued, .running, .waitingForAssistant].contains($0.state) }) == true {
+                try #require(ContinuousClock.now < deadline)
+                try await Task.sleep(for: .milliseconds(5))
+            }
+        }
+        original.receive(event, host: host, user: user)
+        original.startNext()
+        try await settle(original)
+        await originalCoordinator.waitForTermination()
+        #expect(original.entries.first?.state == .completed)
+        let originalRun = try #require(settings.assistantHandoffs.first)
+        var restartSnapshot = try #require(preparation)
+        if scenario == "handoff-saved" {
+            // The handoff journal can reach disk before its workflow link.
+            restartSnapshot["assistantHandoffs"] = try #require(defaults.data(forKey: "assistantHandoffs"))
+        }
+        restoredDefaults.setPersistentDomain(restartSnapshot, forName: restoredSuite)
+        let restored = SettingsManager(defaults: restoredDefaults)
+        if scenario == "changed-head" { gitlab.write("current-head", String(repeating: "b", count: 40)) }
+        if scenario == "changed-account" {
+            let handler = try #require(gitlab.handler)
+            gitlab.handler = { call in
+                if call.endpoint == "/user" { return InMemoryGitLab.output(#"{"id":3,"username":"me"}"#) }
+                return try await handler(call)
+            }
+        }
+        var resumedRuns = 0
+        let resumedCoordinator = AssistantJobCoordinator(healthStore: AssistantCLIHealthStore(defaults: restoredDefaults), execute: { _, _ in
+            resumedRuns += 1
+            return .init(result: .init(status: .succeeded, summary: "Review fixture"), output: "")
+        })
+        let resumed = MergeWorkflowAutomation(settings: restored, glab: glab, jobCoordinator: resumedCoordinator)
+        let requestsBeforeResume = gitlab.requests.count
+        resumed.startNext()
+        try await settle(resumed)
+        await resumedCoordinator.waitForTermination()
+
+        if scenario == "changed-head" || scenario == "changed-account" {
+            #expect(resumed.entries.first?.state == .skipped)
+            #expect(restored.assistantHandoffs.isEmpty)
+            #expect(gitlab.requests.count > requestsBeforeResume)
+        } else {
+            #expect(resumed.entries.first?.state == .completed)
+            #expect(resumed.entries.first?.assistantJobID == originalRun.id)
+            #expect(restored.assistantHandoffs.map(\.id) == [originalRun.id])
+            if scenario == "handoff-saved" { #expect(gitlab.requests.count == requestsBeforeResume) }
+        }
+        #expect(resumedRuns == (scenario == "during-read" ? 1 : 0))
+    }
+
     @Test(arguments: [MergeWorkflowActivityState.queued, .running])
     func restoredAdmissionIsDurablySkippedWithoutDispatch(_ state: MergeWorkflowActivityState) throws {
         let suite = "WorkflowStartupAdmission.\(UUID())"

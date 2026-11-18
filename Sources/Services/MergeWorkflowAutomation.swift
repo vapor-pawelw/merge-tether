@@ -56,6 +56,7 @@ struct MergeWorkflowActivityEntry: Codable, Identifiable {
     var readOnlyFailure: MergeWorkflowReadFailure? = nil
     var deferredForWorker: Bool? = nil
     var deferredForCapacity: Bool? = nil
+    var preparedReviewJobID: UUID? = nil
     var isReadOnlyFailure: Bool { readOnlyFailure != nil }
 }
 
@@ -191,13 +192,37 @@ final class MergeWorkflowAutomation {
         var changed = false
         for index in settings.workflowActivity.indices where [.queued, .running].contains(settings.workflowActivity[index].state) {
             let entry = settings.workflowActivity[index]
-            // Review admission persists .running before the launcher can create a handoff.
-            if entry.state == .queued, entry.assistantJobID == nil, entry.chatURL == nil,
-               entry.event.kind != .pipelineFailure,
-               entry.event.kind == .reviewUpdate || entry.deferredForWorker == true || entry.deferredForCapacity == true { continue }
+            if entry.event.kind == .reviewUpdate, entry.assistantJobID == nil, entry.chatURL == nil,
+               let id = entry.preparedReviewJobID {
+                guard settings.automaticActionsAllowed else { continue }
+                let jobs = settings.assistantHandoffs.filter { $0.id == id }
+                if jobs.count == 1, let job = jobs.first, job.key.work == workKey(entry),
+                   job.key.username == entry.user.username, job.manual != true, job.workflow == .review,
+                   job.workflowEventKind == .reviewUpdate, job.expectedHeadSHA == entry.event.mergeRequest.sha,
+                   job.execution != nil {
+                    // The handoff may have reached disk before the workflow link.
+                    settings.workflowActivity[index].assistantJobID = job.id
+                    settings.workflowActivity[index].state = .waitingForAssistant
+                    settings.workflowActivity[index].preparedReviewJobID = nil
+                    changed = true
+                    continue
+                }
+                if jobs.isEmpty, !AssistantAutomationRunner.PreparedWorkflowReview.hasExecutionEvidence(for: id) {
+                    if entry.state != .queued {
+                        settings.workflowActivity[index].state = .queued
+                        changed = true
+                    }
+                    continue
+                }
+            } else if entry.state == .queued, entry.assistantJobID == nil, entry.chatURL == nil,
+                      entry.event.kind != .pipelineFailure,
+                      entry.event.kind == .reviewUpdate || entry.deferredForWorker == true || entry.deferredForCapacity == true {
+                continue
+            }
             settings.workflowActivity[index].state = .skipped
             settings.workflowActivity[index].deferredForWorker = nil
             settings.workflowActivity[index].deferredForCapacity = nil
+            settings.workflowActivity[index].preparedReviewJobID = nil
             changed = true
         }
         if changed { settings.save() }
@@ -432,6 +457,7 @@ final class MergeWorkflowAutomation {
                     $0.state = mode == .notify || mode == .preview ? .preview : .skipped
                     $0.deferredForWorker = nil
                     $0.deferredForCapacity = nil
+                    $0.preparedReviewJobID = nil
                 }
                 continue
             }
@@ -440,10 +466,13 @@ final class MergeWorkflowAutomation {
                 if next.deferredForWorker != true { deferForActiveWorker(next) }
                 continue
             }
+            // Reserve the exact job identity before the first read can suspend admission.
+            let preparedReviewJobID = next.event.kind == .reviewUpdate ? next.preparedReviewJobID ?? UUID() : nil
             mutate(next.id, ifCurrent: next) {
                 $0.state = .running
                 $0.deferredForWorker = nil
                 $0.deferredForCapacity = nil
+                $0.preparedReviewJobID = preparedReviewJobID
             }
             work = Task {
                 defer {
@@ -451,7 +480,7 @@ final class MergeWorkflowAutomation {
                     startNext()
                 }
                 do {
-                    try await execute(next)
+                    try await execute(next, preparedReviewJobID: preparedReviewJobID)
                 } catch is CancellationError {
                     update(next.id, .skipped, ifCurrent: next)
                 } catch AssistantJobExecutor.ExecutionError.headChanged where next.event.kind == .reviewUpdate {
@@ -500,7 +529,7 @@ final class MergeWorkflowAutomation {
         let configuration: AutomationSettings
     }
 
-    private func execute(_ entry: MergeWorkflowActivityEntry) async throws {
+    private func execute(_ entry: MergeWorkflowActivityEntry, preparedReviewJobID: UUID?) async throws {
         let event = entry.event
         let original = event.mergeRequest
         let assessmentConfiguration = settings.automation
@@ -761,7 +790,8 @@ final class MergeWorkflowAutomation {
                 feedbackNoteIDs: feedbackIDs, isReview: event.kind == .reviewUpdate, mrWorkflow: mrWorkflow,
                 expectedHeadSHA: bindLaunchSnapshot || confirmation != nil ? current.sha : nil, jobCoordinator: jobCoordinator,
                 configurationSnapshot: bindLaunchSnapshot ? settingsBeforeLaunch : nil,
-                glab: glab.freshSession(), workflowEventKind: event.kind, pipelineHandoffConfirmation: confirmation
+                glab: glab.freshSession(), workflowEventKind: event.kind, pipelineHandoffConfirmation: confirmation,
+                preparedWorkflowReview: preparedReviewJobID.map { .init(jobID: $0, user: entry.user) }
             )
         } catch let failure as AssistantAutomationRunner.ReviewAdmissionReadFailure where event.kind == .reviewUpdate {
             throw PrelaunchReadFailure(cause: failure.cause, configuration: settingsBeforeLaunch)
@@ -772,6 +802,7 @@ final class MergeWorkflowAutomation {
         mutate(entry.id, ifCurrent: entry) {
             $0.assistantJobID = job.id
             $0.state = .waitingForAssistant
+            $0.preparedReviewJobID = nil
         }
         synchronizeAssistantJobs()
     }
