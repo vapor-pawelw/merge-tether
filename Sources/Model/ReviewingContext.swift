@@ -127,7 +127,7 @@ struct ReviewingContext {
             let actor = username.isEmpty ? nil : username
             presence = source.actionName == .approvalRequired ? .approvalRequested(actor) : .reviewRequested(actor)
         }
-        let review = row.latestJob.flatMap { $0.workflow == .review || $0.reviewModel != nil ? $0 : nil }
+        let review = row.latestJob.flatMap { AssistantAutomationRunner.recordsReviewVerdict(for: $0) ? $0 : nil }
         let currentReview = review.flatMap { run in
             run.expectedHeadSHA != nil && run.expectedHeadSHA == item.mergeRequest?.sha ? run : nil
         }

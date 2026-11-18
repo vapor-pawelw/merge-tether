@@ -273,4 +273,87 @@ struct StalePipelineJobTests {
         #expect(!ran && settings.assistantHandoffs.count == 1)
         #expect(settings.assistantHandoffs[0].execution?.state == .blocked)
     }
+
+    @Test(arguments: ["failed", "passed", "replaced", "running", "missing", "changed-head", "changed-account",
+                      "changed-pipeline-project", "recovered-during-read", "unbound-legacy"])
+    func foreignPipelineRetryRequiresTheRecordedPipelineToStillBeFailed(_ scenario: String) async throws {
+        let suite = "ForeignPipelineRetry.\(UUID())"
+        let defaults = try #require(UserDefaults(suiteName: suite))
+        defer { defaults.removePersistentDomain(forName: suite) }
+        let settings = SettingsManager(defaults: defaults)
+        settings.automation.applyPreset(.full, for: .codex)
+        let host = "gitlab-\(UUID().uuidString.lowercased()).example.test"
+        let url = try #require(URL(string: "https://\(host)/team/repo/-/merge_requests/11"))
+        let stop = AssistantAutomationRunner.Handoff(id: UUID(), key: .init(assistant: .codex,
+            work: .init(host: host, projectID: 7, iid: 11), username: "me", workspace: "", access: .gitLabRead),
+            title: "Pipeline diagnosis", prompt: "Diagnose pipeline 10", createdAt: Date(), allowsPush: false,
+            execution: .init(state: .blocked, blocker: "Pipeline diagnosis interrupted"),
+            taskPrompt: "Diagnose pipeline 10", mergeRequestURL: url, workflow: .review, manual: true,
+            expectedHeadSHA: Self.sha, taskIntent: .pipelineDiagnosis)
+        var saved = try #require(JSONSerialization.jsonObject(with: JSONEncoder().encode(stop)) as? [String: Any])
+        if scenario != "unbound-legacy" {
+            saved["foreignPipelineDiagnosis"] = [
+                "pipelineID": 10, "projectID": 7, "sha": Self.sha, "reviewerID": 1, "authorID": 2,
+            ]
+        }
+        let stopped = try JSONDecoder().decode(AssistantAutomationRunner.Handoff.self,
+            from: JSONSerialization.data(withJSONObject: saved))
+        settings.assistantHandoffs = [stopped]
+        settings.save()
+
+        let gitlab = InMemoryGitLab()
+        defer { gitlab.close() }
+        let currentHead = scenario == "changed-head" ? String(repeating: "b", count: 40) : Self.sha
+        let currentPipeline = scenario == "replaced" ? 11 : 10
+        let pipelineProject = scenario == "changed-pipeline-project" ? 8 : 7
+        let initialStatus = scenario == "passed" ? "success" : scenario == "running" ? "running" : "failed"
+        func pipelineData() -> [String: Any] {
+            ["id": currentPipeline, "project_id": pipelineProject, "sha": currentHead, "ref": "feature",
+             "status": gitlab.has("pipeline-recovered") ? "success" : initialStatus]
+        }
+        gitlab.handler = { call in
+            #expect(call.method == "GET")
+            if call.arguments == ["config", "get", "host"] { return InMemoryGitLab.output(host) }
+            if call.arguments == ["auth", "status"] { return InMemoryGitLab.output(error: "Logged in to \(host) as me") }
+            switch call.endpoint {
+            case "/user": return try InMemoryGitLab.json(["id": scenario == "changed-account" ? 3 : 1, "username": "me"])
+            case "/projects/7/merge_requests/11":
+                var payload: [String: Any] = ["project_id": 7, "iid": 11, "author": ["id": 2, "username": "other", "name": "Other"],
+                    "title": "Fixture", "web_url": url.absoluteString, "state": "opened", "draft": false,
+                    "sha": currentHead, "source_project_id": 7, "source_branch": "feature", "target_project_id": 7,
+                    "target_branch": "main", "labels": []]
+                if scenario != "missing" { payload["head_pipeline"] = pipelineData() }
+                return try InMemoryGitLab.json(payload)
+            case "/projects/7/pipelines/10": return try InMemoryGitLab.json(pipelineData())
+            case "/projects/7/repository/branches/feature":
+                if scenario == "recovered-during-read" { gitlab.write("pipeline-recovered") }
+                return try InMemoryGitLab.json(["commit": ["id": currentHead]])
+            default: return try gitlab.unexpected(call)
+            }
+        }
+        let glab = gitlab.service(host: host, username: "me")
+        let restored = SettingsManager(defaults: defaults)
+        restored.glabPath = glab.glabPath
+        var launches = 0
+        let coordinator = AssistantJobCoordinator(execute: { _, _ in
+            launches += 1
+            return .init(result: .init(status: .succeeded, summary: "Fixture diagnosis"), output: "")
+        })
+
+        let replacement = try? await AssistantAutomationRunner.retry(stopped.id, settings: restored,
+            jobCoordinator: coordinator, glab: glab)
+        await coordinator.waitForTermination()
+
+        if scenario == "failed" {
+            let run = try #require(replacement)
+            #expect(run.pipelineReservation == nil && !run.allowsPush && run.resolvesOwnThreads != true)
+            #expect(run.expectedHeadSHA == Self.sha && run.taskIntent == .pipelineDiagnosis)
+            #expect(gitlab.requests.contains { $0.endpoint == "/projects/7/pipelines/10" })
+        } else {
+            #expect(replacement == nil)
+            #expect(restored.assistantHandoffs.count == 1)
+        }
+        #expect(launches == (scenario == "failed" ? 1 : 0))
+        #expect(restored.assistantHandoffs.first { $0.id == stopped.id }?.execution?.state == .blocked)
+    }
 }

@@ -75,10 +75,23 @@ final class MergeRequestAttentionMonitor {
         /// Canonical read-only stack/dependency metadata, separate from merge permissions.
         var dependencies: MergeRequestDependencySummary?
 
-        /// Own replies already published, by thread; nil until the discussions were read.
+        /// Own replies observed in the discussions or confirmed by publication.
         var ownPublishedReplies: Set<DuplicateReplyDrafts.Reply>?
         /// Drafts that would repeat a reply already in their thread.
         var duplicateDraftIDs: Set<Int> { DuplicateReplyDrafts.ids(in: drafts, published: ownPublishedReplies ?? []) }
+        var publishAllDrafts: [GitLabDraftNote] {
+            let duplicates = duplicateDraftIDs
+            return drafts.filter { $0.id.map(duplicates.contains) != true }
+        }
+
+        mutating func rememberPublishedReply(_ draft: GitLabDraftNote) {
+            guard let thread = draft.discussionID, !thread.isEmpty else { return }
+            let body = DuplicateReplyDrafts.normalized(draft.note)
+            guard !body.isEmpty else { return }
+            var replies = ownPublishedReplies ?? []
+            replies.insert(.init(discussionID: thread, body: body))
+            ownPublishedReplies = replies
+        }
 
         var authoredRequest: GitLabMergeRequest? { isAuthored ? mergeRequest : nil }
         var canFinishCommentReview: Bool {
@@ -338,6 +351,7 @@ final class MergeRequestAttentionMonitor {
     private var feedbackNeedsRefresh = false
     var onAuthorFeedbackNeedsWork: ((GitLabMergeRequest, Set<Int>, String, AuthorFeedbackResidual?) async -> Void)?
     var onAuthorFeedbackChecked: (() -> Void)?
+    var onScopedAuthorFeedbackChecked: ((MRAutomationScope.Target, UInt64) -> Void)?
 
     private struct Account: Equatable {
         let host: String
@@ -466,15 +480,29 @@ final class MergeRequestAttentionMonitor {
             await self?.onAuthorFeedbackNeedsWork?(request, notes, fingerprint, residual)
         }
         authorFeedbackCoordinator?.onRemoteChange = { [weak self] in
-            guard let self, let account, isCurrent(account) else { return }
+            guard let self else { return }
             onAuthorFeedbackChecked?()
-            if isLoading { feedbackNeedsRefresh = true }
-            else { refresh(host: account.host, username: account.username, todos: []) }
+            requestFeedbackRefresh()
+        }
+        authorFeedbackCoordinator?.onScopedChange = { [weak self] request, target, revision, discussions in
+            guard let self, let account, isCurrent(account), account.host == target.host,
+                  account.username == target.username, glab.accountRevision == revision,
+                  let user else { return }
+            if let discussions {
+                let id = Item.ID(projectID: request.projectID, iid: request.iid)
+                updateItem(id, introducesAttention: false) { item in
+                    guard MRAttentionRecord.sameContext(item.mergeRequest, request),
+                          item.observedDiscussionFingerprint == ReviewVerdict.fingerprint(discussions) else { return }
+                    Self.applyDiscussionFeedback(to: &item, discussions: discussions, userID: user.id)
+                    applyReReviewPresentation(&item, unanswered: ReReviewFeedback(
+                        discussions: discussions, authorID: user.id).hasUnansweredFeedback)
+                }
+            }
+            onScopedAuthorFeedbackChecked?(target, revision)
+            onRefreshed?()
         }
         draftProofRecoveryCoordinator?.onChange = { [weak self] in
-            guard let self, let account, isCurrent(account) else { return }
-            if isLoading { feedbackNeedsRefresh = true }
-            else { refresh(host: account.host, username: account.username, todos: []) }
+            self?.requestFeedbackRefresh()
         }
         aiOriginCoordinator.onPersisted = { [weak self] target, notes, assessment in
             guard let context = originReadContexts.values.removeValue(forKey: target) else { return }
@@ -484,8 +512,7 @@ final class MergeRequestAttentionMonitor {
         aiOriginCoordinator.onChange = { [weak self] in
             guard let self, let account, isCurrent(account) else { return }
             displayAIOriginCoordinator?.resume()
-            if isLoading { feedbackNeedsRefresh = true }
-            else { refresh(host: account.host, username: account.username, todos: []) }
+            requestFeedbackRefresh()
         }
     }
 
@@ -592,6 +619,26 @@ final class MergeRequestAttentionMonitor {
         refresh(host: account.host, username: account.username, todos: [])
     }
 
+    func refreshFeedbackDecision(_ id: Item.ID, target: MRAutomationScope.Target, revision: UInt64) async {
+        let account = Account(host: target.host, username: target.username)
+        while isLoading || isRefreshingDrafts || isConfirming(id) {
+            await withCheckedContinuation { automaticActionIdleWaiters.append($0) }
+        }
+        guard !Task.isCancelled, isCurrent(account), self.account == account,
+              glab.accountRevision == revision, attentionRecordsRevision == revision else { return }
+        let todos = latestTodoSnapshot.flatMap {
+            $0.account == account && $0.revision == revision ? $0.todos : nil
+        } ?? []
+        authorFeedbackCoordinator?.invalidate(projectID: id.projectID, iid: id.iid)
+        isLoading = true
+        defer { finishRefresh(account, revision: revision) }
+        do {
+            try await poll(account, todos: todos, revision: revision, feedbackDecision: id)
+        } catch {
+            Log.monitor.error("Could not refresh feedback decision: \(String(describing: error), privacy: .private)")
+        }
+    }
+
     func refresh(host: String, username: String, todos: [Todo]) {
         let account = Account(host: host, username: username)
         guard isCurrent(account) else { return }
@@ -634,19 +681,7 @@ final class MergeRequestAttentionMonitor {
         refreshGeneration += 1
         isLoading = true
         Task {
-            defer {
-                isLoading = false; onRefreshed?()
-                let pending = pendingRefresh
-                pendingRefresh = nil
-                if let pending, pending.revision == glab.accountRevision, isCurrent(pending.account) {
-                    feedbackNeedsRefresh = false
-                    refresh(host: pending.account.host, username: pending.account.username, todos: pending.todos)
-                } else if feedbackNeedsRefresh, isCurrent(account) {
-                    feedbackNeedsRefresh = false
-                    refresh(host: account.host, username: account.username, todos: [])
-                }
-                signalAutomaticActionIdle()
-            }
+            defer { finishRefresh(account, revision: revision) }
             do {
                 try await poll(account, todos: todos, revision: revision)
             } catch {
@@ -661,6 +696,29 @@ final class MergeRequestAttentionMonitor {
 
     private func isCurrent(_ account: Account) -> Bool {
         glab.resolvedHost == account.host && glab.currentUsername == account.username
+    }
+
+    private func requestFeedbackRefresh() {
+        guard let account, isCurrent(account), let snapshot = latestTodoSnapshot,
+              snapshot.account == account, snapshot.revision == glab.accountRevision else { return }
+        if isLoading { feedbackNeedsRefresh = true }
+        else { refresh(host: account.host, username: account.username, todos: snapshot.todos) }
+    }
+
+    private func finishRefresh(_ account: Account, revision: UInt64) {
+        isLoading = false
+        onRefreshed?()
+        let pending = pendingRefresh
+        pendingRefresh = nil
+        let needsRefresh = feedbackNeedsRefresh
+        feedbackNeedsRefresh = false
+        if let pending, pending.revision == glab.accountRevision, isCurrent(pending.account) {
+            refresh(host: pending.account.host, username: pending.account.username, todos: pending.todos)
+        } else if needsRefresh, isCurrent(account), let snapshot = latestTodoSnapshot,
+                  snapshot.account == account, snapshot.revision == revision, revision == glab.accountRevision {
+            refresh(host: account.host, username: account.username, todos: snapshot.todos)
+        }
+        signalAutomaticActionIdle()
     }
 
     private func clearApprovalProgress() {
@@ -690,20 +748,7 @@ final class MergeRequestAttentionMonitor {
               settings?.actionIsAutomatic(key.action, for: key.target) == true else { return }
         refreshGeneration += 1
         isLoading = true
-        defer {
-            isLoading = false
-            onRefreshed?()
-            let pending = pendingRefresh
-            pendingRefresh = nil
-            if let pending, pending.revision == glab.accountRevision, isCurrent(pending.account) {
-                feedbackNeedsRefresh = false
-                refresh(host: pending.account.host, username: pending.account.username, todos: pending.todos)
-            } else if feedbackNeedsRefresh, isCurrent(account) {
-                feedbackNeedsRefresh = false
-                refresh(host: account.host, username: account.username, todos: [])
-            }
-            signalAutomaticActionIdle()
-        }
+        defer { finishRefresh(account, revision: key.revision) }
         do {
             let todos = latestTodoSnapshot.flatMap {
                 $0.account == account && $0.revision == key.revision ? $0.todos : nil
@@ -732,18 +777,33 @@ final class MergeRequestAttentionMonitor {
     }
 
     private func poll(_ account: Account, todos: [Todo], revision: UInt64,
-                      automaticResume: (id: Item.ID, action: MRAutomaticAction)? = nil) async throws {
+                      automaticResume: (id: Item.ID, action: MRAutomaticAction)? = nil,
+                      feedbackDecision: Item.ID? = nil) async throws {
         let host = account.host
         let user = try await glab.fetchAuthenticatedUser(host: host, expectedUsername: account.username)
+        guard isCurrent(account), revision == glab.accountRevision else { return }
         self.user = user
         let agentWorks = assistantWorks(username: user.username)
         let verdictDirectory = verdictDirectory
         let observedAt = Date()
-        async let authored = try? glab.fetchAuthoredMergeRequests(host: host)
-        async let reviewing = try? glab.fetchReviewAssignedMergeRequests(userID: user.id, host: host)
-        let (owned, assigned) = await (authored, reviewing)
-        guard isCurrent(account) else { return }
-        let listed = (owned ?? []) + (assigned ?? [])
+        let owned: [GitLabMergeRequest]?
+        let assigned: [GitLabMergeRequest]?
+        let listed: [GitLabMergeRequest]
+        if let id = feedbackDecision {
+            let request = try await glab.fetchMergeRequest(projectID: id.projectID, iid: id.iid, host: host)
+            guard request.projectID == id.projectID, request.iid == id.iid,
+                  request.webURL.isGitLabMergeRequest(host: host, iid: id.iid),
+                  ["opened", "closed", "merged"].contains(request.state) else { return }
+            owned = nil
+            assigned = nil
+            listed = [request]
+        } else {
+            async let authored = try? glab.fetchAuthoredMergeRequests(host: host)
+            async let reviewing = try? glab.fetchReviewAssignedMergeRequests(userID: user.id, host: host)
+            (owned, assigned) = await (authored, reviewing)
+            listed = (owned ?? []) + (assigned ?? [])
+        }
+        guard isCurrent(account), revision == glab.accountRevision else { return }
         func target(for request: GitLabMergeRequest) -> MRAutomationScope.Target {
             .init(host: host, username: user.username, projectID: request.projectID, iid: request.iid)
         }
@@ -779,9 +839,9 @@ final class MergeRequestAttentionMonitor {
             let directory = provenanceDirectory
             Task.detached(priority: .utility) { AICommentProvenanceStore.removeMergeRequest(origins, in: directory) }
         }
-        pruneInactiveProvenance(now: observedAt)
-        guard revision == glab.accountRevision else { return }
-        for pending in settings?.pendingCommentReviews ?? [] where pending.host == host && pending.username == user.username {
+        if feedbackDecision == nil { pruneInactiveProvenance(now: observedAt) }
+        for pending in settings?.pendingCommentReviews ?? [] where pending.host == host && pending.username == user.username
+            && (feedbackDecision == nil || (pending.projectID == feedbackDecision?.projectID && pending.iid == feedbackDecision?.iid)) {
             if isIgnored(pending) || settings?.mrLifecycleLedger.request(for: pending)?.state == "merged" {
                 settings?.completeCommentReview(for: pending)
             }
@@ -796,8 +856,11 @@ final class MergeRequestAttentionMonitor {
             $0.webURL.isGitLabMergeRequest(host: host, iid: $0.iid)
                 && ["opened", "closed", "merged"].contains($0.state)
         }.map { Item.ID(projectID: $0.projectID, iid: $0.iid) })
-        var previousCatalog = Dictionary(uniqueKeysWithValues: openItems.map { ($0.id, $0) })
-        for request in settings?.mrLifecycleLedger.retainedRequests(host: host, username: user.username) ?? [] {
+        var previousCatalog = Dictionary(uniqueKeysWithValues: openItems
+            .filter { feedbackDecision == nil || $0.id == feedbackDecision }.map { ($0.id, $0) })
+        let retainedRequests = feedbackDecision == nil
+            ? (settings?.mrLifecycleLedger.retainedRequests(host: host, username: user.username) ?? []) : []
+        for request in retainedRequests {
             let id = Item.ID(projectID: request.projectID, iid: request.iid)
             if previousCatalog[id] == nil {
                 previousCatalog[id] = Item(id: id, title: request.title, url: request.webURL,
@@ -827,7 +890,8 @@ final class MergeRequestAttentionMonitor {
             $0.target.host == host && $0.target.username == user.username && $0.grantsManagement
         }.map(\.target))
         let trackedTargets = settings?.mrLifecycleLedger.targets(host: host, username: user.username) ?? []
-        let lookupTargets = scopeTargets.union(recordedTargets).union(intentTargets).union(trackedTargets)
+        let lookupTargets = feedbackDecision == nil
+            ? scopeTargets.union(recordedTargets).union(intentTargets).union(trackedTargets) : []
         var explicit: [GitLabMergeRequest] = []
         var recordedReviews: [GitLabMergeRequest] = []
         var explicitFetchFailed = false
@@ -886,21 +950,26 @@ final class MergeRequestAttentionMonitor {
                         title: todo.displayTitle, url: url?.url ?? todo.targetURL, draftFromTodo: todo.isDraft)
         }
         var candidates: [Item.ID: Item] = [:]
-        for item in items where item.draftCount > 0 || item.requiresCommentReview || owned == nil {
+        for item in items where (feedbackDecision == nil || item.id == feedbackDecision)
+            && (item.draftCount > 0 || item.requiresCommentReview || owned == nil) {
             candidates[item.id] = item
         }
-        for item in recentTodos where candidates[item.id] == nil {
+        for item in recentTodos where (feedbackDecision == nil || item.id == feedbackDecision) && candidates[item.id] == nil {
             candidates[item.id] = item
         }
-        for item in todoItems {
+        for item in todoItems where feedbackDecision == nil || item.id == feedbackDecision {
             if candidates[item.id] == nil { candidates[item.id] = item }
             candidates[item.id]?.draftFromTodo = item.draftFromTodo
         }
-        recentTodos = todoItems
+        if feedbackDecision == nil { recentTodos = todoItems }
 
         for mr in currentListed {
             guard mr.state == "opened", mr.webURL.isGitLabMergeRequest(host: host, iid: mr.iid) else { continue }
             let id = Item.ID(projectID: mr.projectID, iid: mr.iid)
+            if feedbackDecision != nil {
+                guard !isIgnored(target(for: mr)),
+                      previousCatalog[id] != nil || candidates[id] != nil || isTracked(mr) else { continue }
+            }
             var item = Item(
                 id: id, title: mr.title, url: mr.webURL, draftCount: candidates[id]?.draftCount ?? 0,
                 draftFromTodo: candidates[id]?.draftFromTodo ?? false, mergeRequest: mr, isAuthored: mr.author.id == user.id
@@ -939,7 +1008,7 @@ final class MergeRequestAttentionMonitor {
         var results: [Item] = []
         var authoredUnansweredFeedback: [Item.ID: Bool] = [:]
         var reReviewCandidates: [(GitLabMergeRequest, ReReviewFeedback, Int)] = []
-        var failed = owned == nil || assigned == nil
+        var failed = feedbackDecision == nil && (owned == nil || assigned == nil)
         let ordered = candidates.values.sorted { ($0.id.projectID, $0.id.iid) < ($1.id.projectID, $1.id.iid) }
         // Limit simultaneous glab processes while still checking the entire list.
         for start in stride(from: 0, to: ordered.count, by: 4) {
@@ -1069,18 +1138,7 @@ final class MergeRequestAttentionMonitor {
                                 }
                             }
                             if item.isAuthored {
-                                updated.feedback = GitLabMergeRequestDiscussion.unresolvedFeedback(in: discussions, excluding: user.id)
-                                let feedbackIDs = Set(updated.feedback.compactMap(\.id))
-                                let unresolved = discussions.filter { discussion in
-                                    discussion.notes.contains { $0.system != true && $0.resolvable == true && $0.resolved == false }
-                                }
-                                let uncertain = discussions.contains { discussion in
-                                    discussion.notes.contains { $0.system != true && $0.resolvable == true && $0.resolved == nil }
-                                }
-                                updated.hasOtherUnresolvedDiscussions = unresolved.contains { discussion in
-                                    !discussion.notes.contains { $0.id.map(feedbackIDs.contains) == true }
-                                } || ((uncertain || unresolved.isEmpty) && item.needsDiscussion)
-                                updated.needsDiscussion = !unresolved.isEmpty || item.needsDiscussion
+                                Self.applyDiscussionFeedback(to: &updated, discussions: discussions, userID: user.id)
                             }
                         }
                         let feedback = discussions.map { ReReviewFeedback(discussions: $0, authorID: user.id) }
@@ -1106,7 +1164,7 @@ final class MergeRequestAttentionMonitor {
                         item.mergeRequest = latest
                     }
                     let work = AssistantAutomationRunner.MergeRequestWork(host: host, projectID: item.id.projectID, iid: item.id.iid)
-                    if success, let request = item.mergeRequest, let discussions {
+                    if feedbackDecision == nil, success, let request = item.mergeRequest, let discussions {
                         await scheduleAIOriginChecks(request: request, drafts: item.drafts, discussions: discussions,
                             account: account, user: user)
                     }
@@ -1124,7 +1182,8 @@ final class MergeRequestAttentionMonitor {
                         let verificationCandidates = item.mergeRequest.map { request in
                             DraftReplyRepair.preparationAllowed(request, configuration: settings.automation) ? item.drafts : candidates
                         } ?? candidates
-                        if automaticResume == nil || (automaticResume?.action == .commentPublication && automaticResume?.id == item.id),
+                        if feedbackDecision == nil,
+                           automaticResume == nil || (automaticResume?.action == .commentPublication && automaticResume?.id == item.id),
                            success, let request = item.mergeRequest, let discussions, let head = request.sha,
                            !verificationCandidates.isEmpty, settings.automation.allowFollowUpPush,
                            verificationCandidates.contains(where: { draft in
@@ -1176,7 +1235,8 @@ final class MergeRequestAttentionMonitor {
                     if automaticResume == nil, success, let request = item.authoredRequest, let discussions {
                         authorFeedbackCoordinator?.refresh(request: request, discussions: discussions,
                             drafts: item.draftCount, host: host, user: user,
-                            approvalRevision: item.approvalProgress.map(Self.approvalRevision))
+                            approvalRevision: item.approvalProgress.map(Self.approvalRevision),
+                            scopedRefresh: feedbackDecision != nil)
                     }
                     if automaticResume == nil, success, let feedback, let request = item.authoredRequest {
                         reReviewCandidates.append((request, feedback, item.draftCount))
@@ -1191,8 +1251,10 @@ final class MergeRequestAttentionMonitor {
             }
         }
         guard isCurrent(account), revision == glab.accountRevision else { return }
-        hasError = failed || explicitFetchFailed
-        hasOwnListing = owned != nil
+        if feedbackDecision == nil {
+            hasError = failed || explicitFetchFailed
+            hasOwnListing = owned != nil
+        }
         let openIDs = Set(currentListed.filter { $0.state == "opened" }.map {
             Item.ID(projectID: $0.projectID, iid: $0.iid)
         })
@@ -1213,7 +1275,7 @@ final class MergeRequestAttentionMonitor {
             guard isCurrent(account), revision == glab.accountRevision else { return }
             retainedCatalog[id] = item
         }
-        if let settings {
+        if let settings, feedbackDecision == nil {
             settings.mrLifecycleLedger.prepareFinishedRemoval(host: host, username: user.username)
             for target in settings.mrLifecycleLedger.targets(host: host, username: user.username) {
                 let id = Item.ID(projectID: target.projectID, iid: target.iid ?? 0)
@@ -1260,6 +1322,20 @@ final class MergeRequestAttentionMonitor {
                 applyReReviewPresentation(&results[index], unanswered: authoredUnansweredFeedback[id] ?? true)
             }
         }
+        if let id = feedbackDecision {
+            if let item = results.first {
+                let catalog = previousCatalog[id] != nil || item.mergeRequest.map(isTracked) == true
+                attentionRecords[id] = MRAttentionRecord(evidence: item, catalog: catalog ? item : nil)
+                attentionCandidateIDs.insert(id)
+                if catalog { catalogIDs.insert(id) }
+            } else if let request = currentListed.first, request.state != "opened" || isIgnored(target(for: request)) {
+                attentionRecords.removeValue(forKey: id)
+                attentionCandidateIDs.remove(id)
+                catalogIDs.remove(id)
+            }
+            settings?.save()
+            return
+        }
         var records = retainedCatalog.mapValues { MRAttentionRecord(evidence: $0, catalog: $0) }
         for item in results {
             records[item.id] = MRAttentionRecord(evidence: item, catalog: retainedCatalog[item.id])
@@ -1288,6 +1364,26 @@ final class MergeRequestAttentionMonitor {
             }
         }
         scheduleDependencyRefresh(account: account, revision: revision)
+    }
+
+    private nonisolated static func applyDiscussionFeedback(
+        to item: inout Item, discussions: [GitLabMergeRequestDiscussion], userID: Int
+    ) {
+        let aggregateBlocker = item.mergeRequest.map {
+            $0.blockingDiscussionsResolved == false || $0.detailedMergeStatus == "discussions_not_resolved"
+        } ?? item.needsDiscussion
+        item.feedback = GitLabMergeRequestDiscussion.unresolvedFeedback(in: discussions, excluding: userID)
+        let feedbackIDs = Set(item.feedback.compactMap(\.id))
+        let unresolved = discussions.filter { discussion in
+            discussion.notes.contains { $0.system != true && $0.resolvable == true && $0.resolved == false }
+        }
+        let uncertain = discussions.contains { discussion in
+            discussion.notes.contains { $0.system != true && $0.resolvable == true && $0.resolved == nil }
+        }
+        item.hasOtherUnresolvedDiscussions = unresolved.contains { discussion in
+            !discussion.notes.contains { $0.id.map(feedbackIDs.contains) == true }
+        } || ((uncertain || unresolved.isEmpty) && aggregateBlocker)
+        item.needsDiscussion = !unresolved.isEmpty || aggregateBlocker
     }
 
     /// The inbox is published before optional dependency reads. A cancelled predecessor
@@ -1814,6 +1910,7 @@ final class MergeRequestAttentionMonitor {
             if !publicDrafts.contains(draft) { publicDrafts.append(draft) }
             manualPublicationProgress[id] = .init(request: reviewedRequest, snapshot: snapshot,
                 accountRevision: revision, publicDrafts: publicDrafts)
+            updateItem(id) { $0.rememberPublishedReply(draft) }
         }
         var publishedNow: [GitLabDraftNote] = []
         var attemptedWrite = false
@@ -1944,8 +2041,7 @@ final class MergeRequestAttentionMonitor {
               !isConfirming(id) else { return }
         if !automatic {
             // "Publish all" never repeats a reply already in its thread; the user can still pick one explicitly.
-            let duplicates = displayed.duplicateDraftIDs
-            let publishable = displayed.drafts.filter { $0.id.map(duplicates.contains) != true }
+            let publishable = displayed.publishAllDrafts
             guard !publishable.isEmpty else { return }
             await publishDrafts(publishable, for: .init(host: account.host, username: account.username,
                 projectID: id.projectID, iid: id.iid, url: displayed.url))
@@ -2269,6 +2365,8 @@ final class MergeRequestAttentionMonitor {
               expectedDrafts.allSatisfy({ $0.id != nil && $0.authorID == user.id }),
               Set(expectedDrafts.compactMap(\.id)).count == expectedDrafts.count,
               let displayed = items.first(where: { $0.id == id }), displayed.drafts == expectedDrafts else { return .changed }
+        let publishable = displayed.publishAllDrafts
+        guard !publishable.isEmpty else { return .changed }
         let generation = accountGeneration, revision = glab.accountRevision
         let currentContext: @MainActor @Sendable () -> Bool = {
             generation == self.accountGeneration && revision == self.glab.accountRevision
@@ -2283,19 +2381,32 @@ final class MergeRequestAttentionMonitor {
         var attemptedWrite = false
         var publishedAny = false
         do {
-            for draft in expectedDrafts {
+            for draft in publishable {
                 try Task.checkCancellation()
                 async let live = glab.fetchMergeRequest(projectID: id.projectID, iid: id.iid, host: account.host)
                 async let authenticated = glab.fetchAuthenticatedUser(host: account.host, expectedUsername: account.username)
-                let (request, liveUser) = try await (live, authenticated)
+                async let threads = try? glab.fetchMergeRequestDiscussions(projectID: id.projectID, iid: id.iid, host: account.host)
+                let (request, liveUser, initialDiscussions) = try await (live, authenticated, threads)
                 guard currentContext() else { return publishedAny ? .partial : .changed }
                 guard liveUser == user else { throw GlabError.notAuthenticated }
-                let origin = await captureGeneratedPublication([draft], id: id, account: account, user: user)
+                let discussions: [GitLabMergeRequestDiscussion]
+                let origin: PublicationEvidence?
+                if let initialDiscussions {
+                    discussions = initialDiscussions
+                    origin = await captureGeneratedPublication([draft], id: id, account: account, user: user, before: discussions)
+                } else {
+                    // Retry duplicate validation once. A failed capture leaves origin evidence unknown.
+                    try Task.checkCancellation()
+                    discussions = try await glab.fetchMergeRequestDiscussions(projectID: id.projectID, iid: id.iid, host: account.host)
+                    origin = nil
+                }
+                let replies = DuplicateReplyDrafts.publishedReplies(in: discussions, userID: user.id)
                 // Read the exact bodies last, after identity checks that can suspend.
                 let drafts = try await glab.fetchOwnDraftNotes(projectID: id.projectID, iid: id.iid, host: account.host, userID: user.id)
                 guard currentContext(), request.state == "opened", request.sha == head,
                       request.projectID == id.projectID, request.iid == id.iid, request.webURL == displayed.url,
-                      drafts == remaining, let draftID = draft.id else {
+                      drafts == remaining, let draftID = draft.id,
+                      !DuplicateReplyDrafts.ids(in: drafts, published: replies).contains(draftID) else {
                     if currentContext() { confirmationStates[id] = .changed }
                     return publishedAny ? .partial : .changed
                 }
@@ -2307,14 +2418,20 @@ final class MergeRequestAttentionMonitor {
                 publishedAny = true
                 remaining.removeAll { $0 == draft }
                 publishedDrafts[id, default: []].append(draft)
-                updateItem(id) { $0.drafts = remaining; $0.draftCount = remaining.count }
+                updateItem(id) {
+                    $0.drafts = remaining; $0.draftCount = remaining.count
+                    $0.rememberPublishedReply(draft)
+                }
                 await recordGeneratedPublication(origin, id: id, account: account, user: user)
             }
             previousDrafts[id] = nil
             confirmationStates[id] = nil
-            await completeCommentReviewAfterPublication(id, snapshot: displayed.commentReviewSnapshot, published: expectedDrafts, account: account, user: user)
-            guard currentContext() else { return .uncertain }
-            await refreshReReviewAfterPublication(id, account: account, user: user)
+            if remaining.isEmpty {
+                await completeCommentReviewAfterPublication(id, snapshot: displayed.commentReviewSnapshot,
+                    published: publishable, account: account, user: user)
+                guard currentContext() else { return .uncertain }
+                await refreshReReviewAfterPublication(id, account: account, user: user)
+            }
             return currentContext() ? .completed : .uncertain
         } catch {
             if currentContext() { confirmationStates[id] = .failed }
@@ -2532,6 +2649,9 @@ final class MergeRequestAttentionMonitor {
             updateItem(item.id, skipUnchangedPendingDraftEvidence: true) {
                 $0.drafts = current; $0.draftCount = current.count
                 $0.commentReviewSnapshot = CommentReviewSnapshot(request: request, discussions: discussions)
+                if contextMatches, let discussions {
+                    $0.ownPublishedReplies = DuplicateReplyDrafts.publishedReplies(in: discussions, userID: user.id)
+                }
                 $0.reviewingProgress = contextMatches ? Self.reviewingProgress(for: item, request: request,
                     discussions: discussions, host: account.host, user: user, verdictDirectory: verdictDirectory) : nil
                 if !$0.isAuthored, let request {

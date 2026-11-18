@@ -180,6 +180,15 @@ enum AssistantJobExecutor {
         let usageMergeRequest = AssistantUsageMergeRequest(host: handoff.key.work.host, username: handoff.key.username,
             projectID: handoff.key.work.projectID, iid: handoff.key.work.iid, title: request.title,
             url: request.webURL.absoluteString)
+        let beforeLaunch: @Sendable () async throws -> Void = { @MainActor in
+            if AssistantAutomationRunner.isForeignPipelineDiagnosis(for: handoff, history: settings.assistantHandoffs) {
+                guard let diagnosis = handoff.foreignPipelineDiagnosis else { throw AssistantAutomationRunner.HandoffError.legacyJob }
+                try await diagnosis.verify(request: request, user: user, host: handoff.key.work.host, glab: glab)
+            }
+            try validatePersistence(settings)
+            try validateConfiguration(handoff, automation: settings.automation)
+            try validateIgnoredTarget(handoff, ignored: settings.ignoredMergeRequests)
+        }
         do {
         if handoff.key.assistant == .codex {
             try Data(AssistantJobResult.schema.utf8).write(to: invocation.schemaURL, options: .atomic)
@@ -191,10 +200,7 @@ enum AssistantJobExecutor {
                                                   usage: .init(role: .codingAgent, assistant: handoff.key.assistant,
                                                     model: (handoff.codingModel ?? handoff.reviewModel)?.rawValue,
                                                     mergeRequest: usageMergeRequest),
-                                                  beforeLaunch: { @MainActor in
-                                                      try validatePersistence(settings)
-                                                      try validateConfiguration(handoff, automation: settings.automation)
-                                                  })
+                                                  beforeLaunch: beforeLaunch)
             capturedOutput = output
             guard output.exitCode == 0 else { throw CLIProcessError(exitCode: output.exitCode, diagnostic: output.stderr) }
             try AssistantJobResult.validateCodexEvents(output.stdout)
@@ -208,10 +214,7 @@ enum AssistantJobExecutor {
                                                   usage: .init(role: .codingAgent, assistant: handoff.key.assistant,
                                                     model: handoff.claudeCodingModel?.rawValue,
                                                     mergeRequest: usageMergeRequest),
-                                                  beforeLaunch: { @MainActor in
-                                                      try validatePersistence(settings)
-                                                      try validateConfiguration(handoff, automation: settings.automation)
-                                                  })
+                                                  beforeLaunch: beforeLaunch)
             capturedOutput = output
             guard output.exitCode == 0 else { throw CLIProcessError(exitCode: output.exitCode, diagnostic: output.stderr) }
             result = try AssistantJobResult.claude(output.stdout)

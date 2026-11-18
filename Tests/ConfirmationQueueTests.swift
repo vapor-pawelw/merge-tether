@@ -1630,6 +1630,52 @@ import MergeTetherRemote
         #expect(harness.monitor.currentOpenItems.first?.drafts.isEmpty == true)
     }
 
+    @Test(arguments: [false, true])
+    func publishAllKeepsDuplicateRepliesPrivateOnBothPlatforms(remote: Bool) async throws {
+        let harness = try makeHarness(assistantWorked: true)
+        defer { harness.cleanUp() }
+        try harness.write("drafts.json", #"""
+            [{"id":11,"author_id":3,"note":"Verified the correction.","discussion_id":"review"},
+             {"id":12,"author_id":3,"note":"Verified the correction.","discussion_id":"review"}]
+            """#)
+        try harness.write("discussions.json", #"""
+            [{"id":"review","notes":[{"id":40,"author":{"id":8},"system":false,"body":"Please verify"}]}]
+            """#)
+        try harness.recordVerdict("objections", head: head)
+        try await harness.poll()
+        let item = try #require(harness.monitor.currentItems.first)
+        try #require(item.duplicateDraftIDs == [12] && !item.requiresDiscussionRecheck)
+        #expect(RemoteBoardAdapter.card(item, account: "me@\(host)").actions.contains { $0.kind == .publish })
+
+        if remote {
+            let result = await harness.monitor.publishRemoteDrafts(of: item.id, head: head, expectedDrafts: item.drafts)
+            #expect(result == .completed)
+        } else {
+            await harness.monitor.publishDrafts(of: item.id)
+        }
+
+        #expect(harness.log("publish.log").isEmpty)
+        #expect(harness.log("selected.log").contains("/11/publish"))
+        #expect(!harness.log("selected.log").contains("/12/publish"))
+        #expect(!harness.settings.pendingCommentReviews.isEmpty)
+        let remaining = try #require(harness.monitor.currentOpenItems.first(where: { $0.id == item.id }))
+        try #require(remaining.drafts.compactMap(\.id) == [12])
+        #expect(remaining.duplicateDraftIDs == [12])
+        #expect(!RemoteBoardAdapter.card(remaining, account: "me@\(host)").actions.contains { $0.kind == .publish })
+
+        if remote {
+            let result = await harness.monitor.publishRemoteDrafts(of: item.id, head: head, expectedDrafts: remaining.drafts)
+            #expect(result == .changed)
+        } else {
+            await harness.monitor.publishDrafts(of: item.id)
+        }
+        #expect(!harness.log("selected.log").contains("/12/publish"))
+
+        let target = MRDiscussionTarget(host: host, username: "me", projectID: 1, iid: 2, url: item.url)
+        await harness.monitor.publishDrafts(remaining.drafts, for: target)
+        #expect(harness.log("selected.log").contains("/12/publish"))
+    }
+
     @Test func remotePublicationSendsOnlyTheExactDisplayedDraftIDs() async throws {
         let harness = try makeHarness(assistantWorked: false)
         defer { harness.cleanUp() }
@@ -1643,6 +1689,32 @@ import MergeTetherRemote
         #expect(harness.log("selected.log").contains("/12/publish"))
         #expect(!harness.log("selected.log").contains("/13/publish"))
         #expect(harness.settings.pendingCommentReviews.isEmpty)
+    }
+
+    @Test(arguments: [false, true])
+    func remotePublicationRequiresLiveDuplicateCheck(discussionReadFails: Bool) async throws {
+        let harness = try makeHarness(assistantWorked: true)
+        defer { harness.cleanUp() }
+        try harness.write("drafts.json", #"[{"id":11,"author_id":3,"note":"Reply","discussion_id":"review"}]"#)
+        try harness.recordVerdict("objections", head: head)
+        try await harness.poll()
+        let item = try #require(harness.monitor.currentItems.first)
+        #expect(RemoteBoardAdapter.card(item, account: "me@\(host)").actions.contains { $0.kind == .publish })
+        if discussionReadFails {
+            try harness.write("fail-discussion-read", "yes")
+        } else {
+            try harness.write("discussions.json", #"""
+                [{"id":"review","notes":[{"id":40,"author":{"id":3,"username":"me"},"system":false,"body":"Reply"}]}]
+                """#)
+        }
+        let observedReadCount = harness.gitlab.requests.filter { $0.endpoint.contains("/discussions?") }.count
+
+        let result = await harness.monitor.publishRemoteDrafts(of: item.id, head: head, expectedDrafts: item.drafts)
+        #expect(result == .changed)
+        #expect(harness.log("selected.log").isEmpty && harness.log("publish.log").isEmpty)
+        let readCount = harness.gitlab.requests.filter { $0.endpoint.contains("/discussions?") }.count - observedReadCount
+        #expect(readCount == (discussionReadFails ? 2 : 1))
+        #expect(harness.monitor.currentOpenItems.first(where: { $0.id == item.id })?.drafts == item.drafts)
     }
 
     @Test(arguments: ["account", "executable"])

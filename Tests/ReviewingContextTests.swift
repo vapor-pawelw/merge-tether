@@ -130,6 +130,29 @@ struct ReviewingContextTests {
         #expect(ReviewingContext(row: row(item, job: reviewJob(.succeeded))).status == .reviewCompleted)
     }
 
+    @Test(arguments: [AssistantJobExecution.State.running, .succeeded, .failed], [false, true])
+    func pipelineDiagnosisKeepsPipelineProgressWithoutClaimingReviewActivity(
+        _ state: AssistantJobExecution.State, legacy: Bool
+    ) throws {
+        var job = reviewJob(state)
+        if legacy {
+            job.taskPrompt = "Diagnose this MR's failed pipeline and prepare an in-scope verified fix.\nFocus on these GitLab note IDs: "
+        } else {
+            job.taskIntent = .pipelineDiagnosis
+        }
+        let snapshot = row(try item(), job: job)
+        let context = ReviewingContext(row: snapshot)
+
+        #expect(context.status == .activityUnknown)
+        #expect(context.nextStep == .viewDiscussions)
+        if state == .running {
+            let card = MRCardPresentation(row: snapshot, reviewingContext: context, allowsRemoval: true, assistantReady: true)
+            #expect(card.working)
+            #expect(card.activity?.jobID == job.id)
+            #expect(card.status == MRActivity.agentStatus(.AutomationProgress.progressPipeline, assistant: job.key.assistant))
+        }
+    }
+
     @Test func incompleteThreadCannotInventAnUnansweredReply() throws {
         let activity = ReviewingActivity(discussions: [.init(id: "thread", notes: [
             note(10, user: 3), note(11, user: 7), note(nil, user: 3)

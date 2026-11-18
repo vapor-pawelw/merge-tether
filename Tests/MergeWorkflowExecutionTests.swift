@@ -230,8 +230,10 @@ import Testing
                 workspace: "", access: .gitLabRead), title: "Pipeline diagnosis", prompt: task, createdAt: Date(), allowsPush: false,
             execution: .init(state: .failed), taskPrompt: task, mergeRequestURL: url, workflow: .review, manual: true,
             expectedHeadSHA: head)
-        settings.assistantHandoffs = [stopped]
-        let gitlab = reviewRetryGitLab(host: host, url: url, currentHead: head)
+        var bound = stopped
+        bound.foreignPipelineDiagnosis = .init(pipelineID: 10, projectID: 7, sha: head, reviewerID: user.id, authorID: 2)
+        settings.assistantHandoffs = [bound]
+        let gitlab = reviewRetryGitLab(host: host, url: url, currentHead: head, failedPipeline: true)
         defer { gitlab.close() }
         let glab = gitlab.service(host: host, username: user.username)
         settings.glabPath = glab.glabPath
@@ -367,21 +369,137 @@ import Testing
         await coordinator.waitForTermination()
     }
 
-    private func reviewRetryGitLab(host: String, url: URL, currentHead: String) -> InMemoryGitLab {
+    @Test(arguments: ["manual-same-head", "manual-full", "manual-diagnosis", "todo-diagnosis", "todo-genuine", "monitor-diagnosis", "monitor-genuine"])
+    func reviewEntryPointsUseOnlyGenuineCodeReviewEvidence(_ route: String) async throws {
+        let suite = "WorkflowReviewEntryPoint.\(UUID())"
+        let defaults = try #require(UserDefaults(suiteName: suite))
+        defer { defaults.removePersistentDomain(forName: suite) }
+        let settings = SettingsManager(defaults: defaults)
+        settings.automation.applyPreset(.full, for: .codex)
+        let host = "gitlab-\(UUID().uuidString.lowercased()).example.test"
+        let url = try #require(URL(string: "https://\(host)/team/repo/-/merge_requests/11"))
+        let user = GitLabAuthenticatedUser(id: 1, username: "me")
+        let diagnosed = route.hasSuffix("diagnosis")
+        let sameHead = route == "manual-same-head" || route == "manual-full"
+        let reviewedHead = String(repeating: "a", count: 40)
+        let head = sameHead ? reviewedHead : String(repeating: "b", count: 40)
+        let pastTask = diagnosed
+            ? "Diagnose this MR's failed pipeline and prepare an in-scope verified fix.\nFocus on these GitLab note IDs: "
+            : "Review the full diff and discussions."
+        let past = AssistantAutomationRunner.Handoff(id: UUID(),
+            key: .init(assistant: .codex, work: .init(host: host, projectID: 7, iid: 11), username: user.username,
+                workspace: "", access: .gitLabRead), title: "Previously completed", prompt: pastTask, createdAt: Date(),
+            allowsPush: false, execution: .init(state: .succeeded), taskPrompt: pastTask, mergeRequestURL: url,
+            workflow: .review, manual: diagnosed, expectedHeadSHA: reviewedHead)
+        let verdict = ReviewVerdict(version: 1, host: host, projectID: 7, iid: 11, headSHA: reviewedHead, verdict: .noObjections,
+            discussionFingerprint: ReviewVerdict.fingerprint([]), username: user.username, userID: user.id, runID: past.id)
+        let verdictFile = ReviewVerdictStore.fileURL(host: host, projectID: 7, iid: 11)
+        defer {
+            try? FileManager.default.removeItem(at: verdictFile.deletingLastPathComponent())
+            try? FileManager.default.removeItem(at: AssistantJobJournal.checkpointURL(for: past.id))
+        }
+        try FileManager.default.createDirectory(at: verdictFile.deletingLastPathComponent(), withIntermediateDirectories: true)
+        try JSONEncoder().encode(verdict).write(to: verdictFile)
+        try await AssistantJobJournal.save(.init(result: .init(status: .succeeded, summary: "Finished"), output: ""),
+            for: past, reviewVerdict: verdict)
+        settings.assistantHandoffs = [past]
+        #expect((ReviewVerdictStore.authenticatedVerdict(host: host, projectID: 7, iid: 11,
+            user: user, settings: settings) != nil) == !diagnosed)
+
+        let gitlab = reviewRetryGitLab(host: host, url: url, currentHead: head)
+        defer { gitlab.close() }
+        let glab = gitlab.service(host: host, username: user.username)
+        settings.glabPath = glab.glabPath
+        let coordinator = AssistantJobCoordinator(healthStore: AssistantCLIHealthStore(defaults: defaults), execute: { _, _ in
+            .init(result: .init(status: .blocked, summary: "Review fixture stopped."), output: "")
+        })
+        if route.hasPrefix("monitor-") {
+            for trigger in MergeWorkflowTrigger.allCases { settings.automation.workflowRules[trigger].mode = .off }
+            settings.automation.workflowRules[.reviewUpdate].mode = .preview
+            gitlab.write("current-head", reviewedHead)
+            let automation = MergeWorkflowAutomation(settings: settings, glab: glab, jobCoordinator: coordinator)
+            automation.observe([], host: host, user: user)
+            let baselineDeadline = ContinuousClock.now + .seconds(3)
+            while defaults.data(forKey: "automation.mergeWorkflowBaselines.v1") == nil, ContinuousClock.now < baselineDeadline {
+                try await Task.sleep(for: .milliseconds(10))
+            }
+            try #require(defaults.data(forKey: "automation.mergeWorkflowBaselines.v1") != nil)
+            gitlab.write("current-head", head)
+            automation.observe([], host: host, user: user)
+            let eventDeadline = ContinuousClock.now + .seconds(3)
+            while automation.entries.isEmpty, ContinuousClock.now < eventDeadline {
+                try await Task.sleep(for: .milliseconds(10))
+            }
+            let context = try #require(automation.entries.first?.event.context)
+            #expect(context.contains("identical") == !diagnosed)
+            #expect(context.contains(reviewedHead) == !diagnosed)
+            return
+        }
+        if route.hasPrefix("manual-") {
+            settings.resolvedHost = host
+            let dependencies = AssistantDependencyMonitor(probe: { _, _ in .ready(URL(fileURLWithPath: "/in-memory/assistant")) })
+            let monitor = TodoMonitorService(settings: settings, glab: glab,
+                assistantDependencies: dependencies, reviewJobCoordinator: coordinator)
+            defer { monitor.stopTimer() }
+            dependencies.refresh()
+            while dependencies.isChecking { await Task.yield() }
+            let request = try await glab.fetchMergeRequest(projectID: 7, iid: 11, host: host)
+            var item = MergeRequestAttentionMonitor.Item(id: .init(projectID: 7, iid: 11), title: request.title, url: url)
+            item.mergeRequest = request
+            if route == "manual-full" { await monitor.resetReviewState(for: item) }
+            else { await monitor.runReview(for: item) }
+        } else {
+            let todo = try #require(GlabService.decodeTodos(Data("""
+                [{"id":42,"action_name":"review_requested","target_type":"MergeRequest","target_url":"\(url.absoluteString)",
+                  "body":"Review request","created_at":"2026-11-04T10:00:00Z","state":"pending",
+                  "project":{"id":7,"name_with_namespace":"Team / Repo","path_with_namespace":"team/repo"},
+                  "author":{"id":2,"username":"author","name":"Author"},
+                  "target":{"iid":11,"state":"opened","author":{"id":2,"username":"author","name":"Author"}}}]
+                """.utf8)).first)
+            settings.automation.reviewRequested.promptTemplate = "Only review database migrations."
+            let automation = TodoAutomationService(canAutomate: { _ in true }, jobCoordinator: coordinator)
+            _ = try await automation.prepareToAcknowledge(todo, event: .reviewRequested, host: host, username: user.username,
+                settings: settings, glab: glab, isPending: { true })
+        }
+        let started = try #require(settings.assistantHandoffs.first { $0.id != past.id })
+        #expect(started.prompt.contains("Full review from scratch") == (route == "manual-full"))
+        #expect(started.prompt.contains("Do not raise new findings about unchanged code") == (route == "manual-same-head"))
+        #expect(started.prompt.contains(reviewedHead) == (sameHead || route == "todo-genuine"))
+        if route.hasPrefix("todo-") { #expect(started.prompt.contains("Only review database migrations.")) }
+        await coordinator.waitForTermination()
+    }
+
+    private func reviewRetryGitLab(host: String, url: URL, currentHead: String, failedPipeline: Bool = false) -> InMemoryGitLab {
         let gitlab = InMemoryGitLab()
         gitlab.write("current-head", currentHead)
+        let pipeline = #"{"id":10,"project_id":7,"sha":"\#(currentHead)","ref":"feature","status":"failed"}"#
+        let pipelineFields = failedPipeline ? #", "source_project_id":7,"target_project_id":7,"head_pipeline":\#(pipeline)"# : ""
         gitlab.handler = { call in
             #expect(call.method == "GET")
             if call.arguments == ["config", "get", "host"] { return InMemoryGitLab.output(host) }
             if call.arguments == ["auth", "status"] { return InMemoryGitLab.output(error: "Logged in to \(host) as me") }
             switch call.endpoint {
             case "/user": return InMemoryGitLab.output(#"{"id":1,"username":"me"}"#)
-            case "/projects/7/merge_requests/11":
-                return InMemoryGitLab.output("""
+            case let path where path == "/projects/7/merge_requests/11" || path.hasPrefix("/merge_requests?scope=all"):
+                let mr = """
                     {"project_id":7,"iid":11,"author":{"id":2,"username":"author","name":"Author"},
                     "title":"Review fixture","web_url":"\(url.absoluteString)","state":"opened","draft":false,
-                    "sha":"\(gitlab.text("current-head"))","source_branch":"feature","target_branch":"main","labels":[]}
-                    """)
+                    "sha":"\(gitlab.text("current-head"))","source_branch":"feature","target_branch":"main","labels":[]\(pipelineFields)}
+                    """
+                return InMemoryGitLab.output(call.endpoint == "/projects/7/merge_requests/11" ? mr : "[\(mr)]")
+            case "/projects/7/pipelines/10" where failedPipeline: return InMemoryGitLab.output(pipeline)
+            case "/projects/7/repository/branches/feature" where failedPipeline:
+                return InMemoryGitLab.output(#"{"commit":{"id":"\#(currentHead)"}}"#)
+            case "/projects/7": return InMemoryGitLab.output(#"{"default_branch":"main"}"#)
+            case "/projects/7/merge_requests/11/approvals":
+                return InMemoryGitLab.output(#"{"approved":false,"approved_by":[]}"#)
+            case "/merge_requests?scope=created_by_me&state=opened&with_merge_status_recheck=true&per_page=100":
+                return InMemoryGitLab.output("[]")
+            case "/projects/7/merge_requests/11/raw_diffs":
+                return InMemoryGitLab.output("diff --git a/A b/A\n@@ -1,2 +1,3 @@\n context\n+reviewed\n")
+            case let path where path.hasPrefix("/projects/7/merge_requests?"): return InMemoryGitLab.output("[]")
+            case let path where path.contains("/reviewers?"):
+                return InMemoryGitLab.output(#"[{"user":{"id":1},"state":"reviewed"}]"#)
             case let path where path.contains("/discussions?") || path.contains("/draft_notes"):
                 return InMemoryGitLab.output("[]")
             default: return try gitlab.unexpected(call)

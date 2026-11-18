@@ -1986,6 +1986,38 @@ struct AuthorFeedbackCoordinatorTests {
         }
     }
 
+    @Test(arguments: [false, true])
+    func resolutionOnlyChangesRefreshSettledFeedbackWithoutAnotherAssessment(initiallyResolved: Bool) async throws {
+        try await withFixture { f in
+            try f.write("approvals.json", #"{"approved_by":[]}"#)
+            if initiallyResolved { f.gitlab.write("resolved") }
+            let original = try f.discussions()
+            let coordinator = f.coordinator()
+            defer { coordinator.cancel() }
+
+            try f.start(coordinator, approvalRevision: "0/0:")
+            try await f.waitForPass(1)
+            try f.start(coordinator, approvalRevision: "0/0:")
+            try await f.waitForPass(2)
+            #expect(coordinator.status(projectID: 1, iid: 2)?.waitingForReviewer == !initiallyResolved)
+
+            if initiallyResolved { f.gitlab.remove("resolved") }
+            else { f.gitlab.write("resolved") }
+            let current = try f.discussions()
+            #expect(ReviewVerdict.fingerprint(original) == ReviewVerdict.fingerprint(current))
+            try f.start(coordinator, initialDiscussions: current, approvalRevision: "0/0:")
+            let deadline = ContinuousClock.now + .seconds(5)
+            while coordinator.status(projectID: 1, iid: 2)?.waitingForReviewer != initiallyResolved,
+                  ContinuousClock.now < deadline {
+                try await Task.sleep(for: .milliseconds(10))
+            }
+
+            #expect(coordinator.status(projectID: 1, iid: 2)?.waitingForReviewer == initiallyResolved)
+            #expect(f.inputs.count == 1)
+            #expect(f.resolutionPosts == 0)
+        }
+    }
+
     @Test func laterPassesRaiseNoNewConcernsAboutAlreadyAssessedNotes() async throws {
         try await withFixture { f in
             try f.write("approvals.json", #"{"approved_by":[]}"#)

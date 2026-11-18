@@ -45,9 +45,10 @@ import MergeTetherRemote
             head: item.mergeRequest?.sha, detail: detail(item), drafts: drafts)
         card.contextRevision = item.mergeRequest.flatMap(contextRevision)
         card.dependencies = dependencyPresentation(item.dependencies, projectID: item.id.projectID)
+        let publishable = item.publishAllDrafts
         var kinds = extraActions
         if item.mergeRequest?.sha != nil {
-            if item.draftCount == drafts.count, !drafts.isEmpty, !item.requiresDiscussionRecheck,
+            if item.draftCount == drafts.count, !publishable.isEmpty, !item.requiresDiscussionRecheck,
                item.drafts.allSatisfy({ $0.id != nil && AICommentAssessmentStore.safeForAutomaticPublication($0) }) { kinds.append(.publish) }
             if item.canApprove { kinds.append(.approve) }
             if item.canConfirmReReview { kinds.append(.reReview) }
@@ -63,7 +64,13 @@ import MergeTetherRemote
                item.observedDiscussionFingerprint ?? "", item.mergeRequest?.semanticContextFingerprint ?? "",
                String(item.requiresCommentReview), item.commentReviewSnapshot?.discussionFingerprint ?? ""] + metadata + context) {
             card.actions = Array(Set(kinds.map(\.rawValue))).sorted().compactMap { raw in
-                RemoteActionKind(rawValue: raw).map { RemoteAction(id: raw, kind: $0, token: token) }
+                guard let kind = RemoteActionKind(rawValue: raw) else { return nil }
+                if kind == .publish {
+                    let draftIDs = publishable.compactMap(\.id).map(String.init)
+                    guard let publicationToken = try? RemoteDigest.token([token] + draftIDs) else { return nil }
+                    return RemoteAction(id: raw, kind: kind, token: publicationToken)
+                }
+                return RemoteAction(id: raw, kind: kind, token: token)
             }
             card.actions += item.drafts.compactMap { draft in
                 guard let id = draft.id, id > 0 else { return nil }

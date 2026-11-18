@@ -1,5 +1,6 @@
 import Foundation
 
+@MainActor
 extension AssistantAutomationRunner.Handoff {
     func progressStatus(intents: [MRTodoIntent] = [], conflictReceipts: Set<MergeConflictReceipt> = []) -> String {
         MRActivity.agentStatus(progressTitle(intents: intents, conflictReceipts: conflictReceipts), assistant: key.assistant)
@@ -15,7 +16,9 @@ extension AssistantAutomationRunner.Handoff {
             $0.jobID == id && $0.host == key.work.host && $0.projectID == key.work.projectID && $0.iid == key.work.iid
         }
         if operationalExecution?.state == .queued { return .AutomationProgress.progressQueued }
-        if pipelineReservation != nil || intentKind == .pipeline { return .AutomationProgress.progressPipeline }
+        if pipelineReservation != nil || intentKind == .pipeline || AssistantAutomationRunner.isForeignPipelineDiagnosis(for: self) {
+            return .AutomationProgress.progressPipeline
+        }
         if intentKind == .conflict || conflict || allowsPush { return .AutomationProgress.progressConflicts }
         if workflow == .review || reviewModel != nil { return .AutomationProgress.progressReview }
         if workflow == .followUp { return .AutomationProgress.progressFeedback }

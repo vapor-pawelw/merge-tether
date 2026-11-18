@@ -111,6 +111,30 @@ import MergeTetherRemote
         #expect(try JSONDecoder().decode(RemoteCard.self, from: JSONEncoder().encode(card)).drafts == card.drafts)
     }
 
+    @Test func phoneBulkPublicationBindsTheDuplicateFilteredSelection() throws {
+        var item = try item()
+        item.mergeRequest = try MRDependencyPresentationTests().request(2, project: 1)
+        item.drafts = [
+            .init(id: 11, authorID: 3, note: "First reply", discussionID: "one", position: nil),
+            .init(id: 12, authorID: 3, note: "First reply", discussionID: "one", position: nil),
+            .init(id: 13, authorID: 3, note: "Second reply", discussionID: "two", position: nil),
+        ]
+        item.draftCount = item.drafts.count
+        let original = RemoteBoardAdapter.card(item, account: "me@host")
+        let originalPublish = try #require(original.actions.first { $0.kind == .publish })
+
+        item.ownPublishedReplies = [.init(discussionID: "one", body: "First reply")]
+        let narrower = RemoteBoardAdapter.card(item, account: "me@host")
+        let narrowerPublish = try #require(narrower.actions.first { $0.kind == .publish })
+        #expect(narrower.drafts == original.drafts)
+        #expect(narrowerPublish.token != originalPublish.token)
+
+        item.ownPublishedReplies?.insert(.init(discussionID: "two", body: "Second reply"))
+        let duplicatesOnly = RemoteBoardAdapter.card(item, account: "me@host")
+        #expect(duplicatesOnly.drafts == original.drafts)
+        #expect(!duplicatesOnly.actions.contains { $0.kind == .publish })
+    }
+
     @Test(arguments: ["target", "description", "head", "author"])
     func readOnlyDetailsBindEveryRelevantDisplayedContextEvenWithoutActions(_ change: String) throws {
         let source = try MRDependencyPresentationTests().request(2, project: 1)

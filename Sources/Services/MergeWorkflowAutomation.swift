@@ -261,7 +261,7 @@ final class MergeWorkflowAutomation {
             await monitor.poll(
                 glab: glab, host: host, user: user, authored: authored,
                 enabled: rules.enabled, reviewSLA: Double(max(1, rules[.reviewWaiting].waitHours)) * 3600, trackedReviews: trackedReviews,
-                automationScope: observationScope,
+                automationScope: observationScope, reviewHistory: settings.assistantHandoffs,
                 isCurrent: { self.isCurrent(host: host, user: user) && self.settings.automation.scope == observationScope }
             ) { event in
                 guard self.isCurrent(host: host, user: user) else { return }

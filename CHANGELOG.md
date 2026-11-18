@@ -318,6 +318,12 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 
 ### Fixed
 
+- Use the same duplicate-filtered **Publish all** selection on Mac and iPhone, while keeping individual draft selection available.
+
+- Refresh feedback status when a thread is resolved or reopened without rerunning its assessment. Refresh only the affected merge request after a suggestion decision.
+
+- Use the same verified scope for **Run review** and **Retry**. Keep pipeline diagnoses separate from code review in review history and verify that the original failed pipeline is still current before retrying a diagnosis.
+
 - Preserve configured review constraints and pipeline diagnosis when retrying a task. Limit a review retry to discussion changes and earlier findings when a verified review already covers the current commit.
 
 - Refresh the discussion scope when retrying a review, including when the commit stays the same. Preserve an explicit review from scratch across retries and subsequent pushes.

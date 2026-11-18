@@ -155,6 +155,11 @@ final class TodoAutomationService {
 
         let work = AssistantAutomationRunner.MergeRequestWork(host: host, projectID: todo.project.id, iid: iid)
         guard assistant == nil || !AssistantAutomationRunner.isWorking(on: work) else { return false }
+        let accountRevision = glab.accountRevision
+        let reviewScope = if assistant != nil, event == .reviewRequested,
+                             let reviewer = try? await glab.fetchAuthenticatedUser(host: host, expectedUsername: username) {
+            Self.reviewScope(work: work, reviewer: reviewer, settings: settings)
+        } else { "" }
         let context = TodoAutomationContext(todo: todo, event: event, author: author, iid: iid)
         let acknowledgement = assistant != nil && (manual || rule.markDoneOnSuccess) ? todo.feedbackIdentity : nil
         var noteIDs = todo.linkedNoteID.map { [$0] } ?? []
@@ -170,7 +175,7 @@ final class TodoAutomationService {
             evidence = ""
         }
         let stackPosition = assistant == nil ? nil : await glab.stackPosition(for: work)
-        guard isPending(), settings.automation[event] == rule,
+        guard isPending(), glab.accountRevision == accountRevision, settings.automation[event] == rule,
               manual || settings.automation.scope.resolve(target).active,
               assistant == nil || (settings.automation.assistant == assistant
                   && settings.automation.assistantWorkspace == workspace
@@ -193,7 +198,8 @@ final class TodoAutomationService {
             try await run(
                 context, invocation: invocation, work: work, stackPosition: stackPosition, evidence: evidence,
                 username: username, settings: settings, manual: manual,
-                feedbackNoteIDs: event == .authorFeedback ? noteIDs : [], feedbackTodo: acknowledgement
+                feedbackNoteIDs: event == .authorFeedback ? noteIDs : [], feedbackTodo: acknowledgement,
+                reviewScope: reviewScope
             )
         }
         settings.automationReceipts.insert(key)
@@ -482,6 +488,7 @@ final class TodoAutomationService {
         manual: Bool,
         feedbackNoteIDs: [Int] = [],
         feedbackTodo: Todo.FeedbackIdentity? = nil,
+        reviewScope: String = "",
         verifiedFeedbackMarker: String? = nil, expectedHeadSHA: String? = nil,
         verifiedFeedbackNotes: [Int: String]? = nil,
         feedbackRecovery: FeedbackRecovery? = nil,
@@ -514,7 +521,6 @@ final class TodoAutomationService {
                 "\n\n\($0)\nThe verifier identified possible remaining expectations or a missing reply. Include general comments and conditions attached to an advance approval. Decide whether each request is justified. Correlate summaries with their underlying findings and substantive author replies across all discussions. A correction delivered for another comment still needs a reply in each actionable feedback thread: verify the remote correction, then save a brief private reply here linking the original feedback or published explanation. Do not repeat delivered code changes or duplicate replies within the same thread. Purely informational summaries without a distinct request need no reply. A summary's distinct unanswered request still requires work or an evidence-based answer. Implement and test warranted corrections; for an unwarranted request, prepare an evidence-based explanation instead of unnecessary code changes. Some indicated concerns may already be fixed and only need a verified response. Follow the existing push and publication permissions."
             } ?? ""
             let questions = try codeReviewInstructions(codeReviewRequests, notes: codeReviewNotes)
-            let reviewScope = context.event == .reviewRequested ? Self.reviewScope(work: work, username: username) : ""
             let prompt = "\(task)\(scope)\(custom)\(isolation)\n\nFallback if needed: \(fallback)\(reviewScope)\(suppliedEvidence)\(verifiedContext)\(feedbackRecovery?.instructions ?? "")\(questions)"
             return try await AssistantAutomationRunner.launch(
                 assistant, title: title, stackPosition: stackPosition, mergeRequestURL: context.url,
@@ -556,10 +562,10 @@ final class TodoAutomationService {
     }
 
     /// A repeated review request reviews only what changed since this user's recorded review.
-    static func reviewScope(work: AssistantAutomationRunner.MergeRequestWork, username: String,
+    static func reviewScope(work: AssistantAutomationRunner.MergeRequestWork, reviewer: GitLabAuthenticatedUser, settings: SettingsManager,
                             directory: URL = ReviewVerdictStore.directory) -> String {
-        guard let verdict = ReviewVerdictStore.verdict(host: work.host, projectID: work.projectID, iid: work.iid, in: directory),
-              verdict.username == username else { return "" }
+        guard let verdict = ReviewVerdictStore.authenticatedVerdict(host: work.host, projectID: work.projectID, iid: work.iid,
+            user: reviewer, settings: settings, in: directory) else { return "" }
         let text = IncrementalReviewScope(reviewedHead: verdict.headSHA).instructions
         return text.isEmpty ? "" : "\n\n" + text
     }

@@ -71,6 +71,94 @@ struct FeedbackSuggestionDecisionActionTests {
         }
     }
 
+    @Test(arguments: ["ignore", "restore", "reset"])
+    func feedbackDecisionRefreshesOnlyItsMergeRequestAndKeepsTheInbox(_ action: String) async throws {
+        let suite = "FeedbackDecisionScopedRefresh.\(UUID())"
+        let defaults = try #require(UserDefaults(suiteName: suite))
+        defer { defaults.removePersistentDomain(forName: suite) }
+        let gitlab = InMemoryGitLab()
+        defer { gitlab.close() }
+        let glab = gitlab.service(host: target.host, username: target.username)
+        let settings = SettingsManager(defaults: defaults)
+        settings.glabPath = glab.glabPath
+        settings.resolvedHost = target.host
+        settings.onboardingCompleted = false
+        settings.automation.applyPreset(.manual, for: .codex)
+        let selected = MergeRequestAttentionMonitor.Item.ID(projectID: 1, iid: 2)
+        let unrelated = MergeRequestAttentionMonitor.Item.ID(projectID: 7, iid: 9)
+        let source = try note()
+        func mergeRequest(projectID: Int, iid: Int, title: String) -> String {
+            """
+            {"project_id":\(projectID),"iid":\(iid),"author":{"id":3,"username":"me","name":"Me"},"title":"\(title)",
+             "web_url":"https://gitlab.example.test/group/repo\(projectID)/-/merge_requests/\(iid)","state":"opened","draft":false,
+             "sha":"aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa","source_branch":"feature","target_branch":"main","labels":[]}
+            """
+        }
+        gitlab.write("selected", mergeRequest(projectID: 1, iid: 2, title: "Selected before decision"))
+        gitlab.write("unrelated", mergeRequest(projectID: 7, iid: 9, title: "Unrelated before decision"))
+        gitlab.write("todos", #"[{"id":401,"action_name":"mentioned","target_type":"MergeRequest","target_url":"https://gitlab.example.test/group/repo7/-/merge_requests/9","body":"Unread feedback","state":"pending","created_at":"2026-11-06T10:00:00Z","project":{"id":7,"name_with_namespace":"Group / Repo7","path_with_namespace":"group/repo7"},"author":{"id":9,"username":"reviewer","name":"Reviewer"},"target":{"id":9,"iid":9,"title":"Unrelated before decision","state":"opened"}}]"#)
+        let encodedSource = try JSONSerialization.jsonObject(with: JSONEncoder().encode([source]))
+        gitlab.handler = { request in
+            if request.arguments.first == "config" { return InMemoryGitLab.output(target.host) }
+            if request.arguments.first == "auth" { return InMemoryGitLab.output(error: "Logged in to \(target.host) as \(target.username)") }
+            if request.arguments.contains(where: { $0.hasPrefix("/todos?") }) { return try gitlab.response("todos") }
+            switch request.endpoint {
+            case "/user": return InMemoryGitLab.output(#"{"id":3,"username":"me"}"#)
+            case "/projects/1/merge_requests/2": return try gitlab.response("selected")
+            case "/projects/7/merge_requests/9": return try gitlab.response("unrelated")
+            case let path where path.hasPrefix("/projects/1/merge_requests/2/discussions"):
+                return try InMemoryGitLab.json([["id": "discussion", "notes": encodedSource]])
+            case let path where path.hasPrefix("/merge_requests?scope=created_by_me"):
+                return InMemoryGitLab.output("[\(gitlab.text("selected")),\(gitlab.text("unrelated"))]")
+            default: return InMemoryGitLab.output("[]")
+            }
+        }
+        let monitor = TodoMonitorService(settings: settings, glab: glab,
+            notifications: NotificationService(authorization: { .denied }, post: { _ in }))
+        defer { monitor.stopTimer() }
+        await monitor.bootstrap()
+        await monitor.refreshNow()
+        monitor.attention.refresh(host: target.host, username: target.username, todos: monitor.currentAccountTodos)
+        try await waitForRefresh(monitor.attention)
+        try #require(monitor.attention.currentOpenItems.first { $0.id == selected }?.title == "Selected before decision")
+        try #require(monitor.attention.currentOpenItems.first { $0.id == unrelated }?.title == "Unrelated before decision")
+        try #require(monitor.currentAccountTodos.map(\.id) == [401])
+
+        gitlab.write("selected", mergeRequest(projectID: 1, iid: 2, title: "Selected updated"))
+        gitlab.write("unrelated", mergeRequest(projectID: 7, iid: 9, title: "Unrelated updated"))
+        gitlab.requests.removeAll()
+        if action == "ignore" {
+            try await monitor.ignoreFeedbackSuggestion(source, concernSummary: "Confirm the rollout", concernReason: "Needs confirmation", for: target)
+        } else {
+            let savedDecision = settings.feedbackSuggestionDecisions.ignore(source, concernSummary: "Confirm the rollout",
+                concernReason: "Needs confirmation", for: target)
+            let decision = try #require(savedDecision)
+            if action == "restore" {
+                try await monitor.restoreFeedbackSuggestion(decision.id, for: target)
+            } else {
+                try await monitor.resetFeedbackSuggestionDecisions(for: target)
+            }
+        }
+        try await waitForRefresh(monitor.attention)
+
+        let requests = gitlab.requests
+        #expect(requests.filter { $0.endpoint.hasPrefix("/projects/1/merge_requests/2/draft_notes") }.count == 1)
+        #expect(!requests.contains { $0.endpoint.hasPrefix("/merge_requests?") || $0.arguments.contains(where: { $0.hasPrefix("/todos?") })
+            || $0.endpoint.hasPrefix("/projects/7/merge_requests/9/draft_notes") })
+        #expect(requests.allSatisfy { $0.method == "GET" })
+        #expect(monitor.currentAccountTodos.map(\.id) == [401])
+        #expect(monitor.attention.currentOpenItems.first { $0.id == unrelated }?.title == "Unrelated before decision")
+        #expect(monitor.attention.currentOpenItems.first { $0.id == selected }?.title == "Selected updated")
+    }
+
+    private func waitForRefresh(_ monitor: MergeRequestAttentionMonitor) async throws {
+        let deadline = ContinuousClock.now + .seconds(5)
+        while monitor.isLoading && ContinuousClock.now < deadline {
+            try await Task.sleep(for: .milliseconds(10))
+        }
+        try #require(!monitor.isLoading)
+    }
+
     private func settingsDefaults(_ directory: URL) -> UserDefaults {
         UserDefaults(suiteName: "FeedbackSuggestionDecisionActionTests.\(directory.lastPathComponent)")!
     }

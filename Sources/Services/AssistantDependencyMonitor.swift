@@ -19,6 +19,10 @@ final class AssistantDependencyMonitor {
 
     var available: Set<AutomationAssistant> { Set(statuses.filter { $0.value.isReady }.map(\.key)) }
 
+    func check(_ assistant: AutomationAssistant) async -> AssistantDependencyStatus {
+        await probe(assistant, true)
+    }
+
     func refresh(requireCLI _: Bool = true, force: Bool = false) {
         let requireCLI = true
         if force { task?.cancel(); task = nil }

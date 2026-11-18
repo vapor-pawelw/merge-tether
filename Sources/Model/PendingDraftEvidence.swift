@@ -5,6 +5,7 @@ extension MergeRequestAttentionMonitor.Item {
     /// mutations and updateItem's derived safety flags; other mutations always publish.
     func hasSamePendingDraftEvidence(as previous: Self) -> Bool {
         drafts == previous.drafts && draftCount == previous.draftCount
+            && ownPublishedReplies == previous.ownPublishedReplies
             && requiresCommentReview == previous.requiresCommentReview
             && commentReviewSnapshot == previous.commentReviewSnapshot
             && reviewingProgress == previous.reviewingProgress

@@ -26,6 +26,11 @@ final class MergeRequestTodoRouter {
         await synchronize(host: host, username: username, cachedRequests: [:])
     }
 
+    func refreshCompletionEvidence(for target: MRAutomationScope.Target, accountRevision: UInt64) async {
+        guard !Task.isCancelled, isCurrent(target.host, target.username), glab.accountRevision == accountRevision else { return }
+        await synchronize(host: target.host, username: target.username, cachedRequests: [:], only: target)
+    }
+
     init(settings: SettingsManager, glab: GlabService,
          canAutomate: @escaping @MainActor () async -> Bool, launcher: Launcher? = nil,
          proofDirectory: URL = ReviewVerdictStore.directory,
@@ -454,13 +459,14 @@ final class MergeRequestTodoRouter {
     }
 
     private func synchronize(host: String, username: String,
-                             cachedRequests: [MRAutomationScope.Target: GitLabMergeRequest]) async {
+                             cachedRequests: [MRAutomationScope.Target: GitLabMergeRequest],
+                             only target: MRAutomationScope.Target? = nil) async {
         // Completion decisions use a new read after acknowledgements/worker state,
         // rather than the earlier classification snapshot.
         let revision = glab.accountRevision
         var requests: [MRAutomationScope.Target: GitLabMergeRequest] = [:]
         for original in settings.mrActionIntents where original.target.host == host && original.target.username == username
-            && original.state != .completed {
+            && original.state != .completed && (target == nil || original.target == target) {
             guard !Task.isCancelled, isCurrent(host, username), glab.accountRevision == revision,
                   let iid = original.target.iid else { return }
             let job = original.jobID.flatMap { id in settings.assistantHandoffs.first { $0.id == id } }
@@ -709,6 +715,7 @@ final class MergeRequestTodoRouter {
         let permittedTools = settings.automation.permitsAssistantTools(project: intent.request.webURL.gitLabProjectPath)
         let access: AssistantAutomationRunner.Access = permittedTools ? .configuredTools : (intent.kind == .conflict ? .preparation : .gitLabRead)
         let reservation = try Self.reservePipeline(for: intent, manual: manual)
+        let foreignDiagnosis = intent.kind == .pipeline && workflow == .review
         var transferred = false
         defer { if !transferred, let reservation { try? ExistingPipelineWorkDetector().finishHandoff(for: reservation) } }
         let job = try await AssistantAutomationRunner.launch(settings.automation.assistant, title: configured.title,
@@ -716,7 +723,9 @@ final class MergeRequestTodoRouter {
             access: access, work: work, username: intent.target.username, settings: settings, allowsPush: conflictPush,
             pipelineReservation: reservation,
             feedbackNoteIDs: intent.noteIDs.sorted(), feedbackTodos: intent.sourceEvents, isReview: intent.kind == .review,
-            mrWorkflow: workflow, manual: manual, taskIntent: taskIntent)
+            mrWorkflow: workflow, manual: manual, expectedHeadSHA: foreignDiagnosis ? intent.headSHA : nil,
+            glab: foreignDiagnosis ? glab.freshSession() : nil, taskIntent: taskIntent,
+            foreignPipeline: foreignDiagnosis ? intent.request.headPipeline : nil)
         transferred = true
         return job.id
     }

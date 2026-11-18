@@ -50,19 +50,35 @@ struct IncrementalReviewScopeTests {
         #expect(full.contains("Full review from scratch") && !full.contains("Incremental") && !full.contains("Assess only"))
     }
 
-    @Test func repeatedReviewRequestScopesToTheRecordedReviewOfTheSameUser() throws {
+    @Test func repeatedReviewRequestScopesToTheAuthenticatedReviewOfTheSameUser() async throws {
         let directory = FileManager.default.temporaryDirectory.appending(path: UUID().uuidString)
         defer { try? FileManager.default.removeItem(at: directory) }
+        let suite = "IncrementalReviewScope.\(UUID())"
+        let defaults = try #require(UserDefaults(suiteName: suite))
+        defer { defaults.removePersistentDomain(forName: suite) }
+        let settings = SettingsManager(defaults: defaults)
+        settings.automation.applyPreset(.full, for: .codex)
         let work = AssistantAutomationRunner.MergeRequestWork(host: "gitlab.example.test", projectID: 7, iid: 13)
-        #expect(TodoAutomationService.reviewScope(work: work, username: "owner", directory: directory).isEmpty)
+        let user = GitLabAuthenticatedUser(id: 1, username: "owner")
         let head = String(repeating: "a", count: 40)
+        let job = AssistantAutomationRunner.Handoff(id: UUID(),
+            key: .init(assistant: .codex, work: work, username: user.username, workspace: "", access: .gitLabRead),
+            title: "Review", prompt: "Review", createdAt: Date(), allowsPush: false,
+            execution: .init(state: .succeeded), workflow: .review, expectedHeadSHA: head)
+        defer { try? FileManager.default.removeItem(at: AssistantJobJournal.checkpointURL(for: job.id)) }
+        settings.assistantHandoffs = [job]
         let verdict = ReviewVerdict(version: 1, host: work.host, projectID: 7, iid: 13, headSHA: head,
-            verdict: .objections, discussionFingerprint: "x", username: "owner", userID: 1)
+            verdict: .objections, discussionFingerprint: "x", username: user.username, userID: user.id, runID: job.id)
         let file = ReviewVerdictStore.fileURL(host: work.host, projectID: 7, iid: 13, in: directory)
         try FileManager.default.createDirectory(at: file.deletingLastPathComponent(), withIntermediateDirectories: true)
         try JSONEncoder().encode(verdict).write(to: file)
-        #expect(TodoAutomationService.reviewScope(work: work, username: "owner", directory: directory).contains(head))
-        #expect(TodoAutomationService.reviewScope(work: work, username: "someone-else", directory: directory).isEmpty)
+        #expect(TodoAutomationService.reviewScope(work: work, reviewer: user, settings: settings, directory: directory).isEmpty)
+
+        try await AssistantJobJournal.save(.init(result: .init(status: .succeeded, summary: "Reviewed"), output: ""),
+            for: job, reviewVerdict: verdict)
+        #expect(TodoAutomationService.reviewScope(work: work, reviewer: user, settings: settings, directory: directory).contains(head))
+        let other = GitLabAuthenticatedUser(id: 2, username: user.username)
+        #expect(TodoAutomationService.reviewScope(work: work, reviewer: other, settings: settings, directory: directory).isEmpty)
     }
 
     private func discussions(_ json: String) throws -> [GitLabMergeRequestDiscussion] {

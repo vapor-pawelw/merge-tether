@@ -115,6 +115,7 @@ final class MergeWorkflowMonitor {
         reviewSLA: TimeInterval, now: Date = Date(),
         trackedReviews: Set<AssistantAutomationRunner.MergeRequestWork> = [],
         automationScope: MRAutomationScope = .init(),
+        reviewHistory: [AssistantAutomationRunner.Handoff] = [],
         isCurrent: @MainActor () -> Bool = { true },
         deliver: @MainActor (MergeWorkflowEvent) -> Void
     ) async {
@@ -179,7 +180,7 @@ final class MergeWorkflowMonitor {
 
         if enabled.contains(.reviewUpdate) {
             events.append(contentsOf: await reviewUpdates(glab: glab, account: account, baselines: &next, tracked: trackedReviews, ownedKeys: ownedKeys,
-                automationScope: automationScope, username: user.username))
+                automationScope: automationScope, username: user.username, reviewHistory: reviewHistory))
         } else {
             next.reviews.removeAll()
         }
@@ -375,7 +376,7 @@ final class MergeWorkflowMonitor {
     private func reviewUpdates(
         glab: GlabService, account: Account, baselines: inout Baselines,
         tracked: Set<AssistantAutomationRunner.MergeRequestWork>, ownedKeys: Set<String>,
-        automationScope: MRAutomationScope, username: String
+        automationScope: MRAutomationScope, username: String, reviewHistory: [AssistantAutomationRunner.Handoff]
     ) async -> [MergeWorkflowEvent] {
         let assigned = try? await glab.fetchReviewAssignedMergeRequests(userID: account.userID, host: account.host)
         var candidates = assigned ?? []
@@ -434,8 +435,22 @@ final class MergeWorkflowMonitor {
             let firstObservation = baselines.reviews[key] == nil
             var previous = baselines.reviews[key] ?? ReviewCheckpoint(head: head, hasReviewed: hasReviewEvidence,
                 reportedHeads: [head], seenAuthorReplies: replies)
-            let verdict = ReviewVerdictStore.verdict(host: account.host, projectID: request.projectID,
+            let candidate = ReviewVerdictStore.verdict(host: account.host, projectID: request.projectID,
                 iid: request.iid, user: .init(id: account.userID, username: username), in: verdictDirectory)
+            let diagnosedHead = candidate.flatMap { verdict -> String? in
+                guard let run = reviewHistory.first(where: {
+                    $0.id == verdict.runID && $0.key.work.host == account.host && $0.key.username == username
+                        && $0.key.work.projectID == request.projectID && $0.key.work.iid == request.iid
+                }), AssistantAutomationRunner.isForeignPipelineDiagnosis(for: run, history: reviewHistory) else { return nil }
+                return verdict.headSHA
+            }
+            let verdict = diagnosedHead == nil ? candidate : nil
+            if let diagnosedHead, previous.reviewedHead == diagnosedHead {
+                previous.reviewedHead = nil
+                previous.reviewedDiff = nil
+                previous.reviewedNoteRevisions = nil
+                previous.lastObservedVerdictDigest = nil
+            }
             let verdictDigest: String? = {
                 guard let verdict, verdict.version == 1, verdict.headSHA == head else { return nil }
                 let encoder = JSONEncoder()
@@ -489,7 +504,8 @@ final class MergeWorkflowMonitor {
                     ? head + "-context-" + (staleContext ?? "")
                     : head + (ids.isEmpty ? "" : "-replies-" + ids.map(String.init).joined(separator: ","))
                 var scope = IncrementalReviewScope(currentHead: head)
-                if changedHead, let reviewed = previous.reviewedHead ?? (previous.head != head ? previous.head : nil) {
+                let observedReviewHead = previous.head == diagnosedHead ? nil : previous.head
+                if changedHead, let reviewed = previous.reviewedHead ?? observedReviewHead {
                     scope.reviewedHead = reviewed
                     if let reviewedDiff = previous.reviewedDiff, reviewedDiff.headSHA == reviewed,
                        let currentDiff = try? await glab.fetchReviewDiffSnapshot(for: request, host: account.host) {
@@ -501,7 +517,11 @@ final class MergeWorkflowMonitor {
                         to: MergeRequestDiffDigest.noteRevisions(discussions, excludingAuthor: account.userID))
                 }
                 var parts: [String] = []
-                if changedHead { parts.append("The MR head changed after your recorded review.") }
+                if changedHead {
+                    parts.append(scope.reviewedHead == nil
+                        ? "The MR head changed. Review the current diff and discussions at this head."
+                        : "The MR head changed after your recorded review.")
+                }
                 if !ids.isEmpty {
                     parts.append("The author replied after your review comments. Recheck reply note IDs: "
                         + ids.map(String.init).joined(separator: ", ") + ".")

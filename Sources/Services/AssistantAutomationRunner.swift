@@ -95,6 +95,30 @@ enum AssistantAutomationRunner {
         }
     }
 
+    struct ForeignPipelineDiagnosis: Codable, Equatable, Sendable {
+        let pipelineID: Int
+        let projectID: Int
+        let sha: String
+        let reviewerID: Int
+        let authorID: Int
+
+        func verify(request: GitLabMergeRequest, user: GitLabAuthenticatedUser, host: String, glab: GlabService) async throws {
+            guard user.id == reviewerID else { throw AssistantJobExecutor.ExecutionError.wrongAccount }
+            guard request.author.id == authorID, authorID != reviewerID else {
+                throw AssistantJobExecutor.ExecutionError.inactiveMergeRequest
+            }
+            guard let pipeline = request.headPipeline, let id = pipeline.id,
+                  pipeline.projectID == projectID else {
+                throw HandoffError.pipelineState(pipelineID, "unknown")
+            }
+            if id > pipelineID { throw HandoffError.pipelineSuperseded(pipelineID) }
+            guard id == pipelineID, pipeline.sha == sha else { throw HandoffError.pipelineState(pipelineID, "unknown") }
+            if pipeline.status == "success" { throw HandoffError.pipelinePassed(pipelineID) }
+            guard pipeline.status == "failed" else { throw HandoffError.pipelineState(pipelineID, pipeline.status) }
+            _ = try await glab.verifiedFailedPipeline(for: request, host: host, expectedUser: user)
+        }
+    }
+
     struct Handoff: Codable, Identifiable {
         let id: UUID
         let key: ChatKey
@@ -140,6 +164,7 @@ enum AssistantAutomationRunner {
         /// Legacy full-review intent, retained when decoding older runs.
         var reviewFromScratch: Bool? = nil
         var taskIntent: TaskIntent? = nil
+        var foreignPipelineDiagnosis: ForeignPipelineDiagnosis? = nil
 
         var deliveredFeedbackTodos: [Todo.FeedbackIdentity] {
             if let execution { return execution.state == .succeeded ? feedbackTodos ?? [] : [] }
@@ -266,7 +291,8 @@ enum AssistantAutomationRunner {
         draftRepair: DraftReplyRepair.Context? = nil,
         retryOf: UUID? = nil,
         feedbackRecoveryRootID: UUID? = nil,
-        taskIntent: TaskIntent? = nil
+        taskIntent: TaskIntent? = nil,
+        foreignPipeline: GitLabMergeRequest.Pipeline? = nil
     ) async throws -> Handoff {
         guard mrWorkflow != .draftReply else { throw AssistantJobExecutor.ExecutionError.disabledPermission }
         let automaticConfiguration = configurationSnapshot ?? settings.automation
@@ -294,15 +320,31 @@ enum AssistantAutomationRunner {
             savedTaskIntent($0, history: settings.assistantHandoffs) ?? .review()
         }
         let diagnosesPipeline = intent == .pipelineDiagnosis
+        let foreignDiagnosis = review && diagnosesPipeline
         let recordsReviewVerdict = review && !diagnosesPipeline
         let headSHA: String?
         var reviewer: GitLabAuthenticatedUser?
-        if jobCoordinator == nil || configurationSnapshot != nil || (reviewRetry != nil && glab != nil) {
-            let snapshot = try await freshRequest(work: work, username: username, settings: settings, isReview: review, glab: glab)
+        var pipelineDiagnosis: ForeignPipelineDiagnosis?
+        if foreignDiagnosis || jobCoordinator == nil || configurationSnapshot != nil || (reviewRetry != nil && glab != nil) {
+            let service = glab ?? GlabService()
+            let snapshot = try await freshRequest(work: work, username: username, settings: settings, isReview: review, glab: service)
             headSHA = snapshot.request.sha
             reviewer = snapshot.user
             guard let headSHA, !headSHA.isEmpty else { throw AssistantJobExecutor.ExecutionError.inactiveMergeRequest }
             if let expectedHeadSHA, expectedHeadSHA != headSHA { throw AssistantJobExecutor.ExecutionError.headChanged }
+            if foreignDiagnosis {
+                if let reviewRetry {
+                    try AssistantJobExecutor.validateHeadSnapshot(expected: reviewRetry.expectedHeadSHA, actual: headSHA)
+                    // Older runs did not record the pipeline identity at dispatch.
+                    pipelineDiagnosis = reviewRetry.foreignPipelineDiagnosis
+                } else if let pipelineID = foreignPipeline?.id, let projectID = foreignPipeline?.projectID,
+                          let sha = foreignPipeline?.sha {
+                    pipelineDiagnosis = .init(pipelineID: pipelineID, projectID: projectID, sha: sha,
+                        reviewerID: snapshot.user.id, authorID: snapshot.request.author.id)
+                }
+                guard let pipelineDiagnosis else { throw HandoffError.legacyJob }
+                try await pipelineDiagnosis.verify(request: snapshot.request, user: snapshot.user, host: work.host, glab: service)
+            }
         } else { headSHA = expectedHeadSHA }
         try validateLaunchPolicy()
         guard !executionCoordinator.isWorking(on: work) else { throw HandoffError.mergeRequestBusy }
@@ -319,7 +361,10 @@ enum AssistantAutomationRunner {
         } else {
             taskPrompt = prompt
         }
-        let boundedPrompt = refreshedTaskPrompt(taskPrompt, expectedHeadSHA: headSHA)
+        let pipelineScope = pipelineDiagnosis.map {
+            "\n\nDiagnose GitLab pipeline \($0.pipelineID) in project \($0.projectID) at SHA \($0.sha). Stop if it is no longer the MR's current failed pipeline."
+        } ?? ""
+        let boundedPrompt = refreshedTaskPrompt(taskPrompt, expectedHeadSHA: headSHA) + pipelineScope
         let acknowledgements = (feedbackTodos + (feedbackTodo.map { [$0] } ?? [])).reduce(into: [Todo.FeedbackIdentity]()) {
             if !$0.contains($1) { $0.append($1) }
         }
@@ -422,7 +467,7 @@ enum AssistantAutomationRunner {
             resolvesOwnThreads: recordsReviewVerdict ? resolveOwnThreads : nil,
             manual: manual, expectedHeadSHA: headSHA, configurationSnapshot: manual ? settings.automation : automaticConfiguration,
             retryOf: retryOf, feedbackRecoveryRootID: feedbackRecoveryRootID, feedbackDecisionRevision: decisionContext,
-            taskIntent: intent
+            taskIntent: intent, foreignPipelineDiagnosis: pipelineDiagnosis
         )
         for (noteID, revision) in verifiedFeedbackNotes ?? [:] {
             settings.authorFeedbackAttempts.insert(.init(target: target, noteID: noteID, revision: revision,
@@ -526,8 +571,8 @@ enum AssistantAutomationRunner {
         }
     }
 
-    private static func currentReviewTask(work: MergeRequestWork, head: String, user: GitLabAuthenticatedUser?,
-                                          settings: SettingsManager, fullReview: Bool, configuredInstructions: String?) -> String {
+    static func currentReviewTask(work: MergeRequestWork, head: String, user: GitLabAuthenticatedUser?,
+                                  settings: SettingsManager, fullReview: Bool, configuredInstructions: String? = nil) -> String {
         let reviewedHead = fullReview ? nil : user.flatMap {
             ReviewVerdictStore.authenticatedVerdict(host: work.host, projectID: work.projectID, iid: work.iid,
                 user: $0, settings: settings)?.headSHA
@@ -550,7 +595,12 @@ enum AssistantAutomationRunner {
 
     static func recordsReviewVerdict(for handoff: Handoff, history: [Handoff] = []) -> Bool {
         (handoff.workflow == .review || handoff.reviewModel != nil)
-            && savedTaskIntent(handoff, history: history) != .pipelineDiagnosis
+            && !isForeignPipelineDiagnosis(for: handoff, history: history)
+    }
+
+    static func isForeignPipelineDiagnosis(for handoff: Handoff, history: [Handoff] = []) -> Bool {
+        (handoff.workflow == .review || handoff.reviewModel != nil)
+            && savedTaskIntent(handoff, history: history) == .pipelineDiagnosis
     }
 
     private static func savedTaskIntent(_ stopped: Handoff, history: [Handoff]) -> TaskIntent? {

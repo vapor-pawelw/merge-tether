@@ -147,6 +147,7 @@ final class AuthorFeedbackCoordinator {
     /// A user reset discards earlier passes, so the next pass assesses every note from scratch.
     @ObservationIgnored private var fullReassessment: Set<MRAutomationScope.Target> = []
     var onRemoteChange: (() -> Void)?
+    var onScopedChange: ((GitLabMergeRequest, MRAutomationScope.Target, UInt64, [GitLabMergeRequestDiscussion]?) -> Void)?
     var onNeedsWork: ((GitLabMergeRequest, Set<Int>, String, AuthorFeedbackResidual?) async -> Void)?
 
     private struct Input: Sendable {
@@ -166,6 +167,7 @@ final class AuthorFeedbackCoordinator {
         let approvalRevision: String?
         let handoffRevision: String
         let writesAllowed: Bool
+        let scopedRefresh: Bool
         var readOnly: Bool { drafts > 0 }
     }
 
@@ -228,7 +230,7 @@ final class AuthorFeedbackCoordinator {
 
     /// `approvalRevision` identifies the observed approvals; without it an unchanged snapshot is always rechecked.
     func refresh(request: GitLabMergeRequest, discussions: [GitLabMergeRequestDiscussion], drafts: Int,
-                 host: String, user: GitLabAuthenticatedUser, approvalRevision: String? = nil) {
+                 host: String, user: GitLabAuthenticatedUser, approvalRevision: String? = nil, scopedRefresh: Bool = false) {
         let target = MRAutomationScope.Target(host: host, username: user.username, projectID: request.projectID, iid: request.iid)
         let configuration = settings.automation
         guard request.author.id == user.id, request.state == "opened", request.draft != nil,
@@ -258,7 +260,8 @@ final class AuthorFeedbackCoordinator {
                           completedFollowUpJobID: completedJobID, decisionRevision: decisionRevision,
                           ignoredSuggestions: settings.feedbackSuggestionDecisions.applicable(in: discussions, for: target),
                           reviewParticipationRevision: participationRevision, approvalRevision: approvalRevision,
-                          handoffRevision: handoffRevision(target), writesAllowed: settings.automaticWritesAllowed)
+                          handoffRevision: handoffRevision(target), writesAllowed: settings.automaticWritesAllowed,
+                          scopedRefresh: scopedRefresh)
         if isSettled(input) { return }
         // An unchanged periodic refresh must not take ownership from the active task.
         if !sameSnapshot(statusOwners[target], input) {
@@ -423,7 +426,7 @@ final class AuthorFeedbackCoordinator {
     }
 
     /// A settled snapshot repeats no GitLab reads, verifier run or launch admission until an input
-    /// changes (head, text, drafts, approvals, jobs, settings, decisions) or the recheck interval passes.
+    /// changes (head, text, thread state, drafts, approvals, jobs, settings, decisions) or the recheck interval passes.
     private func isSettled(_ input: Input) -> Bool {
         guard let stable = stableChecks[input.target], tasks[input.target] == nil, pending[input.target] == nil,
               statusOwners[input.target]?.id == stable.input.id,
@@ -432,9 +435,20 @@ final class AuthorFeedbackCoordinator {
               stable.input.handoffRevision == input.handoffRevision, stable.input.writesAllowed == input.writesAllowed,
               stable.input.request.semanticContextFingerprint == input.request.semanticContextFingerprint,
               stable.input.request.draft == input.request.draft,
-              sameSnapshot(stable.input, input) else { return false }
+              sameSnapshot(stable.input, input),
+              Self.sameDiscussionResolution(stable.input.discussions, input.discussions) else { return false }
         let elapsed = now().timeIntervalSince(stable.date)
         return elapsed >= 0 && elapsed < Self.unchangedRecheckInterval
+    }
+
+    // Resolution changes need a new status pass. An active assessment can still finish and supply its text verdict.
+    private static func sameDiscussionResolution(_ previous: [GitLabMergeRequestDiscussion],
+                                                 _ current: [GitLabMergeRequestDiscussion]) -> Bool {
+        previous.elementsEqual(current) { before, after in
+            before.id == after.id && before.notes.elementsEqual(after.notes) { earlier, latest in
+                earlier.id == latest.id && earlier.resolvable == latest.resolvable && earlier.resolved == latest.resolved
+            }
+        }
     }
 
     private func recordSettlement(_ input: Input, settled: Bool) {
@@ -464,7 +478,12 @@ final class AuthorFeedbackCoordinator {
     private func discardOwnedCheckingStatus(_ input: Input) {
         guard statusOwners[input.target]?.id == input.id, statuses[input.target]?.phase == .checking else { return }
         removeStatus(for: input.target)
-        onRemoteChange?()
+        notifyChange(input)
+    }
+
+    private func notifyChange(_ input: Input, updatedDiscussions: [GitLabMergeRequestDiscussion]? = nil) {
+        if input.scopedRefresh { onScopedChange?(input.request, input.target, input.accountRevision, updatedDiscussions) }
+        else { onRemoteChange?() }
     }
 
     private func removeStatus(for target: MRAutomationScope.Target) {
@@ -727,7 +746,7 @@ final class AuthorFeedbackCoordinator {
             let changed = statuses[input.target] != completed
             statuses[input.target] = completed
             recordSettlement(input, settled: !changed)
-            if changed { onRemoteChange?() }
+            if changed { notifyChange(input) }
             return
         }
         var approved = prepared.approvals
@@ -837,7 +856,7 @@ final class AuthorFeedbackCoordinator {
         let updated = statuses[input.target] != completed
         statuses[input.target] = completed
         recordSettlement(input, settled: !changed && !updated)
-        if changed || updated { onRemoteChange?() }
+        if changed || updated { notifyChange(input, updatedDiscussions: changed ? threads : nil) }
     }
 
     private func excludedReplyAuthors(_ input: Input) -> Set<Int> {

@@ -101,7 +101,8 @@ final class TodoMonitorService {
     var markMergeRequestReadyError: String?
     @ObservationIgnored var boardPolicyOrder = BoardPolicyOrder()
     private(set) var assistantJobActionNotices: [UUID: String] = [:]
-    let assistantDependencies = AssistantDependencyMonitor()
+    let assistantDependencies: AssistantDependencyMonitor
+    let reviewJobCoordinator: AssistantJobCoordinator?
     var availableAssistants: Set<AutomationAssistant> {
         assistantDependencies.available.filter { cliHealth.hold(for: $0) == nil }
     }
@@ -231,7 +232,9 @@ final class TodoMonitorService {
         cancelPolicyJob: @escaping @MainActor (UUID, SettingsManager) -> Void = {
             AssistantAutomationRunner.cancel($0, settings: $1)
         },
-        schedulePresentationNotification: @escaping PresentationNotificationScheduler = PresentationNotificationDelivery.schedule
+        schedulePresentationNotification: @escaping PresentationNotificationScheduler = PresentationNotificationDelivery.schedule,
+        assistantDependencies: AssistantDependencyMonitor = AssistantDependencyMonitor(),
+        reviewJobCoordinator: AssistantJobCoordinator? = nil
     ) {
         boardProjectorCache = .init(scheduleNotification: schedulePresentationNotification)
         boardSnapshotCache = .init(scheduleNotification: schedulePresentationNotification)
@@ -240,6 +243,8 @@ final class TodoMonitorService {
         self.glab = glab
         self.todoStore = InboxTodoStore(settings: settings, glab: glab)
         self.notifications = notifications
+        self.assistantDependencies = assistantDependencies
+        self.reviewJobCoordinator = reviewJobCoordinator
         self.attentionNotificationScheduler = AttentionNotificationScheduler(notifications: notifications)
         self.automation = automation
         self.cancelPolicyJob = cancelPolicyJob
@@ -296,6 +301,9 @@ final class TodoMonitorService {
         attention.onAuthorFeedbackChecked = { [weak self] in
             guard let self, let host = self.glab.resolvedHost, let username = self.glab.currentUsername else { return }
             Task { await self.mrTodoRouter.refreshCompletionEvidence(host: host, username: username) }
+        }
+        attention.onScopedAuthorFeedbackChecked = { [weak self] target, revision in
+            Task { await self?.mrTodoRouter.refreshCompletionEvidence(for: target, accountRevision: revision) }
         }
         assistantDependencies.onRecovered = { [weak self] assistant in
             guard let self, self.settings.automation.assistant == assistant else { return }
@@ -914,6 +922,14 @@ final class TodoMonitorService {
             currentAccountRevision: { self.glab.accountRevision },
             isRefreshing: { self.isLoading || self.attention.isLoading || self.authoredMergeRequests.isLoading },
             refresh: { await self.forceRefreshFromGitLab() })
+    }
+
+    func refreshFeedbackDecisions(for target: MRAutomationScope.Target, revision: UInt64) async {
+        guard let iid = target.iid else { return }
+        let id = MergeRequestAttentionMonitor.Item.ID(projectID: target.projectID, iid: iid)
+        await refreshProgress.perform(scope: .mergeRequest(id), accountRevision: revision,
+            currentAccountRevision: { self.glab.accountRevision }, isRefreshing: { false },
+            refresh: { await self.attention.refreshFeedbackDecision(id, target: target, revision: revision) })
     }
 
     func refreshNow() async {

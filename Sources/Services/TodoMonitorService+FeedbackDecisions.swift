@@ -38,25 +38,27 @@ extension TodoMonitorService {
         guard settings.feedbackSuggestionDecisions.revision(for: target) != previous else { return }
         settings.recordAutomationEvent(target: target, action: .feedbackDecision, origin: .manual, state: .completed,
             message: String(localized: .FeedbackDecisionActions.ignoredEvent(decision.sourceNoteID, decision.concernSummary)))
-        await refreshFeedbackDecisions(for: target)
+        await refreshFeedbackDecisions(for: target, revision: revision)
     }
 
     func restoreFeedbackSuggestion(_ id: UUID, for target: MRAutomationScope.Target) async throws {
         try validateFeedbackDecisionTarget(target)
+        let revision = glab.accountRevision
         guard let decision = settings.feedbackSuggestionDecisions.entries(for: target).first(where: { $0.id == id }),
               settings.feedbackSuggestionDecisions.remove(id, for: target) else { return }
         settings.recordAutomationEvent(target: target, action: .feedbackDecision, origin: .manual, state: .completed,
             message: String(localized: .FeedbackDecisionActions.restoredEvent(decision.sourceNoteID, decision.concernSummary)))
-        await refreshFeedbackDecisions(for: target)
+        await refreshFeedbackDecisions(for: target, revision: revision)
     }
 
     func resetFeedbackSuggestionDecisions(for target: MRAutomationScope.Target) async throws {
         try validateFeedbackDecisionTarget(target)
+        let revision = glab.accountRevision
         let count = settings.feedbackSuggestionDecisions.reset(for: target)
         guard count > 0 else { return }
         settings.recordAutomationEvent(target: target, action: .feedbackDecision, origin: .manual, state: .completed,
             message: String(localized: .FeedbackDecisionActions.resetEvent(count)))
-        await refreshFeedbackDecisions(for: target)
+        await refreshFeedbackDecisions(for: target, revision: revision)
     }
 
     private func validateFeedbackDecisionTarget(_ target: MRAutomationScope.Target) throws {
@@ -68,10 +70,4 @@ extension TodoMonitorService {
         }
     }
 
-    private func refreshFeedbackDecisions(for target: MRAutomationScope.Target) async {
-        guard let iid = target.iid else { return }
-        let id = MergeRequestAttentionMonitor.Item.ID(projectID: target.projectID, iid: iid)
-        attention.retryAuthorFeedback(id)
-        await refreshFromGitLab(for: id)
-    }
 }
