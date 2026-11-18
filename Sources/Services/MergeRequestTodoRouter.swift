@@ -672,7 +672,7 @@ final class MergeRequestTodoRouter {
         let rule = configuration[event]
         let title = context.render(rule.titleTemplate, titleAuthor: intent.request.author.assistantTitleName(viewerUsername: intent.target.username))
         let instructions = rule.promptTemplate == AutomationSettings()[event].promptTemplate
-            ? "" : "\n\nMy additional instructions: " + context.render(rule.promptTemplate)
+            ? "" : context.render(rule.promptTemplate)
         return (title.isEmpty ? intent.request.title : title, instructions)
     }
 
@@ -686,19 +686,25 @@ final class MergeRequestTodoRouter {
         case .conflict, .refresh: nil
         }
         let task: String = switch intent.kind {
-        case .review: "Review or re-review the current merge request. Save warranted findings as private GitLab drafts."
+        case .review: AssistantAutomationRunner.TaskIntent.routedReview
         case .followUp: "First assess the specified reviewer comments on my MR against the current code and discussion. Informational summaries or accepted feedback require no code changes or reply. For warranted actionable feedback only, implement fixes, verify and push only within the configured author-follow-up permission, then save verified private replies."
-        case .pipeline: "Diagnose this MR's failed pipeline and prepare an in-scope verified fix."
+        case .pipeline: AssistantAutomationRunner.TaskIntent.routedPipeline
         case .conflict: "Resolve conflicts in an isolated worktree. Do not push unless the separate conflict-push permission below authorizes it."
         case .refresh: "Refresh current merge request state."
         }
         let configured = Self.configuredAssistantContext(intent, configuration: settings.automation)
+        let custom = configured.instructions.isEmpty ? nil : configured.instructions
+        let taskIntent: AssistantAutomationRunner.TaskIntent? = switch intent.kind {
+        case .review: .review(configuredInstructions: custom)
+        case .pipeline: .pipelineDiagnosis
+        default: nil
+        }
         let conflictPush = intent.kind == .conflict
             && settings.automation.permitsConflictPush(project: intent.request.webURL.gitLabProjectPath, manual: manual)
         let isolation = workflow == .followUp || intent.kind == .conflict
             ? "\n" + AssistantAutomationRunner.isolatedFixInstructions : ""
-        let prompt = task + "\nFocus on these GitLab note IDs: " + intent.noteIDs.sorted().map(String.init).joined(separator: ", ")
-            + configured.instructions + isolation
+        let prompt = task + AssistantAutomationRunner.TaskIntent.routedNotes + intent.noteIDs.sorted().map(String.init).joined(separator: ", ")
+            + (custom.map { AssistantAutomationRunner.TaskIntent.customInstructions + $0 } ?? "") + isolation
             + (conflictPush ? "\nSeparate conflict-push permission is ON for this MR; push only the verified in-scope conflict resolution." : "")
         let permittedTools = settings.automation.permitsAssistantTools(project: intent.request.webURL.gitLabProjectPath)
         let access: AssistantAutomationRunner.Access = permittedTools ? .configuredTools : (intent.kind == .conflict ? .preparation : .gitLabRead)
@@ -709,7 +715,8 @@ final class MergeRequestTodoRouter {
             mergeRequestURL: intent.request.webURL, prompt: prompt, workspace: settings.automation.assistantWorkspace,
             access: access, work: work, username: intent.target.username, settings: settings, allowsPush: conflictPush,
             pipelineReservation: reservation,
-            feedbackNoteIDs: intent.noteIDs.sorted(), feedbackTodos: intent.sourceEvents, isReview: intent.kind == .review, mrWorkflow: workflow, manual: manual)
+            feedbackNoteIDs: intent.noteIDs.sorted(), feedbackTodos: intent.sourceEvents, isReview: intent.kind == .review,
+            mrWorkflow: workflow, manual: manual, taskIntent: taskIntent)
         transferred = true
         return job.id
     }

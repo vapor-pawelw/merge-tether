@@ -44,7 +44,7 @@ extension TodoMonitorService {
                 workspace: settings.automation.assistantWorkspace, access: .gitLabRead,
                 work: .init(host: target.host, projectID: target.projectID, iid: target.iid),
                 username: target.username, settings: settings, isReview: true, mrWorkflow: .review, manual: true,
-                expectedHeadSHA: head, reviewFromScratch: fromScratch)
+                expectedHeadSHA: head, taskIntent: .review(fromScratch: fromScratch))
         } catch {
             assistantJobActionError = String(localized: .AssistantJobs.assistantJobsActionFailed)
         }

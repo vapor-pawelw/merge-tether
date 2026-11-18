@@ -74,7 +74,7 @@ enum AssistantJobJournal {
 
     /// Authentication proves which validated completion captured these bytes, not review correctness.
     static func reviewVerdict(for handoff: AssistantAutomationRunner.Handoff) -> ReviewVerdict? {
-        guard handoff.workflow == .review || handoff.reviewModel != nil,
+        guard AssistantAutomationRunner.recordsReviewVerdict(for: handoff),
               let checkpoint = checkpoint(for: handoff), checkpoint.result.status == .succeeded,
               let verdict = checkpoint.reviewVerdict, verdict.runID == handoff.id,
               verdict.host == handoff.key.work.host, verdict.projectID == handoff.key.work.projectID,

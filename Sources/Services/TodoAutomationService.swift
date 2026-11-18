@@ -495,16 +495,17 @@ final class TodoAutomationService {
         if let assistant = invocation.assistant {
             let scope = feedbackNoteIDs.isEmpty ? "" : "\n\nFocus on GitLab note IDs: \(feedbackNoteIDs.map(String.init).joined(separator: ", "))."
             let task = switch context.event {
-            case .reviewRequested: "Task: Review or re-review this merge request."
+            case .reviewRequested: AssistantAutomationRunner.TaskIntent.todoReview
             case .authorFeedback: "Task: Follow up on review feedback on my merge request."
             }
-            let custom = rule.promptTemplate == AutomationSettings()[context.event].promptTemplate
-                ? "" : "\n\nMy additional instructions: \(context.render(rule.promptTemplate))"
+            let configuredInstructions = rule.promptTemplate == AutomationSettings()[context.event].promptTemplate
+                ? nil : context.render(rule.promptTemplate)
+            let custom = configuredInstructions.map { AssistantAutomationRunner.TaskIntent.customInstructions + $0 } ?? ""
             let isolation = context.event == .authorFeedback
                 ? "\n\n\(AssistantAutomationRunner.isolatedFixInstructions)" : ""
             let fallback = switch context.event {
             case .reviewRequested:
-                "Check the current head, scope and diff. Verify actionable findings and check discussions and drafts for duplicates. For a re-review, recheck prior findings against the new head."
+                AssistantAutomationRunner.TaskIntent.todoReviewFallback
             case .authorFeedback:
                 "Check the current head and only the indicated feedback, or unresolved feedback when no notes are specified. Verify it against the code. For warranted fixes follow the mandatory implement, test, commit, authorized push and remote-content verification sequence before saving any response drafts. If push is off, pending or failed, keep that run's result in chat only."
             }
@@ -525,7 +526,8 @@ final class TodoAutomationService {
                 isReview: context.event == .reviewRequested,
                 mrWorkflow: context.event == .authorFeedback ? .followUp : .review,
                 manual: manual, expectedHeadSHA: expectedHeadSHA, jobCoordinator: jobCoordinator,
-                retryOf: feedbackRecovery?.origin.id, feedbackRecoveryRootID: feedbackRecovery?.rootID
+                retryOf: feedbackRecovery?.origin.id, feedbackRecoveryRootID: feedbackRecovery?.rootID,
+                taskIntent: context.event == .reviewRequested ? .review(configuredInstructions: configuredInstructions) : nil
             )
         } else {
             var environment = AssistantAutomationRunner.environment

@@ -112,6 +112,7 @@ enum ReviewVerdictStore {
               let run = settings.assistantHandoffs.first(where: { $0.id == runID }),
               run.key.work == .init(host: host, projectID: projectID, iid: iid), run.key.username == user.username,
               run.key.assistant == settings.automation.assistant, run.execution?.state == .succeeded,
+              AssistantAutomationRunner.recordsReviewVerdict(for: run, history: settings.assistantHandoffs),
               AssistantJobJournal.reviewVerdict(for: run) == verdict else { return nil }
         return verdict
     }

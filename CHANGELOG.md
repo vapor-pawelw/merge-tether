@@ -318,6 +318,8 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 
 ### Fixed
 
+- Preserve configured review constraints and pipeline diagnosis when retrying a task. Limit a review retry to discussion changes and earlier findings when a verified review already covers the current commit.
+
 - Refresh the discussion scope when retrying a review, including when the commit stays the same. Preserve an explicit review from scratch across retries and subsequent pushes.
 
 - Recheck that at least one required approval rule remains before submitting an automatic merge. Remember GitLab queue entries even when discussion reads fail or an earlier commit was rejected from the train, so removing a queue entry still stops automatic resubmission.

@@ -251,7 +251,8 @@ enum AssistantJobExecutor {
                         && $0.execution?.state.isActive == true
                 }
         }
-        guard result.status == .succeeded, handoff.workflow == .review || handoff.reviewModel != nil,
+        guard result.status == .succeeded,
+              AssistantAutomationRunner.recordsReviewVerdict(for: handoff, history: settings.assistantHandoffs),
               current(), let expectedHead = handoff.expectedHeadSHA,
               let verdict = ReviewVerdictStore.verdict(host: work.host, projectID: work.projectID, iid: work.iid,
                 user: user, in: directory), verdict.runID == handoff.id,
