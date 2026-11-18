@@ -17,6 +17,7 @@ enum DraftReplyRepair {
         /// Absent for Codex and for repairs recorded before Claude models were selectable.
         var claudeCodingModel: ClaudeCodingModel?
         var automaticRecoveryOf: UUID? = nil
+        var workRevision: String? = nil
 
         private var policy: String {
             "|\(assistant.rawValue)|\(codingModel.rawValue)|\(codingThinking.rawValue)"
@@ -29,7 +30,13 @@ enum DraftReplyRepair {
         var key: String {
             AICommentAssessmentStore.digest(lineage + "|\(origin.verificationID)|\(headSHA)|\(discussionFingerprint)|\(recoveryContextFingerprint)"
                 + "|\(bodySHA256)|\(rejection.state.rawValue)|" + AICommentAssessmentStore.digest(rejection.reason)
-                + policy + (automaticRecoveryOf.map { "|post-stop:\($0.uuidString)" } ?? ""))
+                + policy + (automaticRecoveryOf.map { "|post-stop:\($0.uuidString)" } ?? "")
+                + (workRevision.map { "|work:" + $0 } ?? ""))
+        }
+        @MainActor func workRevisionMatches(_ settings: SettingsManager) -> Bool {
+            guard let workRevision else { return true }
+            let work = AssistantAutomationRunner.MergeRequestWork(host: origin.host, projectID: origin.projectID, iid: origin.iid)
+            return FollowUpVerificationStore.recoveryWorkRevision(work: work, username: origin.username, settings: settings) == workRevision
         }
         func matchesCodingPolicy(_ configuration: AutomationSettings) -> Bool {
             codingModel == configuration.codexReviewModel
@@ -86,7 +93,7 @@ enum DraftReplyRepair {
             assistant: configuration.assistant, codingModel: configuration.codexReviewModel,
             codingThinking: configuration.codingThinking(for: configuration.assistant),
             claudeCodingModel: configuration.assistant == .claude ? configuration.claudeCodingModel : nil,
-            automaticRecoveryOf: snapshot.automaticRepairRecoveryOf)
+            automaticRecoveryOf: snapshot.automaticRepairRecoveryOf, workRevision: snapshot.assessedWorkRevision)
         return result.matches(snapshot, configuration: configuration) ? result : nil
     }
 
@@ -283,7 +290,14 @@ enum DraftReplyRepair {
                 retrySnapshot.automaticRepairRecoveryOf = predecessor.id
             }
             guard let context = context(snapshot: retrySnapshot, origin: origin, rejection: rejection, configuration: settings.automation) else { continue }
-            if let exact = previous.first(where: { $0.context.key == context.key }) {
+            var legacyContext = context
+            legacyContext.workRevision = nil
+            if let exact = previous.first(where: {
+                $0.context.key == context.key
+                    || ($0.context.workRevision == nil && $0.context.key == legacyContext.key
+                        && FollowUpVerificationStore.legacyRecoveryIsCurrent(origin: $0.context.origin,
+                            work: snapshot.work, username: snapshot.user.username, settings: settings, in: directory))
+            }) {
                 if let job = job(context, settings: settings), job.execution?.state.isActive == true { return .working }
                 blocked = stopped(exact, settings: settings)
                     ?? "The coding task finished, but this exact reply remains unsupported. A fresh correction or explicit retry is required."
@@ -352,6 +366,7 @@ enum DraftReplyRepair {
             configuration.preservingScope(from: settings.automation) == settings.automation
                 && settings.automation.assistant == context.assistant
                 && context.matchesCodingPolicy(settings.automation)
+                && context.workRevisionMatches(settings)
                 && preparationAllowed(snapshot.request, configuration: settings.automation)
                 && !settings.ignoredMergeRequests.contains(target)
         }
@@ -360,6 +375,7 @@ enum DraftReplyRepair {
             try await validate(context, snapshot: snapshot, settings: settings, glab: glab, directory: directory)
             try Task.checkCancellation()
         } catch {
+            if !context.workRevisionMatches(settings), job(context, settings: settings) == nil { return nil }
             if error is LivePolicyDenied { return nil }
             let permissionError = error as? AssistantJobExecutor.ExecutionError
             if !policyIsCurrent(), error is CancellationError || permissionError == .disabledPermission || permissionError == .headChanged {
@@ -410,6 +426,7 @@ enum DraftReplyRepair {
                 draftRepair: context, retryOf: context.automaticRecoveryOf)
             return handoff.id
         } catch {
+            if !context.workRevisionMatches(settings), job(context, settings: settings) == nil { return nil }
             let permissionError = error as? AssistantJobExecutor.ExecutionError
             // This controlled launcher persists a child before scheduling any worker. A missing child
             // proves these policy-invalidated read failures occurred before any worker could start.
@@ -428,6 +445,7 @@ enum DraftReplyRepair {
                     // Missing or changed evidence keeps the original refusal and its reservation.
                 }
             }
+            if !context.workRevisionMatches(settings), job(context, settings: settings) == nil { return nil }
             throw error
         }
     }
@@ -454,6 +472,8 @@ enum DraftReplyRepair {
 
     static func validate(_ context: Context, snapshot: DraftProofRecoveryCoordinator.Snapshot, settings: SettingsManager,
                          glab: GlabService, directory: URL = FollowUpVerificationStore.directory, excludingRunID: UUID? = nil) async throws {
+        let explicitRetry = settings.assistantHandoffs.first { $0.id == excludingRunID }?.manual == true
+        guard explicitRetry || context.workRevisionMatches(settings) else { throw AssistantJobExecutor.ExecutionError.disabledPermission }
         let isAutomaticRecovery = context.automaticRecoveryOf != nil && excludingRunID != nil
             && settings.assistantHandoffs.first(where: { $0.id == excludingRunID })?.manual != true
         let predecessor = try isAutomaticRecovery
@@ -494,6 +514,7 @@ enum DraftReplyRepair {
             }
             throw LivePolicyDenied()
         }
+        guard explicitRetry || context.workRevisionMatches(settings) else { throw AssistantJobExecutor.ExecutionError.disabledPermission }
         guard context.matches(live, configuration: settings.automation),
               preparationAllowed(live.request, configuration: settings.automation), glab.resolvedHost == snapshot.host,
               glab.currentUsername == snapshot.user.username else { throw AssistantJobExecutor.ExecutionError.headChanged }

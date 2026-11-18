@@ -456,10 +456,12 @@ import MergeTetherRemote
             let assessment = DraftProofRecoveryVerifier.Assessment(drafts: ids.map {
                 .init(draftID: $0, state: .valid, reason: "Independent fixture assessment supports this exact reply")
             })
-            try FollowUpVerificationStore.persistRecovery(.init(version: 2,
+            try FollowUpVerificationStore.persistRecovery(.init(version: 3,
                 attemptID: AICommentAssessmentStore.digest(identity.uuidString), assessmentID: identity,
                 assistant: settings.automation.assistant, model: settings.automation.codexVerificationModel.rawValue,
-                origin: origin, proof: proof, assessment: assessment, requestedDraftIDs: ids), work: work, username: "me", in: folder)
+                origin: origin, proof: proof, assessment: assessment, requestedDraftIDs: ids,
+                workRevision: try #require(FollowUpVerificationStore.recoveryWorkRevision(work: work, username: "me", settings: settings))),
+                work: work, username: "me", in: folder)
         }
 
         func log(_ name: String) -> String {
@@ -2079,9 +2081,15 @@ import MergeTetherRemote
     func repeatedQuickReadFailureDoesNotChurnButRecoveryPublishesFreshEvidence(_ failure: String) async throws {
         let harness = try makeHarness(assistantWorked: true)
         defer { harness.cleanUp() }
+        var catalogPasses = 0
+        harness.monitor.onRefreshed = { catalogPasses += 1 }
         try harness.write("drafts.json", draftJSON)
         try harness.recordVerdict("objections", head: head)
         try await harness.poll()
+        // Finish optional catalog dependencies before observing only quick-read evidence changes.
+        let settled = ContinuousClock.now + .seconds(3)
+        while catalogPasses < 2, ContinuousClock.now < settled { try await Task.sleep(for: .milliseconds(10)) }
+        try #require(catalogPasses >= 2)
         let link = try #require(harness.monitor.currentItems.first?.url)
         try harness.write(failure, "yes")
         await harness.monitor.refreshPendingDrafts()
@@ -4507,9 +4515,24 @@ import MergeTetherRemote
     }
 
     @Test func laterSealedRepliesDoNotHideCurrentEarlierProofOrPublishHumanRepliesUnderAIOnly() async throws {
-        let harness = try makeHarness(assistantWorked: true, authored: true)
-        defer { harness.cleanUp() }
+        var freshAssessments = 0
+        let harness = try makeHarness(assistantWorked: true, authored: true, verifyDraftRecovery: { input, _, _ in
+            freshAssessments += 1
+            return .init(drafts: input.requestedDraftIDs.map {
+                .init(draftID: $0, state: .valid, reason: "The earlier reply remains supported by current source and discussion evidence")
+            })
+        })
+        defer { harness.monitor.draftProofRecoveryCoordinator?.cancel(); harness.cleanUp() }
         _ = try prepareSupersededFollowUpProofs(harness)
+        harness.gitlab.beforeCommand = { call in
+            if call.endpoint.hasSuffix("/draft_notes/12/publish") { #expect(freshAssessments == 1) }
+        }
+        try await harness.poll()
+        let work = AssistantAutomationRunner.MergeRequestWork(host: host, projectID: 1, iid: 2)
+        let settled = ContinuousClock.now + .seconds(3)
+        while freshAssessments == 0 || harness.monitor.draftProofRecoveryCoordinator?.isChecking(work: work) == true,
+              ContinuousClock.now < settled { try await Task.sleep(for: .milliseconds(10)) }
+        try #require(freshAssessments == 1)
         try await harness.poll()
         #expect(harness.monitor.currentOpenItems.first?.requiresDiscussionRecheck == false)
         #expect(harness.monitor.currentOpenItems.first?.awaitingRemoteVerification == false)

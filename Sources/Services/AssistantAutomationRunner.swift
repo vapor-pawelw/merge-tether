@@ -349,6 +349,9 @@ enum AssistantAutomationRunner {
         let target = MRAutomationScope.Target(host: work.host, username: username, projectID: work.projectID, iid: work.iid)
         func validateLaunchPolicy() throws {
             try AssistantJobExecutor.validatePersistence(settings)
+            if !manual, draftRepair?.workRevisionMatches(settings) == false {
+                throw AssistantJobExecutor.ExecutionError.disabledPermission
+            }
             if pipelineClaims.hasActiveReservation(host: work.host, projectID: work.projectID, iid: work.iid) {
                 guard let pipelineReservation, pipelineReservation.host == work.host,
                       pipelineReservation.projectID == work.projectID, pipelineReservation.mergeRequestIID == work.iid,

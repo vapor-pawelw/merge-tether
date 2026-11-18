@@ -438,6 +438,9 @@ enum AssistantJobExecutor {
         try validateConfiguration(handoff, automation: settings.automation)
         try validateIgnoredTarget(handoff, ignored: settings.ignoredMergeRequests)
         let work = handoff.key.work, project = request.webURL.gitLabProjectPath
+        guard handoff.manual == true || handoff.draftRepair?.workRevisionMatches(settings) != false else {
+            throw ExecutionError.disabledPermission
+        }
         guard request.projectID == work.projectID, request.iid == work.iid,
               request.webURL.isGitLabMergeRequest(host: work.host, iid: work.iid),
               handoff.manual == true || settings.automation.assistant == handoff.key.assistant,

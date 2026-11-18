@@ -119,9 +119,11 @@ struct FollowUpPushPermissionTests {
         let assessment = DraftProofRecoveryVerifier.Assessment(drafts: origin.drafts.map {
             .init(draftID: $0.id, state: .valid, reason: "Independent fixture assessment supports the exact reply")
         })
-        try FollowUpVerificationStore.persistRecovery(.init(version: 2, attemptID: AICommentAssessmentStore.digest(identity.uuidString),
+        try FollowUpVerificationStore.persistRecovery(.init(version: 3, attemptID: AICommentAssessmentStore.digest(identity.uuidString),
             assessmentID: identity, assistant: settings.automation.assistant, model: settings.automation.codexVerificationModel.rawValue,
-            origin: origin, proof: proof, assessment: assessment), work: work, username: "me", in: folder)
+            origin: origin, proof: proof, assessment: assessment,
+            workRevision: try #require(FollowUpVerificationStore.recoveryWorkRevision(work: work, username: "me", settings: settings))),
+            work: work, username: "me", in: folder)
         return proof
     }
 
@@ -144,7 +146,7 @@ struct FollowUpPushPermissionTests {
         #expect(FollowUpVerificationStore.recoveryOrigins(work: work, username: "me", input: unrelated, in: current).isEmpty)
     }
 
-    @Test func publicationProofsRetainDistinctSucceededOriginsAfterNewerRun() throws {
+    @Test func publicationProofsRetainDistinctOriginsAfterFreshAssessmentOfEachSettledWorkEpoch() throws {
         let folder = FileManager.default.temporaryDirectory.appending(path: UUID().uuidString)
         let suite = "FollowUpPushPermissionTests.\(UUID())"
         let defaults = try #require(UserDefaults(suiteName: suite))
@@ -158,27 +160,35 @@ struct FollowUpPushPermissionTests {
         let archive = folder.appending(path: "follow-up-verifications-archive/\(work.host)/1-2-me/\(oldProof.verificationID.uuidString.lowercased()).json")
         try write(oldProof, to: archive)
         try write(newProof, to: FollowUpVerificationStore.recordURL(kind: "follow-up-verifications", work: work, username: "me", in: folder))
-        let oldClaims = try independentlyAssess(oldProof, settings: settings, folder: folder)
-        let newClaims = try independentlyAssess(newProof, settings: settings, folder: folder)
+        var oldClaims = try independentlyAssess(oldProof, settings: settings, folder: folder)
+        var newClaims = try independentlyAssess(newProof, settings: settings, folder: folder)
         func candidates() -> [FollowUpVerification] {
             FollowUpVerificationStore.publicationReceipts(work: work, username: "me", settings: settings, in: folder)
         }
         #expect(Set(candidates().map(\.verificationID)) == [oldClaims.verificationID, newClaims.verificationID])
         settings.assistantHandoffs[1].execution?.state = .blocked
+        #expect(candidates().isEmpty)
+        oldClaims = try independentlyAssess(oldProof, settings: settings, folder: folder)
+        newClaims = try independentlyAssess(newProof, settings: settings, folder: folder)
         #expect(Set(candidates().map(\.verificationID)) == [oldClaims.verificationID, newClaims.verificationID])
         for state in [AssistantJobExecution.State.queued, .running, .failed, .cancelled, .interrupted] {
             settings.assistantHandoffs[1].execution?.state = state
             #expect(candidates().isEmpty)
         }
         settings.assistantHandoffs[1].execution = nil
-        // Legacy origins lacking process metadata remain usable only because their exact claims
-        // have already passed an independent current-content assessment, not because of a raw seal.
+        #expect(candidates().isEmpty)
+        // The exact retained seal establishes ownership; only a new assessment authorizes the current epoch.
+        newClaims = try independentlyAssess(newProof, settings: settings, folder: folder)
         #expect(candidates() == [newClaims])
         settings.assistantHandoffs[1].execution = .init(state: .succeeded)
         settings.assistantHandoffs[0].execution?.state = .failed
+        #expect(candidates().isEmpty)
+        newClaims = try independentlyAssess(newProof, settings: settings, folder: folder)
         #expect(candidates() == [newClaims])
         settings.assistantHandoffs[0].execution?.state = .succeeded
         settings.assistantHandoffs[0].followUpPushAllowed = false
+        #expect(candidates().isEmpty)
+        newClaims = try independentlyAssess(newProof, settings: settings, folder: folder)
         #expect(candidates() == [newClaims])
         settings.automation.allowFollowUpPush = false
         #expect(candidates().isEmpty)
@@ -211,7 +221,7 @@ struct FollowUpPushPermissionTests {
     }
 
     @Test(arguments: ["queued", "running", "failed", "blocked", "cancelled", "interrupted", "unknown", "succeeded"])
-    func newerOtherProviderFollowUpKeepsAnUnsettledOwnershipBarrier(state: String) throws {
+    func newerOtherProviderWorkNeedsASettledEpochAndFreshIndependentAssessment(state: String) throws {
         let folder = FileManager.default.temporaryDirectory.appending(path: UUID().uuidString)
         let suite = "FollowUpPushPermissionTests.\(UUID())"
         let defaults = try #require(UserDefaults(suiteName: suite))
@@ -228,7 +238,8 @@ struct FollowUpPushPermissionTests {
         #expect(candidates.isEmpty)
         let claims = try independentlyAssess(sealed, settings: settings, folder: folder)
         let assessed = FollowUpVerificationStore.publicationReceipts(work: work, username: "me", settings: settings, in: folder)
-        #expect(assessed == (state == "succeeded" ? [claims] : []))
+        let settled = ["succeeded", "failed", "blocked", "cancelled", "interrupted"].contains(state)
+        #expect(assessed == (settled ? [claims] : []))
     }
 
     @Test func legacyProofRecoveryRequiresExactKnownSucceededRunArtifact() throws {
@@ -250,7 +261,7 @@ struct FollowUpPushPermissionTests {
         try write(oldProof, to: artifact)
         try write(newProof, to: FollowUpVerificationStore.recordURL(kind: "follow-up-verifications", work: work, username: "me", in: folder))
         let oldClaims = try independentlyAssess(oldProof, settings: settings, folder: folder)
-        let newClaims = try independentlyAssess(newProof, settings: settings, folder: folder)
+        var newClaims = try independentlyAssess(newProof, settings: settings, folder: folder)
         func candidates() -> [FollowUpVerification] {
             FollowUpVerificationStore.publicationReceipts(work: work, username: "me", settings: settings, in: folder)
         }
@@ -267,6 +278,8 @@ struct FollowUpPushPermissionTests {
         settings.assistantHandoffs[0].execution?.workingDirectory = root.path
         #expect(candidates() == [newClaims])
         settings.assistantHandoffs = [newer]
+        #expect(candidates().isEmpty)
+        newClaims = try independentlyAssess(newProof, settings: settings, folder: folder)
         #expect(candidates() == [newClaims])
         #expect(!FileManager.default.fileExists(atPath: folder.appending(path: "follow-up-verifications-archive").path))
     }

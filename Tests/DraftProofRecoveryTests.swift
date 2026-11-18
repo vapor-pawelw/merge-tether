@@ -386,9 +386,9 @@ struct DraftProofRecoveryTests {
         #expect(!verifiedA.covers(f.snapshot.drafts[0], request: f.snapshot.request, host: f.work.host,
             user: f.snapshot.user, runID: verifiedA.runID)) // A changed source head still requires a fresh claim check.
 
-        // A normal unfinished follow-up has broad authority and must retain its whole-origin fence.
+        // Ordinary write work requires fresh truth, without erasing known ownership.
         f.settings.assistantHandoffs[1].draftRepair = nil
-        #expect(origins().isEmpty)
+        #expect(origins().contains(f.proof))
         #expect(f.publication().isEmpty)
     }
 
@@ -1380,7 +1380,7 @@ struct DraftProofRecoveryTests {
         #expect(f.live.drafts == f.snapshot.drafts)
     }
 
-    @Test(arguments: ["valid", "extraID", "missingIntent", "wrongIntent", "unknownAncestor", "unfinishedAncestor", "foreignSource", "foreignAccount"])
+    @Test(arguments: ["valid", "extraID", "missingIntent", "wrongIntent", "unknownAncestor", "unfinishedAncestor", "unknownWork", "foreignSource", "foreignAccount"])
     func repairedSealIsQuarantinedAndCannotManufactureDraftOwnership(_ scenario: String) async throws {
         let f = try Fixture()
         defer { f.clean() }
@@ -1408,21 +1408,29 @@ struct DraftProofRecoveryTests {
             let archive = FollowUpVerificationStore.recordURL(kind: "follow-up-verifications-archive", work: f.work, username: "me", in: f.folder).deletingPathExtension()
             try FileManager.default.removeItem(at: archive)
         }
-        if scenario == "unfinishedAncestor" {
+        if scenario == "unfinishedAncestor" || scenario == "unknownWork" {
             let origin = f.settings.assistantHandoffs[0]
             f.settings.assistantHandoffs.append(.init(id: UUID(), key: origin.key, title: "Unfinished intervening work", prompt: "",
                 createdAt: origin.createdAt.addingTimeInterval(0.000001), allowsPush: false, followUpPushAllowed: true,
-                execution: .init(state: .failed)))
+                execution: scenario == "unknownWork" ? nil : .init(state: .failed)))
         }
         try f.persist(repaired)
         #expect(f.publication().isEmpty)
         let origins = FollowUpVerificationStore.recoveryOrigins(work: f.work, username: "me", settings: f.settings, in: f.folder)
-        #expect(origins.contains(repaired) == (scenario == "valid"))
-        if scenario == "valid" {
+        #expect(origins.contains(repaired) == (["valid", "unfinishedAncestor", "unknownWork"].contains(scenario)))
+        if scenario == "valid" || scenario == "unknownWork" {
             f.claimState = .valid
             let check = f.coordinator()
             check.schedule(snapshot: f.snapshot, origin: repaired, configuration: f.settings.automation)
             try await f.settle(check)
+            if scenario == "unknownWork" {
+                #expect(f.assessments == 1 && f.publication().isEmpty)
+                let waiting = try #require(f.settings.assistantHandoffs.firstIndex { $0.title == "Unfinished intervening work" })
+                f.settings.assistantHandoffs[waiting].execution = .init(state: .blocked, finishedAt: f.clock)
+                check.schedule(snapshot: f.snapshot, origin: repaired, configuration: f.settings.automation)
+                try await f.settle(check)
+                #expect(f.assessments == 2)
+            }
             #expect(f.publication().contains { $0.runID == repaired.runID && $0.drafts.map(\.id) == [12] })
         }
     }
@@ -1555,7 +1563,8 @@ struct DraftProofRecoveryTests {
         try f.persist(laterProof)
         let origins = FollowUpVerificationStore.recoveryOrigins(work: f.work, username: "me", settings: f.settings, in: f.folder)
         if change != "same" {
-            #expect(!origins.contains(earlierProof))
+            #expect(origins.contains(earlierProof))
+            #expect(f.publication().isEmpty)
             return
         }
         #expect(Set(origins.map(\.runID)) == [earlier.id, later.id])
@@ -1595,13 +1604,312 @@ struct DraftProofRecoveryTests {
         #expect(FollowUpVerificationStore.contextReceipts(work: fixture.work, username: "me", settings: fixture.settings, in: fixture.folder).isEmpty)
     }
 
-    @Test func unknownOriginAndNewerUnfinishedRunCannotBeRecovered() throws {
+    @Test(arguments: [DraftProofRecoveryVerifier.Assessment.State.valid, .invalid])
+    func unrelatedBlockedFeedbackDoesNotStrandAnInterruptedOwnedReply(_ verdict: DraftProofRecoveryVerifier.Assessment.State) async throws {
+        let f = try Fixture()
+        defer { f.clean() }
+        f.snapshot.discussions.append(.init(id: "other-feedback", notes: [.init(id: 20,
+            author: .init(id: 7, username: "reviewer", name: "Reviewer"), system: false,
+            resolvable: true, resolved: false, resolvedBy: nil, body: "Supply the independently requested external evidence")]))
+        f.live = f.snapshot
+        f.settings.assistantHandoffs[0].execution = .init(state: .succeeded, finishedAt: f.clock)
+        f.claimState = .invalid
+        let first = f.coordinator()
+        defer { first.cancel() }
+        f.enableRepairs(first)
+        first.schedule(snapshot: f.snapshot, origin: f.proof, configuration: f.settings.automation)
+        try await f.waitForRepairs(1)
+        let repairID = try #require(f.repairJobs.first?.id)
+        let repairIndex = try #require(f.settings.assistantHandoffs.firstIndex { $0.id == repairID })
+        f.settings.assistantHandoffs[repairIndex].execution = .init(state: .interrupted, finishedAt: f.clock)
+        first.cancel()
+        let unrelatedID = f.addUnsealedFollowUp(state: .blocked)
+        let origins = FollowUpVerificationStore.recoveryOrigins(work: f.work, username: "me", settings: f.settings, in: f.folder)
+        let original = try #require(origins.first { $0 == f.proof })
+        #expect(f.publication().isEmpty)
+        f.claimState = verdict
+        let restarted = f.coordinator()
+        defer { restarted.cancel() }
+        f.enableRepairs(restarted)
+
+        restarted.schedule(snapshot: f.snapshot, origin: original, configuration: f.settings.automation)
+        if verdict == .valid { try await f.settle(restarted) }
+        else { try await f.waitForRepairs(2) }
+
+        #expect(f.assessments == 2)
+        #expect(f.publication().isEmpty == (verdict != .valid))
+        #expect(f.repairJobs.count == (verdict == .valid ? 1 : 2))
+        if verdict == .invalid { #expect(f.repairJobs.last?.retryOf == repairID) }
+        #expect(f.settings.assistantHandoffs.first { $0.id == unrelatedID }?.execution?.state == .blocked)
+        #expect(f.live.drafts == f.snapshot.drafts)
+    }
+
+    @Test(arguments: [AssistantJobExecution.State.blocked, .failed, .interrupted, .succeeded], [false, true])
+    func aNewStoppedFollowUpRequiresFreshVerificationInsteadOfRevivingACachedValidReply(_ state: AssistantJobExecution.State, _ legacy: Bool) async throws {
+        let f = try Fixture()
+        defer { f.clean() }
+        let first = f.coordinator()
+        defer { first.cancel() }
+        first.schedule(snapshot: f.snapshot, origin: f.proof, configuration: f.settings.automation)
+        try await f.settle(first)
+        #expect(f.assessments == 1 && f.publication().count == 1)
+        if legacy {
+            let current = try #require(FollowUpVerificationStore.recoveryRecords(work: f.work, username: "me",
+                settings: f.settings, in: f.folder).first)
+            let old = FollowUpVerificationStore.RecoveryRecord(version: 2, attemptID: current.attemptID,
+                assessmentID: current.assessmentID, assistant: current.assistant, model: current.model,
+                origin: current.origin, proof: current.proof, assessment: current.assessment,
+                requestedDraftIDs: current.requestedDraftIDs)
+            try FollowUpVerificationStore.persistRecovery(old, work: f.work, username: "me", in: f.folder)
+            #expect(f.publication().count == 1)
+        }
+        let laterID = f.addUnsealedFollowUp(state: state)
+        #expect(FollowUpVerificationStore.recoveryOrigins(work: f.work, username: "me", settings: f.settings, in: f.folder).contains(f.proof))
+        #expect(f.publication().isEmpty)
+        let restarted = f.coordinator()
+        defer { restarted.cancel() }
+
+        restarted.schedule(snapshot: f.snapshot, origin: f.proof, configuration: f.settings.automation)
+        try await f.settle(restarted)
+
+        #expect(f.assessments == 2 && f.publication().count == 1)
+        #expect(f.settings.assistantHandoffs.first { $0.id == laterID }?.execution?.state == state)
+    }
+
+    @Test(arguments: [false, true], [false, true])
+    func anUnchangedPreUpgradeNegativeVerdictIsRetainedUntilNewWorkNeedsFreshEvidence(_ resealed: Bool, _ contextless: Bool) async throws {
+        let f = try Fixture()
+        defer { f.clean() }
+        f.claimState = .invalid
+        let first = f.coordinator()
+        defer { first.cancel() }
+        first.schedule(snapshot: f.snapshot, origin: f.proof, configuration: f.settings.automation)
+        try await f.settle(first)
+        let attemptPath = try f.pendingAttemptPath()
+        var attempt = try #require(JSONSerialization.jsonObject(with: Data(contentsOf: attemptPath)) as? [String: Any])
+        var context = try #require(attempt["context"] as? [String: Any])
+        let configuration = f.settings.automation
+        let parts = ["draft-verdict-v1", f.snapshot.host, String(f.snapshot.user.id), f.snapshot.user.username,
+            f.snapshot.request.sha!, f.snapshot.branchHead, f.snapshot.request.draftProofRecoveryContextFingerprint,
+            configuration.assistant.rawValue, configuration.codexVerificationModel.rawValue,
+            String(DraftProofRecoveryVerifier.criteriaVersion), "null", AICommentAssessmentStore.digest("")]
+        let legacyKey = AICommentAssessmentStore.digest(parts.joined(separator: "|"))
+        let fingerprint = try #require(ReviewVerdict.fingerprint(f.snapshot.discussions))
+        let legacyID = AICommentAssessmentStore.digest(legacyKey + "|" + fingerprint + "|12|" + f.proof.verificationID.uuidString)
+        context["key"] = legacyKey
+        context.removeValue(forKey: "workRevision")
+        attempt["context"] = context
+        if contextless { attempt.removeValue(forKey: "context") }
+        attempt["id"] = legacyID
+        attempt.removeValue(forKey: "workRevision")
+        try FileManager.default.removeItem(at: attemptPath)
+        try JSONSerialization.data(withJSONObject: attempt).write(to: attemptPath.deletingLastPathComponent().appending(path: legacyID + ".json"))
+        first.cancel()
+        var currentOrigin = f.proof
+        if resealed {
+            let later = f.addUnsealedFollowUp(state: .succeeded)
+            try f.archive(f.proof)
+            currentOrigin = f.currentProof(runID: later, body: "Fixed")
+            try f.persist(currentOrigin)
+        }
+        f.claimState = .valid
+        let restarted = f.coordinator()
+        defer { restarted.cancel() }
+
+        restarted.schedule(snapshot: f.snapshot, origin: currentOrigin, configuration: f.settings.automation)
+        try await f.settle(restarted)
+
+        if resealed {
+            #expect(f.assessments == 2 && f.publication().count == 1)
+            return
+        }
+        #expect(f.assessments == 1 && f.publication().isEmpty)
+        #expect(restarted.failure(work: f.work) != nil)
+        _ = f.addUnsealedFollowUp(state: .blocked)
+        restarted.schedule(snapshot: f.snapshot, origin: f.proof, configuration: f.settings.automation)
+        try await f.settle(restarted)
+        #expect(f.assessments == 2 && f.publication().count == 1)
+    }
+
+    @Test(arguments: [false, true], ["validation", "runnerFallback"])
+    func aWriterThatStartsAndStopsDuringRepairPreflightRequiresAnotherAssessmentWithoutChargingTheSlot(_ timeout: Bool, _ stage: String) async throws {
+        let f = try Fixture()
+        defer { f.clean() }
+        f.claimState = .invalid
+        let gitlab = f.liveGitLab()
+        defer { gitlab.close() }
+        let glab = gitlab.service(host: f.work.host, username: "me")
+        f.settings.glabPath = glab.glabPath
+        var userReads = 0
+        gitlab.beforeCommand = { request in
+            guard request.endpoint == "/user" else { return }
+            userReads += 1
+            let changingRead = stage == "runnerFallback" ? 3 : 1
+            if stage == "runnerFallback", userReads == 2 {
+                f.live.request = try f.request(draft: true)
+            }
+            guard userReads >= changingRead else { return }
+            // No incorrect worker may execute after the controlled admission read.
+            if userReads > changingRead { throw CancellationError() }
+            let id = f.addUnsealedFollowUp(state: .running)
+            let index = try #require(f.settings.assistantHandoffs.firstIndex { $0.id == id })
+            f.settings.assistantHandoffs[index].execution = .init(state: .blocked, finishedAt: f.clock)
+            if timeout { throw URLError(.timedOut) }
+        }
+        let first = f.coordinator()
+        defer { first.cancel() }
+        var returned = false
+        first.onNeedsRepair = { snapshot, origin, assessment in
+            defer { returned = true }
+            return try await DraftReplyRepair.launch(snapshot: snapshot, origin: origin, assessment: assessment,
+                settings: f.settings, glab: glab, directory: f.folder)
+        }
+        first.schedule(snapshot: f.snapshot, origin: f.proof, configuration: f.settings.automation)
+        let deadline = ContinuousClock.now + .seconds(3)
+        while !returned, ContinuousClock.now < deadline { try await Task.sleep(for: .milliseconds(10)) }
+        first.cancel()
+        try #require(returned)
+        let attempts = FollowUpVerificationStore.recordURL(kind: "draft-repair-attempts", work: f.work,
+            username: "me", in: f.folder).deletingPathExtension()
+        let paths = (try? FileManager.default.contentsOfDirectory(at: attempts, includingPropertiesForKeys: nil)) ?? []
+        #expect(userReads == (stage == "runnerFallback" ? 3 : 1) && f.repairJobs.isEmpty)
+        #expect(paths.filter { $0.pathExtension == "json" }.isEmpty)
+        #expect(f.publication().isEmpty)
+        f.live = f.snapshot
+        let resumed = f.coordinator()
+        defer { resumed.cancel() }
+        f.enableRepairs(resumed)
+
+        resumed.schedule(snapshot: f.snapshot, origin: f.proof, configuration: f.settings.automation)
+        try await f.waitForRepairs(1)
+
+        #expect(f.assessments == 2 && f.repairJobs.count == 1)
+        #expect(f.publication().isEmpty && f.live.drafts == f.snapshot.drafts)
+    }
+
+    @Test func aLegacySuccessfulRepairWithoutAChangedSealCannotSpendAnotherAutomaticAttemptOnTheSameRejection() async throws {
+        let f = try Fixture()
+        defer { f.clean() }
+        f.claimState = .invalid
+        let first = f.coordinator()
+        defer { first.cancel() }
+        f.enableRepairs(first)
+        first.schedule(snapshot: f.snapshot, origin: f.proof, configuration: f.settings.automation)
+        try await f.waitForRepairs(1)
+        let repair = try #require(f.repairJobs.first)
+        let index = try #require(f.settings.assistantHandoffs.firstIndex { $0.id == repair.id })
+        let original = try #require(repair.draftRepair)
+        var legacy = original
+        legacy.workRevision = nil
+        let folder = FollowUpVerificationStore.recordURL(kind: "draft-repair-attempts", work: f.work,
+            username: "me", in: f.folder).deletingPathExtension()
+        let path = folder.appending(path: original.key + ".json")
+        var attempt = try #require(JSONSerialization.jsonObject(with: Data(contentsOf: path)) as? [String: Any])
+        attempt["context"] = try JSONSerialization.jsonObject(with: JSONEncoder().encode(legacy))
+        try FileManager.default.removeItem(at: path)
+        try JSONSerialization.data(withJSONObject: attempt).write(to: folder.appending(path: legacy.key + ".json"))
+        f.settings.assistantHandoffs[index].draftRepair = legacy
+        f.settings.assistantHandoffs[index].execution = .init(state: .succeeded, finishedAt: f.clock)
+        first.cancel()
+        let restarted = f.coordinator()
+        defer { restarted.cancel() }
+        f.enableRepairs(restarted)
+
+        restarted.schedule(snapshot: f.snapshot, origin: f.proof, configuration: f.settings.automation)
+        try await f.settle(restarted)
+
+        #expect(f.assessments == 1 && f.repairJobs.count == 1)
+        #expect(f.publication().isEmpty && f.live.drafts == f.snapshot.drafts)
+    }
+
+    @Test(arguments: ["newRun", "state", "completion", "stop"])
+    func changesToTheStoppedWorkEpochInvalidateEvenAFreshRecovery(_ change: String) async throws {
+        let f = try Fixture()
+        defer { f.clean() }
+        let laterID = f.addUnsealedFollowUp(state: .blocked)
+        let origins = FollowUpVerificationStore.recoveryOrigins(work: f.work, username: "me", settings: f.settings, in: f.folder)
+        let origin = try #require(origins.first { $0 == f.proof })
+        let first = f.coordinator()
+        defer { first.cancel() }
+        first.schedule(snapshot: f.snapshot, origin: origin, configuration: f.settings.automation)
+        try await f.settle(first)
+        #expect(f.assessments == 1 && f.publication().count == 1)
+        let index = try #require(f.settings.assistantHandoffs.firstIndex { $0.id == laterID })
+        switch change {
+        case "newRun": _ = f.addUnsealedFollowUp(state: .failed)
+        case "state": f.settings.assistantHandoffs[index].execution?.state = .failed
+        case "completion": f.settings.assistantHandoffs[index].execution?.finishedAt = f.clock.addingTimeInterval(5)
+        default: f.settings.assistantHandoffs[index].execution?.cancellationOrigin = .user
+        }
+        #expect(f.publication().isEmpty)
+        let next = f.coordinator()
+        defer { next.cancel() }
+
+        next.schedule(snapshot: f.snapshot, origin: origin, configuration: f.settings.automation)
+        try await f.settle(next)
+
+        #expect(f.assessments == 2 && f.publication().count == 1)
+    }
+
+    @Test(arguments: ["queued", "running", "unknown"])
+    func unfinishedWriteWorkPausesRecoveryWithoutSpendingAnAssessmentAndResumesAfterItStops(_ lifecycle: String) async throws {
+        let f = try Fixture()
+        defer { f.clean() }
+        let first = f.coordinator()
+        defer { first.cancel() }
+        first.schedule(snapshot: f.snapshot, origin: f.proof, configuration: f.settings.automation)
+        try await f.settle(first)
+        #expect(f.publication().count == 1)
+        let laterID = f.addUnsealedFollowUp(state: lifecycle == "queued" ? .queued : .running)
+        let index = try #require(f.settings.assistantHandoffs.firstIndex { $0.id == laterID })
+        if lifecycle == "unknown" { f.settings.assistantHandoffs[index].execution = nil }
+        #expect(FollowUpVerificationStore.recoveryOrigins(work: f.work, username: "me", settings: f.settings, in: f.folder).contains(f.proof))
+        #expect(f.publication().isEmpty)
+        let next = f.coordinator()
+        defer { next.cancel() }
+        f.enableRepairs(next)
+
+        next.schedule(snapshot: f.snapshot, origin: f.proof, configuration: f.settings.automation)
+        try await f.settle(next)
+
+        #expect(f.assessments == 1 && f.repairJobs.isEmpty && f.publication().isEmpty)
+        f.settings.assistantHandoffs[index].execution = .init(state: .blocked, finishedAt: f.clock)
+        next.schedule(snapshot: f.snapshot, origin: f.proof, configuration: f.settings.automation)
+        try await f.settle(next)
+        #expect(f.assessments == 2 && f.publication().count == 1)
+    }
+
+    @Test func newWriteWorkDuringFinalReadRequiresAnotherAssessmentBeforePublication() async throws {
+        let f = try Fixture()
+        defer { f.clean() }
+        var reads = 0
+        f.duringFetch = {
+            reads += 1
+            if reads == 2 { _ = f.addUnsealedFollowUp(state: .blocked) }
+        }
+        let first = f.coordinator()
+        defer { first.cancel() }
+        first.schedule(snapshot: f.snapshot, origin: f.proof, configuration: f.settings.automation)
+        try await f.settle(first)
+        #expect(f.assessments == 1 && f.publication().isEmpty)
+        f.duringFetch = nil
+        let next = f.coordinator()
+        defer { next.cancel() }
+
+        next.schedule(snapshot: f.snapshot, origin: f.proof, configuration: f.settings.automation)
+        try await f.settle(next)
+
+        #expect(f.assessments == 2 && f.publication().count == 1)
+    }
+
+    @Test func unknownOriginIsRejectedButNewerUnfinishedWorkDoesNotEraseKnownOwnership() throws {
         let fixture = try Fixture()
         defer { fixture.clean() }
         let original = fixture.settings.assistantHandoffs.removeFirst()
         #expect(FollowUpVerificationStore.recoveryOrigins(work: fixture.work, username: "me", settings: fixture.settings, in: fixture.folder).isEmpty)
         fixture.settings.assistantHandoffs = [original, .init(id: UUID(), key: original.key, title: "Newer follow-up", prompt: "", createdAt: original.createdAt.addingTimeInterval(1), allowsPush: false, followUpPushAllowed: true, execution: .init(state: .failed))]
-        #expect(FollowUpVerificationStore.recoveryOrigins(work: fixture.work, username: "me", settings: fixture.settings, in: fixture.folder).isEmpty)
+        #expect(FollowUpVerificationStore.recoveryOrigins(work: fixture.work, username: "me", settings: fixture.settings, in: fixture.folder) == [fixture.proof])
+        #expect(fixture.publication().isEmpty)
     }
 
     @Test func aCachedRejectedClaimRetainsHumanCopySeparatelyFromItsDiagnostic() async throws {
@@ -1789,7 +2097,9 @@ struct DraftProofRecoveryTests {
             environmentRecoveryOf: change == "unrelated" ? nil : blocked.id,
             expectedHeadSHA: change == "head" ? String(repeating: "b", count: 40) : fixture.proof.headSHA)
         fixture.settings.assistantHandoffs += [blocked, replacement]
-        #expect(FollowUpVerificationStore.recoveryOrigins(work: fixture.work, username: "me", settings: fixture.settings, in: fixture.folder).isEmpty)
+        #expect(FollowUpVerificationStore.recoveryOrigins(work: fixture.work, username: "me", settings: fixture.settings, in: fixture.folder) == [fixture.proof])
+        #expect(fixture.publication().isEmpty)
+        #expect(fixture.settings.assistantHandoffs.first { $0.id == blocked.id }?.execution?.state == .blocked)
     }
 
     @Test(arguments: [DraftProofRecoveryVerifier.Assessment.State.valid, .uncertain])
@@ -1863,7 +2173,7 @@ struct DraftProofRecoveryTests {
                 createdAt: replacement.createdAt.addingTimeInterval(1), allowsPush: false, feedbackNoteIDs: [10],
                 followUpPushAllowed: true, execution: .init(state: .failed)))
         }
-        #expect(FollowUpVerificationStore.recoveryOrigins(work: f.work, username: "me", settings: f.settings, in: f.folder).isEmpty)
+        #expect(FollowUpVerificationStore.recoveryOrigins(work: f.work, username: "me", settings: f.settings, in: f.folder) == [f.proof])
         #expect(f.receipts().isEmpty)
     }
 
@@ -2579,6 +2889,19 @@ struct DraftProofRecoveryTests {
             let deadline = ContinuousClock.now + .seconds(3)
             while repairJobs.count < count, ContinuousClock.now < deadline { try await Task.sleep(for: .milliseconds(10)) }
             #expect(repairJobs.count == count)
+        }
+        @discardableResult
+        func addUnsealedFollowUp(state: AssistantJobExecution.State) -> UUID {
+            let key = settings.assistantHandoffs[0].key
+            let created = (settings.assistantHandoffs.map(\.createdAt).max() ?? clock).addingTimeInterval(1)
+            let run = AssistantAutomationRunner.Handoff(id: UUID(), key: key, title: "Independent feedback", prompt: "",
+                createdAt: created, allowsPush: false, feedbackNoteIDs: [20], followUpPushAllowed: true,
+                execution: .init(state: state, finishedAt: state.isActive ? nil : created.addingTimeInterval(1),
+                    blocker: state == .blocked ? "Independent external evidence remains unavailable" : nil),
+                taskPrompt: "Assess only note 20", mergeRequestURL: snapshot.request.webURL,
+                workflow: .followUp, manual: false, expectedHeadSHA: snapshot.request.sha)
+            settings.assistantHandoffs.append(run)
+            return run.id
         }
         func addManualRetry() -> (AssistantAutomationRunner.Handoff, AssistantAutomationRunner.Handoff) {
             let origin = settings.assistantHandoffs[0]

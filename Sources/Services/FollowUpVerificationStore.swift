@@ -297,6 +297,7 @@ extension FollowUpVerificationStore {
         let proof: FollowUpVerification
         let assessment: DraftProofRecoveryVerifier.Assessment
         var requestedDraftIDs: [Int]? = nil
+        var workRevision: String? = nil
     }
 
     @MainActor
@@ -362,27 +363,14 @@ extension FollowUpVerificationStore {
             else { unique[proof.verificationID] = proof }
         }
         let sealed = unique.values.filter { !ambiguous.contains($0.verificationID) }
-        // A worker can finish its sealed replies while reporting publication as blocked.
-        // Admit that ownership to read-only recovery, never directly to publication.
-        // A newer sealed result at the same source revision must not strand sibling replies.
-        let candidates = sealed.filter { proof in
-            guard let origin = origins.first(where: { $0.id == proof.runID }) else { return false }
-            return !runs.contains { later in
-                later.draftRepair == nil && later.createdAt > origin.createdAt && later.execution?.state != .succeeded
-                    && !hasSealedBlockedResult(later, matching: proof, assistant: origin.key.assistant, proofs: sealed)
-                    && !hasSuccessfulEnvironmentReplacement(for: later, runs: runs, headSHA: proof.headSHA)
-                    && !hasSuccessfulManualReplacement(for: later, runs: runs,
-                        events: input.events, headSHA: proof.headSHA)
-                    && !hasSuccessfulRepairReplacement(for: later, runs: runs)
-            }
-        }
         // A repair's declaration cannot manufacture provenance for an arbitrary existing user draft.
         // Its complete ancestry must lead back to an independently known ordinary app-owned seal.
-        var trusted = candidates.filter { proof in origins.first(where: { $0.id == proof.runID })?.draftRepair == nil }
+        // Later task outcomes cannot erase ownership; current truth is assessed separately.
+        var trusted = sealed.filter { proof in origins.first(where: { $0.id == proof.runID })?.draftRepair == nil }
         var added = true
         while added {
             added = false
-            for proof in candidates where !trusted.contains(proof) {
+            for proof in sealed where !trusted.contains(proof) {
                 guard let repair = origins.first(where: { $0.id == proof.runID })?.draftRepair,
                       trusted.contains(repair.origin) else { continue }
                 trusted.append(proof); added = true
@@ -391,69 +379,87 @@ extension FollowUpVerificationStore {
         return trusted.sorted { $0.verificationID.uuidString < $1.verificationID.uuidString }
     }
 
-    private static func hasSealedBlockedResult(_ run: AssistantAutomationRunner.Handoff,
-                                               matching proof: FollowUpVerification, assistant: AutomationAssistant,
-                                               proofs: [FollowUpVerification]) -> Bool {
-        run.execution?.state == .blocked && run.key.assistant == assistant
-            && proofs.contains {
-                $0.runID == run.id && $0.discussionFingerprint != nil && $0.userID == proof.userID
-                    && $0.headSHA == proof.headSHA && $0.sourceProjectID == proof.sourceProjectID
-                    && $0.sourceBranch == proof.sourceBranch
-            }
+    private struct RecoveryWorkState: Encodable {
+        let id: UUID
+        let createdAt: Date
+        let state: AssistantJobExecution.State?
+        let startedAt: Date?
+        let finishedAt: Date?
+        let cancellationOrigin: AssistantJobExecution.CancellationOrigin?
+        let expectedHeadSHA: String?
     }
 
-    private static func hasSuccessfulEnvironmentReplacement(for stopped: AssistantAutomationRunner.Handoff,
-                                                            runs: [AssistantAutomationRunner.Handoff], headSHA: String) -> Bool {
-        guard stopped.environmentRecoveryAttempted == true,
-              stopped.execution?.state == .blocked || stopped.execution?.state == .failed else { return false }
-        return runs.contains { replacement in
-            replacement.environmentRecoveryOf == stopped.id && replacement.createdAt > stopped.createdAt
-                && replacement.execution?.state == .succeeded && replacement.followUpPushAllowed == true
-                && replacement.expectedHeadSHA == headSHA && replacement.key.work == stopped.key.work
-                && replacement.key.username == stopped.key.username && replacement.key.assistant == stopped.key.assistant
+    @MainActor
+    static func recoveryWorkRevision(work: AssistantAutomationRunner.MergeRequestWork, username: String,
+                                     settings: SettingsManager) -> String? {
+        recoveryWorkRevision(work: work, username: username, handoffs: settings.assistantHandoffs)
+    }
+
+    private nonisolated static func recoveryWorkRevision(work: AssistantAutomationRunner.MergeRequestWork, username: String,
+                                                         handoffs: [AssistantAutomationRunner.Handoff]) -> String? {
+        let states = handoffs.filter {
+            $0.key.work == work && $0.key.username == username && $0.draftRepair == nil
+                && ($0.followUpPushAllowed == true || $0.allowsPush)
+        }.sorted { $0.id.uuidString < $1.id.uuidString }.map {
+            RecoveryWorkState(id: $0.id, createdAt: $0.createdAt, state: $0.execution?.state,
+                startedAt: $0.execution?.startedAt, finishedAt: $0.execution?.finishedAt,
+                cancellationOrigin: $0.execution?.cancellationOrigin, expectedHeadSHA: $0.expectedHeadSHA)
+        }
+        let encoder = JSONEncoder()
+        encoder.outputFormatting = [.sortedKeys]
+        guard let data = try? encoder.encode(states) else { return nil }
+        return AICommentAssessmentStore.digest("recovery-work-v1|" + String(decoding: data, as: UTF8.self))
+    }
+
+    @MainActor
+    static func recoveryWorkIsSettled(origin: FollowUpVerification, work: AssistantAutomationRunner.MergeRequestWork,
+                                      username: String, settings: SettingsManager) -> Bool {
+        recoveryWorkIsSettled(origin: origin, work: work, username: username, handoffs: settings.assistantHandoffs)
+    }
+
+    private nonisolated static func recoveryWorkIsSettled(origin: FollowUpVerification,
+        work: AssistantAutomationRunner.MergeRequestWork, username: String,
+        handoffs: [AssistantAutomationRunner.Handoff]) -> Bool {
+        let runs = handoffs.filter { $0.key.work == work && $0.key.username == username }
+        var root = origin
+        var visited: Set<UUID> = []
+        while let producer = runs.first(where: { $0.id == root.runID }), let repair = producer.draftRepair {
+            guard visited.insert(root.verificationID).inserted,
+                  repair.origin.host == work.host, repair.origin.projectID == work.projectID,
+                  repair.origin.iid == work.iid, repair.origin.username == username else { return false }
+            root = repair.origin
+        }
+        guard let producer = runs.first(where: { $0.id == root.runID }) else { return false }
+        return !handoffs.contains {
+            $0.key.work == work && $0.key.username == username && $0.createdAt > producer.createdAt
+                && $0.draftRepair == nil && ($0.followUpPushAllowed == true || $0.allowsPush)
+                && ($0.execution == nil || $0.execution?.state.isActive == true)
         }
     }
 
-    private static func hasSuccessfulRepairReplacement(for stopped: AssistantAutomationRunner.Handoff,
-                                                        runs: [AssistantAutomationRunner.Handoff]) -> Bool {
-        guard let context = stopped.draftRepair, let execution = stopped.execution, !execution.state.isActive else { return false }
-        return runs.contains { replacement in
-            replacement.manual == true && replacement.retryOf == stopped.id && replacement.createdAt > stopped.createdAt
-                && replacement.key == stopped.key && replacement.workflow == .followUp
-                && replacement.followUpPushAllowed == true && replacement.execution?.state == .succeeded
-                && replacement.expectedHeadSHA == context.headSHA && replacement.draftRepair?.key == context.key
-        }
+    @MainActor
+    static func legacyRecoveryIsCurrent(origin: FollowUpVerification, work: AssistantAutomationRunner.MergeRequestWork,
+                                         username: String, settings: SettingsManager, in directory: URL) -> Bool {
+        let input = receiptReadInput(work: work, username: username, settings: settings, in: directory)
+        return legacyRecoveryIsCurrent(origin: origin, input: input,
+            origins: recoveryOrigins(work: work, username: username, input: input, in: directory))
     }
 
-    /// Explicit retry lineage can retire a failed task's recovery fence, but never
-    /// make its predecessor's claims true. Only recoveryOrigins uses this exception;
-    /// the independent current-source verifier must still create publication proof.
-    private static func hasSuccessfulManualReplacement(for stopped: AssistantAutomationRunner.Handoff,
-                                                       runs: [AssistantAutomationRunner.Handoff],
-                                                       events: [MRAutomationEvent], headSHA: String) -> Bool {
-        guard stopped.execution?.state == .blocked || stopped.execution?.state == .failed,
-              stopped.workflow == .followUp, stopped.followUpPushAllowed == true,
-              stopped.expectedHeadSHA == headSHA,
-              let task = stopped.taskPrompt, !task.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty,
-              let notes = stopped.feedbackNoteIDs, !notes.isEmpty, notes.allSatisfy({ $0 > 0 }),
-              Set(notes).count == notes.count,
-              let url = stopped.mergeRequestURL, url.isGitLabMergeRequest(host: stopped.key.work.host, iid: stopped.key.work.iid),
-              stopped.reviewModel == nil, stopped.pipelineReservation == nil else { return false }
-        let target = MRAutomationScope.Target(host: stopped.key.work.host, username: stopped.key.username,
-            projectID: stopped.key.work.projectID, iid: stopped.key.work.iid)
-        return runs.contains { replacement in
-            replacement.createdAt > stopped.createdAt && replacement.execution?.state == .succeeded
-                && replacement.manual == true && replacement.key == stopped.key
-                && replacement.workflow == stopped.workflow && replacement.taskPrompt == task
-                && replacement.expectedHeadSHA == stopped.expectedHeadSHA && replacement.mergeRequestURL == url
-                && replacement.allowsPush == stopped.allowsPush && replacement.followUpPushAllowed == stopped.followUpPushAllowed
-                && replacement.reviewModel == nil && replacement.pipelineReservation == nil
-                && Set(replacement.feedbackNoteIDs ?? []) == Set(notes)
-                && Set(replacement.feedbackTodos ?? []) == Set(stopped.feedbackTodos ?? [])
-                && events.contains { event in
-                    event.target == target && event.action == .retry && event.origin == .manual && event.state == .queued
-                        && event.relatedJobID == stopped.id && event.jobID == replacement.id
-                }
+    private nonisolated static func legacyRecoveryIsCurrent(origin proof: FollowUpVerification,
+        input: ReceiptReadInput, origins: [FollowUpVerification]) -> Bool {
+        let work = AssistantAutomationRunner.MergeRequestWork(host: proof.host, projectID: proof.projectID, iid: proof.iid)
+        let runs = input.handoffs.filter { $0.key.work == work && $0.key.username == proof.username }
+        var root = proof
+        var visited: Set<UUID> = []
+        while let producer = runs.first(where: { $0.id == root.runID }), let repair = producer.draftRepair {
+            guard visited.insert(root.verificationID).inserted, origins.contains(repair.origin) else { return false }
+            root = repair.origin
+        }
+        guard let producer = runs.first(where: { $0.id == root.runID }) else { return false }
+        // Legacy assessments do not attest which later writes they inspected. Require a fresh v3 check.
+        return !runs.contains {
+            $0.id != producer.id && $0.createdAt >= producer.createdAt && $0.draftRepair == nil
+                && ($0.followUpPushAllowed == true || $0.allowsPush)
         }
     }
 
@@ -513,13 +519,18 @@ extension FollowUpVerificationStore {
             guard path.pathExtension == "json", (try? path.resourceValues(forKeys: [.isSymbolicLinkKey]).isSymbolicLink) != true,
                   let data = input.authenticatedRecoveries[path.lastPathComponent],
                   let record = try? JSONDecoder().decode(RecoveryRecord.self, from: data),
-                  [1, 2].contains(record.version), path.deletingPathExtension().lastPathComponent == record.attemptID,
+                  [1, 2, 3].contains(record.version), path.deletingPathExtension().lastPathComponent == record.attemptID,
                   isHex(record.attemptID, lengths: [64]), origins.contains(record.origin),
                   record.assistant == input.assistant, !record.model.isEmpty,
                   record.assessmentID != record.origin.verificationID,
                   let fingerprint = record.proof.discussionFingerprint, isHex(fingerprint, lengths: [64]),
                   let context = record.proof.semanticContextFingerprint, isHex(context, lengths: [64]),
                   let recoveryContext = record.proof.recoveryContextFingerprint, isHex(recoveryContext, lengths: [64]) else { return nil }
+            guard recoveryWorkIsSettled(origin: record.origin, work: work, username: username, handoffs: input.handoffs) else { return nil }
+            if record.version == 3 {
+                guard let revision = record.workRevision, isHex(revision, lengths: [64]),
+                      revision == recoveryWorkRevision(work: work, username: username, handoffs: input.handoffs) else { return nil }
+            } else if !legacyRecoveryIsCurrent(origin: record.origin, input: input, origins: origins) { return nil }
             // Old records assessed their complete origin. New records retain that origin
             // unchanged and explicitly identify the exact subset independently assessed.
             let requested = record.requestedDraftIDs ?? record.origin.drafts.map(\.id)
@@ -530,8 +541,8 @@ extension FollowUpVerificationStore {
                       files: record.proof.files, origin: record.origin)),
                   record.proof == recoveredProof(origin: record.origin, assessmentID: record.assessmentID,
                       fingerprint: fingerprint, semanticContext: context, recoveryContext: recoveryContext, draftIDs: valid,
-                      headSHA: record.version == 2 ? record.proof.headSHA : nil,
-                      files: record.version == 2 ? record.proof.files : nil)
+                      headSHA: record.version >= 2 ? record.proof.headSHA : nil,
+                      files: record.version >= 2 ? record.proof.files : nil)
             else { return nil }
             return record
         }
