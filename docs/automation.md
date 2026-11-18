@@ -373,6 +373,8 @@ Review and follow-up workers may attach optional app-only Markdown (`extraContex
 
 Each threshold considers active discussions from every participant, including general comments. Substantive issues, explicit approval requirements and unresolved uncertainty about major issues block automatic approval. A resolved thread and all its replies are excluded. Resolved discussions remain visible in GitLab. An existing private reply in a resolved thread stays private until you handle it.
 
+When MergeTether automatically approves under a threshold that allows remaining findings, hover over or select the approvals badge on the card or in MR Details to see a note for the approved revision. The local automation event log retains that approval and links to the review run.
+
 Automatic approval also has these requirements.
 
 - A review verdict that meets the threshold and covers the current MR head, title, description and discussion content, bound to the authenticated account and a successful app-managed review.

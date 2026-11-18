@@ -1,6 +1,17 @@
 {
   "sourceLanguage": "en",
   "strings": {
+    "automationHistory.action.approval": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Automatically approved while findings were open."
+          }
+        }
+      }
+    },
     "automationHistory.environmentRecovery.queued": {
       "extractionState": "manual",
       "localizations": {

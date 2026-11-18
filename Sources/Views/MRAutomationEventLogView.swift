@@ -122,6 +122,7 @@ private struct MRAutomationEventLogRow: View {
             case .pipeline: .Settings.settingsAutomationWorkflowPipelineFailure
             case .conflict: .AutomationHistory.automationHistoryActionConflict
             case .refresh: .AutomationHistory.automationHistoryActionRefresh
+            case .approval: .AutomationHistory.automationHistoryActionApproval
             }
         }
     }

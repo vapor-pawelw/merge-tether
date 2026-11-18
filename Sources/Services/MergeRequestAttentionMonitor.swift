@@ -2584,6 +2584,7 @@ final class MergeRequestAttentionMonitor {
         if automatic, let failure = approvalReadFailures[id], failure.context == readContext,
            approvalReadClock() < failure.retryAfter { return false }
         var submitted = false
+        var approvalWithOpenFindingsRunID: UUID?
         var checkedFingerprint: String?
         var checkedSemanticContext: String?
         typealias Evidence = (request: GitLabMergeRequest, drafts: [GitLabDraftNote],
@@ -2631,6 +2632,11 @@ final class MergeRequestAttentionMonitor {
                 && (!automatic || self.autoApproveApplies(to: current, host: account.host, username: account.username))
         }
         @MainActor func confirmed() -> Bool {
+            if let approvalWithOpenFindingsRunID {
+                settings?.recordAutomationEvent(target: commentReviewTarget(id, account: account),
+                    action: .approval, origin: .automatic, state: .completed,
+                    jobID: approvalWithOpenFindingsRunID, approvedHeadSHA: head)
+            }
             approvedHeads[id] = head
             failedApprovalHeads[id] = nil
             approvalReadFailures.removeValue(forKey: id)
@@ -2678,8 +2684,15 @@ final class MergeRequestAttentionMonitor {
             checkedFingerprint = ReviewVerdict.fingerprint(checkedEvidence.discussions)
             checkedSemanticContext = checkedEvidence.request.semanticContextFingerprint
             try await glab.approveMergeRequest(projectID: id.projectID, iid: id.iid, headSHA: head,
-                host: account.host, userID: user.id, willSubmit: { submitted = true },
-                shouldProceed: { permits(checkedEvidence) })
+                host: account.host, userID: user.id, willSubmit: {
+                    submitted = true
+                    if automatic, let verdict = checkedEvidence.checkedVerdict, verdict.verdict == .classifiedFindings,
+                       !ReviewVerdictStore.automaticallyApproves(verdict, head: head,
+                            discussions: checkedEvidence.discussions, user: user, threshold: .noIssues,
+                            semanticContextFingerprint: checkedSemanticContext, in: self.verdictDirectory) {
+                        approvalWithOpenFindingsRunID = verdict.runID
+                    }
+                }, shouldProceed: { permits(checkedEvidence) })
             guard currentAccount() else { return false }
             return confirmed()
         } catch {

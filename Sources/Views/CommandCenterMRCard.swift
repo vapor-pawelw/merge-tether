@@ -196,7 +196,12 @@ private struct CommandCenterMRCardContent: View {
             else if isDraft { BoardDraftBadge() }
             if finishedState == nil {
                 BoardApprovalProgressBadge(progress: row.displayItem.approvalProgress, reviewers: row.displayRequest?.reviewers,
-                    viewerUsername: monitor.glab.currentUsername, isOwnMergeRequest: row.isOwnMergeRequest(viewer: monitor.glab.currentUsername))
+                    viewerUsername: monitor.glab.currentUsername,
+                    isOwnMergeRequest: row.isOwnMergeRequest(viewer: monitor.glab.currentUsername),
+                    showsOpenFindingsApproval: {
+                        guard let scopeTarget, let head = row.displayRequest?.sha else { return false }
+                        return monitor.settings.hasAutomaticApprovalWithOpenFindings(for: scopeTarget, head: head)
+                    })
             }
             HStack(spacing: 0) {
                 if finishedState == nil, let scopeTarget {

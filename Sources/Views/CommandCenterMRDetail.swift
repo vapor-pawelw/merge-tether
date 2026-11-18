@@ -307,7 +307,11 @@ private struct CommandCenterMRDetailContent: View {
                     BoardApprovalProgressBadge(progress: presentationRow.displayItem.approvalProgress,
                         reviewers: presentationRow.displayRequest?.reviewers ?? [],
                         viewerUsername: monitor.glab.currentUsername,
-                        isOwnMergeRequest: presentationRow.isOwnMergeRequest(viewer: monitor.glab.currentUsername))
+                        isOwnMergeRequest: presentationRow.isOwnMergeRequest(viewer: monitor.glab.currentUsername),
+                        showsOpenFindingsApproval: {
+                            guard let target, let head = presentationRow.displayRequest?.sha else { return false }
+                            return monitor.settings.hasAutomaticApprovalWithOpenFindings(for: target, head: head)
+                        })
                 }
                 Spacer()
                 HStack(spacing: 0) {

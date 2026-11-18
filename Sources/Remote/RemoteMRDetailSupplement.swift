@@ -265,6 +265,7 @@ import MergeTetherRemote
         case .pipeline: .Settings.settingsAutomationWorkflowPipelineFailure
         case .conflict: .AutomationHistory.automationHistoryActionConflict
         case .refresh: .AutomationHistory.automationHistoryActionRefresh
+        case .approval: .AutomationHistory.automationHistoryActionApproval
         }
     }
     private static func eventStatus(_ state: MRAutomationEvent.State) -> String {

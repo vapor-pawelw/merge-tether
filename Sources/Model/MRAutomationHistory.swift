@@ -2,7 +2,7 @@ import Foundation
 
 /// Application decisions that cannot be reconstructed from a worker's persisted execution.
 struct MRAutomationEvent: Codable, Identifiable, Equatable, Sendable {
-    enum Action: String, Codable, Sendable { case retry, review, followUp, draftReply, verification, feedbackDecision, pipeline, conflict, refresh }
+    enum Action: String, Codable, Sendable { case retry, review, followUp, draftReply, verification, feedbackDecision, pipeline, conflict, refresh, approval }
     enum Origin: String, Codable, Sendable { case manual, automatic }
     enum State: String, Codable, Sendable { case requested, queued, failed, completed, blocked }
     let id: UUID
@@ -15,6 +15,7 @@ struct MRAutomationEvent: Codable, Identifiable, Equatable, Sendable {
     var intentID: UUID? = nil
     var jobID: UUID? = nil
     var relatedJobID: UUID? = nil
+    var approvedHeadSHA: String? = nil
 }
 
 /// A read-only chronology; run lifecycle remains owned by AssistantJobExecution.
@@ -84,14 +85,21 @@ struct MRAutomationHistory {
 }
 
 extension SettingsManager {
+    func hasAutomaticApprovalWithOpenFindings(for target: MRAutomationScope.Target, head: String) -> Bool {
+        automationEvents.contains {
+            $0.target == target && $0.action == .approval && $0.origin == .automatic
+                && $0.state == .completed && $0.approvedHeadSHA == head
+        }
+    }
+
     func recordAutomationEvent(target: MRAutomationScope.Target, action: MRAutomationEvent.Action,
                                origin: MRAutomationEvent.Origin, state: MRAutomationEvent.State,
                                message: String? = nil, intentID: UUID? = nil, jobID: UUID? = nil,
-                               relatedJobID: UUID? = nil, now: Date = Date()) {
+                               relatedJobID: UUID? = nil, approvedHeadSHA: String? = nil, now: Date = Date()) {
         guard target.iid != nil else { return }
         let event = MRAutomationEvent(id: UUID(), target: target, createdAt: now, action: action,
             origin: origin, state: state, message: message.map(GlabService.redactWorkflowEvidence),
-            intentID: intentID, jobID: jobID, relatedJobID: relatedJobID)
+            intentID: intentID, jobID: jobID, relatedJobID: relatedJobID, approvedHeadSHA: approvedHeadSHA)
         var counts: [MRAutomationScope.Target: Int] = [:]
         automationEvents = ([event] + automationEvents).sorted {
             $0.createdAt == $1.createdAt ? $0.id.uuidString < $1.id.uuidString : $0.createdAt > $1.createdAt

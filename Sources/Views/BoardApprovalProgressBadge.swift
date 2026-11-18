@@ -6,6 +6,7 @@ struct BoardApprovalProgressBadge: View {
     /// Signed-in username; the viewer's own approval is shown only on MRs they review.
     var viewerUsername: String? = nil
     var isOwnMergeRequest = true
+    var showsOpenFindingsApproval: () -> Bool = { false }
     @State private var showingPeople = false
     @State private var badgeHovered = false
     @State private var peopleHovered = false
@@ -73,7 +74,7 @@ struct BoardApprovalProgressBadge: View {
             .help(label)
             .onHover { badgeHovered = $0; updateHover() }
             .popover(isPresented: $showingPeople, arrowEdge: .bottom) {
-                peopleList.onHover { peopleHovered = $0; updateHover() }
+                approvalPopover.onHover { peopleHovered = $0; updateHover() }
             }
             .onChange(of: showingPeople) { _, visible in
                 if !visible { hoverTask?.cancel(); peopleHovered = false }
@@ -103,6 +104,21 @@ struct BoardApprovalProgressBadge: View {
                 .padding(.trailing, 2)
         }
         .accessibilityHidden(true)
+    }
+
+    private var approvalPopover: some View {
+        VStack(alignment: .leading, spacing: 0) {
+            if showsOpenFindingsApproval() {
+                Text(.AutomationHistory.automationHistoryActionApproval)
+                    .font(.callout)
+                    .foregroundStyle(.secondary)
+                    .fixedSize(horizontal: false, vertical: true)
+                    .padding(12)
+                Divider()
+            }
+            peopleList
+        }
+        .frame(width: 280)
     }
 
     private var peopleList: some View {
@@ -144,7 +160,7 @@ struct BoardApprovalProgressBadge: View {
             }
         }
         .scrollBounceBehavior(.basedOnSize)
-        .frame(width: 280, height: min(360, CGFloat(max(people.count, 1)) * 36 + (progress == nil ? 48 : 0)))
+        .frame(height: min(360, CGFloat(max(people.count, 1)) * 36 + (progress == nil ? 48 : 0)))
     }
 
     private func updateHover() {

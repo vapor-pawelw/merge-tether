@@ -6,6 +6,8 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 
 ## Unreleased
 
+- Show when a merge request was automatically approved with findings still open in the approvals popover and the local automation event log.
+
 - Choose when automatic approval can proceed. The default allows minor issues. Stricter choices require no code-related issues or no issues at all. All three consider feedback from every participant and skip resolved threads, which the verifier also skips.
 - Allow automatic approval when a fresh review disproves a GitLab Duo concern, even while that thread is open. Optional replies link to the evidence and state when the concern requires no change.
 - Resume reviews after temporary GitLab read failures, including the final reads before a worker starts and the reviewer and approval checks before a re-review request. Keep queued re-reviews across restarts and when the workflow queue fills.

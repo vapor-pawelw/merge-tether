@@ -33,6 +33,15 @@ import Testing
         #expect(pending.fittingSize.height <= satisfied.fittingSize.height + 1)
     }
 
+    @Test func anApprovalNoteAddsNoSpaceToTheBadge() {
+        let value = progress(approvedBy: [me], required: 1)
+        let plain = NSHostingView(rootView: BoardApprovalProgressBadge(progress: value,
+            viewerUsername: "me", isOwnMergeRequest: false))
+        let withNote = NSHostingView(rootView: BoardApprovalProgressBadge(progress: value,
+            viewerUsername: "me", isOwnMergeRequest: false, showsOpenFindingsApproval: { true }))
+        #expect(withNote.fittingSize == plain.fittingSize)
+    }
+
     @Test func showsAssignedReviewersEvenWithoutRequiredApprovals() {
         let badge = BoardApprovalProgressBadge(progress: MergeRequestApprovalProgress(completed: 0, required: 0),
             reviewers: [me, other])

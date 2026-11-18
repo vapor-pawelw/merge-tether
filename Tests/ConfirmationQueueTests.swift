@@ -2540,11 +2540,44 @@ import MergeTetherRemote
         try await harness.poll()
 
         #expect(harness.log("approve.log").contains("sha=\(head)") == approves)
+        let target = MRAutomationScope.Target(host: host, username: "me", projectID: 1, iid: 2)
+        let shouldShowNote = approves && level != "none"
+        let approvalNotes = harness.settings.automationEvents.filter { $0.action == .approval }
+        #expect(approvalNotes.count == (shouldShowNote ? 1 : 0))
+        let reopened = SettingsManager(defaults: harness.defaults)
+        #expect(reopened.hasAutomaticApprovalWithOpenFindings(for: target, head: head) == shouldShowNote)
+        #expect(!reopened.hasAutomaticApprovalWithOpenFindings(for: target, head: String(repeating: "b", count: 40)))
         if !approves {
             try harness.write("discussions.json", othersThread.replacingOccurrences(of: #""resolved":false"#, with: #""resolved":true"#))
             try await harness.poll()
             #expect(harness.log("approve.log").contains("sha=\(head)"))
+            #expect(!harness.settings.hasAutomaticApprovalWithOpenFindings(for: target, head: head))
         }
+    }
+
+    @Test(arguments: ["failed", "alreadyApproved", "manual", "responseLost"])
+    func openFindingsNoteRequiresConfirmedAutomaticApproval(_ scenario: String) async throws {
+        let harness = try makeHarness(assistantWorked: true)
+        defer { harness.cleanUp() }
+        try harness.write("discussions.json", othersThread)
+        try harness.recordVerdict("classified_findings", head: head, findingLevels: ["40": "non_code"])
+        switch scenario {
+        case "failed": try harness.write("fail-approval-write", "yes")
+        case "alreadyApproved":
+            try harness.write("approvals.json", #"{"approved_by":[{"user":{"id":3,"username":"me"}}]}"#)
+        case "manual": harness.settings.automation.autoApproveEnabled = false
+        case "responseLost": try harness.write("approval-response-lost", "yes")
+        default: break
+        }
+
+        try await harness.poll()
+        if scenario == "manual" {
+            await harness.monitor.approve(.init(projectID: 1, iid: 2))
+        }
+        try await harness.poll()
+
+        #expect(harness.log("approve.log").split(separator: "\n").count == (scenario == "alreadyApproved" ? 0 : 1))
+        #expect(harness.settings.automationEvents.filter { $0.action == .approval }.count == (scenario == "responseLost" ? 1 : 0))
     }
 
     @Test(arguments: ["edited", "metadata", "lateMajor", "stricterPolicy", "unsigned"])
