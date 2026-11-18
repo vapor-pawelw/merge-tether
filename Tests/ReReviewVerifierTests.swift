@@ -809,11 +809,12 @@ struct ReReviewVerifierTests {
         #expect(instructions.contains("A failed live read remains uncertain; intentional omission alone does not"))
     }
 
-    @Test(arguments: AutomationAssistant.allCases)
-    func verifierUsesAResolvedFindingReplyForItsActiveReviewOverview(_ assistant: AutomationAssistant) async throws {
+    @Test(arguments: AutomationAssistant.allCases, [false, true])
+    func verifierUsesAResolvedFindingReplyForItsActiveReviewOverview(_ assistant: AutomationAssistant, stoppedAttempt: Bool) async throws {
         let folder = FileManager.default.temporaryDirectory.appending(path: UUID().uuidString)
         try FileManager.default.createDirectory(at: folder, withIntermediateDirectories: false)
         defer { try? FileManager.default.removeItem(at: folder) }
+        let runID = UUID()
         let script = folder.appending(path: "cli")
         try Data("""
             #!/usr/bin/python3
@@ -821,14 +822,25 @@ struct ReReviewVerifierTests {
             args=sys.argv[1:]
             incoming=sys.stdin.read()
             codex=args[0]=='exec'
+            prompt=incoming if codex else args[args.index('-p')+1]
             schema=json.load(open(args[args.index('--output-schema')+1])) if codex else json.loads(args[args.index('--json-schema')+1])
             assert schema['properties']['notes']['items']['properties']['noteID']['enum']==[10,20]
             assert 'Published answer in closed finding' in incoming
             assert 'Unrelated closed content' not in incoming
+            evidence=json.loads(incoming[incoming.index('{'):])
+            supplied=evidence['blockedFollowUps']
+            if \(stoppedAttempt ? "True" : "False"):
+                assert len(supplied)==1 and supplied[0]['selectedFeedbackIDs']==[10,11]
+                assert supplied[0]['runID']=='\(runID.uuidString)'
+                assert 'selectedFeedbackRevisions' not in supplied[0]
+                assert evidence['priorAssessment']['notes'][0]['state']=='informational'
+                assert 'Reassess that overview for the exact stopped attempt even if its prior state was informational.' in prompt
+            else: assert not supplied
             result={'notes':[
                 {'noteID':10,'state':'addressed','reason':'The verified correction and published reply fully answer the overview.',
                  'informationalPurpose':'reviewSummary','publishedReplyNoteID':12},
-                {'noteID':20,'state':'addressed','reason':'The separate documentation request was implemented.'}]}
+                {'noteID':20,'state':'addressed','reason':'The separate documentation request was implemented.'}],
+                'completedBlockedRunIDs':['\(runID.uuidString)'] if supplied else []}
             if codex: json.dump(result,open(args[args.index('-o')+1],'w'))
             else: print(json.dumps({'is_error':False,'structured_output':result}))
             """.utf8).write(to: script)
@@ -844,14 +856,24 @@ struct ReReviewVerifierTests {
               {"id":21,"author":{"id":7},"system":false,"resolvable":true,"resolved":true,"created_at":"2026-01-01T08:00:00Z","body":"Unrelated closed content"},
               {"id":22,"author":{"id":3},"system":false,"body":"I documented that older behavior."}]}]
             """.utf8))
-        let input = ReReviewVerifier.Input(authorID: 3, headSHA: String(repeating: "a", count: 40),
+        var input = ReReviewVerifier.Input(authorID: 3, headSHA: String(repeating: "a", count: 40),
             title: "Synthetic review", diff: "The update ignores the general number.", discussions: discussions)
+        if stoppedAttempt {
+            input.target = .init(host: "gitlab.example.test", projectID: 1, iid: 2,
+                url: URL(string: "https://gitlab.example.test/group/repo/-/merge_requests/2")!, expectedUsername: "me")
+            input.blockedFollowUps = [.init(runID: runID, selectedFeedbackIDs: [10, 11],
+                blocker: "Could not confirm publication.", summary: "The update now ignores the general number.",
+                selectedFeedbackRevisions: MergeRequestDiffDigest.noteRevisions(discussions).filter { [10, 11].contains($0.key) })]
+            input.priorAssessment = .init(notes: [.init(noteID: 10, state: .informational, reason: "General review overview.")],
+                codeReviewRequests: [], codeChangedSincePrior: false)
+        }
 
         let prepared = input.activeEvidence
         #expect(prepared.discussions.compactMap(\.id) == ["overview", "separate"])
         let assessment = try await ReReviewVerifier.run(prepared, assistant: assistant, model: "fixture", executable: script, retryWait: { _ in })
 
         #expect(assessment.notes.map(\.noteID) == [10, 20])
+        #expect(assessment.completedBlockedRunIDs == (stoppedAttempt ? [runID] : []))
         #expect(assessment.missingPublishedReplyNoteIDs(in: discussions, authorID: 3) == [20])
         let findings = AuthorFeedbackPolicy.evaluate(discussions: discussions, assessment: assessment, authorID: 3, approvedReviewerIDs: [7])
         #expect(findings.filter { $0.state == .needsReply }.map(\.id) == [20])

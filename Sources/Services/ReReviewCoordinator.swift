@@ -343,15 +343,35 @@ final class ReReviewCoordinator {
             markReviewerReadFailed()
             return
         }
-        guard !Task.isCancelled, isCurrent(context), runtimePermitsReReview(context),
-              settings.automation.scope.permits(request, host: host, username: context.username),
+        let stillInScope = !Task.isCancelled && isCurrent(context) && runtimePermitsReReview(context)
+            && settings.automation.scope.permits(request, host: host, username: context.username)
+        let history = MergeRequestReviewHistory(reviewers: reviewers, discussions: discussions, authorID: user.id)
+        var reconciledReceipt = false
+        if stillInScope, settings.automation.hasAutomaticActionConsent, settings.automation.autoReReviewEnabled {
+            for reviewer in reviewers where reviewer.state == "review_started" {
+                let reviewerID = reviewer.user.id
+                let noteID = max(feedback.addressedByReviewer[reviewerID] ?? 0, history.activities[reviewerID]?.noteID ?? 0, 1)
+                let receiptKey = ReReviewReceipt.Key(host: host, authorID: user.id, projectID: request.projectID,
+                                                     iid: request.iid, reviewerID: reviewerID)
+                guard var receipt = settings.reReviewReceipts[receiptKey], receipt.unconfirmed,
+                      receipt.headSHA == head, receipt.noteID == noteID else { continue }
+                receipt.unconfirmed = false
+                receipt.requested = true
+                settings.reReviewReceipts[receiptKey] = receipt
+                reconciledReceipt = true
+            }
+        }
+        if reconciledReceipt {
+            settings.save()
+            notify(context, unanswered: feedback.hasUnansweredFeedback)
+        }
+        guard stillInScope,
               usedAssistant || observedPublication || manualReReviewApprovals[context] != nil
                 || (!onlyResolvedFeedback && sharedAssessment != nil) || reviewers.contains(where: { $0.state == "unapproved" }) else {
             let removed = reReviewChecks.removeValue(forKey: context) != nil
             if invalidated || removed { notify(context, unanswered: feedback.hasUnansweredFeedback) }
             return
         }
-        let history = MergeRequestReviewHistory(reviewers: reviewers, discussions: discussions, authorID: user.id)
         let earlierReviewers = Set(reviewers.filter {
             $0.state == "reviewed" || $0.state == "unapproved"
                 || history.activities[$0.user.id]?.previouslyApproved == true

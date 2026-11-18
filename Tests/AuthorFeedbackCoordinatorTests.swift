@@ -708,6 +708,68 @@ struct AuthorFeedbackCoordinatorTests {
         }
     }
 
+    @Test(arguments: ["verified", "missingProof", "changedFinding"])
+    func aPublishedReplyInAClosedDuoFindingCanRetireTheExactStoredAttempt(_ scenario: String) async throws {
+        try await withFixture { fixture in
+            fixture.settings.automation.autoResolveAcceptedFeedback = false
+            fixture.settings.automation.authorFeedback.isEnabled = true
+            let overview = "I left a recommendation about the title filter."
+            let finding = "Bound the title filter."
+            let request = try JSONDecoder().decode(GitLabMergeRequest.self, from: Data(Fixture.request.utf8))
+            let target = MRAutomationScope.Target(host: Fixture.host, username: "me", projectID: 1, iid: 2)
+            let work = AssistantAutomationRunner.MergeRequestWork(host: Fixture.host, projectID: 1, iid: 2)
+            let revisions = [10: UserAttentionSnapshot.digest("7\n\(overview)"), 11: UserAttentionSnapshot.digest("7\n\(finding)")]
+            let job = AssistantAutomationRunner.Handoff(id: UUID(), key: .init(assistant: .codex,
+                work: work, username: "me", workspace: "", access: .gitLabRead),
+                title: "Duo feedback", prompt: "Handle selected feedback", createdAt: Date(timeIntervalSince1970: 1),
+                allowsPush: false, feedbackNoteIDs: [10, 11], verifiedFeedbackNotes: revisions, followUpPushAllowed: true,
+                execution: .init(state: .blocked, finishedAt: Date(timeIntervalSince1970: 2),
+                    summary: "The source now limits the title filter.", blocker: "Could not confirm publication of the reply."),
+                mergeRequestURL: request.webURL, workflow: .followUp, expectedHeadSHA: request.sha)
+            fixture.settings.assistantHandoffs = [job]
+            let attempts = Set(revisions.map { AuthorFeedbackAttempt(target: target, noteID: $0.key, revision: $0.value) })
+            fixture.settings.authorFeedbackAttempts = attempts
+            try #require(fixture.settings.save())
+
+            let restored = SettingsManager(defaults: fixture.defaults)
+            let restoredJob = try #require(restored.assistantHandoffs.first)
+            #expect(restoredJob.id == job.id && restored.authorFeedbackAttempts == attempts)
+            #expect(AssistantJobExecution.hasUnfinishedWork(in: restored.assistantHandoffs, for: work, username: "me", currentRequest: request))
+            let currentFinding = scenario == "changedFinding" ? "Require a stricter title filter and report the measurements." : finding
+            try fixture.write("discussions.json", """
+                [{"id":"overview","notes":[{"id":10,"author":{"id":7,"username":"duo"},"system":false,"body":"\(overview)","resolvable":false,"created_at":"2026-01-01T10:00:00.000Z"}]},
+                 {"id":"finding","notes":[{"id":11,"author":{"id":7,"username":"duo"},"system":false,"body":"\(currentFinding)","resolvable":true,"resolved":true,"created_at":"2026-01-01T10:00:00.120Z"},
+                                            {"id":14,"author":{"id":3,"username":"me"},"system":false,"body":"Added a 255-code-point limit."}]}]
+                """)
+            let coordinator = AuthorFeedbackCoordinator(settings: restored, glab: fixture.glab, canAutomate: { _ in true }, verify: { input, _, _ in
+                fixture.inputs.append(input)
+                let completed = scenario != "missingProof" ? input.blockedFollowUps.map(\.runID) : []
+                return .init(notes: [.init(noteID: 10, state: .addressed,
+                    reason: "The overview adds no independent request. The correction and published reply cover it in full.",
+                    informationalPurpose: .reviewSummary, publishedReplyNoteID: 14)], completedBlockedRunIDs: completed)
+            })
+            defer { coordinator.cancel() }
+            var requested: Set<Int> = []
+            coordinator.onNeedsWork = { _, notes, _, _ in requested.formUnion(notes) }
+
+            try await fixture.run(coordinator)
+
+            let input = try #require(fixture.inputs.first)
+            #expect(input.discussions.compactMap(\.id) == ["overview"])
+            #expect(input.resolvedOverviewReplyEvidence?.compactMap(\.id) == ["finding"])
+            #expect(input.blockedFollowUps.map(\.selectedFeedbackIDs) == (scenario == "changedFinding" ? [] : [[10, 11]]))
+            let status = try #require(coordinator.status(projectID: 1, iid: 2))
+            let fingerprint = ReviewVerdict.fingerprint(try fixture.discussions())
+            #expect(status.reconciles(restoredJob, request: request, discussionFingerprint: fingerprint) == (scenario == "verified"))
+            #expect(AssistantJobExecution.hasUnfinishedWork(in: restored.assistantHandoffs, for: work, username: "me",
+                currentRequest: request, feedbackStatus: status, discussionFingerprint: fingerprint) == (scenario != "verified"))
+            #expect(restored.assistantHandoffs.map(\.id) == [job.id] && restored.assistantHandoffs.first?.execution == job.execution)
+            #expect(restored.authorFeedbackAttempts == attempts && requested.isEmpty && status.replyNoteIDs.isEmpty)
+            #expect(fixture.gitlab.text("drafts.json") == "[]")
+            #expect(fixture.gitlab.requests.allSatisfy { $0.method == "GET" })
+        }
+    }
+
     @Test func aDefaultDraftDoesNotStartPaidFeedbackVerification() async throws {
         try await withFixture { fixture in
             let draft = Fixture.request.replacingOccurrences(of: "\"draft\":false", with: "\"draft\":true")

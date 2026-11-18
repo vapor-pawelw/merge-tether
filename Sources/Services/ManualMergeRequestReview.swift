@@ -75,8 +75,9 @@ extension TodoMonitorService {
                   confirmed == nil || item.mergeRequest?.sha == request.sha else { throw CancellationError() }
             guard let head = request.sha, !head.isEmpty else { throw AssistantJobExecutor.ExecutionError.headChanged }
             let work = AssistantAutomationRunner.MergeRequestWork(host: target.host, projectID: target.projectID, iid: target.iid)
-            let task = AssistantAutomationRunner.currentReviewTask(work: work, head: head, user: user,
-                settings: settings, fullReview: fromScratch)
+            let task = AssistantAutomationRunner.currentReviewTask(work: work, head: head,
+                semanticContextFingerprint: request.semanticContextFingerprint, user: user, settings: settings,
+                fullReview: fromScratch)
             try await AssistantAutomationRunner.launch(assistant,
                 title: "\(request.webURL.gitLabProjectPath) !\(request.iid) — \(request.title)",
                 mergeRequestURL: request.webURL,

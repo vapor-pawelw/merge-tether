@@ -266,8 +266,10 @@ struct MergeWorkflowMonitorTests {
         let pushed = String(repeating: "b", count: 40)
         let threads = #"[{"id":"other","notes":[{"id":200,"author":{"id":3},"system":false,"body":"Other reviewer's condition","resolvable":true,"resolved":false}]}]"#
         let discussions = try JSONDecoder().decode([GitLabMergeRequestDiscussion].self, from: Data(threads.utf8))
+        let request = try JSONDecoder().decode(GitLabMergeRequest.self, from: Data(mergeRequest(13, sha: reviewed, author: 2).utf8))
         let verdict = ReviewVerdict(version: 1, host: host, projectID: 7, iid: 13, headSHA: reviewed, verdict: .noObjections,
-            discussionFingerprint: ReviewVerdict.fingerprint(discussions), username: user.username, userID: user.id)
+            discussionFingerprint: ReviewVerdict.fingerprint(discussions), username: user.username, userID: user.id,
+            semanticContextFingerprint: request.semanticContextFingerprint)
         let verdictFile = ReviewVerdictStore.fileURL(host: host, projectID: 7, iid: 13, in: directory)
         try FileManager.default.createDirectory(at: verdictFile.deletingLastPathComponent(), withIntermediateDirectories: true)
         try JSONEncoder().encode(verdict).write(to: verdictFile)
@@ -446,8 +448,10 @@ struct MergeWorkflowMonitorTests {
             }
         }
         let glab = gitlab.service(host: host, username: user.username)
+        let request = try JSONDecoder().decode(GitLabMergeRequest.self, from: Data(mergeRequest(13, sha: reviewed, author: 2).utf8))
         let verdict = ReviewVerdict(version: 1, host: host, projectID: 7, iid: 13, headSHA: reviewed, verdict: .noObjections,
-            discussionFingerprint: ReviewVerdict.fingerprint([]), username: user.username, userID: user.id)
+            discussionFingerprint: ReviewVerdict.fingerprint([]), username: user.username, userID: user.id,
+            semanticContextFingerprint: request.semanticContextFingerprint)
         let verdictFile = ReviewVerdictStore.fileURL(host: host, projectID: 7, iid: 13, in: directory)
         try FileManager.default.createDirectory(at: verdictFile.deletingLastPathComponent(), withIntermediateDirectories: true)
         try JSONEncoder().encode(verdict).write(to: verdictFile)
@@ -518,9 +522,10 @@ struct MergeWorkflowMonitorTests {
         settings.save()
 
         func recordVerdict(at head: String) throws {
+            let request = try JSONDecoder().decode(GitLabMergeRequest.self, from: Data(mergeRequest(13, sha: head, author: 2).utf8))
             let receipt = ReviewVerdict(version: 1, host: host, projectID: 7, iid: 13, headSHA: head,
                 verdict: .noObjections, discussionFingerprint: ReviewVerdict.fingerprint([]), username: user.username,
-                userID: user.id, runID: UUID())
+                userID: user.id, runID: UUID(), semanticContextFingerprint: request.semanticContextFingerprint)
             let file = ReviewVerdictStore.fileURL(host: host, projectID: 7, iid: 13, in: directory)
             try FileManager.default.createDirectory(at: file.deletingLastPathComponent(), withIntermediateDirectories: true)
             try JSONEncoder().encode(receipt).write(to: file)
@@ -716,9 +721,11 @@ struct MergeWorkflowMonitorTests {
 
         func recordVerdict(threads: String) throws {
             let discussions = try JSONDecoder().decode([GitLabMergeRequestDiscussion].self, from: Data(threads.utf8))
+            let request = try JSONDecoder().decode(GitLabMergeRequest.self, from: Data(contentsOf: directory.appending(path: "request")))
             let verdict = ReviewVerdict(version: 1, host: "gitlab.example.test", projectID: 7, iid: 13,
                 headSHA: String(repeating: "a", count: 40), verdict: .noObjections,
-                discussionFingerprint: ReviewVerdict.fingerprint(discussions), username: "owner", userID: 1)
+                discussionFingerprint: ReviewVerdict.fingerprint(discussions), username: "owner", userID: 1,
+                semanticContextFingerprint: request.semanticContextFingerprint)
             let file = ReviewVerdictStore.fileURL(host: "gitlab.example.test", projectID: 7, iid: 13, in: verdictDirectory)
             try FileManager.default.createDirectory(at: file.deletingLastPathComponent(), withIntermediateDirectories: true)
             try JSONEncoder().encode(verdict).write(to: file)

@@ -188,9 +188,9 @@ struct ReReviewAssessment: Codable, Sendable {
 
     /// Include only resolved findings that could contain a published answer to an active overview.
     static func resolvedOverviewReplyEvidence(in discussions: [GitLabMergeRequestDiscussion],
-                                              authorID: Int) -> [GitLabMergeRequestDiscussion] {
+                                              authorID: Int, overviewIDs: Set<Int>? = nil) -> [GitLabMergeRequestDiscussion] {
         let overviews = GitLabMergeRequestDiscussion.activeForReview(discussions).compactMap(\.reviewRoot).filter {
-            $0.resolvable == false && $0.author?.id != authorID
+            $0.resolvable == false && $0.author?.id != authorID && (overviewIDs?.contains($0.id ?? 0) ?? true)
         }
         return discussions.filter { thread in
             guard thread.isResolvedForReview, let finding = thread.reviewRoot, let findingID = finding.id else { return false }

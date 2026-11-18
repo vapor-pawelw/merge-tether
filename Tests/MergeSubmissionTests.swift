@@ -567,6 +567,56 @@ import Testing
         }
     }
 
+    @Test(arguments: [false, true])
+    func automaticMergeKeepsTheDiscussionPolicyCheckedBeforeCLIReadiness(_ train: Bool) async throws {
+        try await fixture { glab, gitlab, request in
+            let suite = "MergeDiscussionPolicyRace.\(UUID())"
+            let defaults = try #require(UserDefaults(suiteName: suite))
+            defer { defaults.removePersistentDomain(forName: suite) }
+            let settings = SettingsManager(defaults: defaults)
+            settings.automation.packageDecision = .enabled
+            settings.onboardingCompleted = true
+            settings.notificationsEnabled = false
+            settings.automation.autoMergeEnabled = true
+            if !train { gitlab.write("ordinary-project") }
+            gitlab.write("outcome", "merged")
+            let transport = try #require(gitlab.handler)
+            gitlab.handler = { call in
+                if call.endpoint == "/projects/1/merge_requests/2/merge", call.method == "PUT" {
+                    return InMemoryGitLab.output(#"{"project_id":1,"iid":2,"state":"merged"}"#)
+                }
+                let response = try await transport(call)
+                guard call.endpoint == "/projects/1/merge_requests/2" else { return response }
+                var detail = try #require(JSONSerialization.jsonObject(with: response.stdout) as? [String: Any])
+                detail["head_pipeline"] = ["id": 4, "status": "success"]
+                return try InMemoryGitLab.json(detail)
+            }
+            var readinessChecks = 0
+            let monitor = AuthoredMergeRequestMonitor(settings: settings, glab: glab, canAutomate: { _ in
+                readinessChecks += 1
+                gitlab.write("discussion-policy-disabled")
+                return true
+            })
+
+            monitor.refreshIfNeeded()
+            while monitor.isLoading { await Task.yield() }
+
+            #expect(readinessChecks == 1)
+            #expect(gitlab.requests.allSatisfy { $0.method == "GET" })
+            #expect(settings.mergeSubmissions.isEmpty)
+
+            monitor.refreshIfNeeded()
+            while monitor.isLoading { await Task.yield() }
+            let status = try #require(monitor.requests.first)
+            #expect(status.blockers == [.discussionPolicy])
+            #expect(!status.mayAutoMerge)
+            #expect(status.mayMergeManually)
+            #expect(readinessChecks == 1)
+            #expect(await monitor.mergeManually(request, action: train ? .enqueue : .mergeNow) == .merged)
+            #expect(gitlab.requests.count { $0.method != "GET" } == 1)
+        }
+    }
+
     @Test func aQueueCreatedDuringTheFinalPreflightRemainsUserOwnedAndCannotBeReplaced() async throws {
         try await fixture { glab, gitlab, _ in
             let suite = "MergeQueueRace.\(UUID())"
@@ -741,7 +791,7 @@ import Testing
             case "/version": return try InMemoryGitLab.json(["version": gitlab.has("version") ? gitlab.text("version") : "19.5.3-ee"])
             case "/projects/1":
                 var project: [String: Any] = ["default_branch": "main", "merge_trains_enabled": drift != "policy" && !gitlab.has("ordinary-project"),
-                    "only_allow_merge_if_all_discussions_are_resolved": true]
+                    "only_allow_merge_if_all_discussions_are_resolved": !gitlab.has("discussion-policy-disabled")]
                 if !gitlab.has("separate-approval-policy") { project["reset_approvals_on_push"] = true }
                 return try InMemoryGitLab.json(project)
             case "/projects/1/approvals":

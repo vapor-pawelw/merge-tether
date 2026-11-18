@@ -46,19 +46,23 @@ enum PipelineRefreshError: LocalizedError {
 }
 
 extension GlabService {
+    func staleFailedPipelineTarget(
+        for request: GitLabMergeRequest, host: String, expectedUser: GitLabAuthenticatedUser
+    ) async throws -> StalePipelineTarget? {
+        do {
+            _ = try await verifiedFailedPipeline(for: request, host: host, expectedUser: expectedUser)
+            return nil
+        } catch GitLabPipelineEvidenceError.staleTarget(let proof) { return proof }
+    }
+
     /// Refreshing CI is separate from repeating an earlier code worker. The
     /// durable attempt is written before POST, including when its reply is lost.
     func refreshStaleFailedPipeline(
-        for request: GitLabMergeRequest, host: String, expectedUser: GitLabAuthenticatedUser,
+        _ proof: StalePipelineTarget, for request: GitLabMergeRequest, host: String,
+        expectedUser: GitLabAuthenticatedUser,
         settings: SettingsManager, detector: ExistingPipelineWorkDetector = .init(),
         shouldProceed: @escaping @MainActor @Sendable () -> Bool
-    ) async throws -> Bool {
-        let proof: StalePipelineTarget
-        do {
-            _ = try await verifiedFailedPipeline(for: request, host: host, expectedUser: expectedUser)
-            return false
-        } catch GitLabPipelineEvidenceError.staleTarget(let stale) { proof = stale }
-
+    ) async throws {
         let configuration = settings.automation
         let target = MRAutomationScope.Target(host: host, username: expectedUser.username,
                                              projectID: request.projectID, iid: request.iid)
@@ -80,7 +84,7 @@ extension GlabService {
             targetProjectID: targetProject, targetBranch: request.targetBranch, targetSHA: proof.targetHeadSHA)
         if let existing = settings.pipelineRefreshAttempts.first(where: { $0 == attempt }) {
             guard existing.createdPipelineID != nil else { throw PipelineRefreshError.alreadyAttempted }
-            return true
+            return
         }
         let key = ExistingPipelineWorkDetector.Key(host: host, projectID: request.projectID,
                                                   mergeRequestIID: request.iid, pipelineID: oldID)
@@ -143,6 +147,5 @@ extension GlabService {
         completedAttempt.createdPipelineID = id
         settings.pipelineRefreshAttempts.update(with: completedAttempt)
         settings.save()
-        return true
     }
 }

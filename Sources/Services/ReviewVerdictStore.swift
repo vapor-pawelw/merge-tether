@@ -64,6 +64,13 @@ struct ReviewVerdict: Codable, Equatable, Sendable {
     var semanticContextFingerprint: String? = nil
     var draftBodyDigests: [String: String]? = nil
 
+    func requiresFreshReview(forSemanticContext current: String) -> Bool {
+        switch verdict {
+        case .objections: false
+        case .noObjections, .classifiedFindings: semanticContextFingerprint != current
+        }
+    }
+
     func hasCompleteFindings(in discussions: [GitLabMergeRequestDiscussion], drafts: [GitLabDraftNote]) -> Bool {
         guard verdict == .classifiedFindings else { return true }
         guard let findings, let draftBodyDigests, drafts.count == findings.drafts.count,
@@ -195,10 +202,11 @@ enum ReviewVerdictStore {
     @MainActor
     static func automaticallyApproves(_ verdict: ReviewVerdict, head: String,
         discussions: [GitLabMergeRequestDiscussion], user: GitLabAuthenticatedUser,
-        threshold: AutoApprovalThreshold = .noMajorIssues, semanticContextFingerprint: String? = nil,
+        threshold: AutoApprovalThreshold = .noMajorIssues, semanticContextFingerprint: String,
         legacyDuoThreadsVerified: Bool = false,
         in directory: URL = directory) -> Bool {
-        guard contentMatches(verdict, head: head, discussions: discussions, user: user, in: directory) else { return false }
+        guard !verdict.requiresFreshReview(forSemanticContext: semanticContextFingerprint),
+              contentMatches(verdict, head: head, discussions: discussions, user: user, in: directory) else { return false }
         let active = GitLabMergeRequestDiscussion.activeForReview(discussions)
         switch verdict.verdict {
         case .objections:
@@ -210,8 +218,7 @@ enum ReviewVerdictStore {
                     || (legacyDuoThreadsVerified && verdict.duoAuthorID(for: thread, reviewerID: user.id) != nil)
             }
         case .classifiedFindings:
-            guard let findings = verdict.findings, findings.general.allows(threshold),
-                  let semanticContextFingerprint, verdict.semanticContextFingerprint == semanticContextFingerprint else { return false }
+            guard let findings = verdict.findings, findings.general.allows(threshold) else { return false }
             let publishedDraftRoots = Self.publishedDraftRoots(verdict, matching: discussions, in: directory)
             guard findings.drafts.allSatisfy({ publishedDraftRoots[$0.key] != nil || $0.value.allows(threshold) }) else { return false }
             let draftsByRoot = Dictionary(grouping: publishedDraftRoots, by: \.value)

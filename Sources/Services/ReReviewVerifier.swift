@@ -5,7 +5,7 @@ import Foundation
 enum ReReviewVerifier {
     typealias ExecutableResolver = @MainActor (AutomationAssistant) async -> URL?
     enum VerificationError: Error, Equatable { case unavailable, failed, incompleteEvidence }
-    static let policyVersion = "feedback-disposition-15"
+    static let policyVersion = "feedback-disposition-16"
 
     static let schema = #"{"type":"object","additionalProperties":false,"properties":{"notes":{"type":"array","items":{"type":"object","additionalProperties":false,"properties":{"noteID":{"type":"integer"},"state":{"type":"string","enum":["addressed","rejected","informational","blocking","uncertain"]},"reason":{"type":"string"},"summary":{"type":"string","minLength":1,"maxLength":200},"acceptanceNoteID":{"type":["integer","null"]},"publishedReplyNoteID":{"type":["integer","null"]},"informationalAcknowledgementSafe":{"type":"boolean"},"informationalPurpose":{"type":"string","enum":["concreteCodeReviewFeedback","reviewSummary","automatedReviewReport","other"]},"manualDecision":{"type":["object","null"],"additionalProperties":false,"properties":{"context":{"type":"string","minLength":1,"maxLength":2000},"verifiedFacts":{"type":"string","minLength":1,"maxLength":2000},"missingEvidence":{"type":"string","minLength":1,"maxLength":2000},"question":{"type":"string","minLength":1,"maxLength":1000},"mergeImpact":{"type":"string","minLength":1,"maxLength":1000}},"required":["context","verifiedFacts","missingEvidence","question","mergeImpact"]}},"required":["noteID","state","reason","summary","acceptanceNoteID","publishedReplyNoteID","informationalAcknowledgementSafe","informationalPurpose","manualDecision"]}}},"required":["notes"]}"#
 
@@ -76,6 +76,22 @@ enum ReReviewVerifier {
             let selectedFeedbackIDs: [Int]
             let blocker: String
             let summary: String
+            var selectedFeedbackRevisions: [Int: String]? = nil
+
+            func resolvedFeedbackIDs(in discussions: [GitLabMergeRequestDiscussion], authorID: Int) -> Set<Int> {
+                guard let selectedFeedbackRevisions else { return [] }
+                let selected = Set(selectedFeedbackIDs)
+                let findings = ReReviewAssessment.resolvedOverviewReplyEvidence(in: discussions,
+                    authorID: authorID, overviewIDs: selected)
+                let resolved = Set(findings.compactMap { $0.reviewRoot?.id }).intersection(selected)
+                guard !resolved.isEmpty else { return [] }
+                let currentRevisions = MergeRequestDiffDigest.noteRevisions(discussions)
+                guard selected.allSatisfy({ id in
+                    guard let original = selectedFeedbackRevisions[id] else { return false }
+                    return currentRevisions[id] == original
+                }) else { return [] }
+                return resolved
+            }
         }
         let authorID: Int
         let headSHA: String
@@ -106,8 +122,11 @@ enum ReReviewVerifier {
             let evidence = ReReviewAssessment.resolvedOverviewReplyEvidence(in: allDiscussions, authorID: authorID)
             input.resolvedOverviewReplyEvidence = evidence.isEmpty ? nil : evidence
             let closedIDs = Set(allDiscussions.filter(\.isResolvedForReview).flatMap(\.notes).compactMap(\.id))
+            let activeIDs = Set(input.discussions.flatMap(\.notes).filter { $0.system != true && $0.author?.id != authorID }.compactMap(\.id))
             input.ignoredSuggestions = ignoredSuggestions.filter { !closedIDs.contains($0.sourceNoteID) }
-            input.blockedFollowUps = blockedFollowUps.filter { closedIDs.isDisjoint(with: $0.selectedFeedbackIDs) }
+            input.blockedFollowUps = blockedFollowUps.filter {
+                Set($0.selectedFeedbackIDs).isSubset(of: activeIDs.union($0.resolvedFeedbackIDs(in: allDiscussions, authorID: authorID)))
+            }
             if let completedFollowUp, !closedIDs.isDisjoint(with: completedFollowUp.selectedFeedbackIDs) {
                 input.completedFollowUp = nil
             }
@@ -190,8 +209,9 @@ enum ReReviewVerifier {
         guard input.blockedFollowUps.count <= 1,
               input.blockedFollowUps.isEmpty || input.target != nil,
               input.blockedFollowUps.allSatisfy({ context in
-                  !context.selectedFeedbackIDs.isEmpty && Set(context.selectedFeedbackIDs).count == context.selectedFeedbackIDs.count
-                      && Set(context.selectedFeedbackIDs).isSubset(of: Set(noteIDs))
+                  let availableIDs = Set(noteIDs).union(context.resolvedFeedbackIDs(in: input.discussionsWithReplyEvidence, authorID: input.authorID))
+                  return !context.selectedFeedbackIDs.isEmpty && Set(context.selectedFeedbackIDs).count == context.selectedFeedbackIDs.count
+                      && Set(context.selectedFeedbackIDs).isSubset(of: availableIDs)
                       && !context.blocker.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
                       && context.blocker.count <= 600 && context.summary.count <= 2_000
               }) else { throw VerificationError.incompleteEvidence }
@@ -279,12 +299,13 @@ enum ReReviewVerifier {
             and --hostname target.host to read /user and verify its username is expectedUsername
             and its ID is authorID. Read /projects/projectID/merge_requests/iid for current metadata,
             title, description and SHA. Read every page of its discussions using --paginate and
-            per_page=100. Assess only threads whose first non-system note is not marked resolved.
+            per_page=100. Return note verdicts only for threads whose first non-system note is not marked resolved.
             For an active, non-resolvable review overview, a resolved finding by the same reviewer posted
             within 60 seconds can supply reply evidence. See resolvedOverviewReplyEvidence, or identify
-            the same candidate in live discussions. Use it only to verify that a published MR-author reply
-            after both notes covers the entire active overview against current code. Resolution, timing
-            and authorship alone never prove coverage. Never return verdicts for resolved threads.
+            the same candidate in live discussions. Verify that a published MR-author reply after both
+            notes covers the entire active overview against current code. A selected resolved finding may
+            also supply evidence for the exact stopped attempt described below. Resolution, timing and
+            authorship alone never prove coverage. Never return verdicts for resolved threads.
             Use the same active-thread filter for inline and live assessment. Read raw_diffs and relevant
             source files only as needed to judge active concerns.
             inlineEvidence describes transport, not MR state. included means inline content is supplied.
@@ -553,6 +574,15 @@ enum ReReviewVerifier {
             evidence. Every still-owed author reply must be published,
             and the actual stopped step no longer prevents completing THIS assigned MR task. A later rollout
             or organizational prerequisite alone can remain outstanding without inventing its acceptance.
+            A selected finding may be resolved and appear in resolvedOverviewReplyEvidence. Read that exact
+            finding, its later published author reply and the active overview from the same review. Verify that
+            the reply and current code satisfy the selected finding and any referenced concern in the overview.
+            Reassess that overview for the exact stopped attempt even if its prior state was informational.
+            If it adds no independent request and the published reply covers it in full, return addressed or
+            rejected with informationalPurpose reviewSummary and the exact publishedReplyNoteID.
+            If the overview adds a separate request, verify its own correction and published reply. Resolution
+            does not establish that the original obligation or its reply was fulfilled. Keep the verdicts for
+            active notes only and report completion of the resolved finding through the exact run ID.
             A narrow alternative is an entirely fulfilled administrative self-opt-out: all selected notes
             have a source-quoted reviewerOptOut, are informational/other, and have no independent technical
             obligation. The unwanted reply is NO ACTION, not missing delivery. Complete only that exact
@@ -637,7 +667,9 @@ enum ReReviewVerifier {
         let missingReplies = assessment.missingPublishedReplyNoteIDs(in: input.discussionsWithReplyEvidence, authorID: input.authorID,
             excludedReplyAuthorIDs: Set(input.excludedReplyAuthorIDs))
         guard input.blockedFollowUps.filter({ completed.contains($0.runID) }).allSatisfy({
-            Set($0.selectedFeedbackIDs).isSubset(of: addressed) && Set($0.selectedFeedbackIDs).isDisjoint(with: missingReplies)
+            let selected = Set($0.selectedFeedbackIDs)
+            let resolved = $0.resolvedFeedbackIDs(in: input.discussionsWithReplyEvidence, authorID: input.authorID)
+            return selected.subtracting(resolved).isSubset(of: addressed) && selected.isDisjoint(with: missingReplies)
         }) else { throw VerificationError.incompleteEvidence }
     }
 

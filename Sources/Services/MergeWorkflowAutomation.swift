@@ -584,8 +584,19 @@ final class MergeWorkflowAutomation {
                 }
                 failureAfterInfrastructureRetry = jobs
             } else if settings.automation.autoClaimPipelineFailures && settings.automaticPublicWritesAllowed {
-                if try await glab.refreshStaleFailedPipeline(for: latest, host: entry.host, expectedUser: entry.user,
-                    settings: settings, detector: detector, shouldProceed: { self.shouldProceed(entry) }) {
+                let proof: StalePipelineTarget?
+                do {
+                    proof = try await ReadOnlyAssessmentRetry.run(isCurrent: {
+                        self.shouldProceed(entry) && self.glab.accountRevision == assessmentAccountRevision
+                            && assessmentConfiguration.preservingScope(from: self.settings.automation) == self.settings.automation
+                    }, wait: retryWait) {
+                        try await self.glab.staleFailedPipelineTarget(for: latest, host: entry.host, expectedUser: entry.user)
+                    }
+                } catch is CancellationError { throw CancellationError() }
+                catch { throw PrelaunchReadFailure(cause: error, configuration: assessmentConfiguration) }
+                if let proof {
+                    try await glab.refreshStaleFailedPipeline(proof, for: latest, host: entry.host, expectedUser: entry.user,
+                        settings: settings, detector: detector, shouldProceed: { self.shouldProceed(entry) })
                     update(entry.id, .completed)
                     onRemoteChange?()
                     return
@@ -973,7 +984,7 @@ private extension MergeWorkflowTrigger {
         case .pipelineFailure:
             "Diagnose the pipeline failure and separate infrastructure failures from code failures. Implement and verify warranted in-scope fixes. When follow-up push is enabled, commit and push tested corrections, then re-fetch the remote HEAD and verify source content before saving completion drafts. With push off, pending or failed, keep the result in chat."
         case .reviewUpdate:
-            "Re-review only what the event says changed since my previous review: new or modified code, new or edited notes, or author replies. Check which of my existing findings still apply to the new head. Do not raise new findings about code or discussions already reviewed and unchanged. Prepare private reply drafts."
+            "Use the event to scope the re-review. Check new or changed requirements in the MR title or description against the relevant implementation and discussions. Assess changed code, new or edited notes, and author replies as applicable. Recheck existing findings. Raise new findings tied to the evidence identified in the event and prepare private reply drafts."
         case .newDiscussion:
             "Evaluate the new review threads on my MR. For warranted fixes, implement, verify, commit, push when authorized, and verify remote HEAD/content before saving response drafts. With push off, pending or failed, keep that run's result in chat."
         case .blockerChange:

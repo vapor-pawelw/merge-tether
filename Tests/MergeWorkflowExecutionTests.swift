@@ -62,9 +62,10 @@ import Testing
         settings.automation.applyPreset(.full, for: .codex)
         settings.glabPath = glab.glabPath
         let encoder = JSONEncoder()
+        let reviewedRequest = try JSONDecoder().decode(GitLabMergeRequest.self, from: Data(request(reviewed).utf8))
         let verdict = ReviewVerdict(version: 1, host: host, projectID: 7, iid: 11, headSHA: reviewed,
             verdict: .noObjections, discussionFingerprint: ReviewVerdict.fingerprint([]),
-            username: user.username, userID: user.id)
+            username: user.username, userID: user.id, semanticContextFingerprint: reviewedRequest.semanticContextFingerprint)
         let verdictFile = ReviewVerdictStore.fileURL(host: host, projectID: 7, iid: 11, in: directory)
         try FileManager.default.createDirectory(at: verdictFile.deletingLastPathComponent(), withIntermediateDirectories: true)
         try encoder.encode(verdict).write(to: verdictFile)
@@ -367,7 +368,7 @@ import Testing
             user: user, settings: settings, in: directory) == nil)
     }
 
-    @Test(arguments: ["legacy-full", "legacy-narrowed-retry", "ordinary", "same-head-authenticated"])
+    @Test(arguments: ["legacy-full", "legacy-narrowed-retry", "ordinary", "same-head-authenticated", "same-head-edited-description"])
     func manualReviewRetryKeepsFullReviewAcrossNewHeadsAndRestart(_ scenario: String) async throws {
         let suite = "WorkflowFullReviewRetry.\(UUID())"
         let defaults = try #require(UserDefaults(suiteName: suite))
@@ -377,7 +378,8 @@ import Testing
         let host = "gitlab-\(UUID().uuidString.lowercased()).example.test"
         let url = try #require(URL(string: "https://\(host)/team/repo/-/merge_requests/11"))
         let nextHead = String(repeating: "c", count: 40)
-        let hasCurrentVerdict = scenario == "same-head-authenticated"
+        let changedDescription = scenario == "same-head-edited-description"
+        let hasCurrentVerdict = scenario == "same-head-authenticated" || changedDescription
         let reviewedHead = hasCurrentVerdict ? nextHead : String(repeating: "a", count: 40)
         let stoppedHead = hasCurrentVerdict ? nextHead : String(repeating: "b", count: 40)
         let laterHead = String(repeating: "d", count: 40)
@@ -389,9 +391,14 @@ import Testing
         let reviewed = AssistantAutomationRunner.Handoff(id: UUID(), key: key, title: "Completed review", prompt: "Review",
             createdAt: Date(), allowsPush: false, execution: .init(state: .succeeded),
             mergeRequestURL: url, workflow: .review, expectedHeadSHA: reviewedHead)
+        let gitlab = reviewRetryGitLab(host: host, url: url, currentHead: reviewedHead)
+        defer { gitlab.close() }
+        let glab = gitlab.service(host: host, username: user.username)
+        let reviewedRequest = try await glab.fetchMergeRequest(projectID: work.projectID, iid: work.iid, host: host)
         let verdict = ReviewVerdict(version: 1, host: host, projectID: work.projectID, iid: work.iid,
             headSHA: reviewedHead, verdict: .noObjections, discussionFingerprint: ReviewVerdict.fingerprint([]),
-            username: user.username, userID: user.id, runID: reviewed.id)
+            username: user.username, userID: user.id, runID: reviewed.id,
+            semanticContextFingerprint: reviewedRequest.semanticContextFingerprint)
         let verdictFile = ReviewVerdictStore.fileURL(host: host, projectID: work.projectID, iid: work.iid)
         defer {
             try? FileManager.default.removeItem(at: verdictFile.deletingLastPathComponent())
@@ -426,9 +433,8 @@ import Testing
         }
         try #require(ReviewVerdictStore.authenticatedVerdict(host: host, projectID: work.projectID, iid: work.iid,
             user: user, settings: settings) == verdict)
-        let gitlab = reviewRetryGitLab(host: host, url: url, currentHead: nextHead)
-        defer { gitlab.close() }
-        let glab = gitlab.service(host: host, username: user.username)
+        gitlab.write("current-head", nextHead)
+        if changedDescription { gitlab.write("changed-description") }
         let coordinator = AssistantJobCoordinator(healthStore: AssistantCLIHealthStore(defaults: defaults), execute: { _, _ in
             .init(result: .init(status: .blocked, summary: "Fixture stopped before review completion."), output: "")
         })
@@ -439,8 +445,11 @@ import Testing
         #expect(retry.retryOf == retryTarget)
         #expect(retry.prompt.contains("Full review from scratch") == fromScratch)
         #expect(retry.prompt.contains("Incremental re-review") == (!fromScratch && !hasCurrentVerdict))
-        #expect(retry.prompt.contains("Do not raise new findings about unchanged code") == hasCurrentVerdict)
-        if hasCurrentVerdict {
+        #expect(retry.prompt.contains("Do not raise new findings about unchanged code") == (hasCurrentVerdict && !changedDescription))
+        if changedDescription {
+            #expect(retry.taskPrompt?.contains("title and description") == true)
+            #expect(retry.taskPrompt?.contains("current requirements against") == true)
+        } else if hasCurrentVerdict {
             #expect(retry.prompt.contains("new or edited notes"))
             #expect(retry.prompt.contains("inspect code as needed"))
         }
@@ -459,7 +468,8 @@ import Testing
         await coordinator.waitForTermination()
     }
 
-    @Test(arguments: ["manual-same-head", "manual-full", "manual-diagnosis", "todo-diagnosis", "todo-genuine", "monitor-diagnosis", "monitor-genuine"])
+    @Test(arguments: ["manual-same-head", "manual-edited-description", "manual-full", "manual-diagnosis",
+        "todo-diagnosis", "todo-genuine", "monitor-diagnosis", "monitor-genuine"])
     func reviewEntryPointsUseOnlyGenuineCodeReviewEvidence(_ route: String) async throws {
         let suite = "WorkflowReviewEntryPoint.\(UUID())"
         let defaults = try #require(UserDefaults(suiteName: suite))
@@ -470,7 +480,8 @@ import Testing
         let url = try #require(URL(string: "https://\(host)/team/repo/-/merge_requests/11"))
         let user = GitLabAuthenticatedUser(id: 1, username: "me")
         let diagnosed = route.hasSuffix("diagnosis")
-        let sameHead = route == "manual-same-head" || route == "manual-full"
+        let changedDescription = route == "manual-edited-description"
+        let sameHead = route == "manual-same-head" || changedDescription || route == "manual-full"
         let reviewedHead = String(repeating: "a", count: 40)
         let head = sameHead ? reviewedHead : String(repeating: "b", count: 40)
         let pastTask = diagnosed
@@ -481,8 +492,13 @@ import Testing
                 workspace: "", access: .gitLabRead), title: "Previously completed", prompt: pastTask, createdAt: Date(),
             allowsPush: false, execution: .init(state: .succeeded), taskPrompt: pastTask, mergeRequestURL: url,
             workflow: .review, manual: diagnosed, expectedHeadSHA: reviewedHead)
+        let gitlab = reviewRetryGitLab(host: host, url: url, currentHead: head)
+        defer { gitlab.close() }
+        let glab = gitlab.service(host: host, username: user.username)
+        let request = try await glab.fetchMergeRequest(projectID: 7, iid: 11, host: host)
         let verdict = ReviewVerdict(version: 1, host: host, projectID: 7, iid: 11, headSHA: reviewedHead, verdict: .noObjections,
-            discussionFingerprint: ReviewVerdict.fingerprint([]), username: user.username, userID: user.id, runID: past.id)
+            discussionFingerprint: ReviewVerdict.fingerprint([]), username: user.username, userID: user.id, runID: past.id,
+            semanticContextFingerprint: request.semanticContextFingerprint)
         let verdictFile = ReviewVerdictStore.fileURL(host: host, projectID: 7, iid: 11)
         defer {
             try? FileManager.default.removeItem(at: verdictFile.deletingLastPathComponent())
@@ -495,10 +511,8 @@ import Testing
         settings.assistantHandoffs = [past]
         #expect((ReviewVerdictStore.authenticatedVerdict(host: host, projectID: 7, iid: 11,
             user: user, settings: settings) != nil) == !diagnosed)
+        if changedDescription { gitlab.write("changed-description") }
 
-        let gitlab = reviewRetryGitLab(host: host, url: url, currentHead: head)
-        defer { gitlab.close() }
-        let glab = gitlab.service(host: host, username: user.username)
         settings.glabPath = glab.glabPath
         let coordinator = AssistantJobCoordinator(healthStore: AssistantCLIHealthStore(defaults: defaults), execute: { _, _ in
             .init(result: .init(status: .blocked, summary: "Review fixture stopped."), output: "")
@@ -555,6 +569,10 @@ import Testing
         #expect(started.prompt.contains("Full review from scratch") == (route == "manual-full"))
         #expect(started.prompt.contains("Do not raise new findings about unchanged code") == (route == "manual-same-head"))
         #expect(started.prompt.contains(reviewedHead) == (sameHead || route == "todo-genuine"))
+        if changedDescription {
+            #expect(started.taskPrompt?.contains("title and description") == true)
+            #expect(started.taskPrompt?.contains("current requirements against") == true)
+        }
         if route.hasPrefix("todo-") { #expect(started.prompt.contains("Only review database migrations.")) }
         await coordinator.waitForTermination()
     }
@@ -571,10 +589,11 @@ import Testing
             switch call.endpoint {
             case "/user": return InMemoryGitLab.output(#"{"id":1,"username":"me"}"#)
             case let path where path == "/projects/7/merge_requests/11" || path.hasPrefix("/merge_requests?scope=all"):
+                let description = gitlab.has("changed-description") ? #","description":"Verify the new export requirement.""# : ""
                 let mr = """
                     {"project_id":7,"iid":11,"author":{"id":2,"username":"author","name":"Author"},
                     "title":"Review fixture","web_url":"\(url.absoluteString)","state":"opened","draft":false,
-                    "sha":"\(gitlab.text("current-head"))","source_branch":"feature","target_branch":"main","labels":[]\(pipelineFields)}
+                    "sha":"\(gitlab.text("current-head"))","source_branch":"feature","target_branch":"main","labels":[]\(pipelineFields)\(description)}
                     """
                 return InMemoryGitLab.output(call.endpoint == "/projects/7/merge_requests/11" ? mr : "[\(mr)]")
             case "/projects/7/pipelines/10" where failedPipeline: return InMemoryGitLab.output(pipeline)
@@ -2281,6 +2300,107 @@ import Testing
 
     @Test func transientPrelaunchReadFailureRecoversBeforeThePipelineRefreshAction() async throws {
         try await exercisePipelineRefresh(ambiguousResponse: false, prelaunchFailures: 1)
+    }
+
+    @Test(arguments: [false, true])
+    func pipelineDetailReadResumesWithoutAnotherFailureEvent(exhaustsRetries: Bool) async throws {
+        let directory = FileManager.default.temporaryDirectory.appending(path: UUID().uuidString)
+        defer { try? FileManager.default.removeItem(at: directory) }
+        let suite = "PipelineDetailReadRetry.\(UUID())"
+        let defaults = try #require(UserDefaults(suiteName: suite))
+        defer { defaults.removePersistentDomain(forName: suite) }
+        let host = "gitlab-\(UUID().uuidString.lowercased()).example.test"
+        let user = GitLabAuthenticatedUser(id: 1, username: "me")
+        let source = String(repeating: "a", count: 40)
+        let pipeline = #"{"id":77,"project_id":7,"status":"failed","sha":"\#(source)","ref":"feature"}"#
+        let requestJSON = """
+        {"project_id":7,"iid":11,"author":{"id":1,"username":"me","name":"Me"},
+        "title":"Fixture","web_url":"https://\(host)/team/repo/-/merge_requests/11","state":"opened","draft":false,
+        "sha":"\(source)","source_project_id":7,"source_branch":"feature","target_project_id":7,
+        "target_branch":"main","has_conflicts":false,"labels":[],"head_pipeline":\(pipeline)}
+        """
+        let request = try JSONDecoder().decode(GitLabMergeRequest.self, from: Data(requestJSON.utf8))
+        let detector = ExistingPipelineWorkDetector(directory: directory.appending(path: "claims"),
+                                                    legacyDirectory: directory.appending(path: "legacy"))
+        let key = ExistingPipelineWorkDetector.Key(host: host, projectID: 7, mergeRequestIID: 11, pipelineID: 77)
+        let gitlab = InMemoryGitLab()
+        defer { gitlab.close() }
+        let glab = gitlab.service(host: host, username: user.username)
+        var failingReads = exhaustsRetries ? 3 : 1
+        gitlab.handler = { call in
+            if call.arguments == ["config", "get", "host"] { return InMemoryGitLab.output(host) }
+            if call.arguments == ["auth", "status"] { return InMemoryGitLab.output(error: "Logged in to \(host) as me") }
+            switch call.endpoint {
+            case "/user": return InMemoryGitLab.output(#"{"id":1,"username":"me"}"#)
+            case "/projects/7/merge_requests/11": return InMemoryGitLab.output(requestJSON)
+            case "/projects/7/pipelines/77":
+                if failingReads > 0 {
+                    failingReads -= 1
+                    #expect(detector.status(for: key) == .unverified)
+                    return InMemoryGitLab.output(error: "HTTP 503 Service Unavailable", code: 1)
+                }
+                return InMemoryGitLab.output(pipeline)
+            case "/projects/7/repository/branches/feature": return try InMemoryGitLab.json(["commit": ["id": source]])
+            case let path where path.hasPrefix("/projects/7/pipelines/77/jobs?"):
+                return InMemoryGitLab.output(#"[{"id":88,"status":"failed","allow_failure":false,"failure_reason":"script_failure"}]"#)
+            case "/projects/7": return InMemoryGitLab.output(#"{"default_branch":"main"}"#)
+            case let path where path.contains("/diffs?") || path.contains("/blocks?")
+                || path.contains("/merge_requests?") || path.contains("/discussions?"):
+                return InMemoryGitLab.output("[]")
+            default: return try gitlab.unexpected(call)
+            }
+        }
+        let clock = ReadRetryClock()
+        var started: [AssistantAutomationRunner.Handoff] = []
+        let coordinator = AssistantJobCoordinator(healthStore: AssistantCLIHealthStore(defaults: defaults), execute: { handoff, _ in
+            #expect(handoff.pipelineReservation.map { detector.ownsReservation(for: $0) } == true)
+            started.append(handoff)
+            return .init(result: .init(status: .succeeded, summary: "Diagnosed failure"), output: "")
+        })
+        coordinator.onFinished = { handoff in
+            if let reservation = handoff.pipelineReservation { try? detector.finishHandoff(for: reservation) }
+        }
+        let settings = SettingsManager(defaults: defaults)
+        settings.automation.applyPreset(.full, for: .codex)
+        settings.glabPath = glab.glabPath
+        settings.save()
+        func poll(_ settings: SettingsManager) async throws -> [MergeWorkflowEvent] {
+            let automation = MergeWorkflowAutomation(settings: settings, glab: glab, detector: detector,
+                jobCoordinator: coordinator, retryWait: { _ in await Task.yield() }, now: { clock.date })
+            let monitor = MergeWorkflowMonitor(persistenceStore: settings.persistenceStore)
+            var events: [MergeWorkflowEvent] = []
+            await monitor.poll(glab: glab, host: host, user: user, authored: [request], enabled: [.pipelineFailure],
+                reviewSLA: 3_600, automationScope: settings.automation.scope) {
+                events.append($0)
+                automation.receive($0, host: host, user: user)
+            }
+            automation.startNext()
+            let deadline = ContinuousClock.now + .seconds(5)
+            while automation.entries.contains(where: { [.queued, .running, .waitingForAssistant].contains($0.state) }),
+                  ContinuousClock.now < deadline {
+                try await Task.sleep(for: .milliseconds(5))
+            }
+            return events
+        }
+
+        let first = try await poll(settings)
+        #expect(first.map(\.pipelineID) == [77])
+        #expect(first.map(\.jobID) == [88])
+        if exhaustsRetries {
+            #expect(settings.workflowActivity.first?.isReadOnlyFailure == true)
+            #expect(started.isEmpty && detector.status(for: key) == .unverified)
+            clock.date = clock.date.addingTimeInterval(ReadOnlyAssessmentRetry.cooldown + 1)
+        }
+        let restored = SettingsManager(defaults: defaults)
+        let second = try await poll(restored)
+
+        #expect(second.isEmpty)
+        #expect(restored.workflowActivity.map(\.id) == first.map(\.identity))
+        #expect(started.map { $0.pipelineReservation?.pipelineID } == [77])
+        #expect(started.first?.prompt.contains("Failed job IDs: 88") == true)
+        #expect(detector.status(for: key) == .registered)
+        #expect(!detector.hasActiveReservation(for: key))
+        #expect(gitlab.requests.allSatisfy { $0.method == "GET" })
     }
 
     @Test(arguments: [2, 3])

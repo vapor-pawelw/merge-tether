@@ -244,15 +244,15 @@ final class MergeRequestTodoRouter {
             if original.kind == .pipeline, settings.automaticPublicWritesAllowed {
                 let user = try await glab.fetchAuthenticatedUser(host: original.target.host, expectedUsername: original.target.username)
                 let originalJob = original.jobID.flatMap { id in settings.assistantHandoffs.first { $0.id == id } }
-                let refreshed = try await glab.refreshStaleFailedPipeline(for: request, host: original.target.host,
-                    expectedUser: user, settings: settings, shouldProceed: {
-                        isCurrentRun()
-                            && !self.settings.ignoredMergeRequests.contains(original.target)
-                            && invocationConfiguration.preservingScope(from: self.settings.automation) == self.settings.automation
-                            && self.matchesCompletionSnapshot(original, job: originalJob)
-                            && (manual || self.shouldRunAutomatically(original.kind, request: request, target: original.target, workflowEventKind: original.workflowEventKind))
-                    })
-                if refreshed {
+                if let proof = try await glab.staleFailedPipelineTarget(for: request, host: original.target.host, expectedUser: user) {
+                    try await glab.refreshStaleFailedPipeline(proof, for: request, host: original.target.host,
+                        expectedUser: user, settings: settings, shouldProceed: {
+                            isCurrentRun()
+                                && !self.settings.ignoredMergeRequests.contains(original.target)
+                                && invocationConfiguration.preservingScope(from: self.settings.automation) == self.settings.automation
+                                && self.matchesCompletionSnapshot(original, job: originalJob)
+                                && (manual || self.shouldRunAutomatically(original.kind, request: request, target: original.target, workflowEventKind: original.workflowEventKind))
+                        })
                     update(id, origin: origin) { $0.request = request; $0.state = .completed; $0.error = nil }
                     return
                 }

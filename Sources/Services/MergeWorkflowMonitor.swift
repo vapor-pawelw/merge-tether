@@ -510,6 +510,8 @@ final class MergeWorkflowMonitor {
             let staleContext = await staleReviewContext(request, discussions: discussions, glab: glab,
                 account: account, verdict: verdict)
                 .map { epoch == 0 ? $0 : $0 + "-coverage-\(epoch)" }
+            let metadataNeedsReview = staleContext != nil
+                && verdict?.requiresFreshReview(forSemanticContext: request.semanticContextFingerprint) == true
             let hasReviewed = previous.hasReviewed || hasReviewEvidence || previous.reviewedHead != nil || staleContext != nil
             if firstObservation && !recoveredReview {
                 previous.hasReviewed = hasReviewed
@@ -518,7 +520,8 @@ final class MergeWorkflowMonitor {
                 if let staleContext {
                     let observation = Observation(glab: glab, account: account, request: request)
                     events.append(observation.event(.reviewUpdate, token: head + "-context-" + staleContext,
-                        context: "Your recorded review does not cover the current discussion content at this head. Recheck current discussions and record a fresh review verdict."))
+                        context: metadataNeedsReview ? IncrementalReviewScope.metadataReviewInstructions
+                            : "Your recorded review does not cover the current discussion content at this head. Recheck current discussions and record a fresh review verdict."))
                 }
                 continue
             }
@@ -571,12 +574,14 @@ final class MergeWorkflowMonitor {
                     parts.append("The author replied after your review comments. Recheck reply note IDs: "
                         + ids.map(String.init).joined(separator: ", ") + ".")
                 }
-                if staleUnreported {
+                if metadataNeedsReview {
+                    parts.append(IncrementalReviewScope.metadataReviewInstructions)
+                } else if staleUnreported {
                     parts.append("Your recorded review does not cover the current discussion content. Record a fresh verdict after checking what changed.")
                 }
-                let scoped = scope.instructions
+                let scoped = metadataNeedsReview ? "" : scope.instructions
                 if !scoped.isEmpty { parts.append(scoped) }
-                let onlyOwnOrRemoved = staleUnreported && !changedHead && ids.isEmpty && scope.changedNoteIDs.isEmpty
+                let onlyOwnOrRemoved = staleUnreported && !metadataNeedsReview && !changedHead && ids.isEmpty && scope.changedNoteIDs.isEmpty
                     && previous.reviewedNoteRevisions != nil
                 if onlyOwnOrRemoved {
                     parts.append("No other participant's note was added or edited since your review. Do not review again; confirm your verdict for the current discussions.")
@@ -597,8 +602,7 @@ final class MergeWorkflowMonitor {
     private func reviewCoverage(_ request: GitLabMergeRequest, discussions: [GitLabMergeRequestDiscussion]?,
                                 account: Account, verdict: ReviewVerdict?) -> Bool? {
         guard let head = request.sha, let discussions, ReviewVerdict.fingerprint(discussions) != nil else { return nil }
-        guard verdict?.verdict != .classifiedFindings || verdict?.semanticContextFingerprint == request.semanticContextFingerprint
-        else { return false }
+        guard verdict?.requiresFreshReview(forSemanticContext: request.semanticContextFingerprint) != true else { return false }
         return verdict?.covers(head: head, discussions: discussions, reviewerID: account.userID,
                 publishedDrafts: ReviewVerdictStore.seenDrafts(host: account.host, projectID: request.projectID,
                     iid: request.iid, in: verdictDirectory)) == true
@@ -610,12 +614,11 @@ final class MergeWorkflowMonitor {
         guard let head = request.sha, let discussions, let fingerprint = ReviewVerdict.fingerprint(discussions),
               let verdict, verdict.version == 1, verdict.headSHA == head,
               reviewCoverage(request, discussions: discussions, account: account, verdict: verdict) == false else { return nil }
-        let metadataChanged = verdict.verdict == .classifiedFindings
-            && verdict.semanticContextFingerprint != request.semanticContextFingerprint
+        let metadataNeedsReview = verdict.requiresFreshReview(forSemanticContext: request.semanticContextFingerprint)
         let hasOwnOpenDiscussion = GitLabMergeRequestDiscussion.activeForReview(discussions).contains {
             $0.reviewRoot.map { $0.author?.id == account.userID && $0.resolvable == true } == true
         }
-        guard metadataChanged || !hasOwnOpenDiscussion,
+        guard metadataNeedsReview || !hasOwnOpenDiscussion,
               !AssistantAutomationRunner.isWorking(on: .init(host: account.host, projectID: request.projectID, iid: request.iid)),
               let draftCount = try? await glab.fetchOwnDraftNoteCount(projectID: request.projectID, iid: request.iid,
                   host: account.host, userID: account.userID), draftCount == 0 else { return nil }

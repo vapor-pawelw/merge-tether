@@ -54,6 +54,10 @@ extension GlabService {
 /// later passes look only at what changed since, so unrelated edits never reopen the whole MR.
 struct IncrementalReviewScope: Equatable, Sendable {
     static let manualReviewIntroduction = "Perform an explicit user-requested review or re-review of this merge request."
+    static let metadataReviewInstructions = """
+        Your recorded review does not cover the current MR title and description. Check the current requirements \
+        against the diff and discussions, then record a fresh verdict. Save warranted private drafts without duplicates.
+        """
     static let fullReviewInstructions = """
         Full review from scratch, explicitly requested by the user: review the entire current diff and every current \
         discussion as if for the first time. Earlier verdicts and scope limits do not apply. Still avoid duplicating \

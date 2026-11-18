@@ -1487,7 +1487,7 @@ final class MergeRequestAttentionMonitor {
               let discussions, ReviewVerdict.fingerprint(discussions) != nil else { return nil }
         let verdict = ReviewVerdictStore.verdict(host: host, projectID: request.projectID,
             iid: request.iid, user: user, in: verdictDirectory)
-        guard verdict?.verdict != .classifiedFindings || verdict?.semanticContextFingerprint == request.semanticContextFingerprint,
+        guard verdict?.requiresFreshReview(forSemanticContext: request.semanticContextFingerprint) != true,
               verdict?.covers(head: head, discussions: discussions, reviewerID: user.id,
             publishedDrafts: ReviewVerdictStore.seenDrafts(host: host, projectID: request.projectID,
                 iid: request.iid, in: verdictDirectory)) == true else { return .needsReview }
@@ -2521,7 +2521,8 @@ final class MergeRequestAttentionMonitor {
               !expectedDrafts.isEmpty, expectedDrafts.allSatisfy(AICommentAssessmentStore.safeForAutomaticPublication),
               expectedDrafts.allSatisfy({ $0.id != nil && $0.authorID == user.id }),
               Set(expectedDrafts.compactMap(\.id)).count == expectedDrafts.count,
-              let displayed = items.first(where: { $0.id == id }), displayed.drafts == expectedDrafts else { return .changed }
+              let displayed = items.first(where: { $0.id == id }), displayed.drafts == expectedDrafts,
+              let snapshot = displayed.commentReviewSnapshot, snapshot.headSHA == head else { return .changed }
         let publishable = displayed.publishAllDrafts
         guard !publishable.isEmpty else { return .changed }
         let generation = accountGeneration, revision = glab.accountRevision
@@ -2535,8 +2536,8 @@ final class MergeRequestAttentionMonitor {
             signalAutomaticActionIdle()
         }
         var remaining = expectedDrafts
+        var published: [GitLabDraftNote] = []
         var attemptedWrite = false
-        var publishedAny = false
         do {
             for draft in publishable {
                 try Task.checkCancellation()
@@ -2544,7 +2545,7 @@ final class MergeRequestAttentionMonitor {
                 async let authenticated = glab.fetchAuthenticatedUser(host: account.host, expectedUsername: account.username)
                 async let threads = try? glab.fetchMergeRequestDiscussions(projectID: id.projectID, iid: id.iid, host: account.host)
                 let (request, liveUser, initialDiscussions) = try await (live, authenticated, threads)
-                guard currentContext() else { return publishedAny ? .partial : .changed }
+                guard currentContext() else { return published.isEmpty ? .changed : .partial }
                 guard liveUser == user else { throw GlabError.notAuthenticated }
                 let discussions: [GitLabMergeRequestDiscussion]
                 let origin: PublicationEvidence?
@@ -2562,17 +2563,18 @@ final class MergeRequestAttentionMonitor {
                 let drafts = try await glab.fetchOwnDraftNotes(projectID: id.projectID, iid: id.iid, host: account.host, userID: user.id)
                 guard currentContext(), request.state == "opened", request.sha == head,
                       request.projectID == id.projectID, request.iid == id.iid, request.webURL == displayed.url,
+                      snapshot.matches(request, discussions: discussions, publishedDrafts: published, userID: user.id),
                       drafts == remaining, let draftID = draft.id,
                       !DuplicateReplyDrafts.ids(in: drafts, published: replies).contains(draftID) else {
                     if currentContext() { confirmationStates[id] = .changed }
-                    return publishedAny ? .partial : .changed
+                    return published.isEmpty ? .changed : .partial
                 }
                 try Task.checkCancellation()
                 attemptedWrite = true
                 try await glab.publishDraftNote(projectID: id.projectID, iid: id.iid, draftID: draftID, host: account.host) { !Task.isCancelled && currentContext() }
                 attemptedWrite = false
                 guard currentContext() else { return .uncertain }
-                publishedAny = true
+                published.append(draft)
                 remaining.removeAll { $0 == draft }
                 publishedDrafts[id, default: []].append(draft)
                 updateItem(id) {
@@ -2584,15 +2586,15 @@ final class MergeRequestAttentionMonitor {
             previousDrafts[id] = nil
             confirmationStates[id] = nil
             if remaining.isEmpty {
-                await completeCommentReviewAfterPublication(id, snapshot: displayed.commentReviewSnapshot,
-                    published: publishable, account: account, user: user)
+                await completeCommentReviewAfterPublication(id, snapshot: snapshot,
+                    published: published, account: account, user: user)
                 guard currentContext() else { return .uncertain }
                 await refreshReReviewAfterPublication(id, account: account, user: user)
             }
             return currentContext() ? .completed : .uncertain
         } catch {
             if currentContext() { confirmationStates[id] = .failed }
-            return attemptedWrite ? .uncertain : (publishedAny ? .partial : .changed)
+            return attemptedWrite ? .uncertain : (published.isEmpty ? .changed : .partial)
         }
     }
 
@@ -2720,7 +2722,7 @@ final class MergeRequestAttentionMonitor {
                     if automatic, let verdict = checkedEvidence.checkedVerdict, verdict.verdict == .classifiedFindings,
                        !ReviewVerdictStore.automaticallyApproves(verdict, head: head,
                             discussions: checkedEvidence.discussions, user: user, threshold: .noIssues,
-                            semanticContextFingerprint: checkedSemanticContext, in: self.verdictDirectory) {
+                            semanticContextFingerprint: checkedEvidence.request.semanticContextFingerprint, in: self.verdictDirectory) {
                         approvalWithOpenFindingsRunID = verdict.runID
                     }
                 }, shouldProceed: { permits(checkedEvidence) })

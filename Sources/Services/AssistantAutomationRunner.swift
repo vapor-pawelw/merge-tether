@@ -421,6 +421,7 @@ enum AssistantAutomationRunner {
             }
         }
         let headSHA: String?
+        var semanticContextFingerprint: String?
         var reviewer: GitLabAuthenticatedUser?
         var pipelineDiagnosis: ForeignPipelineDiagnosis?
         if foreignDiagnosis || jobCoordinator == nil || configurationSnapshot != nil || (reviewRetry != nil && glab != nil) {
@@ -453,6 +454,7 @@ enum AssistantAutomationRunner {
                 try validateOwnedPipelineState(snapshot.request, reservation: pipelineReservation)
             }
             headSHA = snapshot.request.sha
+            semanticContextFingerprint = snapshot.request.semanticContextFingerprint
             reviewer = snapshot.user
             guard let headSHA, GlabService.isFullGitSHA(headSHA) else { throw AssistantJobExecutor.ExecutionError.contextUnavailable }
             if let expectedHeadSHA, expectedHeadSHA != headSHA { throw AssistantJobExecutor.ExecutionError.headChanged }
@@ -476,7 +478,8 @@ enum AssistantAutomationRunner {
         if let reviewRetry, case let .some(.review(fromScratch, configuredInstructions)) = intent {
             guard let headSHA, !headSHA.isEmpty else { throw AssistantJobExecutor.ExecutionError.headChanged }
             // The head can remain unchanged while the discussions have moved on.
-            let task = currentReviewTask(work: work, head: headSHA, user: reviewer, settings: settings,
+            let task = currentReviewTask(work: work, head: headSHA, semanticContextFingerprint: semanticContextFingerprint,
+                user: reviewer, settings: settings,
                 fullReview: fromScratch, configuredInstructions: configuredInstructions)
             taskPrompt = task + retryContext(for: reviewRetry)
         } else if let reviewRetry, diagnosesPipeline {
@@ -762,14 +765,19 @@ enum AssistantAutomationRunner {
         }
     }
 
-    static func currentReviewTask(work: MergeRequestWork, head: String, user: GitLabAuthenticatedUser?,
+    static func currentReviewTask(work: MergeRequestWork, head: String, semanticContextFingerprint: String?,
+                                  user: GitLabAuthenticatedUser?,
                                   settings: SettingsManager, fullReview: Bool, configuredInstructions: String? = nil) -> String {
-        let reviewedHead = fullReview ? nil : user.flatMap {
+        let verdict = fullReview ? nil : user.flatMap {
             ReviewVerdictStore.authenticatedVerdict(host: work.host, projectID: work.projectID, iid: work.iid,
-                user: $0, settings: settings)?.headSHA
+                user: $0, settings: settings)
         }
+        let reviewedHead = verdict?.headSHA
         let task: String
-        if reviewedHead == head {
+        if reviewedHead == head, let semanticContextFingerprint,
+           verdict?.requiresFreshReview(forSemanticContext: semanticContextFingerprint) == true {
+            task = IncrementalReviewScope.metadataReviewInstructions
+        } else if reviewedHead == head {
             task = """
                 A verified review covers the current commit. Read the current discussions, including all new or edited notes, and verify earlier findings and author replies. You may inspect code as needed for those checks. Do not raise new findings about unchanged code. Prepare warranted private replies without duplicates.
                 """

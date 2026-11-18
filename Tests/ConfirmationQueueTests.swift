@@ -421,7 +421,8 @@ import MergeTetherRemote
         }
 
         func recordVerdict(_ verdict: String, head: String, authenticated: Bool = true,
-                           nonBlockingDuoNotes: [String: String]? = nil, findingLevels: [String: String]? = nil) throws {
+                           nonBlockingDuoNotes: [String: String]? = nil, findingLevels: [String: String]? = nil,
+                           bindSemanticContext: Bool = true) throws {
             let folder = self.folder.appending(path: "verdicts/gitlab.example.org")
             try FileManager.default.createDirectory(at: folder, withIntermediateDirectories: true)
             let discussions = try JSONDecoder().decode([GitLabMergeRequestDiscussion].self, from: gitlab.data("discussions.json"))
@@ -438,9 +439,11 @@ import MergeTetherRemote
             record["nonBlockingDuoNotes"] = nonBlockingDuoNotes
             if let findingLevels {
                 record["findings"] = ["general": "none", "discussions": findingLevels, "drafts": [:]]
+                record["draftBodyDigests"] = [:] as [String: String]
+            }
+            if (verdict == "no_objections" && bindSemanticContext) || findingLevels != nil {
                 let request = try JSONDecoder().decode(GitLabMergeRequest.self, from: gitlab.data("request.json"))
                 record["semanticContextFingerprint"] = request.semanticContextFingerprint
-                record["draftBodyDigests"] = [:] as [String: String]
             }
             let value = try JSONDecoder().decode(ReviewVerdict.self, from: JSONSerialization.data(withJSONObject: record))
             try JSONEncoder().encode(value).write(to: folder.appending(path: "1-2.json"))
@@ -1917,6 +1920,44 @@ import MergeTetherRemote
         #expect(harness.log("selected.log").isEmpty && harness.log("publish.log").isEmpty)
     }
 
+    @Test(arguments: [false, true])
+    func remotePublishAllRejectsAReplyAfterTheSourceQuestionChanges(_ afterFirstWrite: Bool) async throws {
+        let harness = try makeHarness(assistantWorked: false)
+        defer { harness.cleanUp() }
+        let drafts = #"[{"id":11,"author_id":3,"note":"The export uses CSV.","discussion_id":"review"},{"id":12,"author_id":3,"note":"The export is UTF-8.","discussion_id":"review"}]"#
+        let original = #"[{"id":"review","notes":[{"id":40,"author":{"id":8,"username":"reviewer"},"system":false,"body":"Which format does the export use?"}]}]"#
+        let published = #"[{"id":"review","notes":[{"id":40,"author":{"id":8,"username":"reviewer"},"system":false,"body":"Which format does the export use?"},{"id":41,"author":{"id":3,"username":"me"},"system":false,"body":"The export uses CSV."}]}]"#
+        try harness.write("drafts.json", drafts)
+        try harness.write("discussions.json", original)
+        try harness.write("published-discussions.json", published)
+        try harness.recordVerdict("objections", head: head)
+        try await harness.poll()
+        let item = try #require(harness.monitor.currentItems.first)
+        try #require(RemoteBoardAdapter.card(item, account: "me@\(host)").actions.contains { $0.kind == .publish })
+        try #require(item.commentReviewSnapshot != nil)
+        let transport = try #require(harness.gitlab.handler)
+        var edited = false
+        harness.gitlab.handler = { call in
+            if !edited, call.endpoint.contains("/discussions?"),
+               !afterFirstWrite || harness.log("selected.log").contains("/11/publish") {
+                edited = true
+                let current = harness.log("discussions.json")
+                try harness.write("discussions.json", current.replacingOccurrences(
+                    of: "Which format does the export use?", with: "Can the export switch to JSON before approval?"))
+            }
+            return try await transport(call)
+        }
+
+        let result = await harness.monitor.publishRemoteDrafts(of: item.id, head: head, expectedDrafts: item.drafts)
+
+        #expect(edited)
+        #expect(result == (afterFirstWrite ? .partial : .changed))
+        let writes = harness.gitlab.requests.filter { $0.endpoint.hasSuffix("/publish") }
+        let remaining = try JSONDecoder().decode([GitLabDraftNote].self, from: harness.gitlab.data("drafts.json"))
+        #expect(writes.count == (afterFirstWrite ? 1 : 0))
+        #expect(remaining == (afterFirstWrite ? Array(item.drafts.dropFirst()) : item.drafts))
+    }
+
     private let othersThread = #"""
         [{"notes":[{"id":40,"author":{"id":8},"system":false,"body":"Please check this","resolvable":true,"resolved":false}]}]
         """#
@@ -2345,6 +2386,42 @@ import MergeTetherRemote
         if evidence == "otherAccount" {
             #expect(harness.monitor.currentOpenItems.allSatisfy { !$0.canApprove && !$0.autoApproveReady })
         }
+    }
+
+    @Test(arguments: [false, true])
+    func automaticApprovalWaitsForAFreshReviewAfterADescriptionEdit(_ bound: Bool) async throws {
+        let harness = try makeHarness(assistantWorked: true)
+        defer { harness.cleanUp() }
+        try harness.recordVerdict("no_objections", head: head, bindSemanticContext: bound)
+        let directory = harness.folder.appending(path: "verdicts")
+        let user = try await harness.glab.fetchAuthenticatedUser(host: host, expectedUsername: "me")
+        let verdict = try #require(ReviewVerdictStore.authenticatedVerdict(host: host, projectID: 1,
+            iid: 2, user: user, settings: harness.settings, in: directory))
+        try #require(verdict.verdict == .noObjections && (verdict.semanticContextFingerprint != nil) == bound)
+        let workflow = MergeWorkflowMonitor(defaults: harness.defaults, verdictDirectory: directory)
+        var updates: [MergeWorkflowEvent] = []
+        if bound {
+            await workflow.poll(glab: harness.glab, host: host, user: user, authored: [],
+                enabled: [.reviewUpdate], reviewSLA: 3600) { updates.append($0) }
+            try #require(updates.isEmpty)
+        }
+
+        let changed = harness.log("request.json").replacingOccurrences(of: #""title":"Fix""#,
+            with: #""title":"Fix","description":"Before approval, verify that the export format meets the requirements.""#)
+        try harness.write("request.json", changed)
+        try harness.write("reviewing.json", "[\(changed)]")
+        try await harness.poll()
+
+        #expect(harness.monitor.currentOpenItems.first?.reviewingProgress == .needsReview)
+        #expect(harness.log("approve.log").isEmpty)
+        await workflow.poll(glab: harness.glab, host: host, user: user, authored: [],
+            enabled: [.reviewUpdate], reviewSLA: 3600) { updates.append($0) }
+        #expect(updates.count == 1)
+        #expect(updates.first?.context.contains("title and description") == true)
+        #expect(updates.first?.context.contains("Do not review again") == false)
+        try harness.recordVerdict("classified_findings", head: head, findingLevels: [:])
+        try await harness.poll()
+        #expect(harness.log("approve.log").split(separator: "\n").count == 1)
     }
 
     @Test func persistenceHoldStopsAutomaticApprovalButKeepsExplicitFreshApproval() async throws {
@@ -3938,7 +4015,8 @@ import MergeTetherRemote
         #expect(harness.log("re-review.log").isEmpty)
     }
 
-    @Test func sharedSemanticSuccessDoesNotHideAnUnconfirmedReviewerRequestOrRepeatItsWrite() async throws {
+    @Test(arguments: ["reviewed", "review_started"])
+    func unconfirmedReviewerRequestIsReconciledWithLiveStateAfterRestart(_ reviewerState: String) async throws {
         let harness = try makeHarness(assistantWorked: true, authored: true)
         defer { harness.cleanUp() }
         try prepareAuthoredFeedback(harness)
@@ -3960,6 +4038,34 @@ import MergeTetherRemote
         #expect(harness.settings.reReviewReceipts.values.contains { $0.unconfirmed && $0.requested != true })
         #expect(harness.log("re-review.log") == "requested\n")
         #expect(harness.log("publish.log").isEmpty && harness.log("selected.log").isEmpty)
+
+        try harness.write("reviewers.json", #"[{"user":{"id":8},"state":"\#(reviewerState)"}]"#)
+        let reloaded = SettingsManager(defaults: harness.defaults)
+        let receipt = ReReviewReceipt.Key(host: host, authorID: 3, projectID: 1, iid: 2, reviewerID: 8)
+        try #require(reloaded.reReviewReceipts[receipt]?.unconfirmed == true)
+        reloaded.automation.authorFeedback.isEnabled = false
+        let glab = harness.gitlab.service(host: host, username: "me")
+        let monitor = MergeRequestAttentionMonitor(glab: glab, settings: reloaded,
+            verdictDirectory: harness.folder.appending(path: "verdicts"),
+            aiAssessmentDirectory: harness.folder.appending(path: "ai-assessments"), followUpDirectory: harness.folder,
+            provenanceDirectory: harness.folder.appending(path: "comment-origins"), canAutomate: { _ in false },
+            verifyReReview: { _, _, _ in
+                Issue.record("Reconciliation should only read GitLab reviewer state")
+                throw ReReviewVerifier.VerificationError.unavailable
+            })
+        let restarted = Harness(folder: harness.folder, defaults: harness.defaults, suite: harness.suite,
+            settings: reloaded, glab: glab, gitlab: harness.gitlab, monitor: monitor)
+
+        try await restarted.poll()
+
+        let displayed = try #require(monitor.currentOpenItems.first)
+        let reviewStarted = reviewerState == "review_started"
+        #expect(displayed.reReviewUnconfirmed == !reviewStarted)
+        #expect(displayed.reReviewRequested == reviewStarted)
+        let saved = SettingsManager(defaults: harness.defaults).reReviewReceipts[receipt]
+        #expect(saved?.unconfirmed == !reviewStarted)
+        #expect((saved?.requested == true) == reviewStarted)
+        #expect(harness.log("re-review.log") == "requested\n")
     }
 
     private func completeSharedAuthorFeedback(_ harness: Harness) async throws {
@@ -4874,9 +4980,11 @@ import MergeTetherRemote
             title: "Completed review", prompt: "", createdAt: Date(), allowsPush: false,
             execution: .init(state: .succeeded), workflow: .review, expectedHeadSHA: head)
         harness.settings.assistantHandoffs.append(review)
+        let request = try JSONDecoder().decode(GitLabMergeRequest.self, from: Data(reviewerJSON.utf8))
         let verdict = ReviewVerdict(version: 1, host: host, projectID: 1, iid: 3, headSHA: head,
             verdict: try #require(ReviewVerdict.Kind(rawValue: "no_objections")),
-            discussionFingerprint: ReviewVerdict.fingerprint([]), username: "me", userID: 3, runID: review.id)
+            discussionFingerprint: ReviewVerdict.fingerprint([]), username: "me", userID: 3, runID: review.id,
+            semanticContextFingerprint: request.semanticContextFingerprint)
         try AssistantJobJournal.saveWithLoadedKey(.init(result: .init(status: .succeeded, summary: "Reviewed"), output: ""),
             for: review, reviewVerdict: verdict, reviewDrafts: [])
         let verdictURL = harness.folder.appending(path: "verdicts/gitlab.example.org/1-3.json")

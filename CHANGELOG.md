@@ -11,6 +11,10 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 - Use **Default**, **On**, and **Off** for MR automation, comment publication, auto-approval, and auto-merge on Mac. The lightning panel remembers the choices saved under **On**.
 - Tint the Mac automation bolt orange when an MR uses a manual On or Off override.
 
+- Recheck the project’s discussion policy before automatic merge. Require a current review of the MR title and description before automatic approval.
+- Stop iPhone draft publication when the checked discussion has changed. Reconcile an unconfirmed re-review request when GitLab shows that the reviewer has started.
+- Use verified replies in closed findings from the same review to reconcile a blocked follow-up. Resume failed-pipeline checks after temporary read failures before claiming work.
+
 - Set auto-merge to **Default**, **On** or **Off** for an individual MR from its lightning menu. **On** overrides the global auto-merge defaults for that MR.
 
 - Show when a merge request was automatically approved with findings still open in the approvals popover and the local automation event log.

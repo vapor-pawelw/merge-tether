@@ -136,6 +136,7 @@ import Testing
         let user = GitLabAuthenticatedUser(id: reviewer, username: "reviewer")
         var recorded = verdict(for: [])
         recorded.username = user.username; recorded.userID = user.id; recorded.runID = UUID()
+        recorded.semanticContextFingerprint = "metadata"
         let draft = GitLabDraftNote(id: 5, authorID: user.id, note: "Checked reply", discussionID: "thread", position: nil)
         let published = [GitLabMergeRequestDiscussion(id: "thread", notes: [.init(id: 20,
             author: .init(id: user.id, username: user.username, name: nil), system: false,
@@ -143,7 +144,8 @@ import Testing
         ReviewVerdictStore.rememberDrafts([draft], host: recorded.host, projectID: 1, iid: 2, in: directory)
         #expect(recorded.approves(head: head, discussions: published, reviewerID: user.id,
             publishedDrafts: ReviewVerdictStore.seenDrafts(host: recorded.host, projectID: 1, iid: 2, in: directory)))
-        #expect(!ReviewVerdictStore.automaticallyApproves(recorded, head: head, discussions: published, user: user, in: directory))
+        #expect(!ReviewVerdictStore.automaticallyApproves(recorded, head: head, discussions: published, user: user,
+            semanticContextFingerprint: "metadata", in: directory))
         let capture = try #require(ReviewVerdictStore.capturePublication([draft], verdict: recorded,
             before: [], reviewedDrafts: [draft], user: user, in: directory))
         let later = GitLabDraftNote(id: 6, authorID: user.id, note: draft.note, discussionID: draft.discussionID, position: nil)
@@ -155,11 +157,14 @@ import Testing
         #expect(ReviewVerdictStore.capturePublication([draft], verdict: recorded, before: [],
             reviewedDrafts: [], user: user, in: directory) == nil)
         try ReviewVerdictStore.recordPublication(capture, after: published, user: user, in: directory)
-        #expect(ReviewVerdictStore.automaticallyApproves(recorded, head: head, discussions: published, user: user, in: directory))
+        #expect(ReviewVerdictStore.automaticallyApproves(recorded, head: head, discussions: published, user: user,
+            semanticContextFingerprint: "metadata", in: directory))
         let incoming = published + (try discussions([(21, reviewer, "A new objection")]))
-        #expect(!ReviewVerdictStore.automaticallyApproves(recorded, head: head, discussions: incoming, user: user, in: directory))
+        #expect(!ReviewVerdictStore.automaticallyApproves(recorded, head: head, discussions: incoming, user: user,
+            semanticContextFingerprint: "metadata", in: directory))
         var otherRun = recorded; otherRun.runID = UUID()
-        #expect(!ReviewVerdictStore.automaticallyApproves(otherRun, head: head, discussions: published, user: user, in: directory))
+        #expect(!ReviewVerdictStore.automaticallyApproves(otherRun, head: head, discussions: published, user: user,
+            semanticContextFingerprint: "metadata", in: directory))
         let path = ReviewVerdictStore.fileURL(host: recorded.host, projectID: 1, iid: 2, in: directory)
             .deletingPathExtension().appendingPathExtension("published.json")
         let bytes = try Data(contentsOf: path)
@@ -167,7 +172,8 @@ import Testing
         var envelope = try #require(object as? [String: Any])
         envelope["payload"] = Data("worker substituted normalization".utf8).base64EncodedString()
         try JSONSerialization.data(withJSONObject: envelope).write(to: path)
-        #expect(!ReviewVerdictStore.automaticallyApproves(recorded, head: head, discussions: published, user: user, in: directory))
+        #expect(!ReviewVerdictStore.automaticallyApproves(recorded, head: head, discussions: published, user: user,
+            semanticContextFingerprint: "metadata", in: directory))
     }
 
     @MainActor @Test func publicationCannotNormalizeConcurrentEditsOrAnUnrelatedNewOwnComment() throws {
@@ -177,15 +183,18 @@ import Testing
         let before = try discussions([(10, 7, "Reviewed text")])
         var recorded = verdict(for: before)
         recorded.username = user.username; recorded.userID = user.id; recorded.runID = UUID()
+        recorded.semanticContextFingerprint = "metadata"
         let draft = GitLabDraftNote(id: 5, authorID: user.id, note: "Checked reply", discussionID: nil, position: nil)
         let capture = try #require(ReviewVerdictStore.capturePublication([draft], verdict: recorded,
             before: before, reviewedDrafts: [draft], user: user, in: directory))
         let after = try discussions([(10, 7, "Edited expectation"), (20, reviewer, "Checked reply")])
         try ReviewVerdictStore.recordPublication(capture, after: after, user: user, in: directory)
-        #expect(!ReviewVerdictStore.automaticallyApproves(recorded, head: head, discussions: after, user: user, in: directory))
+        #expect(!ReviewVerdictStore.automaticallyApproves(recorded, head: head, discussions: after, user: user,
+            semanticContextFingerprint: "metadata", in: directory))
         let withUnrelated = try discussions([(10, 7, "Reviewed text"), (20, reviewer, "Checked reply"), (21, reviewer, "Block this MR")])
         try ReviewVerdictStore.recordPublication(capture, after: withUnrelated, user: user, in: directory)
-        #expect(!ReviewVerdictStore.automaticallyApproves(recorded, head: head, discussions: withUnrelated, user: user, in: directory))
+        #expect(!ReviewVerdictStore.automaticallyApproves(recorded, head: head, discussions: withUnrelated, user: user,
+            semanticContextFingerprint: "metadata", in: directory))
     }
 
     @MainActor @Test func publishingReviewedFindingsPreservesCompletionWithoutAuthorizingApproval() throws {
@@ -201,6 +210,7 @@ import Testing
         let after = try discussions([(20, reviewer, "Reviewed finding")])
         try ReviewVerdictStore.recordPublication(capture, after: after, user: user, in: directory)
         #expect(ReviewVerdictStore.contentMatches(recorded, head: head, discussions: after, user: user, in: directory))
-        #expect(!ReviewVerdictStore.automaticallyApproves(recorded, head: head, discussions: after, user: user, in: directory))
+        #expect(!ReviewVerdictStore.automaticallyApproves(recorded, head: head, discussions: after, user: user,
+            semanticContextFingerprint: "metadata", in: directory))
     }
 }

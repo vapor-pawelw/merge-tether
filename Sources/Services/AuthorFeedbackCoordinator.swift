@@ -44,7 +44,8 @@ struct AuthorFeedbackStatus: Equatable, Sendable {
               !selected.isEmpty, selected.count <= 12, Set(selected).count == selected.count,
               let blocker = job.execution?.blocker, !blocker.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty,
               blocker.count <= 600, let summary = job.execution?.summary, summary.count <= 2_000 else { return nil }
-        return .init(runID: job.id, selectedFeedbackIDs: selected.sorted(), blocker: blocker, summary: summary)
+        return .init(runID: job.id, selectedFeedbackIDs: selected.sorted(), blocker: blocker, summary: summary,
+            selectedFeedbackRevisions: job.verifiedFeedbackNotes)
     }
 
     func reconciles(_ job: AssistantAutomationRunner.Handoff, request: GitLabMergeRequest,
@@ -178,7 +179,8 @@ final class AuthorFeedbackCoordinator {
         let drafts: [GitLabDraftNote]
         let approvals: Set<Int>
         let accountKinds: [Int: AuthorFeedbackPolicy.AccountKind]
-        var stoppedFollowUps: [AssistantAutomationRunner.Handoff] = []
+        let stoppedFollowUps: [AssistantAutomationRunner.Handoff]
+        let blockedContexts: [ReReviewVerifier.Input.BlockedFollowUp]
     }
 
     private struct ReadOnlyFailure: Error { let cause: any Error }
@@ -574,8 +576,6 @@ final class AuthorFeedbackCoordinator {
         if let blocked = latestBlockedFollowUp(input) { stoppedFollowUps.append(blocked) }
         let activeDiscussions = GitLabMergeRequestDiscussion.activeForReview(input.discussions)
         let activeNoteIDs = Set(activeDiscussions.flatMap(\.notes).compactMap(\.id))
-        let blockedContexts = stoppedFollowUps.compactMap { AuthorFeedbackStatus.blockedContext(for: $0) }
-            .filter { Set($0.selectedFeedbackIDs).isSubset(of: activeNoteIDs) }
         guard await canAutomate(input.configuration.assistant) else { throw ReReviewVerifier.VerificationError.unavailable }
         guard isCurrent(input) else { throw CancellationError() }
         let request = input.request
@@ -594,14 +594,24 @@ final class AuthorFeedbackCoordinator {
         }.sorted().joined(separator: "\n")
         let diffText = String(decoding: diff, as: UTF8.self)
         let diffDigest = MergeRequestDiffDigest.normalized(diffText)
-        let replyEvidence = ReReviewAssessment.resolvedOverviewReplyEvidence(in: input.discussions, authorID: input.user.id)
-        let replyFingerprint = ReviewVerdict.fingerprint(replyEvidence) ?? ""
+        let stoppedContexts = stoppedFollowUps.compactMap { AuthorFeedbackStatus.blockedContext(for: $0) }
+        var verificationInput = ReReviewVerifier.Input(authorID: input.user.id, headSHA: request.sha ?? "", title: request.title,
+            description: request.description, diff: diffText, discussions: input.discussions,
+            target: .init(host: host, projectID: request.projectID, iid: request.iid,
+                url: request.webURL, expectedUsername: input.user.username),
+            semanticContextFingerprint: request.semanticContextFingerprint,
+            thinking: input.configuration.verificationThinking, blockedFollowUps: stoppedContexts,
+            ignoredSuggestions: input.ignoredSuggestions, completedFollowUp: completedFollowUp,
+            excludedReplyAuthorIDs: excludedReplyAuthors(input).sorted()).activeEvidence
+        let blockedContexts = verificationInput.blockedFollowUps
+        let blockedHead = blockedContexts.isEmpty ? "" : verificationInput.headSHA
+        let replyFingerprint = ReviewVerdict.fingerprint(verificationInput.resolvedOverviewReplyEvidence ?? []) ?? ""
         // Content-bound rather than commit-bound: a rebase that keeps the MR's changes reuses the assessment.
         let key = ReReviewVerifier.policyVersion + "|" + input.activeFingerprint + "|" + request.semanticContextFingerprint
             + "|" + diffDigest + "|" + replyFingerprint
             + "|" + (input.completedFollowUpJobID?.uuidString ?? "")
             + "|" + String(decoding: try encoder.encode(VerifierConfiguration(input.configuration)), as: UTF8.self)
-            + "|" + UserAttentionSnapshot.digest(String(decoding: try encoder.encode(blockedContexts), as: UTF8.self))
+            + "|" + blockedHead + "|" + UserAttentionSnapshot.digest(String(decoding: try encoder.encode(blockedContexts), as: UTF8.self))
             + "|" + input.decisionRevision
             + "|" + input.reviewParticipationRevision
             + "|" + String(decoding: try encoder.encode(completedFollowUp), as: UTF8.self)
@@ -622,16 +632,8 @@ final class AuthorFeedbackCoordinator {
             let model = input.configuration.assistant == .codex
                 ? input.configuration.codexVerificationModel.rawValue : input.configuration.claudeVerificationModel.rawValue
             let prior = Self.priorInput(priorPass(for: input.target), revisions: revisions, diffDigest: diffDigest)
-            let verificationInput = ReReviewVerifier.Input(authorID: input.user.id, headSHA: request.sha ?? "", title: request.title,
-                description: request.description,
-                diff: diffText, discussions: input.discussions,
-                target: .init(host: host, projectID: request.projectID, iid: request.iid,
-                    url: request.webURL, expectedUsername: input.user.username),
-                semanticContextFingerprint: request.semanticContextFingerprint,
-                thinking: input.configuration.verificationThinking, blockedFollowUps: blockedContexts,
-                ignoredSuggestions: input.ignoredSuggestions, completedFollowUp: completedFollowUp,
-                excludedReplyAuthorIDs: excludedReplyAuthors(input).sorted(), priorAssessment: prior)
-            assessment = Self.constrained(try await verify(verificationInput.activeEvidence,
+            verificationInput.priorAssessment = prior
+            assessment = Self.constrained(try await verify(verificationInput,
                 input.configuration.assistant, model), prior: prior)
             _ = try assessment.reviewers(in: input.discussions, authorID: input.user.id, ignoredSuggestions: input.ignoredSuggestions,
                 excludedReplyAuthorIDs: excludedReplyAuthors(input))
@@ -670,12 +672,13 @@ final class AuthorFeedbackCoordinator {
             guard isCurrent(input) else { throw CancellationError() }
             let accountKinds = try await participantAccountKinds(in: threads, input: input)
             return Preparation(assessment: assessment, threads: threads, drafts: drafts, approvals: approvals, accountKinds: accountKinds,
-                stoppedFollowUps: stoppedFollowUps)
+                stoppedFollowUps: stoppedFollowUps, blockedContexts: blockedContexts)
         }
         let approvals = try await glab.fetchMergeRequestApproverIDs(projectID: request.projectID, iid: request.iid, host: host)
         guard isCurrent(input) else { throw CancellationError() }
         let accountKinds = try await participantAccountKinds(in: input.discussions, input: input)
-        return Preparation(assessment: assessment, threads: input.discussions, drafts: [], approvals: approvals, accountKinds: accountKinds)
+        return Preparation(assessment: assessment, threads: input.discussions, drafts: [], approvals: approvals, accountKinds: accountKinds,
+            stoppedFollowUps: [], blockedContexts: [])
     }
 
     private func participantAccountKinds(in discussions: [GitLabMergeRequestDiscussion], input: Input) async throws
@@ -885,6 +888,7 @@ final class AuthorFeedbackCoordinator {
                                             discussions: [GitLabMergeRequestDiscussion], authorID: Int) {
         let missingReplies = prepared.assessment.missingPublishedReplyNoteIDs(in: discussions, authorID: authorID,
             excludedReplyAuthorIDs: excludedReplyAuthors(input))
+        let verifiedActive = status.addressedNoteIDs.union(status.ignoredNoteIDs)
         for candidate in prepared.stoppedFollowUps {
             guard let current = settings.assistantHandoffs.first(where: { $0.id == candidate.id }),
                   current.key == candidate.key, current.workflow == candidate.workflow,
@@ -894,17 +898,21 @@ final class AuthorFeedbackCoordinator {
                   current.allowsPush == candidate.allowsPush,
                   current.expectedHeadSHA == candidate.expectedHeadSHA else { continue }
             let selected = Set(candidate.feedbackNoteIDs ?? [])
-            guard selected.isSubset(of: status.addressedNoteIDs.union(status.ignoredNoteIDs)), selected.isDisjoint(with: status.followUpNoteIDs),
-                  selected.isDisjoint(with: missingReplies) else { continue }
-            if !selected.isDisjoint(with: status.ignoredNoteIDs), candidate.execution?.state != .blocked { continue }
+            guard selected.isDisjoint(with: status.followUpNoteIDs), selected.isDisjoint(with: missingReplies) else { continue }
             if candidate.execution?.state == .blocked {
-                let addressed = Set(prepared.assessment.notes.filter { $0.state == .addressed || $0.state == .rejected || $0.state == .ignoredByUser }.map(\.noteID))
-                    .union(prepared.assessment.pureReviewerOptOutNoteIDs(in: discussions, authorID: authorID))
                 guard prepared.assessment.completedBlockedRunIDs?.contains(candidate.id) == true,
                       let context = AuthorFeedbackStatus.blockedContext(for: candidate),
                       AuthorFeedbackStatus.blockedContext(for: current) == context,
-                      selected.isSubset(of: addressed) else { continue }
+                      prepared.blockedContexts.contains(context) else { continue }
+                let resolved = context.resolvedFeedbackIDs(in: discussions, authorID: authorID)
+                let active = selected.subtracting(resolved)
+                let addressed = Set(prepared.assessment.notes.filter { $0.state == .addressed || $0.state == .rejected || $0.state == .ignoredByUser }.map(\.noteID))
+                    .union(prepared.assessment.pureReviewerOptOutNoteIDs(in: discussions, authorID: authorID))
+                guard active.isSubset(of: verifiedActive), active.isSubset(of: addressed) else { continue }
                 status.reconciledBlockedContexts[candidate.id] = context
+                status.addressedNoteIDs.formUnion(resolved)
+            } else {
+                guard selected.isSubset(of: verifiedActive), selected.isDisjoint(with: status.ignoredNoteIDs) else { continue }
             }
             status.reconciledFollowUpJobIDs.insert(candidate.id)
         }
