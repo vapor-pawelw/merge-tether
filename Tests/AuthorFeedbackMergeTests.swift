@@ -252,20 +252,23 @@ struct AuthorFeedbackMergeTests {
         }
     }
 
-    @Test(arguments: [false, true])
-    func automaticMergeStopsWhenNoRequiredApprovalRuleRemains(_ leavesOptionalRule: Bool) async throws {
+    @Test(arguments: ["none", "optional", "unsatisfied"])
+    func automaticMergeUsesTheCurrentApprovalRulesAtSubmission(_ rules: String) async throws {
         try await withFixture { monitor, gitlab, _ in
             monitor.authorFeedbackAllowsMerge = { _, _, _ in
-                gitlab.write("approval-state.json", leavesOptionalRule
-                    ? #"{"rules":[{"approvals_required":0,"approved":false}]}"#
-                    : #"{"rules":[]}"#)
+                let current = switch rules {
+                case "none": #"{"rules":[]}"#
+                case "optional": #"{"rules":[{"approvals_required":0,"approved":false}]}"#
+                default: #"{"rules":[{"approvals_required":1,"approved":false}]}"#
+                }
+                gitlab.write("approval-state.json", current)
                 return true
             }
 
             try await refresh(monitor)
 
             #expect(gitlab.requests.filter { $0.endpoint.hasSuffix("/approval_state") }.count == 2)
-            #expect(gitlab.requests.allSatisfy { $0.method == "GET" })
+            #expect(gitlab.has("merged") == (rules != "unsatisfied"))
         }
     }
 
@@ -422,7 +425,7 @@ struct AuthorFeedbackMergeTests {
             case let path where path.hasPrefix("/projects/1/merge_requests?state=opened"):
                 return InMemoryGitLab.output("[" + gitlab.text("request.json") + "]")
             case let path where path.contains("/blocks?"): return InMemoryGitLab.output("[]")
-            case "/projects/1": return InMemoryGitLab.output(#"{"default_branch":"main","merge_trains_enabled":false,"only_allow_merge_if_all_discussions_are_resolved":true,"reset_approvals_on_push":true}"#)
+            case "/projects/1": return InMemoryGitLab.output(#"{"default_branch":"main","merge_trains_enabled":false,"only_allow_merge_if_all_discussions_are_resolved":true}"#)
             case let path where path.hasSuffix("/merge"):
                 if call.command.contains("auto_merge=true") {
                     gitlab.write("queued")

@@ -8,7 +8,6 @@ enum MergeRequestBlocker: Hashable {
     case changesRequested
     case discussions
     case discussionPolicy
-    case approvalPolicy
     case dependencies
     case stackTarget
     case dependencyEvidence
@@ -43,7 +42,6 @@ struct AuthoredMergeRequestStatus: Identifiable {
 
     var automaticMergePolicyHold: LocalizedStringResource? {
         if blockers.contains(.discussionPolicy) { return .MergeActions.mergeActionsAutomaticDiscussionPolicy }
-        if blockers.contains(.approvalPolicy) { return .MergeActions.mergeActionsAutomaticApprovalPolicy }
         return nil
     }
 
@@ -60,7 +58,7 @@ struct AuthoredMergeRequestStatus: Identifiable {
 
     private var mergeOrder: (priority: Int, blockers: Int) {
         if blockers.contains(.draft) { return (3, 0) }
-        if blockers.allSatisfy({ $0 == .approvalPolicy || $0 == .discussionPolicy }) { return (0, blockers.count) }
+        if blockers.allSatisfy({ $0 == .discussionPolicy }) { return (0, blockers.count) }
         let needsAction = blockers.contains { blocker in
             switch blocker {
             case .changesRequested, .discussions, .conflicts, .conflictTaskFailed:
@@ -81,7 +79,6 @@ struct AuthoredMergeRequestStatus: Identifiable {
         projectRequiresResolvedDiscussions: Bool?,
         autoMergeEnabled: Bool,
         dependencyReadiness: MergeRequestDependencySummary.MergeReadiness = .unavailable,
-        canVerifyFreshApprovals: Bool = true,
         conflictTaskFailed: Bool = false,
         pendingDraftCount: Int? = 0,
         requiresCommentReview: Bool = false,
@@ -146,23 +143,17 @@ struct AuthoredMergeRequestStatus: Identifiable {
         }
         let ready = action.map { request.isReadyForMergeSubmission($0) } == true && submissionState == .none
         self.mayMergeManually = dependenciesReady && blockers.isEmpty && ready && approvals?.allRequiredRulesApproved == true && discussionsResolved == true
-        let eligibleForAutoMerge = autoMergeEnabled && dependenciesReady && blockers.isEmpty && ready
-            && approvals?.hasRequiredRules == true && approvals?.allRequiredRulesApproved == true
-            && discussionsResolved == true
+        let eligibleForAutoMerge = autoMergeEnabled && mayMergeManually
         if eligibleForAutoMerge && projectRequiresResolvedDiscussions != true {
             blockers.append(.discussionPolicy)
         }
 
-        if eligibleForAutoMerge && !canVerifyFreshApprovals {
-            blockers.append(.approvalPolicy)
-        }
         if conflictTaskFailed && request.hasMergeConflict {
             blockers.append(.conflictTaskFailed)
         }
 
         self.blockers = blockers
         self.mayAutoMerge = eligibleForAutoMerge && projectRequiresResolvedDiscussions == true
-            && canVerifyFreshApprovals
     }
 }
 

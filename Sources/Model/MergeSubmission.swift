@@ -22,7 +22,6 @@ enum MergeSubmissionState: String, Codable, Sendable {
 struct GitLabMergeActionPolicy: Equatable, Sendable {
     let action: MergeSubmissionAction?
     let requiresResolvedDiscussions: Bool?
-    let resetsApprovalsOnPush: Bool?
     var usesMergeTrain = false
 }
 

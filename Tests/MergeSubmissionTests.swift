@@ -42,8 +42,7 @@ import Testing
                 }
                 return try await handler(call)
             }
-            let queuePolicy = GitLabMergeActionPolicy(action: .enqueue, requiresResolvedDiscussions: true,
-                resetsApprovalsOnPush: true)
+            let queuePolicy = GitLabMergeActionPolicy(action: .enqueue, requiresResolvedDiscussions: true)
 
             await #expect(throws: CancellationError.self) {
                 _ = try await glab.mergeMergeRequest(projectID: 1, iid: 2, headSHA: request.sha!, host: host,
@@ -380,8 +379,7 @@ import Testing
             gitlab.write("ordinary-project")
             gitlab.write("pipeline-running")
             gitlab.write("outcome", "queued")
-            let policy = GitLabMergeActionPolicy(action: .enqueue, requiresResolvedDiscussions: true,
-                resetsApprovalsOnPush: true, usesMergeTrain: false)
+            let policy = GitLabMergeActionPolicy(action: .enqueue, requiresResolvedDiscussions: true)
             let outcome = try await glab.mergeMergeRequest(projectID: 1, iid: 2, headSHA: request.sha!, host: host,
                 expectedUser: user, expectedContext: .init(request), action: .enqueue, expectedPolicy: policy, shouldProceed: { true })
             #expect(outcome == .queued)
@@ -800,17 +798,7 @@ import Testing
         }
     }
 
-    @Test(arguments: [false, true])
-    func approvalResetPolicyUsesTheDedicatedEndpointAndPreservesUnavailable(_ unavailable: Bool) async throws {
-        try await fixture { glab, gitlab, _ in
-            gitlab.write("separate-approval-policy")
-            if unavailable { gitlab.write("unavailable-approval-policy") }
-            let policy = try await glab.fetchMergeActionPolicy(projectID: 1, host: host)
-            #expect(policy.resetsApprovalsOnPush == (unavailable ? nil : true))
-        }
-    }
-
-    @Test(arguments: ["unreadable", "disabled", "optedOut"])
+    @Test(arguments: ["disabled", "optedOut"])
     func explainsProjectPolicyHoldsWithoutDisablingManualMerge(_ scenario: String) async throws {
         try await fixture { glab, gitlab, _ in
             let suite = "AutomaticMergePolicyHold.\(UUID())"
@@ -820,8 +808,7 @@ import Testing
             settings.onboardingCompleted = true
             settings.automation.applyPreset(.full, for: .codex)
             settings.automation.allowAssistantTools = true
-            gitlab.write("separate-approval-policy")
-            gitlab.write(scenario == "disabled" ? "discussion-policy-disabled" : "unavailable-approval-policy")
+            gitlab.write("discussion-policy-disabled")
             let target = MRAutomationScope.Target(host: host, username: "me", projectID: 1, iid: 2)
             if scenario == "optedOut" {
                 settings.autoMergeOptOuts.insert(target)
@@ -839,11 +826,8 @@ import Testing
             let model = MRCardPresentation(row: row, reviewingContext: ReviewingContext(row: row),
                 allowsRemoval: false, assistantReady: true, mergeStatus: status, showsAutomaticMergePolicyHold: mergeEnabled)
             let phone = RemoteBoardAdapter.presentation(RemoteBoardAdapter.card(item, account: "me@\(host)"), model: model)
-            let expected = switch scenario {
-            case "unreadable": "Auto-merge needs proof that the required approvals cover this commit."
-            case "disabled": "Auto-merge requires GitLab to enforce resolved discussions."
-            default: "Monitoring MR"
-            }
+            let expected = scenario == "disabled"
+                ? "Auto-merge requires GitLab to enforce resolved discussions." : "Monitoring MR"
             #expect(model.status == expected)
             #expect(phone.presentation?.status == expected)
             item.needsMerge = true
@@ -859,56 +843,39 @@ import Testing
         }
     }
 
-    @Test(arguments: ["current", "older", "otherHead", "otherApprover", "changedBeforeSubmission"])
-    func automaticTrainSubmissionCanVerifyCurrentApprovalsWithoutProjectSettingsAccess(_ scenario: String) async throws {
+    @Test(arguments: [false, true], ["mergeNow", "autoMerge", "mergeTrain"])
+    func manualAndAutomaticSubmissionUseGitLabsCurrentApprovals(_ automatic: Bool, _ mode: String) async throws {
         try await fixture { glab, gitlab, request in
-            let suite = "AutomaticTrainApprovalEvidence.\(UUID())"
+            let suite = "MergeWithCurrentApprovals.\(UUID())"
             let defaults = try #require(UserDefaults(suiteName: suite))
             defer { defaults.removePersistentDomain(forName: suite) }
             let settings = SettingsManager(defaults: defaults)
             settings.onboardingCompleted = true
             settings.automation.applyPreset(.full, for: .codex)
             settings.automation.allowAssistantTools = true
-            gitlab.write("separate-approval-policy")
-            gitlab.write("unavailable-approval-policy")
-            gitlab.write("outcome", "train-only")
-            let transport = try #require(gitlab.handler)
-            gitlab.handler = { call in
-                switch call.endpoint {
-                case "/projects/1/merge_requests/2/versions?per_page=1":
-                    let head = scenario == "otherHead" ? String(repeating: "c", count: 40) : request.sha!
-                    let date = gitlab.has("new-diff-version") ? "2026-01-03T10:00:00Z" : "2026-01-01T10:00:00Z"
-                    return try InMemoryGitLab.json([["id": gitlab.has("new-diff-version") ? 11 : 10,
-                        "head_commit_sha": head, "patch_id_sha": String(repeating: "d", count: 40), "created_at": date]])
-                case "/projects/1/merge_requests/2/approvals":
-                    let date = scenario == "older" ? "2026-01-01T09:59:59Z" : "2026-01-02T10:00:00Z"
-                    return try InMemoryGitLab.json(["approvals_required": 2, "approvals_left": 0, "approved_by": [
-                        ["user": ["id": 7], "approved_at": "2026-01-02T10:00:00Z"],
-                        ["user": ["id": scenario == "otherApprover" ? 9 : 8], "approved_at": date]
-                    ]])
-                case "/projects/1/merge_requests/2/approval_state":
-                    return InMemoryGitLab.output(#"{"rules":[{"approvals_required":2,"approved":true,"approved_by":[{"id":7},{"id":8}]}]}"#)
-                default: return try await transport(call)
-                }
-            }
-            let monitor = AuthoredMergeRequestMonitor(settings: settings, glab: glab, canAutomate: { _ in
-                if scenario == "changedBeforeSubmission" { gitlab.write("new-diff-version") }
-                return true
-            })
-            monitor.refreshIfNeeded()
+            settings.automation.autoMergeEnabled = automatic
+            let train = mode == "mergeTrain"
+            let action: MergeSubmissionAction = mode == "mergeNow" ? .mergeNow : .enqueue
+            let outcome: MergeSubmissionState = train ? .inTrain : action == .enqueue ? .queued : .merged
+            if !train { gitlab.write("ordinary-project") }
+            if mode == "autoMerge" { gitlab.write("pipeline-running") }
+            gitlab.write("outcome", train ? "train-only" : action == .enqueue ? "queued" : "merged")
+            let monitor = AuthoredMergeRequestMonitor(settings: settings, glab: glab, canAutomate: { _ in true })
+            if automatic { monitor.refreshIfNeeded() }
+            else { monitor.setVisible(true) }
             while monitor.isLoading { await Task.yield() }
+            if !automatic { #expect(await monitor.mergeManually(request, action: action) == outcome) }
 
             let writes = gitlab.requests.filter { $0.method != "GET" }
-            if scenario == "current" {
-                let submission = try #require(writes.first)
-                #expect(writes.count == 1)
-                #expect(submission.method == "POST" && submission.endpoint == "/projects/1/merge_trains/merge_requests/2")
-                #expect(submission.arguments.contains("sha=\(request.sha!)"))
-                #expect(monitor.requests.first?.submissionState == .inTrain)
-            } else {
-                #expect(writes.isEmpty)
-                #expect(settings.mergeSubmissions.isEmpty)
-            }
+            #expect(writes.count == 1)
+            let submission = try #require(writes.first)
+            #expect(submission.method == (train ? "POST" : "PUT"))
+            #expect(submission.endpoint == (train ? "/projects/1/merge_trains/merge_requests/2" : "/projects/1/merge_requests/2/merge"))
+            #expect(submission.arguments.contains("sha=\(request.sha!)"))
+            #expect(submission.arguments.contains("auto_merge=true") == (action == .enqueue))
+            #expect(settings.mergeSubmissions.first?.state == outcome)
+            #expect(gitlab.requests.filter { $0.endpoint.hasSuffix("/approval_state") }.count >= 2)
+            #expect(gitlab.requests.allSatisfy { $0.endpoint != "/projects/1/approvals" && !$0.endpoint.contains("/versions?") })
         }
     }
 
@@ -932,7 +899,7 @@ import Testing
 
     private let host = "gitlab.example.test"
     private let user = GitLabAuthenticatedUser(id: 3, username: "me")
-    private var policy: GitLabMergeActionPolicy { .init(action: .enqueue, requiresResolvedDiscussions: true, resetsApprovalsOnPush: true, usesMergeTrain: true) }
+    private var policy: GitLabMergeActionPolicy { .init(action: .enqueue, requiresResolvedDiscussions: true, usesMergeTrain: true) }
     private func submit(_ glab: GlabService, request: GitLabMergeRequest) async throws -> MergeSubmissionState {
         try await glab.mergeMergeRequest(projectID: 1, iid: 2, headSHA: request.sha!, host: host,
             expectedUser: user, expectedContext: .init(request), expectedDiscussionFingerprint: ReviewVerdict.fingerprint([]),
@@ -953,14 +920,8 @@ import Testing
             case "/user": return InMemoryGitLab.output(drift == "account" ? #"{"id":99,"username":"me"}"# : #"{"id":3,"username":"me"}"#)
             case "/version": return try InMemoryGitLab.json(["version": gitlab.has("version") ? gitlab.text("version") : "19.5.3-ee"])
             case "/projects/1":
-                var project: [String: Any] = ["default_branch": "main", "merge_trains_enabled": drift != "policy" && !gitlab.has("ordinary-project"),
-                    "only_allow_merge_if_all_discussions_are_resolved": !gitlab.has("discussion-policy-disabled")]
-                if !gitlab.has("separate-approval-policy") { project["reset_approvals_on_push"] = true }
-                return try InMemoryGitLab.json(project)
-            case "/projects/1/approvals":
-                return gitlab.has("unavailable-approval-policy") ? InMemoryGitLab.output(error: "403 Forbidden", code: 1)
-                    : InMemoryGitLab.output(#"{"reset_approvals_on_push":true}"#)
-            case "/projects/1/merge_requests/2/versions?per_page=1": return InMemoryGitLab.output("[]")
+                return try InMemoryGitLab.json(["default_branch": "main", "merge_trains_enabled": drift != "policy" && !gitlab.has("ordinary-project"),
+                    "only_allow_merge_if_all_discussions_are_resolved": !gitlab.has("discussion-policy-disabled")])
             case let path where path.hasPrefix("/merge_requests?"): return InMemoryGitLab.output("[" + listed + "]")
             case let path where path.contains("/merge_trains?"):
                 return InMemoryGitLab.output(["train", "train-only"].contains(gitlab.text("observed"))
@@ -1001,10 +962,14 @@ import Testing
             case "/projects/1/repository/branches/feature":
                 return try InMemoryGitLab.json(["commit": ["id": String(repeating: "a", count: 40)]])
             case let path where path.contains("/diffs?"): return InMemoryGitLab.output("[]")
+            case let path where path.contains("/reviewers?"): return InMemoryGitLab.output("[]")
             case let path where path.contains("/draft_notes?"):
                 return InMemoryGitLab.output(drift == "drafts" ? #"[{"id":10,"author_id":3,"note":"Reply"}]"# : "[]")
             case "/projects/1/merge_trains/merge_requests/2", "/projects/1/merge_requests/2/merge":
                 gitlab.write("observed", gitlab.text("outcome"))
+                if call.method == "PUT", !call.arguments.contains("auto_merge=true"), gitlab.text("outcome") == "merged" {
+                    return InMemoryGitLab.output(#"{"project_id":1,"iid":2,"state":"merged"}"#)
+                }
                 return InMemoryGitLab.output("[]")
             default: return try gitlab.unexpected(call)
             }

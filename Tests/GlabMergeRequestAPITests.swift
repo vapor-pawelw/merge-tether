@@ -105,7 +105,6 @@ struct GlabMergeRequestAPITests {
             #expect(current.headPipeline?.status == "success")
             #expect(current.blockingDiscussionsResolved == true)
             let approvals = try await glab.fetchMergeRequestApprovalState(projectID: 34, iid: 12, host: host)
-            #expect(approvals.hasRequiredRules)
             #expect(approvals.allRequiredRulesApproved)
             #expect(try await glab.projectRequiresResolvedDiscussions(projectID: 34, host: host))
             // The detail flag can be stale. A resolvable note without a resolved
@@ -153,10 +152,8 @@ struct GlabMergeRequestAPITests {
     @Test func zeroApprovalRulesAndUnknownRuleStatesStayDistinguishable() throws {
         let decoder = JSONDecoder()
         let noRules = try decoder.decode(GitLabMergeRequestApprovalState.self, from: Data(#"{"rules":[]}"#.utf8))
-        #expect(!noRules.hasRequiredRules)
         #expect(noRules.allRequiredRulesApproved)
         let unknown = try decoder.decode(GitLabMergeRequestApprovalState.self, from: Data(#"{"rules":[{"approvals_required":1}]}"#.utf8))
-        #expect(unknown.hasRequiredRules)
         #expect(!unknown.allRequiredRulesApproved)
     }
 

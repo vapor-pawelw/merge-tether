@@ -204,32 +204,17 @@ struct GitLabMergeRequest: Codable, Sendable {
 struct GitLabMergeRequestApprovalState: Decodable, Sendable {
     private let rules: [Rule]
 
-    var hasRequiredRules: Bool {
-        rules.contains { $0.approvalsRequired > 0 }
-    }
-
     var allRequiredRulesApproved: Bool {
         rules.allSatisfy { $0.approvalsRequired == 0 || ($0.approvalsRequired > 0 && $0.approved == true) }
     }
 
-    func requiredRulesAreCovered(by approverIDs: Set<Int>) -> Bool {
-        hasRequiredRules && allRequiredRulesApproved && rules.allSatisfy { rule in
-            rule.approvalsRequired == 0
-                || approverIDs.intersection((rule.approvedBy ?? []).compactMap(\.id)).count >= rule.approvalsRequired
-        }
-    }
-
     private struct Rule: Decodable, Sendable {
-        struct Approver: Decodable, Sendable { let id: Int? }
-
         let approvalsRequired: Int
         let approved: Bool?
-        let approvedBy: [Approver]?
 
         enum CodingKeys: String, CodingKey {
             case approvalsRequired = "approvals_required"
             case approved
-            case approvedBy = "approved_by"
         }
     }
 }

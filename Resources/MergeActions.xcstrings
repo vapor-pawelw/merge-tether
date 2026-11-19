@@ -364,17 +364,6 @@
         }
       }
     },
-    "mergeActions.automaticApprovalPolicy": {
-      "extractionState": "manual",
-      "localizations": {
-        "en": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "Auto-merge needs proof that the required approvals cover this commit."
-          }
-        }
-      }
-    },
     "mergeActions.automaticDiscussionPolicy": {
       "extractionState": "manual",
       "localizations": {

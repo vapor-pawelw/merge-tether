@@ -347,8 +347,7 @@ final class AuthoredMergeRequestMonitor {
                 }
                 do {
                     let outcome = try await performSubmission(status.request, account: account, user: user,
-                        revision: revision, configuration: configuration, policy: policy, automatic: true,
-                        requiresCurrentTrainApprovals: evaluation.requiresCurrentTrainApprovals)
+                        revision: revision, configuration: configuration, policy: policy, automatic: true)
                     if outcome == .merged { continue }
                     status.submissionState = outcome
                 } catch is CancellationError {
@@ -451,8 +450,8 @@ final class AuthoredMergeRequestMonitor {
             async let approvals = glab.fetchMergeRequestApprovalState(projectID: request.projectID, iid: request.iid, host: host)
             async let resolved = glab.mergeRequestDiscussionsAreResolved(projectID: request.projectID, iid: request.iid, host: host)
             async let drafts = glab.fetchOwnDraftNoteCount(projectID: request.projectID, iid: request.iid, host: host, userID: user.id)
-            let (status, policy, _) = try await evaluate(request, approvals: approvals, resolved: resolved, pendingDraftCount: drafts,
-                account: account, user: user, revision: revision, checksAutomaticApprovals: false)
+            let (status, policy) = try await evaluate(request, approvals: approvals, resolved: resolved, pendingDraftCount: drafts,
+                account: account, user: user, revision: revision)
             guard isCurrent(account), glab.accountRevision == revision else { return .changed }
             if let index = requests.firstIndex(where: { $0.id == status.id }) { requests[index] = status }
             guard status.mayMergeManually, status.action == action, let policy else { return .changed }
@@ -482,7 +481,6 @@ final class AuthoredMergeRequestMonitor {
     private func performSubmission(_ request: GitLabMergeRequest, account: Account, user: GitLabAuthenticatedUser,
                                    revision: UInt64, configuration: AutomationSettings,
                                    policy: GitLabMergeActionPolicy, automatic: Bool,
-                                   requiresCurrentTrainApprovals: Bool = false,
                                    verificationAssistant: AutomationAssistant? = nil) async throws -> MergeSubmissionState {
         let work = AssistantAutomationRunner.MergeRequestWork(host: account.host, projectID: request.projectID, iid: request.iid)
         let configurationID = configurationFingerprint()
@@ -527,8 +525,7 @@ final class AuthoredMergeRequestMonitor {
             outcome = try await glab.mergeMergeRequest(projectID: request.projectID, iid: request.iid,
                 headSHA: sha, host: account.host, expectedUser: user, expectedContext: .init(request),
                 expectedDiscussionFingerprint: fingerprint, expectedSemanticContextFingerprint: request.semanticContextFingerprint,
-                action: action, expectedPolicy: policy, requiresApprovalRules: automatic,
-                requiresCurrentTrainApprovals: requiresCurrentTrainApprovals, beforeWrite: { baseline in
+                action: action, expectedPolicy: policy, beforeWrite: { baseline in
                     receipt.trainNoteIDBeforeAttempt = baseline
                     guard permits(), self.submissionState(for: request, account: account) == .none,
                           self.settings.saveMergeSubmission(receipt) else { throw CancellationError() }
@@ -564,9 +561,8 @@ final class AuthoredMergeRequestMonitor {
         pendingDraftCount: Int?,
         account: Account,
         user: GitLabAuthenticatedUser,
-        revision: UInt64,
-        checksAutomaticApprovals: Bool = true
-    ) async -> (status: AuthoredMergeRequestStatus, policy: GitLabMergeActionPolicy?, requiresCurrentTrainApprovals: Bool) {
+        revision: UInt64
+    ) async -> (status: AuthoredMergeRequestStatus, policy: GitLabMergeActionPolicy?) {
         let host = account.host
         var request = request
         let target = MRAutomationScope.Target(host: host, username: account.username, projectID: request.projectID, iid: request.iid)
@@ -609,36 +605,17 @@ final class AuthoredMergeRequestMonitor {
            !(await checkQueuedDiscussions(for: request, account: account, user: user, revision: revision)) {
             state = .changed
         }
-        let project = request.webURL.gitLabProjectPath
-        let shellCanAct = [settings.automation.reviewRequested, settings.automation.authorFeedback].contains {
-            $0.isEnabled && $0.runner == .shell && $0.includes(project: project)
-        }
-        let requiresApprovalReset = settings.automation.permitsAssistantTools(project: project) || shellCanAct
-            || settings.conflictReceipts.contains { $0.matches(request, host: host, userID: user.id) }
-        let requiresCommentReview = settings.pendingCommentReviews.contains(target)
-        let requiresCurrentTrainApprovals = checksAutomaticApprovals && requiresApprovalReset
-            && policy?.resetsApprovalsOnPush == nil && policy?.usesMergeTrain == true && policy?.action == .enqueue
-            && policy?.requiresResolvedDiscussions == true && permitsAutomaticMerge(request, account: account)
-            && state == .none && canSubmit && dependencyReadiness == .ready && pendingDraftCount == 0 && !requiresCommentReview
-            && resolved == true && approvals?.hasRequiredRules == true && approvals?.allRequiredRulesApproved == true
-        let canVerifyFreshApprovals: Bool
-        if requiresCurrentTrainApprovals {
-            canVerifyFreshApprovals = (try? await glab.hasCurrentApprovalsForMergeTrain(request, host: host)) == true
-        } else {
-            canVerifyFreshApprovals = !requiresApprovalReset || policy?.resetsApprovalsOnPush == true
-        }
         let status = AuthoredMergeRequestStatus(
             request: request, approvals: approvals, discussionsResolved: resolved,
             projectRequiresResolvedDiscussions: policy?.requiresResolvedDiscussions, autoMergeEnabled: autoMergeEnabled,
             dependencyReadiness: dependencyReadiness,
-            canVerifyFreshApprovals: canVerifyFreshApprovals,
             conflictTaskFailed: failedConflicts.contains {
                 $0.matches(request, host: host, userID: user.id) && $0.sourceSHA == request.sha
             }, pendingDraftCount: pendingDraftCount,
-            requiresCommentReview: requiresCommentReview,
+            requiresCommentReview: settings.pendingCommentReviews.contains(target),
             action: policy?.action, submissionState: state, queueHasEnded: queueHasEnded
         )
-        return (status, policy, requiresCurrentTrainApprovals)
+        return (status, policy)
     }
 
     private func checkQueuedDiscussions(for request: GitLabMergeRequest, account: Account,

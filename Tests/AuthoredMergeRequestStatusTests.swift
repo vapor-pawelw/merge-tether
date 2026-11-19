@@ -58,7 +58,7 @@ struct AuthoredMergeRequestStatusTests {
         #expect(sorted.map(\.request.iid) == [5, 6, 4, 3, 2, 1])
     }
 
-    @Test func automaticMergeRequiresVerifiedApprovalRulesAndDiscussionEnforcement() throws {
+    @Test func automaticMergeChecksApplicableApprovalRulesAndDiscussionEnforcement() throws {
         let request = try makeRequest()
         let approved = try approvals(required: 2, approved: true)
         let optional = try approvals(required: 0, approved: true)
@@ -69,7 +69,7 @@ struct AuthoredMergeRequestStatusTests {
         #expect(status(request, approved, resolved: false, policy: true).blockers.contains(.discussions))
         #expect(!status(request, approved, resolved: nil, policy: true).mayAutoMerge)
         #expect(!status(request, approved, resolved: true, policy: false).mayAutoMerge)
-        #expect(!status(request, optional, resolved: true, policy: true).mayAutoMerge)
+        #expect(status(request, optional, resolved: true, policy: true).mayAutoMerge)
         #expect(!status(request, unapproved, resolved: true, policy: true).mayAutoMerge)
     }
 
@@ -114,14 +114,14 @@ struct AuthoredMergeRequestStatusTests {
         #expect(!view.mayAutoMerge)
     }
 
-    @Test func assistantChangesRequireAConfirmedApprovalResetPolicy() throws {
+    @Test func readyMRWithoutRequiredApprovalRulesCanMergeManuallyAndAutomatically() throws {
         let request = try makeRequest()
         let status = AuthoredMergeRequestStatus(
-            request: request, approvals: try approvals(required: 2, approved: true), discussionsResolved: true,
-            projectRequiresResolvedDiscussions: true, autoMergeEnabled: true, dependencyReadiness: .ready, canVerifyFreshApprovals: false
+            request: request, approvals: try approvals(required: 0, approved: false), discussionsResolved: true,
+            projectRequiresResolvedDiscussions: true, autoMergeEnabled: true, dependencyReadiness: .ready
         )
-        #expect(status.blockers.contains(.approvalPolicy))
-        #expect(!status.mayAutoMerge)
+        #expect(status.blockers.isEmpty)
+        #expect(status.mayMergeManually && status.mayAutoMerge)
     }
 
     @MainActor

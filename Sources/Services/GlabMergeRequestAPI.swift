@@ -175,18 +175,6 @@ extension GlabService {
         return project.onlyAllowMergeIfAllDiscussionsAreResolved
     }
 
-    func projectResetsApprovalsOnPush(projectID: Int, host: String) async throws -> Bool {
-        struct ApprovalConfiguration: Decodable {
-            let resetApprovalsOnPush: Bool
-
-            enum CodingKeys: String, CodingKey {
-                case resetApprovalsOnPush = "reset_approvals_on_push"
-            }
-        }
-        let config: ApprovalConfiguration = try await mergeRequestAPI("/projects/\(projectID)/approvals", host: host)
-        return config.resetApprovalsOnPush
-    }
-
     func mergeRequestDiscussionsAreResolved(projectID: Int, iid: Int, host: String) async throws -> Bool {
         let discussions = try await fetchMergeRequestDiscussions(projectID: projectID, iid: iid, host: host)
         return discussions.allSatisfy { discussion in
@@ -505,8 +493,6 @@ extension GlabService {
         expectedSemanticContextFingerprint: String? = nil,
         action: MergeSubmissionAction = .mergeNow,
         expectedPolicy: GitLabMergeActionPolicy? = nil,
-        requiresApprovalRules: Bool = false,
-        requiresCurrentTrainApprovals: Bool = false,
         beforeWrite: @MainActor (Int?) throws -> Void = { _ in },
         shouldProceed: @escaping @MainActor @Sendable () -> Bool
     ) async throws -> MergeSubmissionState {
@@ -553,20 +539,15 @@ extension GlabService {
             let policy = try await fetchMergeActionPolicy(projectID: projectID, host: host, request: current)
             guard policy == expectedPolicy, policy.action == action else { throw CancellationError() }
         }
-        if !requiresCurrentTrainApprovals, expectedPolicy != nil || requiresApprovalRules {
+        if expectedPolicy != nil {
             let approvals = try await fetchMergeRequestApprovalState(projectID: projectID, iid: iid, host: host)
-            guard approvals.allRequiredRulesApproved,
-                  !requiresApprovalRules || approvals.hasRequiredRules else { throw CancellationError() }
+            guard approvals.allRequiredRulesApproved else { throw CancellationError() }
         }
         guard current.isReadyForMergeSubmission(action) else { throw CancellationError() }
         guard try await fetchMergeDependencyReadiness(for: current, host: host) == .ready else { throw CancellationError() }
         let trainPreparation = expectedPolicy?.usesMergeTrain == true
             ? try await fetchMergeTrainPreparation(current, host: host) : nil
         if let conflict = trainPreparation?.conflict { throw conflict }
-        if requiresCurrentTrainApprovals {
-            guard expectedPolicy?.usesMergeTrain == true, action == .enqueue, requiresApprovalRules,
-                  try await hasCurrentApprovalsForMergeTrain(current, host: host) else { throw CancellationError() }
-        }
         // Re-read after dependency I/O so same-head retargets cannot reuse the
         // checked graph. GitLab's merge SHA precondition protects only the source.
         async let finalRequest = fetchMergeRequest(projectID: projectID, iid: iid, host: host)
