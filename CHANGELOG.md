@@ -6,6 +6,8 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 
 ## Unreleased
 
+- Keep unanswered review findings in the verdict and draft follow-ups only when a substantive incoming reply warrants an answer.
+
 - Show approval badges in gray at zero approvals, muted orange below half of the required approvals, and muted yellow from halfway. Show green when the approval count meets or exceeds the requirement or GitLab confirms the rules are satisfied.
 
 - Regenerate private drafts on Mac or iPhone for one comment, one MR, or all tracked MRs. Add optional instructions, compare the proposals, and save the ones you choose.

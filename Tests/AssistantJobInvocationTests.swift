@@ -4,6 +4,17 @@ import Testing
 
 struct AssistantJobInvocationTests {
     @Test(arguments: [false, true])
+    func reviewerRechecksUnansweredFindingsWithoutDraftingSelfReplies(_ autoResolve: Bool) {
+        let instructions = AssistantAutomationRunner.MRWorkflow.review.instructions(
+            allowFollowUpPush: false, autoResolveOwnReviewThreads: autoResolve)
+
+        #expect(instructions.contains("with no substantive incoming reply, do not create or update a reply draft"))
+        #expect(instructions.contains("Record any remaining concern in the review verdict"))
+        #expect(instructions.contains("respond only when it adds useful information"))
+        #expect(!instructions.contains("If anything remains wrong or cannot be verified, leave the thread unresolved and save/update"))
+    }
+
+    @Test(arguments: [false, true])
     func feedbackInstructionsRequireAReplyInEachThreadWithoutRepeatingDeliveredFixes(_ push: Bool) {
         let instructions = AssistantAutomationRunner.MRWorkflow.followUp.instructions(
             allowFollowUpPush: push, autoResolveOwnReviewThreads: false)

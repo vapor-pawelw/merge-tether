@@ -11,7 +11,7 @@ Worker output is written to private files throughout execution. Validated comple
 1. A review request arrives. Draft MRs are tracked in Reviewing; their automatic work waits by default, while normal manual actions remain available. The selected CLI reviews ready MRs and saves warranted findings as private GitLab drafts.
 2. Drafts wait on the relevant MR card. Open **Review and confirm** to read the complete discussion and private drafts, then publish the reviewed set or edit it in GitLab. Publication can also run automatically under the selected profile and publication mode.
 3. New commits or author replies trigger a new re-review task. The first poll establishes a baseline; later events are deduplicated across restarts.
-4. With **Resolve my verified findings during re-review** enabled, the agent checks each concern against the current remote head and resolves only threads whose first non-system note belongs to you. Unaddressed or uncertain concerns stay open with private draft replies. Turning the option off leaves resolution to you.
+4. The agent checks each concern against the current remote head and records open or uncertain findings in the review verdict. It drafts a follow-up in your thread only when there is a substantive incoming reply that warrants an answer. With **Resolve my verified findings during re-review** enabled, it can resolve verified findings in threads whose first non-system note belongs to you. Turning the option off leaves resolution to you.
 5. Automatic approval requires a current review that meets your selected approval threshold, completed comment review, and no pending drafts, in addition to your automation scope and CLI readiness.
 
 **When you are the author**

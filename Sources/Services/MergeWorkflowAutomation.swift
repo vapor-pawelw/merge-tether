@@ -984,7 +984,7 @@ private extension MergeWorkflowTrigger {
         case .pipelineFailure:
             "Diagnose the pipeline failure and separate infrastructure failures from code failures. Implement and verify warranted in-scope fixes. When follow-up push is enabled, commit and push tested corrections, then re-fetch the remote HEAD and verify source content before saving completion drafts. With push off, pending or failed, keep the result in chat."
         case .reviewUpdate:
-            "Use the event to scope the re-review. Check new or changed requirements in the MR title or description against the relevant implementation and discussions. Assess changed code, new or edited notes, and author replies as applicable. Recheck existing findings. Raise new findings tied to the evidence identified in the event and prepare private reply drafts."
+            "Use the event to scope the re-review. Check new or changed requirements in the MR title or description against the relevant implementation and discussions. Assess changed code, new or edited notes, and author replies as applicable. Recheck existing findings. Raise new findings tied to the evidence identified in the event. Apply the review workflow rules to any reply drafts."
         case .newDiscussion:
             "Evaluate the new review threads on my MR. For warranted fixes, implement, verify, commit, push when authorized, and verify remote HEAD/content before saving response drafts. With push off, pending or failed, keep that run's result in chat."
         case .blockerChange:
