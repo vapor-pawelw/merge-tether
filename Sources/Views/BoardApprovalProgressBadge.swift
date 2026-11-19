@@ -25,6 +25,12 @@ struct BoardApprovalProgressBadge: View {
     private var satisfied: Bool {
         progress?.isSatisfied ?? false
     }
+    var approvalColor: Color {
+        if satisfied { return .green }
+        guard let progress, progress.required > 0 else { return .secondary }
+        let fraction = Double(progress.completed) / Double(progress.required)
+        return .green.opacity(min(fraction * 0.8, 0.7))
+    }
     private var requiredApprovalPending: Bool {
         guard let progress, progress.required > 0 else { return false }
         return !(progress.requirementsSatisfied ?? (progress.completed >= progress.required))
@@ -62,7 +68,7 @@ struct BoardApprovalProgressBadge: View {
                         } else { Text(.Board.boardApprovalsUnknownRatio) }
                         if let assigned { Text(.Board.boardApprovalsReviewerCountBadge(assigned)) }
                     }
-                    .font(.caption2).monospacedDigit().foregroundStyle(satisfied ? Color.green : .secondary)
+                    .font(.caption2).monospacedDigit().foregroundStyle(approvalColor)
                     if let viewerApproval { viewerSegment(viewerApproval) }
                 }
                 .fixedSize()

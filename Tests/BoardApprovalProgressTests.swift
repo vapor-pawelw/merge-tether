@@ -4,6 +4,37 @@ import Testing
 @testable import GitLabTodos
 
 @MainActor struct BoardApprovalProgressTests {
+    @Test func usesSecondaryColorWhenApprovalProgressIsUnknown() {
+        #expect(BoardApprovalProgressBadge(progress: nil).approvalColor == .secondary)
+    }
+
+    @Test func colorsKnownApprovalProgress() throws {
+        let cases: [(Int, Int, Color)] = [
+            (0, 0, .secondary),
+            (1, 0, .green),
+            (0, 1, .green.opacity(0)),
+            (1, 3, .green.opacity(4.0 / 15.0)),
+            (1, 2, .green.opacity(0.4)),
+            (2, 3, .green.opacity(8.0 / 15.0)),
+            (8, 10, .green.opacity(0.64)),
+            (9, 10, .green.opacity(0.7)),
+            (2, 2, .green),
+        ]
+        let environment = EnvironmentValues()
+        for (completed, required, expected) in cases {
+            let progress = try #require(MergeRequestApprovalProgress(completed: completed, required: required))
+            let color = BoardApprovalProgressBadge(progress: progress).approvalColor
+            #expect(color.resolve(in: environment) == expected.resolve(in: environment), "\(completed)/\(required)")
+        }
+    }
+
+    @Test(arguments: [2, 5])
+    func capsOpacityWhileAnApprovalRuleIsPending(completed: Int) throws {
+        var progress = try #require(MergeRequestApprovalProgress(completed: completed, required: 2))
+        progress.requirementsSatisfied = false
+        #expect(BoardApprovalProgressBadge(progress: progress).approvalColor == Color.green.opacity(0.7))
+    }
+
     @Test func hidesTheCounterWhenGitLabRequiresNoApprovals() {
         let view = NSHostingView(rootView: BoardApprovalProgressBadge(
             progress: MergeRequestApprovalProgress(completed: 0, required: 0)))
