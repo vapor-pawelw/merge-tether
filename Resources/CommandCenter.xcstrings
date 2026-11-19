@@ -23,6 +23,13 @@
         }
       }
     },
+    "commandCenter.automationActivity": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": { "stringUnit": { "state": "translated", "value": "Automation Activity" } },
+        "pl": { "stringUnit": { "state": "translated", "value": "Aktywność automatyzacji" } }
+      }
+    },
     "commandCenter.overview": {
       "extractionState": "manual",
       "localizations": {

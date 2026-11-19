@@ -5,7 +5,6 @@ import SwiftUI
 struct CommandCenterView: View {
     let monitor: TodoMonitorService
     let updates: UpdateService
-    @SceneStorage("commandCenter.showActivity") private var showActivity = false
     @State private var showingAdd = false
     @State private var showingInbox = false
     @State private var regenerationPresentation: DraftRegenerationPresentation?
@@ -17,7 +16,7 @@ struct CommandCenterView: View {
         let display = monitor.commandCenterDisplayFrame
         VStack(spacing: 0) {
             statusBanners
-            if !showActivity, initialRefresh == .syncing {
+            if initialRefresh == .syncing {
                 HStack {
                     ProgressView().controlSize(.small)
                     Text(.Board.boardInitialSync)
@@ -29,17 +28,8 @@ struct CommandCenterView: View {
             NotificationPermissionView(notifications: monitor.notifications,
                                        enabled: monitor.settings.notificationsEnabled)
                 .padding(.horizontal, 18)
-            if showActivity {
-                VSplitView {
-                    AssistantJobHistoryView(monitor: monitor).frame(minHeight: 250)
-                    MergeWorkflowActivityView(entries: monitor.authoredMergeRequests.workflow.entries,
-                                              onHandoff: monitor.authoredMergeRequests.workflow.confirmPipelineHandoff)
-                        .frame(minHeight: 180)
-                }
-            } else {
-                CommandCenterBoardView(monitor: monitor, board: display.board, refreshState: initialRefresh)
-                    .id("\(monitor.glab.resolvedHost ?? "")|\(monitor.glab.currentUsername ?? "")")
-            }
+            CommandCenterBoardView(monitor: monitor, board: display.board, refreshState: initialRefresh)
+                .id("\(monitor.glab.resolvedHost ?? "")|\(monitor.glab.currentUsername ?? "")")
             if let todo = monitor.undoableTodo { undoBanner(todo) }
             accountFooter
         }
@@ -57,13 +47,6 @@ struct CommandCenterView: View {
         }
         .navigationTitle(Text(.Board.boardTitle))
         .toolbar {
-            ToolbarItem(placement: .navigation) {
-                Picker(selection: $showActivity) {
-                    Text(.Board.boardTabBoard).tag(false)
-                    Text(.Board.boardTabActivity).tag(true)
-                } label: { Text(.Board.boardTitle) }
-                .pickerStyle(.segmented).labelsHidden().fixedSize()
-            }
             ToolbarItemGroup(placement: .primaryAction) {
                 Button { openWindow(id: "remote-access") } label: {
                     Label { Text(.Remote.remoteMacPairPhone) } icon: { Image(systemName: "iphone") }
@@ -233,7 +216,7 @@ struct CommandCenterView: View {
                 onRetry: { Task { await monitor.refreshManually() } },
                 onOpenSetup: { openWindow(id: "onboarding") },
                 onOpenIntegration: { SettingsNavigation.shared.showIntegration { openSettings() } })
-        } else if !showActivity, monitor.boardRefreshState == .unavailable {
+        } else if monitor.boardRefreshState == .unavailable {
             HStack {
                 Label { Text(.Board.boardInitialSyncFailed) } icon: { Image(systemName: "exclamationmark.triangle") }
                 Spacer()

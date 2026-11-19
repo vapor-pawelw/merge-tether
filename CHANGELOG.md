@@ -6,6 +6,8 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 
 ## Unreleased
 
+- Move the Mac Activity view from the board toolbar to **Window → Automation Activity** for troubleshooting across merge requests.
+
 - Remove dotted underlines from tappable person names on iPhone and show review status as an icon at the end of the person's row.
 
 - Deliver iPhone avatars on the board and in MR details through the paired Mac. The iOS app connects only to the relay for automatic data loading.

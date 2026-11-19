@@ -110,6 +110,19 @@ struct GitLabTodosApp: App {
         }
         .windowResizability(.contentSize)
 
+        Window(String(localized: .CommandCenter.commandCenterAutomationActivity), id: "automation-activity") {
+            let monitor = appDelegate.monitor
+            let workflow = monitor.authoredMergeRequests.workflow
+            VSplitView {
+                AssistantJobHistoryView(monitor: monitor).frame(minHeight: 250)
+                MergeWorkflowActivityView(entries: workflow.entries, onHandoff: workflow.confirmPipelineHandoff)
+                    .frame(minHeight: 180)
+            }
+            .frame(minWidth: 540)
+        }
+        .defaultSize(width: 780, height: 680)
+        .windowResizability(.contentMinSize)
+
         Settings {
             SettingsView(monitor: appDelegate.monitor)
         }
