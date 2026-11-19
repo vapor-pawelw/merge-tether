@@ -6,6 +6,8 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 
 ## Unreleased
 
+- Reduce the gap between the merge request title and the author and approvals line to 8 pt on iPhone.
+
 - Drag the sheet handle down to dismiss iPhone MR Details and refresh with the toolbar button.
 
 - Make iPhone discussion cards easier to distinguish from the section background in MR Details.

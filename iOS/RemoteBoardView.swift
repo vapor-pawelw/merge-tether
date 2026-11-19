@@ -351,7 +351,7 @@ struct RemoteCardView: View {
         }
     }
     private var header: some View {
-        VStack(alignment: .leading, spacing: 10) {
+        VStack(alignment: .leading, spacing: 8) {
             HStack(alignment: .firstTextBaseline, spacing: 8) {
                 Text(verbatim: expanded ? card.project : (card.presentation?.repository ?? card.project))
                     .fontWeight(.medium).lineLimit(expanded ? nil : 1).truncationMode(.middle)
@@ -361,6 +361,7 @@ struct RemoteCardView: View {
                     Text(verbatim: "!\(iid)").monospacedDigit().fixedSize()
                 }
             }.font(.caption).foregroundStyle(.secondary)
+                .padding(.bottom, 2)
             title
             if card.presentation?.author != nil || card.presentation?.draftBadge != nil || card.id.hasPrefix("mr:") {
                 ViewThatFits(in: .horizontal) {
