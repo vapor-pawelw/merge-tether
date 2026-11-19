@@ -37,7 +37,8 @@ final class MRDiscussionPresentation {
 
         init(_ draft: GitLabDraftNote) {
             self.draft = draft
-            exactText = [draft.note, draft.discussionID, draft.position?.newPath, draft.position?.oldPath]
+            exactText = [draft.note, draft.discussionID, draft.position?.newPath, draft.position?.oldPath,
+                         draft.position?.baseSHA, draft.position?.headSHA, draft.position?.positionType]
                 .map { $0.map { Data($0.utf8) } }
         }
     }

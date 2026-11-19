@@ -121,17 +121,37 @@ extension GlabService {
             let content: String
             enum CodingKeys: String, CodingKey { case filePath = "file_path"; case encoding, content }
         }
-        let unreserved = CharacterSet(charactersIn: "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789-._~")
-        guard !path.isEmpty, !path.hasPrefix("/"), !path.split(separator: "/", omittingEmptySubsequences: false).contains(where: { $0.isEmpty || $0 == "." || $0 == ".." }),
-              Self.isFullGitSHA(ref), let encoded = path.addingPercentEncoding(withAllowedCharacters: unreserved) else {
-            throw GlabError.decoding("Invalid remote source evidence")
-        }
+        let encoded = try Self.encodeRepositoryFilePath(path, ref: ref)
         let file: File = try await mergeRequestAPI("/projects/\(projectID)/repository/files/\(encoded)?ref=\(ref)", host: host)
         let base64 = file.content.components(separatedBy: .whitespacesAndNewlines).joined()
         guard file.filePath == path, file.encoding == "base64", let bytes = Data(base64Encoded: base64) else {
             throw GlabError.decoding("Could not verify the remote source file")
         }
         return SHA256.hash(data: bytes).map { String(format: "%02x", $0) }.joined()
+    }
+
+    func fetchDiscussionCode(_ anchor: MRDiscussionCodeAnchor, in projectID: Int,
+                             for target: MRDiscussionTarget) async throws -> [MRDiscussionCodeAnchor.Line] {
+        let revision = accountRevision
+        guard projectID > 0, resolvedHost == target.host, currentUsername == target.username else {
+            throw GlabError.notAuthenticated
+        }
+        let encoded = try Self.encodeRepositoryFilePath(anchor.path, ref: anchor.revision)
+        let data: Data = try await mergeRequestAPI(
+            "/projects/\(projectID)/repository/files/\(encoded)/raw?ref=\(anchor.revision)",
+            host: target.host, decode: { $0 })
+        try Task.checkCancellation()
+        guard accountRevision == revision else { throw GlabError.notAuthenticated }
+        return anchor.excerpt(from: data)
+    }
+
+    private static func encodeRepositoryFilePath(_ path: String, ref: String) throws -> String {
+        let unreserved = CharacterSet(charactersIn: "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789-._~")
+        guard !path.isEmpty, !path.hasPrefix("/"), !path.split(separator: "/", omittingEmptySubsequences: false).contains(where: { $0.isEmpty || $0 == "." || $0 == ".." }),
+              Self.isFullGitSHA(ref), let encoded = path.addingPercentEncoding(withAllowedCharacters: unreserved) else {
+            throw GlabError.decoding("Invalid remote source evidence")
+        }
+        return encoded
     }
 
     func fetchMergeRequestApprovalState(

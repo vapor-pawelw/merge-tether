@@ -15,7 +15,7 @@ struct MRDiscussionThreadsView: View {
     var selectionDisabled = false
     var onDelete: ((GitLabDraftNote) -> Void)? = nil
     var title: LocalizedStringResource = .MRDiscussions.mrDiscussionsTitle
-    var draftsFirst = false
+    var codeContext: MRDiscussionCodeContext? = nil
     /// Present when the user may change comment origins; `nil` classification returns to automatic assessment.
     var onSetOrigin: MRDiscussionOriginAction? = nil
     var extraContexts: AICommentProvenanceStore.ExtraContexts = .empty
@@ -55,11 +55,13 @@ struct MRDiscussionThreadsView: View {
                 ForEach(Array(snapshot.standaloneDrafts.enumerated()), id: \.offset) { index, draft in
                     if index > 0 || !snapshot.threads.isEmpty { Divider() }
                     VStack(alignment: .leading, spacing: 9) {
-                        Text(draft.discussionID == nil ? .MRDiscussions.mrDiscussionsNewComment
+                        Text(draft.discussionID == nil
+                             ? draft.position?.isAnchored == true ? .MRDiscussions.mrDiscussionsNewCodeComment : .MRDiscussions.mrDiscussionsNewComment
                              : hasLoaded || hasError ? .MRDiscussions.mrDiscussionsUnmatchedReply
                              : .MRDiscussions.mrDiscussionsReplyDraft)
                             .font(.caption.weight(.medium)).foregroundStyle(.secondary)
                         MRDiscussionDraftView(draft: draft, author: currentUser, markdownCache: markdownCache,
+                            mergeRequestURL: mergeRequestURL, codeContext: codeContext,
                             extraContext: extraContexts.forDraft(draft),
                             selection: selection, selectionDisabled: selectionDisabled, onDelete: onDelete)
                     }
@@ -92,7 +94,7 @@ struct MRDiscussionThreadsView: View {
     private func threadView(_ thread: MRDiscussionSnapshot.Thread, currentUser: PersonIdentity?) -> some View {
         MRDiscussionThreadView(thread: thread, mergeRequestURL: mergeRequestURL,
                                currentUsername: currentUsername, currentUser: currentUser, markdownCache: markdownCache, initiallyExpanded: expandPendingDrafts && !thread.drafts.isEmpty,
-                               selection: selection, selectionDisabled: selectionDisabled, draftsFirst: draftsFirst,
+                               selection: selection, selectionDisabled: selectionDisabled,
                                extraContexts: extraContexts, onDelete: onDelete, onSetOrigin: onSetOrigin)
     }
 }
@@ -108,7 +110,6 @@ private struct MRDiscussionThreadView: View {
     let initiallyExpanded: Bool
     let selection: Binding<DraftPublicationSelection>?
     let selectionDisabled: Bool
-    let draftsFirst: Bool
     var extraContexts: AICommentProvenanceStore.ExtraContexts = .empty
     var onDelete: ((GitLabDraftNote) -> Void)? = nil
     var onSetOrigin: MRDiscussionOriginAction? = nil
@@ -141,7 +142,6 @@ private struct MRDiscussionThreadView: View {
         let summary = thread.replySummary(currentUsername: currentUsername)
         let originBadge = thread.originBadge
         return VStack(alignment: .leading, spacing: 12) {
-            if draftsFirst { draftRows }
             DisclosureGroup(isExpanded: $isExpanded) {
                 if isExpanded {
                     VStack(alignment: .leading, spacing: 12) {
@@ -156,7 +156,7 @@ private struct MRDiscussionThreadView: View {
                                                  mergeRequestURL: mergeRequestURL, threadLocation: thread.location,
                                                  markdownCache: markdownCache, onSetOrigin: noteOriginAction(note), extraContext: extraContexts.forNote(note.id))
                         }
-                        if !draftsFirst { draftRows }
+                        if selection == nil { draftRows }
                     }
                     .padding(.top, 10)
                 }
@@ -164,6 +164,7 @@ private struct MRDiscussionThreadView: View {
                 threadHeader(firstComment: comments.first, summary: summary, originBadge: originBadge)
             }
             .disclosureGroupStyle(MRDiscussionDisclosureStyle())
+            if selection != nil { draftRows }
         }
         .padding(.horizontal, 12).padding(.vertical, 11)
         .frame(maxWidth: .infinity, alignment: .leading)
@@ -377,6 +378,8 @@ private struct MRDiscussionDraftView: View {
     let author: PersonIdentity?
     let markdownCache: MRDiscussionMarkdownCache
     var threadLocation: String? = nil
+    var mergeRequestURL: URL? = nil
+    var codeContext: MRDiscussionCodeContext? = nil
     var extraContext: String? = nil
     var selection: Binding<DraftPublicationSelection>? = nil
     var selectionDisabled = false
@@ -400,6 +403,13 @@ private struct MRDiscussionDraftView: View {
             if let location = MRDiscussionLocation(position: draft.position), location.full != threadLocation {
                 MRDiscussionLocationLabel(location: location).textSelection(.enabled)
             }
+            if let mergeRequestURL, let position = draft.position,
+               position.newLine != nil || position.oldLine != nil {
+                let request = codeContext?.request(for: position)
+                MRDiscussionCodePreview(request: request, codeContext: codeContext,
+                    changesURL: MRDiscussionCodeAnchor.changesURL(for: position, mergeRequestURL: mergeRequestURL))
+                    .id(request)
+            }
             MRDiscussionBody(source: draft.note, markdownCache: markdownCache)
             DraftPublicationWarnings(drafts: [draft])
         }
@@ -407,6 +417,76 @@ private struct MRDiscussionDraftView: View {
         .frame(maxWidth: .infinity, alignment: .leading)
         .background(Color.accentColor.opacity(0.07), in: RoundedRectangle(cornerRadius: 8))
         .overlay(alignment: .leading) { Rectangle().fill(Color.accentColor.opacity(0.45)).frame(width: 2) }
+    }
+}
+
+struct MRDiscussionCodeContext {
+    let target: MRDiscussionTarget
+    let accountRevision: UInt64
+    let sourceProjectID: Int?
+    let targetProjectID: Int?
+    let glab: GlabService
+
+    struct Request: Hashable {
+        let target: MRDiscussionTarget
+        let accountRevision: UInt64
+        let projectID: Int
+        let anchor: MRDiscussionCodeAnchor
+    }
+
+    func request(for position: GitLabDraftNote.Position) -> Request? {
+        guard let anchor = MRDiscussionCodeAnchor(position) else { return nil }
+        let projectID = anchor.side == .new ? sourceProjectID : targetProjectID
+        return .init(target: target, accountRevision: accountRevision, projectID: projectID ?? target.projectID, anchor: anchor)
+    }
+}
+
+private struct MRDiscussionCodePreview: View {
+    let request: MRDiscussionCodeContext.Request?
+    let codeContext: MRDiscussionCodeContext?
+    let changesURL: URL
+    @State private var lines: [MRDiscussionCodeAnchor.Line]?
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 6) {
+            if let lines, !lines.isEmpty {
+                ScrollView(.horizontal) {
+                    Grid(alignment: .leading, horizontalSpacing: 10, verticalSpacing: 2) {
+                        ForEach(lines) { line in
+                            let highlighted = line.number == request?.anchor.line
+                            GridRow {
+                                Text(verbatim: String(line.number)).foregroundStyle(.secondary)
+                                    .gridColumnAlignment(.trailing)
+                                Text(verbatim: line.text).fixedSize(horizontal: true, vertical: false)
+                            }
+                            .fontWeight(highlighted ? .semibold : .regular)
+                            .background(highlighted ? Color.accentColor.opacity(0.15) : .clear)
+                        }
+                    }
+                    .padding(8)
+                    .font(.caption.monospaced()).textSelection(.enabled)
+                }
+                .background(.background.opacity(0.5), in: RoundedRectangle(cornerRadius: 6))
+            } else if request == nil || lines != nil {
+                Text(.MRDiscussions.mrDiscussionsCodeUnavailable).foregroundStyle(.secondary)
+            } else {
+                HStack(spacing: 6) {
+                    ProgressView().controlSize(.small).accessibilityHidden(true)
+                    Text(.MRDiscussions.mrDiscussionsCodeLoading).foregroundStyle(.secondary)
+                }
+            }
+            Link(destination: changesURL) {
+                Label(.MRDiscussions.mrDiscussionsOpenChanges, systemImage: "arrow.up.right.square")
+            }
+        }
+        .font(.caption)
+        .task {
+            guard lines == nil, let request, let glab = codeContext?.glab,
+                  request.accountRevision == glab.accountRevision else { return }
+            let result = try? await glab.fetchDiscussionCode(request.anchor, in: request.projectID, for: request.target)
+            guard !Task.isCancelled, request.accountRevision == glab.accountRevision else { return }
+            lines = result ?? []
+        }
     }
 }
 

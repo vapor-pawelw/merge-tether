@@ -237,15 +237,27 @@ struct GitLabDraftNote: Codable, Equatable, Sendable {
         let newLine: Int?
         let oldPath: String?
         let oldLine: Int?
+        var baseSHA: String? = nil
+        var headSHA: String? = nil
+        var positionType: String? = nil
 
         enum CodingKeys: String, CodingKey {
             case newPath = "new_path"
             case newLine = "new_line"
             case oldPath = "old_path"
             case oldLine = "old_line"
+            case baseSHA = "base_sha"
+            case headSHA = "head_sha"
+            case positionType = "position_type"
         }
 
         var isAnchored: Bool { newPath != nil || oldPath != nil || newLine != nil || oldLine != nil }
+
+        // The saved publication and provenance records compare line locations and may predate these preview fields.
+        static func == (lhs: Self, rhs: Self) -> Bool {
+            lhs.newPath == rhs.newPath && lhs.newLine == rhs.newLine
+                && lhs.oldPath == rhs.oldPath && lhs.oldLine == rhs.oldLine
+        }
     }
 
     enum Kind: Equatable {

@@ -1,6 +1,50 @@
 {
   "sourceLanguage": "en",
   "strings": {
+    "mrDiscussions.newCodeComment": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "New code comment"
+          }
+        }
+      }
+    },
+    "mrDiscussions.codeLoading": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Loading code context…"
+          }
+        }
+      }
+    },
+    "mrDiscussions.codeUnavailable": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Code context is unavailable."
+          }
+        }
+      }
+    },
+    "mrDiscussions.openChanges": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Open file changes in GitLab"
+          }
+        }
+      }
+    },
     "mrDiscussions.title": {
       "extractionState": "manual",
       "localizations": {

@@ -1,3 +1,4 @@
+import CryptoKit
 import Foundation
 
 struct MRDiscussionTarget: Hashable, Sendable {
@@ -213,9 +214,61 @@ struct MRDiscussionLocation: Equatable {
     init(full: String) { self.full = full }
 
     init?(position: GitLabDraftNote.Position?) {
-        guard let path = position?.newPath ?? position?.oldPath else { return nil }
-        let line = position?.newLine ?? position?.oldLine
+        guard let position else { return nil }
+        let oldSide = position.newLine == nil && position.oldLine != nil
+        let path = oldSide ? position.oldPath ?? position.newPath : position.newPath ?? position.oldPath
+        guard let path else { return nil }
+        let line = position.newLine ?? position.oldLine
         full = line.map { "\(path):\($0)" } ?? path
+    }
+}
+
+struct MRDiscussionCodeAnchor: Hashable {
+    enum Side: Hashable { case old, new }
+
+    let path: String
+    let line: Int
+    let revision: String
+    let side: Side
+
+    init?(_ position: GitLabDraftNote.Position?) {
+        guard let position, position.positionType == nil || position.positionType == "text" else { return nil }
+        side = position.newLine == nil ? .old : .new
+        guard let path = side == .new ? position.newPath : position.oldPath,
+              let line = side == .new ? position.newLine : position.oldLine, line > 0,
+              let revision = side == .new ? position.headSHA : position.baseSHA,
+              GlabService.isFullGitSHA(revision) else { return nil }
+        self.path = path
+        self.line = line
+        self.revision = revision
+    }
+
+    struct Line: Identifiable, Equatable {
+        let number: Int
+        let text: String
+        var id: Int { number }
+    }
+
+    func excerpt(from data: Data) -> [Line] {
+        guard data.count <= 1_048_576, !data.contains(0), let source = String(data: data, encoding: .utf8) else { return [] }
+        let lines = source.utf8.split(separator: 10, omittingEmptySubsequences: false)
+        let count = lines.count - (lines.last?.isEmpty == true ? 1 : 0)
+        guard line <= count else { return [] }
+        return (max(1, line - 2)...min(count, line + 2)).map { number in
+            let bytes = lines[number - 1]
+            let text = String(decoding: bytes.last == 13 ? bytes.dropLast() : bytes, as: UTF8.self)
+            let prefix = text.prefix(500)
+            return Line(number: number, text: prefix.count == text.count ? text : prefix + "…")
+        }
+    }
+
+    static func changesURL(for position: GitLabDraftNote.Position, mergeRequestURL: URL) -> URL {
+        let changes = mergeRequestURL.appending(path: "diffs")
+        guard let path = position.newPath ?? position.oldPath,
+              var components = URLComponents(url: changes, resolvingAgainstBaseURL: false) else { return changes }
+        components.query = nil
+        components.fragment = Insecure.SHA1.hash(data: Data(path.utf8)).map { String(format: "%02x", $0) }.joined()
+        return components.url ?? changes
     }
 }
 

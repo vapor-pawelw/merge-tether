@@ -132,6 +132,13 @@ private struct CommandCenterMRDetailContent: View {
         return .init(host: host, username: username, projectID: item.id.projectID, iid: item.id.iid, url: item.url)
     }
 
+    private var discussionCodeContext: MRDiscussionCodeContext? {
+        guard let discussionTarget else { return nil }
+        let request = presentationRow.displayRequest
+        return .init(target: discussionTarget, accountRevision: monitor.glab.accountRevision,
+            sourceProjectID: request?.sourceProjectID, targetProjectID: request?.targetProjectID, glab: monitor.glab)
+    }
+
     var body: some View {
         let citationContext = self.citationContext
         let discussions = discussionSnapshot
@@ -909,7 +916,7 @@ private struct CommandCenterMRDetailContent: View {
             expandPendingDrafts: true, selection: $publicationSession.selection,
             selectionDisabled: discussionTarget == nil || monitor.attention.confirmationStates[item.id]?.isBusy == true,
             onDelete: { draft in Task { await monitor.attention.deleteDraft(draft, from: item.id) } },
-            title: .DraftPublication.draftPublicationThreads, draftsFirst: true, onSetOrigin: originAction,
+            title: .DraftPublication.draftPublicationThreads, codeContext: discussionCodeContext, onSetOrigin: originAction,
             extraContexts: current ? discussionStore.extraContexts : .empty,
             currentUserIdentity: current ? discussionStore.currentUser : nil, onRefresh: refreshDiscussions)
     }
@@ -940,7 +947,7 @@ private struct CommandCenterMRDetailContent: View {
             MRDiscussionThreadsView(snapshot: snapshot, mergeRequestURL: item.url,
             currentUsername: monitor.glab.currentUsername, isLoading: current && discussionStore.isLoading,
             hasError: current && discussionStore.hasError, hasLoaded: current && discussionStore.hasLoaded,
-            onSetOrigin: originAction, extraContexts: current ? discussionStore.extraContexts : .empty,
+            codeContext: discussionCodeContext, onSetOrigin: originAction, extraContexts: current ? discussionStore.extraContexts : .empty,
             currentUserIdentity: current ? discussionStore.currentUser : nil, onRefresh: refreshDiscussions)
         }
     }

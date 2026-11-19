@@ -110,6 +110,7 @@ struct MRDiscussionSnapshotTests {
         (#"{"new_path":"Sources/Views/File.swift","new_line":12}"#, "Sources/Views/File.swift:12", "File.swift:12"),
         (#"{"old_path":"Deleted/Old.swift","old_line":8}"#, "Deleted/Old.swift:8", "Old.swift:8"),
         (#"{"new_path":"Renamed/New.swift","old_path":"Old.swift","new_line":5,"old_line":2}"#, "Renamed/New.swift:5", "New.swift:5"),
+        (#"{"new_path":"Renamed/New.swift","old_path":"Original/Old.swift","old_line":2}"#, "Original/Old.swift:2", "Old.swift:2"),
         (#"{"new_path":"Sources/File.swift","old_line":3}"#, "Sources/File.swift:3", "File.swift:3"),
         (#"{"new_path":"Sources/File.swift"}"#, "Sources/File.swift", "File.swift"),
         (#"{"new_path":"dir/a%2Fb #c:part.swift","new_line":4}"#, "dir/a%2Fb #c:part.swift:4", "a%2Fb #c:part.swift:4"),
@@ -123,6 +124,52 @@ struct MRDiscussionSnapshotTests {
         #expect(location.compact == compact)
         let thread = try presentationThread(notes: "[{\"id\":1,\"position\":\(position)}]")
         #expect(thread.location == full)
+    }
+
+    @Test func draftPositionKeepsTheRevisionsNeededForACodePreview() throws {
+        let json = #"{"new_path":"File.swift","new_line":2,"base_sha":"abc","head_sha":"def","position_type":"text"}"#
+        let position = try JSONDecoder().decode(GitLabDraftNote.Position.self, from: Data(json.utf8))
+        let encoded = try #require(JSONSerialization.jsonObject(with: JSONEncoder().encode(position)) as? [String: Any])
+        #expect(encoded["base_sha"] as? String == "abc")
+        #expect(encoded["head_sha"] as? String == "def")
+        #expect(encoded["position_type"] as? String == "text")
+    }
+
+    @Test(arguments: [false, true])
+    @MainActor
+    func inlineDraftReadsTheOriginalFileAndHighlightsTheAnchoredLine(deletedLine: Bool) async throws {
+        let gitlab = InMemoryGitLab()
+        defer { gitlab.close() }
+        let host = "gitlab.example.com"
+        let target = MRDiscussionTarget(host: host, username: "me", projectID: 1, iid: 2,
+            url: try #require(URL(string: "https://gitlab.example.com/team/project/-/merge_requests/2")))
+        let glab = gitlab.service(host: host, username: target.username)
+        let base = String(repeating: "a", count: 40), head = String(repeating: "b", count: 40)
+        let line = deletedLine ? #""old_line":4"# : #""new_line":4,"old_line":3"#
+        let json = #"{"position_type":"text","new_path":"src/new #name.swift","old_path":"src/old.swift","head_sha":"\#(head)","base_sha":"\#(base)",\#(line)}"#
+        let position = try JSONDecoder().decode(GitLabDraftNote.Position.self, from: Data(json.utf8))
+        let context = MRDiscussionCodeContext(target: target, accountRevision: glab.accountRevision,
+            sourceProjectID: 7, targetProjectID: 1, glab: glab)
+        let request = try #require(context.request(for: position))
+        let endpoint = deletedLine ? "/projects/1/repository/files/src%2Fold.swift/raw?ref=\(base)"
+            : "/projects/7/repository/files/src%2Fnew%20%23name.swift/raw?ref=\(head)"
+        gitlab.handler = { request in
+            guard request.method == "GET", request.endpoint == endpoint else { return try gitlab.unexpected(request) }
+            return InMemoryGitLab.output("one\r\ntwo\r\n\r\n  target line\r\nfive\r\n")
+        }
+        let excerpt = try await glab.fetchDiscussionCode(request.anchor, in: request.projectID, for: request.target)
+        #expect(excerpt.map(\.number) == [2, 3, 4, 5])
+        #expect(excerpt.map(\.text) == ["two", "", "  target line", "five"])
+        #expect(excerpt.first(where: { $0.number == request.anchor.line })?.text == "  target line")
+    }
+
+    @Test func aDraftWithoutAPinnedTextPositionHasNoCodePreview() throws {
+        for json in [#"{"new_path":"File.swift","new_line":2}"#,
+                     #"{"new_path":"File.swift","head_sha":"HEAD","new_line":2}"#,
+                     #"{"new_path":"File.swift","head_sha":"aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa","position_type":"file"}"#] {
+            let position = try JSONDecoder().decode(GitLabDraftNote.Position.self, from: Data(json.utf8))
+            #expect(MRDiscussionCodeAnchor(position) == nil)
+        }
     }
 
     @Test func missingPathsHaveNoLocationAndLiteralTrailingSlashesRemainIntact() throws {
