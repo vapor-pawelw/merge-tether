@@ -3,6 +3,44 @@ import Testing
 import MergeTetherRemote
 
 @MainActor @Suite struct RemotePhoneModelTests {
+    @Test(arguments: [RemoteCommandResult.Status.completed, .changed, .uncertain])
+    func inboxSeenClosesOnlySuccessfulResultsAndRequestsTheUpdatedBoard(_ status: RemoteCommandResult.Status) async throws {
+        let f = try PhoneFixture(), model = f.model
+        var board = f.board
+        board.lanes[0].cards[0].id = "completion:update"
+        board.lanes[0].cards[0].actions = [.init(id: "seen", kind: .markDone, token: "checked")]
+        model.connect(); await model.refresh(); await f.reply(board: board)
+        let transport = f.transports[0], card = board.cards[0]
+        transport.onCommand = { command in
+            await transport.onMessage?(.init(type: .result, result: .init(id: command.id, status: status)))
+        }
+        await model.perform(card: card, action: card.actions[0])
+        #expect(model.state.result?.status == (status == .completed ? nil : status))
+        #expect(transport.sent.last?.type == .hello && transport.sent.last?.refresh == false)
+    }
+
+    @Test(arguments: [false, true])
+    func pendingActionKeepsItsCardControlsOnlyInTheOriginalSession(_ sessionChanged: Bool) async throws {
+        let f = try PhoneFixture(), model = f.model, board = f.board
+        model.connect(); await model.refresh(); await f.reply(board: board)
+        let transport = f.transports[0], card = board.cards[0], action = card.actions[0]
+        await model.refresh()
+        let challenge = try #require(transport.sent.last?.challenge)
+        transport.onCommand = { command in
+            #expect(model.state.pending?.actionID == action.id)
+            #expect(model.pendingActionCard == card)
+            var updated = board
+            updated.lanes[0].cards[0].actions = []
+            if sessionChanged { updated.hostSession = UUID() }
+            await transport.onMessage?(.init(type: .snapshot, challenge: challenge, board: updated))
+            #expect(model.state.board?.cards.first?.actions.isEmpty == true)
+            #expect(model.pendingActionCard == (sessionChanged ? nil : card))
+            await transport.onMessage?(.init(type: .result, result: .init(id: command.id, status: .completed)))
+        }
+        await model.perform(card: card, action: action)
+        #expect(model.pendingActionCard == nil)
+    }
+
     @Test(arguments: [false, true])
     func actionsReloadOpenDetailsEvenWhenTheBoardContextDoesNotChange(_ closeBeforeResult: Bool) async throws {
         let f = try PhoneFixture(), model = f.model

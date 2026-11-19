@@ -25,6 +25,12 @@ enum RemotePhoneConnectionStatus { case unpaired, connecting, connected, offline
     private(set) var isSynchronizingDetails = false
     private(set) var isManuallyRefreshingContent = false
     private var viewedCardID: String?
+    private var pendingActionPresentation: (id: UUID, card: RemoteCard)?
+    var pendingActionCard: RemoteCard? {
+        guard let pending = state.pending, pendingActionPresentation?.id == pending.id,
+              state.board?.account == pending.account, state.board?.hostSession == pending.hostSession else { return nil }
+        return pendingActionPresentation?.card
+    }
     private var needsDetailReload = false
     private var detailRecoveryAttempts = 0
     @ObservationIgnored private var contentRefresh: Task<Void, Never>?
@@ -161,7 +167,7 @@ enum RemotePhoneConnectionStatus { case unpaired, connecting, connected, offline
                     self.receiptChallenge = nil; self.receiptRevision = nil
                     self.state.recoverResult(result)
                     self.shouldRecoverCommand = result.status == .running
-                    if result.status != .running { await self.refreshAfterAction(self.recovery?.command) }
+                    if result.status != .running { await self.finishAction(result) }
                     return
                 }
                 if message.type == .details {
@@ -205,9 +211,7 @@ enum RemotePhoneConnectionStatus { case unpaired, connecting, connected, offline
                     if self.state.needsRefresh(now: self.now()) { await self.refresh() }
                 }
                 if accepted, message.type == .result, let result = message.result, result.status != .running {
-                    self.shouldRecoverCommand = false
-                    let command = self.recovery?.command
-                    await self.refreshAfterAction(command?.id == result.id ? command : nil)
+                    await self.finishAction(result)
                 }
             }
             self.connection = connection; connection.start()
@@ -261,12 +265,19 @@ enum RemotePhoneConnectionStatus { case unpaired, connecting, connected, offline
         if !task.isCancelled { contentRefresh = nil; isManuallyRefreshingContent = false }
     }
 
-    private func refreshAfterAction(_ command: RemoteCommand?) async {
+    private func finishAction(_ result: RemoteCommandResult) async {
+        shouldRecoverCommand = false
+        let command = recovery?.command
+        let completedCommand = command?.id == result.id ? command : nil
+        if result.status == .completed, completedCommand?.isCompletionAcknowledgement == true {
+            state.acknowledgeResult()
+        }
         needsDetailReload = viewedCardID != nil
         isSynchronizingDetails = viewedCardID != nil
         detailRecoveryAttempts = 0
         detailState.prepareToReload()
-        await refresh(force: true, fromGitLab: command?.isFeedbackSuggestionDecision != true)
+        let usesCurrentBoard = completedCommand?.isFeedbackSuggestionDecision == true || completedCommand?.isCompletionAcknowledgement == true
+        await refresh(force: true, fromGitLab: !usesCurrentBoard)
     }
 
     private func refreshViewedDetails() async {
@@ -347,6 +358,12 @@ enum RemotePhoneConnectionStatus { case unpaired, connecting, connected, offline
         do { try saveRecovery(pending); recovery = pending }
         catch {
             self.error = true; requestState.recoverResult(.init(id: command.id, status: .failed)); return
+        }
+        pendingActionPresentation = (command.id, card)
+        defer {
+            if pendingActionPresentation?.id == command.id, state.pending?.id != command.id {
+                pendingActionPresentation = nil
+            }
         }
         do {
             try await connection.send(.init(type: .command, command: command))

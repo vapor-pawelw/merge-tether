@@ -33,7 +33,6 @@ struct MRDiscussionThreadsView: View {
                     .help(Text(.MRDiscussions.mrDiscussionsAiLegend))
                     .accessibilityLabel(Text(.MRDiscussions.mrDiscussionsAiLegend))
                 Spacer()
-                if isLoading { ProgressView().controlSize(.small) }
                 Button(action: onRefresh) {
                     Label { Text(.MRDiscussions.mrDiscussionsRefresh) } icon: { Image(systemName: "arrow.clockwise") }
                 }
@@ -43,8 +42,8 @@ struct MRDiscussionThreadsView: View {
             if hasError {
                 Label { Text(.MRDiscussions.mrDiscussionsFailed) } icon: { Image(systemName: "exclamationmark.triangle") }
                     .font(.callout).foregroundStyle(.orange)
-            } else if !hasLoaded {
-                Text(isLoading ? .MRDiscussions.mrDiscussionsLoading : .MRDiscussions.mrDiscussionsUnavailable)
+            } else if !hasLoaded && !isLoading {
+                Text(.MRDiscussions.mrDiscussionsUnavailable)
                     .font(.callout).foregroundStyle(.secondary)
             }
             LazyVStack(alignment: .leading, spacing: 0) {

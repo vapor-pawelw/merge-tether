@@ -247,8 +247,8 @@ extension RemoteConnection: RemoteHostTransport {}
             }
         case .command:
             guard let command = message.command, let pairing else { return }
-            // Suggestion decisions validate live evidence for their own MR before saving locally.
-            let fresh = if command.isFeedbackSuggestionDecision { true } else {
+            // Seen acknowledges a local receipt. Suggestion decisions validate their own MR in the executor.
+            let fresh = if command.isCompletionAcknowledgement || command.isFeedbackSuggestionDecision { true } else {
                 await refreshSource(force: true, deadline: .now + .seconds(35))
             }
             var board = snapshot()

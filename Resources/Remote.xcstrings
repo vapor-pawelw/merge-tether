@@ -545,13 +545,30 @@
         "en": {
           "stringUnit": {
             "state": "translated",
-            "value": "Executing on Mac…"
+            "value": "Working…"
           }
         },
         "pl": {
           "stringUnit": {
             "state": "translated",
-            "value": "Wykonywanie na Macu…"
+            "value": "W trakcie…"
+          }
+        }
+      }
+    },
+    "remote.seen": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Seen"
+          }
+        },
+        "pl": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Przeczytane"
           }
         }
       }

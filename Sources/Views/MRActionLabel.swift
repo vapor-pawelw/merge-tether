@@ -9,17 +9,29 @@ struct MRActionLabel: View {
     var working = false
 
     var body: some View {
-        if let symbol = cta.symbol ?? fallbackSymbol {
-            Label { Text(title).lineLimit(1) } icon: {
-                HStack(spacing: 4) {
-                    if working { ProgressView().controlSize(.mini) }
-                    if !working || cta.effect.symbol != nil { Image(systemName: symbol) }
+        MRActionProgressLabel(working: working) {
+            if let symbol = cta.symbol ?? fallbackSymbol {
+                Label { Text(title).lineLimit(1) } icon: { Image(systemName: symbol) }
+            } else {
+                Text(title).lineLimit(1)
+            }
+        }
+    }
+}
+
+struct MRActionProgressLabel<Title: View>: View {
+    let working: Bool
+    @ViewBuilder var title: () -> Title
+
+    var body: some View {
+        ZStack {
+            title().opacity(working ? 0 : 1).accessibilityHidden(working)
+            if working {
+                HStack(spacing: 5) {
+                    ProgressView().controlSize(.mini).accessibilityHidden(true)
+                    Text(.Remote.remoteRunning)
                 }
             }
-        } else if working {
-            ProgressView().controlSize(.mini)
-        } else {
-            Text(title).lineLimit(1)
         }
     }
 }

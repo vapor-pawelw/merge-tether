@@ -5,8 +5,7 @@ struct RemoteLaneBoard: View {
     let lanes: [RemoteLane]
     let onOpen: (RemoteCard) -> Void
     let onOpenCTA: (RemoteCard, RemoteCardCTA) -> Void
-    var onFinishCommentReview: ((RemoteCard) -> Void)? = nil
-    var canAct: ((Date) -> Bool)? = nil
+    let model: RemotePhoneModel
     var onRefresh: (() async -> Void)? = nil
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
     @Environment(\.dynamicTypeSize) private var dynamicTypeSize
@@ -69,7 +68,7 @@ struct RemoteLaneBoard: View {
             HStack(alignment: .top, spacing: 14) {
                 ForEach(lanes) { lane in
                     RemoteLaneView(lane: lane, showsHeader: showsLaneHeader, onOpen: onOpen, onOpenCTA: onOpenCTA,
-                        onFinishCommentReview: onFinishCommentReview, canAct: canAct, onRefresh: onRefresh)
+                        model: model, onRefresh: onRefresh)
                         .frame(width: laneWidth, height: max(1, size.height - 12))
                         .id(lane.id)
                 }
@@ -89,8 +88,7 @@ private struct RemoteLaneView: View {
     let showsHeader: Bool
     let onOpen: (RemoteCard) -> Void
     let onOpenCTA: (RemoteCard, RemoteCardCTA) -> Void
-    var onFinishCommentReview: ((RemoteCard) -> Void)? = nil
-    var canAct: ((Date) -> Bool)? = nil
+    let model: RemotePhoneModel
     var onRefresh: (() async -> Void)? = nil
 
     var body: some View {
@@ -115,7 +113,7 @@ private struct RemoteLaneView: View {
                     ForEach(lane.cards) { card in
                         RemoteCardView(card: card, onOpen: { onOpen(card) },
                             onOpenCTA: { onOpenCTA(card, $0) },
-                            onFinishCommentReview: onFinishCommentReview.map { action in { action(card) } }, canAct: canAct)
+                            actionsModel: model)
                     }
                 }
                 .animation(reduceMotion ? nil : .spring(duration: 0.28, bounce: 0.12), value: lane.cards.map(\.dependencies))

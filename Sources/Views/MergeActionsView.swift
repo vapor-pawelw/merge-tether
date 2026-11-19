@@ -27,11 +27,12 @@ struct MergeActionsView<StatusTrailer: View, AdditionalActions: View>: View {
         let verificationAssistant: AutomationAssistant
         let accountRevision: UInt64
     }
+    private enum PendingAction: Equatable { case merge(MergeSubmissionAction), threads }
 
     @State private var showingConfirmation = false
     @State private var mergeConfirmation: MergeConfirmation?
     @State private var attemptedAction: MergeSubmissionAction?
-    @State private var working = false
+    @State private var pendingAction: PendingAction?
     @State private var result: MergeSubmissionState?
     @State private var prepared: ManualDiscussionResolution.Prepared?
     @State private var resolutionMessage: String?
@@ -85,8 +86,10 @@ struct MergeActionsView<StatusTrailer: View, AdditionalActions: View>: View {
     private var showsDiscussionLine: Bool {
         hasDiscussionBlock && blocker != .prerequisite(.discussions) && !coveredBlockers.contains(.discussions)
     }
-    private var hidesActions: Bool { hidesBlockedActions && actionsBlocked }
+    private var working: Bool { pendingAction != nil }
+    private var hidesActions: Bool { hidesBlockedActions && actionsBlocked && !working }
     private var directMergeAction: MergeSubmissionAction? {
+        if case let .merge(action) = pendingAction { return action }
         let canConfirmChangedAction = state == .changed && status?.action != attemptedAction
         guard owned, state == .none || canConfirmChangedAction, blocker == nil, !hidesActions,
               item.reReviewReadiness?.hasConcreteConcerns != true else { return nil }
@@ -125,16 +128,15 @@ struct MergeActionsView<StatusTrailer: View, AdditionalActions: View>: View {
                                 verificationAssistant: monitor.settings.automation.assistant, accountRevision: monitor.glab.accountRevision)
                             showingConfirmation = true
                         } label: {
-                            if working { ProgressView().controlSize(.small) }
-                            else { Text(action.title) }
+                            MRActionProgressLabel(working: pendingAction == .merge(action)) { Text(action.title) }
                         }
                         .buttonStyle(.borderedProminent).disabled(actionsBlocked || working)
                         .mrActionHelp(.merge)
                     }
-                    if showsRecoveryActions, hasDiscussionBlock, !hidesActions {
+                    if showsRecoveryActions, pendingAction == .threads || (hasDiscussionBlock && !hidesActions) {
                         Button { prepareResolution() } label: {
-                            if working { ProgressView().controlSize(.small) }
-                            else { MRActionLabel(title: .MergeActions.mergeActionsResolveAll, cta: .resolveThreads) }
+                            MRActionLabel(title: .MergeActions.mergeActionsResolveAll, cta: .resolveThreads,
+                                working: pendingAction == .threads)
                         }
                         .buttonStyle(.bordered).disabled(working || actionsBlocked)
                         .mrActionHelp(.resolveThreads, detail: .MergeActions.mergeActionsResolveScope)
@@ -283,20 +285,20 @@ struct MergeActionsView<StatusTrailer: View, AdditionalActions: View>: View {
 
     private func merge(_ confirmation: MergeConfirmation) {
         guard !working, monitor.glab.accountRevision == confirmation.accountRevision else { return }
-        working = true
+        pendingAction = .merge(confirmation.action)
         attemptedAction = confirmation.action
         Task { @MainActor in
-            defer { working = false }
+            defer { pendingAction = nil }
             result = await monitor.authoredMergeRequests.mergeManually(confirmation.request,
                 action: confirmation.action, verificationAssistant: confirmation.verificationAssistant)
             if result == .merged || result?.isDelegated == true { await monitor.refreshNow() }
         }
     }
     private func prepareResolution() {
-        guard let request = item.mergeRequest else { return }
-        working = true; resolutionMessage = nil
+        guard !working, let request = item.mergeRequest else { return }
+        pendingAction = .threads; resolutionMessage = nil
         Task { @MainActor in
-            defer { working = false }
+            defer { pendingAction = nil }
             do {
                 prepared = try await ManualDiscussionResolution.prepare(request, monitor: monitor)
                 showingConfirmation = true
@@ -304,9 +306,10 @@ struct MergeActionsView<StatusTrailer: View, AdditionalActions: View>: View {
         }
     }
     private func resolve(_ confirmed: ManualDiscussionResolution.Prepared) {
-        prepared = nil; working = true
+        guard !working else { return }
+        prepared = nil; pendingAction = .threads
         Task { @MainActor in
-            defer { working = false }
+            defer { pendingAction = nil }
             let result = await ManualDiscussionResolution.resolve(confirmed, glab: monitor.glab, settings: monitor.settings)
             resolutionMessage = String(localized: .MergeActions.mergeActionsResolveResult(result.resolved, result.selected, result.held))
             await monitor.refreshNow()

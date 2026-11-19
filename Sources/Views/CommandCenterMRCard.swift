@@ -22,6 +22,8 @@ private struct CommandCenterMRCardContent: View {
     var onAttention: ((CommandCenterMRDetailSection) -> Void)? = nil
     let onDetails: () -> Void
     @State private var isStarting = false
+    @State private var pendingPrimary: (title: LocalizedStringResource, cta: MRActionCTA?)?
+    @State private var finishingCommentReview = false
     @State private var retryError: String?
     @State private var confirmRemoval = false
     @Environment(\.openSettings) private var openSettings
@@ -134,7 +136,8 @@ private struct CommandCenterMRCardContent: View {
                         .fixedSize(horizontal: false, vertical: true)
                 }
                 MergeActionsView(item: item, monitor: monitor, evidenceMatchesCatalogContext: row.evidenceMatchesCatalogContext,
-                    actionsBlocked: presentation.actionsBlocked, onReviewFeedback: { openAttention(.feedback) },
+                    actionsBlocked: presentation.actionsBlocked || isStarting || finishingCommentReview,
+                    onReviewFeedback: { openAttention(.feedback) },
                     showsExplanations: false, showsRecoveryActions: false, textFont: .callout,
                     coveredBlockers: shownRequirements?.coveredBlockers ?? [],
                     hidesBlockedActions: presentation.working, highlightedSubmission: presentation.mergeStage?.submission, statusTrailer: {
@@ -157,13 +160,23 @@ private struct CommandCenterMRCardContent: View {
                             .buttonStyle(.plain)
                     }
                     Spacer(minLength: 6)
-                    primaryAction(hasDirectMergeAction: hasDirectMergeAction)
-                    if presentation.showsAdditionalCommentReview {
-                        Button { start { await monitor.attention.finishCommentReview(item) } } label: {
-                            Text(.CommentReview.commentReviewFinish)
+                    if let pendingPrimary {
+                        primary(pendingPrimary.title, cta: pendingPrimary.cta, enabled: false) {}
+                    } else {
+                        primaryAction(hasDirectMergeAction: hasDirectMergeAction)
+                    }
+                    if presentation.showsAdditionalCommentReview || finishingCommentReview {
+                        Button {
+                            finishingCommentReview = true
+                            Task {
+                                defer { finishingCommentReview = false }
+                                await monitor.attention.finishCommentReview(item)
+                            }
+                        } label: {
+                            MRActionProgressLabel(working: finishingCommentReview) { Text(.CommentReview.commentReviewFinish) }
                         }
                         .buttonStyle(.bordered)
-                        .disabled(presentation.actionsBlocked || !item.canFinishCommentReview)
+                        .disabled(isStarting || finishingCommentReview || presentation.actionsBlocked || !item.canFinishCommentReview)
                     }
                 }
             }
@@ -358,21 +371,25 @@ private struct CommandCenterMRCardContent: View {
     @ViewBuilder
     private func primary(_ title: LocalizedStringResource, cta: MRActionCTA? = nil, enabled: Bool = true,
                          action: @escaping () -> Void) -> some View {
-        if let cta {
-            Button(action: action) { MRActionLabel(title: title, cta: cta, working: isStarting) }
-                .buttonStyle(.bordered).disabled(isStarting || !enabled).mrActionHelp(cta)
-        } else {
-            Button(action: action) {
-                if isStarting { ProgressView().controlSize(.mini) }
-                else { Text(title).lineLimit(1) }
+        Button {
+            action()
+            if isStarting { pendingPrimary = (title, cta) }
+        } label: {
+            if let cta {
+                MRActionLabel(title: title, cta: cta, working: isStarting)
+            } else {
+                MRActionProgressLabel(working: isStarting) { Text(title).lineLimit(1) }
             }
-            .buttonStyle(.bordered).disabled(isStarting || !enabled)
         }
+        .buttonStyle(.bordered).disabled(isStarting || finishingCommentReview || !enabled).mrActionHelp(cta)
     }
 
     private func start(_ operation: @escaping @MainActor () async -> Void) {
         isStarting = true
-        Task { defer { isStarting = false }; await operation() }
+        Task {
+            defer { isStarting = false; pendingPrimary = nil }
+            await operation()
+        }
     }
 
     private var moreMenu: some View {

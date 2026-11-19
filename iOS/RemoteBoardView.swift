@@ -20,7 +20,7 @@ struct RemoteBoardView: View {
                         if board.partial { Text(.Remote.remotePartial).font(.caption).foregroundStyle(.orange).padding(.horizontal) }
                         RemoteLaneBoard(lanes: board.lanes.filter { $0.id != .other }, onOpen: { selected = .init(card: $0) },
                             onOpenCTA: { selected = .init(card: $0, cta: $1) },
-                            onFinishCommentReview: finishCommentReview, canAct: { model.state.canAct(now: $0) },
+                            model: model,
                             onRefresh: { await model.refreshContent() })
                         if let updated = board.updatedAt {
                             HStack { Text(.Remote.remoteUpdated); Text(updated, style: .relative) }
@@ -103,7 +103,7 @@ struct RemoteBoardView: View {
                         onRetry: retryInbox,
                         onOpen: { pendingInboxCard = .init(card: $0); showingInbox = false },
                         onOpenCTA: { pendingInboxCard = .init(card: $0, cta: $1); showingInbox = false },
-                        onFinishCommentReview: finishCommentReview, canAct: { model.state.canAct(now: $0) },
+                        model: model,
                         onRefresh: { await model.refreshContent() })
                 }
                 .frame(idealWidth: 520, idealHeight: 680)
@@ -131,10 +131,6 @@ struct RemoteBoardView: View {
         } else {
             model.reconnect()
         }
-    }
-    private func finishCommentReview(_ card: RemoteCard) {
-        guard let action = card.actions.first(where: { $0.kind == .finishCommentReview }) else { return }
-        Task { await model.perform(card: card, action: action) }
     }
     private var reconnectButton: some View {
         Button { model.reconnect() } label: { Label(.Remote.remoteReconnect, systemImage: "arrow.triangle.2.circlepath") }
@@ -229,11 +225,16 @@ struct RemoteCardView: View {
     var branches: RemoteDetailBranches? = nil
     var onOpen: (() -> Void)?
     var onOpenCTA: ((RemoteCardCTA) -> Void)? = nil
-    var onFinishCommentReview: (() -> Void)? = nil
-    var canAct: ((Date) -> Bool)? = nil
+    var actionsModel: RemotePhoneModel? = nil
     private var primaryCTA: RemoteCardCTA? { card.primaryCTA.flatMap { $0.duplicatesCardTap ? nil : $0 } }
     private var secondaryCTA: RemoteCardCTA? { card.presentation?.secondaryCTA.flatMap { $0.duplicatesCardTap ? nil : $0 } }
-    private var hasFinishAction: Bool { card.actions.contains { $0.kind == .finishCommentReview } && onFinishCommentReview != nil }
+    private var directAction: RemoteAction? {
+        guard let actionsModel else { return nil }
+        let actions = actionsModel.pendingActionCard.flatMap { $0.id == card.id ? $0.actions : nil } ?? card.actions
+        return actions.first {
+            $0.kind == .finishCommentReview || (card.id.hasPrefix("completion:") && $0.id == "seen" && $0.kind == .markDone)
+        }
+    }
     var body: some View {
         VStack(alignment: .leading, spacing: expanded ? 16 : 12) {
             header
@@ -246,25 +247,34 @@ struct RemoteCardView: View {
                 .accessibilityLabel(Text(.RemoteDetail.remoteDetailBranches(branches.source, branches.target)))
             }
             content
-            if !expanded, onOpen != nil, primaryCTA != nil || secondaryCTA != nil || hasFinishAction {
+            if !expanded, onOpen != nil, primaryCTA != nil || secondaryCTA != nil || directAction != nil {
                 HStack {
                     if let secondary = secondaryCTA {
-                        RemoteCardCTAButton(cta: secondary, canAct: canAct) { onOpenCTA?(secondary) }
+                        RemoteCardCTAButton(cta: secondary, canAct: { actionsModel?.state.canAct(now: $0) == true }) { onOpenCTA?(secondary) }
                             .font(.caption).buttonStyle(.plain).foregroundStyle(.secondary)
                             .frame(minHeight: 44)
                             .accessibilityIdentifier("remote.secondary-cta.\(card.id)")
                     }
                     Spacer(minLength: 0)
-                    if card.actions.contains(where: { $0.kind == .finishCommentReview }), let onFinishCommentReview {
-                        TimelineView(.periodic(from: .now, by: 1)) { context in
-                            Button(action: onFinishCommentReview) { Text(.CommentReview.commentReviewFinish) }
-                                .font(.subheadline.weight(.semibold)).buttonStyle(.borderedProminent)
-                                .controlSize(.large)
-                                .disabled(canAct?(context.date) != true)
-                                .accessibilityIdentifier("remote.finish-comment-review.\(card.id)")
+                    if let action = directAction, let actionsModel {
+                        let pending = actionsModel.pendingActionCard?.id == card.id ? actionsModel.state.pending : nil
+                        let seen = action.kind == .markDone
+                        let button = Button {
+                            Task { await actionsModel.perform(card: card, action: action) }
+                        } label: {
+                            RemoteActionProgressLabel(running: pending?.actionID == action.id) {
+                                Text(seen ? .Remote.remoteSeen : .CommentReview.commentReviewFinish)
+                            }
                         }
+                        Group {
+                            if seen { button.buttonStyle(.bordered).tint(.secondary) }
+                            else { button.buttonStyle(.borderedProminent) }
+                        }
+                        .font(.subheadline.weight(.semibold)).controlSize(.large)
+                        .modifier(RemoteActionAvailability(state: actionsModel.state))
+                        .accessibilityIdentifier("remote.\(seen ? "seen" : "finish-comment-review").\(card.id)")
                     } else if let cta = primaryCTA {
-                        RemoteCardCTAButton(cta: cta, canAct: canAct) { onOpenCTA?(cta) }
+                        RemoteCardCTAButton(cta: cta, canAct: { actionsModel?.state.canAct(now: $0) == true }) { onOpenCTA?(cta) }
                             .font(.subheadline.weight(.semibold)).buttonStyle(.bordered)
                             .controlSize(.large)
                             .accessibilityIdentifier("remote.cta.\(card.id)")

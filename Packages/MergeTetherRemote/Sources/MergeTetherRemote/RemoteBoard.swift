@@ -214,6 +214,9 @@ public struct RemoteCommand: Codable, Equatable, Sendable {
     public var isFeedbackSuggestionDecision: Bool {
         actionID.hasPrefix("ignoreSuggestion:") || actionID.hasPrefix("restoreSuggestion:")
     }
+    public var isCompletionAcknowledgement: Bool {
+        cardID.hasPrefix("completion:") && actionID == "seen"
+    }
     public init(id: UUID = UUID(), hostSession: UUID, account: String, cardID: String, actionID: String, token: String,
                 argument: String? = nil) {
         self.id = id; self.hostSession = hostSession; self.account = account; self.cardID = cardID; self.actionID = actionID; self.token = token

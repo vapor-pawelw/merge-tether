@@ -7,8 +7,7 @@ struct RemoteInboxView: View {
     let onRetry: () -> Void
     let onOpen: (RemoteCard) -> Void
     let onOpenCTA: (RemoteCard, RemoteCardCTA) -> Void
-    var onFinishCommentReview: ((RemoteCard) -> Void)? = nil
-    var canAct: ((Date) -> Bool)? = nil
+    let model: RemotePhoneModel
     var onRefresh: (() async -> Void)? = nil
     @Environment(\.dismiss) private var dismiss
 
@@ -98,7 +97,7 @@ struct RemoteInboxView: View {
                 ForEach(cards) { card in
                     RemoteCardView(card: card, onOpen: { onOpen(card) },
                         onOpenCTA: { onOpenCTA(card, $0) },
-                        onFinishCommentReview: onFinishCommentReview.map { action in { action(card) } }, canAct: canAct)
+                        actionsModel: model)
                 }
             }
         }

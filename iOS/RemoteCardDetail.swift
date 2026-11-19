@@ -16,6 +16,14 @@ struct RemoteCardDetail: View {
     @Environment(\.dismiss) private var dismiss
     private var boardCard: RemoteCard? { model.state.board?.cards.first { $0.id == original.id } }
     private var current: RemoteCard { boardCard ?? original }
+    private var actionCard: RemoteCard? {
+        if let pending = model.pendingActionCard, pending.id == original.id { return pending }
+        return boardCard
+    }
+    private var runningActionID: String? {
+        guard model.pendingActionCard?.id == original.id else { return nil }
+        return model.state.pending?.actionID
+    }
     private func headerCard(_ details: RemoteMRDetails?) -> RemoteCard {
         var card = current
         if let approvals = details?.approvals {
@@ -119,6 +127,7 @@ struct RemoteCardDetail: View {
                 }
             }
             .safeAreaInset(edge: .top, spacing: 0) {
+                if current.id.hasPrefix("mr:"), shown == nil { detailLoadingBanner }
                 if model.expiredApprovalCardID == original.id {
                     expiredApprovalNotice
                 }
@@ -162,6 +171,26 @@ struct RemoteCardDetail: View {
                 else { Text(confirmation?.kind == .deleteDraft ? .CommentReview.commentReviewDeleteHelp : .Remote.remoteConfirmHelp) }
             }
             .onDisappear { model.cancelApproval(); model.cancelDetails() }
+        }
+    }
+
+    private var detailLoadingBanner: some View {
+        TimelineView(.periodic(from: .now, by: 1)) { context in
+            if boardCard != nil, model.supportsDetails, !model.isManuallyRefreshingContent,
+               model.connectionStatus(now: context.date) == .connected,
+               model.isSynchronizingDetails || model.detailState.isLoading(now: context.date) {
+                HStack(spacing: 8) {
+                    ProgressView().controlSize(.small).accessibilityHidden(true)
+                    Text(.RemoteDetail.remoteDetailLoading)
+                }
+                .font(.footnote).foregroundStyle(.secondary)
+                .fixedSize(horizontal: false, vertical: true)
+                .padding(.horizontal, 16).padding(.vertical, 6)
+                .frame(maxWidth: .infinity, minHeight: 40)
+                .background(.bar)
+                .overlay(alignment: .bottom) { Divider() }
+                .accessibilityIdentifier("remote.details.loading")
+            }
         }
     }
 
@@ -212,12 +241,13 @@ struct RemoteCardDetail: View {
 
     @ViewBuilder
     private func draftSection(_ details: RemoteMRDetails?) -> some View {
-        if !current.drafts.isEmpty {
+        let drafts = (actionCard ?? current).drafts
+        if !drafts.isEmpty {
             VStack(alignment: .leading, spacing: 12) {
                 HStack(alignment: .firstTextBaseline, spacing: 8) {
                     Text(.RemoteDetail.remoteDetailPendingDrafts).font(.headline)
                         .accessibilityAddTraits(.isHeader)
-                    Text(current.drafts.count, format: .number)
+                    Text(drafts.count, format: .number)
                         .font(.caption.weight(.medium).monospacedDigit())
                         .foregroundStyle(.secondary)
                         .padding(.horizontal, 8).padding(.vertical, 3)
@@ -226,13 +256,14 @@ struct RemoteCardDetail: View {
                 Text(.RemoteDetail.remoteDetailPendingDraftsHelp)
                     .font(.callout).foregroundStyle(.secondary)
                     .fixedSize(horizontal: false, vertical: true)
-                ForEach(current.drafts) { draft in
+                ForEach(drafts) { draft in
                     RemoteDraftCard(draft: draft,
-                        deleteAction: boardCard?.actions.first { $0.kind == .deleteDraft && $0.id == "deleteDraft:\(draft.id)" },
-                        publishAction: boardCard?.actions.first { $0.kind == .publishDraft && $0.id == "publishDraft:\(draft.id)" },
+                        deleteAction: actionCard?.actions.first { $0.kind == .deleteDraft && $0.id == "deleteDraft:\(draft.id)" },
+                        publishAction: actionCard?.actions.first { $0.kind == .publishDraft && $0.id == "publishDraft:\(draft.id)" },
                         extraContext: details?.draftContexts?[String(draft.id)],
                         replyThread: details?.threads?.first { $0.draftIDs?.contains(draft.id) == true },
                         canAct: boardCard != nil && model.state.canAct(now: .now),
+                        runningActionID: runningActionID,
                         onAction: showConfirmation)
                 }
             }
@@ -241,13 +272,17 @@ struct RemoteCardDetail: View {
 
     @ViewBuilder
     private var actionSection: some View {
-        if boardCard != nil, model.state.pending != nil || !buttonActions.isEmpty {
+        if !buttonActions.isEmpty {
             VStack(alignment: .leading, spacing: 12) {
                 // The header card above already states the explanation; repeat only the controls.
                 Text(.RemoteDetail.remoteDetailActions).font(.headline)
                     .accessibilityAddTraits(.isHeader)
-                RemoteDetailActionButtons(actions: buttonActions, running: model.state.pending != nil,
-                    onAction: showConfirmation)
+                RemoteDetailActionButtons(actions: buttonActions, runningActionID: runningActionID,
+                    onAction: { action in
+                        if current.id.hasPrefix("completion:"), action.id == "seen" {
+                            Task { await model.perform(card: current, action: action) }
+                        } else { showConfirmation(action) }
+                    })
                     .modifier(RemoteActionAvailability(state: model.state))
             }
             .padding(16)
@@ -258,7 +293,7 @@ struct RemoteCardDetail: View {
 
     /// Draft-level actions live on their draft cards.
     private var buttonActions: [RemoteAction] {
-        current.actions.filter { $0.kind != .deleteDraft && $0.kind != .publishDraft && $0.kind != .setCommentOrigin }
+        (actionCard?.actions ?? []).filter { $0.kind != .deleteDraft && $0.kind != .publishDraft && $0.kind != .setCommentOrigin }
     }
 
     private func detailReadStatus(_ loadedDetails: RemoteMRDetails?) -> some View {
@@ -272,10 +307,6 @@ struct RemoteCardDetail: View {
                 } else if !model.supportsDetails {
                     Text(.RemoteDetail.remoteDetailUpdateMac).foregroundStyle(.secondary)
                 } else if loadedDetails == nil {
-                    if !model.supportsDetailPreviews, !model.isManuallyRefreshingContent,
-                       model.isSynchronizingDetails || model.detailState.isLoading(now: context.date) {
-                        ProgressView(.RemoteDetail.remoteDetailLoading)
-                    }
                     if !model.isSynchronizingDetails, model.detailState.failure != nil || model.detailState.hasTimedOut(now: context.date) {
                         Text(.RemoteDetail.remoteDetailReadFailed)
                             .foregroundStyle(.orange)
@@ -315,7 +346,8 @@ private struct RemoteDetailRefreshButton: View {
         }
         .accessibilityLabel(Text(.RemoteDetail.remoteDetailRefresh))
         .accessibilityIdentifier("remote.details.refresh")
-        .disabled(card == nil || !model.supportsDetails || loading || model.connectionStatus(now: now) != .connected)
+        .disabled(card == nil || !model.supportsDetails || loading || model.state.pending != nil
+            || model.connectionStatus(now: now) != .connected)
         .task {
             while !Task.isCancelled {
                 now = Date()
@@ -325,7 +357,7 @@ private struct RemoteDetailRefreshButton: View {
     }
 }
 
-private struct RemoteActionAvailability: ViewModifier {
+struct RemoteActionAvailability: ViewModifier {
     let state: RemotePhoneState
     func body(content: Content) -> some View {
         TimelineView(.periodic(from: .now, by: 1)) { context in
@@ -336,18 +368,22 @@ private struct RemoteActionAvailability: ViewModifier {
 
 private struct RemoteDetailActionButtons: View {
     let actions: [RemoteAction]
-    let running: Bool
+    let runningActionID: String?
     let onAction: (RemoteAction) -> Void
+    @Environment(\.isEnabled) private var isEnabled
     private static let secondaryKinds: Set<RemoteActionKind> = [.ignoreSuggestion, .restoreSuggestion]
 
     var body: some View {
         VStack(alignment: .leading, spacing: 12) {
-            if running { ProgressView(.Remote.remoteRunning) }
             ForEach(actions.filter { !Self.secondaryKinds.contains($0.kind) }) { action in
                 Button(role: action.kind == .stopJob ? .destructive : nil) { onAction(action) } label: {
-                    title(action).frame(maxWidth: .infinity)
+                    RemoteActionProgressLabel(running: runningActionID == action.id) {
+                        title(action)
+                    }
+                    .frame(maxWidth: .infinity)
                 }
                 .buttonStyle(.borderedProminent).controlSize(.large)
+                .accessibilityIdentifier("remote.action.\(action.id)")
             }
             ForEach(actions.filter { Self.secondaryKinds.contains($0.kind) }) { action in
                 VStack(alignment: .leading, spacing: 8) {
@@ -356,16 +392,40 @@ private struct RemoteDetailActionButtons: View {
                             .fixedSize(horizontal: false, vertical: true).frame(maxWidth: .infinity, alignment: .leading)
                     }
                     Button { onAction(action) } label: {
-                        Text(action.kind.title).font(.callout.weight(.medium)).frame(minHeight: 44)
+                        RemoteActionProgressLabel(running: runningActionID == action.id) {
+                            Text(action.kind.title)
+                        }
+                        .font(.callout.weight(.medium)).frame(minHeight: 44)
                     }
                     .buttonStyle(.plain)
-                    .foregroundStyle(action.kind == .ignoreSuggestion ? Color.orange : Color.accentColor)
+                    .foregroundStyle(isEnabled ? (action.kind == .ignoreSuggestion ? Color.orange : Color.accentColor) : Color.secondary)
                 }
                 .padding(.vertical, 4)
             }
         }
     }
     private func title(_ action: RemoteAction) -> Text {
-        if let label = action.label { Text(verbatim: label) } else { Text(action.kind.title) }
+        if action.id == "seen", action.kind == .markDone { Text(.Remote.remoteSeen) }
+        else if let label = action.label { Text(verbatim: label) }
+        else { Text(action.kind.title) }
+    }
+}
+
+struct RemoteActionProgressLabel<Title: View>: View {
+    let running: Bool
+    @ViewBuilder var title: () -> Title
+
+    var body: some View {
+        ZStack {
+            title().opacity(running ? 0 : 1).accessibilityHidden(running)
+            if running {
+                HStack(spacing: 6) {
+                    ProgressView().controlSize(.small).accessibilityHidden(true)
+                    Text(.Remote.remoteRunning)
+                }
+                .foregroundStyle(Color.primary)
+                .tint(Color.primary)
+            }
+        }
     }
 }

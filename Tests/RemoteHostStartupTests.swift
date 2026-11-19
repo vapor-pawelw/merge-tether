@@ -254,6 +254,22 @@ struct RemoteHostSessionTests {
         #expect(f.monitor.lifecycleCompletions.isEmpty)
     }
 
+    @Test func inboxSeenAcknowledgesTheCompletionWithoutRefreshingGitLab() async throws {
+        let f = try Fixture(); defer { f.clean() }
+        await f.host.startupLoadTask?.value
+        let board = try await f.board()
+        let completion = try #require(board.cards.first { $0.id.hasPrefix("completion:") })
+        let command = try f.command(board, cardID: completion.id)
+        f.gitlab.requests.removeAll()
+
+        await f.transport.onMessage?(.init(type: .command, command: command))
+
+        #expect(command.actionID == "seen")
+        #expect(f.transport.messages.last?.result?.status == .completed)
+        #expect(f.monitor.lifecycleCompletions.isEmpty)
+        #expect(f.gitlab.requests.isEmpty)
+    }
+
     @Test func accountRoundTripRejectsTheEarlierCommandEvenWhenAccountTextMatches() async throws {
         let f = try Fixture()
         defer { f.clean() }

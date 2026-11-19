@@ -5,24 +5,25 @@ import MergeTetherRemote
 struct ConfirmationQueueRow<AdditionalActions: View>: View {
     let item: MergeRequestAttentionMonitor.Item
     let state: MergeRequestAttentionMonitor.ConfirmationState?
-    let onPublish: () -> Void
-    let onApprove: () -> Void
+    let onPublish: () async -> Void
+    let onApprove: () async -> Void
     let onOpen: () -> Void
     var onManage: (() -> Void)? = nil
     var initiallyExpanded = false
     var showDraftPreview = true
     var showHeader = true
     var selection: Binding<DraftPublicationSelection>? = nil
-    var onPublishSelected: (([GitLabDraftNote]) -> Void)? = nil
+    var onPublishSelected: (([GitLabDraftNote]) async -> Void)? = nil
     var requiresSelection = false
     var onDelete: ((GitLabDraftNote) -> Void)? = nil
-    var onFinishCommentReview: (() -> Void)? = nil
+    var onFinishCommentReview: (() async -> Void)? = nil
     let additionalActions: AdditionalActions
 
     @State private var showsComments = false
     @State private var localSelection = DraftPublicationSelection()
+    @State private var pendingAction: MergeRequestAttentionMonitor.ConfirmationState?
 
-    private var isBusy: Bool { state?.isBusy == true }
+    private var isBusy: Bool { pendingAction != nil || state?.isBusy == true }
     private var draftSelection: Binding<DraftPublicationSelection> { selection ?? $localSelection }
 
     var body: some View {
@@ -112,42 +113,49 @@ struct ConfirmationQueueRow<AdditionalActions: View>: View {
                 ? draftSelection.wrappedValue.selectedDrafts(from: item.drafts) : item.drafts)
 
             HStack(spacing: 8) {
-                if !item.drafts.isEmpty {
+                if pendingAction == .publishing || (pendingAction == nil && !item.drafts.isEmpty) {
                     let selected = draftSelection.wrappedValue.selectedDrafts(from: item.drafts)
                     if requiresSelection {
-                        Button { onPublishSelected?(selected) } label: {
-                            // Only publishing every draft lets the paused workflow continue.
-                            if selected.count == item.drafts.count {
-                                MRActionLabel(title: .CommentReview.commentReviewPublishSelected(selected.count), cta: .publishComments)
-                            } else {
-                                Text(.DraftPublication.draftPublicationPublishSelected(selected.count))
+                        Button {
+                            guard let onPublishSelected else { return }
+                            run(.publishing) { await onPublishSelected(selected) }
+                        } label: {
+                            MRActionProgressLabel(working: pendingAction == .publishing) {
+                                // Only publishing every draft lets the paused workflow continue.
+                                if selected.count == item.drafts.count {
+                                    MRActionLabel(title: .CommentReview.commentReviewPublishSelected(selected.count), cta: .publishComments)
+                                } else {
+                                    Text(.DraftPublication.draftPublicationPublishSelected(selected.count))
+                                }
                             }
                         }
                         .mrActionHelp(.publishComments, detail: .CommentReview.commentReviewPublishSelectedHelp)
                         .buttonStyle(.borderedProminent)
                         .disabled(selected.isEmpty || onPublishSelected == nil)
                     } else {
-                        Button(action: onPublish) { MRActionLabel(title: .CommentReview.commentReviewPublishAll, cta: .publishComments) }
+                        Button { run(.publishing, operation: onPublish) } label: {
+                            MRActionLabel(title: .CommentReview.commentReviewPublishAll, cta: .publishComments, working: pendingAction == .publishing)
+                        }
                             .mrActionHelp(.publishComments, detail: .Menu.menuConfirmPublishHelp)
                             .buttonStyle(.borderedProminent)
                     }
-                } else if item.requiresCommentReview, let onFinishCommentReview {
-                    Button(action: onFinishCommentReview) {
-                        MRActionLabel(title: .CommentReview.commentReviewFinish, cta: .finishCommentReview)
+                } else if pendingAction == .finishingCommentReview || (pendingAction == nil && item.requiresCommentReview), let onFinishCommentReview {
+                    Button { run(.finishingCommentReview, operation: onFinishCommentReview) } label: {
+                        MRActionLabel(title: .CommentReview.commentReviewFinish, cta: .finishCommentReview,
+                            working: pendingAction == .finishingCommentReview)
                     }
                         .buttonStyle(.borderedProminent)
                         .mrActionHelp(.finishCommentReview)
                         .disabled(!item.canFinishCommentReview)
-                } else if item.canApprove {
-                    Button(action: onApprove) { Text(.Menu.menuConfirmApprove) }
+                } else if pendingAction == .approving || (pendingAction == nil && item.canApprove) {
+                    Button { run(.approving, operation: onApprove) } label: {
+                        MRActionProgressLabel(working: pendingAction == .approving) { Text(.Menu.menuConfirmApprove) }
+                    }
                         .buttonStyle(.borderedProminent)
                         .mrActionHelp(.approve)
                 }
                 Button(action: onOpen) { Text(.Menu.menuConfirmEdit) }
                     .buttonStyle(.bordered)
-                if isBusy {
-                    ProgressView().controlSize(.small)
-                }
             }
             .controlSize(.small)
             .disabled(isBusy)
@@ -168,22 +176,22 @@ struct ConfirmationQueueRow<AdditionalActions: View>: View {
         .onChange(of: item.id) { _, _ in draftSelection.wrappedValue = DraftPublicationSelection() }
     }
 
+    private func run(_ action: MergeRequestAttentionMonitor.ConfirmationState, operation: @escaping () async -> Void) {
+        guard !isBusy else { return }
+        pendingAction = action
+        Task { defer { pendingAction = nil }; await operation() }
+    }
+
     @ViewBuilder
     private var statusLine: some View {
         switch state {
-        case .publishing:
-            Text(.Menu.menuConfirmPublishing).foregroundStyle(.secondary)
-        case .approving:
-            Text(.Menu.menuConfirmApproving).foregroundStyle(.secondary)
         case .deleting:
             Text(.CommentReview.commentReviewDeleting).foregroundStyle(.secondary)
-        case .finishingCommentReview:
-            Text(.CommentReview.commentReviewFinishing).foregroundStyle(.secondary)
         case .failed:
             Text(.Menu.menuConfirmFailed).foregroundStyle(.orange)
         case .changed:
             Text(.Menu.menuConfirmChanged).foregroundStyle(.orange)
-        case nil:
+        case .publishing, .approving, .finishingCommentReview, nil:
             EmptyView()
         }
     }

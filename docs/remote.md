@@ -164,8 +164,9 @@ still use the Mac's existing guards and required saved receipts. The notice neve
 grants action permission; both native clients must support protocol v2.
 
 Commands bind a host session, authenticated account, card, action and content token.
-The Mac refreshes before checking the token. Approval pins the displayed commit;
-publication checks the live commit and exact remaining draft content before each
+Most commands refresh GitLab before the Mac checks the token. **Seen** in Inbox
+checks and acknowledges the Mac's saved completion receipt. Approval pins the displayed commit.
+Publication checks the live commit and exact remaining draft content before each
 individual checked draft ID. It rejects GitLab slash commands and discussion
 resolution. A server-side edit can still race the final publication HTTP request,
 which GitLab does not provide with an atomic content/head precondition.

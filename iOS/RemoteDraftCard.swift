@@ -8,6 +8,7 @@ struct RemoteDraftCard: View {
     var extraContext: String? = nil
     var replyThread: RemoteDetailThread? = nil
     let canAct: Bool
+    var runningActionID: String? = nil
     let onAction: (RemoteAction) -> Void
 
     var body: some View {
@@ -20,10 +21,13 @@ struct RemoteDraftCard: View {
                 Spacer(minLength: 0)
                 if let deleteAction {
                     Button { onAction(deleteAction) } label: {
-                        Image(systemName: "trash").frame(minWidth: 44, minHeight: 44)
+                        RemoteActionProgressLabel(running: runningActionID == deleteAction.id) {
+                            Image(systemName: "trash")
+                        }
+                        .frame(minWidth: 44, minHeight: 44)
                     }
                     .buttonStyle(.plain).foregroundStyle(.secondary)
-                    .accessibilityLabel(Text(.CommentReview.commentReviewDelete))
+                    .accessibilityLabel(Text(runningActionID == deleteAction.id ? .Remote.remoteRunning : .CommentReview.commentReviewDelete))
                     .disabled(!canAct)
                     .accessibilityIdentifier("remote.delete-draft.\(draft.id)")
                 }
@@ -78,7 +82,10 @@ struct RemoteDraftCard: View {
             // Drafts with quick actions or thread resolution get no button: the Mac shows their effects.
             if let publishAction {
                 Button { onAction(publishAction) } label: {
-                    Label(.Remote.remotePublishDraft, systemImage: "paperplane").frame(minHeight: 44)
+                    RemoteActionProgressLabel(running: runningActionID == publishAction.id) {
+                        Label(.Remote.remotePublishDraft, systemImage: "paperplane")
+                    }
+                    .frame(minHeight: 44)
                 }
                 .buttonStyle(.bordered).disabled(!canAct)
                 .accessibilityIdentifier("remote.publish-draft.\(draft.id)")

@@ -9,7 +9,8 @@ import MergeTetherRemote
         let draftPreview = arguments.contains("--remote-preview-draft") || staleDetails
         let manualDecisionPreview = arguments.contains("--remote-preview-manual-decision")
         let approvalPreview = arguments.contains("--remote-preview-approvals") || arguments.contains("--remote-preview-approval-reset")
-        let boardPreview = arguments.contains("--remote-preview") || draftPreview || approvalPreview || manualDecisionPreview
+        let slowResponses = arguments.contains("--remote-preview-slow")
+        let boardPreview = arguments.contains("--remote-preview") || draftPreview || approvalPreview || manualDecisionPreview || slowResponses
         let previewBoard = draftPreview ? draftBoard : approvalPreview || manualDecisionPreview ? approvalBoard(reset: arguments.contains("--remote-preview-approval-reset")) : board
         let connecting = arguments.contains("--remote-preview-connecting")
         let offline = arguments.contains("--remote-preview-offline")
@@ -22,7 +23,7 @@ import MergeTetherRemote
             loadRecovery: { nil }, saveRecovery: { _ in }, removeRecovery: {}, makeConnection: { _ in
             connections += 1
             return PreviewTransport(board: boardPreview ? previewBoard : nil, delay: connections > 1, failed: failed,
-                staleDetails: staleDetails)
+                staleDetails: staleDetails, slowResponses: slowResponses)
         }, now: { Date().addingTimeInterval(offline ? -46 : 0) })
         if boardPreview { model.state.receive(.init(type: .snapshot, challenge: model.state.challenge(), board: previewBoard)) }
         return model
@@ -96,7 +97,13 @@ import MergeTetherRemote
                 primaryCTA: .init(title: String(localized: .MRHumanAction.mrHumanActionActionReviewApproval), destination: .actions),
                 presentation: .init(author: "Sam Example", repository: "mobile-app", authorUsername: "sam"), approvals: .init(completed: 2, required: 2)),
         ]),
-        .init(id: .other, cards: []),
+        .init(id: .other, cards: [
+            .init(id: "completion:merged", title: "Preserve payment history", project: "example/payments-api",
+                url: URL(string: "https://gitlab.example.org/example/payments-api/-/merge_requests/41"),
+                detail: "Merge request merged", actions: [.init(id: "seen", kind: .markDone, token: "preview")],
+                needsAttention: false, mergeRequestIID: 41,
+                presentation: .init(author: "Alex Example", repository: "payments-api", draftBadge: "Merged"))
+        ]),
     ])
 
     static func details(for card: RemoteCard) -> RemoteMRDetails {
@@ -172,9 +179,11 @@ import MergeTetherRemote
     var board: RemoteBoard?
     let delay: Bool
     let failed: Bool
+    let slowResponses: Bool
     private var staleDetails: Bool
-    init(board: RemoteBoard?, delay: Bool, failed: Bool, staleDetails: Bool = false) {
+    init(board: RemoteBoard?, delay: Bool, failed: Bool, staleDetails: Bool = false, slowResponses: Bool = false) {
         self.board = board; self.delay = delay; self.failed = failed; self.staleDetails = staleDetails
+        self.slowResponses = slowResponses
     }
     func start() { onStatus?(!failed, failed) }
     func stop() { onStatus?(false, false) }
@@ -183,7 +192,8 @@ import MergeTetherRemote
             if delay { try await Task.sleep(for: .seconds(8)) }
             if message.refresh == true { try await Task.sleep(for: .milliseconds(300)); board.updatedAt = .now; self.board = board }
             await onMessage?(.init(type: .snapshot, challenge: message.challenge, board: board,
-                capabilities: [RemoteMessage.detailsCapability, RemoteMessage.detailContextCapability]))
+                capabilities: [RemoteMessage.detailsCapability, RemoteMessage.detailContextCapability]
+                    + (slowResponses ? [RemoteMessage.detailPreviewCapability] : [])))
         } else if message.type == .detailRequest, let request = message.detailRequest, let board,
                   request.matches(board), let card = board.cards.first(where: { $0.id == request.cardID }) {
             if staleDetails {
@@ -191,10 +201,17 @@ import MergeTetherRemote
                 await onMessage?(.init(type: .details, detailResponse: .init(request: request, status: .changed)))
                 return
             }
+            if slowResponses { try await Task.sleep(for: .seconds(15)) }
             await onMessage?(.init(type: .details, detailResponse: .init(request: request, status: .current,
                 details: RemoteDemo.details(for: card))))
         } else if let command = message.command {
-            if command.actionID == "markReady", var board {
+            if slowResponses { try await Task.sleep(for: .seconds(15)) }
+            if command.isCompletionAcknowledgement, var board {
+                for lane in board.lanes.indices {
+                    board.lanes[lane].cards.removeAll { $0.id == command.cardID }
+                }
+                self.board = board
+            } else if command.actionID == "markReady", var board {
                 for lane in board.lanes.indices {
                     for index in board.lanes[lane].cards.indices where board.lanes[lane].cards[index].id == command.cardID {
                         board.lanes[lane].cards[index].title = board.lanes[lane].cards[index].title.replacingOccurrences(of: "Draft: ", with: "")

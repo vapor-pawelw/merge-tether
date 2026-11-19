@@ -53,6 +53,7 @@ private struct CommandCenterMRDetailContent: View {
     @State private var isResettingReview = false
     @State private var discussionStore = MRDiscussionStore()
     @State private var publicationSession = DraftPublicationSession()
+    @State private var footerPublication: [GitLabDraftNote]? = nil
     @State private var detailsExpanded = false
     @State private var feedbackExpanded = false
     @State private var historyExpanded = false
@@ -60,6 +61,7 @@ private struct CommandCenterMRDetailContent: View {
     @State private var historyNavigationID = UUID()
     @State private var pendingInitialAnchor: Anchor?
     @State private var initialDiscussionAttemptFinished = false
+    @State private var isManuallyRefreshingDiscussions = false
     @State private var feedbackDecisionConfirmation: FeedbackDecisionConfirmation?
     @State private var isUpdatingFeedbackDecision = false
     @State private var feedbackDecisionError: String?
@@ -184,6 +186,17 @@ private struct CommandCenterMRDetailContent: View {
                 if finishedState == nil { selectedPublicationActions }
             }
             .safeAreaInset(edge: .top, spacing: 0) {
+                if discussionTarget != nil, !initialDiscussionAttemptFinished || isManuallyRefreshingDiscussions {
+                    HStack(spacing: 8) {
+                        ProgressView().controlSize(.small).accessibilityHidden(true)
+                        Text(.MRDiscussions.mrDiscussionsLoading)
+                    }
+                    .font(.callout).foregroundStyle(.secondary)
+                    .padding(.horizontal, 16).padding(.vertical, 6)
+                    .frame(maxWidth: .infinity, minHeight: 40)
+                    .background(.bar)
+                    .overlay(alignment: .bottom) { Divider() }
+                }
                 if let target = originTarget, let change = monitor.commentOrigins.pending(for: target) {
                     CommentOriginResumeBanner(change: change, onUndo: {
                         do { try monitor.commentOrigins.undo(change.id) } catch { originChangeFailed = true }
@@ -544,26 +557,26 @@ private struct CommandCenterMRDetailContent: View {
     }
 
     private var confirmationControls: some View {
-        let publishSelected: (([GitLabDraftNote]) -> Void)? = discussionTarget.map { target in
-            { selected in Task { await monitor.attention.publishDrafts(selected, for: target) } }
+        let publishSelected: (([GitLabDraftNote]) async -> Void)? = discussionTarget.map { target in
+            { selected in await monitor.attention.publishDrafts(selected, for: target) }
         }
         return ConfirmationQueueRow(item: item, state: monitor.attention.confirmationStates[item.id],
-            onPublish: { Task { await monitor.attention.publishDrafts(of: item.id) } },
-            onApprove: { Task { await monitor.attention.approve(item.id) } },
+            onPublish: { await monitor.attention.publishDrafts(of: item.id) },
+            onApprove: { await monitor.attention.approve(item.id) },
             onOpen: { NSWorkspace.shared.open(item.url) }, initiallyExpanded: initialSection == .drafts,
             showDraftPreview: false, showHeader: false, selection: $publicationSession.selection,
             onPublishSelected: publishSelected, requiresSelection: true,
             onDelete: { draft in Task { await monitor.attention.deleteDraft(draft, from: item.id) } },
-            onFinishCommentReview: { Task { await monitor.attention.finishCommentReview(item) } },
+            onFinishCommentReview: { _ = await monitor.attention.finishCommentReview(item) },
             additionalActions: EmptyView())
     }
 
     @ViewBuilder
     private var selectedPublicationActions: some View {
-        let selected = publicationSession.selection.selectedDrafts(from: item.drafts)
+        let selected = footerPublication ?? publicationSession.selection.selectedDrafts(from: item.drafts)
         if !selected.isEmpty, let target = discussionTarget {
             let state = monitor.attention.confirmationStates[item.id]
-            let busy = state?.isBusy == true
+            let busy = footerPublication != nil || state?.isBusy == true
             VStack(alignment: .leading, spacing: 8) {
                 DraftPublicationWarnings(drafts: selected)
                 HStack(spacing: 12) {
@@ -572,13 +585,21 @@ private struct CommandCenterMRDetailContent: View {
                     }
                     .buttonStyle(.borderless)
                     Spacer()
-                    if busy { ProgressView().controlSize(.small) }
-                    Button { Task { await monitor.attention.publishDrafts(selected, for: target) } } label: {
-                        // Only publishing every draft lets the paused workflow continue.
-                        if selected.count == item.drafts.count {
-                            MRActionLabel(title: .CommentReview.commentReviewPublishSelected(selected.count), cta: .publishComments)
-                        } else {
-                            Text(.DraftPublication.draftPublicationPublishSelected(selected.count))
+                    Button {
+                        guard !busy else { return }
+                        footerPublication = selected
+                        Task {
+                            defer { footerPublication = nil }
+                            await monitor.attention.publishDrafts(selected, for: target)
+                        }
+                    } label: {
+                        MRActionProgressLabel(working: footerPublication != nil) {
+                            // Only publishing every draft lets the paused workflow continue.
+                            if selected.count == item.drafts.count {
+                                MRActionLabel(title: .CommentReview.commentReviewPublishSelected(selected.count), cta: .publishComments)
+                            } else {
+                                Text(.DraftPublication.draftPublicationPublishSelected(selected.count))
+                            }
                         }
                     }
                     .mrActionHelp(.publishComments, detail: .CommentReview.commentReviewPublishSelectedHelp)
@@ -711,8 +732,7 @@ private struct CommandCenterMRDetailContent: View {
                     if discussionTarget == expectedTarget { reviewStartError = monitor.assistantJobActionError }
                 }
             } label: {
-                MRActionLabel(title: isStartingReview ? .CommandCenter.commandCenterReviewStarting : .CommandCenter.commandCenterReviewRun,
-                              cta: .runReview)
+                MRActionLabel(title: .CommandCenter.commandCenterReviewRun, cta: .runReview, working: isStartingReview)
             }
             .controlSize(.small)
             .disabled(isStartingReview || !monitor.canRunReview(for: item))
@@ -918,7 +938,7 @@ private struct CommandCenterMRDetailContent: View {
             onDelete: { draft in Task { await monitor.attention.deleteDraft(draft, from: item.id) } },
             title: .DraftPublication.draftPublicationThreads, codeContext: discussionCodeContext, onSetOrigin: originAction,
             extraContexts: current ? discussionStore.extraContexts : .empty,
-            currentUserIdentity: current ? discussionStore.currentUser : nil, onRefresh: refreshDiscussions)
+            currentUserIdentity: current ? discussionStore.currentUser : nil, onRefresh: { refreshDiscussions(visible: true) })
     }
 
     private var originTarget: MRAutomationScope.Target? {
@@ -948,13 +968,17 @@ private struct CommandCenterMRDetailContent: View {
             currentUsername: monitor.glab.currentUsername, isLoading: current && discussionStore.isLoading,
             hasError: current && discussionStore.hasError, hasLoaded: current && discussionStore.hasLoaded,
             codeContext: discussionCodeContext, onSetOrigin: originAction, extraContexts: current ? discussionStore.extraContexts : .empty,
-            currentUserIdentity: current ? discussionStore.currentUser : nil, onRefresh: refreshDiscussions)
+            currentUserIdentity: current ? discussionStore.currentUser : nil, onRefresh: { refreshDiscussions(visible: true) })
         }
     }
 
-    private func refreshDiscussions() {
+    private func refreshDiscussions(visible: Bool = false) {
         guard let target = discussionTarget else { discussionStore.clear(); return }
-        Task { await loadDiscussions(target) }
+        if visible { isManuallyRefreshingDiscussions = true }
+        Task {
+            defer { if visible { isManuallyRefreshingDiscussions = false } }
+            await loadDiscussions(target)
+        }
     }
 
     private func loadDiscussions(_ target: MRDiscussionTarget) async {

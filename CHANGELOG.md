@@ -10,6 +10,8 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 
 - In Mac draft review, show the surrounding code with the commented line highlighted and put the original discussion above reply drafts.
 
+- On iPhone and Mac, show a slim loading banner in MR Details and put action progress on the button that started the work.
+- Mark merged and closed updates as **Seen** directly from the iPhone Inbox. Acknowledging an update uses the Mac's saved receipt without polling GitLab.
 - Within each activity group, put MRs ready for manual merge immediately below pinned cards. Cards needing attention come before MRs eligible for automatic merge.
 
 - Show saved iPhone MR details immediately and refresh them in the background. Manual refresh shows progress while keeping the details visible.
