@@ -49,9 +49,10 @@ import MergeTetherRemote
                         reviewers: [GitLabMergeRequestReviewer]?, discussions: [GitLabMergeRequestDiscussion]?,
                         origins: [Int: MRDiscussionSnapshot.Origin] = [:], drafts: [GitLabDraftNote], username: String,
                         authorKinds: [Int: AuthorFeedbackPolicy.AccountKind] = [:],
-                        extraContexts: AICommentProvenanceStore.ExtraContexts = .empty) -> RemoteMRDetails {
+                        extraContexts: AICommentProvenanceStore.ExtraContexts = .empty, checkedAt: Date = .now) -> RemoteMRDetails {
         var progress = progress
-        let history = MergeRequestReviewHistory(reviewers: reviewers ?? [], discussions: discussions ?? [], authorID: request.author.id)
+        let history = if reviewers == nil, discussions == nil, let saved = progress?.reviewHistory { saved }
+            else { MergeRequestReviewHistory(reviewers: reviewers ?? [], discussions: discussions ?? [], authorID: request.author.id) }
         progress?.reviewHistory = history
         let approvals = RemoteApprovalDetails(progress: progress, reviewers: request.reviewers ?? [], viewerUsername: username,
             isOwnMergeRequest: request.author.username.lowercased() == username.lowercased(),
@@ -100,7 +101,7 @@ import MergeTetherRemote
                     draftCount: summary.draftCount, draftIDs: thread.drafts.compactMap(\.id))
             }
         }
-        var details = RemoteMRDetails(checkedAt: .now, metadata: metadata, description: request.description, approvals: approvals, threads: threads,
+        var details = RemoteMRDetails(checkedAt: checkedAt, metadata: metadata, description: request.description, approvals: approvals, threads: threads,
             branches: .init(source: request.sourceBranch, target: request.targetBranch))
         details.discussionFingerprint = discussions.flatMap { ReviewVerdict.fingerprint($0) }
         let draftContexts = Dictionary(drafts.compactMap { draft in

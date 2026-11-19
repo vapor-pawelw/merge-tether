@@ -270,8 +270,10 @@ public struct RemoteDetailResponse: Codable, Equatable, Sendable {
     public let request: RemoteDetailRequest
     public var status: Status
     public var details: RemoteMRDetails?
-    public init(request: RemoteDetailRequest, status: Status, details: RemoteMRDetails? = nil) {
-        self.request = request; self.status = status; self.details = details
+    /// A display-only response while the same request's GitLab read continues.
+    public let isPreview: Bool?
+    public init(request: RemoteDetailRequest, status: Status, details: RemoteMRDetails? = nil, isPreview: Bool? = nil) {
+        self.request = request; self.status = status; self.details = details; self.isPreview = isPreview
     }
 
     /// The encrypted message budget includes its envelope and JSON escaping, not just body characters.
@@ -404,6 +406,7 @@ public struct RemoteDetailResponse: Codable, Equatable, Sendable {
     public private(set) var openRequest: RemoteDetailRequest?
     public private(set) var response: RemoteDetailResponse?
     public private(set) var failure: RemoteDetailResponse.Status?
+    private var displayCache: [String: RemoteDetailResponse] = [:]
     private var deadline = Date.distantPast
     private var originRevisions: [String: UInt64] = [:]
     private var authorKindRevisions: [String: UInt64] = [:]
@@ -420,8 +423,15 @@ public struct RemoteDetailResponse: Codable, Equatable, Sendable {
     }
     public func receive(_ value: RemoteDetailResponse, board: RemoteBoard) {
         guard value.request == pending, value.request.matches(board) else { return }
+        if value.isPreview == true {
+            if value.status == .current, value.details != nil { cacheForDisplay(value) }
+            return
+        }
         pending = nil
-        if value.status == .current, value.details != nil { response = value; failure = nil }
+        if value.status == .current, value.details != nil {
+            response = value; failure = nil
+            cacheForDisplay(value)
+        }
         else {
             openRequest = nil
             failure = value.status
@@ -429,12 +439,16 @@ public struct RemoteDetailResponse: Codable, Equatable, Sendable {
         }
     }
     public func update(board: RemoteBoard) {
+        if displayCache.values.contains(where: { $0.request.hostSession != board.hostSession || $0.request.account != board.account }) {
+            displayCache.removeAll()
+        }
         if let openRequest, !openRequest.matches(board) { self.openRequest = nil }
         if let response, !response.request.matches(board) { self.response = nil }
         if let pending, !pending.matches(board) { self.pending = nil; failure = .changed }
     }
     public func disconnect() { pending = nil; openRequest = nil; originRevisions = [:]; authorKindRevisions = [:] }
     public func prepareToReload() { disconnect(); failure = nil }
+    public func reset() { prepareToReload(); response = nil; displayCache.removeAll() }
 
     @discardableResult public func receiveOrigins(_ update: RemoteDetailOrigins, board: RemoteBoard) -> Bool {
         let authors = update.authorKinds ?? []
@@ -475,6 +489,7 @@ public struct RemoteDetailResponse: Codable, Equatable, Sendable {
         }
         response.details = details
         self.response = response
+        cacheForDisplay(response)
         return true
     }
     public func isLoading(now: Date = Date()) -> Bool { pending != nil && now < deadline }
@@ -482,5 +497,49 @@ public struct RemoteDetailResponse: Codable, Equatable, Sendable {
     public func details(for card: RemoteCard, board: RemoteBoard) -> RemoteMRDetails? {
         guard let response, card.id == response.request.cardID, response.request.matches(board), board.cards.contains(card) else { return nil }
         return response.details
+    }
+
+    public func displayedDetails(for card: RemoteCard, board: RemoteBoard) -> RemoteMRDetails? {
+        guard let cached = displayCache[card.id],
+              cached.request.hostSession == board.hostSession, cached.request.account == board.account,
+              var details = cached.details else { return nil }
+        if (details.draftContexts != nil || details.originResume != nil), !cached.request.matches(board) {
+            details.draftContexts = nil
+            details.originResume = nil
+        }
+        return details
+    }
+
+    private func cacheForDisplay(_ value: RemoteDetailResponse) {
+        guard var details = value.details else { return }
+        let id = value.request.cardID
+        if let cached = displayCache[id], let previous = cached.details,
+           cached.request.hostSession == value.request.hostSession, cached.request.account == value.request.account {
+            let sameContent = (value.request.contentDigest ?? value.request.cardDigest)
+                == (cached.request.contentDigest ?? cached.request.cardDigest)
+            // Keep richer sections through a partial host preview or an optional GitLab read failure.
+            if value.isPreview == true, cached.isPreview != true, sameContent, details.checkedAt <= previous.checkedAt {
+                return
+            }
+            if details.threads == nil {
+                details.threads = previous.threads
+                details.discussionFingerprint = previous.discussionFingerprint
+                if sameContent { details.draftContexts = details.draftContexts ?? previous.draftContexts }
+            }
+            details.usage = details.usage ?? previous.usage
+            if var approvals = details.approvals {
+                approvals.progress = approvals.progress ?? previous.approvals?.progress
+                approvals.rules = approvals.rules ?? previous.approvals?.rules
+                details.approvals = approvals
+            } else { details.approvals = previous.approvals }
+        }
+        var cached = value
+        cached.details = details
+        displayCache[id] = cached
+        if displayCache.count > 16, let oldest = displayCache.keys.filter({ $0 != id }).min(by: {
+            (displayCache[$0]?.details?.checkedAt ?? .distantPast) < (displayCache[$1]?.details?.checkedAt ?? .distantPast)
+        }) {
+            displayCache.removeValue(forKey: oldest)
+        }
     }
 }

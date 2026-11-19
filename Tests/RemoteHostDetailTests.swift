@@ -4,6 +4,42 @@ import MergeTetherRemote
 @testable import GitLabTodos
 
 @MainActor @Suite struct RemoteHostDetailTests {
+    @Test func phoneReceivesLocalDetailsBeforeGitLabAndCachedDiscussionsOnReopen() async throws {
+        let f = try Fixture(); defer { f.clean() }
+        f.detailNotes = [.init(id: "1", body: "Previously loaded comment")]
+        f.heldReads = [1, 2]
+        let board = try await f.board(detailPreviews: true)
+        let handler = try #require(f.gitlab.handler)
+        f.gitlab.handler = { call in
+            if call.endpoint.contains("/discussions?") {
+                return InMemoryGitLab.output(#"[{"id":"local","notes":[{"id":2,"body":"Already read on the Mac","system":false}]}]"#)
+            }
+            return try await handler(call)
+        }
+        _ = try await f.monitor.glab.fetchMergeRequestDiscussions(projectID: 1, iid: 2, host: "gitlab.example.test")
+        let card = try #require(board.cards.first { $0.id == "mr:1:2" })
+        let first = try RemoteDetailRequest(card: card, board: board)
+        await f.transport.onMessage?(.init(type: .detailRequest, detailRequest: first))
+        try await f.waitForRead(1)
+        let local = f.transport.messages.last { $0.detailResponse?.request == first }?.detailResponse
+        #expect(local?.details?.description == "Context")
+        #expect(local?.details?.threads?.first?.notes.first?.body == "Already read on the Mac")
+        #expect(local?.isPreview == true)
+        f.gitlab.write("release-1")
+        await f.host.detailTask?.value
+        #expect(f.transport.messages.last?.detailResponse?.details?.description == "Read 1")
+        #expect(f.transport.messages.last?.detailResponse?.isPreview != true)
+
+        f.date += 1
+        let reopened = try RemoteDetailRequest(card: card, board: board)
+        await f.transport.onMessage?(.init(type: .detailRequest, detailRequest: reopened))
+        try await f.waitForRead(2)
+        let cached = f.transport.messages.last { $0.detailResponse?.request == reopened }?.detailResponse
+        #expect(cached?.details?.threads?.first?.notes.first?.body == "Previously loaded comment")
+        f.gitlab.write("release-2")
+        await f.host.detailTask?.value
+    }
+
     @Test(arguments: ["current", "otherHead", "otherAccount"])
     func phoneApprovalsShowOpenFindingsOnlyForTheApprovedHeadAndAccount(_ scenario: String) async throws {
         let f = try Fixture(); defer { f.clean() }
@@ -498,11 +534,12 @@ import MergeTetherRemote
             monitor = TodoMonitorService(settings: settings, glab: glab)
             pair = try .generate(origin: #require(URL(string: "https://relay.example.test")), access: String(repeating: "a", count: 43))
         }
-        func board(originUpdates: Bool = false, markReady: Bool = false) async throws -> RemoteBoard {
+        func board(originUpdates: Bool = false, markReady: Bool = false, detailPreviews: Bool = false) async throws -> RemoteBoard {
             await host.startupLoadTask?.value
             let capabilities = [RemoteMessage.detailsCapability]
                 + (originUpdates ? [RemoteMessage.detailOriginsCapability] : [])
                 + (markReady ? [RemoteMessage.markReadyCapability] : [])
+                + (detailPreviews ? [RemoteMessage.detailPreviewCapability] : [])
             await transport.onMessage?(.init(type: .hello, challenge: UUID(), capabilities: capabilities))
             // Both background dependency reads can change the card digest after the catalog is idle.
             let deadline = ContinuousClock.now + .seconds(3)

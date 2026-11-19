@@ -233,6 +233,7 @@ public struct RemoteMessage: Codable, Sendable {
     public static let commentReviewCapability = "comment-review-v1"
     public static let detailsCapability = "mr-details-v1"
     public static let detailContextCapability = "detail-context-v1"
+    public static let detailPreviewCapability = "detail-preview-v1"
     public static let detailOriginsCapability = "detail-origins-v1"
     public static let mrControlsCapability = "mr-controls-v1"
     public static let commentOriginCapability = "comment-origin-v1"

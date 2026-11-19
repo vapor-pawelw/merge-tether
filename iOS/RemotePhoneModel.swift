@@ -20,8 +20,10 @@ enum RemotePhoneConnectionStatus { case unpaired, connecting, connected, offline
     let detailState = RemoteDetailState()
     private(set) var supportsDetails = false
     private(set) var supportsDetailContext = false
+    private(set) var supportsDetailPreviews = false
     private(set) var supportsOriginUpdates = false
     private(set) var isSynchronizingDetails = false
+    private(set) var isManuallyRefreshingContent = false
     private var viewedCardID: String?
     private var needsDetailReload = false
     private var detailRecoveryAttempts = 0
@@ -101,7 +103,7 @@ enum RemotePhoneConnectionStatus { case unpaired, connecting, connected, offline
             error = true; return false
         }
         do { try savePairing(pairing) } catch { self.error = true; return false }
-        disconnect(); self.pairing = pairing; state = RemotePhoneState(); paired = true; error = false
+        disconnect(); detailState.reset(); self.pairing = pairing; state = RemotePhoneState(); paired = true; error = false
         recovery = nil; shouldRecoverCommand = false; recoveryUnavailable = false; relayMismatch = false
         bindResultAcknowledgement()
         pairingCandidate = nil; pairingRevision = UUID(); connect()
@@ -129,7 +131,8 @@ enum RemotePhoneConnectionStatus { case unpaired, connecting, connected, offline
                 if !connected {
                     self.connectionRevision = UUID(); self.cancelApproval(); self.state.disconnected()
                     self.detailState.disconnect(); self.supportsDetails = false; self.supportsOriginUpdates = false
-                    self.supportsDetailContext = false; self.isSynchronizingDetails = false
+                    self.supportsDetailContext = false; self.supportsDetailPreviews = false
+                    self.isSynchronizingDetails = false; self.isManuallyRefreshingContent = false
                     self.contentRefresh?.cancel(); self.contentRefresh = nil
                     self.shouldRecoverCommand = self.recovery != nil
                     self.receiptChallenge = nil; self.receiptRevision = nil
@@ -170,6 +173,10 @@ enum RemotePhoneConnectionStatus { case unpaired, connecting, connected, offline
                     }
                     guard let response = message.detailResponse else { return }
                     guard response.request == self.detailState.pending else { return }
+                    if response.isPreview == true {
+                        if self.supportsDetailPreviews { self.detailState.receive(response, board: board) }
+                        return
+                    }
                     if response.status == .changed, self.detailRecoveryAttempts < 2 {
                         self.detailRecoveryAttempts += 1
                         self.detailState.prepareToReload()
@@ -187,6 +194,7 @@ enum RemotePhoneConnectionStatus { case unpaired, connecting, connected, offline
                 if accepted, message.type == .snapshot, self.state.isConnected(now: self.now()) {
                     self.supportsDetails = message.capabilities?.contains(RemoteMessage.detailsCapability) == true
                     self.supportsDetailContext = self.supportsDetails && message.capabilities?.contains(RemoteMessage.detailContextCapability) == true
+                    self.supportsDetailPreviews = self.supportsDetails && message.capabilities?.contains(RemoteMessage.detailPreviewCapability) == true
                     self.supportsOriginUpdates = self.supportsDetails && message.capabilities?.contains(RemoteMessage.detailOriginsCapability) == true
                     if let board = self.state.board { self.detailState.update(board: board) }
                     if self.viewedCardID != nil, self.detailState.failure == .changed { self.isSynchronizingDetails = true }
@@ -209,7 +217,8 @@ enum RemotePhoneConnectionStatus { case unpaired, connecting, connected, offline
         let old = connection; connection = nil; connectionRevision = UUID()
         old?.stop(); cancelApproval(); state.disconnected(); connectingUntil = .distantPast
         detailState.disconnect(); supportsDetails = false; supportsOriginUpdates = false
-        supportsDetailContext = false; isSynchronizingDetails = false
+        supportsDetailContext = false; supportsDetailPreviews = false
+        isSynchronizingDetails = false; isManuallyRefreshingContent = false
         contentRefresh?.cancel(); contentRefresh = nil
         shouldRecoverCommand = recovery != nil; receiptChallenge = nil; receiptRevision = nil
     }
@@ -220,7 +229,7 @@ enum RemotePhoneConnectionStatus { case unpaired, connecting, connected, offline
         do { try await connection.send(.init(type: .hello, challenge: challenge,
             capabilities: [RemoteMessage.commentReviewCapability, RemoteMessage.mergeActionsCapability, RemoteMessage.detailsCapability,
                            RemoteMessage.detailOriginsCapability, RemoteMessage.mrControlsCapability,
-                           RemoteMessage.commentOriginCapability, RemoteMessage.markReadyCapability],
+                           RemoteMessage.commentOriginCapability, RemoteMessage.markReadyCapability, RemoteMessage.detailPreviewCapability],
             refresh: fromGitLab)) }
         catch {
             guard !Task.isCancelled, self.connection === connection, self.state === requestState else { return }
@@ -231,6 +240,7 @@ enum RemotePhoneConnectionStatus { case unpaired, connecting, connected, offline
     }
     func refreshContent() async {
         if let contentRefresh { await contentRefresh.value; return }
+        isManuallyRefreshingContent = true
         let task = Task { @MainActor [weak self] in
             guard let self else { return }
             self.detailRecoveryAttempts = 0
@@ -248,7 +258,7 @@ enum RemotePhoneConnectionStatus { case unpaired, connecting, connected, offline
         }
         contentRefresh = task
         await task.value
-        if !task.isCancelled { contentRefresh = nil }
+        if !task.isCancelled { contentRefresh = nil; isManuallyRefreshingContent = false }
     }
 
     private func refreshAfterAction(_ command: RemoteCommand?) async {
@@ -270,7 +280,7 @@ enum RemotePhoneConnectionStatus { case unpaired, connecting, connected, offline
         guard state.board?.cards.contains(where: { $0.id == card.id }) == true else { return }
         if viewedCardID != card.id { detailRecoveryAttempts = 0 }
         viewedCardID = card.id
-        if state.pending != nil || state.isRefreshing(now: now()) {
+        if state.pending != nil || (state.isRefreshing(now: now()) && (needsDetailReload || isManuallyRefreshingContent)) {
             needsDetailReload = true; isSynchronizingDetails = true; return
         }
         guard supportsDetails, state.isConnected(now: now()), let board = state.board, let connection,

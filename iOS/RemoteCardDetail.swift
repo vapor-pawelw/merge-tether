@@ -13,20 +13,13 @@ struct RemoteCardDetail: View {
     @State private var confirmationCard: RemoteCard?
     @State private var approvalID: UUID?
     @State private var confirmationAccount = ""
-    /// The last details shown for this card, kept on screen while a re-read is in flight so sections do not vanish.
-    @State private var retainedDetails: RemoteMRDetails?
     @Environment(\.dismiss) private var dismiss
     private var boardCard: RemoteCard? { model.state.board?.cards.first { $0.id == original.id } }
     private var current: RemoteCard { boardCard ?? original }
-    /// Matching a response hashes the card, so it is evaluated once per body rather than per use or timer tick.
-    private var loadedDetails: RemoteMRDetails? {
-        guard let board = model.state.board, let card = boardCard else { return nil }
-        return model.detailState.details(for: card, board: board)
-    }
     private func headerCard(_ details: RemoteMRDetails?) -> RemoteCard {
         var card = current
         if let approvals = details?.approvals {
-            card.approvals = approvals.progress
+            card.approvals = approvals.progress ?? card.approvals
             card.presentation?.approvalPeople = approvals.people
             card.presentation?.viewerApprovalID = approvals.viewerApprovalID
         }
@@ -41,9 +34,14 @@ struct RemoteCardDetail: View {
               supportsDetails: model.supportsDetails)
     }
     var body: some View {
-        let fresh = loadedDetails
-        let rereading = (model.detailState.pending != nil || model.isSynchronizingDetails) && boardCard != nil
-        let shown = fresh ?? (rereading ? retainedDetails : nil)
+        let shown = model.state.board.flatMap { board in
+            model.detailState.displayedDetails(for: current, board: board)
+        }
+        let confirmed = model.state.board.flatMap { board in
+            boardCard.flatMap { model.detailState.details(for: $0, board: board) }
+        }
+        let hasConfirmedDiscussions = confirmed?.threads != nil && confirmed?.discussionFingerprint == shown?.discussionFingerprint
+            && confirmed?.originResume == shown?.originResume
         NavigationStack {
             ScrollViewReader { proxy in
                 ScrollView(showsIndicators: false) {
@@ -52,7 +50,7 @@ struct RemoteCardDetail: View {
                         VStack(alignment: .leading, spacing: 10) {
                             RemoteCardView(card: headerCard(shown), expanded: true, branches: shown?.branches)
                                 .id(RemoteCardCTA.Destination.overview)
-                            if current.id.hasPrefix("mr:") { detailReadStatus(fresh) }
+                            if current.id.hasPrefix("mr:") { detailReadStatus(shown) }
                         }
                         if current.primaryCTA?.destination == .setup {
                             Text(.Remote.remoteSetupOnMac).foregroundStyle(.secondary).id(RemoteCardCTA.Destination.setup)
@@ -73,7 +71,7 @@ struct RemoteCardDetail: View {
                         if current.id.hasPrefix("mr:") {
                             if let details = shown {
                                 RemoteMRDetailContent(details: details, card: current,
-                                    onCommentOrigin: current.actions.contains { $0.kind == .setCommentOrigin } ? { request in
+                                    onCommentOrigin: hasConfirmedDiscussions && current.actions.contains { $0.kind == .setCommentOrigin } ? { request in
                                         Task { await model.setCommentOrigin(request, card: current) }
                                     } : nil)
                             }
@@ -109,9 +107,6 @@ struct RemoteCardDetail: View {
                     guard current.id.hasPrefix("mr:") else { return }
                     await model.requestDetails(card: current)
                 }
-                .onChange(of: fresh) { _, value in if let value { retainedDetails = value } }
-                .onChange(of: detailIdentity.session) { _, _ in retainedDetails = nil }
-                .onChange(of: detailIdentity.account) { _, _ in retainedDetails = nil }
                 .toolbar {
                     ToolbarItem(placement: .topBarLeading) {
                         Button { dismiss() } label: { Image(systemName: "xmark") }
@@ -276,8 +271,9 @@ struct RemoteCardDetail: View {
                     Label(.RemoteDetail.remoteDetailCached, systemImage: "wifi.slash").foregroundStyle(.secondary)
                 } else if !model.supportsDetails {
                     Text(.RemoteDetail.remoteDetailUpdateMac).foregroundStyle(.secondary)
-                } else {
-                    if model.isSynchronizingDetails || model.detailState.isLoading(now: context.date) {
+                } else if loadedDetails == nil {
+                    if !model.supportsDetailPreviews, !model.isManuallyRefreshingContent,
+                       model.isSynchronizingDetails || model.detailState.isLoading(now: context.date) {
                         ProgressView(.RemoteDetail.remoteDetailLoading)
                     }
                     if !model.isSynchronizingDetails, model.detailState.failure != nil || model.detailState.hasTimedOut(now: context.date) {
@@ -309,7 +305,7 @@ private struct RemoteDetailRefreshButton: View {
     @State private var now = Date()
 
     var body: some View {
-        let loading = model.isSynchronizingDetails || model.detailState.isLoading(now: now)
+        let loading = model.isManuallyRefreshingContent
         Button {
             guard card != nil else { return }
             Task { await model.refreshContent() }

@@ -6,6 +6,8 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 
 ## Unreleased
 
+- Show saved iPhone MR details immediately and refresh them in the background. Manual refresh shows progress while keeping the details visible.
+
 - Show when verified feedback is waiting for a reviewer whose re-review is already pending, even if GitLab still reports requested changes. Reuse the current feedback assessment for re-review and offer a retry or a link to the outstanding comment.
 
 - Use **Default**, **On**, and **Off** for MR automation, comment publication, auto-approval, and auto-merge on Mac. The lightning panel remembers the choices saved under **On**.

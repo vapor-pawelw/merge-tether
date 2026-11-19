@@ -22,6 +22,27 @@ final class GlabService {
     @ObservationIgnored private var feedbackAccountCacheRevision: UInt64?
     @ObservationIgnored private var feedbackAccountCache: [Int: AuthorFeedbackPolicy.AccountKind] = [:]
     @ObservationIgnored private var localAutomationAuthors: [String: Set<Int>] = [:]
+    private struct DiscussionKey: Hashable { let projectID: Int; let iid: Int }
+    @ObservationIgnored private var recentDiscussions: [DiscussionKey: (readAt: Date, discussions: [GitLabMergeRequestDiscussion])] = [:]
+
+    func cachedDiscussions(projectID: Int, iid: Int) -> [GitLabMergeRequestDiscussion]? {
+        recentDiscussions[DiscussionKey(projectID: projectID, iid: iid)]?.discussions
+    }
+
+    func rememberDiscussions(_ discussions: [GitLabMergeRequestDiscussion], projectID: Int, iid: Int, readAt: Date) {
+        let key = DiscussionKey(projectID: projectID, iid: iid)
+        if let previous = recentDiscussions[key], previous.readAt > readAt { return }
+        // Cap retained discussion bodies independently of the live API response.
+        if discussions.reduce(0, { $0 + $1.notes.count }) > 1_000 ||
+            discussions.reduce(0, { size, thread in size + thread.notes.reduce(0) { $0 + ($1.body?.utf8.count ?? 0) } }) > 512_000 {
+            recentDiscussions.removeValue(forKey: key)
+            return
+        }
+        recentDiscussions[key] = (readAt, discussions)
+        if recentDiscussions.count > 16, let oldest = recentDiscussions.min(by: { $0.value.readAt < $1.value.readAt })?.key {
+            recentDiscussions.removeValue(forKey: oldest)
+        }
+    }
 
     func updateLocalAutomationAuthors(_ ids: Set<Int>, host: String, username: String) {
         guard !host.isEmpty, !username.isEmpty else { return }
@@ -101,7 +122,9 @@ final class GlabService {
     }
 
     /// Path to the resolved `glab` executable. Set by `OnboardingDetector` / `recheck()`.
-    var glabPath: URL?
+    var glabPath: URL? {
+        didSet { if glabPath != oldValue { recentDiscussions.removeAll() } }
+    }
 
     /// Username on the default host, set only when that host is authenticated.
     var currentUsername: String? {
@@ -114,7 +137,9 @@ final class GlabService {
     }
 
     /// A round-trip through another account must not revive earlier session data.
-    private(set) var accountRevision: UInt64 = 0
+    private(set) var accountRevision: UInt64 = 0 {
+        didSet { recentDiscussions.removeAll() }
+    }
 
     /// All hosts glab reports as logged in.
     var authedHosts: [AuthedHost] = []

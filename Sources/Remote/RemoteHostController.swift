@@ -39,6 +39,7 @@ extension RemoteConnection: RemoteHostTransport {}
     private var phoneSupportsCommentReview = false
     private var phoneSupportsMergeActions = false
     private var phoneSupportsDetails = false
+    private var phoneSupportsDetailPreviews = false
     private var phoneSupportsOriginUpdates = false
     private var phoneSupportsMRControls = false
     private var phoneSupportsCommentOrigins = false
@@ -52,6 +53,7 @@ extension RemoteConnection: RemoteHostTransport {}
     private let detailReader: DetailReader
     private var activeDetailRequest: RemoteDetailRequest?
     private var lastDetailRead = Date.distantPast
+    @ObservationIgnored private var recentDetails: [String: (digest: String, details: RemoteMRDetails)] = [:]
     @ObservationIgnored private var resolutionPreviews: [String: ManualDiscussionResolution.Prepared] = [:]
 
     init(monitor: TodoMonitorService,
@@ -117,6 +119,7 @@ extension RemoteConnection: RemoteHostTransport {}
             let pair = try RemotePairing.generate(origin: configured, access: invitation.trimmingCharacters(in: .whitespacesAndNewlines), now: now())
             try savePairing(pair)
             connection?.stop(); connection = nil; resetConnectionSession()
+            recentDetails.removeAll()
             pairing = pair; relayMismatch = false; activatePairing(pair)
         } catch { failed = true }
     }
@@ -127,6 +130,7 @@ extension RemoteConnection: RemoteHostTransport {}
         authorKindObserver = nil
         startupGeneration = UUID(); startupLoadTask?.cancel()
         connection?.stop(); connection = nil; pairing = nil; connected = false
+        recentDetails.removeAll()
         resetConnectionSession()
         do { try removePairing(); failed = false } catch { failed = true }
     }
@@ -140,6 +144,7 @@ extension RemoteConnection: RemoteHostTransport {}
         phoneSupportsCommentReview = false
         phoneSupportsMergeActions = false
         phoneSupportsDetails = false
+        phoneSupportsDetailPreviews = false
         phoneSupportsOriginUpdates = false
         phoneSupportsMRControls = false
         phoneSupportsCommentOrigins = false
@@ -203,6 +208,7 @@ extension RemoteConnection: RemoteHostTransport {}
             phoneSupportsCommentReview = message.capabilities?.contains(RemoteMessage.commentReviewCapability) == true
             phoneSupportsMergeActions = message.capabilities?.contains(RemoteMessage.mergeActionsCapability) == true
             phoneSupportsDetails = message.capabilities?.contains(RemoteMessage.detailsCapability) == true
+            phoneSupportsDetailPreviews = phoneSupportsDetails && message.capabilities?.contains(RemoteMessage.detailPreviewCapability) == true
             phoneSupportsMRControls = message.capabilities?.contains(RemoteMessage.mrControlsCapability) == true
             phoneSupportsMarkReady = message.capabilities?.contains(RemoteMessage.markReadyCapability) == true
             phoneSupportsCommentOrigins = phoneSupportsDetails && message.capabilities?.contains(RemoteMessage.commentOriginCapability) == true
@@ -225,7 +231,7 @@ extension RemoteConnection: RemoteHostTransport {}
             if !fresh { board.partial = true }
             do { try await active.send(.init(type: .snapshot, challenge: challenge, board: board,
                 capabilities: [RemoteMessage.detailsCapability, RemoteMessage.detailContextCapability, RemoteMessage.detailOriginsCapability, RemoteMessage.mrControlsCapability,
-                               RemoteMessage.commentOriginCapability, RemoteMessage.markReadyCapability])) }
+                               RemoteMessage.commentOriginCapability, RemoteMessage.markReadyCapability, RemoteMessage.detailPreviewCapability])) }
             catch { failed = true; try? await active.send(.init(type: .unavailable)) }
         case .receipt:
             guard let command = message.command, let challenge = message.challenge, let pairing else { return }
@@ -282,12 +288,14 @@ extension RemoteConnection: RemoteHostTransport {}
         guard request.matches(board), let pairingSession = pairing?.sessionID,
               let row = rows.first(where: { "mr:\($0.id.projectID):\($0.id.iid)" == request.cardID }),
               let source = row.displayRequest,
-              board.cards.first(where: { $0.id == request.cardID })?.contextRevision == RemoteBoardAdapter.contextRevision(source) else {
+              let card = board.cards.first(where: { $0.id == request.cardID }),
+              card.contextRevision == RemoteBoardAdapter.contextRevision(source) else {
             Task { try? await active.send(.init(type: .details, detailResponse: .init(request: request, status: .changed))) }
             return
         }
         clearOriginSubscription()
-        let delay = max(0, 1 - now().timeIntervalSince(lastDetailRead))
+        let nextRead = lastDetailRead.addingTimeInterval(1)
+        let digest = card.detailContextDigest
         detailTask?.cancel(); activeDetailRequest = request
         let revision = monitor.glab.accountRevision
         let subscription = phoneSupportsOriginUpdates
@@ -300,6 +308,17 @@ extension RemoteConnection: RemoteHostTransport {}
             }
             let response: RemoteDetailResponse
             do {
+                if phoneSupportsDetailPreviews, let username = monitor.glab.currentUsername {
+                    let preview = await detailPreview(request, source: source, row: row, username: username,
+                        digest: digest, checkedAt: board.updatedAt ?? now())
+                    guard !Task.isCancelled, phoneSupportsDetails, connection === active,
+                          self.pairing?.sessionID == pairingSession, monitor.glab.accountRevision == revision,
+                          activeDetailRequest == request else { return }
+                    if phoneSupportsDetailPreviews, request.matches(snapshot()) {
+                        try? await active.send(.init(type: .details, detailResponse: preview))
+                    }
+                }
+                let delay = nextRead.timeIntervalSince(now())
                 if delay > 0 { try await Task.sleep(for: .seconds(delay)) }
                 guard !Task.isCancelled, phoneSupportsDetails, connection === active,
                       self.pairing?.sessionID == pairingSession, monitor.glab.accountRevision == revision,
@@ -318,6 +337,12 @@ extension RemoteConnection: RemoteHostTransport {}
                   monitor.glab.accountRevision == revision, activeDetailRequest == request else { return }
             var checked = bounded
             if !request.matches(snapshot()) { checked = .init(request: request, status: .changed) }
+            if checked.status == .current, let digest, let details = checked.details {
+                recentDetails[request.cardID] = (digest, details)
+                if recentDetails.count > 16, let oldest = recentDetails.min(by: { $0.value.details.checkedAt < $1.value.details.checkedAt })?.key {
+                    recentDetails.removeValue(forKey: oldest)
+                }
+            }
             do {
                 try await active.send(.init(type: .details, detailResponse: checked))
                 guard !Task.isCancelled, phoneSupportsDetails, connection === active,
@@ -332,6 +357,23 @@ extension RemoteConnection: RemoteHostTransport {}
                 }
             } catch {}
         }
+    }
+
+    private func detailPreview(_ request: RemoteDetailRequest, source: GitLabMergeRequest, row: MergeRequestBoardSnapshot.Row,
+                               username: String, digest: String?, checkedAt: Date) async -> RemoteDetailResponse {
+        if let cached = recentDetails[request.cardID], cached.digest == digest {
+            let response = RemoteDetailResponse(request: request, status: .current, details: cached.details, isPreview: true)
+            return await Task.detached(priority: .userInitiated) { response.bounded() }.value
+        }
+        let discussions = monitor.glab.cachedDiscussions(projectID: source.projectID, iid: source.iid)
+        let item = row.evidenceMatchesCatalogContext ? row.item : row.displayItem
+        var details = await Task.detached(priority: .userInitiated) {
+            RemoteMRDetailLoader.project(request: source, progress: item.approvalProgress, rules: nil, reviewers: nil,
+                discussions: discussions, drafts: item.drafts, username: username, checkedAt: checkedAt)
+        }.value
+        RemoteMRDetailSupplement.append(to: &details, row: row, monitor: monitor, usage: nil)
+        let response = RemoteDetailResponse(request: request, status: .current, details: details, isPreview: true)
+        return await Task.detached(priority: .userInitiated) { response.bounded() }.value
     }
 
     private func clearOriginSubscription() {
@@ -405,6 +447,7 @@ extension RemoteConnection: RemoteHostTransport {}
         let currentAccount = "\(monitor.glab.currentUsername ?? "")@\(monitor.glab.resolvedHost ?? "")"
         if account != currentAccount || accountRevision != monitor.glab.accountRevision {
             clearOriginSubscription()
+            recentDetails.removeAll()
             account = currentAccount; accountRevision = monitor.glab.accountRevision; hostSession = UUID()
             resolutionPreviews.removeAll()
         }

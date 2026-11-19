@@ -44,9 +44,10 @@ import MergeTetherRemote
     func manualRefreshWaitsForTheBoardAndOpenDetailsAndCoalescesGestures(_ detailsOpen: Bool) async throws {
         let f = try PhoneFixture(), model = f.model
         var board = f.board; board.lanes[0].cards[0].id = "mr:1:2"
-        let capabilities = [RemoteMessage.detailsCapability, RemoteMessage.detailContextCapability]
+        let capabilities = [RemoteMessage.detailsCapability, RemoteMessage.detailContextCapability, RemoteMessage.detailPreviewCapability]
         model.connect(); await model.refresh(); await f.reply(board: board, capabilities: capabilities)
         let transport = f.transports[0]
+        #expect(transport.sent.first?.capabilities?.contains(RemoteMessage.detailPreviewCapability) == true)
         if detailsOpen {
             await model.requestDetails(card: board.cards[0])
             let request = try #require(transport.sent.last?.detailRequest)
@@ -59,15 +60,23 @@ import MergeTetherRemote
         let deadline = ContinuousClock.now + .seconds(2)
         while transport.sent.filter({ $0.type == .hello }).count < 2, ContinuousClock.now < deadline { await Task.yield() }
         #expect(!firstFinished && !secondFinished)
+        #expect(model.isManuallyRefreshingContent)
+        if detailsOpen { #expect(model.detailState.displayedDetails(for: board.cards[0], board: board) != nil) }
         await f.reply(board: board, capabilities: capabilities)
         if detailsOpen {
             let request = try #require(transport.sent.last?.detailRequest)
             #expect(request.contentDigest != nil)
             #expect(!firstFinished && !secondFinished)
             await transport.onMessage?(.init(type: .details, detailResponse: .init(request: request,
+                status: .current, details: .init(checkedAt: f.date, description: "From the Mac"), isPreview: true)))
+            #expect(model.detailState.pending == request)
+            #expect(model.isManuallyRefreshingContent)
+            await transport.onMessage?(.init(type: .details, detailResponse: .init(request: request,
                 status: .current, details: .init(checkedAt: f.date, description: "Refreshed"))))
+            #expect(model.detailState.displayedDetails(for: board.cards[0], board: board)?.description == "Refreshed")
         }
         await first.value; await second.value
+        #expect(!model.isManuallyRefreshingContent)
         #expect(transport.sent.filter { $0.type == .hello }.count == 2)
         #expect(transport.sent.filter { $0.type == .detailRequest }.count == (detailsOpen ? 2 : 0))
         #expect(!model.isSynchronizingDetails)

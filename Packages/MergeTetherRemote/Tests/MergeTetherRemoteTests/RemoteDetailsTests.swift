@@ -3,6 +3,48 @@ import Testing
 @testable import MergeTetherRemote
 
 @Suite struct RemoteDetailsTests {
+    @MainActor @Test func previewsKeepTheReadPendingAndPreserveCachedDiscussionsThroughFailures() throws {
+        var board = board()
+        let card = board.cards[0], state = RemoteDetailState()
+        let request = try #require(state.begin(card: card, board: board, now: date))
+        let preview = RemoteDetailResponse(request: request, status: .current,
+            details: .init(checkedAt: date, description: "On the Mac"), isPreview: true)
+        state.receive(try JSONDecoder().decode(RemoteDetailResponse.self, from: JSONEncoder().encode(preview)), board: board)
+        #expect(state.pending == request)
+        #expect(state.details(for: card, board: board) == nil)
+        #expect(state.displayedDetails(for: card, board: board)?.description == "On the Mac")
+
+        let threads = [RemoteDetailThread(id: "thread", state: .open, notes: [.init(id: "1", body: "Cached comment")])]
+        state.receive(.init(request: request, status: .current, details: .init(checkedAt: date, threads: threads)), board: board)
+        state.disconnect()
+        board.lanes[0].cards[0].contextRevision = "updated"
+        state.update(board: board)
+        let updated = board.cards[0]
+        let refresh = try #require(state.begin(card: updated, board: board, now: date, force: true))
+        #expect(state.displayedDetails(for: updated, board: board)?.threads == threads)
+        state.receive(.init(request: refresh, status: .current, details: .init(checkedAt: date, description: "New description"),
+            isPreview: true), board: board)
+        state.receive(.init(request: refresh, status: .unavailable), board: board)
+        #expect(state.details(for: updated, board: board) == nil)
+        #expect(state.displayedDetails(for: updated, board: board)?.description == "New description")
+        #expect(state.displayedDetails(for: updated, board: board)?.threads == threads)
+
+        var partial = board
+        partial.partial = true
+        partial.lanes = []
+        state.update(board: partial)
+        #expect(state.displayedDetails(for: updated, board: partial)?.threads == threads)
+
+        for changeAccount in [true, false] {
+            var other = board
+            if changeAccount { other.account = "another@host" }
+            else { other.hostSession = UUID() }
+            state.update(board: other)
+            #expect(state.displayedDetails(for: updated, board: other) == nil)
+        }
+        #expect(state.displayedDetails(for: updated, board: board) == nil)
+    }
+
     @Test(arguments: [RemoteApprovalPerson.Status.approved, .previouslyApproved, .commented, .assigned])
     func onlyApprovalEvidenceMarksTheViewerAndPlacesThemFirst(_ status: RemoteApprovalPerson.Status) throws {
         let other = RemoteApprovalPerson(id: 8, name: "Other", username: "other", status: .approved)
