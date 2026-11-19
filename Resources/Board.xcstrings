@@ -195,28 +195,6 @@
         "pl": { "stringUnit": { "state": "translated", "value": "Aktualizacje" } }
       }
     },
-    "board.tab.board": {
-      "extractionState": "manual",
-      "localizations": {
-        "en": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "Board"
-          }
-        }
-      }
-    },
-    "board.tab.activity": {
-      "extractionState": "manual",
-      "localizations": {
-        "en": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "Activity"
-          }
-        }
-      }
-    },
     "board.lane.own": {
       "extractionState": "manual",
       "localizations": {

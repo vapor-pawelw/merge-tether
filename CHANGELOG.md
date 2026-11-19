@@ -6,6 +6,8 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 
 ## Unreleased
 
+- Move the Mac Activity view from the board toolbar to **Window → Automation Activity** for troubleshooting across merge requests.
+
 - Confirm app-wide automation changes from the Mac toolbar, with the option to skip future confirmations.
 
 - Highlight who still needs to resolve addressed feedback on Mac and iPhone MR cards and in Details. Hover or tap a person's name for their avatar and GitLab username.
