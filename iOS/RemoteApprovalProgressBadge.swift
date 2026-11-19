@@ -71,8 +71,7 @@ struct RemoteApprovalProgressBadge: View {
                 .fixedSize()
                 .padding(.horizontal, 6).padding(.vertical, 3)
                 .background(.secondary.opacity(0.08), in: RoundedRectangle(cornerRadius: 8))
-                .frame(minHeight: 44)
-                .contentShape(Rectangle())
+                .contentShape(.interaction, ApprovalBadgeHitArea())
             }
             .buttonStyle(.plain)
             .accessibilityLabel(explanation)
@@ -99,5 +98,14 @@ struct RemoteApprovalProgressBadge: View {
                 .accessibilityIdentifier("remote.approvals.people")
             }
         }
+    }
+}
+
+private struct ApprovalBadgeHitArea: Shape {
+    func path(in rect: CGRect) -> Path {
+        Rectangle().path(in: CGRect(
+            origin: rect.origin,
+            size: CGSize(width: rect.width, height: max(44, rect.height))
+        ))
     }
 }
