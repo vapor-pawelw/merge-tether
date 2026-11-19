@@ -17,6 +17,7 @@ struct MergeActionsView<StatusTrailer: View, AdditionalActions: View>: View {
     var coveredBlockers: Set<MergeRequestBlocker> = []
     /// Cards hide actions that would only show disabled while MergeTether is working.
     var hidesBlockedActions = false
+    var highlightedSubmission: MergeSubmissionState? = nil
     var statusTrailer: () -> StatusTrailer
     var additionalActions: (Bool) -> AdditionalActions
     @Environment(\.openURL) private var openURL
@@ -40,7 +41,8 @@ struct MergeActionsView<StatusTrailer: View, AdditionalActions: View>: View {
          showsReplySources: Bool = true,
          showsRecoveryActions: Bool = true,
          textFont: Font = .subheadline, coveredBlockers: Set<MergeRequestBlocker> = [],
-         hidesBlockedActions: Bool = false, @ViewBuilder statusTrailer: @escaping () -> StatusTrailer,
+         hidesBlockedActions: Bool = false, highlightedSubmission: MergeSubmissionState? = nil,
+         @ViewBuilder statusTrailer: @escaping () -> StatusTrailer,
          @ViewBuilder additionalActions: @escaping (Bool) -> AdditionalActions) {
         self.item = item; self.monitor = monitor
         self.evidenceMatchesCatalogContext = evidenceMatchesCatalogContext
@@ -49,6 +51,7 @@ struct MergeActionsView<StatusTrailer: View, AdditionalActions: View>: View {
         self.showsRecoveryActions = showsRecoveryActions
         self.textFont = textFont
         self.coveredBlockers = coveredBlockers; self.hidesBlockedActions = hidesBlockedActions
+        self.highlightedSubmission = highlightedSubmission
         self.statusTrailer = statusTrailer; self.additionalActions = additionalActions
     }
 
@@ -71,6 +74,9 @@ struct MergeActionsView<StatusTrailer: View, AdditionalActions: View>: View {
     }
     private var state: MergeSubmissionState { result ?? status?.submissionState ?? .none }
     private var displayedState: MergeSubmissionState { result ?? status?.displayedSubmissionState ?? .none }
+    private var submissionTitle: LocalizedStringResource? {
+        displayedState == highlightedSubmission ? nil : displayedState.title
+    }
     private var hasDiscussionBlock: Bool { status?.blockers.contains(.discussions) == true || item.mergeRequest?.blockingDiscussionsResolved == false }
     private var shownBlocker: ManualMergeBlocker? {
         if case .prerequisite(let reason) = blocker, coveredBlockers.contains(reason) { return nil }
@@ -168,7 +174,7 @@ struct MergeActionsView<StatusTrailer: View, AdditionalActions: View>: View {
 
     private var hasStatusText: Bool {
         status?.request.mergeTrainConflict != nil || status?.request.mergeTrainEvidenceUnavailable == true
-            || displayedState.title != nil || shownBlocker != nil || showsDiscussionLine
+            || submissionTitle != nil || (displayedState.title == nil && shownBlocker != nil) || showsDiscussionLine
             || (showsReplySources && feedbackRecovery?.replySourceIDs.isEmpty == false) || resolutionMessage != nil || result == .changed
     }
 
@@ -180,9 +186,9 @@ struct MergeActionsView<StatusTrailer: View, AdditionalActions: View>: View {
             }.foregroundStyle(.orange)
         } else if status?.request.mergeTrainEvidenceUnavailable == true {
             statusLine(.MergeActions.mergeActionsTrainEvidenceUnavailable, symbol: "exclamationmark.triangle", emphasized: true)
-        } else if let title = displayedState.title {
+        } else if let title = submissionTitle {
             statusLine(title, symbol: displayedState.isDelegated ? "clock" : "exclamationmark.circle", emphasized: !displayedState.isDelegated)
-        } else if let blocker = shownBlocker {
+        } else if displayedState.title == nil, let blocker = shownBlocker {
             statusLine(blocker.title, symbol: "lock")
             if feedbackRecovery?.recoveryAction == .verifyFeedback, feedbackRecheckRoute == .review {
                 statusLine(.MergeActions.mergeActionsFeedbackChecksPaused, symbol: "pause.circle")

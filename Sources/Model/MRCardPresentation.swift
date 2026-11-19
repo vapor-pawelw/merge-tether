@@ -16,6 +16,26 @@ enum MergeRequestFinishedState: String {
 @MainActor
 struct MRCardPresentation {
     struct Chip { let title: LocalizedStringResource; let symbol: String }
+    enum MergeStage: Equatable {
+        case merging, inTrain, queued
+
+        var title: LocalizedStringResource {
+            switch self {
+            case .merging: .AutomationProgress.progressMerging
+            case .inTrain: .MergeActions.mergeActionsInTrain
+            case .queued: .MergeActions.mergeActionsQueued
+            }
+        }
+
+        var submission: MergeSubmissionState? {
+            switch self {
+            case .merging: nil
+            case .inTrain: .inTrain
+            case .queued: .queued
+            }
+        }
+    }
+
     let row: MergeRequestBoardSnapshot.Row
     let preservedHumanAction: MRHumanAction?
     let isRefreshingAttention: Bool
@@ -36,6 +56,7 @@ struct MRCardPresentation {
     let conflictReceipts: Set<MergeConflictReceipt>
     let automaticPipelineProgress: Bool
     let automaticMergeProgress: Bool
+    let confirmedSubmission: MergeSubmissionState?
     private var item: MergeRequestAttentionMonitor.Item { row.item }
     private var finishedState: MergeRequestFinishedState? { .init(row.displayRequest) }
 
@@ -46,12 +67,19 @@ struct MRCardPresentation {
          automaticPipelineProgress: Bool = false, conflictReceipts: Set<MergeConflictReceipt> = [],
          preservedHumanAction: MRHumanAction? = nil, isRefreshingAttention: Bool = false, refreshFailures: [RefreshFailure] = [],
          showsReadProgress: Bool = true, automaticMergeProgress: Bool = false,
-         cliHoldKind: AssistantCLIHealthIssue.Kind? = nil, assistant: AutomationAssistant = .codex) {
+         cliHoldKind: AssistantCLIHealthIssue.Kind? = nil, assistant: AutomationAssistant = .codex,
+         mergeStatus: AuthoredMergeRequestStatus? = nil) {
         self.row = row; self.reviewingContext = reviewingContext; self.allowsRemoval = allowsRemoval
         self.preservedHumanAction = preservedHumanAction; self.isRefreshingAttention = isRefreshingAttention
         self.refreshFailures = refreshFailures
         self.showsReadProgress = showsReadProgress
         self.automaticMergeProgress = automaticMergeProgress
+        if row.evidenceMatchesCatalogContext, let request = row.displayRequest,
+           let mergeStatus, mergeStatus.matchesCurrentRequest(request) {
+            self.confirmedSubmission = mergeStatus.displayedSubmissionState
+        } else {
+            self.confirmedSubmission = nil
+        }
         self.assistant = assistant
         self.cliHoldKind = cliHoldKind
         self.assistantReady = assistantReady; self.confirmationState = confirmationState
@@ -74,6 +102,10 @@ struct MRCardPresentation {
                 assistantPreparing: ready || input.assistantChecking,
                 publicationPolicy: monitor.settings.publicationPolicy(for: $0))
         } ?? [] : []
+        let mergeStatus = monitor.authoredMergeRequests.hasSyncedCurrentCatalog && row.evidenceMatchesCatalogContext
+            ? monitor.authoredMergeRequests.requests.first {
+                $0.request.projectID == row.id.projectID && $0.request.iid == row.id.iid
+            } : nil
         self.init(row: row, reviewingContext: MRBoardProjector.reviewingContext(for: row, input: input), allowsRemoval: allowsRemoval,
             assistantReady: ready, confirmationState: monitor.attention.confirmationStates[row.id],
             automaticallyPublishedDraftIDs: automatic,
@@ -84,9 +116,25 @@ struct MRCardPresentation {
             isRefreshingAttention: MRBoardProjector.isRecheckingAttention(for: row, input: input),
             refreshFailures: MRBoardProjector.attentionRefreshFailures(for: row, input: input),
             showsReadProgress: monitor.showsRefreshProgress(for: row.id),
-            automaticMergeProgress: row.item.mergeRequest.map { monitor.authoredMergeRequests.isMerging($0) } ?? false,
+            automaticMergeProgress: row.displayRequest.map { monitor.authoredMergeRequests.isMerging($0) } ?? false,
             cliHoldKind: monitor.cliHealth.hold(for: row.latestJob?.key.assistant ?? monitor.settings.automation.assistant)?.issue.kind,
-            assistant: input.automation.assistant)
+            assistant: input.automation.assistant, mergeStatus: mergeStatus)
+    }
+
+    var mergeStage: MergeStage? {
+        guard let request = row.displayRequest, request.state == "opened", request.draft != true else { return nil }
+        if automaticMergeProgress { return .merging }
+        switch confirmedSubmission ?? (request.hasQueuedMerge ? .queued : .none) {
+        case .inTrain: return .inTrain
+        case .queued: return .queued
+        default: return nil
+        }
+    }
+
+    var mergeActivity: MRActivity? {
+        guard mergeStage == .merging, row.latestJob?.execution?.state.isActive != true,
+              progressTitle == .AutomationProgress.progressMerging else { return nil }
+        return activity
     }
 
     private var recoveryWaitsForHuman: Bool {
@@ -157,7 +205,7 @@ struct MRCardPresentation {
     }
     var waitingStatus: MRWaitingStatus? {
         // A quiet background read keeps the settled waiting list; only a shown refresh replaces it.
-        guard !busy, !working, !waitingOnCLI, !(isRefreshingAttention && showsReadProgress), !refreshFailed,
+        guard mergeStage == nil, !busy, !working, !waitingOnCLI, !(isRefreshingAttention && showsReadProgress), !refreshFailed,
               humanAction == nil, confirmationState != .failed, confirmationState != .changed else { return nil }
         return MRWaitingStatus(row: row)
     }
@@ -167,6 +215,7 @@ struct MRCardPresentation {
             return cliHoldKind == .loginRequired ? .AutomationProgress.progressPausedLogin : .AutomationProgress.progressPausedLimit
         }
         if busy || (isRefreshingAttention && showsReadProgress) { return progressTitle }
+        if let mergeStage { return mergeStage.title }
         if let waitingStatus { return waitingStatus.title }
         guard allowsRemoval else {
             return row.isDraft ? .AutomationProgress.progressOwnDraft : .AutomationProgress.progressMonitoring

@@ -86,14 +86,67 @@ struct MRProgressPresentationTests {
         if !aiChecking { #expect(model.humanAction?.kind == .blockedRun) }
     }
 
-    @Test func actualMergeProgressRemainsVisibleAndBlocksActionsDuringQuietReads() {
-        let item = MergeRequestAttentionMonitor.Item(id: .init(projectID: 1, iid: 2), title: "Example",
-            url: URL(string: "https://gitlab.example.test/group/repo/-/merge_requests/2")!)
+    @Test func actualMergeProgressRemainsVisibleAndBlocksActionsDuringQuietReads() throws {
+        let request = try mergeRequestWithAutoMerge()
+        let item = MergeRequestAttentionMonitor.Item(id: .init(projectID: 1, iid: 2), title: request.title,
+            url: request.webURL, mergeRequest: request)
         let row = MergeRequestBoardSnapshot.Row(item: item, latestJob: nil, intents: [])
         let model = MRCardPresentation(row: row, reviewingContext: ReviewingContext(row: row), allowsRemoval: false,
             assistantReady: true, showsReadProgress: false, automaticMergeProgress: true)
         #expect(model.busy && model.working && model.actionsBlocked)
         #expect(model.status == "Merging MR" && model.actionLabel == nil)
+        #expect(model.mergeStage == .merging && model.mergeActivity == model.activity)
+    }
+
+    @Test func aGitLabAutoMergeScheduleShowsAQueuedStatusWithoutASpinner() throws {
+        let request = try mergeRequestWithAutoMerge()
+        let item = MergeRequestAttentionMonitor.Item(id: .init(projectID: request.projectID, iid: request.iid),
+            title: request.title, url: request.webURL, mergeRequest: request, isAuthored: true)
+        let row = MergeRequestBoardSnapshot.Row(item: item, latestJob: nil, intents: [])
+        let model = MRCardPresentation(row: row, reviewingContext: ReviewingContext(row: row),
+            allowsRemoval: false, assistantReady: true, showsReadProgress: false)
+        #expect(model.status == "Queued for auto-merge")
+        #expect(model.mergeStage == .queued)
+        #expect(!model.working && model.activity == nil && model.humanAction == nil)
+    }
+
+    @Test(arguments: [true, false])
+    func confirmedTrainMembershipAppliesOnlyToTheMatchingRequest(_ sameContext: Bool) throws {
+        let request = try mergeRequestWithAutoMerge()
+        let observed = try mergeRequestWithAutoMerge(sourceBranch: sameContext ? "feature" : "previous")
+        let status = AuthoredMergeRequestStatus(request: observed, approvals: nil, discussionsResolved: nil,
+            projectRequiresResolvedDiscussions: nil, autoMergeEnabled: false, submissionState: .inTrain)
+        let item = MergeRequestAttentionMonitor.Item(id: .init(projectID: 1, iid: 2), title: request.title,
+            url: request.webURL, mergeRequest: request, isAuthored: true)
+        let row = MergeRequestBoardSnapshot.Row(item: item, latestJob: nil, intents: [])
+        let model = MRCardPresentation(row: row, reviewingContext: ReviewingContext(row: row),
+            allowsRemoval: false, assistantReady: true, mergeStatus: status)
+        #expect(model.mergeStage == (sameContext ? .inTrain : .queued))
+        #expect(model.status == (sameContext ? "In merge train" : "Queued for auto-merge"))
+        #expect(!model.working && model.humanAction == nil)
+    }
+
+    @Test(arguments: [MergeSubmissionState.uncertain, .changed])
+    func anUnconfirmedSubmissionDoesNotShowAQueueBanner(_ state: MergeSubmissionState) throws {
+        let request = try mergeRequestWithAutoMerge()
+        let status = AuthoredMergeRequestStatus(request: request, approvals: nil, discussionsResolved: nil,
+            projectRequiresResolvedDiscussions: nil, autoMergeEnabled: false, submissionState: state)
+        let item = MergeRequestAttentionMonitor.Item(id: .init(projectID: 1, iid: 2), title: request.title,
+            url: request.webURL, mergeRequest: request, isAuthored: true)
+        let row = MergeRequestBoardSnapshot.Row(item: item, latestJob: nil, intents: [])
+        let model = MRCardPresentation(row: row, reviewingContext: ReviewingContext(row: row),
+            allowsRemoval: false, assistantReady: true, mergeStatus: status)
+        #expect(model.mergeStage == nil)
+        #expect(model.confirmedSubmission == state)
+    }
+
+    private func mergeRequestWithAutoMerge(sourceBranch: String = "feature") throws -> GitLabMergeRequest {
+        try JSONDecoder().decode(GitLabMergeRequest.self, from: Data("""
+            {"project_id":1,"iid":2,"author":{"id":7,"username":"author","name":"Author"},
+            "title":"Example","web_url":"https://gitlab.example.test/group/repo/-/merge_requests/2",
+            "state":"opened","draft":false,"source_branch":"\(sourceBranch)","target_branch":"main","labels":[],
+            "merge_when_pipeline_succeeds":true}
+            """.utf8))
     }
 
     @Test(arguments: ["merged", "closed"], [AssistantJobExecution.State.running, .blocked])
@@ -119,8 +172,9 @@ struct MRProgressPresentationTests {
         let model = MRCardPresentation(row: row, reviewingContext: ReviewingContext(row: row),
             allowsRemoval: !item.isAuthored, assistantReady: true,
             confirmationState: jobState == .running ? .publishing : nil,
-            automaticPipelineProgress: jobState == .running)
+            automaticPipelineProgress: jobState == .running, automaticMergeProgress: true)
         #expect(!model.busy && !model.working)
+        #expect(model.mergeStage == nil)
         #expect(model.actionsBlocked)
         #expect(model.humanAction == nil && model.actionLabel == nil && model.nextStep == nil)
         #expect(model.chips.isEmpty)

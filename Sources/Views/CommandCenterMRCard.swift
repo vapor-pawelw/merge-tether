@@ -42,6 +42,8 @@ private struct CommandCenterMRCardContent: View {
     private var humanAction: MRHumanAction? { presentation.humanAction }
 
     var body: some View {
+        let mergeActivity = presentation.mergeActivity
+        let showsWorkingStatus = presentation.working && mergeActivity == nil
         VStack(alignment: .leading, spacing: 9) {
             metadataHeader
             VStack(alignment: .leading, spacing: 3) {
@@ -57,6 +59,9 @@ private struct CommandCenterMRCardContent: View {
             if finishedState != nil {
                 FinishedMergeRequestStatus(item: row.displayItem, monitor: monitor)
             } else {
+                if let stage = presentation.mergeStage {
+                    MRMergeStageBanner(stage: stage, startedAt: monitor.activityStartedAt(for: item, activity: mergeActivity))
+                }
                 if humanAction != nil {
                     // The orange icon and edge carry urgency; the sentence stays high-contrast.
                     Label { Text(verbatim: presentation.message).foregroundStyle(Color.primary) } icon: {
@@ -84,9 +89,9 @@ private struct CommandCenterMRCardContent: View {
                     .fixedSize(horizontal: false, vertical: true)
                 }
                 if let job = row.latestJob { AssistantJobPreflightNotice(jobID: job.id, monitor: monitor) }
-                if presentation.working || presentation.refreshFailed || humanAction != nil || neutralStatus != nil || (isDraft && item.isAuthored) {
+                if showsWorkingStatus || presentation.refreshFailed || humanAction != nil || neutralStatus != nil || (isDraft && item.isAuthored) {
                     HStack(spacing: 6) {
-                        if presentation.working {
+                        if showsWorkingStatus {
                             if let status = presentation.status {
                                 MRActivityStatus(status: status,
                                     startedAt: monitor.activityStartedAt(for: item, activity: presentation.activity), effect: presentation.activityEffect)
@@ -131,7 +136,7 @@ private struct CommandCenterMRCardContent: View {
                     actionsBlocked: presentation.actionsBlocked, onReviewFeedback: { openAttention(.feedback) },
                     showsExplanations: false, showsRecoveryActions: false, textFont: .callout,
                     coveredBlockers: shownRequirements?.coveredBlockers ?? [],
-                    hidesBlockedActions: presentation.working, statusTrailer: {
+                    hidesBlockedActions: presentation.working, highlightedSubmission: presentation.mergeStage?.submission, statusTrailer: {
                         // Short state chips and automation rules sit together, above the action row.
                         VStack(alignment: .leading, spacing: 5) {
                             if !chips.isEmpty {
@@ -142,7 +147,8 @@ private struct CommandCenterMRCardContent: View {
                                 }
                             }
                             MREffectivePolicySummary(row: row, monitor: monitor,
-                                excluding: [presentation.message, presentation.nextStep ?? ""], holdsOnly: true)
+                                excluding: [presentation.message, presentation.nextStep ?? "",
+                                    presentation.mergeStage.map { String(localized: $0.title) } ?? ""], holdsOnly: true)
                         }
                     }) { hasDirectMergeAction in
                     if humanAction?.action == .retryRun {
@@ -222,10 +228,8 @@ private struct CommandCenterMRCardContent: View {
         return waiting
     }
     private var neutralStatus: LocalizedStringResource? {
-        if monitor.authoredMergeRequests.requests.contains(where: {
-            $0.request.projectID == item.id.projectID && $0.request.iid == item.id.iid
-                && $0.request.sha == item.mergeRequest?.sha && $0.displayedSubmissionState != .none
-        }) { return nil }
+        if presentation.mergeStage != nil { return nil }
+        if let state = presentation.confirmedSubmission, state != .none { return nil }
         return presentation.neutralStatus
     }
 

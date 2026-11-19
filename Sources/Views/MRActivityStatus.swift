@@ -22,3 +22,37 @@ struct MRActivityStatus: View {
         }
     }
 }
+
+struct MRMergeStageBanner: View {
+    let stage: MRCardPresentation.MergeStage
+    var startedAt: Date? = nil
+
+    private var tint: Color {
+        switch stage {
+        case .merging: .green
+        case .inTrain: .indigo
+        case .queued: .blue
+        }
+    }
+
+    var body: some View {
+        Group {
+            if stage == .merging {
+                MRActivityStatus(status: String(localized: stage.title), startedAt: startedAt)
+            } else {
+                Label { Text(stage.title) } icon: {
+                    Image(systemName: stage == .inTrain ? "tram.fill" : "clock")
+                        .foregroundStyle(tint)
+                }
+            }
+        }
+        .font(.callout.weight(.semibold))
+        .foregroundStyle(Color.primary)
+        .fixedSize(horizontal: false, vertical: true)
+        .padding(.horizontal, 8)
+        .padding(.vertical, 6)
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .background(tint.opacity(0.14), in: RoundedRectangle(cornerRadius: 6))
+        .accessibilityElement(children: .combine)
+    }
+}

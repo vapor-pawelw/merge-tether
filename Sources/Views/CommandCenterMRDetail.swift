@@ -154,9 +154,10 @@ private struct CommandCenterMRDetailContent: View {
                             showsReplySources: !(showsDecisions && item.authorFeedbackStatus != nil),
                             textFont: .callout,
                             coveredBlockers: shownRequirements(presentation)?.coveredBlockers ?? [],
-                            hidesBlockedActions: presentation.working, statusTrailer: {
+                            hidesBlockedActions: presentation.working, highlightedSubmission: presentation.mergeStage?.submission, statusTrailer: {
                                 MREffectivePolicySummary(row: presentationRow, monitor: monitor,
-                                    excluding: [presentation.humanAction?.explanation ?? ""], holdsOnly: true)
+                                    excluding: [presentation.humanAction?.explanation ?? "",
+                                        presentation.mergeStage.map { String(localized: $0.title) } ?? ""], holdsOnly: true)
                             }, additionalActions: { _ in EmptyView() })
                     }
                     if finishedState == nil { supplementaryActions(citationContext: citationContext).id(Anchor.actions) }
@@ -299,7 +300,8 @@ private struct CommandCenterMRDetailContent: View {
     }
 
     private func header(_ progress: MRCardPresentation) -> some View {
-        VStack(alignment: .leading, spacing: 12) {
+        let mergeActivity = progress.mergeActivity
+        return VStack(alignment: .leading, spacing: 12) {
             HStack(spacing: 8) {
                 Text(verbatim: "!\(item.id.iid)").monospacedDigit()
                 if let finishedState { FinishedMergeRequestBadge(state: finishedState) }
@@ -333,6 +335,9 @@ private struct CommandCenterMRDetailContent: View {
             .font(.callout).foregroundStyle(.secondary)
             Text(verbatim: presentationRow.displayTitle).font(.title2.weight(.semibold))
                 .lineLimit(3).textSelection(.enabled).padding(.top, 2)
+            if let stage = progress.mergeStage {
+                MRMergeStageBanner(stage: stage, startedAt: monitor.activityStartedAt(for: item, activity: mergeActivity))
+            }
             if let request = presentationRow.displayRequest {
                 Label { Text(verbatim: request.sourceBranch + " → " + request.targetBranch) } icon: {
                     Image(systemName: "arrow.triangle.branch")
@@ -355,7 +360,8 @@ private struct CommandCenterMRDetailContent: View {
                                 }
                             }
                             .font(.callout)
-                        } else if (needsHumanAttention || !progress.working) && !(genericAttention && showsDecisions) {
+                        } else if (needsHumanAttention || !progress.working && progress.mergeStage == nil)
+                                    && !(genericAttention && showsDecisions) {
                             Label {
                                 if let status = progress.status, !progress.working {
                                     Text(verbatim: status)
@@ -364,7 +370,7 @@ private struct CommandCenterMRDetailContent: View {
                             .font(.callout.weight(needsHumanAttention ? .medium : .regular))
                             .foregroundStyle(needsHumanAttention ? .orange : .secondary)
                         }
-                        if progress.working, let status = progress.status {
+                        if progress.working, mergeActivity == nil, let status = progress.status {
                             MRActivityStatus(status: status,
                                 startedAt: monitor.activityStartedAt(for: item, activity: progress.activity), effect: progress.activityEffect)
                             .font(.callout).foregroundStyle(.secondary)
