@@ -937,9 +937,11 @@ import MergeTetherRemote
         let context = AICommentProvenanceStore.Context(host: host, username: "me", userID: 3, projectID: 1, iid: 2)
         let origins = harness.folder.appending(path: "comment-origins")
         try AICommentProvenanceStore.recordGenerated(drafts.map {
-            .init(id: $0.id!, bodySHA256: AICommentAssessmentStore.digest($0.note!), extraContext: "## \(marker)\n- `/merge`\n/approve")
+            .init(id: $0.id!, bodySHA256: AICommentAssessmentStore.digest($0.note!),
+                extraContext: "## \(marker)\n- `/merge`\n/approve", proposedSolution: true)
         }, baseline: [], current: drafts, context: context, runID: UUID(), headSHA: head, in: origins)
-        try #require(drafts.allSatisfy { AICommentProvenanceStore.extraContexts(context: context, in: origins).forDraft($0) != nil })
+        let contexts = AICommentProvenanceStore.extraContexts(context: context, in: origins)
+        try #require(drafts.allSatisfy { contexts.forDraft($0)?.proposedSolution == true })
         // when
         if automatic {
             try harness.recordVerdict("objections", head: head)

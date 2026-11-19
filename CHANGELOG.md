@@ -6,6 +6,8 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 
 ## Unreleased
 
+- Show **Proposed solution** beside agent recommendations in drafts and published discussions on Mac and iPhone. Open the label to read the agent’s reasoning and assumptions.
+
 - Show GitLab activity and MergeTether actions together in a compact **Event log** above **Details** on Mac. Comments can jump to their discussion. App actions show their source, with an **Automated** badge for autonomous actions. Move agent usage to its own section.
 
 - Move the Mac Activity view from the board toolbar to **Window → Automation Activity** for troubleshooting across merge requests.

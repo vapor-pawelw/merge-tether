@@ -327,7 +327,7 @@ private struct MRDiscussionNoteView: View {
     let threadLocation: String?
     let markdownCache: MRDiscussionMarkdownCache
     var onSetOrigin: ((AICommentOriginOverride.Classification?) -> Void)? = nil
-    var extraContext: String? = nil
+    var extraContext: AICommentProvenanceStore.ExtraContexts.Entry? = nil
 
     var body: some View {
         VStack(alignment: .leading, spacing: 7) {
@@ -347,7 +347,7 @@ private struct MRDiscussionNoteHeader: View {
     let authorKind: AuthorFeedbackPolicy.AccountKind?
     let mergeRequestURL: URL
     var onSetOrigin: ((AICommentOriginOverride.Classification?) -> Void)? = nil
-    var extraContext: String? = nil
+    var extraContext: AICommentProvenanceStore.ExtraContexts.Entry? = nil
 
     var body: some View {
         HStack(alignment: .firstTextBaseline, spacing: 8) {
@@ -358,7 +358,7 @@ private struct MRDiscussionNoteHeader: View {
                                         scope: .comment, onSelect: onSetOrigin)
             }
             Spacer(minLength: 4)
-            if let extraContext { ExtraContextButton(markdown: extraContext) }
+            if let extraContext { ExtraContextButton(context: extraContext) }
             if let posted = note.createdAt {
                 Text(verbatim: MRDiscussionTimestamp.display(posted)).font(.caption).foregroundStyle(.secondary)
                     .lineLimit(1).fixedSize().help(posted)
@@ -397,7 +397,7 @@ private struct MRDiscussionDraftView: View {
     var threadLocation: String? = nil
     var mergeRequestURL: URL? = nil
     var codeContext: MRDiscussionCodeContext? = nil
-    var extraContext: String? = nil
+    var extraContext: AICommentProvenanceStore.ExtraContexts.Entry? = nil
     var selection: Binding<DraftPublicationSelection>? = nil
     var selectionDisabled = false
     var onDelete: ((GitLabDraftNote) -> Void)? = nil
@@ -414,7 +414,7 @@ private struct MRDiscussionDraftView: View {
                     .fontWeight(.medium)
                 Text(.MRDiscussions.mrDiscussionsPrivateDraft).font(.caption.weight(.semibold)).foregroundStyle(Color.accentColor)
                 Spacer(minLength: 4)
-                if let extraContext { ExtraContextButton(markdown: extraContext) }
+                if let extraContext { ExtraContextButton(context: extraContext) }
                 if let onRegenerate, let id = draft.id, DraftPublicationSelection.canSelect(draft) {
                     Button { onRegenerate(draft) } label: { Image(systemName: "wand.and.stars") }
                         .buttonStyle(.borderless).foregroundStyle(Color.accentColor)
@@ -518,16 +518,20 @@ private struct MRDiscussionCodePreview: View {
 
 /// App-only agent explanation. It is local display data and never part of the published comment.
 private struct ExtraContextButton: View {
-    let markdown: String
+    let context: AICommentProvenanceStore.ExtraContexts.Entry
     @State private var isPresented = false
 
     var body: some View {
         Button { isPresented.toggle() } label: {
-            Label { Text(.MRDiscussions.mrDiscussionsExtraContext) } icon: { Image(systemName: "lightbulb") }
-                .font(.caption.weight(.medium))
+            if context.proposedSolution {
+                Text(.MRDiscussions.mrDiscussionsProposedSolution).font(.caption)
+            } else {
+                Label(.MRDiscussions.mrDiscussionsExtraContext, systemImage: "lightbulb")
+                    .font(.caption.weight(.medium))
+            }
         }
         .buttonStyle(.borderless)
-        .foregroundStyle(Color.accentColor)
+        .foregroundStyle(context.proposedSolution ? Color.secondary : Color.accentColor)
         .help(Text(.MRDiscussions.mrDiscussionsExtraContextHelp))
         .accessibilityHint(Text(.MRDiscussions.mrDiscussionsExtraContextHelp))
         .popover(isPresented: $isPresented, arrowEdge: .bottom) {
@@ -536,7 +540,7 @@ private struct ExtraContextButton: View {
                     Label { Text(.MRDiscussions.mrDiscussionsExtraContextHelp) } icon: { Image(systemName: "lock") }
                         .font(.caption).foregroundStyle(.secondary)
                         .fixedSize(horizontal: false, vertical: true)
-                    ExtraContextMarkdown(source: markdown).font(.callout)
+                    ExtraContextMarkdown(source: context.markdown).font(.callout)
                 }
                 .padding(16)
             }

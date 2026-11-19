@@ -229,7 +229,8 @@ struct AICommentProvenanceTests: Sendable {
     }
 
 
-    @Test func extraContextIsStoredLocallyForTheExactDraftAndFollowsItsPublishedNote() throws {
+    @Test(arguments: [false, true])
+    func extraContextIsStoredLocallyForTheExactDraftAndFollowsItsPublishedNote(_ proposedSolution: Bool) throws {
         // given
         let directory = try temporaryDirectory()
         defer { try? FileManager.default.removeItem(at: directory) }
@@ -237,13 +238,15 @@ struct AICommentProvenanceTests: Sendable {
         let markdown = "## Background\n- The parser drops `nil` here."
         // when
         try AICommentProvenanceStore.recordGenerated([
-            .init(id: 11, bodySHA256: AICommentAssessmentStore.digest(generated.note!), extraContext: "  \(markdown)\n"),
-            .init(id: 12, bodySHA256: AICommentAssessmentStore.digest(plain.note!), extraContext: " ")
+            .init(id: 11, bodySHA256: AICommentAssessmentStore.digest(generated.note!), extraContext: "  \(markdown)\n",
+                proposedSolution: proposedSolution ? true : nil),
+            .init(id: 12, bodySHA256: AICommentAssessmentStore.digest(plain.note!), extraContext: " ", proposedSolution: true)
         ], baseline: [], current: [generated, plain], context: context, runID: UUID(),
             headSHA: String(repeating: "a", count: 40), in: directory)
         // then
         let drafts = AICommentProvenanceStore.extraContexts(context: context, in: directory)
-        #expect(drafts.forDraft(generated) == markdown)
+        #expect(drafts.forDraft(generated)?.markdown == markdown)
+        #expect(drafts.forDraft(generated)?.proposedSolution == proposedSolution)
         #expect(drafts.forDraft(plain) == nil)
         #expect(drafts.forDraft(draft(11, body: "User edit")) == nil)
         let other = AICommentProvenanceStore.Context(host: context.host, username: "other", userID: 19, projectID: 1, iid: 2)
@@ -254,7 +257,7 @@ struct AICommentProvenanceTests: Sendable {
         try AICommentProvenanceStore.recordPublished(publication, after: after, in: directory)
         let snapshot = AICommentProvenanceStore.snapshot(context: context, in: directory)
         let published = AICommentProvenanceStore.extraContexts(context: context, snapshot: snapshot, in: directory)
-        #expect(published.forNote(20) == markdown)
+        #expect(published.forNote(20) == drafts.forDraft(generated))
         #expect(published.forNote(21) == nil)
 
         // A later rewrite without context removes the stale explanation.
@@ -273,32 +276,45 @@ struct AICommentProvenanceTests: Sendable {
         #expect(AICommentProvenanceStore.normalizedExtraContext(nil) == nil)
     }
 
-    @MainActor @Test func detailsShowExtraContextOnlyForTheMatchingPublishedNote() async throws {
+    @MainActor @Test(arguments: [false, true])
+    func detailsShowExtraContextOnlyForTheMatchingPublishedNote(_ edited: Bool) async throws {
         // given
         let directory = try temporaryDirectory()
         defer { try? FileManager.default.removeItem(at: directory) }
         let generated = draft(11)
         try AICommentProvenanceStore.recordGenerated([.init(id: 11, bodySHA256: AICommentAssessmentStore.digest(generated.note!),
-            extraContext: "Why this matters")], baseline: [], current: [generated], context: context, runID: UUID(),
+            extraContext: "Why this matters", proposedSolution: true)], baseline: [], current: [generated], context: context, runID: UUID(),
             headSHA: String(repeating: "a", count: 40), in: directory)
+        let assessmentDirectory = directory.appending(path: "assessments")
+        let body = edited ? "Edited reply" : "Generated reply"
+        if edited {
+            let publication = try #require(AICommentProvenanceStore.capturePublication([generated], context: context, before: [], in: directory))
+            let original = try discussions(#"[{"id":20,"body":"Generated reply","author":{"id":9,"username":"me"}}]"#)
+            try AICommentProvenanceStore.recordPublished(publication, after: original, in: directory)
+            try AICommentOriginOverrideStore.save(.init(version: 1, host: context.host, username: context.username,
+                projectID: 1, iid: 2, noteID: 20, authorID: 9, bodySHA256: AICommentAssessmentStore.digest(body),
+                classification: .human, createdAt: .now, activatesAt: .now), in: assessmentDirectory)
+        }
         let gitlab = InMemoryGitLab()
         defer { gitlab.close() }
         let glab = gitlab.service(host: context.host, username: "me")
         gitlab.handler = { call in
             if call.endpoint == "/user" { return InMemoryGitLab.output(#"{"id":9,"username":"me"}"#) }
             if call.endpoint.contains("/discussions") {
-                return InMemoryGitLab.output(#"[{"id":"thread","notes":[{"id":5,"body":"Reviewer note","author":{"id":5,"username":"reviewer"}},{"id":20,"body":"Generated reply","author":{"id":9,"username":"me"}}]}]"#)
+                return InMemoryGitLab.output(#"[{"id":"thread","notes":[{"id":5,"body":"Reviewer note","author":{"id":5,"username":"reviewer"}},{"id":20,"body":"\#(body)","author":{"id":9,"username":"me"}}]}]"#)
             }
             return try gitlab.unexpected(call)
         }
-        let store = MRDiscussionStore(assessmentDirectory: directory.appending(path: "assessments"), provenanceDirectory: directory)
+        let store = MRDiscussionStore(assessmentDirectory: assessmentDirectory, provenanceDirectory: directory)
         // when
         await store.refresh(target: .init(host: context.host, username: "me", projectID: 1, iid: 2,
             url: URL(string: "https://gitlab.example.test/g/p/-/merge_requests/2")!), glab: glab)
         // then
-        #expect(store.extraContexts.forNote(20) == "Why this matters")
+        #expect(store.extraContexts.forNote(20)?.markdown == (edited ? nil : "Why this matters"))
+        #expect(store.extraContexts.forNote(20)?.proposedSolution == (edited ? nil : true))
+        if edited { #expect(store.origins[20] == .manual(.human)) }
         #expect(store.extraContexts.forNote(5) == nil)
-        #expect(store.extraContexts.forDraft(generated) == "Why this matters")
+        #expect(store.extraContexts.forDraft(generated)?.markdown == "Why this matters")
         #expect(gitlab.requests.allSatisfy { $0.method == "GET" })
     }
 

@@ -375,6 +375,8 @@ These assessments have display purpose and separate storage. They do not satisfy
 
 Review and follow-up workers may attach optional app-only Markdown (`extraContext`) to each draft they declare in `generatedDrafts`. It is meant for the MergeTether user: simpler explanations, background on the code involved, why the comment matters and its trade-offs, so the GitLab comment can stay concise or follow the user's guidelines. Workers leave it null by default. MergeTether stores it beside the local authorship record for that exact draft ID and body, shows it from an **Extra context** button in Mac and iOS Details while the draft text is unchanged, and keeps showing it beside the comment once that draft's publication is recorded or reconciled. It is never part of a draft body, a publication request, a quick action or any other GitLab write, and it grants no permission. It is removed with the MR's other display records.
 
+Workers can set `proposedSolution` when the draft recommends a concrete solution. The existing Extra context then explains the recommendation and its assumptions, and opens from a muted **Proposed solution** label. The label follows the exact draft into its published comment through the same local record, including automatic publication.
+
 ## Automatic approval
 
 **Approve merge requests automatically** is enabled by Trusted and Max and disabled by Safe and Manual. Set **Automatically approve when** in **Settings → Automation → Profile & permissions**. Changing presets keeps your selected threshold.

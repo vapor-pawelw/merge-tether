@@ -96,7 +96,7 @@ struct AssistantJobInvocationTests {
         #expect(instructions.contains("If no incoming reviewer reply is owed, skip drafting and sealing") == authored)
         if !authored { #expect(instructions.contains("save warranted private review findings")) }
         #expect(instructions.contains("never replaces a follow-up seal"))
-        #expect(instructions.contains("as {id,bodySHA256,extraContext}"))
+        #expect(instructions.contains("as {id,bodySHA256,extraContext,proposedSolution}"))
         #expect(instructions.contains("extraContext is optional app-only Markdown"))
         #expect(instructions.contains("Do not open coding-agent desktop apps"))
         #expect(!instructions.contains("Do not open desktop apps,"))

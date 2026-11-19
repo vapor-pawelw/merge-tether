@@ -6,6 +6,7 @@ struct RemoteDraftCard: View {
     let deleteAction: RemoteAction?
     var publishAction: RemoteAction? = nil
     var extraContext: String? = nil
+    var proposedSolution = false
     var replyThread: RemoteDetailThread? = nil
     let canAct: Bool
     var runningActionID: String? = nil
@@ -79,7 +80,7 @@ struct RemoteDraftCard: View {
             RemoteMarkdownText(source: draft.body).font(.callout).lineSpacing(4)
                 .textSelection(.enabled).fixedSize(horizontal: false, vertical: true)
             if let extraContext {
-                RemoteExtraContextButton(markdown: extraContext)
+                RemoteExtraContextButton(markdown: extraContext, proposedSolution: proposedSolution)
                     .accessibilityIdentifier("remote.draft-extra-context.\(draft.id)")
             }
             ForEach(Array((draft.publicationWarnings ?? []).enumerated()), id: \.offset) { _, warning in

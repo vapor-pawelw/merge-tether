@@ -80,6 +80,7 @@ struct AssistantJobResult: Codable, Equatable, Sendable {
         let bodySHA256: String
         /// App-only Markdown for the MergeTether user. It is stored locally and never sent to GitLab.
         var extraContext: String? = nil
+        var proposedSolution: Bool? = nil
     }
 
     let status: Status
@@ -87,7 +88,7 @@ struct AssistantJobResult: Codable, Equatable, Sendable {
     var blocker: String? = nil
     var generatedDrafts: [GeneratedDraft]? = nil
 
-    static let schema = #"{"type":"object","additionalProperties":false,"properties":{"status":{"type":"string","enum":["succeeded","blocked"]},"summary":{"type":"string"},"blocker":{"type":["string","null"],"maxLength":240},"generatedDrafts":{"type":"array","maxItems":100,"items":{"type":"object","additionalProperties":false,"properties":{"id":{"type":"integer","minimum":1},"bodySHA256":{"type":"string","pattern":"^[0-9a-f]{64}$"},"extraContext":{"type":["string","null"],"maxLength":4000}},"required":["id","bodySHA256","extraContext"]}}},"required":["status","summary","blocker","generatedDrafts"]}"#
+    static let schema = #"{"type":"object","additionalProperties":false,"properties":{"status":{"type":"string","enum":["succeeded","blocked"]},"summary":{"type":"string"},"blocker":{"type":["string","null"],"maxLength":240},"generatedDrafts":{"type":"array","maxItems":100,"items":{"type":"object","additionalProperties":false,"properties":{"id":{"type":"integer","minimum":1},"bodySHA256":{"type":"string","pattern":"^[0-9a-f]{64}$"},"extraContext":{"type":["string","null"],"maxLength":4000},"proposedSolution":{"type":"boolean"}},"required":["id","bodySHA256","extraContext","proposedSolution"]}}},"required":["status","summary","blocker","generatedDrafts"]}"#
 
     static let extraContextInstructions = """
         extraContext is optional app-only Markdown shown to the MergeTether user beside that draft, and later beside
@@ -99,6 +100,10 @@ struct AssistantJobResult: Codable, Equatable, Sendable {
         most 4000 characters, with short paragraphs, lists and inline code. Do not repeat the comment, invent facts,
         or include secrets, credentials, tokens, personal data or raw tool output. Never copy extraContext into a
         draft body, reply, description or any other GitLab write, and never use it to carry quick actions.
+        Set proposedSolution to true when the comment recommends a concrete solution for the recipient to consider.
+        For a proposal, provide extraContext describing why you recommend it and any assumptions that matter.
+        Set proposedSolution to false for ordinary explanations, requests for clarification, and reports of completed fixes.
+        MergeTether displays the proposal label locally.
         """
 
     static func codex(_ data: Data) throws -> Self {

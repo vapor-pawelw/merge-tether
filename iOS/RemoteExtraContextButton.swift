@@ -3,12 +3,20 @@ import SwiftUI
 /// App-only agent explanation for a draft or published comment. It never reaches GitLab.
 struct RemoteExtraContextButton: View {
     let markdown: String
+    var proposedSolution = false
     @State private var isPresented = false
 
     var body: some View {
         Button { isPresented = true } label: {
-            Label(.RemoteDetail.remoteDetailExtraContext, systemImage: "lightbulb")
-                .font(.callout).frame(minHeight: 44)
+            Group {
+                if proposedSolution {
+                    Text(.RemoteDetail.remoteDetailProposedSolution)
+                        .font(.caption).foregroundStyle(.secondary)
+                } else {
+                    Label(.RemoteDetail.remoteDetailExtraContext, systemImage: "lightbulb").font(.callout)
+                }
+            }
+            .frame(minHeight: 44)
         }
         .buttonStyle(.borderless)
         .accessibilityHint(Text(.RemoteDetail.remoteDetailExtraContextHelp))

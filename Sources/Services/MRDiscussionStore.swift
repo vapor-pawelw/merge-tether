@@ -181,16 +181,17 @@ final class MRDiscussionStore {
             var origins: [Int: MRDiscussionSnapshot.Origin] = [:]
             for thread in result {
                 for note in thread.notes where note.system != true {
+                    let isGenerated = generated?.contains(note, discussionID: thread.id) == true
+                    if let id = note.id, !isGenerated { contexts.removeNote(id) }
                     if let id = note.id, let override = AICommentOriginOverrideStore.override(for: note, host: target.host,
                         projectID: target.projectID, iid: target.iid, username: target.username, in: directory) {
                         origins[id] = .manual(override.badge)
                         continue
                     }
-                    if let id = note.id, generated?.contains(note, discussionID: thread.id) == true {
+                    if let id = note.id, isGenerated {
                         origins[id] = .appGenerated
                         continue
                     }
-                    if let id = note.id { contexts.removeNote(id) }
                     if let declared = AICommentOriginAssessor.declaredAttribution(for: note) {
                         origins[declared.noteID] = .assessed(evidence: declared.evidence)
                         continue

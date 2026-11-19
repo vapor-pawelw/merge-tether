@@ -84,6 +84,7 @@ import MergeTetherRemote
                         }
                         var components = URLComponents(url: request.webURL, resolvingAgainstBaseURL: false)
                         components?.fragment = note.id.map { "note_\($0)" }
+                        let extraContext = extraContexts.forNote(note.id)
                         return RemoteDetailNote(id: note.id.map(String.init) ?? "unidentified/\(index)",
                             author: note.author?.person.displayName, username: note.author?.username, body: note.body ?? "",
                             location: MRDiscussionLocation(position: note.position)?.full,
@@ -96,7 +97,8 @@ import MergeTetherRemote
                                 }
                             }, avatarURL: note.author?.avatarURL,
                             originManual: note.id.flatMap { thread.origins[$0] }?.isManual == true ? true : nil,
-                            extraContext: extraContexts.forNote(note.id))
+                            extraContext: extraContext?.markdown,
+                            proposedSolution: extraContext?.proposedSolution == true ? true : nil)
                     }, reply: .init(rawValue: String(describing: summary.publishedReply)) ?? .unavailable,
                     draftCount: summary.draftCount, draftIDs: thread.drafts.compactMap(\.id))
             }
@@ -104,11 +106,15 @@ import MergeTetherRemote
         var details = RemoteMRDetails(checkedAt: checkedAt, metadata: metadata, description: request.description, approvals: approvals, threads: threads,
             branches: .init(source: request.sourceBranch, target: request.targetBranch))
         details.discussionFingerprint = discussions.flatMap { ReviewVerdict.fingerprint($0) }
-        let draftContexts = Dictionary(drafts.compactMap { draft in
-            guard let id = draft.id, id > 0, let markdown = extraContexts.forDraft(draft) else { return nil as (String, String)? }
-            return (String(id), markdown)
+        let draftContexts = Dictionary(drafts.compactMap { draft -> (Int, AICommentProvenanceStore.ExtraContexts.Entry)? in
+            guard let id = draft.id, id > 0, let context = extraContexts.forDraft(draft) else { return nil }
+            return (id, context)
         }, uniquingKeysWith: { first, _ in first })
-        details.draftContexts = draftContexts.isEmpty ? nil : draftContexts
+        if !draftContexts.isEmpty {
+            details.draftContexts = Dictionary(uniqueKeysWithValues: draftContexts.map { (String($0.key), $0.value.markdown) })
+            let proposals = draftContexts.compactMap { $0.value.proposedSolution ? $0.key : nil }.sorted()
+            details.proposedSolutionDraftIDs = proposals.isEmpty ? nil : proposals
+        }
         return details
     }
 }

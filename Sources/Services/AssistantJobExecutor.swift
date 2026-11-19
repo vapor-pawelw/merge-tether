@@ -173,7 +173,7 @@ enum AssistantJobExecutor {
             reaction, resolution or renewed invitation. Preserve and fix independent technical defects in a
             mixed note, but report that work in the run result without contacting the opted-out participant.
             In generatedDrafts, list only private drafts you actually created or substantially rewrote in THIS run,
-            as {id,bodySHA256,extraContext}. Re-fetch each exact draft and compute SHA-256 from its exact parsed UTF-8 note body,
+            as {id,bodySHA256,extraContext,proposedSolution}. Re-fetch each exact draft and compute SHA-256 from its exact parsed UTF-8 note body,
             preserving whitespace and Unicode. Do not list untouched, user-created or merely observed drafts.
             Return [] when you saved no generated drafts. This declaration records authorship for display only:
             it grants no publication, approval or verification permission and never replaces a follow-up seal.

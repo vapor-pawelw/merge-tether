@@ -154,9 +154,12 @@ public struct RemoteDetailNote: Codable, Equatable, Identifiable, Sendable {
     public var originManual: Bool?
     /// App-only Markdown from MergeTether's agent. Additive: older phones ignore it.
     public var extraContext: String?
+    /// When true, the Extra context belongs to a proposed solution.
+    public var proposedSolution: Bool?
     public init(id: String, author: String? = nil, username: String? = nil, body: String, location: String? = nil,
                 createdAt: Date? = nil, url: URL? = nil, origin: Origin? = nil, authorID: Int? = nil,
-                authorKind: AuthorKind? = nil, avatarURL: URL? = nil, originManual: Bool? = nil, extraContext: String? = nil) {
+                authorKind: AuthorKind? = nil, avatarURL: URL? = nil, originManual: Bool? = nil, extraContext: String? = nil,
+                proposedSolution: Bool? = nil) {
         self.originManual = originManual
         self.id = id; self.author = author; self.username = username; self.body = body; self.location = location
         self.createdAt = createdAt; self.url = url; self.origin = origin
@@ -164,6 +167,7 @@ public struct RemoteDetailNote: Codable, Equatable, Identifiable, Sendable {
         self.authorKind = authorKind
         self.avatarURL = avatarURL
         self.extraContext = extraContext
+        self.proposedSolution = proposedSolution
     }
 }
 
@@ -251,6 +255,8 @@ public struct RemoteMRDetails: Codable, Equatable, Sendable {
     public var originResume: RemoteOriginResume?
     /// App-only Markdown from MergeTether's agent for pending board drafts, keyed by draft ID. Additive.
     public var draftContexts: [String: String]?
+    /// Drafts whose Extra context describes a proposed solution.
+    public var proposedSolutionDraftIDs: [Int]?
     /// Additive; older hosts send none and older phones ignore it.
     public var automation: RemoteAutomationStatus?
 
@@ -344,6 +350,7 @@ public struct RemoteDetailResponse: Codable, Equatable, Sendable {
                         if note.body.count > 4_000 { thread.truncated = true }
                         note.body = text(note.body, 4_000)
                         note.extraContext = note.extraContext.map { text($0, 4_000) }
+                        if note.extraContext == nil { note.proposedSolution = nil }
                         return note
                     }
                     return thread
@@ -353,6 +360,10 @@ public struct RemoteDetailResponse: Codable, Equatable, Sendable {
                 if contexts.count > 100 { clipped = true }
                 return Dictionary(uniqueKeysWithValues: contexts.sorted { $0.key < $1.key }.prefix(100)
                     .filter { $0.key.utf8.count <= 32 }.map { ($0.key, text($0.value, 4_000)) })
+            }
+            details.proposedSolutionDraftIDs = details.proposedSolutionDraftIDs.flatMap { ids in
+                let retained = list(ids, 100).filter { details.draftContexts?[String($0)] != nil }
+                return retained.isEmpty ? nil : retained
             }
             details.activity = list(details.activity, 30).map { original in
                 var activity = original
@@ -367,11 +378,17 @@ public struct RemoteDetailResponse: Codable, Equatable, Sendable {
         result.details?.truncated = true
         while size() > RemoteCipher.maximumPayloadBytes, var details = result.details {
             // Optional explanations go first: they are shown on demand and the comments stay readable without them.
-            if details.draftContexts?.isEmpty == false { details.draftContexts = nil }
+            if details.draftContexts?.isEmpty == false {
+                details.draftContexts = nil
+                details.proposedSolutionDraftIDs = nil
+            }
             else if details.threads?.contains(where: { $0.notes.contains { $0.extraContext != nil } }) == true {
                 details.threads = details.threads?.map { thread in
                     var thread = thread
-                    for index in thread.notes.indices { thread.notes[index].extraContext = nil }
+                    for index in thread.notes.indices {
+                        thread.notes[index].extraContext = nil
+                        thread.notes[index].proposedSolution = nil
+                    }
                     return thread
                 }
             }
@@ -514,6 +531,7 @@ public struct RemoteDetailResponse: Codable, Equatable, Sendable {
               var details = cached.details else { return nil }
         if (details.draftContexts != nil || details.originResume != nil), !cached.request.matches(board) {
             details.draftContexts = nil
+            details.proposedSolutionDraftIDs = nil
             details.originResume = nil
         }
         return details
@@ -533,7 +551,10 @@ public struct RemoteDetailResponse: Codable, Equatable, Sendable {
             if details.threads == nil {
                 details.threads = previous.threads
                 details.discussionFingerprint = previous.discussionFingerprint
-                if sameContent { details.draftContexts = details.draftContexts ?? previous.draftContexts }
+                if sameContent, details.draftContexts == nil {
+                    details.draftContexts = previous.draftContexts
+                    details.proposedSolutionDraftIDs = previous.proposedSolutionDraftIDs
+                }
             }
             details.usage = details.usage ?? previous.usage
             if var approvals = details.approvals {

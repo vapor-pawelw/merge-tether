@@ -884,6 +884,23 @@
         }
       }
     },
+    "mrDiscussions.proposedSolution": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Proposed solution"
+          }
+        },
+        "pl": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Proponowane rozwiązanie"
+          }
+        }
+      }
+    },
     "mrDiscussions.extraContextHelp": {
       "extractionState": "manual",
       "localizations": {

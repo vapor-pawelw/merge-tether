@@ -153,18 +153,23 @@ import MergeTetherRemote
         let current = GitLabDraftNote(id: 11, authorID: 4, note: "Generated draft", discussionID: "thread", position: nil)
         let edited = GitLabDraftNote(id: 12, authorID: 4, note: "Edited by the user", discussionID: "thread", position: nil)
         var contexts = AICommentProvenanceStore.ExtraContexts()
-        contexts.drafts[11] = .init(bodySHA256: AICommentAssessmentStore.digest("Generated draft"), markdown: "Draft background")
-        contexts.drafts[12] = .init(bodySHA256: AICommentAssessmentStore.digest("Generated draft"), markdown: "Stale background")
-        contexts.notes[2] = "Published background"
+        contexts.drafts[11] = .init(bodySHA256: AICommentAssessmentStore.digest("Generated draft"), markdown: "Draft background",
+            proposedSolution: true)
+        contexts.drafts[12] = .init(bodySHA256: AICommentAssessmentStore.digest("Generated draft"), markdown: "Stale background",
+            proposedSolution: true)
+        contexts.notes[2] = .init(bodySHA256: AICommentAssessmentStore.digest("Generated reply"), markdown: "Published background",
+            proposedSolution: true)
         let details = RemoteMRDetailLoader.project(request: request, progress: nil, rules: nil, reviewers: nil,
             discussions: discussions, origins: [2: .appGenerated], drafts: [current, edited], username: "owner",
             extraContexts: contexts)
         #expect(details.draftContexts == ["11": "Draft background"])
+        #expect(details.proposedSolutionDraftIDs == [11])
         let notes = try #require(details.threads?.first?.notes)
         #expect(notes[0].extraContext == nil && notes[1].extraContext == "Published background")
+        #expect(notes[0].proposedSolution == nil && notes[1].proposedSolution == true)
         let none = RemoteMRDetailLoader.project(request: request, progress: nil, rules: nil, reviewers: nil,
             discussions: discussions, drafts: [current], username: "owner")
-        #expect(none.draftContexts == nil)
+        #expect(none.draftContexts == nil && none.proposedSolutionDraftIDs == nil)
     }
 
     @Test func currentFeedbackProjectionKeepsAssessmentSeparateFromRepliesAndResolution() throws {

@@ -64,21 +64,22 @@ enum AICommentProvenanceStore {
         struct Entry: Equatable, Sendable {
             let bodySHA256: String
             let markdown: String
+            var proposedSolution = false
         }
         var drafts: [Int: Entry] = [:]
-        var notes: [Int: String] = [:]
+        var notes: [Int: Entry] = [:]
 
         static let empty = ExtraContexts()
         var isEmpty: Bool { drafts.isEmpty && notes.isEmpty }
 
         /// A draft edited after generation no longer matches the text the context explained.
-        func forDraft(_ draft: GitLabDraftNote) -> String? {
+        func forDraft(_ draft: GitLabDraftNote) -> Entry? {
             guard let id = draft.id, let entry = drafts[id], let body = draft.note,
                   AICommentAssessmentStore.digest(body) == entry.bodySHA256 else { return nil }
-            return entry.markdown
+            return entry
         }
 
-        func forNote(_ id: Int?) -> String? { id.flatMap { notes[$0] } }
+        func forNote(_ id: Int?) -> Entry? { id.flatMap { notes[$0] } }
 
         /// Only a note whose current text still matches its publication receipt keeps the context.
         mutating func removeNote(_ id: Int) { notes[id] = nil }
@@ -90,6 +91,7 @@ enum AICommentProvenanceStore {
         let draftID: Int
         let bodySHA256: String
         let markdown: String
+        var proposedSolution: Bool? = nil
     }
 
     nonisolated static let extraContextLimit = 4_000
@@ -133,7 +135,7 @@ enum AICommentProvenanceStore {
             if let markdown = normalizedExtraContext(claim.extraContext) {
                 // Display-only: a failed write never blocks the authorship receipt above.
                 try? write(ExtraContextRecord(version: 1, context: context, draftID: claim.id,
-                    bodySHA256: claim.bodySHA256, markdown: markdown), to: contextFile)
+                    bodySHA256: claim.bodySHA256, markdown: markdown, proposedSolution: claim.proposedSolution), to: contextFile)
             } else {
                 try? FileManager.default.removeItem(at: contextFile)
             }
@@ -151,12 +153,13 @@ enum AICommentProvenanceStore {
             guard let record: ExtraContextRecord = read(url, limit: 32_768), record.version == 1, record.context == context,
                   record.draftID > 0, url.deletingPathExtension().lastPathComponent == String(record.draftID),
                   let markdown = normalizedExtraContext(record.markdown) else { continue }
-            result.drafts[record.draftID] = .init(bodySHA256: record.bodySHA256, markdown: markdown)
+            result.drafts[record.draftID] = .init(bodySHA256: record.bodySHA256, markdown: markdown,
+                proposedSolution: record.proposedSolution == true)
         }
         if let snapshot, snapshot.context == context {
             for (noteID, note) in snapshot.notes {
                 guard let entry = result.drafts[note.draftID], entry.bodySHA256 == note.bodySHA256 else { continue }
-                result.notes[noteID] = entry.markdown
+                result.notes[noteID] = entry
             }
         }
         return result

@@ -54,6 +54,7 @@ struct RemoteMRDetailContent: View {
                     RemoteOriginResumeBanner(resume: resume, onCommentOrigin: onCommentOrigin)
                 }
                 if let threads = details.threads {
+                    let proposalIDs = Set(details.proposedSolutionDraftIDs ?? [])
                     if threads.isEmpty {
                         Text(details.truncated ? .RemoteDetail.remoteDetailTruncated : .RemoteDetail.remoteDetailNoDiscussions)
                             .font(.callout).foregroundStyle(.secondary)
@@ -63,7 +64,8 @@ struct RemoteMRDetailContent: View {
                         ForEach(threads) { thread in
                             RemoteDiscussionCard(thread: thread, mergeRequestURL: card.url,
                                 drafts: card.drafts.filter { thread.draftIDs?.contains($0.id) == true },
-                                draftContexts: details.draftContexts ?? [:], onCommentOrigin: onCommentOrigin)
+                                draftContexts: details.draftContexts ?? [:], proposalIDs: proposalIDs,
+                                onCommentOrigin: onCommentOrigin)
                         }
                     }
                 } else { unavailable }
@@ -223,6 +225,7 @@ private struct RemoteDiscussionCard: View {
     let mergeRequestURL: URL?
     var drafts: [RemoteDraft] = []
     var draftContexts: [String: String] = [:]
+    var proposalIDs: Set<Int> = []
     var onCommentOrigin: ((RemoteCommentOriginRequest) -> Void)? = nil
     @State private var expanded = false
     @State private var threadOriginRequest: ThreadOriginRequest?
@@ -260,7 +263,7 @@ private struct RemoteDiscussionCard: View {
             }
             ForEach(drafts) { draft in
                 RemoteDraftCard(draft: draft, deleteAction: nil, extraContext: draftContexts[String(draft.id)],
-                    canAct: false, onAction: { _ in })
+                    proposedSolution: proposalIDs.contains(draft.id), canAct: false, onAction: { _ in })
                     .padding(.top, 12)
                     .accessibilityIdentifier("remote.thread-draft.\(draft.id)")
             }
@@ -376,7 +379,7 @@ private struct RemoteDiscussionCard: View {
         RemoteMarkdownText(source: note.body).font(.callout).lineSpacing(3).textSelection(.enabled)
             .fixedSize(horizontal: false, vertical: true)
         if let extraContext = note.extraContext, !extraContext.isEmpty {
-            RemoteExtraContextButton(markdown: extraContext)
+            RemoteExtraContextButton(markdown: extraContext, proposedSolution: note.proposedSolution == true)
         }
         if let url = safeLink(note.url, to: mergeRequestURL) {
             Link(destination: url) { Label(.RemoteDetail.remoteDetailOpenComment, systemImage: "arrow.up.right.square") }
