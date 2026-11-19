@@ -6,6 +6,8 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 
 ## Unreleased
 
+- Regenerate private drafts on Mac or iPhone for one comment, one MR, or all tracked MRs. Add optional instructions, compare the proposals, and save the ones you choose.
+
 - Highlight merge train, queued auto-merge, and active merge progress below the MR title on Mac cards and in Details.
 
 - Show saved iPhone MR details immediately and refresh them in the background. Manual refresh shows progress while keeping the details visible.

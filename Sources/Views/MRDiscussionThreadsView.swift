@@ -14,6 +14,7 @@ struct MRDiscussionThreadsView: View {
     var selection: Binding<DraftPublicationSelection>? = nil
     var selectionDisabled = false
     var onDelete: ((GitLabDraftNote) -> Void)? = nil
+    var onRegenerate: ((GitLabDraftNote) -> Void)? = nil
     var title: LocalizedStringResource = .MRDiscussions.mrDiscussionsTitle
     var draftsFirst = false
     /// Present when the user may change comment origins; `nil` classification returns to automatic assessment.
@@ -61,7 +62,8 @@ struct MRDiscussionThreadsView: View {
                             .font(.caption.weight(.medium)).foregroundStyle(.secondary)
                         MRDiscussionDraftView(draft: draft, author: currentUser, markdownCache: markdownCache,
                             extraContext: extraContexts.forDraft(draft),
-                            selection: selection, selectionDisabled: selectionDisabled, onDelete: onDelete)
+                            selection: selection, selectionDisabled: selectionDisabled,
+                            onDelete: onDelete, onRegenerate: onRegenerate)
                     }
                     .padding(12)
                     .frame(maxWidth: .infinity, alignment: .leading)
@@ -93,7 +95,7 @@ struct MRDiscussionThreadsView: View {
         MRDiscussionThreadView(thread: thread, mergeRequestURL: mergeRequestURL,
                                currentUsername: currentUsername, currentUser: currentUser, markdownCache: markdownCache, initiallyExpanded: expandPendingDrafts && !thread.drafts.isEmpty,
                                selection: selection, selectionDisabled: selectionDisabled, draftsFirst: draftsFirst,
-                               extraContexts: extraContexts, onDelete: onDelete, onSetOrigin: onSetOrigin)
+                               extraContexts: extraContexts, onDelete: onDelete, onRegenerate: onRegenerate, onSetOrigin: onSetOrigin)
     }
 }
 
@@ -111,6 +113,7 @@ private struct MRDiscussionThreadView: View {
     let draftsFirst: Bool
     var extraContexts: AICommentProvenanceStore.ExtraContexts = .empty
     var onDelete: ((GitLabDraftNote) -> Void)? = nil
+    var onRegenerate: ((GitLabDraftNote) -> Void)? = nil
     var onSetOrigin: MRDiscussionOriginAction? = nil
     @State private var isExpanded = false
     @State private var appliedInitialExpansion = false
@@ -267,7 +270,7 @@ private struct MRDiscussionThreadView: View {
             MRDiscussionDraftView(draft: draft, author: currentUser, markdownCache: markdownCache,
                                   threadLocation: thread.location,
                 extraContext: extraContexts.forDraft(draft),
-                selection: selection, selectionDisabled: selectionDisabled, onDelete: onDelete)
+                selection: selection, selectionDisabled: selectionDisabled, onDelete: onDelete, onRegenerate: onRegenerate)
         }
     }
 }
@@ -381,6 +384,7 @@ private struct MRDiscussionDraftView: View {
     var selection: Binding<DraftPublicationSelection>? = nil
     var selectionDisabled = false
     var onDelete: ((GitLabDraftNote) -> Void)? = nil
+    var onRegenerate: ((GitLabDraftNote) -> Void)? = nil
 
     var body: some View {
         VStack(alignment: .leading, spacing: 7) {
@@ -394,6 +398,14 @@ private struct MRDiscussionDraftView: View {
                 Text(.MRDiscussions.mrDiscussionsPrivateDraft).font(.caption.weight(.semibold)).foregroundStyle(Color.accentColor)
                 Spacer(minLength: 4)
                 if let extraContext { ExtraContextButton(markdown: extraContext) }
+                if let onRegenerate, let id = draft.id, DraftPublicationSelection.canSelect(draft) {
+                    Button { onRegenerate(draft) } label: { Image(systemName: "wand.and.stars") }
+                        .buttonStyle(.borderless).foregroundStyle(Color.accentColor)
+                        .disabled(selectionDisabled)
+                        .help(Text(.DraftRegeneration.draftRegenerationOneAction))
+                        .accessibilityLabel(Text(.DraftRegeneration.draftRegenerationOneAction))
+                        .accessibilityIdentifier("draft-regeneration.draft.\(id)")
+                }
                 if let onDelete { DraftDeleteButton(draft: draft, disabled: selectionDisabled, onDelete: onDelete) }
             }
             .font(.callout)

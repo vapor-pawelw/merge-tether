@@ -332,6 +332,21 @@ final class MergeRequestAttentionMonitor {
     var hasCurrentOwnListing: Bool { hasOwnListing && account.map(isCurrent) == true }
     private let glab: GlabService
     private let settings: SettingsManager?
+    @ObservationIgnored private(set) lazy var draftRegeneration = DraftRegenerationCoordinator(
+        glab: glab, settings: settings, provenanceDirectory: provenanceDirectory,
+        candidates: { [weak self] in
+            guard let self else { return [] }
+            return openItems.compactMap { item in
+                guard !item.drafts.isEmpty, let request = item.mergeRequest else { return nil }
+                return .init(request: request, drafts: item.drafts)
+            }
+        }, isBusy: { [weak self] id in
+            guard let self, let account, isCurrent(account) else { return true }
+            return confirmationStates[id]?.isBusy == true || hasActiveWorker(for: id, account: account)
+        }, onUpdate: { [weak self] id, previous, replacement in
+            self?.didRegenerateDraft(previous, replacement: replacement, in: id)
+        }
+    )
     private let reportDirectory: URL?
     private let verdictDirectory: URL
     let aiAssessmentDirectory: URL
@@ -660,6 +675,7 @@ final class MergeRequestAttentionMonitor {
             return
         }
         if self.account != account {
+            draftRegeneration.cancelAndClear()
             dependencyTask?.cancel()
             dependencyPresentation = .init()
             authorFeedbackCoordinator?.cancel()
@@ -1270,6 +1286,7 @@ final class MergeRequestAttentionMonitor {
                             let duplicates = item.duplicateDraftIDs
                             item.automaticDraftIDs = Set(item.drafts.filter {
                                 $0.id.map(duplicates.contains) != true
+                                && !settings.holdsRegeneratedDraft($0, for: lifecycleTarget)
                                 && (!item.isAuthored || (settings.automation.allowFollowUpPush && $0.id.map(contextDraftIDs.contains) == true))
                                     && policy.allows($0, request: request, discussions: discussions, userID: user.id,
                                         host: host, aiNoteIDs: evidence.ai, botNoteIDs: evidence.bots)
@@ -1699,6 +1716,14 @@ final class MergeRequestAttentionMonitor {
         } == true
     }
 
+    private func didRegenerateDraft(_ previous: GitLabDraftNote, replacement: GitLabDraftNote, in id: Item.ID) {
+        previousDrafts[id] = nil
+        updateItem(id) {
+            if let index = $0.drafts.firstIndex(of: previous) { $0.drafts[index] = replacement }
+            if let draftID = replacement.id { $0.automaticDraftIDs.remove(draftID) }
+        }
+    }
+
     /// With "Publish comments without confirmation" on, publishes assistant drafts once they are
     /// unchanged across two polls, so a draft the assistant is still writing is never sent.
     private func publishSettledDrafts(
@@ -1712,7 +1737,11 @@ final class MergeRequestAttentionMonitor {
             guard agentWorks.contains(work), !hasActiveWorker(for: item.id, account: account), let request = item.mergeRequest,
                   permitsAutomaticPublication(of: request, account: account)
             else { continue }
-            let checkedDraftIDs = item.automaticDraftIDs
+            let checkedDraftIDs: Set<Int> = Set(item.drafts.compactMap { draft in
+                guard let id = draft.id, item.automaticDraftIDs.contains(id),
+                      !draftRegeneration.isHeldForAutomaticPublication(draft, in: item.id) else { return nil }
+                return id
+            })
             let policy = settings.publicationPolicy(for: commentReviewTarget(item.id, account: account))
             guard item.automaticPublicationPolicy == policy,
                   !checkedDraftIDs.isEmpty else { continue }
@@ -2273,7 +2302,7 @@ final class MergeRequestAttentionMonitor {
     private func automaticPublicationAdmission(_ draft: GitLabDraftNote, id: Item.ID, account: Account,
         request: GitLabMergeRequest, policy: AutomaticPublicationPolicy,
         generation: Int, revision: UInt64) async -> (@MainActor @Sendable () -> Bool)? {
-        guard let settings, let user else { return nil }
+        guard let settings, let user, !draftRegeneration.isHeldForAutomaticPublication(draft, in: id) else { return nil }
         let configuration = settings.automation
         let target = commentReviewTarget(id, account: account)
         guard await permitsAssistantAutomation(for: account),
@@ -2298,6 +2327,7 @@ final class MergeRequestAttentionMonitor {
                 && settings.commentReviewRevision(for: self.commentReviewTarget(id, account: account)) == reviewRevision
                 && settings.reviewParticipationPreferences.revision(host: account.host, username: account.username) == participationRevision
                 && self.permitsAutomaticPublication(of: request, account: account)
+                && !self.draftRegeneration.isHeldForAutomaticPublication(draft, in: id)
                 && !self.hasActiveWorker(for: id, account: account)
         }
         return admitted() ? admitted : nil
@@ -2751,7 +2781,7 @@ final class MergeRequestAttentionMonitor {
     }
 
     private func isConfirming(_ id: Item.ID) -> Bool {
-        confirmationStates[id]?.isBusy == true
+        confirmationStates[id]?.isBusy == true || draftRegeneration.isSaving(id)
     }
 
     private func updateItem(_ id: Item.ID, introducesAttention: Bool = true,

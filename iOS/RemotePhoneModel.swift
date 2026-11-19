@@ -22,6 +22,24 @@ enum RemotePhoneConnectionStatus { case unpaired, connecting, connected, offline
     private(set) var supportsDetailContext = false
     private(set) var supportsDetailPreviews = false
     private(set) var supportsOriginUpdates = false
+    private(set) var supportsDraftRegeneration = false
+    private(set) var draftRegenerationLoadFailed = false
+    private var draftRegenerationPreviewBatchID: UUID?
+    private var draftRegenerationPreviewToken: String?
+    private var failedDraftRegenerationPreview: RemoteDraftRegenerationPageRequest?
+    private var draftRegenerationPreview: [DraftRegenerationProposal] = []
+    @ObservationIgnored private var draftRegenerationRead: DraftRegenerationRead?
+    @ObservationIgnored private var draftRegenerationReadTimeout: Task<Void, Never>?
+    @ObservationIgnored private var draftRegenerationPoll: Task<Void, Never>?
+
+    private final class DraftRegenerationRead {
+        var request: RemoteDraftRegenerationPageRequest
+        var challenge = UUID()
+        var bytes = Data()
+        var expectedBytes: Int?
+
+        init(request: RemoteDraftRegenerationPageRequest) { self.request = request }
+    }
     private(set) var isSynchronizingDetails = false
     private(set) var isManuallyRefreshingContent = false
     private var viewedCardID: String?
@@ -103,7 +121,8 @@ enum RemotePhoneConnectionStatus { case unpaired, connecting, connected, offline
             error = true; return false
         }
         do { try savePairing(pairing) } catch { self.error = true; return false }
-        disconnect(); detailState.reset(); self.pairing = pairing; state = RemotePhoneState(); paired = true; error = false
+        disconnect(); detailState.reset(); resetDraftRegenerationConnection()
+        self.pairing = pairing; state = RemotePhoneState(); paired = true; error = false
         recovery = nil; shouldRecoverCommand = false; recoveryUnavailable = false; relayMismatch = false
         bindResultAcknowledgement()
         pairingCandidate = nil; pairingRevision = UUID(); connect()
@@ -132,6 +151,7 @@ enum RemotePhoneConnectionStatus { case unpaired, connecting, connected, offline
                     self.connectionRevision = UUID(); self.cancelApproval(); self.state.disconnected()
                     self.detailState.disconnect(); self.supportsDetails = false; self.supportsOriginUpdates = false
                     self.supportsDetailContext = false; self.supportsDetailPreviews = false
+                    self.suspendDraftRegenerationReads()
                     self.isSynchronizingDetails = false; self.isManuallyRefreshingContent = false
                     self.contentRefresh?.cancel(); self.contentRefresh = nil
                     self.shouldRecoverCommand = self.recovery != nil
@@ -161,7 +181,14 @@ enum RemotePhoneConnectionStatus { case unpaired, connecting, connected, offline
                     self.receiptChallenge = nil; self.receiptRevision = nil
                     self.state.recoverResult(result)
                     self.shouldRecoverCommand = result.status == .running
-                    if result.status != .running { await self.refreshAfterAction(self.recovery?.command) }
+                    if result.status != .running {
+                        let command = self.recovery?.command
+                        await self.refreshAfterAction(command)
+                        if command?.isDraftRegeneration == true, result.status == .completed || result.status == .partial,
+                           self.state.result?.id == result.id {
+                            self.state.acknowledgeResult()
+                        }
+                    }
                     return
                 }
                 if message.type == .details {
@@ -190,12 +217,23 @@ enum RemotePhoneConnectionStatus { case unpaired, connecting, connected, offline
                     if response.status == .current { self.detailRecoveryAttempts = 0 }
                     return
                 }
+                if message.type == .draftRegenerationPage {
+                    guard let page = message.draftRegenerationPage, let challenge = message.challenge else { return }
+                    await self.receiveDraftRegenerationPage(page, challenge: challenge)
+                    return
+                }
+                let previousBoard = self.state.board
                 let accepted = self.state.receive(message, now: self.now())
                 if accepted, message.type == .snapshot, self.state.isConnected(now: self.now()) {
                     self.supportsDetails = message.capabilities?.contains(RemoteMessage.detailsCapability) == true
                     self.supportsDetailContext = self.supportsDetails && message.capabilities?.contains(RemoteMessage.detailContextCapability) == true
                     self.supportsDetailPreviews = self.supportsDetails && message.capabilities?.contains(RemoteMessage.detailPreviewCapability) == true
                     self.supportsOriginUpdates = self.supportsDetails && message.capabilities?.contains(RemoteMessage.detailOriginsCapability) == true
+                    if self.state.board?.hostSession != previousBoard?.hostSession || self.state.board?.account != previousBoard?.account {
+                        self.resetDraftRegenerationConnection()
+                    }
+                    self.supportsDraftRegeneration = message.capabilities?.contains(RemoteMessage.draftRegenerationCapability) == true
+                    await self.synchronizeDraftRegeneration()
                     if let board = self.state.board { self.detailState.update(board: board) }
                     if self.viewedCardID != nil, self.detailState.failure == .changed { self.isSynchronizingDetails = true }
                     self.error = self.recoveryUnavailable; self.connectionFailed = false; self.connectingUntil = .distantPast
@@ -209,6 +247,10 @@ enum RemotePhoneConnectionStatus { case unpaired, connecting, connected, offline
                     let command = self.recovery?.command
                     await self.refreshAfterAction(command?.id == result.id ? command : nil)
                 }
+                if accepted, message.type == .accepted, let command = self.state.pending,
+                   command.isDraftRegeneration, command.actionID == RemoteDraftRegenerationControl.applyID {
+                    await self.refresh(fromGitLab: false)
+                }
             }
             self.connection = connection; connection.start()
         } catch { self.error = true; connectionFailed = true }
@@ -218,6 +260,7 @@ enum RemotePhoneConnectionStatus { case unpaired, connecting, connected, offline
         old?.stop(); cancelApproval(); state.disconnected(); connectingUntil = .distantPast
         detailState.disconnect(); supportsDetails = false; supportsOriginUpdates = false
         supportsDetailContext = false; supportsDetailPreviews = false
+        suspendDraftRegenerationReads()
         isSynchronizingDetails = false; isManuallyRefreshingContent = false
         contentRefresh?.cancel(); contentRefresh = nil
         shouldRecoverCommand = recovery != nil; receiptChallenge = nil; receiptRevision = nil
@@ -229,7 +272,8 @@ enum RemotePhoneConnectionStatus { case unpaired, connecting, connected, offline
         do { try await connection.send(.init(type: .hello, challenge: challenge,
             capabilities: [RemoteMessage.commentReviewCapability, RemoteMessage.mergeActionsCapability, RemoteMessage.detailsCapability,
                            RemoteMessage.detailOriginsCapability, RemoteMessage.mrControlsCapability,
-                           RemoteMessage.commentOriginCapability, RemoteMessage.markReadyCapability, RemoteMessage.detailPreviewCapability],
+                           RemoteMessage.commentOriginCapability, RemoteMessage.markReadyCapability, RemoteMessage.detailPreviewCapability,
+                           RemoteMessage.draftRegenerationCapability],
             refresh: fromGitLab)) }
         catch {
             guard !Task.isCancelled, self.connection === connection, self.state === requestState else { return }
@@ -262,11 +306,15 @@ enum RemotePhoneConnectionStatus { case unpaired, connecting, connected, offline
     }
 
     private func refreshAfterAction(_ command: RemoteCommand?) async {
+        if let command, command.isDraftRegeneration, command.actionID != RemoteDraftRegenerationControl.applyID {
+            await refresh(force: true, fromGitLab: false)
+            return
+        }
         needsDetailReload = viewedCardID != nil
         isSynchronizingDetails = viewedCardID != nil
         detailRecoveryAttempts = 0
         detailState.prepareToReload()
-        await refresh(force: true, fromGitLab: command?.isFeedbackSuggestionDecision != true)
+        await refresh(force: true, fromGitLab: command?.isFeedbackSuggestionDecision != true && command?.isDraftRegeneration != true)
     }
 
     private func refreshViewedDetails() async {
@@ -340,28 +388,259 @@ enum RemotePhoneConnectionStatus { case unpaired, connecting, connected, offline
             }
             guard board.cards.contains(where: { $0.hasSameActionContext(as: card) && $0.actions.contains(action) }) else { return }
         }
+        await submitCommand(card: card, action: action, argument: argument)
+    }
+
+    @discardableResult
+    private func submitCommand(card: RemoteCard, action: RemoteAction, argument: String?) async -> RemoteCommandResult? {
         let requestState = state, revision = connectionRevision
         guard !recoveryUnavailable, recovery == nil, let pairing, let connection,
-              let command = requestState.command(card: card, action: action, argument: argument, now: now()) else { return }
-        let pending = RemoteCommandRecovery(pairingSession: pairing.sessionID, command: command)
+              let command = requestState.command(card: card, action: action, argument: argument, now: now()) else { return nil }
+        let pending = RemoteCommandRecovery(pairingSession: pairing.sessionID, command: command.receiptIdentity)
         do { try saveRecovery(pending); recovery = pending }
         catch {
-            self.error = true; requestState.recoverResult(.init(id: command.id, status: .failed)); return
+            self.error = true
+            let result = RemoteCommandResult(id: command.id, status: .failed)
+            requestState.recoverResult(result)
+            return result
         }
         do {
             try await connection.send(.init(type: .command, command: command))
         } catch {
-            guard self.connection === connection, state === requestState, connectionRevision == revision else { return }
-            requestState.disconnected(); shouldRecoverCommand = true; return
+            guard self.connection === connection, state === requestState, connectionRevision == revision else { return nil }
+            requestState.disconnected(); shouldRecoverCommand = true
+            return requestState.result
         }
         while state === requestState && requestState.pending?.id == command.id {
-            do { try await Task.sleep(for: .seconds(1)) } catch { return }
+            do { try await Task.sleep(for: .seconds(1)) } catch { return nil }
             requestState.checkCommandTimeout(now: now())
         }
-        if state === requestState, requestState.result?.id == command.id, requestState.result?.status == .uncertain {
-            shouldRecoverCommand = true
+        guard state === requestState, let result = requestState.result, result.id == command.id else { return nil }
+        if result.status == .uncertain { shouldRecoverCommand = true }
+        return result
+    }
+    // MARK: - Draft regeneration
+
+    var draftRegenerationIsAvailable: Bool {
+        supportsDraftRegeneration && state.board?.draftRegeneration != nil
+            && !recoveryUnavailable && recovery == nil && state.canAct(now: now())
+    }
+
+    var draftRegenerationBatch: DraftRegenerationBatch? {
+        guard supportsDraftRegeneration, let control = state.board?.draftRegeneration, var batch = control.batch else { return nil }
+        if batch.id == draftRegenerationPreviewBatchID,
+           batch.phase != .ready || control.previewToken == draftRegenerationPreviewToken {
+            batch.proposals = draftRegenerationPreview
+        }
+        return batch
+    }
+
+    var draftRegenerationIsLoading: Bool {
+        guard supportsDraftRegeneration, let control = state.board?.draftRegeneration, control.proposalCount > 0,
+              let token = control.previewToken else { return false }
+        return (control.batch?.id != draftRegenerationPreviewBatchID || token != draftRegenerationPreviewToken)
+            && !draftRegenerationLoadFailed
+    }
+
+    var draftRegenerationMergeRequestCount: Int { state.board?.draftRegeneration?.mergeRequestCount ?? 0 }
+
+    func draftRegenerationCount(for scope: DraftRegenerationScope) -> Int {
+        guard supportsDraftRegeneration, let board = state.board, let control = board.draftRegeneration else { return 0 }
+        switch scope {
+        case .all: return control.count
+        case .mergeRequest(let projectID, let iid):
+            return regenerationDraftIDs(projectID: projectID, iid: iid, board: board).count
+        case .draft(let projectID, let iid, let draftID):
+            return regenerationDraftIDs(projectID: projectID, iid: iid, board: board).contains(draftID) ? 1 : 0
         }
     }
+
+    private func regenerationDraftIDs(projectID: Int, iid: Int, board: RemoteBoard) -> Set<Int> {
+        guard let card = board.cards.first(where: { $0.id == "mr:\(projectID):\(iid)" }),
+              card.head != nil else { return [] }
+        let grouped = Dictionary(grouping: card.drafts, by: \.id)
+        return Set(grouped.compactMap { id, drafts in
+            guard id > 0, drafts.count == 1,
+                  drafts.first?.body.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty == false else { return nil }
+            return id
+        })
+    }
+
+    func startDraftRegeneration(_ scope: DraftRegenerationScope, instructions: String?) async -> Bool {
+        let count = draftRegenerationCount(for: scope)
+        guard count > 0, (instructions?.utf8.count ?? 0) <= DraftRegenerationScope.maximumInstructionsBytes else { return false }
+        return await performDraftRegeneration(.start(scope: scope, count: count, instructions: instructions),
+                                              kind: .startDraftRegeneration) == .completed
+    }
+
+    func applyDraftRegeneration(_ ids: Set<String>, batchID: UUID) async -> RemoteCommandResult.Status {
+        guard let batch = draftRegenerationBatch, batch.id == batchID, batch.phase == .ready,
+              !ids.isEmpty, ids.isSubset(of: Set(batch.proposals.compactMap { $0.replacement != nil && $0.issue == nil ? $0.id : nil }))
+        else { return .changed }
+        return await performDraftRegeneration(.apply(batchID: batchID, proposalIDs: ids.sorted()), kind: .applyDraftRegeneration)
+    }
+
+    func discardDraftRegeneration(_ batchID: UUID) async -> Bool {
+        guard draftRegenerationBatch?.id == batchID else { return false }
+        return await performDraftRegeneration(.discard(batchID: batchID), kind: .discardDraftRegeneration) == .completed
+    }
+
+    private func performDraftRegeneration(_ operation: RemoteDraftRegenerationOperation,
+                                          kind: RemoteActionKind) async -> RemoteCommandResult.Status {
+        guard draftRegenerationIsAvailable, let board = state.board, let card = board.draftRegeneration?.card,
+              let action = card.actions.first(where: { $0.kind == kind }) else { return .changed }
+        guard let argument = operation.argument else { return .limit }
+        guard let result = await submitCommand(card: card, action: action, argument: argument) else { return .changed }
+        guard state.board?.account == board.account, state.board?.hostSession == board.hostSession else { return .changed }
+        if state.result?.id == result.id, result.status != .uncertain, result.status != .running {
+            state.acknowledgeResult()
+        }
+        if result.status == .completed || result.status == .partial
+            || (kind == .applyDraftRegeneration && result.status != .uncertain) {
+            let deadline = ContinuousClock.now + .seconds(6)
+            while state.board?.account == board.account, state.board?.hostSession == board.hostSession,
+                  ContinuousClock.now < deadline, state.isRefreshing(now: now()) {
+                do { try await Task.sleep(for: .milliseconds(100)) } catch { break }
+            }
+        }
+        return result.status
+    }
+
+    func reloadDraftRegeneration() async {
+        resetDraftRegenerationPreview()
+        if state.isConnected(now: now()) {
+            await refresh(fromGitLab: false)
+        } else if paired {
+            reconnect()
+        }
+    }
+
+    private func synchronizeDraftRegeneration() async {
+        guard supportsDraftRegeneration, let board = state.board, let control = board.draftRegeneration,
+              let batch = control.batch else {
+            resetDraftRegenerationPreview()
+            return
+        }
+        if batch.phase == .generating || batch.phase == .saving {
+            resetDraftRegenerationPreview(keepingBatch: batch.id)
+            if draftRegenerationPoll == nil {
+                draftRegenerationPoll = Task { [weak self] in
+                    do { try await Task.sleep(for: .seconds(3)) } catch { return }
+                    guard let self else { return }
+                    draftRegenerationPoll = nil
+                    await refresh(fromGitLab: false)
+                }
+            }
+            return
+        }
+        draftRegenerationPoll?.cancel(); draftRegenerationPoll = nil
+        guard control.proposalCount > 0 else {
+            resetDraftRegenerationPreview()
+            return
+        }
+        guard let token = control.previewToken else {
+            resetDraftRegenerationPreview()
+            draftRegenerationLoadFailed = true
+            return
+        }
+        if batch.id == draftRegenerationPreviewBatchID, token == draftRegenerationPreviewToken { return }
+        guard (token != failedDraftRegenerationPreview?.previewToken || batch.id != failedDraftRegenerationPreview?.batchID),
+              (token != draftRegenerationRead?.request.previewToken || batch.id != draftRegenerationRead?.request.batchID)
+        else { return }
+        resetDraftRegenerationPreview(keepingBatch: batch.id)
+        let request = RemoteDraftRegenerationPageRequest(hostSession: board.hostSession, account: board.account,
+            batchID: batch.id, previewToken: token, offset: 0)
+        let read = DraftRegenerationRead(request: request)
+        draftRegenerationRead = read
+        await requestDraftRegenerationPage(read)
+    }
+
+    private func requestDraftRegenerationPage(_ read: DraftRegenerationRead) async {
+        guard let connection, let active = draftRegenerationRead, active === read else { return }
+        let challenge = UUID()
+        read.challenge = challenge
+        draftRegenerationReadTimeout?.cancel()
+        draftRegenerationReadTimeout = Task { [weak self, weak read] in
+            do { try await Task.sleep(for: .seconds(10)) } catch { return }
+            guard let self, let read, draftRegenerationRead === read, read.challenge == challenge else { return }
+            failDraftRegenerationPreview()
+        }
+        do {
+            try await connection.send(.init(type: .draftRegenerationRequest, challenge: challenge,
+                draftRegenerationRequest: read.request))
+        } catch {
+            guard draftRegenerationRead === read, read.challenge == challenge else { return }
+            failDraftRegenerationPreview()
+        }
+    }
+
+    private func receiveDraftRegenerationPage(_ page: RemoteDraftRegenerationPage, challenge: UUID) async {
+        guard supportsDraftRegeneration, let read = draftRegenerationRead, page.request == read.request,
+              challenge == read.challenge, let board = state.board, let control = board.draftRegeneration,
+              page.request.hostSession == board.hostSession, page.request.account == board.account,
+              page.request.batchID == control.batch?.id, page.request.previewToken == control.previewToken else { return }
+        draftRegenerationReadTimeout?.cancel()
+        guard let bytes = page.data, page.totalBytes > read.bytes.count,
+              page.totalBytes <= RemoteDraftRegenerationPage.maximumBytes,
+              read.expectedBytes == nil || read.expectedBytes == page.totalBytes,
+              bytes.count == min(RemoteDraftRegenerationPage.pageBytes, page.totalBytes - read.bytes.count) else {
+            failDraftRegenerationPreview()
+            return
+        }
+        read.expectedBytes = page.totalBytes
+        read.bytes.append(bytes)
+        if read.bytes.count == page.totalBytes {
+            guard RemoteDraftRegenerationPage.token(read.bytes) == page.request.previewToken,
+                  let proposals = try? JSONDecoder().decode([DraftRegenerationProposal].self, from: read.bytes),
+                  proposals.count == control.proposalCount, Set(proposals.map(\.id)).count == proposals.count else {
+                failDraftRegenerationPreview()
+                return
+            }
+            draftRegenerationPreview = proposals
+            draftRegenerationPreviewBatchID = page.request.batchID
+            draftRegenerationPreviewToken = page.request.previewToken
+            draftRegenerationRead = nil
+            draftRegenerationLoadFailed = false
+        } else {
+            read.request = .init(hostSession: board.hostSession, account: board.account,
+                batchID: page.request.batchID, previewToken: page.request.previewToken, offset: read.bytes.count)
+            await requestDraftRegenerationPage(read)
+        }
+    }
+
+    private func failDraftRegenerationPreview() {
+        failedDraftRegenerationPreview = draftRegenerationRead?.request
+        stopDraftRegenerationRead()
+        draftRegenerationLoadFailed = true
+    }
+
+    private func resetDraftRegenerationPreview(keepingBatch batchID: UUID? = nil) {
+        stopDraftRegenerationRead()
+        if batchID == nil || batchID != draftRegenerationPreviewBatchID {
+            draftRegenerationPreviewBatchID = nil
+            draftRegenerationPreviewToken = nil
+            draftRegenerationPreview = []
+        }
+        failedDraftRegenerationPreview = nil
+        draftRegenerationLoadFailed = false
+    }
+
+    private func stopDraftRegenerationRead() {
+        draftRegenerationReadTimeout?.cancel(); draftRegenerationReadTimeout = nil
+        draftRegenerationRead = nil
+    }
+
+    private func suspendDraftRegenerationReads() {
+        draftRegenerationPoll?.cancel(); draftRegenerationPoll = nil
+        stopDraftRegenerationRead()
+    }
+
+    private func resetDraftRegenerationConnection() {
+        supportsDraftRegeneration = false
+        suspendDraftRegenerationReads()
+        resetDraftRegenerationPreview()
+    }
+
     private func recoverLastCommand() async {
         guard shouldRecoverCommand, let recovery, let pairing, recovery.pairingSession == pairing.sessionID,
               let connection else { return }

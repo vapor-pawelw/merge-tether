@@ -2,6 +2,19 @@ import Foundation
 
 extension SettingsManager {
     struct CommentReviewProgress: Codable, Equatable {
+        struct RegeneratedDraft: Codable, Hashable {
+            let id: Int
+            let authorID: Int
+            let bodyDigest: String
+
+            init?(_ draft: GitLabDraftNote) {
+                guard let id = draft.id, id > 0, draft.authorID > 0, let body = draft.note else { return nil }
+                self.id = id
+                authorID = draft.authorID
+                bodyDigest = AICommentAssessmentStore.digest(body)
+            }
+        }
+
         struct AutomaticPublication: Codable, Equatable {
             let userID: Int
             let requestContext: String
@@ -19,6 +32,26 @@ extension SettingsManager {
         var observedDraftIDs: Set<Int> = []
         var automaticallyPublishedDraftIDs: Set<Int> = []
         var automaticPublication: AutomaticPublication?
+        var regeneratedDrafts: Set<RegeneratedDraft>?
+    }
+
+    func holdRegeneratedDraft(_ draft: GitLabDraftNote, for target: MRAutomationScope.Target) -> Bool {
+        guard target.iid != nil, let held = CommentReviewProgress.RegeneratedDraft(draft) else { return false }
+        pendingCommentReviews.insert(target)
+        var progress = commentReviewProgress[target] ?? .init()
+        progress.observedDraftIDs.insert(held.id)
+        progress.automaticallyPublishedDraftIDs.remove(held.id)
+        progress.automaticPublication = nil
+        var regenerated = progress.regeneratedDrafts ?? []
+        regenerated.insert(held)
+        progress.regeneratedDrafts = regenerated
+        commentReviewProgress[target] = progress
+        return save() && persistenceDegraded.isEmpty
+    }
+
+    func holdsRegeneratedDraft(_ draft: GitLabDraftNote, for target: MRAutomationScope.Target) -> Bool {
+        guard let held = CommentReviewProgress.RegeneratedDraft(draft) else { return false }
+        return commentReviewProgress[target]?.regeneratedDrafts?.contains(held) == true
     }
 
     func commentReviewRevision(for target: MRAutomationScope.Target) -> UInt64 {

@@ -7,10 +7,15 @@ import MergeTetherRemote
         let arguments = CommandLine.arguments
         let staleDetails = arguments.contains("--remote-preview-stale-details")
         let draftPreview = arguments.contains("--remote-preview-draft") || staleDetails
+        let regenerationPreview = arguments.contains("--remote-preview-draft-regeneration")
         let manualDecisionPreview = arguments.contains("--remote-preview-manual-decision")
         let approvalPreview = arguments.contains("--remote-preview-approvals") || arguments.contains("--remote-preview-approval-reset")
-        let boardPreview = arguments.contains("--remote-preview") || draftPreview || approvalPreview || manualDecisionPreview
-        let previewBoard = draftPreview ? draftBoard : approvalPreview || manualDecisionPreview ? approvalBoard(reset: arguments.contains("--remote-preview-approval-reset")) : board
+        let boardPreview = arguments.contains("--remote-preview") || draftPreview || regenerationPreview || approvalPreview || manualDecisionPreview
+        let previewBoard: RemoteBoard
+        if regenerationPreview { previewBoard = regenerationBoard }
+        else if draftPreview { previewBoard = draftBoard }
+        else if approvalPreview || manualDecisionPreview { previewBoard = approvalBoard(reset: arguments.contains("--remote-preview-approval-reset")) }
+        else { previewBoard = board }
         let connecting = arguments.contains("--remote-preview-connecting")
         let offline = arguments.contains("--remote-preview-offline")
         let failed = arguments.contains("--remote-preview-failed")
@@ -26,6 +31,15 @@ import MergeTetherRemote
         }, now: { Date().addingTimeInterval(offline ? -46 : 0) })
         if boardPreview { model.state.receive(.init(type: .snapshot, challenge: model.state.challenge(), board: previewBoard)) }
         return model
+    }
+
+    private static var regenerationBoard: RemoteBoard {
+        var preview = board
+        preview.lanes[0].cards[0].drafts.append(.init(id: 2, body: "Can we explain the retry behavior in the release notes?"))
+        preview.lanes[1].cards[0].id = "mr:2:17"
+        preview.lanes[1].cards[0].drafts = [.init(id: 3, body: "Please show an error after a failed checkout.")]
+        preview.draftRegeneration = PreviewTransport.regenerationControl(batch: nil, data: nil)
+        return preview
     }
 
     static func approvalBoard(reset: Bool) -> RemoteBoard {
@@ -173,17 +187,37 @@ import MergeTetherRemote
     let delay: Bool
     let failed: Bool
     private var staleDetails: Bool
+    private var regeneration: DraftRegenerationBatch?
+    private var regenerationReadyAt = Date.distantFuture
     init(board: RemoteBoard?, delay: Bool, failed: Bool, staleDetails: Bool = false) {
         self.board = board; self.delay = delay; self.failed = failed; self.staleDetails = staleDetails
     }
     func start() { onStatus?(!failed, failed) }
     func stop() { onStatus?(false, false) }
     func send(_ message: RemoteMessage) async throws {
+        if var batch = regeneration, batch.phase == .generating, Date() >= regenerationReadyAt {
+            batch.phase = .ready
+            batch.completed = batch.total
+            regeneration = batch
+            updateRegenerationControl()
+        }
         if message.type == .hello, var board {
             if delay { try await Task.sleep(for: .seconds(8)) }
             if message.refresh == true { try await Task.sleep(for: .milliseconds(300)); board.updatedAt = .now; self.board = board }
+            var capabilities = [RemoteMessage.detailsCapability, RemoteMessage.detailContextCapability]
+            if board.draftRegeneration != nil { capabilities.append(RemoteMessage.draftRegenerationCapability) }
             await onMessage?(.init(type: .snapshot, challenge: message.challenge, board: board,
-                capabilities: [RemoteMessage.detailsCapability, RemoteMessage.detailContextCapability]))
+                capabilities: capabilities))
+        } else if let request = message.draftRegenerationRequest {
+            let data = regenerationData
+            let fullSize = data?.count ?? 0
+            let page = data.flatMap { contents -> Data? in
+                guard request.previewToken == RemoteDraftRegenerationPage.token(contents),
+                      request.batchID == regeneration?.id, (0..<fullSize).contains(request.offset) else { return nil }
+                return contents.subdata(in: request.offset..<min(request.offset + RemoteDraftRegenerationPage.pageBytes, fullSize))
+            }
+            await onMessage?(.init(type: .draftRegenerationPage, challenge: message.challenge,
+                draftRegenerationPage: .init(request: request, data: page, totalBytes: fullSize)))
         } else if message.type == .detailRequest, let request = message.detailRequest, let board,
                   request.matches(board), let card = board.cards.first(where: { $0.id == request.cardID }) {
             if staleDetails {
@@ -194,6 +228,12 @@ import MergeTetherRemote
             await onMessage?(.init(type: .details, detailResponse: .init(request: request, status: .current,
                 details: RemoteDemo.details(for: card))))
         } else if let command = message.command {
+            if command.cardID == RemoteDraftRegenerationControl.cardID {
+                await onMessage?(.init(type: .accepted, result: .init(id: command.id, status: .running)))
+                let status = performRegeneration(RemoteDraftRegenerationOperation(argument: command.argument))
+                await onMessage?(.init(type: .result, result: .init(id: command.id, status: status)))
+                return
+            }
             if command.actionID == "markReady", var board {
                 for lane in board.lanes.indices {
                     for index in board.lanes[lane].cards.indices where board.lanes[lane].cards[index].id == command.cardID {
@@ -208,6 +248,87 @@ import MergeTetherRemote
             }
             await onMessage?(.init(type: .result, result: .init(id: command.id, status: .completed)))
         }
+    }
+
+    static func regenerationControl(batch: DraftRegenerationBatch?, data: Data?) -> RemoteDraftRegenerationControl {
+        var actions: [RemoteAction] = []
+        if batch == nil {
+            actions.append(.init(id: RemoteDraftRegenerationControl.startID, kind: .startDraftRegeneration, token: "preview-start"))
+        } else if let batch, batch.phase != .saving {
+            actions.append(.init(id: RemoteDraftRegenerationControl.discardID, kind: .discardDraftRegeneration, token: batch.id.uuidString))
+            if batch.phase == .ready {
+                actions.append(.init(id: RemoteDraftRegenerationControl.applyID, kind: .applyDraftRegeneration, token: batch.id.uuidString))
+            }
+        }
+        var summary = batch
+        summary?.proposals = []
+        return .init(card: .init(id: RemoteDraftRegenerationControl.cardID, title: "", project: "", url: nil, actions: actions),
+            count: 3, batch: summary, previewToken: data.map(RemoteDraftRegenerationPage.token),
+            proposalCount: data == nil ? 0 : batch?.proposals.count ?? 0, mergeRequestCount: 2)
+    }
+
+    private var regenerationData: Data? {
+        guard let regeneration, regeneration.phase == .ready || regeneration.phase == .finished else { return nil }
+        let encoder = JSONEncoder()
+        encoder.outputFormatting = .sortedKeys
+        return try? encoder.encode(regeneration.proposals)
+    }
+
+    private func updateRegenerationControl() {
+        board?.draftRegeneration = Self.regenerationControl(batch: regeneration, data: regenerationData)
+    }
+
+    private func performRegeneration(_ operation: RemoteDraftRegenerationOperation?) -> RemoteCommandResult.Status {
+        switch operation {
+        case .start(let scope, _, _)?:
+            let proposals = [
+                DraftRegenerationProposal(projectID: 1, iid: 42, draftID: 1, mergeRequestTitle: "Add a clearer payment confirmation",
+                    original: "Handled the retry case and added coverage for the duplicate response.",
+                    replacement: "A failed retry keeps the last confirmation visible. A regression test covers duplicate responses.",
+                    selectedByDefault: true),
+                .init(projectID: 1, iid: 42, draftID: 2, mergeRequestTitle: "Add a clearer payment confirmation",
+                    original: "Can we explain the retry behavior in the release notes?",
+                    replacement: "Could the release notes say that a failed retry now keeps the last payment confirmation visible?"),
+                .init(projectID: 2, iid: 17, draftID: 3, mergeRequestTitle: "Handle interrupted checkout requests",
+                    original: "Please show an error after a failed checkout.", issue: .outdated,
+                    explanation: "The checkout already shows this error.")
+            ].filter { proposal in
+                switch scope {
+                case .all: true
+                case .mergeRequest(let project, let iid): proposal.projectID == project && proposal.iid == iid
+                case .draft(let project, let iid, let id): proposal.projectID == project && proposal.iid == iid && proposal.draftID == id
+                }
+            }
+            regeneration = .init(id: UUID(), scope: scope, total: proposals.count, proposals: proposals)
+            regenerationReadyAt = Date().addingTimeInterval(2)
+        case .apply(let id, let ids)?:
+            guard var batch = regeneration, batch.id == id, batch.phase == .ready else { return .changed }
+            let selected = Set(ids)
+            for index in batch.proposals.indices where selected.contains(batch.proposals[index].id) {
+                let proposal = batch.proposals[index]
+                if proposal.draftID == 2 {
+                    batch.proposals[index].issue = .changed
+                } else if let body = proposal.replacement {
+                    batch.proposals[index].issue = .saved
+                    let cardID = "mr:\(proposal.projectID):\(proposal.iid)"
+                    if let lane = board?.lanes.firstIndex(where: { $0.cards.contains { $0.id == cardID } }),
+                       let card = board?.lanes[lane].cards.firstIndex(where: { $0.id == cardID }),
+                       let draft = board?.lanes[lane].cards[card].drafts.firstIndex(where: { $0.id == proposal.draftID }) {
+                        board?.lanes[lane].cards[card].drafts[draft].body = body
+                    }
+                }
+            }
+            batch.phase = .finished
+            regeneration = batch
+            updateRegenerationControl()
+            return batch.proposals.contains { $0.issue == .changed } ? .partial : .completed
+        case .discard(let id)?:
+            guard regeneration?.id == id else { return .changed }
+            regeneration = nil
+        case nil: return .failed
+        }
+        updateRegenerationControl()
+        return .completed
     }
 }
 #endif

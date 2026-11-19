@@ -262,6 +262,17 @@ struct GitLabDraftNote: Codable, Equatable, Sendable {
         return discussionID == nil ? .general : .reply
     }
 
+    func replacingBody(_ body: String) -> Self {
+        .init(id: id, authorID: authorID, note: body, discussionID: discussionID,
+              resolveDiscussion: resolveDiscussion, position: position)
+    }
+
+    func matchesBodyUpdate(_ expected: Self) -> Bool {
+        id == expected.id && authorID == expected.authorID && note == expected.note
+            && discussionID == expected.discussionID && position == expected.position
+            && (resolveDiscussion == true) == (expected.resolveDiscussion == true)
+    }
+
     enum CodingKeys: String, CodingKey {
         case id, note, position
         case authorID = "author_id"

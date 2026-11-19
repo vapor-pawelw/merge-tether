@@ -9,6 +9,7 @@ struct RemoteDraftCard: View {
     var replyThread: RemoteDetailThread? = nil
     let canAct: Bool
     let onAction: (RemoteAction) -> Void
+    var onRegenerate: (() -> Void)? = nil
 
     var body: some View {
         VStack(alignment: .leading, spacing: 14) {
@@ -18,6 +19,15 @@ struct RemoteDraftCard: View {
                     .padding(.horizontal, 8).padding(.vertical, 4)
                     .background(Color.accentColor.opacity(0.08), in: Capsule())
                 Spacer(minLength: 0)
+                if let onRegenerate {
+                    Button(action: onRegenerate) {
+                        Image(systemName: "wand.and.stars").frame(minWidth: 44, minHeight: 44)
+                    }
+                    .buttonStyle(.plain).foregroundStyle(.tint)
+                    .accessibilityLabel(Text(.DraftRegeneration.draftRegenerationOneAction))
+                    .disabled(!canAct)
+                    .accessibilityIdentifier("draft-regeneration.draft.\(draft.id)")
+                }
                 if let deleteAction {
                     Button { onAction(deleteAction) } label: {
                         Image(systemName: "trash").frame(minWidth: 44, minHeight: 44)

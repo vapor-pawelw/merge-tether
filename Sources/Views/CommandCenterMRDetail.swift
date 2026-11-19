@@ -1,4 +1,5 @@
 import AppKit
+import MergeTetherRemote
 import SwiftUI
 
 enum CommandCenterMRDetailSection: Hashable {
@@ -64,6 +65,7 @@ private struct CommandCenterMRDetailContent: View {
     @State private var isUpdatingFeedbackDecision = false
     @State private var feedbackDecisionError: String?
     @State private var originChangeFailed = false
+    @State private var regenerationPresentation: DraftRegenerationPresentation?
 
     private enum Anchor: Hashable { case overview, drafts, comments, details, actions, feedbackStatus, assistantRuns }
 
@@ -244,6 +246,7 @@ private struct CommandCenterMRDetailContent: View {
             }
             .onChange(of: discussionTarget) { _, _ in
                 publicationSession.clearSelection()
+                regenerationPresentation = nil
                 reviewStartError = nil
                 feedbackDecisionConfirmation = nil
                 feedbackDecisionError = nil
@@ -284,6 +287,7 @@ private struct CommandCenterMRDetailContent: View {
             .confirmationDialog(Text(.Board.boardRemove), isPresented: $confirmRemoval, titleVisibility: .visible) {
                 Button(role: .destructive) { monitor.removeReviewedMergeRequest(item) } label: { Text(.Board.boardRemove) }
             } message: { Text(.Board.boardRemoveExplanation) }
+            .sheet(item: $regenerationPresentation) { monitor.draftRegenerationSheet($0) }
         }
     }
 
@@ -511,6 +515,7 @@ private struct CommandCenterMRDetailContent: View {
                     if discussionTarget == nil {
                         Text(.DraftPublication.draftPublicationUnavailable).font(.callout).foregroundStyle(.secondary)
                     }
+                    draftRegenerationButton
                     publicationThreads(discussions)
                 }
                 decisionActions
@@ -533,6 +538,36 @@ private struct CommandCenterMRDetailContent: View {
                         .frame(width: 3).padding(.vertical, 12)
                 }
             }
+        }
+    }
+
+    @ViewBuilder
+    private var draftRegenerationButton: some View {
+        let coordinator = monitor.draftRegeneration
+        let scope = DraftRegenerationScope.mergeRequest(projectID: item.id.projectID, iid: item.id.iid)
+        if let phase = coordinator.batch?.phase {
+            Button { regenerationPresentation = .init(scope: nil) } label: {
+                Label(phase.regenerationTitle, systemImage: "wand.and.stars")
+            }
+            .buttonStyle(.bordered)
+        } else if coordinator.count(for: scope) > 0 {
+            Button { regenerationPresentation = .init(scope: scope) } label: {
+                Label(.DraftRegeneration.draftRegenerationMrAction, systemImage: "wand.and.stars")
+            }
+            .buttonStyle(.bordered)
+            .disabled(!coordinator.isAvailable)
+            .accessibilityIdentifier("draft-regeneration.merge-request")
+        }
+    }
+
+    private var regenerateDraft: ((GitLabDraftNote) -> Void)? {
+        guard monitor.draftRegeneration.isAvailable, monitor.draftRegeneration.batch == nil,
+              discussionTarget != nil else { return nil }
+        return { draft in
+            guard let id = draft.id else { return }
+            let scope = DraftRegenerationScope.draft(projectID: item.id.projectID, iid: item.id.iid, draftID: id)
+            guard monitor.draftRegeneration.count(for: scope) > 0 else { return }
+            regenerationPresentation = .init(scope: scope)
         }
     }
 
@@ -909,6 +944,7 @@ private struct CommandCenterMRDetailContent: View {
             expandPendingDrafts: true, selection: $publicationSession.selection,
             selectionDisabled: discussionTarget == nil || monitor.attention.confirmationStates[item.id]?.isBusy == true,
             onDelete: { draft in Task { await monitor.attention.deleteDraft(draft, from: item.id) } },
+            onRegenerate: regenerateDraft,
             title: .DraftPublication.draftPublicationThreads, draftsFirst: true, onSetOrigin: originAction,
             extraContexts: current ? discussionStore.extraContexts : .empty,
             currentUserIdentity: current ? discussionStore.currentUser : nil, onRefresh: refreshDiscussions)
