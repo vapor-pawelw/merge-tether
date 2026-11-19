@@ -6,7 +6,7 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 
 ## Unreleased
 
-- Reduce the gap between the merge request title and the author and approvals line to 8 pt on iPhone.
+- Use 16 pt insets and section gaps on iPhone merge request cards, with 8 pt between rows within each section.
 
 - Drag the sheet handle down to dismiss iPhone MR Details and refresh with the toolbar button.
 

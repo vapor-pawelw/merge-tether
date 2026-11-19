@@ -71,7 +71,7 @@ struct RemoteApprovalProgressBadge: View {
                 .fixedSize()
                 .padding(.horizontal, 6).padding(.vertical, 3)
                 .background(.secondary.opacity(0.08), in: RoundedRectangle(cornerRadius: 8))
-                .contentShape(.interaction, ApprovalBadgeHitArea())
+                .contentShape(.interaction, CardControlHitArea(anchor: .top))
             }
             .buttonStyle(.plain)
             .accessibilityLabel(explanation)
@@ -101,11 +101,12 @@ struct RemoteApprovalProgressBadge: View {
     }
 }
 
-private struct ApprovalBadgeHitArea: Shape {
+struct CardControlHitArea: Shape {
+    var anchor: UnitPoint = .center
+
     func path(in rect: CGRect) -> Path {
-        Rectangle().path(in: CGRect(
-            origin: rect.origin,
-            size: CGSize(width: rect.width, height: max(44, rect.height))
-        ))
+        let height = max(44, rect.height)
+        let top = rect.minY - (height - rect.height) * anchor.y
+        return Rectangle().path(in: CGRect(x: rect.minX, y: top, width: rect.width, height: height))
     }
 }

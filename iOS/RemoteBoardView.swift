@@ -197,6 +197,7 @@ struct RemoteBoardView: View {
 private struct RemoteCardCTAButton: View {
     let cta: RemoteCardCTA
     let canAct: ((Date) -> Bool)?
+    var labelHitArea: CardControlHitArea? = nil
     let onTap: () -> Void
 
     var body: some View {
@@ -208,7 +209,13 @@ private struct RemoteCardCTAButton: View {
     }
 
     private var button: some View {
-        Button(action: onTap) { Text(verbatim: cta.title) }
+        Button(action: onTap) {
+            if let labelHitArea {
+                Text(verbatim: cta.title).contentShape(.interaction, labelHitArea)
+            } else {
+                Text(verbatim: cta.title)
+            }
+        }
     }
 }
 
@@ -292,23 +299,15 @@ struct RemoteCardView: View {
         }
     }
     var body: some View {
-        VStack(alignment: .leading, spacing: expanded ? 16 : 12) {
+        VStack(alignment: .leading, spacing: 16) {
             header
-            if expanded, let branches {
-                Label { Text(verbatim: branches.source + " → " + branches.target) } icon: {
-                    Image(systemName: "arrow.triangle.branch")
-                }
-                .font(.caption.monospaced()).foregroundStyle(.secondary)
-                .textSelection(.enabled).fixedSize(horizontal: false, vertical: true)
-                .accessibilityLabel(Text(.RemoteDetail.remoteDetailBranches(branches.source, branches.target)))
-            }
-            content
+            if hasInformation { content }
             if !expanded, onOpen != nil, primaryCTA != nil || secondaryCTA != nil || directAction != nil {
                 HStack {
                     if let secondary = secondaryCTA {
-                        RemoteCardCTAButton(cta: secondary, canAct: { actionsModel?.state.canAct(now: $0) == true }) { onOpenCTA?(secondary) }
+                        RemoteCardCTAButton(cta: secondary, canAct: { actionsModel?.state.canAct(now: $0) == true },
+                                            labelHitArea: CardControlHitArea()) { onOpenCTA?(secondary) }
                             .font(.caption).buttonStyle(.plain).foregroundStyle(.secondary)
-                            .frame(minHeight: 44)
                             .accessibilityIdentifier("remote.secondary-cta.\(card.id)")
                     }
                     Spacer(minLength: 0)
@@ -361,7 +360,6 @@ struct RemoteCardView: View {
                     Text(verbatim: "!\(iid)").monospacedDigit().fixedSize()
                 }
             }.font(.caption).foregroundStyle(.secondary)
-                .padding(.bottom, 2)
             title
             if card.presentation?.author != nil || card.presentation?.draftBadge != nil || card.id.hasPrefix("mr:") {
                 ViewThatFits(in: .horizontal) {
@@ -401,8 +399,23 @@ struct RemoteCardView: View {
             }
         }
     }
+    private var hasInformation: Bool {
+        (expanded && branches != nil) || !card.detail.isEmpty
+            || card.presentation?.requirements?.isEmpty == false || card.visibleStatus != nil
+            || card.presentation?.pendingDrafts != nil || card.dependencies != nil
+            || card.presentation?.steps?.isEmpty == false || card.visibleNextStep != nil
+            || !(card.presentation?.chips.isEmpty ?? card.drafts.isEmpty)
+    }
     private var content: some View {
         VStack(alignment: .leading, spacing: 8) {
+            if expanded, let branches {
+                Label { Text(verbatim: branches.source + " → " + branches.target) } icon: {
+                    Image(systemName: "arrow.triangle.branch")
+                }
+                .font(.caption.monospaced()).foregroundStyle(.secondary)
+                .textSelection(.enabled).fixedSize(horizontal: false, vertical: true)
+                .accessibilityLabel(Text(.RemoteDetail.remoteDetailBranches(branches.source, branches.target)))
+            }
             if !card.detail.isEmpty {
                 HStack(alignment: .firstTextBaseline, spacing: 5) {
                     if card.needsAttention == true { Image(systemName: "exclamationmark.circle.fill").accessibilityHidden(true) }
@@ -413,7 +426,7 @@ struct RemoteCardView: View {
                 .fixedSize(horizontal: false, vertical: true)
             }
             if let requirements = card.presentation?.requirements, !requirements.isEmpty {
-                VStack(alignment: .leading, spacing: 4) {
+                VStack(alignment: .leading, spacing: 8) {
                     ForEach(Array(requirements.enumerated()), id: \.offset) { index, line in
                         if index == 0, let people = card.presentation?.threadResolutionPeople, !people.isEmpty {
                             ThreadResolutionWaitLabel(people: people.map {
@@ -489,7 +502,7 @@ private struct RemoteStepChain: View {
 private struct RemoteMRDependencyRow: View {
     let dependencies: RemoteMRDependencies
     var body: some View {
-        VStack(alignment: .leading, spacing: 3) {
+        VStack(alignment: .leading, spacing: 8) {
             if !description.characters.isEmpty {
                 Text(description).font(.caption).foregroundStyle(.secondary)
                     .fixedSize(horizontal: false, vertical: true)
