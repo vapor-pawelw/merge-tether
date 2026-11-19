@@ -38,6 +38,9 @@ extension RemoteActionKind {
         case .ignoreSuggestion: .FeedbackSuggestions.feedbackSuggestionsIgnore
         case .restoreSuggestion: .FeedbackSuggestions.feedbackSuggestionsRestore
         case .setCommentOrigin: .RemoteDetail.remoteDetailOriginMenuTitle
+        case .startDraftRegeneration: .DraftRegeneration.draftRegenerationGenerate
+        case .applyDraftRegeneration: .DraftRegeneration.draftRegenerationSaveDraft
+        case .discardDraftRegeneration: .DraftRegeneration.draftRegenerationDiscard
         }
     }
 }

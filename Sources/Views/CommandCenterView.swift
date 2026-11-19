@@ -1,4 +1,5 @@
 import AppKit
+import MergeTetherRemote
 import SwiftUI
 
 struct CommandCenterView: View {
@@ -7,6 +8,7 @@ struct CommandCenterView: View {
     @SceneStorage("commandCenter.showActivity") private var showActivity = false
     @State private var showingAdd = false
     @State private var showingInbox = false
+    @State private var regenerationPresentation: DraftRegenerationPresentation?
     @Environment(\.openSettings) private var openSettings
     @Environment(\.openWindow) private var openWindow
 
@@ -72,6 +74,7 @@ struct CommandCenterView: View {
             }
             ToolbarItemGroup(placement: .primaryAction) {
                 globalAutomationToggle
+                draftRegenerationButton
                 Button { showingAdd = true } label: {
                     Label { Text(.Board.boardAdd) } icon: { Image(systemName: "plus") }
                 }
@@ -122,6 +125,8 @@ struct CommandCenterView: View {
             }
         }
         .sheet(isPresented: $showingAdd) { CommandCenterAddMergeRequestView(monitor: monitor) }
+        .sheet(item: $regenerationPresentation) { monitor.draftRegenerationSheet($0) }
+        .onChange(of: monitor.glab.accountRevision) { _, _ in regenerationPresentation = nil }
         .alert(Text(.DraftMR.failed), isPresented: Binding(
             get: { monitor.markMergeRequestReadyError != nil },
             set: { if !$0 { monitor.markMergeRequestReadyError = nil } })) {
@@ -145,6 +150,31 @@ struct CommandCenterView: View {
             monitor.markMenuOpened()
         }
         .onDisappear { monitor.authoredMergeRequests.setVisible(false) }
+    }
+
+    @ViewBuilder
+    private var draftRegenerationButton: some View {
+        let regeneration = monitor.draftRegeneration
+        if let phase = regeneration.batch?.phase {
+            Button { regenerationPresentation = .init(scope: nil) } label: {
+                Label(phase.regenerationTitle, systemImage: "wand.and.stars")
+                    .overlay(alignment: .topTrailing) {
+                        if phase == .ready {
+                            Circle().fill(Color.accentColor).frame(width: 7, height: 7)
+                                .offset(x: 3, y: -3).accessibilityHidden(true)
+                        }
+                    }
+            }
+            .help(Text(phase.regenerationTitle))
+            .accessibilityIdentifier("draft-regeneration.resume")
+        } else if regeneration.count(for: .all) > 0 {
+            Button { regenerationPresentation = .init(scope: .all) } label: {
+                Label(.DraftRegeneration.draftRegenerationAllAction, systemImage: "wand.and.stars")
+            }
+            .disabled(!regeneration.isAvailable)
+            .help(Text(.DraftRegeneration.draftRegenerationAllAction))
+            .accessibilityIdentifier("draft-regeneration.all")
+        }
     }
 
     /// App-wide killswitch: off overrides presets and per-MR choices without changing them.
@@ -267,5 +297,17 @@ struct CommandCenterView: View {
         } else {
             updates.seedIfNeeded()
         }
+    }
+}
+
+extension TodoMonitorService {
+    func draftRegenerationSheet(_ presentation: DraftRegenerationPresentation) -> some View {
+        let coordinator = draftRegeneration
+        return DraftRegenerationSheet(presentation: presentation, isAvailable: { coordinator.isAvailable },
+            batch: { coordinator.batch }, count: { coordinator.count(for: $0) },
+            mergeRequestCount: { coordinator.mergeRequestCount },
+            start: { coordinator.start($0, instructions: $1) },
+            apply: { await coordinator.apply($0, batchID: $1) },
+            discard: { coordinator.discard($0) })
     }
 }

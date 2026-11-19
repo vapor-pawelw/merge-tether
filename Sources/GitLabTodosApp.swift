@@ -50,9 +50,11 @@ final class GitLabTodosAppDelegate: NSObject, NSApplicationDelegate {
     func applicationShouldTerminate(_ sender: NSApplication) -> NSApplication.TerminateReply {
         guard !terminating else { return .terminateLater }
         terminating = true
+        let draftRegeneration = monitor.draftRegeneration.prepareForTermination()
         monitor.prepareForTermination()
         Task { @MainActor in
             await AssistantAutomationRunner.waitForTermination()
+            await draftRegeneration?.value
             sender.reply(toApplicationShouldTerminate: true)
         }
         return .terminateLater

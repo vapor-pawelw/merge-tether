@@ -9,6 +9,7 @@ final class TodoMonitorService {
     let glab: GlabService
     let notifications: NotificationService
     let attention: MergeRequestAttentionMonitor
+    var draftRegeneration: DraftRegenerationCoordinator { attention.draftRegeneration }
     let authoredMergeRequests: AuthoredMergeRequestMonitor
     private var boardDisplayMetadata = MRDisplayMetadataCache()
     @ObservationIgnored private let boardProjectorCache: ObservedPresentationCache<MRBoardProjector?>

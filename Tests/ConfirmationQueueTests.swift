@@ -4199,6 +4199,33 @@ import MergeTetherRemote
         #expect(harness.log("drafts.json").contains("/merge"))
     }
 
+    @Test func maxPublishesTheEligibleSiblingAndLeavesTheRegeneratedDraftForManualPublication() async throws {
+        let harness = try makeHarness(assistantWorked: true)
+        defer { harness.cleanUp() }
+        harness.settings.automation.applyPreset(.full, for: .codex)
+        try harness.write("drafts.json", draftJSON)
+        try harness.recordVerdict("objections", head: head)
+        let drafts = try JSONDecoder().decode([GitLabDraftNote].self, from: harness.gitlab.data("drafts.json"))
+        let regenerated = try #require(drafts.first { $0.id == 11 })
+        let target = MRAutomationScope.Target(host: host, username: "me", projectID: 1, iid: 2)
+        try #require(harness.settings.holdRegeneratedDraft(regenerated, for: target))
+
+        try await harness.poll()
+        try await harness.poll()
+
+        let published = harness.gitlab.requests.filter { $0.method == "PUT" && $0.endpoint.hasSuffix("/publish") }
+        #expect(published.map(\.endpoint) == ["/projects/1/merge_requests/2/draft_notes/12/publish"])
+        #expect(harness.monitor.currentOpenItems.first?.drafts == [regenerated])
+
+        await harness.monitor.publishDrafts([regenerated], for: manualTarget)
+
+        let finalPublished = harness.gitlab.requests.filter { $0.method == "PUT" && $0.endpoint.hasSuffix("/publish") }
+        #expect(finalPublished.map(\.endpoint) == [
+            "/projects/1/merge_requests/2/draft_notes/12/publish", "/projects/1/merge_requests/2/draft_notes/11/publish"
+        ])
+        #expect(harness.monitor.currentOpenItems.first?.drafts.isEmpty == true)
+    }
+
     @Test func automaticAIReplyPublicationImmediatelyRequestsEligibleReReview() async throws {
         let harness = try makeHarness(assistantWorked: true, authored: true)
         defer { harness.cleanUp() }

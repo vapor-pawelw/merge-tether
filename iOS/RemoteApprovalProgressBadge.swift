@@ -17,6 +17,12 @@ struct RemoteApprovalProgressBadge: View {
     private var complete: Bool {
         progress.map { received > 0 && ($0.requirementsSatisfied ?? ($0.required == 0 || received >= $0.required)) } ?? false
     }
+    private var approvalColor: Color {
+        if complete { return .green }
+        guard let progress, progress.required > 0 else { return .secondary }
+        let fraction = Double(received) / Double(progress.required)
+        return .green.opacity(min(fraction * 0.8, 0.7))
+    }
     private var requiredApprovalPending: Bool {
         guard let progress, progress.required > 0 else { return false }
         return !(progress.requirementsSatisfied ?? (received >= progress.required))
@@ -51,7 +57,7 @@ struct RemoteApprovalProgressBadge: View {
                             Text(.Board.boardApprovalsReviewerCountBadge(assignedReviewerCount))
                         }
                     }
-                    .font(.caption2).monospacedDigit().foregroundStyle(complete ? Color.green : .secondary)
+                    .font(.caption2).monospacedDigit().foregroundStyle(approvalColor)
                     if let viewer {
                         Divider().frame(height: 10)
                         PersonAvatar(url: viewer.avatarURL, size: 16)

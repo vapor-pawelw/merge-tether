@@ -224,6 +224,21 @@ extension GlabService {
         )
     }
 
+    func updateDraftNote(_ draft: GitLabDraftNote, body: String, projectID: Int, iid: Int, host: String,
+                         shouldProceed: @escaping @MainActor @Sendable () -> Bool) async throws -> GitLabDraftNote {
+        guard projectID > 0, iid > 0, let draftID = draft.id, draftID > 0,
+              DraftRegenerationGeneratedDraft.isValidBody(body) else { throw CancellationError() }
+        let updated: GitLabDraftNote = try await mergeRequestWriteAPI(
+            "/projects/\(projectID)/merge_requests/\(iid)/draft_notes/\(draftID)",
+            host: host, arguments: ["--method", "PUT", "--raw-field", "note=\(body)"],
+            timeout: 30, shouldProceed: shouldProceed
+        )
+        guard updated.matchesBodyUpdate(draft.replacingBody(body)) else {
+            throw GlabError.decoding("Unexpected private draft update response")
+        }
+        return updated
+    }
+
     /// Read stable account metadata rather than inferring identity from names or AI-like prose.
     func feedbackAccountKind(userID: Int, host: String) async throws -> AuthorFeedbackPolicy.AccountKind {
         struct Account: Decodable {

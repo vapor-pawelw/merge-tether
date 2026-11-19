@@ -21,7 +21,7 @@ struct DraftPublicationRisk: Identifiable, Equatable, Sendable {
         self.resolvesDiscussion = resolvesDiscussion
     }
 
-    private static func hasQuickAction(in note: String?) -> Bool {
+    static func hasQuickAction(in note: String?) -> Bool {
         // Even a slash-command example inside a fence can execute a GitLab quick action.
         (note ?? "").split(whereSeparator: \.isNewline).contains {
             $0.trimmingCharacters(in: .whitespaces).hasPrefix("/")

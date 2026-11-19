@@ -9,6 +9,8 @@ public enum RemoteActionKind: String, Codable, Sendable { case publish, approve,
     // Sent only to phones that announce `commentOriginCapability`; its command carries a `RemoteCommentOriginRequest`.
     case setCommentOrigin
     case markReady
+    // Sent only to clients that advertise draftRegenerationCapability.
+    case startDraftRegeneration, applyDraftRegeneration, discardDraftRegeneration
 }
 
 public struct RemoteAction: Codable, Equatable, Identifiable, Sendable {
@@ -195,10 +197,14 @@ public struct RemoteBoard: Codable, Equatable, Sendable {
     public var partial: Bool
     public var automationPaused: Bool?
     public var lanes: [RemoteLane]
-    public init(hostSession: UUID, account: String, updatedAt: Date? = nil, partial: Bool = false, lanes: [RemoteLane], automationPaused: Bool? = nil) {
+    public var draftRegeneration: RemoteDraftRegenerationControl?
+    public init(hostSession: UUID, account: String, updatedAt: Date? = nil, partial: Bool = false, lanes: [RemoteLane],
+                automationPaused: Bool? = nil, draftRegeneration: RemoteDraftRegenerationControl? = nil) {
         self.hostSession = hostSession; self.account = account; self.updatedAt = updatedAt
         self.partial = partial; self.lanes = lanes; self.automationPaused = automationPaused
+        self.draftRegeneration = draftRegeneration
     }
+    public var commandCards: [RemoteCard] { cards + (draftRegeneration.map { [$0.card] } ?? []) }
     public var cards: [RemoteCard] { lanes.flatMap(\.cards) }
 }
 
@@ -216,6 +222,16 @@ public struct RemoteCommand: Codable, Equatable, Sendable {
     }
     public var isCompletionAcknowledgement: Bool {
         cardID.hasPrefix("completion:") && actionID == "seen"
+    }
+    public var isDraftRegeneration: Bool { cardID == RemoteDraftRegenerationControl.cardID }
+    public var receiptIdentity: Self {
+        guard isDraftRegeneration, let argument else { return self }
+        if argument.hasPrefix("sha256:"), argument.utf8.count == 71,
+           argument.dropFirst(7).allSatisfy({ "0123456789abcdef".contains($0) }) { return self }
+        var receipt = self
+        // Store additional user instructions in command receipts by digest.
+        receipt.argument = "sha256:" + RemoteDraftRegenerationPage.token(Data(argument.utf8))
+        return receipt
     }
     public init(id: UUID = UUID(), hostSession: UUID, account: String, cardID: String, actionID: String, token: String,
                 argument: String? = nil) {
@@ -241,7 +257,10 @@ public struct RemoteMessage: Codable, Sendable {
     public static let mrControlsCapability = "mr-controls-v1"
     public static let commentOriginCapability = "comment-origin-v1"
     public static let markReadyCapability = "mark-ready-v1"
-    public enum Kind: String, Codable, Sendable { case hello, snapshot, command, accepted, result, receipt, receiptResult = "receipt-result", unavailable, hostReady = "host-ready", detailRequest = "detail-request", details, cancelDetails = "cancel-details" }
+    public static let draftRegenerationCapability = "draft-regeneration-v1"
+    public enum Kind: String, Codable, Sendable { case hello, snapshot, command, accepted, result, receipt, receiptResult = "receipt-result", unavailable, hostReady = "host-ready", detailRequest = "detail-request", details, cancelDetails = "cancel-details"
+        case draftRegenerationRequest = "draft-regeneration-request", draftRegenerationPage = "draft-regeneration-page"
+    }
     public var type: Kind
     public var challenge: UUID?
     public var board: RemoteBoard?
@@ -251,25 +270,32 @@ public struct RemoteMessage: Codable, Sendable {
     public var detailRequest: RemoteDetailRequest?
     public var detailResponse: RemoteDetailResponse?
     public var detailOrigins: RemoteDetailOrigins?
+    public var draftRegenerationRequest: RemoteDraftRegenerationPageRequest?
+    public var draftRegenerationPage: RemoteDraftRegenerationPage?
     /// True reads GitLab before answering. False reads only the host's current board.
     /// When omitted, initial connections and stale boards may cause a GitLab refresh.
     public var refresh: Bool?
     public init(type: Kind, challenge: UUID? = nil, board: RemoteBoard? = nil,
                 command: RemoteCommand? = nil, result: RemoteCommandResult? = nil, capabilities: [String]? = nil,
                 detailRequest: RemoteDetailRequest? = nil, detailResponse: RemoteDetailResponse? = nil,
-                detailOrigins: RemoteDetailOrigins? = nil, refresh: Bool? = nil) {
+                detailOrigins: RemoteDetailOrigins? = nil, refresh: Bool? = nil,
+                draftRegenerationRequest: RemoteDraftRegenerationPageRequest? = nil,
+                draftRegenerationPage: RemoteDraftRegenerationPage? = nil) {
         self.type = type; self.challenge = challenge; self.board = board; self.command = command; self.result = result
         self.refresh = refresh
         self.capabilities = capabilities
         self.detailRequest = detailRequest; self.detailResponse = detailResponse
         self.detailOrigins = detailOrigins
+        self.draftRegenerationRequest = draftRegenerationRequest; self.draftRegenerationPage = draftRegenerationPage
     }
 }
 
 extension RemoteBoard {
     public func forClient(supportsCommentReview: Bool, supportsMergeActions: Bool = false, supportsMRControls: Bool = false,
-                          supportsCommentOrigins: Bool = false, supportsMarkReady: Bool = false) -> Self {
+                          supportsCommentOrigins: Bool = false, supportsMarkReady: Bool = false,
+                          supportsDraftRegeneration: Bool = false) -> Self {
         var compatible = self
+        if !supportsDraftRegeneration { compatible.draftRegeneration = nil }
         for lane in compatible.lanes.indices {
             for card in compatible.lanes[lane].cards.indices {
                 if !supportsMarkReady {

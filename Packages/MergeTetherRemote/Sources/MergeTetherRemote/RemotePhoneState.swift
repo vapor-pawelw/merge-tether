@@ -6,8 +6,10 @@ import Observation
     public private(set) var pending: RemoteCommand?
     public private(set) var result: RemoteCommandResult?
     @ObservationIgnored public var onResultAcknowledgement: (@MainActor (RemoteCommandResult) throws -> Void)?
+    private static let acceptedCommandWindow: TimeInterval = 120
     private var expected: UUID?
     private var pendingUntil: Date = .distantPast
+    private var acceptedDraftSave: UUID?
     private var challengeUntil: Date = .distantPast
     private var validUntil: Date = .distantPast
     private var connectedUntil: Date = .distantPast
@@ -43,20 +45,31 @@ import Observation
             self.expected = nil
             validUntil = challengeUntil
             connectedUntil = challengeUntil
+            if now < challengeUntil, now < pendingUntil, let pending, let acceptedDraftSave,
+               board.hostSession == pending.hostSession, board.account == pending.account,
+               let batch = board.draftRegeneration?.batch, batch.id == acceptedDraftSave, batch.phase == .saving {
+                pendingUntil = now.addingTimeInterval(Self.acceptedCommandWindow)
+            }
         case .accepted:
             guard message.result?.id == pending?.id, pending != nil else { return false }
-            pendingUntil = now.addingTimeInterval(120)
+            pendingUntil = now.addingTimeInterval(Self.acceptedCommandWindow)
+            if let pending, message.result?.status == .running, pending.isDraftRegeneration,
+               pending.actionID == RemoteDraftRegenerationControl.applyID,
+               let operation = RemoteDraftRegenerationOperation(argument: pending.argument),
+               case .apply(let batchID, _) = operation {
+                acceptedDraftSave = batchID
+            }
         case .result:
             guard let result = message.result, result.id == pending?.id else { return false }
             self.result = result
-            if result.status != .running { pending = nil }
+            if result.status != .running { clearPending() }
         default: return false
         }
         return true
     }
     public func disconnected() {
         refreshFailed()
-        if let pending { result = .init(id: pending.id, status: .uncertain); self.pending = nil }
+        if let pending { result = .init(id: pending.id, status: .uncertain); clearPending() }
     }
     public func isConnected(now: Date = Date()) -> Bool { now < connectedUntil }
     public func isRefreshing(now: Date = Date()) -> Bool { expected != nil && now < challengeUntil }
@@ -73,7 +86,7 @@ import Observation
     }
     public func command(card: RemoteCard, action: RemoteAction, argument: String? = nil, now: Date = Date()) -> RemoteCommand? {
         guard canAct(now: now), let board,
-              board.cards.contains(where: { $0.hasSameActionContext(as: card) && $0.actions.contains(action) }) else { return nil }
+              board.commandCards.contains(where: { $0.hasSameActionContext(as: card) && $0.actions.contains(action) }) else { return nil }
         let command = RemoteCommand(hostSession: board.hostSession, account: board.account, cardID: card.id, actionID: action.id,
                                     token: action.token, argument: argument)
         pending = command; pendingUntil = now.addingTimeInterval(45)
@@ -82,7 +95,11 @@ import Observation
     public func recoverResult(_ result: RemoteCommandResult) {
         guard pending == nil || pending?.id == result.id else { return }
         self.result = result
-        if result.status != .running { pending = nil }
+        if result.status != .running { clearPending() }
+    }
+    private func clearPending() {
+        pending = nil
+        acceptedDraftSave = nil
     }
     public func acknowledgeResult() {
         guard let result else { return }

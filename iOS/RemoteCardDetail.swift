@@ -13,6 +13,7 @@ struct RemoteCardDetail: View {
     @State private var confirmationCard: RemoteCard?
     @State private var approvalID: UUID?
     @State private var confirmationAccount = ""
+    @State private var regenerationPresentation: DraftRegenerationPresentation?
     @Environment(\.dismiss) private var dismiss
     private var boardCard: RemoteCard? { model.state.board?.cards.first { $0.id == original.id } }
     private var current: RemoteCard { boardCard ?? original }
@@ -170,6 +171,8 @@ struct RemoteCardDetail: View {
                 else if confirmation?.kind == .reReview { Text(.Remote.remoteReReviewConfirmation) }
                 else { Text(confirmation?.kind == .deleteDraft ? .CommentReview.commentReviewDeleteHelp : .Remote.remoteConfirmHelp) }
             }
+            .sheet(item: $regenerationPresentation) { model.draftRegenerationSheet($0) }
+            .onChange(of: model.state.board?.account) { _, _ in regenerationPresentation = nil }
             .onDisappear { model.cancelApproval(); model.cancelDetails() }
         }
     }
@@ -256,6 +259,7 @@ struct RemoteCardDetail: View {
                 Text(.RemoteDetail.remoteDetailPendingDraftsHelp)
                     .font(.callout).foregroundStyle(.secondary)
                     .fixedSize(horizontal: false, vertical: true)
+                draftRegenerationButton
                 ForEach(drafts) { draft in
                     RemoteDraftCard(draft: draft,
                         deleteAction: actionCard?.actions.first { $0.kind == .deleteDraft && $0.id == "deleteDraft:\(draft.id)" },
@@ -264,9 +268,50 @@ struct RemoteCardDetail: View {
                         replyThread: details?.threads?.first { $0.draftIDs?.contains(draft.id) == true },
                         canAct: boardCard != nil && model.state.canAct(now: .now),
                         runningActionID: runningActionID,
-                        onAction: showConfirmation)
+                        onAction: showConfirmation, onRegenerate: regenerateDraftAction(draft))
                 }
             }
+        }
+    }
+
+    private var draftMergeRequest: (projectID: Int, iid: Int)? {
+        guard let card = boardCard else { return nil }
+        let parts = card.id.split(separator: ":")
+        guard parts.count == 3, parts[0] == "mr", let projectID = Int(parts[1]), let iid = Int(parts[2]),
+              projectID > 0, iid > 0 else { return nil }
+        return (projectID, iid)
+    }
+
+    @ViewBuilder
+    private var draftRegenerationButton: some View {
+        if let phase = model.draftRegenerationBatch?.phase {
+            Button { regenerationPresentation = .init(scope: nil) } label: {
+                Label(phase.regenerationTitle, systemImage: "wand.and.stars")
+                    .frame(minHeight: 44)
+            }
+            .buttonStyle(.bordered)
+        } else if model.supportsDraftRegeneration, let target = draftMergeRequest {
+            let scope = DraftRegenerationScope.mergeRequest(projectID: target.projectID, iid: target.iid)
+            if model.draftRegenerationCount(for: scope) > 0 {
+                Button { regenerationPresentation = .init(scope: scope) } label: {
+                    Label(.DraftRegeneration.draftRegenerationMrAction, systemImage: "wand.and.stars")
+                        .frame(minHeight: 44)
+                }
+                .buttonStyle(.bordered)
+                .disabled(!model.draftRegenerationIsAvailable)
+                .accessibilityIdentifier("draft-regeneration.merge-request")
+            }
+        }
+    }
+
+    private func regenerateDraftAction(_ draft: RemoteDraft) -> (() -> Void)? {
+        guard model.supportsDraftRegeneration, model.draftRegenerationBatch == nil,
+              let target = draftMergeRequest else { return nil }
+        let scope = DraftRegenerationScope.draft(projectID: target.projectID, iid: target.iid, draftID: draft.id)
+        guard model.draftRegenerationCount(for: scope) > 0 else { return nil }
+        return {
+            guard model.draftRegenerationIsAvailable else { return }
+            regenerationPresentation = .init(scope: scope)
         }
     }
 

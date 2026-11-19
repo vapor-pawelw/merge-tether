@@ -178,7 +178,8 @@ bound for the cryptographic pairing; it never evicts receipts to admit more work
 Capacity or storage failure blocks new commands. Completed results survive host
 restart; a recorded running command recovers as uncertain and is not executed
 again. Acceptance extends the phone deadline to two minutes, independently of
-network heartbeats.
+network heartbeats. A fresh snapshot showing the same accepted draft batch
+still saving extends the wait for that save.
 
 Reconnecting, restarting or changing accounts creates a new command session and
 invalidates old execution permission. An authenticated receipt query can recover
@@ -256,6 +257,8 @@ Within cryptographic protocol v2, `merge-actions-v1` names the independent actio
 `mr-controls-v1` follows the same rule for `publishDraft`, `runReview`, `stopJob`, `ignoreSuggestion` and `restoreSuggestion`: clients that do not advertise it never receive those cases. Actions may carry an additive `label` for per-item buttons.
 
 `mark-ready-v1` independently enables `markReady` for your own open Draft MRs. The Mac uses the same account, ownership, source-commit and result checks as its local button. Confirmation explains that configured automation may resume. Phones without this capability receive neither the new action nor its bound CTA. Update both apps to use it; existing v2 pairing remains valid.
+
+The `draft-regeneration-v1` capability lets the phone start and review a batch for a draft, an MR, or all tracked MRs. The paired Mac runs the configured CLI with its current local skills. Progress remains available after closing the form. Starting and saving use the existing command receipts. The phone sends extra instructions in the encrypted command and the receipt keeps their digest. Proposal bodies travel in bounded pages tied to the host session, account and batch. Previews larger than 2 MiB are available on the Mac. Older clients continue to receive the existing board.
 
 ### Refresh and open Details
 

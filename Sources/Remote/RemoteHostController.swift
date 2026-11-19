@@ -44,6 +44,27 @@ extension RemoteConnection: RemoteHostTransport {}
     private var phoneSupportsMRControls = false
     private var phoneSupportsCommentOrigins = false
     private var phoneSupportsMarkReady = false
+    private var phoneSupportsDraftRegeneration = false
+    private var regenerationPreview: DraftRegenerationPreview?
+
+    private struct DraftRegenerationPreview {
+        let batchID: UUID
+        let proposals: [DraftRegenerationProposal]
+        let bytes: Data?
+        let token: String?
+
+        init(batch: DraftRegenerationBatch) {
+            batchID = batch.id
+            proposals = batch.proposals
+            if let encoded = try? JSONEncoder().encode(proposals), encoded.count <= RemoteDraftRegenerationPage.maximumBytes {
+                bytes = encoded
+                token = RemoteDraftRegenerationPage.token(encoded)
+            } else {
+                bytes = nil
+                token = nil
+            }
+        }
+    }
     private var originObserver: UUID?
     private var authorKindObserver: UUID?
     private var originSubscription: RemoteDetailOriginSubscription?
@@ -149,6 +170,8 @@ extension RemoteConnection: RemoteHostTransport {}
         phoneSupportsMRControls = false
         phoneSupportsCommentOrigins = false
         phoneSupportsMarkReady = false
+        phoneSupportsDraftRegeneration = false
+        regenerationPreview = nil
         clearOriginSubscription()
         detailTask?.cancel(); detailTask = nil; activeDetailRequest = nil
         lastDetailRead = .distantPast
@@ -211,6 +234,7 @@ extension RemoteConnection: RemoteHostTransport {}
             phoneSupportsDetailPreviews = phoneSupportsDetails && message.capabilities?.contains(RemoteMessage.detailPreviewCapability) == true
             phoneSupportsMRControls = message.capabilities?.contains(RemoteMessage.mrControlsCapability) == true
             phoneSupportsMarkReady = message.capabilities?.contains(RemoteMessage.markReadyCapability) == true
+            phoneSupportsDraftRegeneration = message.capabilities?.contains(RemoteMessage.draftRegenerationCapability) == true
             phoneSupportsCommentOrigins = phoneSupportsDetails && message.capabilities?.contains(RemoteMessage.commentOriginCapability) == true
             phoneSupportsOriginUpdates = phoneSupportsDetails && message.capabilities?.contains(RemoteMessage.detailOriginsCapability) == true
             if !phoneSupportsOriginUpdates { clearOriginSubscription() }
@@ -231,7 +255,8 @@ extension RemoteConnection: RemoteHostTransport {}
             if !fresh { board.partial = true }
             do { try await active.send(.init(type: .snapshot, challenge: challenge, board: board,
                 capabilities: [RemoteMessage.detailsCapability, RemoteMessage.detailContextCapability, RemoteMessage.detailOriginsCapability, RemoteMessage.mrControlsCapability,
-                               RemoteMessage.commentOriginCapability, RemoteMessage.markReadyCapability, RemoteMessage.detailPreviewCapability])) }
+                               RemoteMessage.commentOriginCapability, RemoteMessage.markReadyCapability, RemoteMessage.detailPreviewCapability,
+                               RemoteMessage.draftRegenerationCapability])) }
             catch { failed = true; try? await active.send(.init(type: .unavailable)) }
         case .receipt:
             guard let command = message.command, let challenge = message.challenge, let pairing else { return }
@@ -245,10 +270,16 @@ extension RemoteConnection: RemoteHostTransport {}
             if message.detailRequest == activeDetailRequest {
                 detailTask?.cancel(); detailTask = nil; activeDetailRequest = nil
             }
+        case .draftRegenerationRequest:
+            guard phoneSupportsDraftRegeneration, let request = message.draftRegenerationRequest,
+                  let challenge = message.challenge else { return }
+            let page = draftRegenerationPage(for: request)
+            do { try await active.send(.init(type: .draftRegenerationPage, challenge: challenge, draftRegenerationPage: page)) }
+            catch { return }
         case .command:
             guard let command = message.command, let pairing else { return }
-            // Seen acknowledges a local receipt. Suggestion decisions validate their own MR in the executor.
-            let fresh = if command.isCompletionAcknowledgement || command.isFeedbackSuggestionDecision { true } else {
+            // Seen acknowledges a local receipt. Draft regeneration and suggestion decisions validate their own context.
+            let fresh = if command.isCompletionAcknowledgement || command.isFeedbackSuggestionDecision || command.isDraftRegeneration { true } else {
                 await refreshSource(force: true, deadline: .now + .seconds(35))
             }
             var board = snapshot()
@@ -270,7 +301,7 @@ extension RemoteConnection: RemoteHostTransport {}
                 let current = self.snapshot()
                 guard settled, self.connection === active, !current.partial,
                       current.hostSession == board.hostSession, current.account == board.account,
-                      current.cards.contains(where: { $0.hasSameActionContext(as: card) && $0.actions.contains(action) }) else { return .changed }
+                      current.commandCards.contains(where: { $0.hasSameActionContext(as: card) && $0.actions.contains(action) }) else { return .changed }
                 return await self.execute(card, action: action, argument: command.argument)
             }
             try? await active.send(.init(type: .result, result: result))
@@ -450,6 +481,7 @@ extension RemoteConnection: RemoteHostTransport {}
             recentDetails.removeAll()
             account = currentAccount; accountRevision = monitor.glab.accountRevision; hostSession = UUID()
             resolutionPreviews.removeAll()
+            regenerationPreview = nil
         }
         var board = RemoteBoardAdapter.board(monitor: monitor, session: hostSession, account: account)
         if !board.partial {
@@ -464,11 +496,96 @@ extension RemoteConnection: RemoteHostTransport {}
                 }
             }
         }
+        if phoneSupportsDraftRegeneration {
+            board.draftRegeneration = draftRegenerationControl(isPartial: board.partial)
+        }
         return board.forClient(supportsCommentReview: phoneSupportsCommentReview, supportsMergeActions: phoneSupportsMergeActions,
             supportsMRControls: phoneSupportsMRControls, supportsCommentOrigins: phoneSupportsCommentOrigins,
-            supportsMarkReady: phoneSupportsMarkReady)
+            supportsMarkReady: phoneSupportsMarkReady, supportsDraftRegeneration: phoneSupportsDraftRegeneration)
     }
+
+    private func draftRegenerationControl(isPartial: Bool) -> RemoteDraftRegenerationControl? {
+        let coordinator = monitor.draftRegeneration
+        let batch = coordinator.batch
+        let count = coordinator.count(for: .all)
+        guard coordinator.isAvailable || batch != nil else { return nil }
+        var actions: [RemoteAction] = []
+        if let batch {
+            if (batch.phase == .ready || batch.phase == .finished), !batch.proposals.isEmpty {
+                if regenerationPreview?.batchID != batch.id || regenerationPreview?.proposals != batch.proposals {
+                    regenerationPreview = DraftRegenerationPreview(batch: batch)
+                }
+            } else {
+                regenerationPreview = nil
+            }
+            if !isPartial {
+                if batch.phase == .ready, batch.proposals.contains(where: { $0.replacement != nil && $0.issue == nil }),
+                   let token = regenerationPreview?.token {
+                    actions.append(.init(id: RemoteDraftRegenerationControl.applyID, kind: .applyDraftRegeneration, token: token))
+                }
+                if batch.phase != .saving {
+                    actions.append(.init(id: RemoteDraftRegenerationControl.discardID, kind: .discardDraftRegeneration,
+                        token: batch.id.uuidString))
+                }
+            }
+        } else {
+            regenerationPreview = nil
+            if !isPartial, coordinator.isAvailable, count > 0, let token = coordinator.scopeToken(for: .all) {
+                actions.append(.init(id: RemoteDraftRegenerationControl.startID, kind: .startDraftRegeneration, token: token))
+            }
+        }
+        return RemoteDraftRegenerationControl(
+            card: .init(id: RemoteDraftRegenerationControl.cardID, title: "", project: "", url: nil, actions: actions),
+            count: count, batch: batch.map {
+                .init(id: $0.id, scope: $0.scope, total: $0.total, completed: $0.completed, phase: $0.phase,
+                      savingTotal: $0.savingTotal, savingCompleted: $0.savingCompleted)
+            }, previewToken: regenerationPreview?.token, proposalCount: batch?.proposals.count ?? 0,
+            mergeRequestCount: coordinator.mergeRequestCount)
+    }
+
+    private func draftRegenerationPage(for request: RemoteDraftRegenerationPageRequest) -> RemoteDraftRegenerationPage {
+        let currentAccount = "\(monitor.glab.currentUsername ?? "")@\(monitor.glab.resolvedHost ?? "")"
+        guard request.hostSession == hostSession, request.account == account, account == currentAccount,
+              accountRevision == monitor.glab.accountRevision, let batch = monitor.draftRegeneration.batch,
+              batch.id == request.batchID, batch.phase == .ready || batch.phase == .finished,
+              let preview = regenerationPreview, preview.batchID == batch.id, preview.proposals == batch.proposals,
+              preview.token == request.previewToken, let bytes = preview.bytes,
+              (0..<bytes.count).contains(request.offset),
+              request.offset.isMultiple(of: RemoteDraftRegenerationPage.pageBytes) else {
+            return .init(request: request)
+        }
+        let end = min(request.offset + RemoteDraftRegenerationPage.pageBytes, bytes.count)
+        return .init(request: request, data: bytes.subdata(in: request.offset..<end), totalBytes: bytes.count)
+    }
+
+    private func executeDraftRegeneration(_ action: RemoteAction, argument: String?) async -> RemoteCommandResult.Status {
+        guard phoneSupportsDraftRegeneration, let operation = RemoteDraftRegenerationOperation(argument: argument) else { return .changed }
+        let coordinator = monitor.draftRegeneration
+        switch (action.kind, operation) {
+        case (.startDraftRegeneration, .start(let scope, let count, let instructions)):
+            guard count > 0, count == coordinator.count(for: scope),
+                  (instructions?.utf8.count ?? 0) <= DraftRegenerationScope.maximumInstructionsBytes,
+                  coordinator.scopeToken(for: .all) == action.token,
+                  let scopeToken = coordinator.scopeToken(for: scope) else { return .changed }
+            return coordinator.start(scope, instructions: instructions, expectedToken: scopeToken) ? .completed : .changed
+        case (.applyDraftRegeneration, .apply(let batchID, let proposalIDs)):
+            let ids = Set(proposalIDs)
+            guard ids.count == proposalIDs.count, !ids.isEmpty, let batch = coordinator.batch,
+                  batch.id == batchID, batch.phase == .ready, regenerationPreview?.token == action.token,
+                  ids.isSubset(of: Set(batch.proposals.compactMap { $0.replacement != nil && $0.issue == nil ? $0.id : nil }))
+            else { return .changed }
+            return await coordinator.apply(ids, batchID: batchID)
+        case (.discardDraftRegeneration, .discard(let batchID)):
+            guard batchID.uuidString == action.token else { return .changed }
+            return coordinator.discard(batchID) ? .completed : .changed
+        default: return .changed
+        }
+    }
+
     private func execute(_ card: RemoteCard, action: RemoteAction, argument: String? = nil) async -> RemoteCommandResult.Status {
+        if card.id == RemoteDraftRegenerationControl.cardID {
+            return await executeDraftRegeneration(action, argument: argument)
+        }
         if card.id.hasPrefix("completion:") {
             return RemoteBoardAdapter.acknowledgeCompletion(card, action: action, monitor: monitor, account: account)
                 ? .completed : .changed

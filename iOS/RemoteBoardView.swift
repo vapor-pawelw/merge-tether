@@ -7,6 +7,7 @@ struct RemoteBoardView: View {
     @State private var selected: RemoteCardSelection?
     @State private var showingInbox = false
     @State private var pendingInboxCard: RemoteCardSelection?
+    @State private var regenerationPresentation: DraftRegenerationPresentation?
     var body: some View {
         NavigationStack {
             Group {
@@ -18,6 +19,9 @@ struct RemoteBoardView: View {
                             Text(.Remote.remoteAutomationPaused).font(.caption).foregroundStyle(.orange).padding(.horizontal)
                         }
                         if board.partial { Text(.Remote.remotePartial).font(.caption).foregroundStyle(.orange).padding(.horizontal) }
+                        if let batch = model.draftRegenerationBatch {
+                            draftRegenerationStatus(batch)
+                        }
                         RemoteLaneBoard(lanes: board.lanes.filter { $0.id != .other }, onOpen: { selected = .init(card: $0) },
                             onOpenCTA: { selected = .init(card: $0, cta: $1) },
                             model: model,
@@ -74,7 +78,9 @@ struct RemoteBoardView: View {
                                 Text(.Board.boardInboxAccessibilityCount($0.count))
                             } ?? Text(verbatim: ""))
                             .accessibilityIdentifier("remote.inbox")
-                            RemoteConnectionToolbar(model: model)
+                            RemoteConnectionToolbar(model: model, onRegenerateDrafts: {
+                                regenerationPresentation = .init(scope: .all)
+                            })
                         }
                     }
                     ToolbarItem(placement: .topBarLeading) {
@@ -92,9 +98,12 @@ struct RemoteBoardView: View {
                 Text(.Remote.remotePairingTrust) + Text(verbatim: "\n" + (model.pairingCandidate?.origin.absoluteString ?? ""))
             }
             .sheet(isPresented: $pairingSheet) { NavigationStack { RemotePairingView(model: model) }.presentationDetents([.medium, .large]) }
+            .sheet(item: $regenerationPresentation) { model.draftRegenerationSheet($0) }
             .onChange(of: model.pairingRevision) {
                 pairingSheet = false; selected = nil; showingInbox = false; pendingInboxCard = nil
+                regenerationPresentation = nil
             }
+            .onChange(of: model.state.board?.account) { _, _ in regenerationPresentation = nil }
             .popover(isPresented: $showingInbox, attachmentAnchor: .rect(.bounds), arrowEdge: .top) {
                 TimelineView(.periodic(from: .now, by: 1)) { context in
                     let status = model.connectionStatus(now: context.date)
@@ -124,6 +133,28 @@ struct RemoteBoardView: View {
                 set: { if !$0, selected == nil { model.state.acknowledgeResult() } }
             )) { Button(.Remote.remoteClose) { model.state.acknowledgeResult() } }
         }
+    }
+
+    private func draftRegenerationStatus(_ batch: DraftRegenerationBatch) -> some View {
+        Button { regenerationPresentation = .init(scope: nil) } label: {
+            HStack(spacing: 10) {
+                if batch.phase == .generating || batch.phase == .saving {
+                    ProgressView().controlSize(.small)
+                } else {
+                    Image(systemName: "wand.and.stars").foregroundStyle(.tint)
+                }
+                Text(batch.phase.regenerationTitle)
+                    .font(.callout.weight(.medium))
+                    .foregroundStyle(.primary)
+                Spacer()
+                Image(systemName: "chevron.forward").font(.caption.weight(.semibold)).foregroundStyle(.secondary)
+            }
+            .padding(.horizontal, 12).padding(.vertical, 8)
+            .frame(minHeight: 44)
+            .background(.background, in: RoundedRectangle(cornerRadius: 10))
+        }
+        .buttonStyle(.plain).padding(.horizontal)
+        .accessibilityIdentifier("draft-regeneration.resume")
     }
     private func retryInbox() {
         if model.connectionStatus() == .connected {
@@ -183,6 +214,7 @@ private struct RemoteCardCTAButton: View {
 // TimelineView inside ToolbarItem causes a continuous toolbar preference-update loop.
 private struct RemoteConnectionToolbar: View {
     let model: RemotePhoneModel
+    let onRegenerateDrafts: () -> Void
     @State private var now = Date()
 
     var body: some View {
@@ -195,6 +227,15 @@ private struct RemoteConnectionToolbar: View {
             .accessibilityIdentifier("remote.refresh")
             .disabled(status != .connected)
             Menu {
+                if model.supportsDraftRegeneration, model.draftRegenerationBatch == nil,
+                   model.draftRegenerationCount(for: .all) > 0 {
+                    Button(action: onRegenerateDrafts) {
+                        Label(.DraftRegeneration.draftRegenerationAllAction, systemImage: "wand.and.stars")
+                    }
+                    .disabled(!model.draftRegenerationIsAvailable || !model.state.canAct(now: now))
+                    .accessibilityIdentifier("draft-regeneration.all")
+                    Divider()
+                }
                 if let origin = model.relayConfiguration.origin {
                     Text(.Remote.remoteRelayConfigured)
                     Text(verbatim: origin.absoluteString)
@@ -207,7 +248,7 @@ private struct RemoteConnectionToolbar: View {
                 .accessibilityIdentifier("remote.reconnect")
                 .disabled(status == .connecting)
             } label: { Image(systemName: "ellipsis.circle") }
-            .accessibilityLabel(Text(.Remote.remoteConnectionMenu))
+            .accessibilityLabel(Text(.DraftRegeneration.draftRegenerationBoardMenu))
             .accessibilityIdentifier("remote.connection.menu")
         }
         .task {
@@ -216,6 +257,20 @@ private struct RemoteConnectionToolbar: View {
                 do { try await Task.sleep(for: .seconds(1)) } catch { return }
             }
         }
+    }
+}
+
+extension RemotePhoneModel {
+    func draftRegenerationSheet(_ presentation: DraftRegenerationPresentation) -> some View {
+        DraftRegenerationSheet(presentation: presentation,
+            isAvailable: { self.draftRegenerationIsAvailable && self.state.canAct(now: .now) },
+            batch: { self.draftRegenerationBatch }, count: { self.draftRegenerationCount(for: $0) },
+            mergeRequestCount: { self.draftRegenerationMergeRequestCount },
+            isLoading: { self.draftRegenerationIsLoading }, loadFailed: { self.draftRegenerationLoadFailed },
+            reload: { await self.reloadDraftRegeneration() },
+            start: { await self.startDraftRegeneration($0, instructions: $1) },
+            apply: { await self.applyDraftRegeneration($0, batchID: $1) },
+            discard: { await self.discardDraftRegeneration($0) })
     }
 }
 
