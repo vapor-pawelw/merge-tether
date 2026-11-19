@@ -1,4 +1,7 @@
 import SwiftUI
+#if os(iOS)
+import ImageIO
+#endif
 
 /// A GitLab person as the UI shows them: display name first, the @username only on request.
 struct PersonIdentity: Equatable, Hashable, Sendable {
@@ -33,6 +36,13 @@ struct PersonIdentity: Equatable, Hashable, Sendable {
     }
 
     var hasAvatar: Bool { avatarURL.map { ["http", "https"].contains($0.scheme?.lowercased() ?? "") } ?? false }
+
+    var initials: String? {
+        guard let displayName else { return nil }
+        let words = displayName.split(whereSeparator: \.isWhitespace)
+        let letters = words.count > 1 ? [words.first?.first, words.last?.first].compactMap { $0 } : Array(displayName.prefix(2))
+        return String(letters).uppercased()
+    }
 }
 
 /// Avatar and display name. macOS reveals the @username on hover; iOS on tap, styled as a link.
@@ -58,7 +68,7 @@ struct PersonLabel: View {
 
     private func content(_ name: String) -> some View {
         HStack(spacing: 5) {
-            if showsAvatar { PersonAvatar(url: person.avatarURL, size: avatarSize).accessibilityHidden(true) }
+            if showsAvatar { PersonAvatar(url: person.avatarURL, size: avatarSize, initials: person.initials).accessibilityHidden(true) }
             Text(verbatim: name).lineLimit(1)
         }
     }
@@ -77,7 +87,7 @@ struct PersonLabel: View {
         if let handle = person.handle {
             Button { showsHandle = true } label: {
                 HStack(spacing: 5) {
-                    if showsAvatar { PersonAvatar(url: person.avatarURL, size: avatarSize).accessibilityHidden(true) }
+                    if showsAvatar { PersonAvatar(url: person.avatarURL, size: avatarSize, initials: person.initials).accessibilityHidden(true) }
                     Text(verbatim: name).lineLimit(1)
                         .foregroundStyle(.tint)
                         .underline(pattern: .dot)
@@ -100,7 +110,7 @@ struct PersonLabel: View {
 
     private func handlePopover(_ name: String, handle: String) -> some View {
         HStack(spacing: 10) {
-            PersonAvatar(url: person.avatarURL, size: 36).accessibilityHidden(true)
+            PersonAvatar(url: person.avatarURL, size: 36, initials: person.initials).accessibilityHidden(true)
             VStack(alignment: .leading, spacing: 2) {
                 Text(verbatim: name).font(.headline)
                 Text(verbatim: handle).font(.callout.monospaced()).foregroundStyle(.secondary)
@@ -115,18 +125,83 @@ struct PersonLabel: View {
 struct PersonAvatar: View {
     let url: URL?
     var size: CGFloat = 16
+    var initials: String? = nil
+    #if os(iOS)
+    @State private var loaded: (url: URL, image: UIImage)?
+    #endif
 
     var body: some View {
         #if os(macOS)
         AvatarView(url: url, size: size)
         #else
-        AsyncImage(url: PersonIdentity(name: nil, username: nil, avatarURL: url).hasAvatar ? url : nil) { phase in
-            if let image = phase.image { image.resizable().scaledToFill() }
-            // A concrete color, so the placeholder stays gray inside the tinted name button.
-            else { Image(systemName: "person.crop.circle.fill").resizable().scaledToFit().foregroundStyle(Color.secondary) }
+        Group {
+            if let loaded, loaded.url == url {
+                Image(uiImage: loaded.image).resizable().scaledToFill()
+            } else if let initials {
+                Text(verbatim: initials).font(.system(size: size * 0.42, weight: .semibold))
+                    .lineLimit(1).minimumScaleFactor(0.7)
+                    .foregroundStyle(Color.secondary)
+                    .frame(maxWidth: .infinity, maxHeight: .infinity)
+                    .background(Color.secondary.opacity(0.14))
+            } else {
+                Image(systemName: "person.crop.circle.fill").resizable().scaledToFit().foregroundStyle(Color.secondary)
+            }
         }
         .frame(width: size, height: size)
         .clipShape(Circle())
+        .task(id: url) {
+            guard let url, PersonIdentity(name: nil, username: nil, avatarURL: url).hasAvatar else {
+                loaded = nil; return
+            }
+            let image = await PhoneAvatarCache.shared.image(for: url)
+            guard !Task.isCancelled else { return }
+            loaded = image.map { (url, $0) }
+        }
         #endif
     }
 }
+
+#if os(iOS)
+@MainActor private final class PhoneAvatarCache {
+    static let shared = PhoneAvatarCache()
+    private let images = NSCache<NSURL, UIImage>()
+    private let failures = NSCache<NSURL, NSDate>()
+    private var requests: [URL: Task<UIImage?, Never>] = [:]
+    private let session: URLSession
+
+    private init() {
+        images.countLimit = 256
+        failures.countLimit = 256
+        let configuration = URLSessionConfiguration.ephemeral
+        configuration.timeoutIntervalForRequest = 10
+        configuration.httpShouldSetCookies = false
+        session = URLSession(configuration: configuration)
+    }
+
+    func image(for url: URL) async -> UIImage? {
+        let key = url as NSURL
+        if let image = images.object(forKey: key) { return image }
+        if let until = failures.object(forKey: key) as Date?, until > .now { return nil }
+        if let request = requests[url] { return await request.value }
+
+        let request = Task { [session] () -> UIImage? in
+            guard let (data, response) = try? await session.data(from: url),
+                  let http = response as? HTTPURLResponse, (200..<300).contains(http.statusCode),
+                  data.count <= 4 * 1024 * 1024,
+                  let source = CGImageSourceCreateWithData(data as CFData, nil),
+                  let thumbnail = CGImageSourceCreateThumbnailAtIndex(source, 0, [
+                    kCGImageSourceCreateThumbnailFromImageAlways: true,
+                    kCGImageSourceCreateThumbnailWithTransform: true,
+                    kCGImageSourceThumbnailMaxPixelSize: 120
+                  ] as CFDictionary) else { return nil }
+            return UIImage(cgImage: thumbnail)
+        }
+        requests[url] = request
+        let image = await request.value
+        requests[url] = nil
+        if let image { images.setObject(image, forKey: key) }
+        else { failures.setObject(Date.now.addingTimeInterval(60) as NSDate, forKey: key) }
+        return image
+    }
+}
+#endif
