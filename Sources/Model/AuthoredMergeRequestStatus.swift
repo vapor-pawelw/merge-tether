@@ -28,9 +28,18 @@ struct AuthoredMergeRequestStatus: Identifiable {
     let mayMergeManually: Bool
     let action: MergeSubmissionAction?
     var submissionState: MergeSubmissionState
+    let queueHasEnded: Bool
     let dependencyReadiness: MergeRequestDependencySummary.MergeReadiness
 
     var id: String { "\(request.projectID)!\(request.iid)" }
+
+    var waitsForApprovalsAfterQueueDeparture: Bool {
+        queueHasEnded && submissionState == .changed && request.headPipeline?.status == "success" && blockers == [.approvals]
+    }
+
+    var displayedSubmissionState: MergeSubmissionState {
+        waitsForApprovalsAfterQueueDeparture ? .none : submissionState
+    }
 
     func matchesCurrentRequest(_ current: GitLabMergeRequest) -> Bool {
         MergeRequestDependencySummary.Context(request) == .init(current)
@@ -71,10 +80,12 @@ struct AuthoredMergeRequestStatus: Identifiable {
         pendingDraftCount: Int? = 0,
         requiresCommentReview: Bool = false,
         action: MergeSubmissionAction? = .mergeNow,
-        submissionState: MergeSubmissionState = .none
+        submissionState: MergeSubmissionState = .none,
+        queueHasEnded: Bool = false
     ) {
         self.action = action
         self.submissionState = submissionState
+        self.queueHasEnded = queueHasEnded
         self.request = request
         self.dependencyReadiness = dependencyReadiness
         var blockers: [MergeRequestBlocker] = []

@@ -29,13 +29,13 @@ struct MREffectivePolicySummary: View {
                     } == true
             } : nil
         let catalogCurrent = monitor.attention.hasSyncedCurrentCatalog || monitor.authoredMergeRequests.hasSyncedCurrentCatalog
-        let submission = status?.submissionState ?? (catalogCurrent && request?.hasQueuedMerge == true ? .queued : .none)
+        let submission = status?.displayedSubmissionState ?? (catalogCurrent && request?.hasQueuedMerge == true ? .queued : .none)
         let input = MREffectivePolicyPresentation.Input(request: request, target: target, settings: monitor.settings,
             assistantReady: monitor.assistantDependencies.available.contains(monitor.settings.automation.assistant),
             readState: .init(catalogCurrent: catalogCurrent, row: row, input: monitor.boardRowInput(for: row)),
             submission: submission,
             cliHold: monitor.cliHealth.hold(for: monitor.settings.automation.assistant)?.issue.kind)
-        return (.init(input: input), status?.submissionState.title)
+        return (.init(input: input), status?.displayedSubmissionState.title)
     }
 }
 

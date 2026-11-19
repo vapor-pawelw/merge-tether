@@ -36,7 +36,7 @@ import MergeTetherRemote
             readState: .init(catalogCurrent: monitor.attention.hasSyncedCurrentCatalog || monitor.authoredMergeRequests.hasSyncedCurrentCatalog,
                 sameContext: row.evidenceMatchesCatalogContext, readFailed: monitor.lastError != nil || monitor.attention.hasError,
                 rechecking: monitor.isLoading || monitor.attention.isLoading),
-            submission: status?.submissionState ?? .none,
+            submission: status?.displayedSubmissionState ?? .none,
             cliHold: monitor.cliHealth.hold(for: monitor.settings.automation.assistant)?.issue.kind)
         let policy = MREffectivePolicyPresentation(input: input)
         details.policy = policy.clauses.map { String(localized: message($0)) }

@@ -224,7 +224,7 @@ private struct CommandCenterMRCardContent: View {
     private var neutralStatus: LocalizedStringResource? {
         if monitor.authoredMergeRequests.requests.contains(where: {
             $0.request.projectID == item.id.projectID && $0.request.iid == item.id.iid
-                && $0.request.sha == item.mergeRequest?.sha && $0.submissionState != .none
+                && $0.request.sha == item.mergeRequest?.sha && $0.displayedSubmissionState != .none
         }) { return nil }
         return presentation.neutralStatus
     }

@@ -360,7 +360,7 @@ final class AuthoredMergeRequestMonitor {
             }
 
             results.append(status)
-            let conflictAfterQueueDeparture = detail?.hasConflicts == true && evaluation.queueHasEnded
+            let conflictAfterQueueDeparture = detail?.hasConflicts == true && status.queueHasEnded
             if automaticMergeTarget == nil,
                status.submissionState == .none || status.request.mergeTrainConflict != nil || conflictAfterQueueDeparture {
                 await scheduleConflictIfNeeded(status.request, account: account, user: user)
@@ -450,7 +450,7 @@ final class AuthoredMergeRequestMonitor {
             async let approvals = glab.fetchMergeRequestApprovalState(projectID: request.projectID, iid: request.iid, host: host)
             async let resolved = glab.mergeRequestDiscussionsAreResolved(projectID: request.projectID, iid: request.iid, host: host)
             async let drafts = glab.fetchOwnDraftNoteCount(projectID: request.projectID, iid: request.iid, host: host, userID: user.id)
-            let (status, _, policy) = try await evaluate(request, approvals: approvals, resolved: resolved, pendingDraftCount: drafts,
+            let (status, policy) = try await evaluate(request, approvals: approvals, resolved: resolved, pendingDraftCount: drafts,
                 account: account, user: user, revision: revision)
             guard isCurrent(account), glab.accountRevision == revision else { return .changed }
             if let index = requests.firstIndex(where: { $0.id == status.id }) { requests[index] = status }
@@ -562,7 +562,7 @@ final class AuthoredMergeRequestMonitor {
         account: Account,
         user: GitLabAuthenticatedUser,
         revision: UInt64
-    ) async -> (status: AuthoredMergeRequestStatus, queueHasEnded: Bool, policy: GitLabMergeActionPolicy?) {
+    ) async -> (status: AuthoredMergeRequestStatus, policy: GitLabMergeActionPolicy?) {
         let host = account.host
         var request = request
         let target = MRAutomationScope.Target(host: host, username: account.username, projectID: request.projectID, iid: request.iid)
@@ -622,9 +622,9 @@ final class AuthoredMergeRequestMonitor {
             }, pendingDraftCount: pendingDraftCount,
             requiresCommentReview: settings.pendingCommentReviews.contains(.init(host: host,
                 username: user.username, projectID: request.projectID, iid: request.iid)),
-            action: policy?.action, submissionState: state
+            action: policy?.action, submissionState: state, queueHasEnded: queueHasEnded
         )
-        return (status, queueHasEnded, policy)
+        return (status, policy)
     }
 
     private func checkQueuedDiscussions(for request: GitLabMergeRequest, account: Account,

@@ -239,7 +239,7 @@ import MergeTetherRemote
             title = .MergeActions.mergeActionsTrainEvidenceUnavailable
             detail = nil
             blocker = .prerequisite(.unknown)
-        } else if let stateTitle = checked?.submissionState.title {
+        } else if let stateTitle = checked?.displayedSubmissionState.title {
             title = stateTitle
             detail = String(localized: .MergeActions.mergeActionsConfirmHelp)
             blocker = .submission

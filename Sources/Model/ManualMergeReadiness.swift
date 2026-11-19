@@ -127,7 +127,13 @@ extension MergeRequestAttentionMonitor.Item {
         guard let status else { return .checking }
         guard request.webURL == url, request.projectID == id.projectID, request.iid == id.iid,
               status.matchesCurrentRequest(request) else { return .context }
-        guard status.submissionState == .none, !request.hasQueuedMerge else { return .submission }
+        guard !request.hasQueuedMerge else { return .submission }
+        guard status.submissionState == .none else {
+            if status.waitsForApprovalsAfterQueueDeparture, let action = status.action {
+                return catalogMergeBlocker(request, action: action) ?? .prerequisite(.approvals)
+            }
+            return .submission
+        }
         guard let action = status.action else { return .capability }
         if let blocker = catalogMergeBlocker(request, action: action) { return blocker }
         if requiresCommentReview || draftCount > 0 || !drafts.isEmpty { return .prerequisite(.commentReview) }

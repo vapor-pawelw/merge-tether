@@ -70,6 +70,7 @@ struct MergeActionsView<StatusTrailer: View, AdditionalActions: View>: View {
         return item.manualMergeBlocker(using: status)
     }
     private var state: MergeSubmissionState { result ?? status?.submissionState ?? .none }
+    private var displayedState: MergeSubmissionState { result ?? status?.displayedSubmissionState ?? .none }
     private var hasDiscussionBlock: Bool { status?.blockers.contains(.discussions) == true || item.mergeRequest?.blockingDiscussionsResolved == false }
     private var shownBlocker: ManualMergeBlocker? {
         if case .prerequisite(let reason) = blocker, coveredBlockers.contains(reason) { return nil }
@@ -85,7 +86,9 @@ struct MergeActionsView<StatusTrailer: View, AdditionalActions: View>: View {
               item.reReviewReadiness?.hasConcreteConcerns != true else { return nil }
         return status?.action
     }
-    private var needsGitLabCheck: Bool { state == .uncertain || state == .changed || status?.action == nil && status != nil }
+    private var needsGitLabCheck: Bool {
+        displayedState == .uncertain || displayedState == .changed || status?.action == nil && status != nil
+    }
     private var feedbackRecovery: ManualFeedbackRecovery? {
         guard evidenceMatchesCatalogContext, monitor.authoredMergeRequests.hasSyncedCurrentCatalog else { return nil }
         return item.manualFeedbackRecovery()
@@ -165,7 +168,7 @@ struct MergeActionsView<StatusTrailer: View, AdditionalActions: View>: View {
 
     private var hasStatusText: Bool {
         status?.request.mergeTrainConflict != nil || status?.request.mergeTrainEvidenceUnavailable == true
-            || state.title != nil || shownBlocker != nil || showsDiscussionLine
+            || displayedState.title != nil || shownBlocker != nil || showsDiscussionLine
             || (showsReplySources && feedbackRecovery?.replySourceIDs.isEmpty == false) || resolutionMessage != nil || result == .changed
     }
 
@@ -177,8 +180,8 @@ struct MergeActionsView<StatusTrailer: View, AdditionalActions: View>: View {
             }.foregroundStyle(.orange)
         } else if status?.request.mergeTrainEvidenceUnavailable == true {
             statusLine(.MergeActions.mergeActionsTrainEvidenceUnavailable, symbol: "exclamationmark.triangle", emphasized: true)
-        } else if let title = state.title {
-            statusLine(title, symbol: state.isDelegated ? "clock" : "exclamationmark.circle", emphasized: !state.isDelegated)
+        } else if let title = displayedState.title {
+            statusLine(title, symbol: displayedState.isDelegated ? "clock" : "exclamationmark.circle", emphasized: !displayedState.isDelegated)
         } else if let blocker = shownBlocker {
             statusLine(blocker.title, symbol: "lock")
             if feedbackRecovery?.recoveryAction == .verifyFeedback, feedbackRecheckRoute == .review {

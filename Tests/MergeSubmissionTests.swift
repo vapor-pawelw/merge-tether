@@ -412,6 +412,67 @@ import Testing
         }
     }
 
+    @Test(arguments: ["departed", "active", "unreadable"])
+    func greenPipelineWaitsNormallyForApprovalsAfterConfirmedQueueDeparture(_ queue: String) async throws {
+        try await fixture { glab, gitlab, _ in
+            let suite = "ApprovalsAfterQueue.\(UUID())"
+            let defaults = try #require(UserDefaults(suiteName: suite))
+            defer { defaults.removePersistentDomain(forName: suite) }
+            let settings = SettingsManager(defaults: defaults)
+            settings.onboardingCompleted = true
+            settings.notificationsEnabled = false
+            settings.automation.autoMergeEnabled = true
+            gitlab.write("observed", "train-only")
+            let monitor = AuthoredMergeRequestMonitor(settings: settings, glab: glab, canAutomate: { _ in true })
+            @MainActor func refresh() async {
+                monitor.refreshIfNeeded()
+                while monitor.isLoading { await Task.yield() }
+            }
+            await refresh()
+            let receipt = try #require(settings.mergeSubmissions.first)
+            #expect(receipt.state == .inTrain)
+
+            if queue != "active" { gitlab.remove("observed") }
+            gitlab.write("current-head", String(repeating: "c", count: 40))
+            gitlab.write("missing-approvals")
+            let transport = try #require(gitlab.handler)
+            gitlab.handler = { call in
+                if queue == "unreadable", call.endpoint.contains("/merge_trains?") {
+                    return InMemoryGitLab.output(error: "503 Service Unavailable", code: 1)
+                }
+                if gitlab.has("missing-approvals"), call.endpoint.hasSuffix("/approval_state") {
+                    return InMemoryGitLab.output(#"{"rules":[{"approvals_required":2,"approved":false}]}"#)
+                }
+                let response = try await transport(call)
+                guard call.endpoint == "/projects/1/merge_requests/2" else { return response }
+                var detail = try #require(JSONSerialization.jsonObject(with: response.stdout) as? [String: Any])
+                detail["head_pipeline"] = ["id": 4, "status": "success"]
+                if gitlab.has("missing-approvals") { detail["detailed_merge_status"] = "not_approved" }
+                return try InMemoryGitLab.json(detail)
+            }
+            await refresh()
+
+            @MainActor func check(_ blocker: ManualMergeBlocker) throws {
+                let status = try #require(monitor.requests.first)
+                let request = status.request
+                let item = MergeRequestAttentionMonitor.Item(id: .init(projectID: request.projectID, iid: request.iid),
+                    title: request.title, url: request.webURL, mergeRequest: request, isAuthored: true)
+                let card = RemoteBoardAdapter.mergePresentation(RemoteBoardAdapter.card(item, account: "me@\(host)"),
+                    item: item, status: status)
+                #expect(item.manualMergeBlocker(using: status) == blocker)
+                #expect(card.presentation?.status == String(localized: blocker.title))
+                #expect(status.submissionState == .changed)
+                #expect(!status.mayAutoMerge && !status.mayMergeManually)
+            }
+            try check(queue == "departed" ? .prerequisite(.approvals) : .submission)
+            gitlab.remove("missing-approvals")
+            await refresh()
+            try check(.submission)
+            #expect(settings.mergeSubmissions == [receipt])
+            #expect(gitlab.requests.allSatisfy { $0.method == "GET" })
+        }
+    }
+
     @Test(arguments: ["ordinary", "train", "active-train", "unreadable-train"])
     func confirmedQueueDepartureAllowsOrdinaryConflictRepairWithoutResubmission(_ queue: String) async throws {
         try await fixture { glab, gitlab, _ in
