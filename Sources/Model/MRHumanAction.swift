@@ -202,7 +202,7 @@ struct MRHumanAction {
 
     init?(row: MergeRequestBoardSnapshot.Row, assistantReady: Bool,
           confirmationState: MergeRequestAttentionMonitor.ConfirmationState? = nil,
-          automaticallyPublishedDraftIDs: Set<Int> = []) {
+          automaticallyPublishedDraftIDs: Set<Int> = [], automaticMergePolicyHold: LocalizedStringResource? = nil) {
         let item = row.item
         guard row.needsAttention, row.latestJob?.operationalExecution?.state.isActive != true,
               !item.aiOriginChecking,
@@ -300,7 +300,7 @@ struct MRHumanAction {
         } else if item.needsPipelineHandoff {
             self.init(kind: .pipelineHandoff, action: .reviewHandoff, message: .MRHumanAction.mrHumanActionPipelineHandoff)
         } else if item.needsMerge && !hasOutstandingFeedback {
-            self.init(kind: .merge, action: .reviewMerge, message: .MRHumanAction.mrHumanActionMerge)
+            self.init(kind: .merge, action: .reviewMerge, message: automaticMergePolicyHold ?? .MRHumanAction.mrHumanActionMerge)
         } else if item.authorFeedbackStatus?.phase == .failed {
             self.init(kind: .verificationFailure, action: assistantReady ? .verifyFeedback : .setupAssistant,
                       message: .MRHumanAction.mrHumanActionVerificationFailure)

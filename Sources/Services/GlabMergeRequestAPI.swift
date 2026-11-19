@@ -491,6 +491,7 @@ extension GlabService {
         action: MergeSubmissionAction = .mergeNow,
         expectedPolicy: GitLabMergeActionPolicy? = nil,
         requiresApprovalRules: Bool = false,
+        requiresCurrentTrainApprovals: Bool = false,
         beforeWrite: @MainActor (Int?) throws -> Void = { _ in },
         shouldProceed: @escaping @MainActor @Sendable () -> Bool
     ) async throws -> MergeSubmissionState {
@@ -537,7 +538,7 @@ extension GlabService {
             let policy = try await fetchMergeActionPolicy(projectID: projectID, host: host, request: current)
             guard policy == expectedPolicy, policy.action == action else { throw CancellationError() }
         }
-        if expectedPolicy != nil || requiresApprovalRules {
+        if !requiresCurrentTrainApprovals, expectedPolicy != nil || requiresApprovalRules {
             let approvals = try await fetchMergeRequestApprovalState(projectID: projectID, iid: iid, host: host)
             guard approvals.allRequiredRulesApproved,
                   !requiresApprovalRules || approvals.hasRequiredRules else { throw CancellationError() }
@@ -547,6 +548,10 @@ extension GlabService {
         let trainPreparation = expectedPolicy?.usesMergeTrain == true
             ? try await fetchMergeTrainPreparation(current, host: host) : nil
         if let conflict = trainPreparation?.conflict { throw conflict }
+        if requiresCurrentTrainApprovals {
+            guard expectedPolicy?.usesMergeTrain == true, action == .enqueue, requiresApprovalRules,
+                  try await hasCurrentApprovalsForMergeTrain(current, host: host) else { throw CancellationError() }
+        }
         // Re-read after dependency I/O so same-head retargets cannot reuse the
         // checked graph. GitLab's merge SHA precondition protects only the source.
         async let finalRequest = fetchMergeRequest(projectID: projectID, iid: iid, host: host)

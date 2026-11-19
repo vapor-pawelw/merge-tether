@@ -41,6 +41,12 @@ struct AuthoredMergeRequestStatus: Identifiable {
         waitsForApprovalsAfterQueueDeparture ? .none : submissionState
     }
 
+    var automaticMergePolicyHold: LocalizedStringResource? {
+        if blockers.contains(.discussionPolicy) { return .MergeActions.mergeActionsAutomaticDiscussionPolicy }
+        if blockers.contains(.approvalPolicy) { return .MergeActions.mergeActionsAutomaticApprovalPolicy }
+        return nil
+    }
+
     func matchesCurrentRequest(_ current: GitLabMergeRequest) -> Bool {
         MergeRequestDependencySummary.Context(request) == .init(current)
             && request.semanticContextFingerprint == current.semanticContextFingerprint

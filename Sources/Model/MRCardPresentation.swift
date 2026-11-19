@@ -57,6 +57,7 @@ struct MRCardPresentation {
     let automaticPipelineProgress: Bool
     let automaticMergeProgress: Bool
     let confirmedSubmission: MergeSubmissionState?
+    private let automaticMergePolicyHold: LocalizedStringResource?
     private var item: MergeRequestAttentionMonitor.Item { row.item }
     private var finishedState: MergeRequestFinishedState? { .init(row.displayRequest) }
 
@@ -68,7 +69,7 @@ struct MRCardPresentation {
          preservedHumanAction: MRHumanAction? = nil, isRefreshingAttention: Bool = false, refreshFailures: [RefreshFailure] = [],
          showsReadProgress: Bool = true, automaticMergeProgress: Bool = false,
          cliHoldKind: AssistantCLIHealthIssue.Kind? = nil, assistant: AutomationAssistant = .codex,
-         mergeStatus: AuthoredMergeRequestStatus? = nil) {
+         mergeStatus: AuthoredMergeRequestStatus? = nil, showsAutomaticMergePolicyHold: Bool = true) {
         self.row = row; self.reviewingContext = reviewingContext; self.allowsRemoval = allowsRemoval
         self.preservedHumanAction = preservedHumanAction; self.isRefreshingAttention = isRefreshingAttention
         self.refreshFailures = refreshFailures
@@ -77,8 +78,10 @@ struct MRCardPresentation {
         if row.evidenceMatchesCatalogContext, let request = row.displayRequest,
            let mergeStatus, mergeStatus.matchesCurrentRequest(request) {
             self.confirmedSubmission = mergeStatus.displayedSubmissionState
+            self.automaticMergePolicyHold = showsAutomaticMergePolicyHold ? mergeStatus.automaticMergePolicyHold : nil
         } else {
             self.confirmedSubmission = nil
+            self.automaticMergePolicyHold = nil
         }
         self.assistant = assistant
         self.cliHoldKind = cliHoldKind
@@ -106,6 +109,9 @@ struct MRCardPresentation {
             ? monitor.authoredMergeRequests.requests.first {
                 $0.request.projectID == row.id.projectID && $0.request.iid == row.id.iid
             } : nil
+        let showsAutomaticMergePolicyHold = if let target, let request = row.displayRequest, mergeStatus?.automaticMergePolicyHold != nil {
+            monitor.settings.permitsAutomaticAction(.merge, for: request, target: target)
+        } else { false }
         self.init(row: row, reviewingContext: MRBoardProjector.reviewingContext(for: row, input: input), allowsRemoval: allowsRemoval,
             assistantReady: ready, confirmationState: monitor.attention.confirmationStates[row.id],
             automaticallyPublishedDraftIDs: automatic,
@@ -118,7 +124,8 @@ struct MRCardPresentation {
             showsReadProgress: monitor.showsRefreshProgress(for: row.id),
             automaticMergeProgress: row.displayRequest.map { monitor.authoredMergeRequests.isMerging($0) } ?? false,
             cliHoldKind: monitor.cliHealth.hold(for: row.latestJob?.key.assistant ?? monitor.settings.automation.assistant)?.issue.kind,
-            assistant: input.automation.assistant, mergeStatus: mergeStatus)
+            assistant: input.automation.assistant, mergeStatus: mergeStatus,
+            showsAutomaticMergePolicyHold: showsAutomaticMergePolicyHold)
     }
 
     var mergeStage: MergeStage? {
@@ -197,7 +204,8 @@ struct MRCardPresentation {
         guard row.needsAttention, !busy,
               !(allowsRemoval && reviewingContext.nextStep == .setupAgent && !item.requiresCommentReview) else { return nil }
         return MRHumanAction(row: row, assistantReady: assistantReady, confirmationState: confirmationState,
-                             automaticallyPublishedDraftIDs: automaticallyPublishedDraftIDs)
+                             automaticallyPublishedDraftIDs: automaticallyPublishedDraftIDs,
+                             automaticMergePolicyHold: automaticMergePolicyHold)
     }
     var showsAdditionalCommentReview: Bool {
         finishedState == nil && item.requiresCommentReview && item.draftCount == 0 && item.drafts.isEmpty
@@ -217,6 +225,7 @@ struct MRCardPresentation {
         if busy || (isRefreshingAttention && showsReadProgress) { return progressTitle }
         if let mergeStage { return mergeStage.title }
         if let waitingStatus { return waitingStatus.title }
+        if let automaticMergePolicyHold { return automaticMergePolicyHold }
         guard allowsRemoval else {
             return row.isDraft ? .AutomationProgress.progressOwnDraft : .AutomationProgress.progressMonitoring
         }

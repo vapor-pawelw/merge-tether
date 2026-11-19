@@ -327,7 +327,7 @@ Readiness uses fresh dependency snapshots rather than the cached dependency row.
 
 Automatic merge also requires a fresh complete semantic assessment when external feedback exists. A remaining condition in a general comment blocks it even when GitLab's approval rules are satisfied and every resolvable thread is closed. Turning off thread resolution does not bypass this merge check.
 
-Automatic merge carries the GitLab project policy from readiness into the final submission checks. If the project stops requiring resolved discussions during preflight, MergeTether holds automatic submission. A deliberate manual merge has its own readiness check.
+Automatic merge carries the GitLab project policy from readiness into the final submission checks. If the project stops requiring resolved discussions during preflight, MergeTether holds automatic submission. GitLab can restrict reads of approval settings to project maintainers. For merge trains with unavailable approval-reset settings, MergeTether can instead verify that every required rule has enough approvals recorded after GitLab created the latest diff version for the exact source commit. It checks this evidence again before submission. GitLab removes an MR from a train if its source branch is updated. Cards and Details explain when the required policy or approval evidence is missing.
 
 ### Explicit merge and GitLab queues
 

@@ -364,6 +364,28 @@
         }
       }
     },
+    "mergeActions.automaticApprovalPolicy": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Auto-merge needs proof that the required approvals cover this commit."
+          }
+        }
+      }
+    },
+    "mergeActions.automaticDiscussionPolicy": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Auto-merge requires GitLab to enforce resolved discussions."
+          }
+        }
+      }
+    },
     "mergeActions.discussions": {
       "extractionState": "manual",
       "localizations": {

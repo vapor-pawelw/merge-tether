@@ -27,6 +27,8 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 - Show the usual approval wait on cards and in Details when a green pipeline follows a confirmed departure from the merge queue and required approvals are still missing.
 
 - Recheck the project’s discussion policy before automatic merge. Require a current review of the MR title and description before automatic approval.
+- Explain on MR cards and in Details when GitLab’s discussion or approval-reset policy holds automatic merge. Keep manual merge available when its checks pass.
+- Add eligible MRs to the merge train when project approval settings are unreadable and GitLab confirms enough approvals for each required rule after the current diff version was created.
 - Stop iPhone draft publication when the checked discussion has changed. Reconcile an unconfirmed re-review request when GitLab shows that the reviewer has started.
 - Use verified replies in closed findings from the same review to reconcile a blocked follow-up. Resume failed-pipeline checks after temporary read failures before claiming work.
 
