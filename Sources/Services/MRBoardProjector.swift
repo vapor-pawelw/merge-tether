@@ -178,6 +178,16 @@ struct MRBoardProjector {
         guard let request else { return nil }
         return requestFacts.facts(for: request)
     }
+
+    private func canMergeAutomatically(_ status: AuthoredMergeRequestStatus, item: Item) -> Bool {
+        let request = status.request
+        let account = input.account
+        return preparing && status.mayAutoMerge && facts(for: request)?.mergeAutomatic == true
+            && !AssistantJobExecution.hasUnfinishedWork(in: input.handoffs,
+                for: .init(host: account.host, projectID: request.projectID, iid: request.iid), username: account.username,
+                currentRequest: request, feedbackStatus: item.authorFeedbackStatus,
+                discussionFingerprint: item.observedDiscussionFingerprint)
+    }
     var catalogItems: [Item] {
         var rows = Dictionary((attentionSnapshot?.catalog ?? []).map { ($0.id, $0) }, uniquingKeysWith: { first, _ in first })
         for request in input.retainedRequests {
@@ -240,12 +250,7 @@ struct MRBoardProjector {
                 else { continue }
                 let id = MergeRequestAttentionMonitor.Item.ID(projectID: request.projectID, iid: request.iid)
                 guard (items.first(where: { $0.id == id })?.draftCount ?? 0) == 0 else { continue }
-                let automatic = preparing && status.mayAutoMerge && facts(for: request)?.mergeAutomatic == true
-                    && !AssistantJobExecution.hasUnfinishedWork(in: input.handoffs,
-                        for: .init(host: host, projectID: id.projectID, iid: id.iid), username: username,
-                        currentRequest: request, feedbackStatus: current.authorFeedbackStatus,
-                        discussionFingerprint: current.observedDiscussionFingerprint)
-                guard !automatic else { continue }
+                guard !canMergeAutomatically(status, item: current) else { continue }
                 if let index = items.firstIndex(where: { $0.id == id }) { items[index].needsMerge = true }
                 else { items.append(.init(id: id, title: request.title, url: request.webURL, needsMerge: true, mergeRequest: request, isAuthored: true)) }
             }
@@ -378,13 +383,22 @@ struct MRBoardProjector {
             (catalog.id, MRCurrentRowProjection(evidence: attention.first { $0.id == catalog.id }
                 ?? evidence.first { $0.id == catalog.id } ?? catalog, catalog: catalog, username: input.account.username))
         }, uniquingKeysWith: { first, _ in first })
+        let automaticMerges = Set(input.authored.compactMap { status -> Item.ID? in
+            let request = status.request
+            let id = Item.ID(projectID: request.projectID, iid: request.iid)
+            guard !input.mrCatalogReadFailed, request.author.username == input.account.username,
+                  let projection = prepared[id], projection.evidenceMatchesCatalogContext,
+                  projection.item.canOfferManualMerge(using: status),
+                  canMergeAutomatically(status, item: projection.item) else { return nil }
+            return id
+        })
         return .init(own: browser.own, reviewed: reviewed, todos: input.todos, attention: attention,
             handoffs: input.handoffs, host: input.account.host, username: input.account.username,
             intents: input.intents, routedTodoIDs: input.routedTodoIDs, ignoredTargets: input.hiddenTargets,
             humanAttention: humanAttention, pinnedCards: input.pins, pipelineEvidence: input.pipelineEvidence,
             pipelineEvidenceCheckedAt: input.pipelineEvidenceCheckedAt, preservedOrder: preservedOrder,
             automation: input.automation, displayRequests: input.displayRequests, grouping: input.grouping,
-            completions: input.completions, currentRows: prepared)
+            completions: input.completions, currentRows: prepared, automaticMerges: automaticMerges)
     }
 
     var pendingUserAttention: ConfirmedAttentionSnapshot.Input {

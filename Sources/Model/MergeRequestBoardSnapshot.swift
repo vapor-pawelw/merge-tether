@@ -11,6 +11,7 @@ struct MergeRequestBoardSnapshot {
         var catalog: MRCurrentRowProjection.Catalog? = nil
         /// Compatibility only; fresh command guards still decide every action.
         var evidenceMatchesCatalogContext = true
+        var isEligibleForAutomaticMerge = false
         var displayRequest: GitLabMergeRequest? { catalog?.facts.request ?? item.mergeRequest }
         var displayTitle: String { catalog?.facts.title ?? item.title }
         var displayURL: URL { catalog?.facts.url ?? item.url }
@@ -125,7 +126,8 @@ struct MergeRequestBoardSnapshot {
          automation: AutomationSettings? = nil, displayRequests: [GitLabMergeRequest] = [],
          grouping: MRBoardGrouping = .withoutAutomation,
          completions: [MergeRequestLifecycleLedger.CompletionReceipt] = [],
-         currentRows: [MergeRequestAttentionMonitor.Item.ID: MRCurrentRowProjection] = [:]) {
+         currentRows: [MergeRequestAttentionMonitor.Item.ID: MRCurrentRowProjection] = [:],
+         automaticMerges: Set<MergeRequestAttentionMonitor.Item.ID> = []) {
         reviewedMembership = Set(reviewed.map { .init(id: $0.id, url: $0.url) })
         self.ignoredTargets = ignoredTargets
         self.automation = automation
@@ -181,7 +183,8 @@ struct MergeRequestBoardSnapshot {
             return Row(item: item, latestJob: latest, intents: currentIntents,
                 pipelineEvidence: pipelineEvidence.first { $0.projectID == item.id.projectID && $0.iid == item.id.iid },
                 pipelineEvidenceCheckedAt: pipelineEvidenceCheckedAt, catalog: projection.catalog,
-                evidenceMatchesCatalogContext: projection.evidenceMatchesCatalogContext)
+                evidenceMatchesCatalogContext: projection.evidenceMatchesCatalogContext,
+                isEligibleForAutomaticMerge: automaticMerges.contains(item.id))
         }
         let originalListed = own + reviewed
         let orphanIntents = accountIntents.filter { intent in
@@ -394,13 +397,22 @@ struct MergeRequestBoardSnapshot {
             return MRBoardActivity(automation: automation, target: target,
                 isDraft: row.isDraft, isFinished: isFinished(row), grouping: grouping).group.rawValue
         }
+        func isCloseToMerge(_ row: Row) -> Bool {
+            row.evidenceMatchesCatalogContext && row.item.isCloseToMerge && row.displayItem.isCloseToMerge
+        }
+        func attentionRank(_ row: Row) -> Int {
+            let closeToMerge = isCloseToMerge(row)
+            if closeToMerge && !row.isEligibleForAutomaticMerge { return 0 }
+            if row.needsAttention { return 1 }
+            return closeToMerge ? 2 : 3
+        }
         let normal = rows.enumerated().sorted {
             (isFinished($0.element) ? 0 : 1, activityRank($0.element), isPinned($0.element) ? 0 : 1,
              automation?.hasEnabledAutomation != true && draftsLast && $0.element.isDraft ? 1 : 0,
-             $0.element.needsAttention ? 0 : 1, $0.offset)
+             attentionRank($0.element), $0.offset)
                 < (isFinished($1.element) ? 0 : 1, activityRank($1.element), isPinned($1.element) ? 0 : 1,
                    automation?.hasEnabledAutomation != true && draftsLast && $1.element.isDraft ? 1 : 0,
-                   $1.element.needsAttention ? 0 : 1, $1.offset)
+                   attentionRank($1.element), $1.offset)
         }.map(\.element)
         let finished = normal.filter(isFinished)
         let active = normal.filter { !isFinished($0) }
@@ -412,12 +424,19 @@ struct MergeRequestBoardSnapshot {
         return finished + restorePositions(active, offset: 0)
 
         func restorePositions(_ group: [Row], offset: Int) -> [Row] {
-            let latched = group.enumerated().filter { preservedOrder[$0.element.id] != nil }.sorted {
+            // Retained positions cannot move ready MRs ahead of pins or auto-merge ahead of attention.
+            let hasAutomaticMerge = group.contains { $0.isEligibleForAutomaticMerge && isCloseToMerge($0) }
+            let leadingCount = group.contains(where: isCloseToMerge) ? group.prefix {
+                isPinned($0) || isCloseToMerge($0) || (hasAutomaticMerge && $0.needsAttention)
+            }.count : 0
+            let leading = group.prefix(leadingCount)
+            let remaining = group.dropFirst(leadingCount)
+            let latched = remaining.enumerated().filter { preservedOrder[$0.element.id] != nil }.sorted {
                 (preservedOrder[$0.element.id] ?? 0, $0.offset) < (preservedOrder[$1.element.id] ?? 0, $1.offset)
             }.map(\.element)
-            var result = group.filter { preservedOrder[$0.id] == nil }
+            var result = Array(leading) + remaining.filter { preservedOrder[$0.id] == nil }
             for row in latched {
-                result.insert(row, at: min(max(0, (preservedOrder[row.id] ?? 0) - offset), result.count))
+                result.insert(row, at: min(max(leadingCount, (preservedOrder[row.id] ?? 0) - offset), result.count))
             }
             return result
         }

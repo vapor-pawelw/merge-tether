@@ -29,6 +29,57 @@ struct MRBoardProjectorTests {
         return input
     }
 
+    @Test func mergeableCardsAppearBelowPinsAndAboveCardsNeedingAttention() throws {
+        func mr(_ iid: Int, _ status: String, pipeline: String = "success") throws -> MergeRequestAttentionMonitor.Item {
+            item(try request(["iid": iid, "web_url": "https://gitlab.test/g/p/-/merge_requests/\(iid)",
+                "detailed_merge_status": status, "head_pipeline": ["id": iid, "status": pipeline],
+                "has_conflicts": false, "blocking_discussions_resolved": true, "user": ["can_merge": true]]))
+        }
+        let pinned = try mr(1, "not_approved")
+        var attention = try mr(2, "requested_changes")
+        attention.needsChanges = true
+        var ready = try mr(3, "mergeable")
+        ready.approvalProgress = .init(completed: 2, required: 2)
+        var waiting = try mr(4, "mergeable", pipeline: "running")
+        waiting.approvalProgress = .init(completed: 2, required: 2)
+        let pin = try #require(BoardCardPin.mergeRequest(host: account.host, username: account.username, projectID: 1, iid: 1))
+        let board = MergeRequestBoardSnapshot(own: [attention, waiting, ready, pinned], reviewed: [], todos: [],
+            attention: [attention], handoffs: [], host: account.host, username: account.username,
+            pinnedCards: [pin], preservedOrder: [attention.id: 0])
+
+        #expect(board.own.map(\.id.iid) == [1, 3, 2, 4])
+    }
+
+    @Test(arguments: [true, false], [true, false])
+    func attentionPrecedesReadyCardsOnlyWhenAutomaticMergeCanTakeOver(_ mergePolicyEnabled: Bool, _ assistantReady: Bool) throws {
+        let mergeable = try request(["detailed_merge_status": "mergeable", "has_conflicts": false,
+            "blocking_discussions_resolved": true, "user": ["can_merge": true], "sha": String(repeating: "a", count: 40)])
+        let ready = item(mergeable)
+        var attention = item(try request(["iid": 43, "web_url": "https://gitlab.test/g/p/-/merge_requests/43",
+            "detailed_merge_status": "requested_changes"]))
+        attention.needsChanges = true
+        let approvals = try JSONDecoder().decode(GitLabMergeRequestApprovalState.self, from: Data(
+            #"{"rules":[{"approvals_required":1,"approved":true}]}"#.utf8))
+        let status = AuthoredMergeRequestStatus(request: mergeable, approvals: approvals, discussionsResolved: true,
+            projectRequiresResolvedDiscussions: true, autoMergeEnabled: true, dependencyReadiness: .ready)
+        try #require(status.mayAutoMerge)
+        var input = input(evidence: attention, catalog: ready)
+        input.automation.applyPreset(.full, for: .codex)
+        input.grouping = .drafts
+        input.attention = .init(host: account.host, username: account.username, revision: account.revision,
+            evidence: [ready, attention], attention: [attention], catalog: [ready, attention])
+        input.authored = [status]
+        input.requestFacts = [.init(request: mergeable, mergeAutomatic: mergePolicyEnabled)]
+        input.assistantReady = assistantReady
+        let board = MRBoardProjector(input: input).board()
+        let final = board.preservingOrder([ready.id: 0, attention.id: 0], host: account.host,
+            username: account.username, pinnedCards: [])
+        let expected = mergePolicyEnabled && assistantReady ? [43, 42] : [42, 43]
+
+        #expect(board.own.map(\.id.iid) == expected)
+        #expect(final.own.map(\.id.iid) == expected)
+    }
+
     @Test(arguments: ["ordinary", "quickAction", "resolve", "both", "missingID"])
     func boardPublicationShortcutRequiresReviewForDraftsWithSideEffects(_ scenario: String) throws {
         var evidence = item(try request())

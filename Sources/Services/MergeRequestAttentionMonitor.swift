@@ -243,11 +243,20 @@ final class MergeRequestAttentionMonitor {
             return (section.rawValue, order.priority, order.blockers, title, id.projectID, id.iid)
         }
 
+        var isCloseToMerge: Bool {
+            guard let request = mergeRequest, request.state == "opened", request.draft == false,
+                  !request.hasQueuedMerge, draftCount == 0, drafts.isEmpty, !requiresCommentReview,
+                  !requiresDiscussionRecheck, feedback.isEmpty,
+                  approvalProgress.map({ $0.requirementsSatisfied ?? ($0.completed >= $0.required) }) != false,
+                  dependencies.map({ $0.predecessors.isEmpty && $0.issues.isEmpty }) != false else { return false }
+            return mergeReadiness.priority == 0
+        }
+
         private var mergeReadiness: (priority: Int, blockers: Int) {
             guard let mergeRequest, let mergeStatus = mergeRequest.detailedMergeStatus else { return (2, 0) }
             let status = AuthoredMergeRequestStatus(
                 request: mergeRequest, approvals: nil, discussionsResolved: mergeRequest.blockingDiscussionsResolved,
-                projectRequiresResolvedDiscussions: nil, autoMergeEnabled: false
+                projectRequiresResolvedDiscussions: nil, autoMergeEnabled: false, dependencyReadiness: .notChecked
             )
             // The list endpoint supplies merge status but does not verify approval rules.
             var blockers = Set(status.blockers).subtracting([.unknown, .draft])
