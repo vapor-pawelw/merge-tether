@@ -121,6 +121,36 @@ struct PersonLabel: View {
     }
 }
 
+struct ThreadResolutionWaitLabel: View {
+    let people: [PersonIdentity]
+
+    var body: some View {
+        HStack(alignment: .firstTextBaseline, spacing: 6) {
+            Image(systemName: "lock").foregroundStyle(.secondary).frame(width: 14)
+                .accessibilityHidden(true)
+            content
+        }
+    }
+
+    private var content: some View {
+        VStack(alignment: .leading, spacing: 4) {
+            Text(.AuthorFeedback.authorFeedbackThreadResolutionWait)
+                .fixedSize(horizontal: false, vertical: true)
+            StatusFlowLayout(spacing: 6) {
+                ForEach(people.prefix(3), id: \.self) { person in
+                    PersonLabel(person: person, avatarSize: 14)
+                        .fontWeight(.semibold)
+                        .foregroundStyle(Color.accentColor)
+                }
+                if people.count > 3 {
+                    Text(.AuthorFeedback.authorFeedbackThreadResolutionPeopleMore(people.count - 3))
+                        .foregroundStyle(.secondary)
+                }
+            }
+        }
+    }
+}
+
 /// Circular avatar with a neutral placeholder for missing or unreachable images.
 struct PersonAvatar: View {
     let url: URL?

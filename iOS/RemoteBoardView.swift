@@ -412,11 +412,18 @@ struct RemoteCardView: View {
             }
             if let requirements = card.presentation?.requirements, !requirements.isEmpty {
                 VStack(alignment: .leading, spacing: 4) {
-                    ForEach(Array(requirements.enumerated()), id: \.offset) { _, line in
-                        Label { Text(verbatim: line).foregroundStyle(.primary) } icon: {
-                            Image(systemName: "lock").foregroundStyle(.secondary)
+                    ForEach(Array(requirements.enumerated()), id: \.offset) { index, line in
+                        if index == 0, let people = card.presentation?.threadResolutionPeople, !people.isEmpty {
+                            ThreadResolutionWaitLabel(people: people.map {
+                                .init(name: $0.name, username: $0.username, avatarURL: $0.avatarURL)
+                            })
+                            .foregroundStyle(.primary)
+                        } else {
+                            Label { Text(verbatim: line).foregroundStyle(.primary) } icon: {
+                                Image(systemName: "lock").foregroundStyle(.secondary)
+                            }
+                            .fixedSize(horizontal: false, vertical: true)
                         }
-                        .fixedSize(horizontal: false, vertical: true)
                     }
                 }.font(.subheadline)
             } else if let status = card.visibleStatus {

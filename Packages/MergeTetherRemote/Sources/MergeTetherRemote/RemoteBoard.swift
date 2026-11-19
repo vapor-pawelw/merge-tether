@@ -79,6 +79,8 @@ public struct RemoteCardText: Codable, Equatable, Sendable {
     public var secondaryCTA: RemoteCardCTA?
     /// Merge requirements, one per line; `status` keeps the joined sentence for older phones.
     public var requirements: [String]?
+    /// When present, the first requirement is a thread resolution wait for these people.
+    public var threadResolutionPeople: [RemotePerson]?
     /// The automation order behind `nextStep`, with the current step's index.
     public var steps: [String]?
     public var currentStep: Int?

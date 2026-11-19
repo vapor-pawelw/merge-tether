@@ -284,6 +284,8 @@ import MergeTetherRemote
             let covered: Bool = if case .prerequisite(let reason) = blocker { waitingStatus.coveredBlockers.contains(reason) } else { false }
             if !covered, !lines.contains(String(localized: title)) { lines.append(String(localized: title)) }
             card.presentation?.requirements = lines
+            let people = waitingStatus.threadResolutionPeople
+            card.presentation?.threadResolutionPeople = people.isEmpty ? nil : people.map(\.remotePerson)
         }
         if let detail { card.detail = detail }
         // The status line or requirement list already carries the blocker; the phone must not print it twice.

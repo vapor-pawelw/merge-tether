@@ -9,6 +9,10 @@ import Foundation
     private let humanResolutionAuthors: [String]
     private let people: PersonDirectory
 
+    var threadResolutionPeople: [PersonIdentity] {
+        humanResolutionAuthors.map(people.person(username:))
+    }
+
     var awaitingRequiredApprovals: Bool {
         guard let progress = approvalProgress, progress.required > 0 else { return false }
         return progress.requirementsSatisfied == false

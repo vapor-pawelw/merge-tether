@@ -343,6 +343,28 @@
         }
       }
     },
+    "authorFeedback.threadResolutionWait": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Feedback addressed, waiting for thread resolution from"
+          }
+        }
+      }
+    },
+    "authorFeedback.threadResolutionPeopleMore.%lld": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "and %lld more"
+          }
+        }
+      }
+    },
     "authorFeedback.botAuthor": {
       "extractionState": "manual",
       "localizations": {

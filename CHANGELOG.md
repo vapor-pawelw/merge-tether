@@ -6,6 +6,8 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 
 ## Unreleased
 
+- Highlight who still needs to resolve addressed feedback on Mac and iPhone MR cards and in Details. Hover or tap a person's name for their avatar and GitLab username.
+
 - Keep unanswered review findings in the verdict and draft follow-ups only when a substantive incoming reply warrants an answer.
 
 - Show approval badges in gray at zero approvals, muted orange below half of the required approvals, and muted yellow from halfway. Show green when the approval count meets or exceeds the requirement or GitLab confirms the rules are satisfied.

@@ -75,6 +75,7 @@ import MergeTetherRemote
         let phone = RemoteBoardAdapter.mergePresentation(original, item: item, status: try mergeStatus(item),
             waitingStatus: model.waitingStatus)
         #expect(phone.presentation?.status == model.status)
+        #expect(phone.presentation?.threadResolutionPeople == nil)
         #expect(phone.approvals?.received == 0 && phone.approvals?.required == 2)
         #expect(phone.dependencies?.predecessors.first?.reference == "!4")
         #expect(!phone.actions.contains { [.merge, .enqueueMerge, .resolveThreads, .publish, .approve].contains($0.kind) })
@@ -94,6 +95,31 @@ import MergeTetherRemote
         #expect(waiting.requirements.count == (satisfied ? 1 : 2))
         #expect(String(localized: waiting.title).contains("Required approvals are still missing") == !satisfied)
         #expect(waiting.coveredBlockers.contains(.approvals) == !satisfied)
+    }
+
+    @Test func resolutionWaitSendsAuthorsAndKeepsTheTextForOlderPhones() throws {
+        var item = try fixture()
+        let avatar = try #require(URL(string: "https://gitlab.example.test/avatar/alice.png"))
+        item.feedback[0] = .init(id: 10, author: .init(id: 7, username: "alice", name: "Alice", avatarURL: avatar),
+            system: false, resolvable: true, resolved: false, resolvedBy: nil, body: "Check the retry")
+        item.authorFeedbackStatus?.findings[0].waitingForHumanResolution = ["@alice", "alice", "bob"]
+        let presentation = model(row(item))
+        let original = RemoteBoardAdapter.presentation(RemoteBoardAdapter.card(item, account: "me@host"), model: presentation)
+        let phone = RemoteBoardAdapter.mergePresentation(original, item: item,
+            status: try mergeStatus(item, discussionsResolved: false), waitingStatus: presentation.waitingStatus)
+        let card = try #require(phone.presentation)
+        let data = try JSONEncoder().encode(card)
+        struct WirePresentation: Decodable { let threadResolutionPeople: [RemotePerson]? }
+        let decoded = try JSONDecoder().decode(WirePresentation.self, from: data)
+        #expect(decoded.threadResolutionPeople == [
+            .init(name: "Alice", username: "alice", avatarURL: avatar),
+            .init(name: "bob", username: "bob"),
+        ])
+        #expect(try JSONDecoder().decode(RemoteCardText.self, from: data) == card)
+        #expect(card.requirements == [
+            "Feedback addressed, waiting for Alice, @bob to resolve threads",
+            "Needs 2 more approvals",
+        ])
     }
 
     @Test func approvalOnlyWaitDoesNotRequireFeedbackAndZeroRequiredDoesNotInventAWait() throws {

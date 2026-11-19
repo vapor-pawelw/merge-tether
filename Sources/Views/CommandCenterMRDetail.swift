@@ -379,9 +379,7 @@ private struct CommandCenterMRDetailContent: View {
                         let genericAttention = needsHumanAttention && (progress.working || progress.status == nil)
                         if let waiting = shownRequirements(progress) {
                             VStack(alignment: .leading, spacing: 5) {
-                                ForEach(Array(waiting.requirements.enumerated()), id: \.offset) { _, line in
-                                    BoardRequirementLine(text: line)
-                                }
+                                BoardWaitingRequirements(waiting: waiting)
                             }
                             .font(.callout)
                         } else if (needsHumanAttention || !progress.working && progress.mergeStage == nil)

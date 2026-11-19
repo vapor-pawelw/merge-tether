@@ -106,9 +106,7 @@ private struct CommandCenterMRCardContent: View {
                         } else if let waiting = shownRequirements {
                             // One blocker per line, in the same style as the merge blockers below.
                             VStack(alignment: .leading, spacing: 5) {
-                                ForEach(Array(waiting.requirements.enumerated()), id: \.offset) { _, line in
-                                    BoardRequirementLine(text: line, isMuted: isMuted)
-                                }
+                                BoardWaitingRequirements(waiting: waiting, isMuted: isMuted)
                             }
                             .font(.callout)
                         } else if humanAction == nil, let status = neutralStatus {
@@ -587,6 +585,23 @@ struct BoardRequirementLine: View {
                 .fixedSize(horizontal: false, vertical: true)
         }
         .accessibilityElement(children: .combine)
+    }
+}
+
+struct BoardWaitingRequirements: View {
+    let waiting: MRWaitingStatus
+    var isMuted = false
+
+    var body: some View {
+        let people = waiting.threadResolutionPeople
+        ForEach(Array(waiting.requirements.enumerated()), id: \.offset) { index, line in
+            if index == 0, !people.isEmpty {
+                ThreadResolutionWaitLabel(people: people)
+                    .foregroundStyle(isMuted ? Color.secondary : Color.primary)
+            } else {
+                BoardRequirementLine(text: line, isMuted: isMuted)
+            }
+        }
     }
 }
 
