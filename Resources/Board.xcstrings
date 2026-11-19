@@ -316,6 +316,13 @@
         }
       }
     },
+    "board.stale.retry": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": { "stringUnit": { "state": "translated", "value": "Try again" } },
+        "pl": { "stringUnit": { "state": "translated", "value": "Spróbuj ponownie" } }
+      }
+    },
     "board.remove": {
       "extractionState": "manual",
       "localizations": {

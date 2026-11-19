@@ -6,6 +6,8 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 
 ## Unreleased
 
+- Retry a failed GitLab refresh directly from the warning banner on Mac.
+
 - Use 16 pt insets and section gaps on iPhone merge request cards, with 8 pt between rows within each section.
 
 - Drag the sheet handle down to dismiss iPhone MR Details and refresh with the toolbar button.

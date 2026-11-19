@@ -241,9 +241,16 @@ struct CommandCenterView: View {
             }
             .font(.caption).foregroundStyle(.orange).padding(10)
         } else if monitor.attention.hasError || monitor.authoredMergeRequests.hasError {
-            Label { Text(.Board.boardStale) } icon: { Image(systemName: "exclamationmark.triangle") }
-                .font(.caption).foregroundStyle(.orange).padding(10)
-                .frame(maxWidth: .infinity, alignment: .leading)
+            HStack(spacing: 10) {
+                Label { Text(.Board.boardStale) } icon: { Image(systemName: "exclamationmark.triangle") }
+                    .foregroundStyle(.orange)
+                Spacer(minLength: 0)
+                Button(.Board.boardStaleRetry) { Task { await monitor.refreshManually() } }
+                    .buttonStyle(.bordered)
+                    .controlSize(.small)
+                    .disabled(monitor.showsGlobalRefreshProgress)
+            }
+            .font(.caption).padding(10)
         }
         AssistantCLIHealthBanner(monitor: monitor)
         if let warning = monitor.assistantDependencyWarning,
