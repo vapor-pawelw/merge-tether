@@ -13,7 +13,6 @@ struct AssistantUsageMRDetailCost: View {
         Group {
             if let mergeRequest {
                 VStack(alignment: .leading, spacing: 10) {
-                    Text(.AssistantUsage.assistantUsageMRTitle).font(.subheadline.weight(.medium))
                     if loadedIdentity == mergeRequest.id, let totals {
                         HStack(alignment: .firstTextBaseline) {
                             Text(.AssistantUsage.assistantUsageMRLifetimeCost)

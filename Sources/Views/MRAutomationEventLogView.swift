@@ -1,61 +1,6 @@
 import SwiftUI
 
-struct MRAutomationEventLogView: View {
-    let target: MRAutomationScope.Target?
-    let monitor: TodoMonitorService
-    let initiallyExpanded: Bool
-    let initiallyExpandedJobID: UUID?
-    let readOnly: Bool
-    @State private var expanded: Bool
-    @State private var showAll: Bool
-
-    init(target: MRAutomationScope.Target?, monitor: TodoMonitorService, initiallyExpanded: Bool = false,
-         initiallyExpandedJobID: UUID? = nil, readOnly: Bool = false) {
-        self.target = target; self.monitor = monitor
-        self.initiallyExpanded = initiallyExpanded; self.initiallyExpandedJobID = initiallyExpandedJobID
-        self.readOnly = readOnly
-        _expanded = State(initialValue: initiallyExpanded || initiallyExpandedJobID != nil)
-        _showAll = State(initialValue: initiallyExpandedJobID != nil)
-    }
-
-    var body: some View {
-        DisclosureGroup(isExpanded: $expanded) {
-            if expanded {
-                let history = target.map {
-                    MRAutomationHistory(target: $0, handoffs: monitor.assistantHandoffs,
-                        workflows: monitor.authoredMergeRequests.workflow.entries,
-                        events: monitor.settings.automationEvents)
-                }
-                let entries = history?.entries ?? []
-                VStack(alignment: .leading, spacing: 12) {
-                    Text(.AutomationHistory.automationHistoryExplanation).font(.caption).foregroundStyle(.secondary)
-                    if entries.isEmpty {
-                        Text(.AutomationHistory.automationHistoryEmpty).foregroundStyle(.secondary)
-                    }
-                    ForEach(showAll ? entries : Array(entries.prefix(8))) { entry in
-                        MRAutomationEventLogRow(entry: entry, runs: history?.associatedRuns(for: entry) ?? [],
-                            monitor: monitor, initiallyExpandedJobID: initiallyExpandedJobID, readOnly: readOnly)
-                            .id(entry.id)
-                        Divider()
-                    }
-                    if entries.count > 8 {
-                        Button { showAll.toggle() } label: {
-                            Text(showAll ? .CommandCenter.commandCenterShowLess : .CommandCenter.commandCenterShowAll)
-                        }
-                        .buttonStyle(.link)
-                    }
-                }
-                .padding(.top, 12)
-            }
-        } label: { Text(.AutomationHistory.automationHistoryTitle).font(.headline) }
-        .onChange(of: initiallyExpanded) { _, value in if value { expanded = true } }
-        .onChange(of: initiallyExpandedJobID) { _, id in
-            if id != nil { expanded = true; showAll = true }
-        }
-    }
-}
-
-private struct MRAutomationEventLogRow: View {
+struct MRAutomationEventLogRow: View {
     let entry: MRAutomationHistory.Entry
     let runs: [AssistantAutomationRunner.Handoff]
     let monitor: TodoMonitorService
@@ -74,34 +19,15 @@ private struct MRAutomationEventLogRow: View {
     }
 
     var body: some View {
-        VStack(alignment: .leading, spacing: 6) {
-            HStack(alignment: .firstTextBaseline) {
-                Text(title).fontWeight(.medium)
-                if entry.isAutomatic {
-                    Image(systemName: "gearshape").font(.caption).foregroundStyle(.secondary)
-                        .help(Text(.AutomationHistory.automationHistoryOriginAutomatic))
-                        .accessibilityLabel(Text(.AutomationHistory.automationHistoryOriginAutomatic))
-                }
-                Spacer(minLength: 8)
-                Text(entry.createdAt, format: .dateTime.year().month().day().hour().minute().second())
-                    .font(.caption).foregroundStyle(.secondary).monospacedDigit()
-            }
-            Text(stateLabel).foregroundStyle(needsAttention ? .orange : .secondary).font(.caption)
-            if let summary {
-                Text(verbatim: String(summary.prefix(280)))
-                    .foregroundStyle(needsAttention ? .orange : .secondary)
-                    .lineLimit(3).textSelection(.enabled)
-            }
-            DisclosureGroup(isExpanded: $detailsExpanded) {
-                if detailsExpanded { details.padding(.top, 6) }
-            } label: {
-                if case .job = entry.source { Text(.AutomationHistory.automationHistoryViewRun) }
-                else { Text(.AutomationHistory.automationHistoryDetails) }
-            }
-            .font(.caption)
+        DisclosureGroup(isExpanded: $detailsExpanded) {
+            if detailsExpanded { details.padding(.vertical, 5) }
+        } label: {
+            MREventLogRowHeader(title: Text(title),
+                context: Text(stateLabel).foregroundColor(needsAttention ? .orange : .secondary), createdAt: entry.createdAt,
+                source: .mergeTether, isAutomatic: entry.isAutomatic)
         }
-        .font(.subheadline)
-        .frame(maxWidth: .infinity, alignment: .leading)
+        .font(.caption)
+        .padding(.vertical, 3)
         .onChange(of: initiallyExpandedJobID) { _, id in
             if case .job(let job, _) = entry.source, job.id == id { detailsExpanded = true }
         }
@@ -109,33 +35,35 @@ private struct MRAutomationEventLogRow: View {
 
     private var title: LocalizedStringResource {
         switch entry.source {
-        case .job(_, let attempt): .AutomationHistory.automationHistoryRun(attempt)
-        case .workflow(let workflow): workflow.event.kind.displayLabel
-        case .event(let event):
-            switch event.action {
-            case .retry: .AutomationHistory.automationHistoryActionRetry
-            case .review: .AutomationHistory.automationHistoryActionReview
-            case .followUp: .AutomationHistory.automationHistoryActionFollowUp
-            case .draftReply: .AutomationHistory.automationHistoryActionDraftReply
-            case .verification: .AutomationHistory.automationHistoryActionVerification
-            case .feedbackDecision: .FeedbackDecisionActions.historyTitle
-            case .pipeline: .Settings.settingsAutomationWorkflowPipelineFailure
-            case .conflict: .AutomationHistory.automationHistoryActionConflict
-            case .refresh: .AutomationHistory.automationHistoryActionRefresh
-            case .approval: .AutomationHistory.automationHistoryActionApproval
+        case .job(let job, let attempt):
+            if job.taskIntent == .conflictResolution { return .AutomationHistory.automationHistoryActionConflict }
+            if job.taskIntent == .pipelineDiagnosis || job.workflowEventKind == .pipelineFailure {
+                return .Settings.settingsAutomationWorkflowPipelineFailure
             }
+            switch job.workflow {
+            case .review: return .AutomationHistory.automationHistoryActionReview
+            case .followUp: return .AutomationHistory.automationHistoryActionFollowUp
+            case .draftReply: return .AutomationHistory.automationHistoryActionDraftReply
+            case nil: return .AutomationHistory.automationHistoryRun(attempt)
+            }
+        case .workflow(let workflow): return workflow.event.kind.displayLabel
+        case .event(let event): return event.title
+        case .gitLab: return .AutomationHistory.automationHistorySystemNote
         }
     }
 
     private var origin: LocalizedStringResource {
         switch entry.source {
         case .job(let job, _):
+            if job.pipelineHandoffConfirmation != nil { return .AutomationHistory.automationHistoryOriginManual }
             if let manual = job.manual {
-                manual ? .AutomationHistory.automationHistoryOriginManual : .AutomationHistory.automationHistoryOriginAutomatic
-            } else { .AutomationHistory.automationHistoryOriginUnknown }
-        case .workflow: .AutomationHistory.automationHistoryOriginAutomatic
+                return manual ? .AutomationHistory.automationHistoryOriginManual : .AutomationHistory.automationHistoryOriginAutomatic
+            }
+            return .AutomationHistory.automationHistoryOriginUnknown
+        case .workflow: return .AutomationHistory.automationHistoryOriginAutomatic
         case .event(let event):
-            event.origin == .manual ? .AutomationHistory.automationHistoryOriginManual : .AutomationHistory.automationHistoryOriginAutomatic
+            return event.origin == .manual ? .AutomationHistory.automationHistoryOriginManual : .AutomationHistory.automationHistoryOriginAutomatic
+        case .gitLab: return .AutomationHistory.automationHistoryOriginUnknown
         }
     }
 
@@ -173,6 +101,7 @@ private struct MRAutomationEventLogRow: View {
             case .completed: .Menu.menuWorkflowStateCompleted
             case .blocked: .AssistantJobs.assistantJobsBlocked
             }
+        case .gitLab: .AssistantJobs.assistantJobsStatusUnavailable
         }
     }
 
@@ -181,23 +110,15 @@ private struct MRAutomationEventLogRow: View {
         case .job(let job, _): [.blocked, .failed, .interrupted].contains(job.execution?.state)
         case .workflow(let workflow): workflow.state == .failed
         case .event(let event): event.state == .failed || event.state == .blocked
+        case .gitLab: false
         }
-    }
-
-    private var summary: String? {
-        let text: String?
-        switch entry.source {
-        case .job(let job, _): text = job.execution?.attentionExplanation ?? job.execution?.errorExplanation ?? job.execution?.summary
-        case .workflow(let workflow): text = workflow.summary ?? workflow.event.context
-        case .event(let event): text = event.message
-        }
-        return text.map { GlabService.redactWorkflowEvidence(AssistantJobExecutor.ExecutionError.displayMessage(for: $0)) }
     }
 
     @ViewBuilder private var details: some View {
         VStack(alignment: .leading, spacing: 8) {
             switch entry.source {
-            case .job(let job, _):
+            case .job(let job, let attempt):
+                Text(.AutomationHistory.automationHistoryRun(attempt)).fontWeight(.medium)
                 AssistantJobRow(handoff: job, monitor: monitor, readOnly: readOnly)
                 raw(.AutomationHistory.automationHistoryRunID, job.id.uuidString)
                 timestamp(.AutomationHistory.automationHistoryQueuedAt, job.createdAt)
@@ -217,6 +138,7 @@ private struct MRAutomationEventLogRow: View {
                 raw(.AutomationHistory.automationHistoryIntentID, event.intentID?.uuidString)
                 raw(.AutomationHistory.automationHistoryRunID, event.jobID?.uuidString)
                 raw(.AutomationHistory.automationHistoryPreviousRunID, event.relatedJobID?.uuidString)
+            case .gitLab: EmptyView()
             }
             raw(.AutomationHistory.automationHistoryOrigin, String(localized: origin))
             if case .job = entry.source {} else {

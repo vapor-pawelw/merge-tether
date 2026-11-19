@@ -1622,14 +1622,19 @@ final class MergeRequestAttentionMonitor {
         } catch { return nil }
     }
 
-    private func recordGeneratedPublication(_ publication: PublicationEvidence?, id: Item.ID,
-        account: Account, user: GitLabAuthenticatedUser) async {
-        guard let publication else { return }
+    private func recordPublication(_ publication: PublicationEvidence?, id: Item.ID,
+        account: Account, user: GitLabAuthenticatedUser, origin: MRAutomationEvent.Origin) async {
         let generation = accountGeneration, revision = glab.accountRevision
+        var noteID: Int?
         func current() -> Bool {
             !Task.isCancelled && generation == accountGeneration && revision == glab.accountRevision && isCurrent(account)
         }
-        guard current() else { return }
+        defer {
+            // The write already succeeded, even if its note could not be matched for display.
+            settings?.recordAutomationEvent(target: commentReviewTarget(id, account: account),
+                action: .publication, origin: origin, state: .completed, publishedNoteID: noteID)
+        }
+        guard let publication, current() else { return }
         do {
             let authenticated = try await glab.fetchAuthenticatedUser(host: account.host, expectedUsername: account.username)
             let discussions = try await glab.fetchMergeRequestDiscussions(projectID: id.projectID, iid: id.iid, host: account.host)
@@ -1642,12 +1647,11 @@ final class MergeRequestAttentionMonitor {
                 try ReviewVerdictStore.recordPublication(review, after: discussions, user: user, in: verdictDirectory)
             }
             let directory = provenanceDirectory
-            try await Task.detached(priority: .utility) {
-                if let origin = publication.origin {
-                    try AICommentProvenanceStore.recordPublished(origin, after: discussions, in: directory)
-                }
+            let matched = try await Task.detached(priority: .utility) {
+                guard let origin = publication.origin else { return Set<Int>() }
+                return try AICommentProvenanceStore.recordPublished(origin, after: discussions, in: directory)
             }.value
-            guard current() else { return }
+            if current(), matched.count == 1 { noteID = matched.first }
         } catch {
             Log.monitor.error("Could not record published comment origins: \(String(describing: error), privacy: .private)")
         }
@@ -1824,7 +1828,7 @@ final class MergeRequestAttentionMonitor {
                     $0.drafts.removeAll { $0 == draft }
                     $0.draftCount = $0.drafts.count
                 }
-                await recordGeneratedPublication(origin, id: id, account: account, user: user)
+                await recordPublication(origin, id: id, account: account, user: user, origin: .automatic)
             }
             publicationChecked = true
         } catch {
@@ -2147,7 +2151,7 @@ final class MergeRequestAttentionMonitor {
                 remaining.removeAll { $0.id == draftID }
                 publishedDrafts[id, default: []].append(draft)
                 display(current)
-                await recordGeneratedPublication(origin, id: id, account: account, user: user)
+                await recordPublication(origin, id: id, account: account, user: user, origin: .manual)
             }
         } catch {
             if currentContext() {
@@ -2280,7 +2284,7 @@ final class MergeRequestAttentionMonitor {
                 publishedNow.append(draft)
                 settings.recordAutomaticCommentPublication([draft], for: reviewTarget, revision: reviewRevision, evidence: completion)
                 updateItem(id) { $0.drafts.removeAll { $0 == draft }; $0.draftCount = $0.drafts.count }
-                await recordGeneratedPublication(origin, id: id, account: account, user: user)
+                await recordPublication(origin, id: id, account: account, user: user, origin: .automatic)
             }
             let remaining = try await glab.fetchOwnDraftNotes(projectID: id.projectID, iid: id.iid, host: account.host, userID: user.id)
             guard isCurrent(account) else { return }
@@ -2615,7 +2619,7 @@ final class MergeRequestAttentionMonitor {
                     $0.drafts = remaining; $0.draftCount = remaining.count
                     $0.rememberPublishedReply(draft)
                 }
-                await recordGeneratedPublication(origin, id: id, account: account, user: user)
+                await recordPublication(origin, id: id, account: account, user: user, origin: .manual)
             }
             previousDrafts[id] = nil
             confirmationStates[id] = nil
@@ -2699,10 +2703,11 @@ final class MergeRequestAttentionMonitor {
                 && (!automatic || self.autoApproveApplies(to: current, host: account.host, username: account.username))
         }
         @MainActor func confirmed() -> Bool {
-            if let approvalWithOpenFindingsRunID {
+            if submitted {
                 settings?.recordAutomationEvent(target: commentReviewTarget(id, account: account),
-                    action: .approval, origin: .automatic, state: .completed,
-                    jobID: approvalWithOpenFindingsRunID, approvedHeadSHA: head)
+                    action: approvalWithOpenFindingsRunID == nil ? .approve : .approval,
+                    origin: automatic ? .automatic : .manual, state: .completed,
+                    jobID: approvalWithOpenFindingsRunID, approvedHeadSHA: approvalWithOpenFindingsRunID == nil ? nil : head)
             }
             approvedHeads[id] = head
             failedApprovalHeads[id] = nil

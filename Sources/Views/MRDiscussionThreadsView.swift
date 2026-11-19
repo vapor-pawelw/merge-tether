@@ -2,6 +2,12 @@ import Foundation
 import MergeTetherRemote
 import SwiftUI
 
+struct MRDiscussionNavigation: Equatable {
+    struct Anchor: Hashable { let threadID: String }
+    let anchor: Anchor
+    private let requestID = UUID()
+}
+
 /// Conversation context with optional draft selection. Publication stays in the confirmation controls.
 struct MRDiscussionThreadsView: View {
     let snapshot: MRDiscussionSnapshot
@@ -21,6 +27,7 @@ struct MRDiscussionThreadsView: View {
     var onSetOrigin: MRDiscussionOriginAction? = nil
     var extraContexts: AICommentProvenanceStore.ExtraContexts = .empty
     var currentUserIdentity: PersonIdentity? = nil
+    var navigation: MRDiscussionNavigation? = nil
     let onRefresh: () -> Void
     @State private var markdownCache = MRDiscussionMarkdownCache()
 
@@ -93,10 +100,14 @@ struct MRDiscussionThreadsView: View {
     }
 
     private func threadView(_ thread: MRDiscussionSnapshot.Thread, currentUser: PersonIdentity?) -> some View {
-        MRDiscussionThreadView(thread: thread, mergeRequestURL: mergeRequestURL,
+        let anchor = MRDiscussionNavigation.Anchor(threadID: thread.id)
+        let expansion = navigation?.anchor == anchor ? navigation : nil
+        return MRDiscussionThreadView(thread: thread, mergeRequestURL: mergeRequestURL,
                                currentUsername: currentUsername, currentUser: currentUser, markdownCache: markdownCache, initiallyExpanded: expandPendingDrafts && !thread.drafts.isEmpty,
                                selection: selection, selectionDisabled: selectionDisabled,
-                               extraContexts: extraContexts, onDelete: onDelete, onRegenerate: onRegenerate, onSetOrigin: onSetOrigin)
+                               extraContexts: extraContexts, onDelete: onDelete, onRegenerate: onRegenerate,
+                               onSetOrigin: onSetOrigin, navigation: expansion)
+            .id(anchor)
     }
 }
 
@@ -115,6 +126,7 @@ private struct MRDiscussionThreadView: View {
     var onDelete: ((GitLabDraftNote) -> Void)? = nil
     var onRegenerate: ((GitLabDraftNote) -> Void)? = nil
     var onSetOrigin: MRDiscussionOriginAction? = nil
+    let navigation: MRDiscussionNavigation?
     @State private var isExpanded = false
     @State private var appliedInitialExpansion = false
     @State private var threadOriginRequest: ThreadOriginRequest?
@@ -174,6 +186,9 @@ private struct MRDiscussionThreadView: View {
             guard !appliedInitialExpansion else { return }
             appliedInitialExpansion = true
             if initiallyExpanded { isExpanded = true }
+        }
+        .onChange(of: navigation, initial: true) { _, request in
+            if request != nil { isExpanded = true }
         }
         .alert(threadOriginTitle, isPresented: Binding(get: { threadOriginRequest != nil },
                                                        set: { if !$0 { threadOriginRequest = nil } }),

@@ -223,18 +223,19 @@ enum AICommentProvenanceStore {
         return .init(context: prepared.context, drafts: prepared.drafts, generated: prepared.generated, beforeIDs: Set(ids))
     }
 
+    @discardableResult
     nonisolated static func recordPublished(_ publication: Publication, after: [GitLabMergeRequestDiscussion],
-        in directory: URL = directory) throws {
+        in directory: URL = directory) throws -> Set<Int> {
         let context = publication.context
         let notes = after.flatMap { thread in thread.notes.map { (thread.id, $0) } }
         let ids = notes.compactMap { $0.1.id }
         guard ids.count == notes.count, ids.allSatisfy({ $0 > 0 }), Set(ids).count == ids.count,
-              publication.beforeIDs.isSubset(of: Set(ids)), ReviewVerdict.fingerprint(after) != nil else { return }
+              publication.beforeIDs.isSubset(of: Set(ids)), ReviewVerdict.fingerprint(after) != nil else { return [] }
         let added = notes.filter { _, note in
             note.system != true && note.author?.id == context.userID
                 && note.id.map { !publication.beforeIDs.contains($0) } == true
         }
-        guard added.count == publication.drafts.count else { return }
+        guard added.count == publication.drafts.count else { return [] }
         var records: [PublishedNote] = []
         var matched: Set<Int> = []
         for draft in publication.drafts {
@@ -244,10 +245,10 @@ enum AICommentProvenanceStore {
                     && AICommentProvenanceStore.positionMatches(draft.position, note.position, reply: draft.discussionID != nil)
             }
             guard candidates.count == 1, let match = candidates.first,
-                  let discussionID = match.0, !discussionID.isEmpty else { return }
+                  let discussionID = match.0, !discussionID.isEmpty else { return [] }
             let note = match.1
             guard let noteID = note.id, let body = note.body,
-                  matched.insert(noteID).inserted, let draftID = draft.id else { return }
+                  matched.insert(noteID).inserted, let draftID = draft.id else { return [] }
             if let runID = publication.generated[draftID] {
                 records.append(.init(version: 1, context: context, runID: runID, draftID: draftID,
                     noteID: noteID, discussionID: discussionID, bodySHA256: AICommentAssessmentStore.digest(body)))
@@ -256,6 +257,7 @@ enum AICommentProvenanceStore {
         for record in records {
             try write(record, to: file(kind: "notes", id: record.noteID, context: context, in: directory))
         }
+        return matched
     }
 
     nonisolated static func snapshot(context: Context, in directory: URL = directory, legacyDirectory: URL? = nil) -> Snapshot {

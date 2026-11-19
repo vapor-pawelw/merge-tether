@@ -18,6 +18,12 @@ struct BoardMRCompletionCard: View {
         isCurrentAccount && monitor.lifecycleCompletions.contains { $0.id == completion.id }
     }
 
+    private var discussionTarget: MRDiscussionTarget? {
+        let target = completion.target
+        guard let iid = target.iid else { return nil }
+        return .init(host: target.host, username: target.username, projectID: target.projectID, iid: iid, url: completion.url)
+    }
+
     var body: some View {
         VStack(alignment: .leading, spacing: 9) {
             metadata
@@ -64,7 +70,7 @@ struct BoardMRCompletionCard: View {
                         Label { Text(.CommandCenter.commandCenterOpenGitLab) } icon: { Image(systemName: "arrow.up.right.square") }
                     }
                     seenButton
-                    MRAutomationEventLogView(target: completion.target, monitor: monitor, readOnly: true)
+                    MREventLogView(target: completion.target, discussionTarget: discussionTarget, monitor: monitor, readOnly: true)
                 }
             }
         }

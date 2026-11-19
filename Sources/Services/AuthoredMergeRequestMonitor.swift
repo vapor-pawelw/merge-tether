@@ -578,6 +578,10 @@ final class AuthoredMergeRequestMonitor {
             receipt.state = outcome
             _ = settings.saveMergeSubmission(receipt)
         }
+        if didWrite, outcome == .merged || outcome.isDelegated {
+            settings.recordAutomationEvent(target: receipt.target, action: outcome == .merged ? .merge : .enqueueMerge,
+                origin: automatic ? .automatic : .manual, state: .completed)
+        }
         return outcome
     }
 

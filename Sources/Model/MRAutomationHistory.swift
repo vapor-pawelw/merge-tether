@@ -2,7 +2,10 @@ import Foundation
 
 /// Application decisions that cannot be reconstructed from a worker's persisted execution.
 struct MRAutomationEvent: Codable, Identifiable, Equatable, Sendable {
-    enum Action: String, Codable, Sendable { case retry, review, followUp, draftReply, verification, feedbackDecision, pipeline, conflict, refresh, approval }
+    enum Action: String, Codable, Sendable {
+        case retry, review, followUp, draftReply, verification, feedbackDecision, pipeline, conflict, refresh, approval
+        case approve, publication, merge, enqueueMerge
+    }
     enum Origin: String, Codable, Sendable { case manual, automatic }
     enum State: String, Codable, Sendable { case requested, queued, failed, completed, blocked }
     let id: UUID
@@ -16,6 +19,26 @@ struct MRAutomationEvent: Codable, Identifiable, Equatable, Sendable {
     var jobID: UUID? = nil
     var relatedJobID: UUID? = nil
     var approvedHeadSHA: String? = nil
+    var publishedNoteID: Int? = nil
+
+    var title: LocalizedStringResource {
+        switch action {
+        case .retry: .AutomationHistory.automationHistoryActionRetry
+        case .review: .AutomationHistory.automationHistoryActionReview
+        case .followUp: .AutomationHistory.automationHistoryActionFollowUp
+        case .draftReply: .AutomationHistory.automationHistoryActionDraftReply
+        case .verification: .AutomationHistory.automationHistoryActionVerification
+        case .feedbackDecision: .FeedbackDecisionActions.historyTitle
+        case .pipeline: .Settings.settingsAutomationWorkflowPipelineFailure
+        case .conflict: .AutomationHistory.automationHistoryActionConflict
+        case .refresh: .AutomationHistory.automationHistoryActionRefresh
+        case .approval: .AutomationHistory.automationHistoryActionApproval
+        case .approve: .AutomationHistory.automationHistoryActionApproved
+        case .publication: .AutomationHistory.automationHistoryActionPublication
+        case .merge: .AutomationHistory.automationHistoryMerged
+        case .enqueueMerge: .AutomationHistory.automationHistoryActionEnqueueMerge
+        }
+    }
 }
 
 /// A read-only chronology; run lifecycle remains owned by AssistantJobExecution.
@@ -26,6 +49,7 @@ struct MRAutomationHistory {
             case job(AssistantAutomationRunner.Handoff, attempt: Int)
             case workflow(MergeWorkflowActivityEntry)
             case event(MRAutomationEvent)
+            case gitLab(MRGitLabActivity, appEvent: MRAutomationEvent?)
         }
         let id: String
         let createdAt: Date
@@ -33,9 +57,10 @@ struct MRAutomationHistory {
 
         var isAutomatic: Bool {
             switch source {
-            case .job(let job, _): job.manual == false
+            case .job(let job, _): job.manual == false && job.pipelineHandoffConfirmation == nil
             case .workflow: true
             case .event(let event): event.origin == .automatic
+            case .gitLab(_, let appEvent): appEvent?.origin == .automatic
             }
         }
     }
@@ -47,6 +72,7 @@ struct MRAutomationHistory {
         case .job(let job, _): ids = [job.id]
         case .workflow(let workflow): ids = [workflow.assistantJobID].compactMap { $0 }
         case .event(let event): ids = [event.jobID, event.relatedJobID].compactMap { $0 }
+        case .gitLab: ids = []
         }
         var result: [AssistantAutomationRunner.Handoff] = []
         for id in ids where !result.contains(where: { $0.id == id }) {
@@ -58,7 +84,7 @@ struct MRAutomationHistory {
     }
 
     init(target: MRAutomationScope.Target, handoffs: [AssistantAutomationRunner.Handoff],
-         workflows: [MergeWorkflowActivityEntry], events: [MRAutomationEvent]) {
+         workflows: [MergeWorkflowActivityEntry], events: [MRAutomationEvent], gitLab: [MRGitLabActivity] = []) {
         guard let iid = target.iid else { entries = []; return }
         let runs = handoffs.filter {
             $0.key.work.host == target.host && $0.key.username == target.username
@@ -76,9 +102,28 @@ struct MRAutomationHistory {
                 && $0.event.mergeRequest.projectID == target.projectID && $0.event.mergeRequest.iid == iid
                 && $0.event.mergeRequest.webURL.isGitLabMergeRequest(host: target.host, iid: iid)
         }.map { Entry(id: "workflow/\($0.id)", createdAt: $0.createdAt, source: .workflow($0)) }
-        let decisionEntries = events.filter { $0.target == target }
+        let decisions = events.filter { $0.target == target }
+        let publicationsByNote = Dictionary(grouping: decisions.filter { $0.action == .publication }, by: \.publishedNoteID)
+        let merges = decisions.filter { $0.action == .merge && $0.state == .completed }
+        var attributedDecisions = Set<UUID>()
+        var seen = Set<String>()
+        let distinctActivity = gitLab.filter { seen.insert($0.id).inserted }
+        let mergeCount = distinctActivity.count { if case .state("merged") = $0.kind { true } else { false } }
+        let gitLabEntries = distinctActivity.map { activity in
+            let appEvent: MRAutomationEvent?
+            switch activity.kind {
+            case .comment(let id, _) where publicationsByNote[id]?.count == 1:
+                appEvent = publicationsByNote[id]?.first
+            case .state("merged") where mergeCount == 1 && merges.count == 1:
+                appEvent = merges.first
+            default: appEvent = nil
+            }
+            if let appEvent { attributedDecisions.insert(appEvent.id) }
+            return Entry(id: activity.id, createdAt: activity.createdAt, source: .gitLab(activity, appEvent: appEvent))
+        }
+        let decisionEntries = decisions.filter { !attributedDecisions.contains($0.id) }
             .map { Entry(id: "event/\($0.id)", createdAt: $0.createdAt, source: .event($0)) }
-        entries = (runEntries + workflowEntries + decisionEntries).sorted {
+        entries = (runEntries + workflowEntries + decisionEntries + gitLabEntries).sorted {
             $0.createdAt == $1.createdAt ? $0.id < $1.id : $0.createdAt > $1.createdAt
         }
     }
@@ -95,11 +140,13 @@ extension SettingsManager {
     func recordAutomationEvent(target: MRAutomationScope.Target, action: MRAutomationEvent.Action,
                                origin: MRAutomationEvent.Origin, state: MRAutomationEvent.State,
                                message: String? = nil, intentID: UUID? = nil, jobID: UUID? = nil,
-                               relatedJobID: UUID? = nil, approvedHeadSHA: String? = nil, now: Date = Date()) {
+                               relatedJobID: UUID? = nil, approvedHeadSHA: String? = nil,
+                               publishedNoteID: Int? = nil, now: Date = Date()) {
         guard target.iid != nil else { return }
         let event = MRAutomationEvent(id: UUID(), target: target, createdAt: now, action: action,
             origin: origin, state: state, message: message.map(GlabService.redactWorkflowEvidence),
-            intentID: intentID, jobID: jobID, relatedJobID: relatedJobID, approvedHeadSHA: approvedHeadSHA)
+            intentID: intentID, jobID: jobID, relatedJobID: relatedJobID, approvedHeadSHA: approvedHeadSHA,
+            publishedNoteID: publishedNoteID)
         var counts: [MRAutomationScope.Target: Int] = [:]
         automationEvents = ([event] + automationEvents).sorted {
             $0.createdAt == $1.createdAt ? $0.id.uuidString < $1.id.uuidString : $0.createdAt > $1.createdAt

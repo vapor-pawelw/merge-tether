@@ -639,17 +639,6 @@
         }
       }
     },
-    "assistantUsageMRTitle": {
-      "extractionState": "manual",
-      "localizations": {
-        "en": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "Agent usage · all tracked time"
-          }
-        }
-      }
-    },
     "assistantUsageMRReviewer": {
       "extractionState": "manual",
       "localizations": {

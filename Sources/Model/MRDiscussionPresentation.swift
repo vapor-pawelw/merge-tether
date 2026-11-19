@@ -4,9 +4,11 @@ import Foundation
 struct MRDiscussionContent: Sendable {
     let discussions: [GitLabMergeRequestDiscussion]
     let fingerprint: String?
+    let activity: [MRGitLabActivity]
 
     init(_ discussions: [GitLabMergeRequestDiscussion]) {
         self.discussions = discussions
+        activity = MRGitLabActivity.notes(in: discussions)
         fingerprint = ReviewVerdict.fingerprint(discussions)
     }
 }

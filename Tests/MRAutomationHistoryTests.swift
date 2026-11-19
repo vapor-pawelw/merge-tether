@@ -7,6 +7,98 @@ struct MRAutomationHistoryTests {
     private let target = MRAutomationScope.Target(host: "gitlab.example.test", username: "me", projectID: 7, iid: 13)
     private let start = Date(timeIntervalSince1970: 100)
 
+    @Test func interleavesGitLabActivityWithLocalRunsAndKeepsRepliesNavigable() throws {
+        let run = job(at: .init(timeIntervalSince1970: 120))
+        let discussions = try JSONDecoder().decode([GitLabMergeRequestDiscussion].self, from: Data("""
+        [{"id":"diff-thread","notes":[
+            {"id":10,"system":false,"body":"Check this","created_at":"1970-01-01T00:01:40Z"},
+            {"id":11,"system":false,"body":"Updated","created_at":"1970-01-01T00:02:20.000Z"}
+        ]},{"id":"system-thread","notes":[
+            {"id":12,"system":true,"body":"reset approvals from @alice","created_at":"1970-01-01T00:02:10Z"}
+        ]},{"id":"duplicate","notes":[
+            {"id":11,"system":false,"body":"Updated","created_at":"1970-01-01T00:02:20Z"}
+        ]}]
+        """.utf8))
+        let gitLab = MRGitLabActivity.notes(in: discussions)
+        let history = MRAutomationHistory(target: target, handoffs: [run], workflows: [], events: [], gitLab: gitLab)
+        #expect(history.entries.map(\.id) == ["note/11", "note/12", "job/\(run.id)", "note/10"])
+        #expect(history.entries.map(\.isAutomatic) == [false, false, false, false])
+        #expect(gitLab.first { $0.id == "note/11" }?.discussionID == "diff-thread")
+        #expect(gitLab.first { $0.id == "note/12" }?.discussionID == nil)
+        #expect(gitLab.first { $0.id == "note/12" }?.body == "reset approvals from @alice")
+    }
+
+    @Test func fetchesPaginatedMRActivityAndPreservesOtherEventsWhenOneResourceFails() async throws {
+        let gitLab = InMemoryGitLab()
+        defer { gitLab.close() }
+        var labelsUnavailable = false
+        gitLab.handler = { request in
+            #expect(request.method == "GET")
+            if request.endpoint == "/user" { return InMemoryGitLab.output(#"{"id":1,"username":"me"}"#) }
+            #expect(request.arguments.contains("--paginate"))
+            let prefix = "/projects/7/merge_requests/13/"
+            switch request.endpoint {
+            case prefix + "resource_state_events?per_page=100":
+                return InMemoryGitLab.output("""
+                [{"id":1,"state":"opened","created_at":"2026-11-19T10:00:00Z"}]
+                [{"id":2,"state":"merged","created_at":"2026-11-19T10:01:00Z"}]
+                """)
+            case prefix + "resource_label_events?per_page=100":
+                if labelsUnavailable { return InMemoryGitLab.output(error: "HTTP 503", code: 1) }
+                return InMemoryGitLab.output("""
+                [{"id":1,"action":"add","label":{"name":"Ready"},"created_at":"2026-11-19T10:00:01Z"}]
+                """)
+            case prefix + "resource_milestone_events?per_page=100":
+                return InMemoryGitLab.output(error: "HTTP 503", code: 1)
+            default: return try gitLab.unexpected(request)
+            }
+        }
+        let glab = gitLab.service(host: target.host, username: target.username)
+        let request = MRDiscussionTarget(host: target.host, username: target.username, projectID: 7, iid: 13,
+            url: try #require(URL(string: "https://gitlab.example.test/group/repo/-/merge_requests/13")))
+        let store = MRGitLabActivityStore()
+        await store.refresh(target: request, glab: glab)
+        let snapshot = store.snapshot(target: request, revision: glab.accountRevision)
+        #expect(Set(snapshot.entries.map(\.id)) == ["state/1", "state/2", "label/1"])
+        #expect(snapshot.hasError)
+        labelsUnavailable = true
+        await store.refresh(target: request, glab: glab)
+        #expect(Set(store.snapshot(target: request, revision: glab.accountRevision).entries.map(\.id))
+            == ["state/1", "state/2", "label/1"])
+        glab.currentUsername = "other"
+        #expect(store.snapshot(target: request, revision: glab.accountRevision).entries.isEmpty)
+    }
+
+    @Test func attributesOnlyMatchingCommentsAndKeepsUnmatchedApplicationReceipts() throws {
+        let discussions = try JSONDecoder().decode([GitLabMergeRequestDiscussion].self, from: Data("""
+        [{"id":"thread","notes":[
+            {"id":10,"system":false,"body":"Manual","created_at":"1970-01-01T00:01:40Z"},
+            {"id":11,"system":false,"body":"Automatic","created_at":"1970-01-01T00:01:41Z"},
+            {"id":12,"system":false,"body":"External","created_at":"1970-01-01T00:01:42Z"}
+        ]}]
+        """.utf8))
+        let activity = MRGitLabActivity.notes(in: discussions)
+        let manual = MRAutomationEvent(id: UUID(), target: target, createdAt: start,
+            action: .publication, origin: .manual, state: .completed, message: nil, publishedNoteID: 10)
+        let automatic = MRAutomationEvent(id: UUID(), target: target, createdAt: start,
+            action: .publication, origin: .automatic, state: .completed, message: nil, publishedNoteID: 11)
+        let unmatched = MRAutomationEvent(id: UUID(), target: target, createdAt: start,
+            action: .publication, origin: .manual, state: .completed, message: nil)
+        let otherTarget = MRAutomationScope.Target(host: target.host, username: "other", projectID: 7, iid: 13)
+        let otherAccount = MRAutomationEvent(id: UUID(), target: otherTarget, createdAt: start,
+            action: .publication, origin: .automatic, state: .completed, message: nil, publishedNoteID: 12)
+        let history = MRAutomationHistory(target: target, handoffs: [], workflows: [],
+            events: [manual, automatic, unmatched, otherAccount], gitLab: activity)
+        #expect(history.entries.count == 4)
+        #expect(history.entries.contains { $0.id == "event/\(unmatched.id)" })
+        #expect(history.entries.filter(\.isAutomatic).map(\.id) == ["note/11"])
+        let appIDs = history.entries.compactMap { entry -> UUID? in
+            guard case .gitLab(_, let appEvent) = entry.source else { return nil }
+            return appEvent?.id
+        }
+        #expect(Set(appIDs) == [manual.id, automatic.id])
+    }
+
     private func job(username: String = "me", host: String = "gitlab.example.test", projectID: Int = 7,
                      iid: Int = 13, at: Date, state: AssistantJobExecution.State = .failed,
                      finished: Date? = nil) -> AssistantAutomationRunner.Handoff {
@@ -110,18 +202,23 @@ struct MRAutomationHistoryTests {
         #expect(history.entries.allSatisfy { history.associatedRuns(for: $0).isEmpty })
     }
 
-    @Test func automaticIconReflectsOnlyKnownLaunchOrRecordedOrigin() throws {
+    @Test func automatedBadgeReflectsOnlyKnownLaunchOrRecordedOrigin() throws {
         var automaticJob = job(at: start)
         automaticJob.manual = false
         var manualJob = job(at: start.addingTimeInterval(1))
         manualJob.manual = true
         let unknownJob = job(at: start.addingTimeInterval(2))
+        var confirmedPipelineJob = job(at: start.addingTimeInterval(3))
+        confirmedPipelineJob.manual = false
+        confirmedPipelineJob.pipelineHandoffConfirmation = .init(target: target, pipelineID: 14,
+            headSHA: String(repeating: "a", count: 40), reservationID: UUID())
         let automaticEvent = MRAutomationEvent(id: UUID(), target: target, createdAt: start,
             action: .followUp, origin: .automatic, state: .completed, message: nil)
         let manualEvent = MRAutomationEvent(id: UUID(), target: target, createdAt: start,
             action: .retry, origin: .manual, state: .queued, message: nil)
         let workflow = try workflow()
-        let history = MRAutomationHistory(target: target, handoffs: [automaticJob, manualJob, unknownJob],
+        let history = MRAutomationHistory(target: target,
+            handoffs: [automaticJob, manualJob, unknownJob, confirmedPipelineJob],
             workflows: [workflow], events: [automaticEvent, manualEvent])
         let automaticIDs = Set(history.entries.filter(\.isAutomatic).map(\.id))
         #expect(automaticIDs == ["job/\(automaticJob.id)", "event/\(automaticEvent.id)", "workflow/\(workflow.id)"])

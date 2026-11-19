@@ -56,6 +56,7 @@ private struct CommandCenterMRDetailContent: View {
     @State private var publicationSession = DraftPublicationSession()
     @State private var footerPublication: [GitLabDraftNote]? = nil
     @State private var detailsExpanded = false
+    @State private var usageExpanded = false
     @State private var feedbackExpanded = false
     @State private var historyExpanded = false
     @State private var focusedJobID: UUID?
@@ -68,6 +69,7 @@ private struct CommandCenterMRDetailContent: View {
     @State private var feedbackDecisionError: String?
     @State private var originChangeFailed = false
     @State private var regenerationPresentation: DraftRegenerationPresentation?
+    @State private var discussionNavigation: MRDiscussionNavigation?
 
     private enum Anchor: Hashable { case overview, drafts, comments, details, actions, feedbackStatus, assistantRuns }
 
@@ -174,11 +176,21 @@ private struct CommandCenterMRDetailContent: View {
                     if finishedState == nil { supplementaryActions(citationContext: citationContext).id(Anchor.actions) }
                     discussionThreads(discussions).id(Anchor.comments)
                     Divider().padding(.vertical, 4)
-                    details.id(Anchor.details)
-                    Divider().padding(.vertical, 4)
-                    MRAutomationEventLogView(target: target, monitor: monitor,
-                        initiallyExpanded: historyExpanded, initiallyExpandedJobID: focusedJobID, readOnly: finishedState != nil)
+                    MREventLogView(target: target, discussionTarget: discussionTarget, discussions: eventDiscussions,
+                        monitor: monitor, initiallyExpanded: historyExpanded, initiallyExpandedJobID: focusedJobID,
+                        readOnly: finishedState != nil,
+                        openDiscussion: { openDiscussion(noteID: $0, discussionID: $1, in: discussions) })
                         .id(historyNavigationID).id(Anchor.assistantRuns)
+                    Divider().padding(.vertical, 4)
+                    details.id(Anchor.details)
+                    if let usageMergeRequest {
+                        Divider().padding(.vertical, 4)
+                        DisclosureGroup(isExpanded: $usageExpanded) {
+                            if usageExpanded {
+                                AssistantUsageMRDetailCost(mergeRequest: usageMergeRequest).padding(.top, 12)
+                            }
+                        } label: { Text(.AssistantUsage.assistantUsageDashboardTitle).font(.headline) }
+                    }
                 }
                 .padding(24)
                 .frame(maxWidth: .infinity, alignment: .leading)
@@ -232,6 +244,12 @@ private struct CommandCenterMRDetailContent: View {
                 guard !Task.isCancelled else { return }
                 pendingInitialAnchor = nil
             }
+            .task(id: discussionNavigation) {
+                guard let discussionNavigation else { return }
+                await Task.yield()
+                guard !Task.isCancelled else { return }
+                proxy.scrollTo(discussionNavigation.anchor, anchor: .top)
+            }
             .task(id: discussionTarget) {
                 initialDiscussionAttemptFinished = false
                 guard let target = discussionTarget else {
@@ -266,6 +284,7 @@ private struct CommandCenterMRDetailContent: View {
             }
             .onChange(of: discussionTarget) { _, _ in
                 publicationSession.clearSelection()
+                discussionNavigation = nil
                 regenerationPresentation = nil
                 reviewStartError = nil
                 feedbackDecisionConfirmation = nil
@@ -675,7 +694,6 @@ private struct CommandCenterMRDetailContent: View {
         DisclosureGroup(isExpanded: $detailsExpanded) {
             if detailsExpanded {
                 VStack(alignment: .leading, spacing: 14) {
-                    AssistantUsageMRDetailCost(mergeRequest: usageMergeRequest)
                     if let request = item.mergeRequest {
                         Grid(alignment: .leading, horizontalSpacing: 20, verticalSpacing: 10) {
                             GridRow(alignment: .firstTextBaseline) {
@@ -972,7 +990,24 @@ private struct CommandCenterMRDetailContent: View {
             onRegenerate: regenerateDraft,
             title: .DraftPublication.draftPublicationThreads, codeContext: discussionCodeContext, onSetOrigin: originAction,
             extraContexts: current ? discussionStore.extraContexts : .empty,
-            currentUserIdentity: current ? discussionStore.currentUser : nil, onRefresh: { refreshDiscussions(visible: true) })
+            currentUserIdentity: current ? discussionStore.currentUser : nil,
+            navigation: discussionNavigation,
+            onRefresh: { refreshDiscussions(visible: true) })
+    }
+
+    private var eventDiscussions: MREventLogView.Discussions {
+        let current = discussionStore.hasCurrentTarget(discussionTarget, accountRevision: monitor.glab.accountRevision)
+        return .init(entries: current ? discussionStore.activity : [],
+            isLoading: discussionTarget != nil && (!initialDiscussionAttemptFinished || discussionStore.isLoading),
+            hasError: current && discussionStore.hasError)
+    }
+
+    private func openDiscussion(noteID: Int, discussionID: String?, in snapshot: MRDiscussionSnapshot) -> Bool {
+        guard let thread = snapshot.threads.first(where: {
+            (discussionID == nil || $0.discussionID == discussionID) && $0.notes.contains { $0.id == noteID }
+        }) else { return false }
+        discussionNavigation = .init(anchor: .init(threadID: thread.id))
+        return true
     }
 
     private var originTarget: MRAutomationScope.Target? {
@@ -1002,7 +1037,9 @@ private struct CommandCenterMRDetailContent: View {
             currentUsername: monitor.glab.currentUsername, isLoading: current && discussionStore.isLoading,
             hasError: current && discussionStore.hasError, hasLoaded: current && discussionStore.hasLoaded,
             codeContext: discussionCodeContext, onSetOrigin: originAction, extraContexts: current ? discussionStore.extraContexts : .empty,
-            currentUserIdentity: current ? discussionStore.currentUser : nil, onRefresh: { refreshDiscussions(visible: true) })
+            currentUserIdentity: current ? discussionStore.currentUser : nil,
+            navigation: discussionNavigation,
+            onRefresh: { refreshDiscussions(visible: true) })
         }
     }
 

@@ -96,7 +96,7 @@ import MergeTetherRemote
         }
         let history = MRAutomationHistory(target: target, handoffs: monitor.assistantHandoffs,
             workflows: monitor.authoredMergeRequests.workflow.entries, events: monitor.settings.automationEvents)
-        details.activity = history.entries.prefix(30).map { entry in
+        details.activity = history.entries.prefix(30).compactMap { entry -> RemoteDetailActivity? in
             switch entry.source {
             case .job(let job, let attempt):
                 return .init(id: entry.id, title: String(localized: .AutomationHistory.automationHistoryRun(attempt)) + " · " + job.title,
@@ -107,8 +107,10 @@ import MergeTetherRemote
                 return .init(id: entry.id, title: String(localized: workflow.event.kind.displayLabel),
                     status: workflowStatus(workflow.state), summary: workflow.summary.map { GlabService.redactWorkflowEvidence(AssistantJobExecutor.ExecutionError.displayMessage(for: $0)) }, createdAt: entry.createdAt)
             case .event(let event):
-                return .init(id: entry.id, title: String(localized: eventTitle(event.action)),
+                return .init(id: entry.id, title: String(localized: event.title),
                     status: eventStatus(event.state), summary: event.message.map { GlabService.redactWorkflowEvidence(AssistantJobExecutor.ExecutionError.displayMessage(for: $0)) }, createdAt: entry.createdAt)
+            case .gitLab:
+                return nil
             }
         }
         if history.entries.count > 30 { details.truncated = true }
@@ -253,20 +255,6 @@ import MergeTetherRemote
         case nil: .AssistantJobs.assistantJobsStatusUnavailable
         }
         return String(localized: label)
-    }
-    private static func eventTitle(_ action: MRAutomationEvent.Action) -> LocalizedStringResource {
-        switch action {
-        case .retry: .AutomationHistory.automationHistoryActionRetry
-        case .review: .AutomationHistory.automationHistoryActionReview
-        case .followUp: .AutomationHistory.automationHistoryActionFollowUp
-        case .draftReply: .AutomationHistory.automationHistoryActionDraftReply
-        case .verification: .AutomationHistory.automationHistoryActionVerification
-        case .feedbackDecision: .FeedbackDecisionActions.historyTitle
-        case .pipeline: .Settings.settingsAutomationWorkflowPipelineFailure
-        case .conflict: .AutomationHistory.automationHistoryActionConflict
-        case .refresh: .AutomationHistory.automationHistoryActionRefresh
-        case .approval: .AutomationHistory.automationHistoryActionApproval
-        }
     }
     private static func eventStatus(_ state: MRAutomationEvent.State) -> String {
         let label: LocalizedStringResource = switch state {

@@ -112,7 +112,7 @@ A failed optional reaction does not block independent corrections or an otherwis
 
 ## Task history, failure and migration
 
-Each MR has one collapsible **Automation event log** in its details. It combines numbered worker attempts, workflow events and persisted application decisions with exact timestamps. A gear icon identifies automatic activity; hover for its meaning. Expand an event for its blocker, error and evidence identifiers, or open the linked run for its recorded prompt, response, transcript and run actions. A successful worker can still have a later application rejection; both results remain visible. Application events are bounded to 100 per MR and 1,000 total, and are scoped to the signed-in account.
+On Mac, **Event log** sits above **Details**, with **Agent usage** in its own section. The log shows GitLab comments, system notes, state, label and milestone changes alongside MergeTether worker runs, workflow events and application actions. Rows show the newest activity first, with badges for **GitLab**, **MergeTether** and confirmed **Automated** actions. Expand a row to jump to its discussion, read the exact timestamp and diagnostics, or open a linked run. When a GitLab result can be matched to a recorded app action, a single row carries the MergeTether badge. Otherwise both available records remain visible. Application events are bounded to 100 per MR and 1,000 total and scoped to the signed-in account.
 
 On Mac, open **Window → Automation Activity** to troubleshoot agent runs and workflow events across merge requests for the signed-in account, including saved history for MRs that have left the board.
 

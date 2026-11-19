@@ -1168,6 +1168,9 @@ import MergeTetherRemote
         #expect(harness.monitor.confirmationStates[item.id] == nil)
         let published = try JSONDecoder().decode([GitLabMergeRequestDiscussion].self, from: Data(after.utf8))[0].notes[1]
         #expect(AICommentProvenanceStore.isGenerated(published, discussionID: "thread", context: context, in: directory) == (evidence == "current"))
+        let event = try #require(harness.settings.automationEvents.first { $0.action == .publication })
+        #expect(event.origin == .manual && event.state == .completed)
+        #expect(event.publishedNoteID == (evidence == "current" ? 40 : nil))
         #expect(failedRead == (evidence != "current"))
     }
 
@@ -1218,6 +1221,9 @@ import MergeTetherRemote
         #expect(harness.monitor.confirmationStates[item.id] == nil)
         let published = try JSONDecoder().decode([GitLabMergeRequestDiscussion].self, from: Data(after.utf8))[0].notes[1]
         #expect(AICommentProvenanceStore.isGenerated(published, discussionID: "abc", context: context, in: directory) == (evidence == "current"))
+        let event = try #require(harness.settings.automationEvents.first { $0.action == .publication })
+        #expect(event.origin == .automatic && event.state == .completed)
+        #expect(event.publishedNoteID == (evidence == "current" ? 41 : nil))
         #expect(failedRead == (evidence == "captureFailure" || evidence == "postFailure"))
     }
 
@@ -2671,6 +2677,9 @@ import MergeTetherRemote
         let shouldShowNote = approves && level != "none"
         let approvalNotes = harness.settings.automationEvents.filter { $0.action == .approval }
         #expect(approvalNotes.count == (shouldShowNote ? 1 : 0))
+        let ordinaryApprovals = harness.settings.automationEvents.filter { $0.action == .approve }
+        #expect(ordinaryApprovals.count == (approves && !shouldShowNote ? 1 : 0))
+        #expect(ordinaryApprovals.allSatisfy { $0.origin == .automatic && $0.state == .completed })
         let reopened = SettingsManager(defaults: harness.defaults)
         #expect(reopened.hasAutomaticApprovalWithOpenFindings(for: target, head: head) == shouldShowNote)
         #expect(!reopened.hasAutomaticApprovalWithOpenFindings(for: target, head: String(repeating: "b", count: 40)))
@@ -2705,6 +2714,9 @@ import MergeTetherRemote
 
         #expect(harness.log("approve.log").split(separator: "\n").count == (scenario == "alreadyApproved" ? 0 : 1))
         #expect(harness.settings.automationEvents.filter { $0.action == .approval }.count == (scenario == "responseLost" ? 1 : 0))
+        let ordinaryApprovals = harness.settings.automationEvents.filter { $0.action == .approve }
+        #expect(ordinaryApprovals.count == (scenario == "manual" ? 1 : 0))
+        #expect(ordinaryApprovals.allSatisfy { $0.origin == .manual && $0.state == .completed })
     }
 
     @Test func manualApprovalShowsTheMetThresholdAndTheOpenMinorFinding() async throws {

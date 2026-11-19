@@ -1,6 +1,248 @@
 {
   "sourceLanguage": "en",
   "strings": {
+    "automationHistory.source.gitLab": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "GitLab"
+          }
+        }
+      }
+    },
+    "automationHistory.source.mergeTether": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "MergeTether"
+          }
+        }
+      }
+    },
+    "automationHistory.automated": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Automated"
+          }
+        }
+      }
+    },
+    "automationHistory.comment": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Comment"
+          }
+        }
+      }
+    },
+    "automationHistory.systemNote": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "System note"
+          }
+        }
+      }
+    },
+    "automationHistory.opened": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Opened merge request"
+          }
+        }
+      }
+    },
+    "automationHistory.reopened": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Reopened merge request"
+          }
+        }
+      }
+    },
+    "automationHistory.closed": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Closed merge request"
+          }
+        }
+      }
+    },
+    "automationHistory.merged": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Merged merge request"
+          }
+        }
+      }
+    },
+    "automationHistory.stateChanged": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Changed state to %@"
+          }
+        }
+      }
+    },
+    "automationHistory.addedLabel": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Added label %@"
+          }
+        }
+      }
+    },
+    "automationHistory.removedLabel": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Removed label %@"
+          }
+        }
+      }
+    },
+    "automationHistory.changedLabel": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Changed label %@"
+          }
+        }
+      }
+    },
+    "automationHistory.addedMilestone": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Added milestone %@"
+          }
+        }
+      }
+    },
+    "automationHistory.removedMilestone": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Removed milestone %@"
+          }
+        }
+      }
+    },
+    "automationHistory.changedMilestone": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Changed milestone %@"
+          }
+        }
+      }
+    },
+    "automationHistory.openDiscussion": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Jump to discussion"
+          }
+        }
+      }
+    },
+    "automationHistory.partial": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Some GitLab activity could not be loaded."
+          }
+        }
+      }
+    },
+    "automationHistory.loading": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Loading GitLab activity"
+          }
+        }
+      }
+    },
+    "automationHistory.action.approved": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Approved merge request"
+          }
+        }
+      }
+    },
+    "automationHistory.action.publication": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Published a comment"
+          }
+        }
+      }
+    },
+    "automationHistory.action.enqueueMerge": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Queued merge"
+          }
+        }
+      }
+    },
     "automationHistory.action.approval": {
       "extractionState": "manual",
       "localizations": {
@@ -29,18 +271,7 @@
         "en": {
           "stringUnit": {
             "state": "translated",
-            "value": "Automation event log"
-          }
-        }
-      }
-    },
-    "automationHistory.explanation": {
-      "extractionState": "manual",
-      "localizations": {
-        "en": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "Newest events first. Worker success is separate from verified GitLab results. Expand an event for exact timestamps and diagnostics."
+            "value": "Event log"
           }
         }
       }
@@ -51,18 +282,7 @@
         "en": {
           "stringUnit": {
             "state": "translated",
-            "value": "No automation events recorded for this merge request."
-          }
-        }
-      }
-    },
-    "automationHistory.details": {
-      "extractionState": "manual",
-      "localizations": {
-        "en": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "Show diagnostics"
+            "value": "No events recorded for this merge request."
           }
         }
       }

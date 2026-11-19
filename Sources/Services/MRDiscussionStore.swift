@@ -38,6 +38,7 @@ final class MRDiscussionStore {
     private(set) var target: MRDiscussionTarget?
     private var discussionContent: MRDiscussionContent?
     var discussions: [GitLabMergeRequestDiscussion] { discussionContent?.discussions ?? [] }
+    var activity: [MRGitLabActivity] { discussionContent?.activity ?? [] }
     var discussionFingerprint: String? { discussionContent?.fingerprint }
     @ObservationIgnored private let presentation = MRDiscussionPresentation()
     private(set) var origins: [Int: MRDiscussionSnapshot.Origin] = [:]
