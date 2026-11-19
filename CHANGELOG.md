@@ -6,6 +6,12 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 
 ## Unreleased
 
+- Drag the sheet handle down to dismiss iPhone MR Details and refresh with the toolbar button.
+
+- Make iPhone discussion cards easier to distinguish from the section background in MR Details.
+
+- Expand or collapse iPhone discussion threads by tapping the comment card, including the area around the chevron.
+
 - Keep newly tracked merge requests on **Default** when automation adds them to the board.
 
 - Drop the `[MT]` prefix from new agent runs and remove the old desktop automation queue, settings and chat links. Move existing CLI evidence into `Automation Evidence` on launch.
@@ -85,7 +91,7 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 - Open iPhone MR Details by tapping anywhere on a card outside its controls, and remove redundant Show details buttons. Show current approvers and the signed-in user's current or reset approval on cards and Details, matching macOS.
 - Show inherited copies of the same feedback concern only once in suggestion actions and feedback lists, while preserving distinct source comments and concerns. Keep the concern readable above its short decision button.
 
-- Pull to refresh iPhone board columns, Inbox and MR Details. Automatically refresh GitLab and open Details after actions, recover stale reads without a manual Refresh board step, and preserve reads and confirmed actions across presentation-only updates. Keep Details open with the action result inline. Coalesce fast detail requests and keep unrelated board changes from invalidating an accepted action.
+- Pull to refresh iPhone board columns and Inbox. Automatically refresh GitLab and open Details after actions, recover stale reads without a manual Refresh board step, and preserve reads and confirmed actions across presentation-only updates. Keep Details open with the action result inline. Coalesce fast detail requests and keep unrelated board changes from invalidating an accepted action.
 
 - Mark your own Draft MRs ready from iPhone cards and Details using the Mac's current-account and commit checks. Keep existing feedback and comment-review CTAs available, negotiate the action independently with older phones, and move Details refresh and section navigation into the toolbar with a compact title and branches inside the header.
 

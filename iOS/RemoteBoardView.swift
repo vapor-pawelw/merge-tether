@@ -127,6 +127,7 @@ struct RemoteBoardView: View {
             }
             .sheet(item: $selected) { selection in
                 RemoteCardDetail(model: model, original: selection.card, initialSelection: selection)
+                    .presentationDragIndicator(.visible)
             }
             .alert(Text(model.state.result?.status.title ?? .Remote.remoteCompleted), isPresented: Binding(
                 get: { selected == nil && model.state.result != nil },

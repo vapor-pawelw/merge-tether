@@ -266,8 +266,13 @@ private struct RemoteDiscussionCard: View {
             }
         }
         .padding(12)
-        .background(color.opacity(0.025), in: RoundedRectangle(cornerRadius: 12))
-        .overlay { RoundedRectangle(cornerRadius: 12).strokeBorder(color.opacity(0.12), lineWidth: 0.5) }
+        .background(Color(uiColor: .secondarySystemFill), in: RoundedRectangle(cornerRadius: 12))
+        .overlay {
+            RoundedRectangle(cornerRadius: 12).strokeBorder(color.opacity(0.12), lineWidth: 0.5)
+                .allowsHitTesting(false)
+        }
+        .contentShape(Rectangle())
+        .onTapGesture(perform: toggleExpansion)
         .alert(threadOriginTitle, isPresented: Binding(get: { threadOriginRequest != nil },
                                                        set: { if !$0 { threadOriginRequest = nil } }),
                presenting: threadOriginRequest) { request in
@@ -318,17 +323,20 @@ private struct RemoteDiscussionCard: View {
                 }
             }
             .frame(maxWidth: .infinity, minHeight: 44, alignment: .leading)
-            .contentShape(Rectangle())
-            .onTapGesture { withAnimation(.snappy) { expanded.toggle() } }
-            Button { withAnimation(.snappy) { expanded.toggle() } } label: {
+            Button(action: toggleExpansion) {
                 Image(systemName: "chevron.right").rotationEffect(.degrees(expanded ? 90 : 0))
                     .font(.footnote.weight(.semibold)).foregroundStyle(.secondary)
                     .frame(width: 44, height: 44)
+                    .contentShape(Rectangle())
             }
             .buttonStyle(.plain)
             .accessibilityLabel(Text(.RemoteDetail.remoteDetailToggleThread))
             .accessibilityValue(Text(expanded ? .RemoteDetail.remoteDetailShowLess : .RemoteDetail.remoteDetailShowMore))
         }
+    }
+
+    private func toggleExpansion() {
+        withAnimation(.snappy) { expanded.toggle() }
     }
 
     private var threadOriginTitle: Text {

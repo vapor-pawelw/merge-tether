@@ -91,8 +91,6 @@ struct RemoteCardDetail: View {
                     .frame(maxWidth: .infinity)
                     .padding(16)
                 }
-                .scrollBounceBehavior(.always, axes: .vertical)
-                .refreshable { await model.refreshContent() }
                 .background(Color(uiColor: .systemGroupedBackground))
                 .scrollPosition(id: $scrollTarget, anchor: .top)
                 .task(id: shown != nil) {
