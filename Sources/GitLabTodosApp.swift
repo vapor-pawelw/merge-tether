@@ -88,6 +88,7 @@ struct GitLabTodosApp: App {
         Window(String(localized: .CommandCenter.commandCenterTitle), id: "main") {
             CommandCenterView(monitor: appDelegate.monitor, updates: appDelegate.updates)
                 .environment(\.avatarCache, appDelegate.avatarCache)
+                .background(MainWindowFrameReader())
         }
         .defaultSize(width: 1280, height: 820)
         .windowResizability(.contentMinSize)

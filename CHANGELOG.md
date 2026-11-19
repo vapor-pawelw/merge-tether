@@ -40,6 +40,8 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 - Use **Default**, **On**, and **Off** for MR automation, comment publication, auto-approval, and auto-merge on Mac. The lightning panel remembers the choices saved under **On**.
 - Tint the Mac automation bolt orange when an MR uses a manual On or Off override.
 
+- Restore the Mac main window to its last size and position on the same display after relaunch. If that display is disconnected, fit the window on the primary display.
+
 - Show the usual approval wait on cards and in Details when a green pipeline follows a confirmed departure from the merge queue and required approvals are still missing.
 
 - Recheck the project’s discussion policy before automatic merge. Require a current review of the MR title and description before automatic approval.
