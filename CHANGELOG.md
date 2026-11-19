@@ -6,6 +6,10 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 
 ## Unreleased
 
+- Remove dotted underlines from tappable person names on iPhone and show review status as an icon at the end of the person's row.
+
+- Deliver iPhone avatars on the board and in MR details through the paired Mac. The iOS app connects only to the relay for automatic data loading.
+
 - Retry a failed GitLab refresh directly from the warning banner on Mac.
 
 - Use 16 pt insets and section gaps on iPhone merge request cards, with 8 pt between rows within each section.

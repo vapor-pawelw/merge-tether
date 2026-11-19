@@ -4,6 +4,51 @@ import MergeTetherRemote
 @testable import GitLabTodos
 
 @MainActor @Suite struct RemoteHostDetailTests {
+    @Test func detailAvatarsComeFromDeliveredPeopleAndOnlyApprovedOrigins() async throws {
+        let gitLab = try #require(URL(string: "https://gitlab.example.test/uploads/person.png"))
+        let gravatar = try #require(URL(string: "https://secure.gravatar.com/avatar/hash"))
+        let unrelated = try #require(URL(string: "https://external.example.net/profile.png"))
+        let f = try Fixture(readAvatarThumbnail: { _ in Data([1, 2, 3]) })
+        defer { f.clean() }
+        f.detailNotes = [
+            .init(id: "1", body: "A comment", avatarURL: gitLab),
+            .init(id: "2", body: "Another comment", avatarURL: gravatar),
+            .init(id: "3", body: "External avatar", avatarURL: unrelated)
+        ]
+        let board = try await f.board(detailAvatars: true)
+        let card = try #require(board.cards.first { $0.id == "mr:1:2" })
+        let request = try RemoteDetailRequest(card: card, board: board)
+        await f.transport.onMessage?(.init(type: .detailRequest, detailRequest: request))
+        await f.host.detailTask?.value
+        await f.host.detailAvatarTask?.value
+        let responses = f.transport.messages.filter { $0.detailResponse?.request == request || $0.challenge == request.id }
+        #expect(responses.map(\.type) == [.details, .avatarThumbnails])
+        #expect(Set(responses.last?.avatarThumbnails?.map(\.url) ?? []) == [gitLab, gravatar])
+    }
+
+    @Test func hostSendsBoardBeforeAvatarsAndSkipsCachedImagesAndOlderPhones() async throws {
+        let avatar = try #require(URL(string: "https://gitlab.example.test/uploads/avatar.png"))
+        let jpeg = Data([1, 2, 3])
+        let f = try Fixture(avatar: avatar, readAvatarThumbnail: { url in url == avatar ? jpeg : nil })
+        defer { f.clean() }
+        _ = try await f.board()
+        #expect(f.transport.messages.allSatisfy { $0.type != .avatarThumbnails })
+
+        let challenge = UUID()
+        await f.transport.onMessage?(.init(type: .hello, challenge: challenge,
+            capabilities: [RemoteMessage.boardAvatarsCapability]))
+        await f.host.avatarTask?.value
+        let responses = f.transport.messages.filter { $0.challenge == challenge }
+        #expect(responses.map(\.type) == [.snapshot, .avatarThumbnails])
+        #expect(responses.last?.avatarThumbnails == [.init(url: avatar, jpeg: jpeg)])
+
+        let cachedChallenge = UUID()
+        await f.transport.onMessage?(.init(type: .hello, challenge: cachedChallenge,
+            capabilities: [RemoteMessage.boardAvatarsCapability], cachedAvatarURLs: [avatar]))
+        await f.host.avatarTask?.value
+        #expect(f.transport.messages.filter { $0.challenge == cachedChallenge }.map(\.type) == [.snapshot])
+    }
+
     @Test func phoneReceivesLocalDetailsBeforeGitLabAndCachedDiscussionsOnReopen() async throws {
         let f = try Fixture(); defer { f.clean() }
         f.detailNotes = [.init(id: "1", body: "Previously loaded comment")]
@@ -492,6 +537,7 @@ import MergeTetherRemote
         var detailsTruncated = false
         var detailNotes: [RemoteDetailNote] = []
         let source: GitLabMergeRequest
+        let readAvatarThumbnail: @Sendable (URL) async -> Data?
         lazy var host = RemoteHostController(monitor: monitor, relayConfiguration: .init(rawOrigin: pair.origin.absoluteString),
             loadPairing: { [pair] in pair }, savePairing: { _ in }, removePairing: {}, commandGate: RemoteCommandGate(store: nil),
             now: { [unowned self] in date }, detailReader: { [unowned self] _, _, _ in
@@ -500,9 +546,10 @@ import MergeTetherRemote
                 if heldReads.contains(index) { try await gitlab.waitFor("release-\(index)") }
                 return .init(checkedAt: date, description: "Read \(index)",
                     threads: detailNotes.isEmpty ? nil : [.init(id: "thread", state: .open, notes: detailNotes)], truncated: detailsTruncated)
-            }, makeConnection: { [transport] _ in transport })
+            }, readAvatarThumbnail: readAvatarThumbnail, makeConnection: { [transport] _ in transport })
 
-        init(draft: Bool = false) throws {
+        init(draft: Bool = false, avatar: URL? = nil, readAvatarThumbnail: @escaping @Sendable (URL) async -> Data? = { _ in nil }) throws {
+            self.readAvatarThumbnail = readAvatarThumbnail
             defaults = try #require(UserDefaults(suiteName: suite))
             let settings = SettingsManager(defaults: defaults)
             settings.onboardingCompleted = false
@@ -510,7 +557,10 @@ import MergeTetherRemote
             let glab = gitlab.service(host: "gitlab.example.test", username: "me")
             settings.glabPath = glab.glabPath; settings.resolvedHost = glab.resolvedHost
             let raw = #"{"project_id":1,"iid":2,"author":{"id":3,"username":"me","name":"Me"},"title":"Feature","description":"Context","labels":[],"web_url":"https://gitlab.example.test/g/p/-/merge_requests/2","state":"opened","draft":false,"sha":"aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa","source_branch":"feature","target_branch":"main","has_conflicts":false,"blocking_discussions_resolved":true,"detailed_merge_status":"mergeable","user":{"can_merge":false}}"#
-            let initial = raw.replacingOccurrences(of: "\"draft\":false", with: "\"draft\":\(draft)")
+            var initial = raw.replacingOccurrences(of: "\"draft\":false", with: "\"draft\":\(draft)")
+            if let avatar {
+                initial = initial.replacingOccurrences(of: "\"name\":\"Me\"", with: "\"name\":\"Me\",\"avatar_url\":\"\(avatar.absoluteString)\"")
+            }
             gitlab.write("request", initial)
             let request = try JSONDecoder().decode(GitLabMergeRequest.self, from: Data(initial.utf8))
             source = request
@@ -534,12 +584,14 @@ import MergeTetherRemote
             monitor = TodoMonitorService(settings: settings, glab: glab)
             pair = try .generate(origin: #require(URL(string: "https://relay.example.test")), access: String(repeating: "a", count: 43))
         }
-        func board(originUpdates: Bool = false, markReady: Bool = false, detailPreviews: Bool = false) async throws -> RemoteBoard {
+        func board(originUpdates: Bool = false, markReady: Bool = false, detailPreviews: Bool = false,
+                   detailAvatars: Bool = false) async throws -> RemoteBoard {
             await host.startupLoadTask?.value
             let capabilities = [RemoteMessage.detailsCapability]
                 + (originUpdates ? [RemoteMessage.detailOriginsCapability] : [])
                 + (markReady ? [RemoteMessage.markReadyCapability] : [])
                 + (detailPreviews ? [RemoteMessage.detailPreviewCapability] : [])
+                + (detailAvatars ? [RemoteMessage.detailAvatarsCapability] : [])
             await transport.onMessage?(.init(type: .hello, challenge: UUID(), capabilities: capabilities))
             // Both background dependency reads can change the card digest after the catalog is idle.
             let deadline = ContinuousClock.now + .seconds(3)

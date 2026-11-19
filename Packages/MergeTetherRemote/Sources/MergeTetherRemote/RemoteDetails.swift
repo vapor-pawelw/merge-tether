@@ -253,6 +253,15 @@ public struct RemoteMRDetails: Codable, Equatable, Sendable {
     public var draftContexts: [String: String]?
     /// Additive; older hosts send none and older phones ignore it.
     public var automation: RemoteAutomationStatus?
+
+    public var avatarThumbnailURLs: [URL] {
+        let fields = metadata + feedback + (usage ?? [])
+        let people = fields.compactMap(\.person)
+        let reviewers = (approvals?.people ?? []).compactMap(\.avatarURL)
+        let commenters = (threads ?? []).flatMap(\.notes).compactMap(\.avatarURL)
+        return RemoteAvatarThumbnail.eligibleURLs(people.compactMap(\.avatarURL) + reviewers + commenters)
+    }
+
     public init(checkedAt: Date, metadata: [RemoteDetailField] = [], description: String? = nil,
                 approvals: RemoteApprovalDetails? = nil, threads: [RemoteDetailThread]? = nil,
                 reasons: [String] = [], policy: [String] = [], feedback: [RemoteDetailField] = [],

@@ -1,6 +1,9 @@
 import AppKit
 import CryptoKit
 import Foundation
+import ImageIO
+import MergeTetherRemote
+import UniformTypeIdentifiers
 
 actor AvatarCache {
     private var memoryCache: [URL: NSImage] = [:]
@@ -56,5 +59,49 @@ actor AvatarCache {
         let hash = SHA256.hash(data: Data(url.absoluteString.utf8))
         let hex = hash.compactMap { String(format: "%02x", $0) }.joined()
         return diskDirectory.appendingPathComponent("\(hex).img")
+    }
+}
+
+/// Reads only anonymous image responses. The host selects URLs from its own GitLab board.
+final class RemoteAvatarLoader: NSObject, URLSessionTaskDelegate {
+    static let shared = RemoteAvatarLoader()
+    private let session: URLSession
+
+    private override init() {
+        let configuration = URLSessionConfiguration.ephemeral
+        configuration.httpShouldSetCookies = false
+        configuration.urlCredentialStorage = nil
+        configuration.timeoutIntervalForRequest = 5
+        configuration.timeoutIntervalForResource = 8
+        session = URLSession(configuration: configuration)
+        super.init()
+    }
+
+    func thumbnail(for url: URL) async -> Data? {
+        guard let (file, response) = try? await session.download(from: url, delegate: self) else { return nil }
+        defer { try? FileManager.default.removeItem(at: file) }
+        guard let http = response as? HTTPURLResponse, (200..<300).contains(http.statusCode),
+              let size = try? file.resourceValues(forKeys: [.fileSizeKey]).fileSize, size <= 4 * 1024 * 1024,
+              let source = CGImageSourceCreateWithURL(file as CFURL, nil),
+              let image = CGImageSourceCreateThumbnailAtIndex(source, 0, [
+                kCGImageSourceCreateThumbnailFromImageAlways: true,
+                kCGImageSourceCreateThumbnailWithTransform: true,
+                kCGImageSourceThumbnailMaxPixelSize: 72
+              ] as CFDictionary) else { return nil }
+        for quality in [0.8, 0.5, 0.3] {
+            let bytes = NSMutableData()
+            guard let destination = CGImageDestinationCreateWithData(bytes, UTType.jpeg.identifier as CFString, 1, nil) else { return nil }
+            CGImageDestinationAddImage(destination, image, [kCGImageDestinationLossyCompressionQuality: quality] as CFDictionary)
+            if CGImageDestinationFinalize(destination), bytes.length <= RemoteAvatarThumbnail.maximumBytes {
+                return bytes as Data
+            }
+        }
+        return nil
+    }
+
+    func urlSession(_ session: URLSession, task: URLSessionTask, willPerformHTTPRedirection response: HTTPURLResponse,
+                    newRequest request: URLRequest) async -> URLRequest? {
+        // Never turn a GitLab avatar into a request to another endpoint on the Mac's network.
+        nil
     }
 }

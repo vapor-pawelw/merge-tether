@@ -208,6 +208,35 @@ public struct RemoteBoard: Codable, Equatable, Sendable {
     }
     public var commandCards: [RemoteCard] { cards + (draftRegeneration.map { [$0.card] } ?? []) }
     public var cards: [RemoteCard] { lanes.flatMap(\.cards) }
+
+    public var avatarThumbnailURLs: [URL] {
+        let presentations = cards.compactMap(\.presentation)
+        let authors = presentations.compactMap(\.authorAvatarURL)
+        let approvers = presentations.flatMap { ($0.approvalPeople ?? []).compactMap(\.avatarURL) }
+        let people = presentations.flatMap { $0.threadResolutionPeople ?? [] }
+        let recipients = cards.flatMap(\.drafts).flatMap { $0.replyRecipients ?? [] }
+        return RemoteAvatarThumbnail.eligibleURLs(authors + approvers + (people + recipients).compactMap(\.avatarURL))
+    }
+}
+
+public struct RemoteAvatarThumbnail: Codable, Equatable, Sendable {
+    public static let maximumBytes = 4096
+    // Leave room in the encrypted payload for base64 and JSON slash escaping.
+    public static let batchSize = 8
+    public let url: URL
+    public let jpeg: Data
+
+    public init(url: URL, jpeg: Data) {
+        self.url = url
+        self.jpeg = jpeg
+    }
+
+    static func eligibleURLs(_ urls: [URL]) -> [URL] {
+        var seen = Set<URL>()
+        return urls.filter { url in
+            url.scheme?.lowercased() == "https" && url.absoluteString.utf8.count <= 1024 && seen.insert(url).inserted
+        }
+    }
 }
 
 public struct RemoteCommand: Codable, Equatable, Sendable {
@@ -260,8 +289,11 @@ public struct RemoteMessage: Codable, Sendable {
     public static let commentOriginCapability = "comment-origin-v1"
     public static let markReadyCapability = "mark-ready-v1"
     public static let draftRegenerationCapability = "draft-regeneration-v1"
+    public static let boardAvatarsCapability = "board-avatars-v1"
+    public static let detailAvatarsCapability = "detail-avatars-v1"
     public enum Kind: String, Codable, Sendable { case hello, snapshot, command, accepted, result, receipt, receiptResult = "receipt-result", unavailable, hostReady = "host-ready", detailRequest = "detail-request", details, cancelDetails = "cancel-details"
         case draftRegenerationRequest = "draft-regeneration-request", draftRegenerationPage = "draft-regeneration-page"
+        case avatarThumbnails = "avatar-thumbnails"
     }
     public var type: Kind
     public var challenge: UUID?
@@ -274,6 +306,8 @@ public struct RemoteMessage: Codable, Sendable {
     public var detailOrigins: RemoteDetailOrigins?
     public var draftRegenerationRequest: RemoteDraftRegenerationPageRequest?
     public var draftRegenerationPage: RemoteDraftRegenerationPage?
+    public var cachedAvatarURLs: [URL]?
+    public var avatarThumbnails: [RemoteAvatarThumbnail]?
     /// True reads GitLab before answering. False reads only the host's current board.
     /// When omitted, initial connections and stale boards may cause a GitLab refresh.
     public var refresh: Bool?
@@ -282,13 +316,16 @@ public struct RemoteMessage: Codable, Sendable {
                 detailRequest: RemoteDetailRequest? = nil, detailResponse: RemoteDetailResponse? = nil,
                 detailOrigins: RemoteDetailOrigins? = nil, refresh: Bool? = nil,
                 draftRegenerationRequest: RemoteDraftRegenerationPageRequest? = nil,
-                draftRegenerationPage: RemoteDraftRegenerationPage? = nil) {
+                draftRegenerationPage: RemoteDraftRegenerationPage? = nil,
+                cachedAvatarURLs: [URL]? = nil, avatarThumbnails: [RemoteAvatarThumbnail]? = nil) {
         self.type = type; self.challenge = challenge; self.board = board; self.command = command; self.result = result
         self.refresh = refresh
         self.capabilities = capabilities
         self.detailRequest = detailRequest; self.detailResponse = detailResponse
         self.detailOrigins = detailOrigins
         self.draftRegenerationRequest = draftRegenerationRequest; self.draftRegenerationPage = draftRegenerationPage
+        self.cachedAvatarURLs = cachedAvatarURLs
+        self.avatarThumbnails = avatarThumbnails
     }
 }
 

@@ -122,9 +122,12 @@ struct RemoteApprovalPersonRow: View {
                 PersonLabel(person: .init(name: person.name, username: person.username, avatarURL: person.avatarURL), avatarSize: 24)
                     .font(.body.weight(.medium))
                 if isViewer { Text(.Board.boardApprovalsViewerSuffix).font(.callout).foregroundStyle(.secondary) }
+                Spacer(minLength: 8)
+                Image(systemName: person.status.symbol)
+                    .font(.callout)
+                    .foregroundStyle(person.status.color)
+                    .accessibilityLabel(Text(person.status.title))
             }
-            Label(person.status.title, systemImage: person.status.symbol)
-                .font(.callout).foregroundStyle(person.status.color)
             if let changedAt = person.changedAt {
                 Text(changedAt, format: .dateTime.year().month().day().hour().minute())
                     .font(.caption).foregroundStyle(.secondary)

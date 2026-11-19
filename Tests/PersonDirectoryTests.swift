@@ -19,12 +19,6 @@ import MergeTetherRemote
         #expect(unknown.displayName == nil && unknown.handle == nil && unknown.accessibilityName == nil)
     }
 
-    @Test func avatarsAreLimitedToWebURLs() {
-        #expect(PersonIdentity(name: nil, username: "a", avatarURL: URL(string: "https://gitlab.example.test/a.png")).hasAvatar)
-        #expect(!PersonIdentity(name: nil, username: "a", avatarURL: URL(string: "file:///etc/passwd")).hasAvatar)
-        #expect(!PersonIdentity(name: nil, username: "a").hasAvatar)
-    }
-
     @Test func directoryResolvesHandlesCaseInsensitivelyAndFallsBackToTheHandle() {
         let avatar = URL(string: "https://gitlab.example.test/alice.png")
         var directory = PersonDirectory([.init(name: nil, username: "Alice", avatarURL: avatar)])

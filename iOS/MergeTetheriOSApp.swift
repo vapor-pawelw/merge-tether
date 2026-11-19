@@ -11,6 +11,7 @@ import SwiftUI
     var body: some Scene {
         WindowGroup {
             RemoteBoardView(model: model)
+                .environment(\.remoteAvatarThumbnails, model.avatarThumbnails)
                 .onOpenURL { model.offerPairing($0.absoluteString) }
                 .onChange(of: phase, initial: true) {
                     if phase == .active { model.connect() } else { model.disconnect() }

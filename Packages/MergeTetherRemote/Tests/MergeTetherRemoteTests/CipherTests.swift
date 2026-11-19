@@ -7,6 +7,23 @@ import Testing
     func pair() throws -> RemotePairing {
         try .generate(origin: URL(string: "https://relay.example.org")!, access: String(repeating: "B", count: 43), now: date)
     }
+    @Test func maximumAvatarBatchFitsAnEncryptedFrame() throws {
+        let invitation = try pair()
+        let phonePair = try RemotePairing(url: invitation.deepLink, now: date)
+        let host = try RemoteCipher(pairing: invitation, role: .host, saveEstablishedPairing: { _ in })
+        let phone = try RemoteCipher(pairing: phonePair, role: .phone, saveEstablishedPairing: { _ in })
+        _ = try host.open(phone.seal(RemoteMessage(type: .hello), now: date), as: RemoteMessage.self, now: date)
+        let jpeg = Data(repeating: 255, count: RemoteAvatarThumbnail.maximumBytes)
+        let thumbnails = (0..<RemoteAvatarThumbnail.batchSize).map { index in
+            RemoteAvatarThumbnail(url: URL(string: "https://gitlab.example.org/\(index)" + String(repeating: "/", count: 996))!, jpeg: jpeg)
+        }
+        let message = RemoteMessage(type: .avatarThumbnails, challenge: UUID(), avatarThumbnails: thumbnails)
+        let wire = try host.seal(message, now: date)
+        let received = try phone.open(wire, as: RemoteMessage.self, now: date)
+        #expect(received.challenge == message.challenge)
+        #expect(received.avatarThumbnails == thumbnails)
+    }
+
     private struct BackgroundPayload: Codable, Sendable {
         let value: String
         let decodedOnMain: Bool

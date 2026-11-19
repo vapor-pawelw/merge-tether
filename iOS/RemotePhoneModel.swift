@@ -17,6 +17,9 @@ enum RemotePhoneConnectionStatus { case unpaired, connecting, connected, offline
     let relayConfiguration: RemoteRelayConfiguration
     private(set) var relayMismatch = false
     var state = RemotePhoneState()
+    private(set) var avatarThumbnails: [URL: Data] = [:]
+    private var avatarSnapshotChallenge: UUID?
+    private var detailAvatarURLs: Set<URL> = []
     let detailState = RemoteDetailState()
     private(set) var supportsDetails = false
     private(set) var supportsDetailContext = false
@@ -129,6 +132,7 @@ enum RemotePhoneConnectionStatus { case unpaired, connecting, connected, offline
         do { try savePairing(pairing) } catch { self.error = true; return false }
         disconnect(); detailState.reset(); resetDraftRegenerationConnection()
         self.pairing = pairing; state = RemotePhoneState(); paired = true; error = false
+        avatarThumbnails.removeAll()
         recovery = nil; shouldRecoverCommand = false; recoveryUnavailable = false; relayMismatch = false
         bindResultAcknowledgement()
         pairingCandidate = nil; pairingRevision = UUID(); connect()
@@ -154,6 +158,7 @@ enum RemotePhoneConnectionStatus { case unpaired, connecting, connected, offline
             connection.onStatus = { [weak self, weak connection] connected, fatal in
                 guard let self, let connection, self.connection === connection else { return }
                 if !connected {
+                    self.avatarSnapshotChallenge = nil
                     self.connectionRevision = UUID(); self.cancelApproval(); self.state.disconnected()
                     self.detailState.disconnect(); self.supportsDetails = false; self.supportsOriginUpdates = false
                     self.supportsDetailContext = false; self.supportsDetailPreviews = false
@@ -219,6 +224,10 @@ enum RemotePhoneConnectionStatus { case unpaired, connecting, connected, offline
                         return
                     }
                     self.detailState.receive(response, board: board)
+                    if response.request == self.detailState.openRequest, response.status == .current {
+                        self.detailAvatarURLs = Set(response.details?.avatarThumbnailURLs ?? [])
+                        self.pruneAvatarThumbnails()
+                    }
                     self.isSynchronizingDetails = false
                     if response.status == .current { self.detailRecoveryAttempts = 0 }
                     return
@@ -228,8 +237,23 @@ enum RemotePhoneConnectionStatus { case unpaired, connecting, connected, offline
                     await self.receiveDraftRegenerationPage(page, challenge: challenge)
                     return
                 }
+                if message.type == .avatarThumbnails {
+                    self.receiveAvatarThumbnails(message)
+                    return
+                }
                 let previousBoard = self.state.board
                 let accepted = self.state.receive(message, now: self.now())
+                if accepted, message.type == .snapshot {
+                    self.avatarSnapshotChallenge = self.state.isConnected(now: self.now()) ? message.challenge : nil
+                    if self.state.board?.account != previousBoard?.account {
+                        self.avatarThumbnails.removeAll()
+                    }
+                    if self.state.board?.hostSession != previousBoard?.hostSession ||
+                        self.state.board?.account != previousBoard?.account {
+                        self.detailAvatarURLs.removeAll()
+                    }
+                    self.pruneAvatarThumbnails()
+                }
                 if accepted, message.type == .snapshot, self.state.isConnected(now: self.now()) {
                     self.supportsDetails = message.capabilities?.contains(RemoteMessage.detailsCapability) == true
                     self.supportsDetailContext = self.supportsDetails && message.capabilities?.contains(RemoteMessage.detailContextCapability) == true
@@ -262,6 +286,7 @@ enum RemotePhoneConnectionStatus { case unpaired, connecting, connected, offline
     func disconnect() {
         let old = connection; connection = nil; connectionRevision = UUID()
         old?.stop(); cancelApproval(); state.disconnected(); connectingUntil = .distantPast
+        avatarSnapshotChallenge = nil
         detailState.disconnect(); supportsDetails = false; supportsOriginUpdates = false
         supportsDetailContext = false; supportsDetailPreviews = false
         suspendDraftRegenerationReads()
@@ -277,14 +302,35 @@ enum RemotePhoneConnectionStatus { case unpaired, connecting, connected, offline
             capabilities: [RemoteMessage.commentReviewCapability, RemoteMessage.mergeActionsCapability, RemoteMessage.detailsCapability,
                            RemoteMessage.detailOriginsCapability, RemoteMessage.mrControlsCapability,
                            RemoteMessage.commentOriginCapability, RemoteMessage.markReadyCapability, RemoteMessage.detailPreviewCapability,
-                           RemoteMessage.draftRegenerationCapability],
-            refresh: fromGitLab)) }
+                           RemoteMessage.draftRegenerationCapability, RemoteMessage.boardAvatarsCapability, RemoteMessage.detailAvatarsCapability],
+            refresh: fromGitLab, cachedAvatarURLs: Array((state.board?.avatarThumbnailURLs ?? [])
+                .filter { avatarThumbnails[$0] != nil }.prefix(64)))) }
         catch {
             guard !Task.isCancelled, self.connection === connection, self.state === requestState else { return }
             if requestState.refreshFailed(challenge: challenge) {
                 self.error = true; self.connectionFailed = true; self.isSynchronizingDetails = false
             }
         }
+    }
+    private func receiveAvatarThumbnails(_ message: RemoteMessage) {
+        guard let challenge = message.challenge, let board = state.board, let thumbnails = message.avatarThumbnails,
+              thumbnails.count <= RemoteAvatarThumbnail.batchSize else { return }
+        let urls: Set<URL>
+        if challenge == avatarSnapshotChallenge {
+            urls = Set(board.avatarThumbnailURLs)
+        } else if let request = detailState.openRequest, request.id == challenge, request.matches(board),
+                  detailState.pending == nil {
+            urls = detailAvatarURLs
+        } else { return }
+        for thumbnail in thumbnails where urls.contains(thumbnail.url) &&
+            !thumbnail.jpeg.isEmpty && thumbnail.jpeg.count <= RemoteAvatarThumbnail.maximumBytes {
+            avatarThumbnails[thumbnail.url] = thumbnail.jpeg
+        }
+    }
+
+    private func pruneAvatarThumbnails() {
+        let visible = detailAvatarURLs.union(state.board?.avatarThumbnailURLs ?? [])
+        avatarThumbnails = avatarThumbnails.filter { visible.contains($0.key) }
     }
     func refreshContent() async {
         if let contentRefresh { await contentRefresh.value; return }
@@ -349,7 +395,8 @@ enum RemotePhoneConnectionStatus { case unpaired, connecting, connected, offline
                   presentationIndependent: supportsDetailContext) else { return }
         needsDetailReload = false; isSynchronizingDetails = false
         let revision = connectionRevision
-        do { try await connection.send(.init(type: .detailRequest, detailRequest: request)) }
+        do { try await connection.send(.init(type: .detailRequest, detailRequest: request,
+            cachedAvatarURLs: Array(avatarThumbnails.keys.prefix(64)))) }
         catch {
             guard self.connection === connection, connectionRevision == revision, let current = state.board else { return }
             detailState.receive(.init(request: request, status: .unavailable), board: current)
@@ -358,6 +405,8 @@ enum RemotePhoneConnectionStatus { case unpaired, connecting, connected, offline
     func cancelDetails() {
         let request = detailState.openRequest ?? detailState.pending
         detailState.disconnect()
+        detailAvatarURLs.removeAll()
+        pruneAvatarThumbnails()
         viewedCardID = nil; needsDetailReload = false; isSynchronizingDetails = false; detailRecoveryAttempts = 0
         guard supportsDetails, let request, let connection else { return }
         Task { try? await connection.send(.init(type: .cancelDetails, detailRequest: request)) }

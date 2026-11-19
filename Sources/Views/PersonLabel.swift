@@ -1,7 +1,4 @@
 import SwiftUI
-#if os(iOS)
-import ImageIO
-#endif
 
 /// A GitLab person as the UI shows them: display name first, the @username only on request.
 struct PersonIdentity: Equatable, Hashable, Sendable {
@@ -34,8 +31,6 @@ struct PersonIdentity: Equatable, Hashable, Sendable {
         guard let handle, trimmedName != nil else { return displayName }
         return displayName + ", " + handle
     }
-
-    var hasAvatar: Bool { avatarURL.map { ["http", "https"].contains($0.scheme?.lowercased() ?? "") } ?? false }
 
     var initials: String? {
         guard let displayName else { return nil }
@@ -90,7 +85,6 @@ struct PersonLabel: View {
                     if showsAvatar { PersonAvatar(url: person.avatarURL, size: avatarSize, initials: person.initials).accessibilityHidden(true) }
                     Text(verbatim: name).lineLimit(1)
                         .foregroundStyle(.tint)
-                        .underline(pattern: .dot)
                 }
             }
             .buttonStyle(.borderless)
@@ -158,16 +152,21 @@ struct PersonAvatar: View {
     var size: CGFloat = 16
     var initials: String? = nil
     #if os(iOS)
-    @State private var loaded: (url: URL, image: UIImage)?
+    @Environment(\.remoteAvatarThumbnails) private var remoteThumbnails
+    private var remoteThumbnail: UIImage? {
+        guard let url, let data = remoteThumbnails[url] else { return nil }
+        return UIImage(data: data)
+    }
     #endif
 
     var body: some View {
         #if os(macOS)
         AvatarView(url: url, size: size)
         #else
+        let thumbnail = remoteThumbnail
         Group {
-            if let loaded, loaded.url == url {
-                Image(uiImage: loaded.image).resizable().scaledToFill()
+            if let thumbnail {
+                Image(uiImage: thumbnail).resizable().scaledToFill()
             } else if let initials {
                 Text(verbatim: initials).font(.system(size: size * 0.42, weight: .semibold))
                     .lineLimit(1).minimumScaleFactor(0.7)
@@ -180,59 +179,19 @@ struct PersonAvatar: View {
         }
         .frame(width: size, height: size)
         .clipShape(Circle())
-        .task(id: url) {
-            guard let url, PersonIdentity(name: nil, username: nil, avatarURL: url).hasAvatar else {
-                loaded = nil; return
-            }
-            let image = await PhoneAvatarCache.shared.image(for: url)
-            guard !Task.isCancelled else { return }
-            loaded = image.map { (url, $0) }
-        }
         #endif
     }
 }
 
 #if os(iOS)
-@MainActor private final class PhoneAvatarCache {
-    static let shared = PhoneAvatarCache()
-    private let images = NSCache<NSURL, UIImage>()
-    private let failures = NSCache<NSURL, NSDate>()
-    private var requests: [URL: Task<UIImage?, Never>] = [:]
-    private let session: URLSession
+private struct RemoteAvatarThumbnailsKey: EnvironmentKey {
+    static let defaultValue: [URL: Data] = [:]
+}
 
-    private init() {
-        images.countLimit = 256
-        failures.countLimit = 256
-        let configuration = URLSessionConfiguration.ephemeral
-        configuration.timeoutIntervalForRequest = 10
-        configuration.httpShouldSetCookies = false
-        session = URLSession(configuration: configuration)
-    }
-
-    func image(for url: URL) async -> UIImage? {
-        let key = url as NSURL
-        if let image = images.object(forKey: key) { return image }
-        if let until = failures.object(forKey: key) as Date?, until > .now { return nil }
-        if let request = requests[url] { return await request.value }
-
-        let request = Task { [session] () -> UIImage? in
-            guard let (data, response) = try? await session.data(from: url),
-                  let http = response as? HTTPURLResponse, (200..<300).contains(http.statusCode),
-                  data.count <= 4 * 1024 * 1024,
-                  let source = CGImageSourceCreateWithData(data as CFData, nil),
-                  let thumbnail = CGImageSourceCreateThumbnailAtIndex(source, 0, [
-                    kCGImageSourceCreateThumbnailFromImageAlways: true,
-                    kCGImageSourceCreateThumbnailWithTransform: true,
-                    kCGImageSourceThumbnailMaxPixelSize: 120
-                  ] as CFDictionary) else { return nil }
-            return UIImage(cgImage: thumbnail)
-        }
-        requests[url] = request
-        let image = await request.value
-        requests[url] = nil
-        if let image { images.setObject(image, forKey: key) }
-        else { failures.setObject(Date.now.addingTimeInterval(60) as NSDate, forKey: key) }
-        return image
+extension EnvironmentValues {
+    var remoteAvatarThumbnails: [URL: Data] {
+        get { self[RemoteAvatarThumbnailsKey.self] }
+        set { self[RemoteAvatarThumbnailsKey.self] = newValue }
     }
 }
 #endif

@@ -22,6 +22,10 @@ later without moving GitLab credentials into the phone or Worker.
 ## Connection
 
 Both apps initiate outbound HTTPS/WebSocket connections to a Cloudflare Worker.
+The relay is the iOS app's only automatic network destination. The Mac handles
+GitLab reads and writes and sends the resulting data through the encrypted relay.
+Explicit links can open GitLab in the browser when tapped. Markdown images are
+never loaded by the iOS app.
 There is no system VPN, local network discovery, open inbound port or VPS. A company
 proxy can still block the relay domain or WebSockets; HTTPS does not bypass an
 organization's network policy. The Mac must remain awake and connected.
@@ -56,6 +60,11 @@ open details. Reconnect never repeats a GitLab command. The phone keeps its pend
 command in Keychain and asks for its exact stored receipt after a fresh snapshot.
 A missing or interrupted outcome stays uncertain; closing the connection cannot
 cancel work already accepted by the Mac.
+
+The Mac sends small avatar thumbnails separately from the board and MR details,
+including avatars for reviewers, discussion authors and draft reply recipients.
+The phone uses initials or a placeholder whenever the paired Mac has no thumbnail
+to deliver. Both apps need thumbnail support.
 
 The Mac reads saved pairing from Keychain in the background. A system permission
 prompt does not prevent the main window or MR automation from starting. A late

@@ -3,6 +3,69 @@ import Testing
 import MergeTetherRemote
 
 @MainActor @Suite struct RemotePhoneModelTests {
+    @Test func detailCommentAvatarsArriveThroughTheCurrentRelayRequest() async throws {
+        let f = try PhoneFixture(), model = f.model
+        let url = try #require(URL(string: "https://gitlab.example.org/commenter"))
+        var board = f.board
+        board.lanes[0].cards[0].id = "mr:1:2"
+        model.connect()
+        await model.refresh()
+        await f.reply(board: board, capabilities: [RemoteMessage.detailsCapability])
+        let transport = f.transports[0]
+        await model.requestDetails(card: board.cards[0])
+        let request = try #require(transport.sent.last?.detailRequest)
+        let details = RemoteMRDetails(checkedAt: f.date, threads: [
+            .init(id: "thread", state: .open, notes: [.init(id: "1", body: "Comment", avatarURL: url)])
+        ])
+        await transport.onMessage?(.init(type: .details, detailResponse: .init(request: request, status: .current, details: details)))
+        let jpeg = Data([1, 2, 3])
+        let message = RemoteMessage(type: .avatarThumbnails, challenge: request.id, avatarThumbnails: [.init(url: url, jpeg: jpeg)])
+        await transport.onMessage?(message)
+        #expect(model.avatarThumbnails[url] == jpeg)
+        model.cancelDetails()
+        await transport.onMessage?(message)
+        #expect(model.avatarThumbnails[url] == nil)
+    }
+
+    @Test func phoneAdvertisesBoardAvatarThumbnails() async throws {
+        let fixture = try PhoneFixture()
+        fixture.model.connect()
+        await fixture.model.refresh()
+        #expect(fixture.transports[0].sent.first?.capabilities?.contains(RemoteMessage.boardAvatarsCapability) == true)
+    }
+
+    @Test func phoneKeepsOnlyBoundedThumbnailsForTheAcceptedBoard() async throws {
+        let f = try PhoneFixture(), model = f.model
+        let author = try #require(URL(string: "https://gitlab.example.org/author"))
+        let approver = try #require(URL(string: "https://gitlab.example.org/approver"))
+        let unrelated = try #require(URL(string: "https://gitlab.example.org/unrelated"))
+        let jpeg = Data([1, 2, 3])
+        var board = f.board
+        board.lanes[0].cards[0].presentation = .init(repository: "example", authorAvatarURL: author,
+            approvalPeople: [.init(id: 1, name: "Approver", username: "approver", status: .approved, avatarURL: approver)])
+        model.connect()
+        await model.refresh()
+        let transport = f.transports[0]
+        let challenge = try #require(transport.sent.last?.challenge)
+        let images: [RemoteAvatarThumbnail] = [
+            .init(url: author, jpeg: jpeg), .init(url: unrelated, jpeg: jpeg),
+            .init(url: approver, jpeg: Data(repeating: 0, count: RemoteAvatarThumbnail.maximumBytes + 1))
+        ]
+        await transport.onMessage?(.init(type: .avatarThumbnails, challenge: challenge, avatarThumbnails: images))
+        #expect(model.avatarThumbnails.isEmpty)
+        await f.reply(board: board)
+        await transport.onMessage?(.init(type: .avatarThumbnails, challenge: UUID(), avatarThumbnails: images))
+        #expect(model.avatarThumbnails.isEmpty)
+        await transport.onMessage?(.init(type: .avatarThumbnails, challenge: challenge, avatarThumbnails: images))
+        #expect(model.avatarThumbnails == [author: jpeg])
+        await model.refresh()
+        #expect(transport.sent.last?.cachedAvatarURLs == [author])
+        board.account = "another-account"
+        await f.reply(board: board)
+        await transport.onMessage?(.init(type: .avatarThumbnails, challenge: challenge, avatarThumbnails: images))
+        #expect(model.avatarThumbnails.isEmpty)
+    }
+
     @Test(arguments: [RemoteCommandResult.Status.completed, .changed, .uncertain])
     func inboxSeenClosesOnlySuccessfulResultsAndRequestsTheUpdatedBoard(_ status: RemoteCommandResult.Status) async throws {
         let f = try PhoneFixture(), model = f.model

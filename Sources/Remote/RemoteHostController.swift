@@ -45,6 +45,12 @@ extension RemoteConnection: RemoteHostTransport {}
     private var phoneSupportsCommentOrigins = false
     private var phoneSupportsMarkReady = false
     private var phoneSupportsDraftRegeneration = false
+    private let readAvatarThumbnail: @Sendable (URL) async -> Data?
+    @ObservationIgnored private(set) var avatarTask: Task<Void, Never>?
+    private var avatarChallenge: UUID?
+    private var phoneSupportsDetailAvatars = false
+    @ObservationIgnored private(set) var detailAvatarTask: Task<Void, Never>?
+    private var detailAvatarRequest: UUID?
     private var regenerationPreview: DraftRegenerationPreview?
 
     private struct DraftRegenerationPreview {
@@ -86,12 +92,14 @@ extension RemoteConnection: RemoteHostTransport {}
          commandGate: RemoteCommandGate? = nil,
          now: @escaping () -> Date = Date.init,
          detailReader: @escaping DetailReader = { try await RemoteMRDetailLoader.load(source: $0, drafts: $1, glab: $2) },
+         readAvatarThumbnail: @escaping @Sendable (URL) async -> Data? = { await RemoteAvatarLoader.shared.thumbnail(for: $0) },
          makeConnection: @escaping (RemotePairing) throws -> any RemoteHostTransport = { try RemoteConnection(pairing: $0, role: .host) }) {
         self.monitor = monitor
         self.relayConfiguration = relayConfiguration
         origin = relayConfiguration.origin?.absoluteString ?? ""
         self.now = now
         self.detailReader = detailReader
+        self.readAvatarThumbnail = readAvatarThumbnail
         self.gate = commandGate ?? RemoteCommandGate(store: RemoteCommandReceiptStore(service: (Bundle.main.bundleIdentifier ?? "MergeTether") + ".remote"))
         let store = RemotePairingStore(service: (Bundle.main.bundleIdentifier ?? "MergeTether") + ".remote")
         self.store = store
@@ -160,6 +168,9 @@ extension RemoteConnection: RemoteHostTransport {}
         else { start(pair) }
     }
     private func resetConnectionSession() {
+        avatarTask?.cancel(); avatarTask = nil; avatarChallenge = nil
+        cancelDetailAvatars()
+        phoneSupportsDetailAvatars = false
         hostSession = UUID()
         resolutionPreviews.removeAll()
         phoneSupportsCommentReview = false
@@ -228,9 +239,11 @@ extension RemoteConnection: RemoteHostTransport {}
         switch message.type {
         case .hello:
             guard let challenge = message.challenge else { return }
+            avatarTask?.cancel(); avatarTask = nil; avatarChallenge = challenge
             phoneSupportsCommentReview = message.capabilities?.contains(RemoteMessage.commentReviewCapability) == true
             phoneSupportsMergeActions = message.capabilities?.contains(RemoteMessage.mergeActionsCapability) == true
             phoneSupportsDetails = message.capabilities?.contains(RemoteMessage.detailsCapability) == true
+            phoneSupportsDetailAvatars = phoneSupportsDetails && message.capabilities?.contains(RemoteMessage.detailAvatarsCapability) == true
             phoneSupportsDetailPreviews = phoneSupportsDetails && message.capabilities?.contains(RemoteMessage.detailPreviewCapability) == true
             phoneSupportsMRControls = message.capabilities?.contains(RemoteMessage.mrControlsCapability) == true
             phoneSupportsMarkReady = message.capabilities?.contains(RemoteMessage.markReadyCapability) == true
@@ -257,15 +270,21 @@ extension RemoteConnection: RemoteHostTransport {}
                 capabilities: [RemoteMessage.detailsCapability, RemoteMessage.detailContextCapability, RemoteMessage.detailOriginsCapability, RemoteMessage.mrControlsCapability,
                                RemoteMessage.commentOriginCapability, RemoteMessage.markReadyCapability, RemoteMessage.detailPreviewCapability,
                                RemoteMessage.draftRegenerationCapability])) }
-            catch { failed = true; try? await active.send(.init(type: .unavailable)) }
+            catch { failed = true; try? await active.send(.init(type: .unavailable)); return }
+            if message.capabilities?.contains(RemoteMessage.boardAvatarsCapability) == true {
+                guard avatarChallenge == challenge else { return }
+                avatarTask = deliverAvatarThumbnails(board.avatarThumbnailURLs, challenge: challenge, session: board.hostSession,
+                    excluding: message.cachedAvatarURLs ?? [], over: active) { $0.avatarChallenge == challenge }
+            }
         case .receipt:
             guard let command = message.command, let challenge = message.challenge, let pairing else { return }
             let result = gate.receipt(for: command, account: snapshot().account, pairingSession: pairing.sessionID)
             try? await active.send(.init(type: .receiptResult, challenge: challenge, result: result))
         case .detailRequest:
             guard phoneSupportsDetails, let request = message.detailRequest else { return }
-            beginDetails(request, connection: active)
+            beginDetails(request, cachedAvatarURLs: message.cachedAvatarURLs ?? [], connection: active)
         case .cancelDetails:
+            if message.detailRequest?.id == detailAvatarRequest { cancelDetailAvatars() }
             if message.detailRequest == originSubscription?.request { clearOriginSubscription() }
             if message.detailRequest == activeDetailRequest {
                 detailTask?.cancel(); detailTask = nil; activeDetailRequest = nil
@@ -308,7 +327,59 @@ extension RemoteConnection: RemoteHostTransport {}
         default: break
         }
     }
-    private func beginDetails(_ request: RemoteDetailRequest, connection active: any RemoteHostTransport) {
+    private func deliverAvatarThumbnails(_ candidates: [URL], challenge: UUID, session: UUID, excluding cached: [URL],
+                                         over active: any RemoteHostTransport,
+                                         isCurrent: @escaping @MainActor (RemoteHostController) -> Bool) -> Task<Void, Never>? {
+        guard connection === active, hostSession == session,
+              accountRevision == monitor.glab.accountRevision,
+              let host = monitor.glab.resolvedHost, let gitLab = URLComponents(string: "https://\(host)") else { return nil }
+        let revision = monitor.glab.accountRevision
+        let cached = Set(cached)
+        let urls = candidates.filter { url in
+            guard let hostname = url.host?.lowercased(), url.user == nil, url.password == nil, !cached.contains(url)
+            else { return false }
+            let port = url.port ?? 443
+            let gitLabAvatar = hostname == gitLab.host?.lowercased() && port == (gitLab.port ?? 443)
+            let gravatar = ["gravatar.com", "www.gravatar.com", "secure.gravatar.com"].contains(hostname)
+                && port == 443 && url.path.hasPrefix("/avatar/")
+            return gitLabAvatar || gravatar
+        }
+        guard !urls.isEmpty else { return nil }
+        return Task { [weak self, weak active, readAvatarThumbnail] in
+            for start in stride(from: 0, to: urls.count, by: RemoteAvatarThumbnail.batchSize) {
+                guard !Task.isCancelled else { return }
+                let batch = urls.dropFirst(start).prefix(RemoteAvatarThumbnail.batchSize)
+                let thumbnails = await withTaskGroup(of: RemoteAvatarThumbnail?.self) { group in
+                    for url in batch {
+                        group.addTask {
+                            guard let jpeg = await readAvatarThumbnail(url), !jpeg.isEmpty,
+                                  jpeg.count <= RemoteAvatarThumbnail.maximumBytes else { return nil }
+                            return .init(url: url, jpeg: jpeg)
+                        }
+                    }
+                    var thumbnails: [RemoteAvatarThumbnail] = []
+                    for await thumbnail in group {
+                        if let thumbnail { thumbnails.append(thumbnail) }
+                    }
+                    return thumbnails
+                }
+                guard !Task.isCancelled, let self, let active, connection === active,
+                      isCurrent(self), hostSession == session,
+                      monitor.glab.accountRevision == revision else { return }
+                guard !thumbnails.isEmpty else { continue }
+                do { try await active.send(.init(type: .avatarThumbnails, challenge: challenge, avatarThumbnails: thumbnails)) }
+                catch { return }
+            }
+        }
+    }
+
+    private func cancelDetailAvatars() {
+        detailAvatarTask?.cancel()
+        detailAvatarTask = nil
+        detailAvatarRequest = nil
+    }
+
+    private func beginDetails(_ request: RemoteDetailRequest, cachedAvatarURLs: [URL], connection active: any RemoteHostTransport) {
         guard request.isValid, activeDetailRequest != request else { return }
         let board = snapshot()
         let sourceBoard = monitor.boardSnapshot
@@ -324,6 +395,7 @@ extension RemoteConnection: RemoteHostTransport {}
             Task { try? await active.send(.init(type: .details, detailResponse: .init(request: request, status: .changed))) }
             return
         }
+        cancelDetailAvatars()
         clearOriginSubscription()
         let nextRead = lastDetailRead.addingTimeInterval(1)
         let digest = card.detailContextDigest
@@ -379,6 +451,11 @@ extension RemoteConnection: RemoteHostTransport {}
                 guard !Task.isCancelled, phoneSupportsDetails, connection === active,
                       self.pairing?.sessionID == pairingSession, monitor.glab.accountRevision == revision,
                       activeDetailRequest == request, request.matches(snapshot()) else { return }
+                if phoneSupportsDetailAvatars, checked.status == .current, let delivered = checked.details {
+                    detailAvatarRequest = request.id
+                    detailAvatarTask = deliverAvatarThumbnails(delivered.avatarThumbnailURLs, challenge: request.id,
+                        session: request.hostSession, excluding: cachedAvatarURLs, over: active) { $0.detailAvatarRequest == request.id }
+                }
                 if checked.status == .current, let details = response.details {
                     if let subscription, originSubscription === subscription, let delivered = checked.details {
                         subscription.delivered(full: details, rendered: delivered)
