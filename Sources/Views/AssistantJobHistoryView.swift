@@ -97,8 +97,6 @@ struct AssistantJobRow: View {
                         }
                     } label: { Text(.AssistantJobs.assistantJobsTranscript) }
                 }
-            } else {
-                Text(.AssistantJobs.assistantJobsLegacyExplanation).font(.caption).foregroundStyle(.secondary)
             }
             if let retryError {
                 Text(verbatim: GlabService.redactWorkflowEvidence(retryError)).foregroundStyle(.orange).textSelection(.enabled)
@@ -144,7 +142,7 @@ struct AssistantJobRow: View {
     }
 
     private var stateLabel: LocalizedStringResource {
-        guard let execution = handoff.execution else { return .AssistantJobs.assistantJobsLegacy }
+        guard let execution = handoff.execution else { return .AssistantJobs.assistantJobsStatusUnavailable }
         switch execution.state {
         case .queued: return .AssistantJobs.assistantJobsQueued
         case .running: return .AssistantJobs.assistantJobsRunning

@@ -166,7 +166,7 @@ final class AuthoredMergeRequestMonitor {
 
     init(settings: SettingsManager, glab: GlabService,
          canAutomate: @escaping @MainActor (AutomationAssistant) async -> Bool = {
-             await AssistantCLI.detect($0, requireCLI: true).isReady
+             await AssistantCLI.detect($0).isReady
          }, conflictLauncher: @escaping ConflictLauncher = AuthoredMergeRequestMonitor.launchConflict) {
         self.settings = settings
         self.glab = glab

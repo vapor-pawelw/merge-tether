@@ -16,7 +16,18 @@ enum MergeTetherMain {
         }
         do {
             guard let lock = try SingleInstanceLock.acquire() else { return }
-            withExtendedLifetime(lock) { GitLabTodosApp.main() }
+            withExtendedLifetime(lock) {
+                do { try InstallationStorage.current.moveAutomationEvidence() }
+                catch {
+                    Log.monitor.error("Cannot move automation evidence: \(error.localizedDescription, privacy: .private)")
+                    let alert = NSAlert(error: error)
+                    alert.messageText = String(localized: .AutomationRuntime.runtimeEvidenceMigrationFailed)
+                    NSApplication.shared.activate()
+                    alert.runModal()
+                    return
+                }
+                GitLabTodosApp.main()
+            }
         } catch {
             Log.monitor.error("Cannot acquire MergeTether instance lock: \(error.localizedDescription, privacy: .private)")
         }

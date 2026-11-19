@@ -14,7 +14,7 @@ import tempfile
 import uuid
 from installation_storage import storage_root
 
-ROOT = storage_root() / "Codex Desktop Relay"
+ROOT = storage_root() / "Automation Evidence"
 GLAB_PATH = str(Path.home() / ".local/bin") + ":/opt/homebrew/bin:/usr/local/bin:/opt/local/bin:/usr/bin:/bin"
 HOST_PATTERN = re.compile(r"[A-Za-z0-9][A-Za-z0-9.-]{0,252}(?::[0-9]{1,5})?")
 VERDICTS = ("no_objections", "objections", "classified_findings")

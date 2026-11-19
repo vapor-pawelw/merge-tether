@@ -356,7 +356,6 @@ final class MergeRequestAttentionMonitor {
             self?.didRegenerateDraft(previous, replacement: replacement, in: id)
         }
     )
-    private let reportDirectory: URL?
     private let verdictDirectory: URL
     let aiAssessmentDirectory: URL
     private let followUpDirectory: URL
@@ -398,14 +397,14 @@ final class MergeRequestAttentionMonitor {
     }
 
     init(
-        glab: GlabService, settings: SettingsManager? = nil, reportDirectory: URL? = nil,
+        glab: GlabService, settings: SettingsManager? = nil,
         verdictDirectory: URL = ReviewVerdictStore.directory,
         aiAssessmentDirectory: URL = AICommentAssessmentStore.directory,
         followUpDirectory: URL = FollowUpVerificationStore.directory,
         provenanceDirectory: URL = AICommentProvenanceStore.directory,
         authorFeedbackAssessmentDirectory: URL? = nil,
         canAutomate: @escaping @MainActor (AutomationAssistant) async -> Bool = {
-            await AssistantCLI.detect($0, requireCLI: true).isReady
+            await AssistantCLI.detect($0).isReady
         },
         approvalReadClock: @escaping ReadOnlyAssessmentRetry.Clock = { Date() },
         approvalReadWait: @escaping ReadOnlyAssessmentRetry.Wait = ReadOnlyAssessmentRetry.wait,
@@ -421,7 +420,6 @@ final class MergeRequestAttentionMonitor {
     ) {
         self.glab = glab
         self.settings = settings
-        self.reportDirectory = reportDirectory
         self.verdictDirectory = verdictDirectory
         self.aiAssessmentDirectory = aiAssessmentDirectory
         self.followUpDirectory = followUpDirectory
@@ -712,7 +710,6 @@ final class MergeRequestAttentionMonitor {
             self.account = account
             displayAIOriginCoordinator?.cancel()
             reReviewCoordinator?.reset()
-            if let reportDirectory { CodexDesktopRelay.clearMergeRequestStatus(in: reportDirectory) }
         }
         refreshGeneration += 1
         isLoading = true
@@ -1658,9 +1655,7 @@ final class MergeRequestAttentionMonitor {
 
     private func assistantWorks(username: String) -> Set<AssistantAutomationRunner.MergeRequestWork> {
         guard let settings else { return [] }
-        let handoffs = settings.assistantHandoffs.filter { $0.key.username == username }.map(\.key.work)
-        let chats = settings.assistantChats.keys.filter { $0.username == username }.map(\.work)
-        return Set(handoffs).union(chats)
+        return Set(settings.assistantHandoffs.lazy.filter { $0.key.username == username }.map(\.key.work))
     }
 
     func autoApproveApplies(to request: GitLabMergeRequest, host: String, username: String) -> Bool {

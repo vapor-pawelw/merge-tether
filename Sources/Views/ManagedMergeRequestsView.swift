@@ -142,19 +142,9 @@ struct ManagedMergeRequestsView: View {
                                 }
                                 .font(.caption).foregroundStyle(.secondary)
                             }
-                            HStack {
-                                MRAutomationScopeMenu(monitor: monitor, target: row.target,
-                                                      projectPath: row.item.url.gitLabProjectPath,
-                                                      isDraft: row.item.section == .draftMergeRequests)
-                                Spacer()
-                                if let chat = monitor.existingCodexChat(for: row.target) {
-                                    Link(destination: chat) {
-                                        Text(monitor.settings.automation.assistant == .claude
-                                             ? .Menu.menuScopeOpenClaudeSession : .Menu.menuScopeOpenChat)
-                                    }
-                                    .font(.caption)
-                                }
-                            }
+                            MRAutomationScopeMenu(monitor: monitor, target: row.target,
+                                                  projectPath: row.item.url.gitLabProjectPath,
+                                                  isDraft: row.item.section == .draftMergeRequests)
                         }
                         .mrRowContentPadding()
                         Divider()

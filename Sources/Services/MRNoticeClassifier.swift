@@ -39,7 +39,7 @@ enum MRNoticeClassifier {
         else { return .uncertain }
         let key = "\(host)/\(fingerprint)/\(assistant.rawValue)/\(model)"
         if let known = cache[key] { return known }
-        guard case .ready(let executable) = await AssistantCLI.detect(assistant, requireCLI: true) else { return .uncertain }
+        guard case .ready(let executable) = await AssistantCLI.detect(assistant) else { return .uncertain }
         let result = (try? await run(request: request, discussions: discussions, user: user, noteID: noteID,
             assistant: assistant, model: model, executable: executable, expectedHost: host)) ?? .uncertain
         guard !Task.isCancelled else { return .uncertain }

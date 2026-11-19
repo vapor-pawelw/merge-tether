@@ -635,7 +635,7 @@ import MergeTetherRemote
 
     @Test func anAgentCardWithoutAGitLabLinkIsStillVisibleOnThePhone() throws {
         let work = AssistantAutomationRunner.MergeRequestWork(host: "gitlab.example.org", projectID: 1, iid: 2)
-        let key = AssistantAutomationRunner.ChatKey(assistant: .codex, work: work, username: "me", workspace: "", access: .gitLabRead)
+        let key = AssistantAutomationRunner.JobKey(assistant: .codex, work: work, username: "me", workspace: "", access: .gitLabRead)
         let job = AssistantAutomationRunner.Handoff(id: UUID(), key: key, title: "Inspect old job", prompt: "", createdAt: Date(), allowsPush: false)
         let pin = try #require(BoardCardPin.mergeRequest(host: work.host, username: "me", projectID: 1, iid: 2))
         let board = MergeRequestBoardSnapshot(own: [], reviewed: [], todos: [], attention: [], handoffs: [], host: work.host, username: "me")

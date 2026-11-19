@@ -8,8 +8,8 @@ struct AssistantSetupView: View {
     @Environment(\.dismiss) private var dismiss
     let onReady: () -> Void
 
-    init(assistant: AutomationAssistant, requireCLI: Bool, onReady: @escaping () -> Void) {
-        _setup = State(initialValue: AssistantSetupSession(assistant: assistant, requireCLI: requireCLI))
+    init(assistant: AutomationAssistant, onReady: @escaping () -> Void) {
+        _setup = State(initialValue: AssistantSetupSession(assistant: assistant))
         self.onReady = onReady
     }
 
@@ -23,7 +23,7 @@ struct AssistantSetupView: View {
             } else if let status = setup.status {
                 Text(status.message(for: setup.assistant)).foregroundStyle(status.isReady ? .green : .orange)
                 switch status {
-                case .missingCLI, .invalidCLI, .missingDesktop, .desktopOnly:
+                case .missingCLI, .invalidCLI:
                     Text(.Settings.settingsAssistantSetupInstallHelp).font(.caption).foregroundStyle(.secondary)
                     Button { perform(install: true) } label: { Text(.Settings.settingsAssistantSetupInstall) }
                 case .loginRequired(let executable):
@@ -76,7 +76,6 @@ extension AssistantDependencyStatus {
         let name = String(localized: assistant.displayName)
         switch self {
         case .ready: return .Settings.settingsAssistantStatusReady(name)
-        case .missingDesktop, .desktopOnly: return .Settings.settingsAssistantStatusCli(name)
         case .missingCLI: return .Settings.settingsAssistantStatusCli(name)
         case .invalidCLI: return .Settings.settingsAssistantStatusInvalid(name)
         case .loginRequired: return .Settings.settingsAssistantStatusLogin(name)

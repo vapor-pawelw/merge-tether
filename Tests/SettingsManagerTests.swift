@@ -7,7 +7,7 @@ import Testing
 struct SettingsManagerTests {
     @Test(arguments: ["automation", "mergeSubmissions", "automationReceipts", "automationAttemptReceipts",
         "authorFeedbackAttempts", "feedbackSuggestionDecisions", "pipelineRefreshAttempts",
-        "pipelineClaimAssessmentAttempts", "pendingTodoAcknowledgements", "assistantHandoffs", "assistantChats",
+        "pipelineClaimAssessmentAttempts", "pendingTodoAcknowledgements", "assistantHandoffs",
         "workflowActivity", "automationEvents", "mrActionIntents", "routedMRTodoReceipts", "boardPins",
         "mrLifecycleLedger", "conflictReceipts", "reReviewReceipts", "reReviewDraftBaselines",
         "pendingCommentReviews", "commentReviewProgress", "ignoredMergeRequests", "autoApproveOptOuts",
@@ -18,7 +18,7 @@ struct SettingsManagerTests {
         let corrupt = Data("{unreadable historical record".utf8)
         defaults.set(corrupt, forKey: key)
         let settings = SettingsManager(defaults: defaults)
-        let convenience = ["assistantChats", "automationEvents", "boardPins", "lastSeenTodoIDs"].contains(key)
+        let convenience = ["automationEvents", "boardPins", "lastSeenTodoIDs"].contains(key)
         #expect(settings.automaticActionsAllowed == convenience)
         #expect(settings.persistenceDegraded.contains(key) == !convenience)
         #expect(defaults.object(forKey: key + ".corrupt") == nil)
@@ -56,6 +56,23 @@ struct SettingsManagerTests {
         #expect(!restored.automaticActionsAllowed)
         #expect(restored.automation == expected)
         #expect(SettingsManager(defaults: defaults).automation == expected)
+    }
+
+    @Test func restoresCLIJobHistoryWithoutDesktopHandoffs() throws {
+        let defaults = makeDefaults()
+        let key = AssistantAutomationRunner.JobKey(assistant: .codex,
+            work: .init(host: "gitlab.example.test", projectID: 1, iid: 2),
+            username: "me", workspace: "", access: .gitLabRead)
+        let desktop = AssistantAutomationRunner.Handoff(id: UUID(), key: key, title: "Review", prompt: "Review",
+            createdAt: Date(), allowsPush: false)
+        let cli = AssistantAutomationRunner.Handoff(id: UUID(), key: key, title: "Review", prompt: "Review",
+            createdAt: Date(), allowsPush: false, execution: .init(state: .succeeded))
+        defaults.set(try JSONEncoder().encode([desktop, cli]), forKey: "assistantHandoffs")
+
+        let restored = SettingsManager(defaults: defaults)
+
+        #expect(restored.assistantHandoffs.map(\.id) == [cli.id])
+        #expect(restored.automaticActionsAllowed)
     }
 
     @Test func wrongStorageTypeIsPreservedRatherThanTreatedAsAMissingProfile() {
@@ -230,7 +247,8 @@ struct SettingsManagerTests {
         let handoff = AssistantAutomationRunner.Handoff(id: UUID(),
             key: .init(assistant: .codex, work: .init(host: "gitlab.example.test", projectID: 1, iid: 2),
                 username: "me", workspace: "", access: .gitLabRead),
-            title: "Fixture", prompt: "Synthetic prompt", createdAt: Date(timeIntervalSince1970: 1), allowsPush: false)
+            title: "Fixture", prompt: "Synthetic prompt", createdAt: Date(timeIntervalSince1970: 1), allowsPush: false,
+            execution: .init(state: .succeeded))
         settings.assistantHandoffs.append(handoff)
         settings.save()
         #expect(settings.persistenceDegraded.contains("assistantHandoffs"))
@@ -242,7 +260,7 @@ struct SettingsManagerTests {
         #expect(!restarted.automaticActionsAllowed)
     }
 
-    @Test(arguments: ["assistantChats", "workflowActivity", "automationEvents", "mrActionIntents"])
+    @Test(arguments: ["workflowActivity", "automationEvents", "mrActionIntents"])
     func unrelatedSavesDoNotRewriteOtherHistoryCollections(_ key: String) throws {
         let suite = "SettingsOtherHistoryWrites.\(UUID())"
         let defaults = try #require(HistoryWriteDefaults(suiteName: suite))
@@ -280,18 +298,20 @@ struct SettingsManagerTests {
         let settings = SettingsManager(defaults: defaults)
         #expect(settings.save())
         defaults.writesByKey = [:]
-        let key = AssistantAutomationRunner.ChatKey(assistant: .codex,
+        let key = AssistantAutomationRunner.JobKey(assistant: .codex,
             work: .init(host: "gitlab.example.test", projectID: 1, iid: 2),
             username: "me", workspace: "", access: .gitLabRead)
-        settings.assistantChats[key] = "synthetic-thread"
+        let job = AssistantAutomationRunner.Handoff(id: UUID(), key: key, title: "Review", prompt: "Review",
+            createdAt: Date(), allowsPush: false, execution: .init(state: .succeeded))
+        settings.assistantHandoffs = [job]
         defaults.synchronizationFails = true
         #expect(!settings.save())
-        #expect(defaults.writesByKey["assistantChats"] == 1)
+        #expect(defaults.writesByKey["assistantHandoffs"] == 1)
         defaults.synchronizationFails = false
         #expect(settings.save())
-        #expect(defaults.writesByKey["assistantChats"] == 2)
+        #expect(defaults.writesByKey["assistantHandoffs"] == 2)
         let restarted = SettingsManager(defaults: defaults)
-        #expect(restarted.assistantChats[key] == "synthetic-thread")
+        #expect(restarted.assistantHandoffs.map(\.id) == [job.id])
         #expect(!restarted.automaticActionsAllowed)
     }
 

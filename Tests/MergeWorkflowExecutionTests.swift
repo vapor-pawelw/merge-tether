@@ -386,7 +386,7 @@ import Testing
         let fromScratch = scenario == "legacy-full" || scenario == "legacy-narrowed-retry"
         let user = GitLabAuthenticatedUser(id: 1, username: "me")
         let work = AssistantAutomationRunner.MergeRequestWork(host: host, projectID: 7, iid: 11)
-        let key = AssistantAutomationRunner.ChatKey(assistant: .codex, work: work, username: user.username,
+        let key = AssistantAutomationRunner.JobKey(assistant: .codex, work: work, username: user.username,
             workspace: "", access: .gitLabRead)
         let reviewed = AssistantAutomationRunner.Handoff(id: UUID(), key: key, title: "Completed review", prompt: "Review",
             createdAt: Date(), allowsPush: false, execution: .init(state: .succeeded),
@@ -541,7 +541,7 @@ import Testing
         }
         if route.hasPrefix("manual-") {
             settings.resolvedHost = host
-            let dependencies = AssistantDependencyMonitor(probe: { _, _ in .ready(URL(fileURLWithPath: "/in-memory/assistant")) })
+            let dependencies = AssistantDependencyMonitor(probe: { _ in .ready(URL(fileURLWithPath: "/in-memory/assistant")) })
             let monitor = TodoMonitorService(settings: settings, glab: glab,
                 assistantDependencies: dependencies, reviewJobCoordinator: coordinator)
             defer { monitor.stopTimer() }
@@ -879,7 +879,7 @@ import Testing
         return try JSONDecoder().decode(MergeWorkflowActivityEntry.self, from: JSONSerialization.data(withJSONObject: object))
     }
 
-    @Test func workflowFollowsPersistedCLIExecutionAndKeepsDesktopHistoryUnverified() throws {
+    @Test func restoresLinkedWorkflowAndDropsEntriesWaitingWithoutAJob() throws {
         let suite = "MergeWorkflowExecutionTests.\(UUID())"
         let defaults = try #require(UserDefaults(suiteName: suite))
         defer { defaults.removePersistentDomain(forName: suite) }
@@ -894,16 +894,14 @@ import Testing
         let glab = GlabService()
         glab.resolvedHost = "gitlab.example.test"
         glab.currentUsername = "me"
-        let automation = MergeWorkflowAutomation(settings: settings, glab: glab)
-        #expect(automation.entries[0].state == .running)
-        #expect(automation.entries[1].state == .waitingForAssistant)
-        settings.assistantHandoffs[0].execution = .init(state: .succeeded, summary: "Fix verified")
-        settings.save()
-        automation.synchronizeAssistantJobs()
-        #expect(automation.entries[0].state == .completed)
-        #expect(automation.entries[0].summary == "Fix verified")
-        #expect(automation.entries[1].state == .waitingForAssistant)
-        #expect(SettingsManager(defaults: defaults).workflowActivity[0].state == .waitingForAssistant)
+        let restored = SettingsManager(defaults: defaults)
+        let automation = MergeWorkflowAutomation(settings: restored, glab: glab)
+        #expect(automation.entries.map(\.state) == [.running])
+        restored.assistantHandoffs[0].execution = .init(state: .succeeded, summary: "Fix verified")
+        restored.save()
+        #expect(automation.entries.map(\.state) == [.completed])
+        #expect(automation.entries.first?.summary == "Fix verified")
+        #expect(SettingsManager(defaults: defaults).workflowActivity.map(\.state) == [.waitingForAssistant])
     }
 
     @Test func linkedCompletionAppearsWithoutSynchronizationOrAnOutcomeMirror() throws {
@@ -1682,14 +1680,14 @@ import Testing
     }
 
     @Test(arguments: ["none", "receipt", "active", "linked-missing", "linked-failed", "linked-interrupted",
-                      "linked-completed", "unlinked-pipeline-job", "routed-linked-job", "refresh-attempt", "chat", "summary", "stale-head",
+                      "linked-completed", "unlinked-pipeline-job", "routed-linked-job", "refresh-attempt", "summary", "stale-head",
                       "different-pipeline", "successful-pipeline", "wrong-account", "checkpoints", "paused", "failed-entry"])
     func fullProfileReconsidersOnlyCurrentSkippedPipelineWorkWithoutRecordedEffects(blocker: String) async throws {
         try await exerciseSkippedPipeline(blocker: blocker)
     }
 
     @Test(arguments: ["none", "active", "linked-missing", "linked-failed", "linked-interrupted", "linked-completed",
-                      "unlinked-pipeline-job", "routed-linked-job", "refresh-attempt", "chat", "summary", "stale-head",
+                      "unlinked-pipeline-job", "routed-linked-job", "refresh-attempt", "summary", "stale-head",
                       "different-pipeline", "successful-pipeline", "wrong-account", "checkpoints", "paused", "failed-entry",
                       "package-disabled", "ignored", "nonempty-receipt", "prior-assessment"])
     func anOrphanedReceiptAllowsOnlyOneSeparateCurrentAssessmentWithoutReplayingKnownWork(blocker: String) async throws {
@@ -1722,7 +1720,6 @@ import Testing
             stored = try JSONDecoder().decode(MergeWorkflowActivityEntry.self, from: JSONSerialization.data(withJSONObject: object))
         }
         if blocker == "summary" { stored.summary = "An earlier outcome is uncertain." }
-        if blocker == "chat" { stored.chatURL = URL(string: "https://example.test/existing-session") }
         let key = ExistingPipelineWorkDetector.Key(host: stored.host, projectID: 7, mergeRequestIID: 11, pipelineID: 101)
         if blocker == "receipt" || seedReceipt {
             let reserved = try detector.registerRun(for: key)

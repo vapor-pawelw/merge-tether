@@ -170,7 +170,7 @@ enum ReReviewVerifier {
     }
 
     @MainActor private static func resolveExecutable(_ assistant: AutomationAssistant) async -> URL? {
-        guard case .ready(let executable) = await AssistantCLI.detect(assistant, requireCLI: true) else { return nil }
+        guard case .ready(let executable) = await AssistantCLI.detect(assistant) else { return nil }
         return executable
     }
 
@@ -485,7 +485,7 @@ enum ReReviewVerifier {
             For a genuinely essential external decision, after bounded reads of available authoritative
             sources fail to settle it and no independent implementable work remains on THIS note, return
             state uncertain and manualDecision. Its context must explain the feature, involved systems,
-            original concern and practical consequence so someone can understand it without this chat.
+            original concern and practical consequence so someone can understand it from the report.
             verifiedFacts lists what current code/tests or other evidence actually prove, distinguishing
             a stub from a real provider observation. missingEvidence names the precise unavailable fact
             and sources already checked. question asks for the specific human decision/evidence needed.

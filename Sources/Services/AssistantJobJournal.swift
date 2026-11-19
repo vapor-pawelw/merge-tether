@@ -8,7 +8,7 @@ import Security
 enum AssistantJobJournal {
     private struct Checkpoint: Codable {
         let runID: UUID
-        let key: AssistantAutomationRunner.ChatKey
+        let key: AssistantAutomationRunner.JobKey
         let head: String?
         let result: AssistantJobResult
         let output: String

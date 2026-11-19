@@ -1,6 +1,8 @@
 import os
 from pathlib import Path
 import plistlib
+import subprocess
+import sys
 import tempfile
 import unittest
 from unittest.mock import patch
@@ -9,6 +11,11 @@ from installation_storage import storage_root
 
 
 class InstallationStorageTests(unittest.TestCase):
+    def test_evidence_helper_uses_renamed_installation_directory(self):
+        with tempfile.TemporaryDirectory() as temporary, patch.dict(os.environ, {"MERGETETHER_STORAGE_ROOT": temporary}):
+            output = subprocess.check_output([sys.executable, "-c", "from evidence import ROOT; print(ROOT)"], text=True)
+            self.assertEqual(Path(output.strip()), Path(temporary) / "Automation Evidence")
+
     def test_explicit_authority_is_shared_with_swift(self):
         with patch.dict(os.environ, {"MERGETETHER_STORAGE_ROOT": "/tmp/local install"}):
             self.assertEqual(storage_root(), Path("/tmp/local install"))

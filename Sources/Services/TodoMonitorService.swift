@@ -192,7 +192,7 @@ final class TodoMonitorService {
             guard let self else { return false }
             let configuration = self.settings.automation
             let revision = self.glab.accountRevision
-            let ready = await AssistantCLI.detect(configuration.assistant, requireCLI: true).isReady
+            let ready = await AssistantCLI.detect(configuration.assistant).isReady
             // This probe also serves manual work; persistence is checked at each action boundary.
             return ready && !Task.isCancelled && self.settings.automation == configuration
                 && self.glab.accountRevision == revision
@@ -248,7 +248,6 @@ final class TodoMonitorService {
         })
     private var timer: Timer?
     private var hasCompletedFirstFetch: Bool { todoStore.hasCompletedFirstFetch }
-    @ObservationIgnored private var legacyGUIQueueRetired = false
 
     init(
         settings: SettingsManager = SettingsManager(),
@@ -278,7 +277,6 @@ final class TodoMonitorService {
         let feedbackAssessments = ApplicationLaunchMode.resolve(environment: ProcessInfo.processInfo.environment) == .application
             ? AuthorFeedbackAssessmentStore.directory : nil
         self.attention = MergeRequestAttentionMonitor(glab: glab, settings: settings,
-                                                       reportDirectory: CodexDesktopRelay.directory,
                                                        authorFeedbackAssessmentDirectory: feedbackAssessments)
         self.authoredMergeRequests = AuthoredMergeRequestMonitor(settings: settings, glab: glab)
         todoStore.onAcknowledged = { [weak self] id in
@@ -438,18 +436,10 @@ final class TodoMonitorService {
         }
     }
 
-    private func retireLegacyGUIQueueIfNeeded() {
-        guard !legacyGUIQueueRetired else { return }
-        do { legacyGUIQueueRetired = try CodexDesktopRelay.retirePendingGUIJobs(in: CodexDesktopRelay.directory) }
-        catch { Log.monitor.error("Could not retire legacy GUI queue: \(String(describing: error), privacy: .private)") }
-    }
-
     /// Refreshes CLI availability and sign-in without depending on desktop chats.
     func refreshAvailableAssistants() {
-        assistantDependencies.refresh(requireCLI: requiresAssistantCLI, force: true)
+        assistantDependencies.refresh(force: true)
     }
-
-    var requiresAssistantCLI: Bool { true }
 
     var boardRefreshState: BoardRefreshState {
         settings.onboardingCompleted ? inboxRefreshState : .current
@@ -469,7 +459,6 @@ final class TodoMonitorService {
     }
 
     func bootstrap() async {
-        retireLegacyGUIQueueIfNeeded()
         refreshAvailableAssistants()
         if glab.glabPath == nil {
             glab.glabPath = await OnboardingDetector.findGlabExecutable()
@@ -500,11 +489,6 @@ final class TodoMonitorService {
 
     var pipelineHandoffs: [MergeWorkflowActivityEntry] {
         authoredMergeRequests.workflow.pendingPipelineHandoffs
-    }
-
-    var assistantGroups: [AssistantTaskGroup] {
-        guard let host = glab.resolvedHost, let username = glab.currentUsername else { return [] }
-        return AssistantTaskGroup.groups(from: settings.assistantHandoffs, host: host, username: username)
     }
 
     /// Capture existing owners and policy decisions as values; the projector cannot call back into them.
@@ -656,9 +640,6 @@ final class TodoMonitorService {
     private func trackedReviewTarget(_ target: MRAutomationScope.Target) -> Bool {
         settings.automation.scope.isManaged(target) || settings.mrLifecycleLedger.request(for: target) != nil
             || settings.mrActionIntents.contains { $0.target == target && $0.grantsManagement }
-            || settings.assistantChats.keys.contains {
-                $0.work.host == target.host && $0.username == target.username && $0.work.projectID == target.projectID && $0.work.iid == target.iid
-            }
             || settings.assistantHandoffs.contains {
                 $0.key.work.host == target.host && $0.key.username == target.username
                     && $0.key.work.projectID == target.projectID && $0.key.work.iid == target.iid
@@ -751,22 +732,6 @@ final class TodoMonitorService {
         guard projectID > 0, iid > 0, let host = glab.resolvedHost, let username = glab.currentUsername,
               url.isGitLabMergeRequest(host: host, iid: iid) else { return nil }
         return .init(host: host, username: username, projectID: projectID, iid: iid)
-    }
-
-    /// The selected assistant's chat for this MR: a Codex thread or a Claude Code session.
-    func existingCodexChat(for target: MRAutomationScope.Target) -> URL? {
-        guard let iid = target.iid else { return nil }
-        let assistant = settings.automation.assistant
-        let work = AssistantAutomationRunner.MergeRequestWork(host: target.host, projectID: target.projectID, iid: iid)
-        let key = AssistantAutomationRunner.ChatKey(assistant: assistant, work: work, username: target.username,
-                                                     workspace: "", access: .gitLabRead)
-        let chatID = key.reusableChat(in: settings.assistantChats) ?? settings.assistantChats.first {
-            $0.key.assistant == assistant && $0.key.work == work && $0.key.username == target.username
-        }?.value ?? assistantHandoffs.last {
-            $0.key.work == work && $0.key.assistant == assistant && $0.chatID != nil
-        }?.chatID
-        return chatID.flatMap(assistant == .codex ? AssistantAutomationRunner.codexChatURL
-                                                  : AssistantAutomationRunner.claudeSessionURL)
     }
 
     func addAutomationTarget(from address: String) async throws {
@@ -986,7 +951,6 @@ final class TodoMonitorService {
 
     func refreshNow() async {
         guard !Task.isCancelled, todoStore.beginRefresh() else { return }
-        retireLegacyGUIQueueIfNeeded()
         refreshAvailableAssistants()
         refreshAssistantRelay()
         defer {
@@ -1220,7 +1184,7 @@ final class TodoMonitorService {
             cancelPolicyJob(handoff.id, settings)
         }
         attention.automationConfigurationChanged(outsideScope: scopeOnly ? cancellationScope : nil)
-        assistantDependencies.refresh(requireCLI: true, force: !scopeOnly)
+        assistantDependencies.refresh(force: !scopeOnly)
         authoredMergeRequests.automationConfigurationChanged(outsideScope: scopeOnly ? cancellationScope : nil)
         authoredMergeRequests.workflow.synchronizeAssistantJobs()
         wakeAutomaticRetries()
@@ -1352,7 +1316,7 @@ final class TodoMonitorService {
 
     func refreshAssistantRelay() {
         FollowUpVerificationStore.synchronizeRuns(settings: settings)
-        assistantDependencies.refresh(requireCLI: true)
+        assistantDependencies.refresh()
     }
 
     func retryAssistantJob(_ id: UUID) async {

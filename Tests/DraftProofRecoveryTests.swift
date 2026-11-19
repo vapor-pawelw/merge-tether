@@ -1547,7 +1547,7 @@ struct DraftProofRecoveryTests {
         f.settings.assistantHandoffs[0].execution = .init(state: .blocked)
         let earlierProof = f.currentProof(runID: earlier.id, body: "Fixed")
         try f.archive(earlierProof)
-        let laterKey = AssistantAutomationRunner.ChatKey(assistant: change == "provider" ? .claude : earlier.key.assistant,
+        let laterKey = AssistantAutomationRunner.JobKey(assistant: change == "provider" ? .claude : earlier.key.assistant,
             work: earlier.key.work, username: earlier.key.username, workspace: earlier.key.workspace, access: earlier.key.access)
         let later = AssistantAutomationRunner.Handoff(id: UUID(), key: laterKey, title: "Another sealed response", prompt: "",
             createdAt: earlier.createdAt.addingTimeInterval(1), allowsPush: false, followUpPushAllowed: true,
@@ -2091,7 +2091,7 @@ struct DraftProofRecoveryTests {
         defer { fixture.clean() }
         let origin = fixture.settings.assistantHandoffs[0]
         let blocked = AssistantAutomationRunner.Handoff(id: UUID(), key: origin.key, title: "Blocked", prompt: "", createdAt: origin.createdAt.addingTimeInterval(1), allowsPush: false, followUpPushAllowed: true, execution: .init(state: .blocked), environmentRecoveryAttempted: true, expectedHeadSHA: fixture.proof.headSHA)
-        let key = change == "account" ? AssistantAutomationRunner.ChatKey(assistant: .codex, work: fixture.work, username: "other", workspace: "", access: .gitLabRead) : origin.key
+        let key = change == "account" ? AssistantAutomationRunner.JobKey(assistant: .codex, work: fixture.work, username: "other", workspace: "", access: .gitLabRead) : origin.key
         let replacement = AssistantAutomationRunner.Handoff(id: UUID(), key: key, title: "Later task", prompt: "", createdAt: origin.createdAt.addingTimeInterval(2), allowsPush: false, followUpPushAllowed: true,
             execution: .init(state: change == "failed" ? .failed : change == "active" ? .running : .succeeded),
             environmentRecoveryOf: change == "unrelated" ? nil : blocked.id,
@@ -2786,7 +2786,7 @@ struct DraftProofRecoveryTests {
             suite = "DraftProofRecoveryTests.\(UUID())"; defaults = UserDefaults(suiteName: suite)!
             settings = SettingsManager(defaults: defaults)
             settings.automation.applyPreset(.full, for: .codex)
-            let key = AssistantAutomationRunner.ChatKey(assistant: .codex, work: work, username: "me", workspace: "", access: .gitLabRead)
+            let key = AssistantAutomationRunner.JobKey(assistant: .codex, work: work, username: "me", workspace: "", access: .gitLabRead)
             let origin = AssistantAutomationRunner.Handoff(id: UUID(), key: key, title: "Historical follow-up", prompt: "", createdAt: Date(), allowsPush: false, followUpPushAllowed: true)
             settings.assistantHandoffs = [origin]
             proof = .init(version: 1, sealed: true, verificationID: UUID(), runID: origin.id, host: work.host, projectID: 1, iid: 2, username: "me", userID: 3, headSHA: String(repeating: "a", count: 40), sourceProjectID: 1, sourceBranch: "fix", files: [.init(path: "Sources/Fixed.swift", sha256: remoteHash)], drafts: [.init(id: 12, bodySHA256: AICommentAssessmentStore.digest("Fixed"))])

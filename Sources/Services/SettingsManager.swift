@@ -19,7 +19,7 @@ final class SettingsManager {
     var automaticWritesAllowed: Bool { automaticActionsAllowed && automation.hasAutomaticActionConsent }
     var automaticPublicWritesAllowed: Bool { automaticActionsAllowed && automation.hasAutomaticPublicActionConsent }
     private static let conveniencePersistenceKeys: Set<String> = [
-        "assistantChats", "automationEvents", "boardPins", "lastSeenTodoIDs"
+        "automationEvents", "boardPins", "lastSeenTodoIDs"
     ]
 
     func recordPersistenceFailure(_ key: String) { persistenceStore.recordFailure(key) }
@@ -82,9 +82,6 @@ final class SettingsManager {
     var assistantHandoffs: [AssistantAutomationRunner.Handoff] {
         didSet { changedHistoryKeys.insert(Key.assistantHandoffs) }
     }
-    var assistantChats: [AssistantAutomationRunner.ChatKey: String] {
-        didSet { changedHistoryKeys.insert(Key.assistantChats) }
-    }
     var workflowActivity: [MergeWorkflowActivityEntry] {
         didSet { changedHistoryKeys.insert(Key.workflowActivity) }
     }
@@ -126,9 +123,10 @@ final class SettingsManager {
         pipelineRefreshAttempts = store.load(Key.pipelineRefreshAttempts, fallback: [])
         pipelineClaimAssessmentAttempts = store.load(Key.pipelineClaimAssessmentAttempts, fallback: [])
         pendingTodoAcknowledgements = store.load(Key.pendingTodoAcknowledgements, fallback: [])
-        assistantHandoffs = store.load(Key.assistantHandoffs, fallback: [])
-        assistantChats = store.load(Key.assistantChats, fallback: [:])
-        workflowActivity = store.load(Key.workflowActivity, fallback: [])
+        assistantHandoffs = store.load(Key.assistantHandoffs, fallback: [AssistantAutomationRunner.Handoff]())
+            .filter { $0.execution != nil }
+        workflowActivity = store.load(Key.workflowActivity, fallback: [MergeWorkflowActivityEntry]())
+            .filter { $0.state != .waitingForAssistant || $0.assistantJobID != nil }
         automationEvents = store.load(Key.automationEvents, fallback: [])
         mrActionIntents = store.load(Key.mrActionIntents, fallback: [])
         routedMRTodoReceipts = store.load(Key.routedMRTodoReceipts, fallback: [])
@@ -200,7 +198,6 @@ final class SettingsManager {
         persistenceStore.save(pipelineClaimAssessmentAttempts, forKey: Key.pipelineClaimAssessmentAttempts)
         persistenceStore.save(pendingTodoAcknowledgements, forKey: Key.pendingTodoAcknowledgements)
         saveHistory(assistantHandoffs, forKey: Key.assistantHandoffs)
-        saveHistory(assistantChats, forKey: Key.assistantChats)
         saveHistory(workflowActivity, forKey: Key.workflowActivity)
         saveHistory(automationEvents, forKey: Key.automationEvents)
         saveHistory(mrActionIntents, forKey: Key.mrActionIntents)
@@ -247,7 +244,7 @@ final class SettingsManager {
         persistenceStore.save(automaticActionOptIns, forKey: Key.automaticActionOptIns)
         let synchronized = persistenceStore.synchronize()
         if !synchronized {
-            changedHistoryKeys.formUnion([Key.assistantHandoffs, Key.assistantChats, Key.workflowActivity,
+            changedHistoryKeys.formUnion([Key.assistantHandoffs, Key.workflowActivity,
                 Key.automationEvents, Key.mrActionIntents])
         }
         let accepted = automationSaved && synchronized
@@ -410,7 +407,6 @@ final class SettingsManager {
         static let pendingCommentReviews = "pendingCommentReviews"
         static let commentReviewProgress = "commentReviewProgress"
         static let assistantHandoffs = "assistantHandoffs"
-        static let assistantChats = "assistantChats"
         static let workflowActivity = "workflowActivity"
         static let automationEvents = "automationEvents"
         static let mrActionIntents = "mrActionIntents"

@@ -67,12 +67,6 @@ private struct MergeWorkflowActivityRow: View {
                 }
             }
 
-            if let chatURL = entry.chatURL {
-                Link(destination: chatURL) {
-                    Text(.Menu.menuWorkflowActivityOpenChat)
-                }
-            }
-
             if entry.state == .awaitingPipelineHandoff, let onHandoff {
                 Button {
                     confirmHandoff = true

@@ -4,21 +4,19 @@ import Observation
 @MainActor @Observable
 final class AssistantSetupSession {
     let assistant: AutomationAssistant
-    let requireCLI: Bool
     private(set) var status: AssistantDependencyStatus?
     private(set) var isWorking = false
     private(set) var failed = false
     private(set) var canCommit = false
-    private let probe: @MainActor (AutomationAssistant, Bool) async -> AssistantDependencyStatus
+    private let probe: @MainActor (AutomationAssistant) async -> AssistantDependencyStatus
     private let install: @MainActor (AutomationAssistant) async throws -> Void
     private var generation = UUID()
     private var cancelled = false
 
-    init(assistant: AutomationAssistant, requireCLI: Bool,
-         probe: @escaping @MainActor (AutomationAssistant, Bool) async -> AssistantDependencyStatus = AssistantCLI.detect,
+    init(assistant: AutomationAssistant,
+         probe: @escaping @MainActor (AutomationAssistant) async -> AssistantDependencyStatus = AssistantCLI.detect,
          install: @escaping @MainActor (AutomationAssistant) async throws -> Void = AssistantCLI.install) {
         self.assistant = assistant
-        self.requireCLI = true
         self.probe = probe
         self.install = install
     }
@@ -29,7 +27,7 @@ final class AssistantSetupSession {
         isWorking = true
         canCommit = false
         failed = false
-        let result = await probe(assistant, requireCLI)
+        let result = await probe(assistant)
         guard current == generation, !Task.isCancelled, !cancelled else { return false }
         status = result
         isWorking = false

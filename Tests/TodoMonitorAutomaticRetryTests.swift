@@ -69,7 +69,7 @@ struct TodoMonitorAutomaticRetryTests {
         defer { gitlab.close() }
         let monitor = TodoMonitorService(settings: settings, glab: gitlab.service(host: target.host, username: "me"),
             notifications: NotificationService(authorization: { .denied }, post: { _ in }),
-            assistantDependencies: AssistantDependencyMonitor(probe: { _, _ in .missingCLI }))
+            assistantDependencies: AssistantDependencyMonitor(probe: { _ in .missingCLI }))
         defer { monitor.stopTimer() }
 
         settings.assistantHandoffs = [child]
@@ -149,7 +149,7 @@ struct TodoMonitorAutomaticRetryTests {
             }
             return InMemoryGitLab.output("[]")
         }
-        let dependencies = AssistantDependencyMonitor(probe: { _, _ in .missingCLI })
+        let dependencies = AssistantDependencyMonitor(probe: { _ in .missingCLI })
         let monitor = TodoMonitorService(settings: settings, glab: glab,
             notifications: NotificationService(authorization: { .denied }, post: { _ in }), assistantDependencies: dependencies)
         defer { monitor.stopTimer() }

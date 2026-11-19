@@ -7,7 +7,7 @@ struct AssistantDependenciesTests {
     #if DEBUG
     @MainActor @Test(arguments: AutomationAssistant.allCases)
     func testHostDiscoveryCannotFallBackToInstalledAssistants(_ assistant: AutomationAssistant) async {
-        let status = await AssistantCLI.detect(assistant, requireCLI: true)
+        let status = await AssistantCLI.detect(assistant)
         switch status {
         case .missingCLI: break
         case .ready(let executable), .loginRequired(let executable):
@@ -26,11 +26,11 @@ struct AssistantDependenciesTests {
         try Data("#!/bin/sh\ncase \"$*\" in\n  --version) echo version-1 ;;\n  'auth status') echo '{\"loggedIn\":true}' ;;\n  *) echo 'exec --output-schema --ignore-user-config --ignore-rules --dangerously-bypass-approvals-and-sandbox --print --tools --safe-mode --dangerously-skip-permissions --output-format --json-schema' ;;\nesac\n".utf8).write(to: cli)
         try FileManager.default.setAttributes([.posixPermissions: 0o700], ofItemAtPath: cli.path)
 
-        let status = await AssistantCLI.check(assistant, desktopURL: nil, candidates: [cli])
+        let status = await AssistantCLI.check(assistant, candidates: [cli])
 
         #expect(status == .ready(cli))
         try FileManager.default.removeItem(at: cli)
-        #expect(await AssistantCLI.check(assistant, desktopURL: nil, candidates: [cli]) == .missingCLI)
+        #expect(await AssistantCLI.check(assistant, candidates: [cli]) == .missingCLI)
     }
 
     @Test(arguments: AutomationAssistant.allCases)
@@ -48,12 +48,12 @@ struct AssistantDependenciesTests {
         esac
         """.utf8).write(to: cli)
         try FileManager.default.setAttributes([.posixPermissions: 0o700], ofItemAtPath: cli.path)
-        #expect(await AssistantCLI.check(assistant, desktopURL: nil, candidates: [cli]) == .invalidCLI)
+        #expect(await AssistantCLI.check(assistant, candidates: [cli]) == .invalidCLI)
     }
 
     @Test(arguments: AutomationAssistant.allCases)
-    func missingCLIBlocksAutomationEvenWhenVerificationIsOff(_ assistant: AutomationAssistant) async {
-        let status = await AssistantCLI.check(assistant, desktopURL: .temporaryDirectory, candidates: [], requireCLI: false)
+    func noExecutableMeansMissingCLI(_ assistant: AutomationAssistant) async {
+        let status = await AssistantCLI.check(assistant, candidates: [])
         #expect(status == .missingCLI)
     }
 
@@ -65,8 +65,7 @@ struct AssistantDependenciesTests {
         let cli = folder.appending(path: assistant.rawValue)
         try Data("#!/bin/sh\ncase \"$*\" in\n 'login status'|'auth status') exit 1 ;;\n *) echo '--output-schema --ignore-user-config --ignore-rules --dangerously-bypass-approvals-and-sandbox --tools --safe-mode --dangerously-skip-permissions --json-schema' ;;\nesac\n".utf8).write(to: cli)
         try FileManager.default.setAttributes([.posixPermissions: 0o700], ofItemAtPath: cli.path)
-        #expect(await AssistantCLI.check(assistant, desktopURL: nil, candidates: [cli]) == .loginRequired(cli))
-        #expect(await AssistantCLI.check(assistant, desktopURL: nil, candidates: [cli], requireCLI: false) == .loginRequired(cli))
+        #expect(await AssistantCLI.check(assistant, candidates: [cli]) == .loginRequired(cli))
     }
 
     @Test func standaloneDiscoveryWorksWithoutAnAppAndOptionalBundledCLIIsPreferred() {
@@ -79,16 +78,12 @@ struct AssistantDependenciesTests {
         #expect(bundled.contains(home.appending(path: ".local/bin/codex")))
     }
 
-    @MainActor @Test func setupAlwaysRequiresCLIRegardlessOfVerificationPreference() async {
-        var requestedCLI = false
-        let setup = AssistantSetupSession(assistant: .codex, requireCLI: false, probe: { _, requireCLI in
-            requestedCLI = requireCLI
-            return .missingCLI
+    @MainActor @Test func setupCannotCommitWhenTheCLIHasNotSignedIn() async {
+        let setup = AssistantSetupSession(assistant: .codex, probe: { _ in
+            .loginRequired(URL(fileURLWithPath: "/example/codex"))
         })
         #expect(await setup.verify() == false)
-        #expect(requestedCLI)
         #expect(!setup.canCommit)
-        #expect(!AssistantDependencyStatus.desktopOnly.isReady)
     }
 
     @Test func verificationMigratesOnAndPreservesExplicitOptOut() throws {
@@ -147,7 +142,7 @@ struct AssistantDependenciesTests {
 
     @MainActor @Test func cancellingSelectionRejectsLateSuccessfulProbe() async {
         var resume: CheckedContinuation<AssistantDependencyStatus, Never>?
-        let setup = AssistantSetupSession(assistant: .claude, requireCLI: true, probe: { _, _ in
+        let setup = AssistantSetupSession(assistant: .claude, probe: { _ in
             await withCheckedContinuation { resume = $0 }
         })
         let task = Task { await setup.verify() }
@@ -159,8 +154,8 @@ struct AssistantDependenciesTests {
         #expect(!setup.canCommit)
     }
     @MainActor @Test func failedInstallationAndMissingCLIKeepSelectionUncommitted() async {
-        let setup = AssistantSetupSession(assistant: .codex, requireCLI: true,
-            probe: { _, _ in .missingCLI }, install: { _ in throw AssistantCLI.SetupError.installationFailed })
+        let setup = AssistantSetupSession(assistant: .codex,
+            probe: { _ in .missingCLI }, install: { _ in throw AssistantCLI.SetupError.installationFailed })
         #expect(await setup.verify() == false)
         #expect(await setup.installAndVerify() == false)
         #expect(!setup.canCommit)
@@ -168,8 +163,8 @@ struct AssistantDependenciesTests {
 
     @MainActor @Test func cancellingInstallationRejectsLateInstallerSuccess() async {
         var resume: CheckedContinuation<Void, Error>?
-        let setup = AssistantSetupSession(assistant: .claude, requireCLI: true,
-            probe: { _, _ in .ready(URL(fileURLWithPath: "/example/cli")) },
+        let setup = AssistantSetupSession(assistant: .claude,
+            probe: { _ in .ready(URL(fileURLWithPath: "/example/cli")) },
             install: { _ in try await withCheckedThrowingContinuation { resume = $0 } })
         let task = Task { await setup.installAndVerify() }
         for _ in 0..<1000 where resume == nil { await Task.yield() }
@@ -182,7 +177,7 @@ struct AssistantDependenciesTests {
 
     @MainActor @Test func olderSuccessfulCheckCannotOverrideANewerFailedCheck() async {
         var completions: [CheckedContinuation<AssistantDependencyStatus, Never>] = []
-        let setup = AssistantSetupSession(assistant: .codex, requireCLI: true, probe: { _, _ in
+        let setup = AssistantSetupSession(assistant: .codex, probe: { _ in
             await withCheckedContinuation { completions.append($0) }
         })
         let first = Task { await setup.verify() }
@@ -199,7 +194,7 @@ struct AssistantDependenciesTests {
 
     @MainActor @Test func initialReadinessIsSeparateFromReadOnlyFailureRecovery() async throws {
         var status: AssistantDependencyStatus = .ready(URL(fileURLWithPath: "/example/cli"))
-        let monitor = AssistantDependencyMonitor(probe: { _, _ in status })
+        let monitor = AssistantDependencyMonitor(probe: { _ in status })
         var ready: [AutomationAssistant] = [], recovered: [AutomationAssistant] = []
         monitor.onReady = { assistant in
             #expect(monitor.available.contains(assistant))
@@ -226,26 +221,24 @@ struct AssistantDependenciesTests {
 
     @MainActor @Test func runtimeFailureAndRecoveryAreDetectedWithoutChangingSavedSelection() async throws {
         var status: AssistantDependencyStatus = .ready(URL(fileURLWithPath: "/example/cli"))
-        let monitor = AssistantDependencyMonitor(probe: { _, requireCLI in requireCLI ? status : .desktopOnly })
+        let monitor = AssistantDependencyMonitor(probe: { _ in status })
         var recovered: Set<AutomationAssistant> = []
         monitor.onRecovered = { recovered.insert($0) }
-        func refresh(requireCLI: Bool) async throws {
-            monitor.refresh(requireCLI: requireCLI, force: true)
+        func refresh() async throws {
+            monitor.refresh(force: true)
             for _ in 0..<1000 where monitor.isChecking { await Task.yield() }
             try #require(!monitor.isChecking)
         }
-        try await refresh(requireCLI: true)
+        try await refresh()
         #expect(monitor.available == Set(AutomationAssistant.allCases))
         status = .missingCLI
-        try await refresh(requireCLI: true)
+        try await refresh()
         #expect(monitor.available.isEmpty)
         status = .ready(URL(fileURLWithPath: "/example/cli"))
-        try await refresh(requireCLI: true)
+        try await refresh()
         #expect(recovered == Set(AutomationAssistant.allCases))
         status = .missingCLI
-        try await refresh(requireCLI: false)
-        #expect(monitor.available.isEmpty)
-        try await refresh(requireCLI: true)
+        try await refresh()
         #expect(monitor.available.isEmpty)
     }
 }

@@ -178,7 +178,7 @@ struct MREffectivePolicyPresentationTests {
         defer { defaults.removePersistentDomain(forName: name) }
         let settings = SettingsManager(defaults: defaults)
         settings.automation.applyPreset(.full, for: .codex)
-        let providers = AssistantDependencyMonitor(probe: { _, _ in .ready(URL(fileURLWithPath: "/in-memory/assistant")) })
+        let providers = AssistantDependencyMonitor(probe: { _ in .ready(URL(fileURLWithPath: "/in-memory/assistant")) })
         providers.refresh(force: true)
         for _ in 0..<1000 where providers.isChecking { await Task.yield() }
         try #require(!providers.isChecking && providers.available.contains(.codex))

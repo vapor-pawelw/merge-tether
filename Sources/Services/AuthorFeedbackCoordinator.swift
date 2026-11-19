@@ -186,7 +186,7 @@ final class AuthorFeedbackCoordinator {
     private struct ReadOnlyFailure: Error { let cause: any Error }
 
     init(settings: SettingsManager, glab: GlabService,
-         canAutomate: @escaping @MainActor (AutomationAssistant) async -> Bool = { await AssistantCLI.detect($0, requireCLI: true).isReady },
+         canAutomate: @escaping @MainActor (AutomationAssistant) async -> Bool = { await AssistantCLI.detect($0).isReady },
          verify: @escaping @MainActor (ReReviewVerifier.Input, AutomationAssistant, String) async throws -> ReReviewAssessment = {
              try await ReReviewVerifier.verifySingleAttempt($0, assistant: $1, model: $2)
          }, retryWait: @escaping ReadOnlyAssessmentRetry.Wait = ReadOnlyAssessmentRetry.wait,

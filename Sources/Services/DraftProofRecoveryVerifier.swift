@@ -32,7 +32,7 @@ enum DraftProofRecoveryVerifier {
     }
 
     @MainActor static func verify(_ input: Input, assistant: AutomationAssistant, model: String) async throws -> Assessment {
-        guard case .ready(let executable) = await AssistantCLI.detect(assistant, requireCLI: true) else { throw Failure.unavailable }
+        guard case .ready(let executable) = await AssistantCLI.detect(assistant) else { throw Failure.unavailable }
         return try await run(input, assistant: assistant, model: model, executable: executable)
     }
 

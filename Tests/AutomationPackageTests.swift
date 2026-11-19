@@ -474,9 +474,9 @@ struct AutomationPackageTests {
         #expect(MergeWorkflowTrigger.allCases.allSatisfy { settings.workflowRules[$0].mode == .off })
     }
 
-    @Test func legacyCodexFlagsCannotGrantConsentOrEnableNewDefaults() throws {
+    @Test func unconsentedRulesDoNotEnableAutomationOrNewDefaults() throws {
         let legacy = Data("""
-            {"codexRelayEnabled":true,"autoReReviewEnabled":false,
+            {"autoReReviewEnabled":false,
              "workflowRules":{"rules":{"pipelineFailure":{"mode":"off","projects":"","targetBranches":"",
                  "requiredLabel":"","retryInfrastructureFailure":false,"waitHours":48}}}}
             """.utf8)
@@ -491,7 +491,7 @@ struct AutomationPackageTests {
         migrated.autoReReviewEnabled = false
         #expect(try decoder.decode(AutomationSettings.self, from: JSONEncoder().encode(migrated)) == migrated)
 
-        let optedOut = Data(#"{"codexRelayEnabled":true,"packageDecision":"disabled"}"#.utf8)
+        let optedOut = Data(#"{"packageDecision":"disabled"}"#.utf8)
         #expect(try !decoder.decode(AutomationSettings.self, from: optedOut).autoReReviewEnabled)
     }
 
@@ -726,7 +726,7 @@ struct AutomationPackageTests {
         defer { defaults.removePersistentDomain(forName: suite) }
         let settings = SettingsManager(defaults: defaults)
         let work = AssistantAutomationRunner.MergeRequestWork(host: "gitlab.example.org", projectID: 1, iid: 2)
-        let key = AssistantAutomationRunner.ChatKey(assistant: .codex, work: work, username: "me", workspace: "", access: .gitLabRead)
+        let key = AssistantAutomationRunner.JobKey(assistant: .codex, work: work, username: "me", workspace: "", access: .gitLabRead)
         let legacy = AssistantAutomationRunner.Handoff(id: UUID(), key: key, title: "Legacy", prompt: "", createdAt: Date(), allowsPush: false)
         let conflict = AssistantAutomationRunner.Handoff(id: UUID(), key: key, title: "Conflict", prompt: "", createdAt: Date(), allowsPush: true)
         settings.assistantHandoffs = [legacy, conflict]

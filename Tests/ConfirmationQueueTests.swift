@@ -117,7 +117,7 @@ import MergeTetherRemote
     func completedManualReviewDoesNotGrantAutomaticWriteConsent(_ installation: String) async throws {
         // given
         let stored = installation == "legacyFlags"
-            ? #"{"autoApproveEnabled":true,"publishDraftsWithoutConfirmation":true,"codexRelayEnabled":true}"# : nil
+            ? #"{"autoApproveEnabled":true,"publishDraftsWithoutConfirmation":true}"# : nil
         let consent: AutomationPackageDecision? = installation == "enabled" ? .enabled : (installation == "disabled" ? .disabled : nil)
         let harness = try makeHarness(assistantWorked: false, consent: consent, storedAutomation: stored, legacyInboxOnly: installation == "legacy110")
         defer { harness.cleanUp() }
@@ -426,7 +426,7 @@ import MergeTetherRemote
             let folder = self.folder.appending(path: "verdicts/gitlab.example.org")
             try FileManager.default.createDirectory(at: folder, withIntermediateDirectories: true)
             let discussions = try JSONDecoder().decode([GitLabMergeRequestDiscussion].self, from: gitlab.data("discussions.json"))
-            let key = AssistantAutomationRunner.ChatKey(assistant: settings.automation.assistant,
+            let key = AssistantAutomationRunner.JobKey(assistant: settings.automation.assistant,
                 work: .init(host: "gitlab.example.org", projectID: 1, iid: 2), username: "me", workspace: "", access: .gitLabRead)
             let run = AssistantAutomationRunner.Handoff(id: UUID(), key: key, title: "Review", prompt: "", createdAt: Date(),
                 allowsPush: false, execution: .init(state: .succeeded), workflow: .review, expectedHeadSHA: head)
@@ -465,7 +465,7 @@ import MergeTetherRemote
 
         func verifyFollowUpDrafts() throws {
             let work = AssistantAutomationRunner.MergeRequestWork(host: "gitlab.example.org", projectID: 1, iid: 2)
-            let key = AssistantAutomationRunner.ChatKey(assistant: .codex, work: work, username: "me", workspace: "", access: .gitLabRead)
+            let key = AssistantAutomationRunner.JobKey(assistant: .codex, work: work, username: "me", workspace: "", access: .gitLabRead)
             let run = AssistantAutomationRunner.Handoff(id: UUID(), key: key, title: "Follow up", prompt: "", createdAt: Date(), allowsPush: false,
                                                        followUpPushAllowed: true, execution: .init(state: .succeeded))
             settings.assistantHandoffs.append(run)
@@ -765,10 +765,11 @@ import MergeTetherRemote
         settings.automation.autoResolveAcceptedFeedback = false
         if assistantWorked {
             let work = AssistantAutomationRunner.MergeRequestWork(host: host, projectID: 1, iid: 2)
-            let key = AssistantAutomationRunner.ChatKey(
+            let key = AssistantAutomationRunner.JobKey(
                 assistant: .codex, work: work, username: "me", workspace: "", access: .gitLabRead
             )
-            settings.assistantChats[key] = "thread"
+            settings.assistantHandoffs.append(.init(id: UUID(), key: key, title: "Review", prompt: "Review",
+                createdAt: Date(), allowsPush: false, execution: .init(state: .succeeded), workflow: .review))
         }
         let glab = gitlab.service(host: host, username: "me")
         let monitor = MergeRequestAttentionMonitor(
@@ -3743,7 +3744,7 @@ import MergeTetherRemote
         try harness.write("drafts.json", "[]")
         try harness.write("discussions.json", harness.log("published-discussions.json"))
         let work = AssistantAutomationRunner.MergeRequestWork(host: host, projectID: 1, iid: 2)
-        let key = AssistantAutomationRunner.ChatKey(assistant: .codex, work: work, username: "me", workspace: "", access: .gitLabRead)
+        let key = AssistantAutomationRunner.JobKey(assistant: .codex, work: work, username: "me", workspace: "", access: .gitLabRead)
         harness.settings.assistantHandoffs = [.init(id: UUID(), key: key, title: "Follow up", prompt: "", createdAt: Date(),
             allowsPush: false, feedbackNoteIDs: [40], execution: .init(state: state))]
 
@@ -3751,23 +3752,6 @@ import MergeTetherRemote
 
         #expect(harness.log("re-review.log") == (state == .succeeded ? "requested\n" : ""))
         #expect(harness.log("publish.log").isEmpty && harness.log("selected.log").isEmpty)
-    }
-
-    @Test func legacyGUIReceiptIsNotCompletionProofForAutomaticReReview() async throws {
-        let harness = try makeHarness(assistantWorked: false, authored: true)
-        defer { harness.cleanUp() }
-        try prepareAuthoredFeedback(harness)
-        try harness.write("drafts.json", "[]")
-        try harness.write("discussions.json", harness.log("published-discussions.json"))
-        let work = AssistantAutomationRunner.MergeRequestWork(host: host, projectID: 1, iid: 2)
-        let key = AssistantAutomationRunner.ChatKey(assistant: .codex, work: work, username: "me", workspace: "", access: .gitLabRead)
-        harness.settings.assistantHandoffs = [.init(id: UUID(), key: key, title: "Legacy", prompt: "", createdAt: Date(),
-            allowsPush: false, relayComplete: true, openedAt: Date(), feedbackNoteIDs: [40])]
-
-        try await harness.poll()
-
-        #expect(harness.log("re-review.log").isEmpty)
-        #expect(harness.log("verification.log").isEmpty)
     }
 
     @Test func disablingVerificationWaitsForExplicitConfirmationAndRejectsChangedDiscussions() async throws {

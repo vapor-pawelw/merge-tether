@@ -1,28 +1,6 @@
 {
   "sourceLanguage": "en",
   "strings": {
-    "runtime.desktopUnavailable": {
-      "extractionState": "manual",
-      "localizations": {
-        "en": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "The selected agent's desktop app is unavailable."
-          }
-        }
-      }
-    },
-    "runtime.cannotBuildLink": {
-      "extractionState": "manual",
-      "localizations": {
-        "en": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "MergeTether could not open the agent."
-          }
-        }
-      }
-    },
     "runtime.alreadyActive": {
       "extractionState": "manual",
       "localizations": {
@@ -34,13 +12,24 @@
         }
       }
     },
-    "runtime.legacyJob": {
+    "runtime.evidenceMigrationFailed": {
       "extractionState": "manual",
       "localizations": {
         "en": {
           "stringUnit": {
             "state": "translated",
-            "value": "This legacy desktop task is retained as history. Start a fresh action from the merge request."
+            "value": "MergeTether could not move its automation evidence."
+          }
+        }
+      }
+    },
+    "runtime.jobUnavailable": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "This agent run is unavailable for retry. Start a new action from the merge request."
           }
         }
       }

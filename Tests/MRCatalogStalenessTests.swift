@@ -353,11 +353,12 @@ struct MRCatalogStalenessTests {
             defaults.removePersistentDomain(forName: suite)
         }
 
-        func recordChat(username: String = "me", host: String = "gitlab.example.org") {
-            let key = AssistantAutomationRunner.ChatKey(assistant: .codex,
+        func recordReview(username: String = "me", host: String = "gitlab.example.org") {
+            let key = AssistantAutomationRunner.JobKey(assistant: .codex,
                 work: .init(host: host, projectID: 1, iid: 3), username: username,
                 workspace: "", access: .gitLabRead)
-            settings.assistantChats[key] = "recorded-chat"
+            settings.assistantHandoffs.append(.init(id: UUID(), key: key, title: "Review", prompt: "Review",
+                createdAt: Date(), allowsPush: false, execution: .init(state: .succeeded), workflow: .review))
         }
 
         func exactFetchCount() throws -> Int {
@@ -419,7 +420,7 @@ struct MRCatalogStalenessTests {
             default: return try gitlab.unexpected(request)
             }
         }
-        let monitor = MergeRequestAttentionMonitor(glab: glab, settings: settings, reportDirectory: folder,
+        let monitor = MergeRequestAttentionMonitor(glab: glab, settings: settings,
             verdictDirectory: folder.appending(path: "verdicts"),
             aiAssessmentDirectory: folder.appending(path: "ai-assessments"), followUpDirectory: folder)
         let result = Harness(folder: folder, defaults: defaults, suite: suite, settings: settings, glab: glab, gitlab: gitlab, monitor: monitor)
@@ -484,7 +485,6 @@ struct MRCatalogStalenessTests {
         try await h.poll()
         #expect(h.monitor.hasError)
         #expect(h.monitor.currentOpenItems.map(\.id.iid) == [3])
-        #expect(!h.gitlab.has("mr-status.json"))
         h.gitlab.remove("fail-explicit")
         try h.write("explicit.json", request(3, owned: false, state: state))
         try await h.poll()
@@ -572,7 +572,7 @@ struct MRCatalogStalenessTests {
     @Test func managedRecordedReviewRemainsDiscoverableWithoutReviewerAssignment() async throws {
         let h = try harness()
         defer { h.cleanUp() }
-        h.recordChat()
+        h.recordReview()
         try await h.poll()
         #expect(Set(h.monitor.currentOpenItems.map(\.id.iid)) == [1, 2, 3])
         #expect(h.monitor.currentItems.isEmpty)
@@ -593,7 +593,7 @@ struct MRCatalogStalenessTests {
     @Test func mergedRecordedReviewIsNotFetchedEveryPollAndReopeningIsRediscovered() async throws {
         let h = try harness()
         defer { h.cleanUp() }
-        h.recordChat()
+        h.recordReview()
         try h.write("explicit.json", request(3, owned: false, state: "merged"))
         try await h.poll()
         try await h.poll()
@@ -613,8 +613,8 @@ struct MRCatalogStalenessTests {
     @Test func recordedReviewsFromOtherAccountsOrHostsDoNotEnterCatalog() async throws {
         let h = try harness()
         defer { h.cleanUp() }
-        h.recordChat(username: "other")
-        h.recordChat(host: "another.example.org")
+        h.recordReview(username: "other")
+        h.recordReview(host: "another.example.org")
         try await h.poll()
         #expect(Set(h.monitor.currentOpenItems.map(\.id.iid)) == [1, 2])
         #expect(try h.exactFetchCount() == 0)

@@ -32,7 +32,7 @@ enum AssistantJobExecutor {
 
     @MainActor
     static func execute(_ handoff: AssistantAutomationRunner.Handoff, settings: SettingsManager) async throws -> AssistantJobCoordinator.Outcome {
-        try await execute(handoff, settings: settings, detectCLI: { await AssistantCLI.detect($0, requireCLI: true) })
+        try await execute(handoff, settings: settings, detectCLI: { await AssistantCLI.detect($0) })
     }
 
     @MainActor
@@ -211,7 +211,7 @@ enum AssistantJobExecutor {
             }
             let latest = authorization.request
             if AssistantAutomationRunner.isForeignPipelineDiagnosis(for: handoff, history: settings.assistantHandoffs) {
-                guard let diagnosis = handoff.foreignPipelineDiagnosis else { throw AssistantAutomationRunner.HandoffError.legacyJob }
+                guard let diagnosis = handoff.foreignPipelineDiagnosis else { throw ExecutionError.contextUnavailable }
                 try await diagnosis.verify(request: latest, user: user, host: handoff.key.work.host, glab: glab)
             }
             if let repair = handoff.draftRepair {

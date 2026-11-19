@@ -130,8 +130,8 @@ struct FollowUpPushPermissionTests {
     @Test func legacySharedProofIsOnlyARecoveryCandidateForThisInstallationsExactPersistedRun() throws {
         let folder = FileManager.default.temporaryDirectory.appending(path: UUID().uuidString)
         defer { try? FileManager.default.removeItem(at: folder) }
-        let legacy = folder.appending(path: "legacy/Codex Desktop Relay")
-        let current = folder.appending(path: "current/Codex Desktop Relay")
+        let legacy = folder.appending(path: "legacy/Automation Evidence")
+        let current = folder.appending(path: "current/Automation Evidence")
         let run = job(.succeeded)
         let receipt = proof(run: run, draftID: 12)
         let path = FollowUpVerificationStore.recordURL(kind: "follow-up-verifications", work: work, username: "me", in: legacy)
@@ -244,7 +244,7 @@ struct FollowUpPushPermissionTests {
 
     @Test func legacyProofRecoveryRequiresExactKnownSucceededRunArtifact() throws {
         let root = FileManager.default.temporaryDirectory.appending(path: UUID().uuidString)
-        let folder = root.appending(path: "Codex Desktop Relay")
+        let folder = root.appending(path: "Automation Evidence")
         let suite = "FollowUpPushPermissionTests.\(UUID())"
         let defaults = try #require(UserDefaults(suiteName: suite))
         defer { try? FileManager.default.removeItem(at: root); defaults.removePersistentDomain(forName: suite) }

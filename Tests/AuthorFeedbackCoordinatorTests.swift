@@ -944,8 +944,6 @@ struct AuthorFeedbackCoordinatorTests {
             #expect(!row.stoppedJobNeedsAttention)
             #expect(!row.needsAttention)
             #expect(MRHumanAction(row: row, assistantReady: true) == nil)
-            let group = try #require(AssistantTaskGroup.groups(from: [job], host: Fixture.host, username: "me").first)
-            #expect(group.manualHandoff(currentItem: item) == nil)
             #expect(!AssistantJobExecution.hasUnfinishedWork(in: [job], for: job.key.work, username: "me",
                 currentRequest: request, feedbackStatus: status, discussionFingerprint: item.observedDiscussionFingerprint))
             #expect(AssistantJobExecution.hasUnfinishedWork(in: [job], for: job.key.work, username: "me",
@@ -962,7 +960,6 @@ struct AuthorFeedbackCoordinatorTests {
             item.observedDiscussionFingerprint = "changed conversation"
             let stale = MergeRequestBoardSnapshot.Row(item: item, latestJob: job, intents: [])
             #expect(stale.stoppedJobNeedsAttention)
-            #expect(group.manualHandoff(currentItem: item)?.id == job.id)
         }
     }
 
@@ -1786,7 +1783,7 @@ struct AuthorFeedbackCoordinatorTests {
             fixture.settings.automation.autoResolveAcceptedFeedback = false
             fixture.settings.automation.authorFeedback.isEnabled = true
             let monitor = MergeRequestAttentionMonitor(glab: fixture.glab, settings: fixture.settings,
-                reportDirectory: nil, canAutomate: { _ in true }, verifyReReview: { _, _, _ in
+                canAutomate: { _ in true }, verifyReReview: { _, _, _ in
                     .init(notes: [.init(noteID: 10, state: .addressed, reason: "Current code and existing reply verified.")])
                 })
             var checked = 0

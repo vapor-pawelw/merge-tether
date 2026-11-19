@@ -150,7 +150,7 @@ private struct MRAutomationEventLogRow: View {
             case .failed: .AssistantJobs.assistantJobsFailed
             case .cancelled: .AssistantJobs.assistantJobsCancelled
             case .interrupted: .AssistantJobs.assistantJobsInterrupted
-            case nil: .AssistantJobs.assistantJobsLegacy
+            case nil: .AssistantJobs.assistantJobsStatusUnavailable
             }
         case .workflow(let workflow):
             switch workflow.state {

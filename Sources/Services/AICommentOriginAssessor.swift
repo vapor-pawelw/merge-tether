@@ -131,7 +131,7 @@ enum AICommentOriginAssessor {
         try validateSources(target: target, notes: notes)
         let declared = notes.compactMap { declaredAttribution(for: $0) }
         if declared.count == notes.count { return .init(notes: declared) }
-        guard case .ready(let executable) = await AssistantCLI.detect(assistant, requireCLI: true) else { throw AssessmentError.unavailable }
+        guard case .ready(let executable) = await AssistantCLI.detect(assistant) else { throw AssessmentError.unavailable }
         return try await run(target: target, notes: notes, assistant: assistant, model: model, thinking: thinking, executable: executable)
     }
 

@@ -56,7 +56,7 @@ struct AutomationSettingsTab: View {
             if !enabled, page == .scope { page = .checkpoints }
         }
         .sheet(item: $setupAction) { action in
-            AssistantSetupView(assistant: draft.assistant, requireCLI: true) {
+            AssistantSetupView(assistant: draft.assistant) {
                 if action == .enableVerification { draft.autoVerifyReReview = true }
                 else { applyDraft() }
             }
@@ -398,7 +398,7 @@ struct AutomationSettingsTab: View {
         Section {
             AutomationAssistantPicker(
                 assistant: $draft.assistant, available: monitor.availableAssistants,
-                onRefresh: monitor.refreshAvailableAssistants, requireCLI: true,
+                onRefresh: monitor.refreshAvailableAssistants,
                 statuses: monitor.assistantDependencies.statuses
             )
         } header: {

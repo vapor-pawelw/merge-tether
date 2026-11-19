@@ -49,7 +49,7 @@ struct AssistantAutomaticRetryCoordinatorTests {
         f.allowed = false
         let coordinator = f.coordinator()
         defer { coordinator.cancel() }
-        let dependencies = AssistantDependencyMonitor(probe: { _, _ in .ready(URL(fileURLWithPath: "/example/cli")) })
+        let dependencies = AssistantDependencyMonitor(probe: { _ in .ready(URL(fileURLWithPath: "/example/cli")) })
         var recoveryResets = 0
         dependencies.onRecovered = { _ in recoveryResets += 1 }
         dependencies.onReady = { assistant in

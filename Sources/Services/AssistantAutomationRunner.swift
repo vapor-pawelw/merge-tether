@@ -89,21 +89,12 @@ enum AssistantAutomationRunner {
         let iid: Int
     }
 
-    struct ChatKey: Codable, Hashable, Sendable {
+    struct JobKey: Codable, Hashable, Sendable {
         let assistant: AutomationAssistant
         let work: MergeRequestWork
         let username: String
         let workspace: String
         let access: Access
-
-        func reusableChat(in chats: [ChatKey: String]) -> String? {
-            guard assistant == .codex, access != .configuredTools else { return chats[self] }
-            let readKey = ChatKey(assistant: assistant, work: work, username: username, workspace: "", access: .gitLabRead)
-            return chats[readKey] ?? chats[self] ?? chats.first {
-                $0.key.assistant == assistant && $0.key.work == work
-                    && $0.key.username == username && $0.key.access == .preparation
-            }?.value
-        }
     }
 
     struct ForeignPipelineDiagnosis: Codable, Equatable, Sendable {
@@ -161,21 +152,17 @@ enum AssistantAutomationRunner {
 
     struct Handoff: Codable, Identifiable {
         let id: UUID
-        let key: ChatKey
+        let key: JobKey
         let title: String
         let prompt: String
         let createdAt: Date
         /// Legacy conflict-task routing flag. Author follow-up permission is separate.
         let allowsPush: Bool
         var pipelineReservation: ExistingPipelineWorkDetector.Key?
-        var relayComplete: Bool?
-        var openedAt: Date?
-        var chatID: String?
         var feedbackNoteIDs: [Int]?
         /// Attempts bind reviewer content, so our own replies or pushes cannot replay a fix.
         var verifiedFeedbackNotes: [Int: String]?
         var feedbackTodos: [Todo.FeedbackIdentity]?
-        var codexDispatchRequested: Bool?
         var reviewModel: CodexReviewModel?
         var reviewThinking: CodexReviewThinking?
         var codingModel: CodexReviewModel?
@@ -232,11 +219,9 @@ enum AssistantAutomationRunner {
     }
 
     enum HandoffError: LocalizedError {
-        case desktopUnavailable
-        case cannotBuildLink
         case mergeRequestBusy
         case executionUnavailable
-        case legacyJob
+        case jobUnavailable
         case pipelinePassed(Int)
         case pipelineSuperseded(Int)
         case pipelineState(Int, String)
@@ -259,10 +244,8 @@ enum AssistantAutomationRunner {
 
         var errorDescription: String? {
             switch self {
-            case .desktopUnavailable: String(localized: .AutomationRuntime.runtimeDesktopUnavailable)
-            case .cannotBuildLink: String(localized: .AutomationRuntime.runtimeCannotBuildLink)
             case .mergeRequestBusy, .executionUnavailable: String(localized: .AutomationRuntime.runtimeAlreadyActive)
-            case .legacyJob: String(localized: .AutomationRuntime.runtimeLegacyJob)
+            case .jobUnavailable: String(localized: .AutomationRuntime.runtimeJobUnavailable)
             case .pipelinePassed(let id): String(localized: .MRFreshness.mrFreshnessPipelinePassed(id))
             case .pipelineSuperseded(let id): String(localized: .MRFreshness.mrFreshnessPipelineSuperseded(id))
             case .pipelineState(let id, let state): String(localized: .MRFreshness.mrFreshnessPipelineState(id, state))
@@ -335,7 +318,6 @@ enum AssistantAutomationRunner {
         username: String,
         settings: SettingsManager,
         allowsPush: Bool = false,
-        showChat: Bool = false,
         pipelineReservation: ExistingPipelineWorkDetector.Key? = nil,
         feedbackNoteIDs: [Int] = [], verifiedFeedbackNotes: [Int: String]? = nil,
         feedbackTodo: Todo.FeedbackIdentity? = nil,
@@ -472,7 +454,7 @@ enum AssistantAutomationRunner {
                     pipelineDiagnosis = .init(pipelineID: pipelineID, projectID: projectID, sha: sha,
                         reviewerID: snapshot.user.id, authorID: snapshot.request.author.id)
                 }
-                guard let pipelineDiagnosis else { throw HandoffError.legacyJob }
+                guard let pipelineDiagnosis else { throw AssistantJobExecutor.ExecutionError.contextUnavailable }
                 try await pipelineDiagnosis.verify(request: snapshot.request, user: snapshot.user, host: work.host, glab: service)
             }
         } else { headSHA = expectedHeadSHA }
@@ -508,9 +490,10 @@ enum AssistantAutomationRunner {
         case .configuredTools:
             configured
         }
-        let key = ChatKey(assistant: assistant, work: work, username: username, workspace: directory, access: access)
-        let prefixedTitle = title.hasPrefix("[MT] ") ? title : "[MT] " + title
-        let name = MergeRequestStackSnapshot.title(prefixedTitle, iid: work.iid, position: stackPosition)
+        let key = JobKey(assistant: assistant, work: work, username: username, workspace: directory, access: access)
+        let oldPrefix = "[MT] "
+        let taskTitle = title.hasPrefix(oldPrefix) ? String(title.dropFirst(oldPrefix.count)) : title
+        let name = MergeRequestStackSnapshot.title(taskTitle, iid: work.iid, position: stackPosition)
         let id = preparedWorkflowReview?.jobID ?? UUID()
         if preparedWorkflowReview != nil {
             try Task.checkCancellation()
@@ -582,7 +565,7 @@ enum AssistantAutomationRunner {
 
                 Within those permissions, load and follow the applicable installed MR skills and repository instructions before working. Apply their scope, verification, language and draft rules. Use the fallback below only where no applicable skill or explicit workflow covers the step. Keep the requested task and any note IDs as the scope.
 
-                Start your final update with a clickable Markdown link to this MR: [Open MR in GitLab](<\(mergeRequestURL.absoluteString)>). Summarize what you did or found, what you verified, and any blockers, missing evidence or next steps. Do this for follow-ups in an existing chat too, even when no changes were needed.
+                Start your final update with a clickable Markdown link to this MR: [Open MR in GitLab](<\(mergeRequestURL.absoluteString)>). Summarize what you did or found, what you verified, and any blockers, missing evidence or next steps. Include the summary even when no changes were needed.
 
                 \(publicationPolicy)\(verdict)\(aiAssessment)\(followUpProof)
 
@@ -671,10 +654,10 @@ enum AssistantAutomationRunner {
     static func retry(_ id: UUID, settings: SettingsManager, expectedHeadSHA: String? = nil,
                       jobCoordinator: AssistantJobCoordinator? = nil, glab: GlabService? = nil,
                       manual: Bool = true, automaticRetryIdentity: AssistantAutomaticRetryIdentity? = nil) async throws -> Handoff {
-        guard let handoff = settings.assistantHandoffs.first(where: { $0.id == id }) else { throw HandoffError.legacyJob }
+        guard let handoff = settings.assistantHandoffs.first(where: { $0.id == id }) else { throw HandoffError.jobUnavailable }
         guard !handoff.isObsoleteReminder else { throw AssistantJobExecutor.ExecutionError.disabledPermission }
         guard let execution = handoff.execution, !execution.state.isActive,
-              let taskPrompt = handoff.taskPrompt, let url = handoff.mergeRequestURL else { throw HandoffError.legacyJob }
+              let taskPrompt = handoff.taskPrompt, let url = handoff.mergeRequestURL else { throw HandoffError.jobUnavailable }
         guard manual || (settings.automaticWritesAllowed && automaticRetryIdentity != nil && glab != nil
             && execution.cancellationOrigin != .user
             && (execution.state == .failed || execution.state == .interrupted
@@ -912,17 +895,6 @@ enum AssistantAutomationRunner {
         _ = try AssistantJobExecutor.validateMergeRequestContext(state: request.state, head: request.sha)
         try AssistantJobExecutor.validateReviewOwnership(isReview: isReview, authorID: request.author.id, userID: user.id)
         return (request, user)
-    }
-
-    /// Reopens a Claude Desktop Code session. Claude links cannot carry a prompt into an
-    /// existing session, so the caller copies it for pasting.
-    nonisolated static func claudeSessionURL(_ id: String) -> URL? {
-        guard CodexDesktopRelay.isClaudeSessionID(id) else { return nil }
-        return URL(string: "claude://claude.ai/epitaxy/\(id)")
-    }
-
-    nonisolated static func codexChatURL(_ id: String) -> URL? {
-        UUID(uuidString: id).flatMap { URL(string: "codex://threads/\($0.uuidString.lowercased())") }
     }
 
     static func copyPrompt(_ prompt: String) {

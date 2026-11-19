@@ -266,7 +266,7 @@ struct MRFeedbackLaunchCoordinatorTests {
             service = TodoAutomationService(canAutomate: { _ in true }, jobCoordinator: coordinator, followUpDirectory: directory)
             monitor = TodoMonitorService(settings: settings, glab: glab,
                 notifications: NotificationService(authorization: { .denied }, post: { _ in }), automation: service)
-            providers = AssistantDependencyMonitor(probe: { _, _ in .ready(URL(fileURLWithPath: "/in-memory/assistant")) })
+            providers = AssistantDependencyMonitor(probe: { _ in .ready(URL(fileURLWithPath: "/in-memory/assistant")) })
             inbox = InboxTodoStore(settings: settings, glab: glab)
             owner = MRFeedbackLaunchCoordinator(settings: settings, glab: glab, automation: service, inbox: inbox,
                 providers: providers, health: AssistantCLIHealthStore(defaults: defaults, persists: false))

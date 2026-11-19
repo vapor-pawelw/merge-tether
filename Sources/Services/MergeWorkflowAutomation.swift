@@ -50,7 +50,6 @@ struct MergeWorkflowActivityEntry: Codable, Identifiable {
     let user: GitLabAuthenticatedUser
     var state: MergeWorkflowActivityState
     var summary: String?
-    var chatURL: URL?
     var assistantJobID: UUID?
     var pipelineClaimAssessment: PipelineClaimAssessmentLineage? = nil
     var readOnlyFailure: MergeWorkflowReadFailure? = nil
@@ -118,7 +117,7 @@ final class MergeWorkflowAutomation {
         // A newer result for the same trigger supersedes its older admission failure.
         return MergeWorkflowTrigger.allCases.contains { trigger in
             guard let entry = current.first(where: { $0.event.kind == trigger }), entry.state == .failed,
-                  entry.assistantJobID == nil, entry.chatURL == nil,
+                  entry.assistantJobID == nil,
                   let failure = entry.readOnlyFailure, shouldProceed(entry),
                   failure.configuration.preservingScope(from: settings.automation) == settings.automation else { return false }
             return true
@@ -192,7 +191,7 @@ final class MergeWorkflowAutomation {
         var changed = false
         for index in settings.workflowActivity.indices where [.queued, .running].contains(settings.workflowActivity[index].state) {
             let entry = settings.workflowActivity[index]
-            if entry.event.kind == .reviewUpdate, entry.assistantJobID == nil, entry.chatURL == nil,
+            if entry.event.kind == .reviewUpdate, entry.assistantJobID == nil,
                let id = entry.preparedReviewJobID {
                 guard settings.automaticActionsAllowed else { continue }
                 let jobs = settings.assistantHandoffs.filter { $0.id == id }
@@ -214,7 +213,7 @@ final class MergeWorkflowAutomation {
                     }
                     continue
                 }
-            } else if entry.state == .queued, entry.assistantJobID == nil, entry.chatURL == nil,
+            } else if entry.state == .queued, entry.assistantJobID == nil,
                       entry.event.kind != .pipelineFailure,
                       entry.event.kind == .reviewUpdate || entry.deferredForWorker == true || entry.deferredForCapacity == true {
                 continue
@@ -282,9 +281,10 @@ final class MergeWorkflowAutomation {
         }
         reconsiderRegisteredPipelines()
         reconsiderSkippedPipelines(authored, user: user)
-        let knownChats = Set(settings.assistantChats.keys.filter { $0.work.host == host && $0.username == user.username }.map(\.work))
-        let knownHandoffs = Set(settings.assistantHandoffs.filter { $0.key.work.host == host && $0.key.username == user.username }.map(\.key.work))
-        let trackedReviews = knownChats.union(knownHandoffs).filter {
+        let knownRuns = Set(settings.assistantHandoffs.lazy.filter {
+            $0.key.work.host == host && $0.key.username == user.username
+        }.map(\.key.work))
+        let trackedReviews = knownRuns.filter {
             settings.automation.scope.resolve(.init(host: host, username: user.username, projectID: $0.projectID, iid: $0.iid)).active
         }
         polling = true
@@ -341,7 +341,7 @@ final class MergeWorkflowAutomation {
     private func reconsiderSkippedPipelines(_ authored: [GitLabMergeRequest], user: GitLabAuthenticatedUser) {
         guard settings.automation.autoClaimPipelineFailures, settings.automation.hasAutomaticActionConsent else { return }
         for entry in currentAdmissions where entry.state == .skipped && entry.event.kind == .pipelineFailure && entry.pipelineClaimAssessment == nil {
-            guard entry.user == user, entry.assistantJobID == nil, entry.chatURL == nil,
+            guard entry.user == user, entry.assistantJobID == nil,
                   (entry.summary ?? "").trimmingCharacters(in: .whitespacesAndNewlines).isEmpty,
                   let key = pipelineKey(entry), key.projectID > 0, key.mergeRequestIID > 0, key.pipelineID > 0,
                   let current = authored.first(where: { $0.projectID == key.projectID && $0.iid == key.mergeRequestIID }),
@@ -443,14 +443,14 @@ final class MergeWorkflowAutomation {
     func startNext() {
         guard work == nil else { return }
         for entry in currentAdmissions where entry.state == .failed && entry.isReadOnlyFailure
-            && entry.assistantJobID == nil && entry.chatURL == nil && shouldProceed(entry)
+            && entry.assistantJobID == nil && shouldProceed(entry)
             && !hasActiveWorker(entry) {
             guard let failure = entry.readOnlyFailure,
                   failure.configuration.preservingScope(from: settings.automation) != settings.automation
                     || now().timeIntervalSince(failure.date) >= ReadOnlyAssessmentRetry.cooldown else { continue }
             update(entry.id, .queued)
         }
-        for next in currentAdmissions.reversed() where next.state == .queued && next.assistantJobID == nil && next.chatURL == nil {
+        for next in currentAdmissions.reversed() where next.state == .queued && next.assistantJobID == nil {
             let mode = configuredRule(for: next.event)?.mode
             guard next.event.kind != .reviewWaiting, mode == .assistant else {
                 mutate(next.id, ifCurrent: next) {
@@ -833,7 +833,7 @@ final class MergeWorkflowAutomation {
         guard let lineage = entry.pipelineClaimAssessment, let key = pipelineKey(entry),
               let skipped = settings.workflowActivity.first(where: { $0.id == lineage.skippedActivityID }),
               skipped.createdAt == lineage.skippedCreatedAt, skipped.state == .skipped, skipped.pipelineClaimAssessment == nil,
-              skipped.host == entry.host, skipped.user == entry.user, skipped.assistantJobID == nil, skipped.chatURL == nil,
+              skipped.host == entry.host, skipped.user == entry.user, skipped.assistantJobID == nil,
               (skipped.summary ?? "").trimmingCharacters(in: .whitespacesAndNewlines).isEmpty,
               skipped.event.pipelineID == key.pipelineID, skipped.event.mergeRequest.projectID == current.projectID,
               skipped.event.mergeRequest.iid == current.iid, skipped.event.mergeRequest.sha == current.sha,
@@ -982,11 +982,11 @@ private extension MergeWorkflowTrigger {
     var instructions: String {
         switch self {
         case .pipelineFailure:
-            "Diagnose the pipeline failure and separate infrastructure failures from code failures. Implement and verify warranted in-scope fixes. When follow-up push is enabled, commit and push tested corrections, then re-fetch the remote HEAD and verify source content before saving completion drafts. With push off, pending or failed, keep the result in chat."
+            "Diagnose the pipeline failure and separate infrastructure failures from code failures. Implement and verify warranted in-scope fixes. When follow-up push is enabled, commit and push tested corrections, then re-fetch the remote HEAD and verify source content before saving completion drafts. With push off, pending or failed, report the result in the run summary."
         case .reviewUpdate:
             "Use the event to scope the re-review. Check new or changed requirements in the MR title or description against the relevant implementation and discussions. Assess changed code, new or edited notes, and author replies as applicable. Recheck existing findings. Raise new findings tied to the evidence identified in the event. Apply the review workflow rules to any reply drafts."
         case .newDiscussion:
-            "Evaluate the new review threads on my MR. For warranted fixes, implement, verify, commit, push when authorized, and verify remote HEAD/content before saving response drafts. With push off, pending or failed, keep that run's result in chat."
+            "Evaluate the new review threads on my MR. For warranted fixes, implement, verify, commit, push when authorized, and verify remote HEAD/content before saving response drafts. With push off, pending or failed, report the result in the run summary."
         case .blockerChange:
             "Explain which GitLab merge blocker changed and what will unblock this MR."
         case .stackDependencyMerged:

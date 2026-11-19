@@ -127,9 +127,8 @@ struct TodoAutomationTests {
         )
         #expect(!acknowledge)
         let handoff = try #require(settings.assistantHandoffs.first)
-        #expect(handoff.title == "[MT] cards-api !1220 (Own)")
+        #expect(handoff.title == "cards-api !1220 (Own)")
         #expect(handoff.key.access == .gitLabRead)
-        #expect(handoff.openedAt == nil)
         #expect(handoff.feedbackTodos == [todo.feedbackIdentity])
         #expect(handoff.manual == true)
         #expect(SettingsManager(defaults: defaults).pendingTodoAcknowledgements.isEmpty)
@@ -156,7 +155,8 @@ struct TodoAutomationTests {
             #expect(!prompt.contains("--evidence-file"))
             #expect(!prompt.contains("save replies as GitLab drafts"))
         }
-        #expect(prompt.hasPrefix("\(todo.targetURL.absoluteString)\n\n"))
+        #expect(prompt.hasPrefix("\(todo.targetURL.absoluteString)\n\ncards-api !1220 (Own)\n\n"))
+        #expect(!prompt.contains("follow-ups in an existing chat"))
         #expect(prompt.contains("Start your final update with a clickable Markdown link"))
         #expect(prompt.contains("git worktree add --detach"))
         if pushAllowed { #expect(prompt.contains("Get my explicit approval before publishing")) }

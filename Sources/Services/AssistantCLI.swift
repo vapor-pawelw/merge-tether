@@ -2,7 +2,7 @@ import AppKit
 import Foundation
 
 enum AssistantDependencyStatus: Equatable, Sendable {
-    case ready(URL), desktopOnly, missingDesktop, missingCLI, invalidCLI, loginRequired(URL)
+    case ready(URL), missingCLI, invalidCLI, loginRequired(URL)
 
     var isReady: Bool {
         switch self {
@@ -24,15 +24,15 @@ enum AssistantCLI {
     }
 
     @MainActor
-    static func detect(_ assistant: AutomationAssistant, requireCLI: Bool) async -> AssistantDependencyStatus {
+    static func detect(_ assistant: AutomationAssistant) async -> AssistantDependencyStatus {
         #if DEBUG
         if ApplicationLaunchMode.resolve(environment: ProcessInfo.processInfo.environment) == .testHost {
-            return await check(assistant, desktopURL: nil,
+            return await check(assistant,
                                candidates: [URL.homeDirectory.appending(path: ".local/bin/\(assistant.rawValue)")])
         }
         #endif
         let optionalApp = AssistantAutomationRunner.desktopApplication(assistant)
-        return await check(assistant, desktopURL: nil, candidates: candidates(for: assistant, desktopURL: optionalApp))
+        return await check(assistant, candidates: candidates(for: assistant, desktopURL: optionalApp))
     }
 
     static func candidates(for assistant: AutomationAssistant, desktopURL: URL?, home: URL = .homeDirectory) -> [URL] {
@@ -50,9 +50,7 @@ enum AssistantCLI {
             }
     }
 
-    static func check(_ assistant: AutomationAssistant, desktopURL: URL?, candidates: [URL],
-                      requireCLI: Bool = true) async -> AssistantDependencyStatus {
-        // Legacy desktop/verification parameters cannot weaken the automation dependency gate.
+    static func check(_ assistant: AutomationAssistant, candidates: [URL]) async -> AssistantDependencyStatus {
         var failure: AssistantDependencyStatus = .missingCLI
         for candidate in candidates where FileManager.default.isExecutableFile(atPath: candidate.path) {
             guard !Task.isCancelled else { return failure }

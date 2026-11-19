@@ -140,7 +140,7 @@ struct ReReviewVerifierTests {
             #expect(provider == assistant)
             return script
         }
-        let monitor = MergeRequestAttentionMonitor(glab: glab, settings: settings, reportDirectory: folder,
+        let monitor = MergeRequestAttentionMonitor(glab: glab, settings: settings,
             canAutomate: { _ in true }, verificationExecutableResolver: executableResolver)
         let coordinator = try #require(monitor.authorFeedbackCoordinator)
         defer { coordinator.cancel() }

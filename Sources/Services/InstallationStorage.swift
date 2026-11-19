@@ -1,3 +1,4 @@
+import Darwin
 import Foundation
 
 /// Runtime storage follows preferences' installation identity. The interactive
@@ -19,7 +20,7 @@ struct InstallationStorage: Sendable {
             .appending(path: identifier, directoryHint: .isDirectory)
     }
 
-    var evidence: URL { root.appending(path: "Codex Desktop Relay", directoryHint: .isDirectory) }
+    var evidence: URL { root.appending(path: "Automation Evidence", directoryHint: .isDirectory) }
     var runs: URL { root.appending(path: "Assistant Runs", directoryHint: .isDirectory) }
     var preparation: URL { root.appending(path: "Assistant Preparation", directoryHint: .isDirectory) }
     var pipelineWork: URL { root.appending(path: "Pipeline Work", directoryHint: .isDirectory) }
@@ -42,6 +43,58 @@ struct InstallationStorage: Sendable {
 
     var legacyEvidence: URL { legacy.evidence }
     var legacyRuns: URL { legacy.runs }
+
+    /// Run under the application instance lock before any evidence reader or writer starts.
+    func moveAutomationEvidence() throws {
+        try moveEvidenceForInstallation()
+        if root != legacy.root { try legacy.moveEvidenceForInstallation() }
+    }
+
+    private func moveEvidenceForInstallation() throws {
+        let source = root.appending(path: "Codex Desktop Relay", directoryHint: .isDirectory)
+        guard try isDirectory(source) else { return }
+        let archive = root.appending(path: "Retired Desktop Automation", directoryHint: .isDirectory)
+        guard try !isDirectory(archive) else { throw CocoaError(.fileWriteFileExists, userInfo: [NSURLErrorKey: archive]) }
+
+        // Move only stores used by the CLI and the app. Older queue, claim and chat records stay together.
+        let stores = ["ai-assessments", "author-feedback-assessments", "display-ai-assessments", "display-comment-origins",
+                      "draft-repair-attempts", "follow-up-locks", "follow-up-preflight", "follow-up-proof-recoveries",
+                      "follow-up-proof-recovery-attempts", "follow-up-runs", "follow-up-verifications",
+                      "follow-up-verifications-archive", "verdicts"]
+        let existing = try stores.map { source.appending(path: $0, directoryHint: .isDirectory) }.filter { try isDirectory($0) }
+        if !existing.isEmpty {
+            if try !isDirectory(evidence) {
+                try FileManager.default.createDirectory(at: evidence, withIntermediateDirectories: false,
+                                                        attributes: [.posixPermissions: 0o700])
+            }
+            let moves = existing.map { ($0, evidence.appending(path: $0.lastPathComponent, directoryHint: .isDirectory)) }
+            for (_, destination) in moves where try isDirectory(destination) {
+                throw CocoaError(.fileWriteFileExists, userInfo: [NSURLErrorKey: destination])
+            }
+            for (original, destination) in moves { try moveDirectory(original, to: destination) }
+        }
+        try moveDirectory(source, to: archive)
+    }
+
+    private func isDirectory(_ url: URL) throws -> Bool {
+        var info = stat()
+        guard lstat(url.path, &info) == 0 else {
+            let failure = errno
+            if failure == ENOENT { return false }
+            throw POSIXError(POSIXErrorCode(rawValue: failure) ?? .EIO)
+        }
+        guard info.st_mode & S_IFMT == S_IFDIR else {
+            throw CocoaError(.fileWriteInvalidFileName, userInfo: [NSURLErrorKey: url])
+        }
+        return true
+    }
+
+    private func moveDirectory(_ source: URL, to destination: URL) throws {
+        guard renamex_np(source.path, destination.path, UInt32(RENAME_EXCL)) == 0 else {
+            let failure = errno
+            throw POSIXError(POSIXErrorCode(rawValue: failure) ?? .EIO)
+        }
+    }
 
     /// Retain undelivered clones/worktrees in place. This index is history only;
     /// it must never be used to import legacy unsigned proof into current gates.

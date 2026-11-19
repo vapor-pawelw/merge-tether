@@ -68,7 +68,7 @@ struct OnboardingView: View {
         .frame(minWidth: 560, minHeight: 440)
         .sheet(isPresented: $showingAssistantSetup) {
             if let pendingAutomation {
-                AssistantSetupView(assistant: pendingAutomation.assistant, requireCLI: true) {
+                AssistantSetupView(assistant: pendingAutomation.assistant) {
                     complete(automation: pendingAutomation)
                 }
             }

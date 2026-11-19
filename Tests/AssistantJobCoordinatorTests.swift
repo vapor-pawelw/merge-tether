@@ -563,7 +563,29 @@ import Testing
         #expect(settings.assistantHandoffs.count == 1)
     }
 
-    @Test func interruptedRecoveryPreservesLegacyAndCompletedHistory() throws {
+    @Test func retryOfExistingCLIRunUsesAnUnprefixedTitle() async throws {
+        let (settings, name, defaults) = try fixture()
+        defer { defaults.removePersistentDomain(forName: name) }
+        let context = job(state: .failed).key
+        let url = try #require(URL(string: "https://gitlab.example.org/g/p/-/merge_requests/2"))
+        let previous = AssistantAutomationRunner.Handoff(id: UUID(), key: context,
+            title: "[MT] Review !2", prompt: "Review", createdAt: Date(), allowsPush: false,
+            execution: .init(state: .failed), taskPrompt: "Review", mergeRequestURL: url)
+        settings.assistantHandoffs = [previous]
+        let coordinator = AssistantJobCoordinator(execute: { _, _ in
+            .init(result: .init(status: .succeeded, summary: "Done"), output: "")
+        })
+        defer { coordinator.prepareForTermination(settings: settings) }
+
+        let retry = try await AssistantAutomationRunner.retry(previous.id, settings: settings, jobCoordinator: coordinator)
+
+        #expect(retry.title == "Review !2")
+        #expect(retry.prompt.hasPrefix("\(url.absoluteString)\n\nReview !2\n\n"))
+        #expect(retry.retryOf == previous.id)
+        #expect(settings.assistantHandoffs.first?.title == previous.title)
+    }
+
+    @Test func interruptedRecoveryPreservesCLIRunHistory() throws {
         let (settings, name, defaults) = try fixture()
         defer { defaults.removePersistentDomain(forName: name) }
         settings.assistantHandoffs = [job(state: .running), job(state: nil), job(state: .succeeded)]
@@ -573,7 +595,8 @@ import Testing
         #expect(settings.assistantHandoffs[1].execution == nil)
         #expect(settings.assistantHandoffs[2].execution?.state == .succeeded)
         let restored = SettingsManager(defaults: defaults)
-        #expect(restored.assistantHandoffs[0].execution?.state == .interrupted)
+        #expect(restored.assistantHandoffs.compactMap { $0.execution?.state } == [.interrupted, .succeeded])
+        #expect(restored.assistantHandoffs.count == 2)
     }
 
     @Test func excludesDuplicateMergeRequestAndPreservesRunningJobDuringRecovery() async throws {

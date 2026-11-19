@@ -35,7 +35,7 @@ macOS GitLab inbox and MR automation. Read [README.md](README.md) for behavior,
   individually. Bulk publishing can include unseen drafts created after verification.
 - Author follow-ups: implement → verify → commit → authorized remote source-branch
   push → re-fetch remote HEAD and verify file content → save reply drafts. With
-  follow-up push off, pending or failed, keep that run's result in chat. Require
+  follow-up push off, pending or failed, report the result in the run summary. Require
   account/run/head/content/draft evidence for automatic publication. A detached
   worktree protects local checkouts; it does not prohibit an authorized remote push.
 - Review-only work on someone else's MR must remain review-only. Keep conflict-push

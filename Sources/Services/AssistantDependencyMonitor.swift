@@ -5,14 +5,13 @@ import Observation
 final class AssistantDependencyMonitor {
     private(set) var statuses: [AutomationAssistant: AssistantDependencyStatus] = [:]
     private var lastCheck: Date?
-    private var requirement: Bool?
     private var task: Task<Void, Never>?
     private var generation = UUID()
-    private let probe: @MainActor (AutomationAssistant, Bool) async -> AssistantDependencyStatus
+    private let probe: @MainActor (AutomationAssistant) async -> AssistantDependencyStatus
     var onReady: ((AutomationAssistant) -> Void)?
     var onRecovered: ((AutomationAssistant) -> Void)?
 
-    init(probe: @escaping @MainActor (AutomationAssistant, Bool) async -> AssistantDependencyStatus = AssistantCLI.detect) {
+    init(probe: @escaping @MainActor (AutomationAssistant) async -> AssistantDependencyStatus = AssistantCLI.detect) {
         self.probe = probe
     }
 
@@ -21,26 +20,18 @@ final class AssistantDependencyMonitor {
     var available: Set<AutomationAssistant> { Set(statuses.filter { $0.value.isReady }.map(\.key)) }
 
     func check(_ assistant: AutomationAssistant) async -> AssistantDependencyStatus {
-        await probe(assistant, true)
+        await probe(assistant)
     }
 
-    func refresh(requireCLI _: Bool = true, force: Bool = false) {
-        let requireCLI = true
+    func refresh(force: Bool = false) {
         if force { task?.cancel(); task = nil }
-        if requirement != requireCLI {
-            task?.cancel()
-            task = nil
-            lastCheck = nil
-            statuses = [:]
-        }
         guard task == nil, force || lastCheck.map({ Date().timeIntervalSince($0) >= 30 }) ?? true else { return }
-        requirement = requireCLI
         let current = UUID()
         generation = current
         task = Task {
             var results: [AutomationAssistant: AssistantDependencyStatus] = [:]
             for assistant in AutomationAssistant.allCases {
-                results[assistant] = await probe(assistant, requireCLI)
+                results[assistant] = await probe(assistant)
             }
             guard generation == current, !Task.isCancelled else { return }
             let ready = results.keys.filter { results[$0]?.isReady == true && statuses[$0]?.isReady != true }

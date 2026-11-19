@@ -298,17 +298,6 @@
         }
       }
     },
-    "menu.scope.openChat": {
-      "extractionState": "manual",
-      "localizations": {
-        "en": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "Open previous Codex chat"
-          }
-        }
-      }
-    },
     "menu.attention.reReviewUnconfirmed": {
       "extractionState": "manual",
       "localizations": {
@@ -426,17 +415,6 @@
           "stringUnit": {
             "state": "translated",
             "value": "Agent result"
-          }
-        }
-      }
-    },
-    "menu.workflow.activity.openChat": {
-      "extractionState": "manual",
-      "localizations": {
-        "en": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "Open linked agent chat"
           }
         }
       }
@@ -921,17 +899,6 @@
           "stringUnit": {
             "state": "translated",
             "value": "The comments or commits changed since you looked. Check them again."
-          }
-        }
-      }
-    },
-    "menu.scope.openClaudeSession": {
-      "extractionState": "manual",
-      "localizations": {
-        "en": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "Open previous Claude session"
           }
         }
       }

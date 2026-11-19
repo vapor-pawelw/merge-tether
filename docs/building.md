@@ -23,7 +23,7 @@ open GitLabTodos.xcworkspace
 
 Build and run the `GitLabTodos` scheme from Xcode. MergeTether is a regular Dock application with a resizable main window. Closing the window keeps background monitoring active until the app is quit. The release bundle identifier and legacy target/scheme names remain unchanged.
 
-Manual GitLab management requires authenticated `glab`. Agent automation additionally requires a compatible, signed-in Codex CLI or Claude CLI. Desktop agent applications and their listener/plugin setup are not prerequisites.
+Manual GitLab management requires authenticated `glab`. Agent automation additionally requires a compatible, signed-in Codex CLI or Claude CLI.
 
 ## Local relay configuration
 
@@ -82,6 +82,13 @@ copy with another identifier gets its own new writes, matching its preferences.
 The app passes `MERGETETHER_STORAGE_ROOT` explicitly to bundled helpers; a helper
 run directly from an app bundle can derive the same identity from `Info.plist`.
 Unbundled helper use retains the release fallback unless an explicit root is set.
+
+On the first launch after the storage rename, the app moves the CLI evidence
+stores to `Automation Evidence` under the instance lock. It keeps the remaining
+desktop records in `Retired Desktop Automation`. Each store moves by an exclusive
+rename. A restart can continue a partial move, and a destination collision stops
+startup before automation can run against incomplete evidence. Launch the updated
+app once before running its bundled proof helpers directly.
 
 Existing run directories remain in place, referenced only by the installation's
 known history; migration does not copy large clones or silently trust shared old
@@ -270,7 +277,7 @@ PYTHONDONTWRITEBYTECODE=1 PYTHONPATH=Helpers/Automation \
   python3 -m unittest discover -s Tests/AutomationHelpers
 ```
 
-The app packages `Helpers/Automation` as `Contents/Resources/Automation`, containing `evidence.py` and `author_follow_up.py`. They provide read-only GitLab verification and local proof records independently of desktop plugins or MCP setup. Their coverage lives in `Tests/AutomationHelpers`; the retired desktop plugin package and its queue tests have been removed.
+The app packages `evidence.py` and `author_follow_up.py` from `Helpers/Automation` under `Contents/Resources/Automation`. They provide read-only GitLab verification and local proof records. Their tests live in `Tests/AutomationHelpers`.
 
 Remove scratch Derived Data and generated projects after validation. Preserve a
 runnable app only when requested. Local debug rebuilds must retain the installed

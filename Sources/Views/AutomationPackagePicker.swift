@@ -160,7 +160,6 @@ struct AutomationAssistantPicker: View {
     @Binding var assistant: AutomationAssistant
     let available: Set<AutomationAssistant>
     let onRefresh: () -> Void
-    var requireCLI = true
     var statuses: [AutomationAssistant: AssistantDependencyStatus] = [:]
     @State private var lastCheck: Date?
     @State private var setupCandidate: AutomationAssistant?
@@ -208,7 +207,7 @@ struct AutomationAssistantPicker: View {
         }
         .onAppear(perform: check)
         .sheet(item: $setupCandidate) { candidate in
-            AssistantSetupView(assistant: candidate, requireCLI: true) {
+            AssistantSetupView(assistant: candidate) {
                 assistant = candidate
                 check()
             }

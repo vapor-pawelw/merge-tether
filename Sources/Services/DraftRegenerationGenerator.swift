@@ -41,7 +41,7 @@ enum DraftRegenerationGenerator {
 
     @MainActor static func generate(_ input: DraftRegenerationGenerationInput) async throws -> [DraftRegenerationGeneratedDraft] {
         let assistant = input.configuration.assistant
-        guard case .ready(let executable) = await AssistantCLI.detect(assistant, requireCLI: true) else { throw Unavailable() }
+        guard case .ready(let executable) = await AssistantCLI.detect(assistant) else { throw Unavailable() }
         try Task.checkCancellation()
         let request = input.request
         let data = try JSONEncoder().encode(Evidence(host: input.host, username: input.user.username, userID: input.user.id,

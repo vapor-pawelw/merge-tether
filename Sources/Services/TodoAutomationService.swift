@@ -40,7 +40,7 @@ final class TodoAutomationService {
     private let followUpDirectory: URL
 
     init(canAutomate: @escaping @MainActor (AutomationAssistant) async -> Bool = {
-        await AssistantCLI.detect($0, requireCLI: true).isReady
+        await AssistantCLI.detect($0).isReady
     }, jobCoordinator: AssistantJobCoordinator? = nil, followUpDirectory: URL = FollowUpVerificationStore.directory) {
         self.canAutomate = canAutomate
         self.jobCoordinator = jobCoordinator
@@ -519,7 +519,7 @@ final class TodoAutomationService {
             case .reviewRequested:
                 AssistantAutomationRunner.TaskIntent.todoReviewFallback
             case .authorFeedback:
-                "Check the current head and only the indicated feedback, or unresolved feedback when no notes are specified. Verify it against the code. For warranted fixes follow the mandatory implement, test, commit, authorized push and remote-content verification sequence before saving any response drafts. If push is off, pending or failed, keep that run's result in chat only."
+                "Check the current head and only the indicated feedback, or unresolved feedback when no notes are specified. Verify it against the code. For warranted fixes follow the mandatory implement, test, commit, authorized push and remote-content verification sequence before saving any response drafts. If push is off, pending or failed, report the result in the run summary and save no response drafts."
             }
             let suppliedEvidence = invocation.access == .gitLabRead ? "" : "\n\n<gitlab-evidence>\n" + evidence + "\n</gitlab-evidence>"
             let verifiedContext = verifiedFeedbackMarker.map {

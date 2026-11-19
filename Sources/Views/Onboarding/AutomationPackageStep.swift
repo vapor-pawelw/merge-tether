@@ -23,7 +23,7 @@ struct AutomationPackageStep: View {
                 else { Text(.Settings.settingsAutomationPackageHelp).foregroundStyle(.secondary) }
                 AutomationAssistantPicker(
                     assistant: $assistant, available: monitor.availableAssistants,
-                    onRefresh: monitor.refreshAvailableAssistants, requireCLI: true,
+                    onRefresh: monitor.refreshAvailableAssistants,
                     statuses: monitor.assistantDependencies.statuses
                 )
                 AutomationPackagePicker(

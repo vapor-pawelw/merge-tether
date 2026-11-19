@@ -94,7 +94,7 @@ struct AssistantRetryOriginTests {
         settings.resolvedHost = host
         let monitor = TodoMonitorService(settings: settings, glab: glab,
             notifications: NotificationService(authorization: { .denied }, post: { _ in }),
-            assistantDependencies: .init(probe: { _, _ in .missingCLI }))
+            assistantDependencies: .init(probe: { _ in .missingCLI }))
         defer { monitor.stopTimer() }
         try body(monitor, settings, job, defaults)
     }

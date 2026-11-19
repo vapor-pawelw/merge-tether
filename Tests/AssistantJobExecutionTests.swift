@@ -75,7 +75,7 @@ import Testing
 
     @MainActor @Test func obsoleteReminderCannotBlockCompletionButAnOlderRealFailureStillDoes() {
         let work = AssistantAutomationRunner.MergeRequestWork(host: "gitlab.example.org", projectID: 1, iid: 2)
-        let key = AssistantAutomationRunner.ChatKey(assistant: .codex, work: work, username: "me", workspace: "", access: .gitLabRead)
+        let key = AssistantAutomationRunner.JobKey(assistant: .codex, work: work, username: "me", workspace: "", access: .gitLabRead)
         let reminder = AssistantAutomationRunner.Handoff(id: UUID(), key: key, title: "Reminder", prompt: "", createdAt: Date(timeIntervalSince1970: 200),
             allowsPush: false, execution: .init(state: .cancelled), workflow: .draftReply)
         let review = AssistantAutomationRunner.Handoff(id: UUID(), key: key, title: "Review", prompt: "", createdAt: Date(timeIntervalSince1970: 100),

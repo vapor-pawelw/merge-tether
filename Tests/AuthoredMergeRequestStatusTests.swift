@@ -87,10 +87,10 @@ struct AuthoredMergeRequestStatusTests {
         #expect(!status(unknown, approvals, resolved: true, policy: true).mayAutoMerge)
     }
 
-    @Test func migratesExistingRulesAndWorkspaceToSharedAssistant() throws {
+    @Test func decodesSharedAssistantRuleAndWorkspace() throws {
         let data = Data("""
-            {"codexWorkspace":"/tmp/project","reviewRequested":{
-                "isEnabled":true,"runner":"codex","command":"",
+            {"assistantWorkspace":"/tmp/project","reviewRequested":{
+                "isEnabled":true,"runner":"assistant","command":"",
                 "titleTemplate":"Custom","promptTemplate":"Custom prompt"
             }}
             """.utf8)
@@ -225,7 +225,7 @@ struct AuthoredMergeRequestStatusTests {
         glab.glabPath = executable
         glab.resolvedHost = "gitlab.example.org"
         glab.currentUsername = "me"
-        let monitor = MergeRequestAttentionMonitor(glab: glab, settings: settings, reportDirectory: folder)
+        let monitor = MergeRequestAttentionMonitor(glab: glab, settings: settings)
         func poll() async throws {
             monitor.refresh(host: "gitlab.example.org", username: "me", todos: [])
             let deadline = ContinuousClock.now + .seconds(5)
@@ -271,7 +271,6 @@ struct AuthoredMergeRequestStatusTests {
         #expect(try String(contentsOf: sent, encoding: .utf8) == "alice\nbob\n")
         #expect(monitor.currentOpenItems.first?.id.iid == 2)
         #expect(monitor.currentOpenItems.first?.draftCount == 0)
-        #expect(!FileManager.default.fileExists(atPath: folder.appending(path: "mr-status.json").path))
     }
 
     @MainActor
@@ -340,7 +339,7 @@ struct AuthoredMergeRequestStatusTests {
         #expect(monitor.requests.count == 1)
 
         availability.ready = true
-        let key = AssistantAutomationRunner.ChatKey(assistant: .codex,
+        let key = AssistantAutomationRunner.JobKey(assistant: .codex,
             work: .init(host: "gitlab.example.org", projectID: 1, iid: 2),
             username: "me", workspace: "", access: .gitLabRead)
         let job = AssistantAutomationRunner.Handoff(id: UUID(), key: key, title: "Review", prompt: "",

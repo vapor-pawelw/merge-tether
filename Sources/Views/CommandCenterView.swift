@@ -137,7 +137,7 @@ struct CommandCenterView: View {
         .task { await prepareWindow() }
         .task {
             while !Task.isCancelled {
-                monitor.assistantDependencies.refresh(requireCLI: true)
+                monitor.assistantDependencies.refresh()
                 do { try await Task.sleep(for: .seconds(30)) } catch { return }
             }
         }

@@ -80,7 +80,7 @@ private struct AssistantCLIProviderHealthBanner: View {
         actionFailed = false
         Task {
             defer { checking = false }
-            let result = await AssistantCLI.detect(provider, requireCLI: true)
+            let result = await AssistantCLI.detect(provider)
             guard result.isReady else { actionFailed = true; monitor.assistantDependencies.refresh(force: true); return }
             // Explicit retry releases unstarted queued work. Failed runs are never replayed automatically.
             if let expectedID { _ = monitor.cliHealth.clear(provider, expectedID: expectedID) }

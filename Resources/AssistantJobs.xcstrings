@@ -78,24 +78,13 @@
         }
       }
     },
-    "assistant.jobs.legacyExplanation": {
+    "assistant.jobs.statusUnavailable": {
       "extractionState": "manual",
       "localizations": {
         "en": {
           "stringUnit": {
             "state": "translated",
-            "value": "This desktop handoff was kept as history and will not run automatically. Start a new action from the MR to use the CLI."
-          }
-        }
-      }
-    },
-    "assistant.jobs.legacy": {
-      "extractionState": "manual",
-      "localizations": {
-        "en": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "Desktop history"
+            "value": "Status unavailable"
           }
         }
       }
