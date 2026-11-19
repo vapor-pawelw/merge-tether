@@ -113,10 +113,11 @@ struct PersonLabel: View {
             PersonAvatar(url: person.avatarURL, size: 36, initials: person.initials).accessibilityHidden(true)
             VStack(alignment: .leading, spacing: 2) {
                 Text(verbatim: name).font(.headline)
-                Text(verbatim: handle).font(.callout.monospaced()).foregroundStyle(.secondary)
+                Text(verbatim: handle).font(.callout.monospaced()).foregroundStyle(Color.secondary)
                     .textSelection(.enabled)
             }
         }
+        .foregroundStyle(Color.primary)
         .padding(14)
     }
 }
