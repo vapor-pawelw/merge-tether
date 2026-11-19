@@ -26,9 +26,8 @@ struct BoardMRCompletionCard: View {
                     BoardCardTitle(title: completion.title, repositoryPath: completion.url.gitLabProjectPath)
                 }
                 .buttonStyle(.plain)
-                if let iid = completion.target.iid {
-                    BoardMRReferenceLine(iid: iid, projectID: completion.target.projectID)
-                }
+                BoardMRReferenceLine(iid: completion.target.iid, projectID: completion.target.projectID,
+                    repositoryPath: completion.url.gitLabProjectPath)
             }
             HStack(spacing: 8) {
                 Text(completion.kind == .merged ? .MRLifecycle.completionMerged : .MRLifecycle.completionClosed)

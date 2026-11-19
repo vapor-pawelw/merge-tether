@@ -1,27 +1,20 @@
 import SwiftUI
 
-/// A single text flow lets the title keep its width while repository context wraps with it.
 struct BoardCardTitle: View {
     let title: String
     let repositoryPath: String
     var font: Font = .callout.weight(.semibold)
     var titleColor: Color = .primary
 
-    private var repositoryName: String {
-        repositoryPath.split(separator: "/").last.map(String.init) ?? repositoryPath
-    }
-
     var body: some View {
-        let titleText = Text(verbatim: title).font(font).foregroundStyle(titleColor)
-        let repositoryText = Text(verbatim: repositoryName).font(.caption).foregroundStyle(Color.accentColor)
-        (titleText + Text(verbatim: repositoryName.isEmpty ? "" : "  ") + repositoryText)
+        Text(verbatim: title)
+            .font(font).foregroundStyle(titleColor)
             .multilineTextAlignment(.leading)
             .lineLimit(2)
             .truncationMode(.tail)
             .fixedSize(horizontal: false, vertical: true)
             .frame(maxWidth: .infinity, alignment: .leading)
             .help(Text(verbatim: "\(title)\n\(repositoryPath)"))
-            .accessibilityLabel(Text(verbatim: "\(title), \(repositoryPath)"))
     }
 }
 
@@ -36,27 +29,14 @@ struct BoardCardActionIcon: View {
     }
 }
 
-struct BoardMRIdentifier: View {
-    let iid: Int
-
-    var body: some View {
-        Text(verbatim: "!\(iid)")
-            .font(.caption).monospacedDigit().foregroundStyle(.secondary).fixedSize()
-            .accessibilityLabel(Text(.Board.boardMergeRequestNumber(iid)))
-    }
-}
-
 struct BoardMRReferenceLine: View {
-    let iid: Int
+    let iid: Int?
     let projectID: Int
+    var repositoryPath = ""
     var dependencies: MergeRequestDependencySummary?
 
     var body: some View {
-        if let dependencies {
-            MRDependencyRow(summary: dependencies, projectID: projectID, iid: iid)
-        } else {
-            BoardMRIdentifier(iid: iid)
-        }
+        MRDependencyRow(summary: dependencies, projectID: projectID, iid: iid, repositoryPath: repositoryPath)
     }
 }
 
@@ -89,39 +69,61 @@ struct BoardCardAuthor: View {
     }
 }
 
-/// One wrapping text flow keeps each canonical predecessor link together with its stack position.
+/// One wrapping line keeps the repository, MR number and predecessor links together.
 struct MRDependencyRow: View {
-    let summary: MergeRequestDependencySummary
+    let summary: MergeRequestDependencySummary?
     let projectID: Int
     var iid: Int? = nil
+    var repositoryPath = ""
+
+    private var repositoryName: String {
+        repositoryPath.split(separator: "/").last.map(String.init) ?? repositoryPath
+    }
 
     var body: some View {
         VStack(alignment: .leading, spacing: 3) {
-            if let iid, summary.predecessors.isEmpty {
-                BoardMRIdentifier(iid: iid).help(tooltip)
-            } else if !description.characters.isEmpty {
-                Text(description).font(.caption).monospacedDigit().foregroundStyle(.secondary)
-                    .fixedSize(horizontal: false, vertical: true)
-                    .help(tooltip)
+            if let iid, summary?.predecessors.isEmpty != false {
+                let numberLabel = Text(.Board.boardMergeRequestNumber(iid))
+                referenceLine(Text(verbatim: "!\(iid)"))
+                    .accessibilityLabel(repositoryPath.isEmpty ? numberLabel : Text("\(repositoryPath), \(numberLabel)"))
+            } else {
+                let description = description
+                if !description.characters.isEmpty || !repositoryName.isEmpty {
+                    referenceLine(Text(description), hasReference: !description.characters.isEmpty)
+                }
             }
-            if let notice = summary.notice {
+            if let notice = summary?.notice {
                 Text(verbatim: notice).font(.caption2).foregroundStyle(.secondary)
                     .fixedSize(horizontal: false, vertical: true)
             }
         }
     }
 
+    private func referenceLine(_ reference: Text, hasReference: Bool = true) -> some View {
+        let repository = Text(verbatim: repositoryName).foregroundStyle(Color.accentColor)
+        let separator = Text(verbatim: repositoryName.isEmpty || !hasReference ? "" : " ")
+        let reference = reference.monospacedDigit().foregroundStyle(.secondary)
+        return Text("\(repository)\(separator)\(reference)")
+            .font(.caption)
+            .fixedSize(horizontal: false, vertical: true)
+            .help(tooltip)
+    }
+
     private var tooltip: Text {
-        let references = summary.predecessors.map { "\($0.title)\n\($0.url.gitLabProjectPath)" }.joined(separator: "\n")
-        if let position = summary.stackPosition {
-            return Text(.MRDependencies.mrDependenciesStackPosition(position)) + Text(verbatim: "\n")
-                + Text(.MRDependencies.mrDependenciesPositionHelp) + Text(verbatim: references.isEmpty ? "" : "\n" + references)
+        let references = summary?.predecessors.map { "\($0.title)\n\($0.url.gitLabProjectPath)" } ?? []
+        let paths = ([repositoryPath].filter { !$0.isEmpty } + references).joined(separator: "\n")
+        if let position = summary?.stackPosition {
+            let positionLabel = Text(.MRDependencies.mrDependenciesStackPosition(position))
+            let positionHelp = Text(.MRDependencies.mrDependenciesPositionHelp)
+            let pathsLabel = Text(verbatim: paths.isEmpty ? "" : "\n" + paths)
+            return Text("\(positionLabel)\n\(positionHelp)\(pathsLabel)")
         }
-        return Text(verbatim: references)
+        return Text(verbatim: paths)
     }
 
     private var description: AttributedString {
         var text = AttributedString()
+        guard let summary else { return text }
         if let iid {
             text = AttributedString("!\(iid)")
         } else if let position = summary.stackPosition {

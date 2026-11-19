@@ -67,9 +67,9 @@ struct BoardMRProposalCard: View {
                         titleColor: isMuted ? .secondary : .primary)
                 }
                 .buttonStyle(.plain)
-                if let iid = proposal.target.iid {
-                    BoardMRReferenceLine(iid: iid, projectID: proposal.target.projectID, dependencies: proposal.item?.dependencies)
-                }
+                BoardMRReferenceLine(iid: proposal.target.iid, projectID: proposal.target.projectID,
+                    repositoryPath: proposal.url.gitLabProjectPath,
+                    dependencies: proposal.target.iid == nil ? nil : proposal.item?.dependencies)
             }
             if let finishedItem {
                 FinishedMergeRequestStatus(item: finishedItem, monitor: monitor)

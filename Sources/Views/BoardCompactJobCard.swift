@@ -45,7 +45,8 @@ struct BoardCompactJobCard: View {
             VStack(alignment: .leading, spacing: 3) {
                 BoardCardTitle(title: handoff.title, repositoryPath: repositoryPath,
                     titleColor: isMuted ? .secondary : .primary)
-                BoardMRReferenceLine(iid: handoff.key.work.iid, projectID: handoff.key.work.projectID)
+                BoardMRReferenceLine(iid: handoff.key.work.iid, projectID: handoff.key.work.projectID,
+                    repositoryPath: repositoryPath)
             }
             if let finishedItem {
                 FinishedMergeRequestStatus(item: finishedItem, monitor: monitor)
