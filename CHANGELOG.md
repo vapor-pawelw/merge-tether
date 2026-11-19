@@ -6,6 +6,8 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 
 ## Unreleased
 
+- Keep newly tracked merge requests on **Default** when automation adds them to the board.
+
 - Drop the `[MT]` prefix from new agent runs and remove the old desktop automation queue, settings and chat links. Move existing CLI evidence into `Automation Evidence` on launch.
 
 - Confirm app-wide automation changes from the Mac toolbar, with the option to skip future confirmations.

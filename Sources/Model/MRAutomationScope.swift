@@ -62,9 +62,9 @@ struct MRAutomationScope: Codable, Equatable, Sendable {
         self[target] == .inherit && targetsFollowingActionDefaults?.contains(target) == true
     }
 
+    /// Track an eligible MR while leaving its automation choice to the user.
     mutating func adoptAutomatically(_ target: Target) {
-        if followsActionDefaults(for: target) { rememberManaged(target) }
-        else { self[target] = .active }
+        rememberManaged(target)
     }
 
     subscript(target: Target) -> Choice {
