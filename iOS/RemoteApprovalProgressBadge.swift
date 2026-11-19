@@ -17,11 +17,8 @@ struct RemoteApprovalProgressBadge: View {
     private var complete: Bool {
         progress.map { received > 0 && ($0.requirementsSatisfied ?? ($0.required == 0 || received >= $0.required)) } ?? false
     }
-    private var approvalColor: Color {
-        if complete { return .green }
-        guard let progress, progress.required > 0 else { return .secondary }
-        let fraction = Double(received) / Double(progress.required)
-        return .green.opacity(min(fraction * 0.8, 0.7))
+    private var approvalColor: ApprovalBadgeColor {
+        .init(received: received, required: progress?.required, isSatisfied: complete)
     }
     private var requiredApprovalPending: Bool {
         guard let progress, progress.required > 0 else { return false }

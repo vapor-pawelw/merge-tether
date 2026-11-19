@@ -6,7 +6,7 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 
 ## Unreleased
 
-- Tint approval badges green on Mac and iPhone in proportion to required approvals received. Cap partial progress at 70% opacity and use full green when the approval rules are satisfied.
+- Blend approval badges from their default color toward green as required approvals come in on Mac and iPhone. Cap the green blend at 70% until the approval rules are satisfied.
 
 - Regenerate private drafts on Mac or iPhone for one comment, one MR, or all tracked MRs. Add optional instructions, compare the proposals, and save the ones you choose.
 

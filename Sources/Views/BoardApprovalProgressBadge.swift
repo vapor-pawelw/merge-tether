@@ -25,11 +25,8 @@ struct BoardApprovalProgressBadge: View {
     private var satisfied: Bool {
         progress?.isSatisfied ?? false
     }
-    var approvalColor: Color {
-        if satisfied { return .green }
-        guard let progress, progress.required > 0 else { return .secondary }
-        let fraction = Double(progress.completed) / Double(progress.required)
-        return .green.opacity(min(fraction * 0.8, 0.7))
+    var approvalColor: ApprovalBadgeColor {
+        .init(received: progress?.completed ?? 0, required: progress?.required, isSatisfied: satisfied)
     }
     private var requiredApprovalPending: Bool {
         guard let progress, progress.required > 0 else { return false }

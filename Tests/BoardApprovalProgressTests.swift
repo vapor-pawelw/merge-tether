@@ -5,34 +5,53 @@ import Testing
 
 @MainActor struct BoardApprovalProgressTests {
     @Test func usesSecondaryColorWhenApprovalProgressIsUnknown() {
-        #expect(BoardApprovalProgressBadge(progress: nil).approvalColor == .secondary)
+        let environment = EnvironmentValues()
+        #expect(BoardApprovalProgressBadge(progress: nil).approvalColor.resolve(in: environment)
+            == Color.secondary.resolve(in: environment))
     }
 
-    @Test func colorsKnownApprovalProgress() throws {
-        let cases: [(Int, Int, Color)] = [
-            (0, 0, .secondary),
-            (1, 0, .green),
-            (0, 1, .green.opacity(0)),
-            (1, 3, .green.opacity(4.0 / 15.0)),
-            (1, 2, .green.opacity(0.4)),
-            (2, 3, .green.opacity(8.0 / 15.0)),
-            (8, 10, .green.opacity(0.64)),
-            (9, 10, .green.opacity(0.7)),
-            (2, 2, .green),
+    @Test(arguments: [ColorScheme.light, .dark])
+    func blendsApprovalProgressWithTheDefaultColor(colorScheme: ColorScheme) throws {
+        let cases: [(Int, Int, Float)] = [
+            (0, 0, 0),
+            (1, 0, 1),
+            (0, 1, 0),
+            (1, 3, 4.0 / 15.0),
+            (1, 2, 0.4),
+            (2, 3, 8.0 / 15.0),
+            (8, 10, 0.64),
+            (9, 10, 0.7),
+            (2, 2, 1),
         ]
-        let environment = EnvironmentValues()
-        for (completed, required, expected) in cases {
+        var environment = EnvironmentValues()
+        environment.colorScheme = colorScheme
+        for (completed, required, greenWeight) in cases {
             let progress = try #require(MergeRequestApprovalProgress(completed: completed, required: required))
-            let color = BoardApprovalProgressBadge(progress: progress).approvalColor
-            #expect(color.resolve(in: environment) == expected.resolve(in: environment), "\(completed)/\(required)")
+            expectColorBlend(progress, greenWeight: greenWeight, in: environment)
         }
     }
 
     @Test(arguments: [2, 5])
-    func capsOpacityWhileAnApprovalRuleIsPending(completed: Int) throws {
+    func capsGreenBlendWhileAnApprovalRuleIsPending(completed: Int) throws {
         var progress = try #require(MergeRequestApprovalProgress(completed: completed, required: 2))
         progress.requirementsSatisfied = false
-        #expect(BoardApprovalProgressBadge(progress: progress).approvalColor == Color.green.opacity(0.7))
+        expectColorBlend(progress, greenWeight: 0.7, in: EnvironmentValues())
+    }
+
+    private func expectColorBlend(_ progress: MergeRequestApprovalProgress, greenWeight: Float, in environment: EnvironmentValues) {
+        let actual = BoardApprovalProgressBadge(progress: progress).approvalColor.resolve(in: environment)
+        let secondary = Color.secondary.resolve(in: environment)
+        let green = Color.green.resolve(in: environment)
+        let expectedOpacity = secondary.opacity * (1 - greenWeight) + green.opacity * greenWeight
+        #expect(abs(actual.opacity - expectedOpacity) < 0.00001)
+        for (actual, secondary, green) in [
+            (actual.linearRed * actual.opacity, secondary.linearRed * secondary.opacity, green.linearRed * green.opacity),
+            (actual.linearGreen * actual.opacity, secondary.linearGreen * secondary.opacity, green.linearGreen * green.opacity),
+            (actual.linearBlue * actual.opacity, secondary.linearBlue * secondary.opacity, green.linearBlue * green.opacity),
+        ] {
+            let expected = secondary * (1 - greenWeight) + green * greenWeight
+            #expect(abs(actual - expected) < 0.00001, "\(progress.completed)/\(progress.required)")
+        }
     }
 
     @Test func hidesTheCounterWhenGitLabRequiresNoApprovals() {
