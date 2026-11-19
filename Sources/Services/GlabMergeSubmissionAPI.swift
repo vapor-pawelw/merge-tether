@@ -29,6 +29,118 @@ extension GlabService {
         return observation(target == conflict.targetSHA ? conflict : nil)
     }
 
+    func verifyFailedTrainPipeline(_ receipt: MergeSubmissionReceipt, replacement: GitLabMergeRequest,
+                                   activeQueue: Bool, host: String) async throws -> Set<Int>? {
+        guard let baseline = receipt.trainNoteIDBeforeAttempt else { return nil }
+        let discussions = try await fetchMergeRequestDiscussions(projectID: replacement.projectID, iid: replacement.iid, host: host)
+        let notes = discussions.flatMap(\.notes)
+        let trainEvents = notes.filter { note in
+            guard note.system == true, (note.id ?? 0) > baseline, let body = note.body else { return false }
+            return Self.isTrainAdmission(body) || body.hasPrefix("removed this merge request from the merge train")
+                || body.hasPrefix(Self.trainAutoAddNote) || body.hasPrefix("canceled the automatic merge")
+        }.sorted { ($0.id ?? 0) < ($1.id ?? 0) }
+        let automaticallyAdmitted = trainEvents.first?.body?.hasPrefix(Self.trainAutoAddNote) == true
+            && trainEvents.first?.author?.id == receipt.userID
+        let lifecycle = trainEvents.dropFirst(automaticallyAdmitted ? 1 : 0)
+        guard activeQueue || lifecycle.count == 2,
+              let admission = lifecycle.first, let removal = lifecycle.dropFirst().first else { return nil }
+        guard admission.body.map(Self.isTrainAdmission) == true,
+              removal.body?.hasPrefix("removed this merge request from the merge train because the pipeline did not succeed.") == true,
+              admission.author?.id == receipt.userID, removal.author?.id == receipt.userID,
+              let admittedAt = MergeRequestReviewHistory.date(admission.createdAt),
+              let removedAt = MergeRequestReviewHistory.date(removal.createdAt), removedAt > admittedAt else { return nil }
+
+        struct TrainPipeline: Decodable {
+            let id: Int
+            let projectID: Int
+            let ref: String
+            let status: String
+            let createdAt: String
+            let updatedAt: String
+            enum CodingKeys: String, CodingKey {
+                case id, ref, status
+                case projectID = "project_id"
+                case createdAt = "created_at"
+                case updatedAt = "updated_at"
+            }
+        }
+        let mrPath = "/projects/\(replacement.projectID)/merge_requests/\(replacement.iid)"
+        let pipelines: [TrainPipeline] = try await mergeRequestAPI(
+            "\(mrPath)/pipelines?per_page=100", host: host, arguments: ["--paginate"], timeout: 45,
+            decode: { try GlabPaginatedJSON.decode(TrainPipeline.self, from: $0) }
+        )
+        let trainRef = "refs/merge-requests/\(replacement.iid)/train"
+        let trainPipelines = pipelines.filter {
+            guard $0.projectID == replacement.projectID, $0.ref == trainRef,
+                  let created = MergeRequestReviewHistory.date($0.createdAt) else { return false }
+            return created >= admittedAt && created <= removedAt
+        }
+        guard let failed = trainPipelines.max(by: { $0.id < $1.id }), failed.status == "failed",
+              let finishedAt = MergeRequestReviewHistory.date(failed.updatedAt), finishedAt <= removedAt else { return nil }
+
+        // The removal note omits the SHA. Bind it to the old revision using
+        // GitLab's diff history, even when the app missed the removal itself.
+        struct Version: Decodable {
+            let head: String
+            let createdAt: String
+            enum CodingKeys: String, CodingKey {
+                case head = "head_commit_sha"
+                case createdAt = "created_at"
+            }
+        }
+        let versions: [Version] = try await mergeRequestAPI(
+            "\(mrPath)/versions?per_page=100",
+            host: host, arguments: ["--paginate"], timeout: 45,
+            decode: { try GlabPaginatedJSON.decode(Version.self, from: $0) }
+        )
+        let history = versions.compactMap { version in
+            MergeRequestReviewHistory.date(version.createdAt).map { (head: version.head, date: $0) }
+        }.sorted { $0.date < $1.date }
+        guard history.count == versions.count,
+              let previous = history.last(where: { $0.date <= admittedAt }), previous.head == receipt.context.head,
+              history.filter({ $0.date >= previous.date && $0.date <= removedAt }).allSatisfy({ $0.head == previous.head }),
+              let current = history.last, current.date > removedAt, current.head == replacement.sha else { return nil }
+        if activeQueue {
+            guard let event = trainEvents.last, let body = event.body,
+                  Self.isTrainAdmission(body) || body.hasPrefix(Self.trainAutoAddNote),
+                  let queuedAt = MergeRequestReviewHistory.date(event.createdAt), queuedAt >= current.date else { return nil }
+        }
+        return Set(notes.compactMap(\.id))
+    }
+
+    private static let trainAutoAddNote = "enabled automatic add to merge train"
+
+    private static func isTrainAdmission(_ body: String) -> Bool {
+        body.hasPrefix("started a [merge train]") || body.hasPrefix("added this merge request to the merge train at position ")
+    }
+
+    func verifyReplacementPipeline(for request: GitLabMergeRequest, host: String) async throws -> GitLabMergeRequest.Pipeline {
+        guard let head = request.headPipeline, head.status == "success", let id = head.id, id > 0,
+              let project = head.projectID, project > 0, let sha = head.sha, Self.isFullGitSHA(sha),
+              let source = request.sha else { throw CancellationError() }
+        let pipeline: GitLabMergeRequest.Pipeline = try await mergeRequestAPI("/projects/\(project)/pipelines/\(id)", host: host)
+        guard pipeline.status == "success", pipeline.id == id, pipeline.projectID == project, pipeline.sha == sha,
+              let ref = pipeline.ref, head.ref == nil || head.ref == ref else { throw CancellationError() }
+        if ref == "refs/merge-requests/\(request.iid)/merge", project == request.targetProjectID {
+            struct Commit: Decodable {
+                let id: String
+                let parentIDs: [String]
+                enum CodingKeys: String, CodingKey { case id; case parentIDs = "parent_ids" }
+            }
+            let commit: Commit = try await mergeRequestAPI("/projects/\(project)/repository/commits/\(sha)", host: host)
+            // GitLab creates the merge result with target first and source second.
+            // The train builds a new pipeline against the target it will merge into.
+            guard commit.id == sha, commit.parentIDs.count == 2, commit.parentIDs.last == source,
+                  let base = commit.parentIDs.first, base != source, Self.isFullGitSHA(base) else { throw CancellationError() }
+        } else {
+            let sourceBranch = ref == request.sourceBranch && project == request.sourceProjectID
+            let mrHead = ref == "refs/merge-requests/\(request.iid)/head"
+                && (project == request.sourceProjectID || project == request.targetProjectID)
+            guard sha == source, sourceBranch || mrHead else { throw CancellationError() }
+        }
+        return pipeline
+    }
+
     func fetchMergeActionPolicy(projectID: Int, host: String, request: GitLabMergeRequest? = nil) async throws -> GitLabMergeActionPolicy {
         struct Project: Decodable {
             let mergeTrainsEnabled: Bool?

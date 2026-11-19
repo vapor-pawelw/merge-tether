@@ -493,6 +493,7 @@ extension GlabService {
         expectedSemanticContextFingerprint: String? = nil,
         action: MergeSubmissionAction = .mergeNow,
         expectedPolicy: GitLabMergeActionPolicy? = nil,
+        expectedTrainRecoveryNoteIDs: Set<Int>? = nil,
         beforeWrite: @MainActor (Int?) throws -> Void = { _ in },
         shouldProceed: @escaping @MainActor @Sendable () -> Bool
     ) async throws -> MergeSubmissionState {
@@ -522,19 +523,22 @@ extension GlabService {
               current.author.id == expectedUser.id, current.sha == headSHA,
               current.webURL.isGitLabMergeRequest(host: host, iid: iid),
               expectedContext == nil || expectedContext == context else { throw CancellationError() }
+        func checkedObservation(_ outcome: MergeSubmissionState, live: GitLabMergeRequest) throws -> MergeSubmissionState {
+            guard glabPath == executable, accountRevision == revision, resolvedHost == host,
+                  currentUsername == expectedUser.username else { throw GlabError.notAuthenticated }
+            guard MergeRequestDependencySummary.Context(live) == context, live.author.id == expectedUser.id,
+                  expectedSemanticContextFingerprint == nil
+                    || live.semanticContextFingerprint == expectedSemanticContextFingerprint else { throw CancellationError() }
+            try Task.checkCancellation()
+            return outcome
+        }
         if expectedPolicy != nil {
             let observed = try await observedMergeSubmission(current, action: action, host: host, usesMergeTrain: expectedPolicy?.usesMergeTrain == true)
             if observed != .none {
                 // A user may enqueue during this preflight. Recheck the session
                 // and context after the awaited train read before recording it.
                 let live = try await fetchMergeRequest(projectID: projectID, iid: iid, host: host)
-                guard glabPath == executable, accountRevision == revision, resolvedHost == host,
-                      currentUsername == expectedUser.username else { throw GlabError.notAuthenticated }
-                guard MergeRequestDependencySummary.Context(live) == context, live.author.id == expectedUser.id,
-                      expectedSemanticContextFingerprint == nil
-                        || live.semanticContextFingerprint == expectedSemanticContextFingerprint else { throw CancellationError() }
-                try Task.checkCancellation()
-                return observed
+                return try checkedObservation(observed, live: live)
             }
             let policy = try await fetchMergeActionPolicy(projectID: projectID, host: host, request: current)
             guard policy == expectedPolicy, policy.action == action else { throw CancellationError() }
@@ -548,10 +552,41 @@ extension GlabService {
         let trainPreparation = expectedPolicy?.usesMergeTrain == true
             ? try await fetchMergeTrainPreparation(current, host: host) : nil
         if let conflict = trainPreparation?.conflict { throw conflict }
+        var recoveredPipeline: GitLabMergeRequest.Pipeline?
+        if let expectedTrainRecoveryNoteIDs {
+            let observed = try await observedMergeSubmission(current, action: action, host: host)
+            if observed.isDelegated {
+                let live = try await fetchMergeRequest(projectID: projectID, iid: iid, host: host)
+                return try checkedObservation(observed, live: live)
+            }
+            guard trainPreparation?.latestNoteID == expectedTrainRecoveryNoteIDs.max() else { throw CancellationError() }
+            recoveredPipeline = try await verifyReplacementPipeline(for: current, host: host)
+        }
         // Re-read after dependency I/O so same-head retargets cannot reuse the
         // checked graph. GitLab's merge SHA precondition protects only the source.
         async let finalRequest = fetchMergeRequest(projectID: projectID, iid: iid, host: host)
-        if expectedDiscussionFingerprint != nil || expectedSemanticContextFingerprint != nil {
+        var replacementContext: GitLabMergeRequest?
+        if let expectedTrainRecoveryNoteIDs {
+            async let drafts = fetchOwnDraftNoteCount(projectID: projectID, iid: iid, host: host, userID: expectedUser.id)
+            let live = try await finalRequest
+            let observed = try await observedMergeSubmission(live, action: action, host: host)
+            if observed != .none { return try checkedObservation(observed, live: live) }
+            let pending = try await drafts
+            let threads = try await fetchMergeRequestDiscussions(projectID: projectID, iid: iid, host: host)
+            guard let sourceProject = context.sourceProjectID else { throw CancellationError() }
+            async let replacement = fetchMergeRequest(projectID: projectID, iid: iid, host: host)
+            async let activeTrain = fetchActiveMergeTrainIIDs(projectID: projectID, host: host).contains(iid)
+            async let source = fetchBranchHeadSHA(projectID: sourceProject, branch: context.source, host: host)
+            let checked = try await replacement
+            if try await activeTrain { return try checkedObservation(.inTrain, live: checked) }
+            if checked.hasQueuedMerge { return try checkedObservation(.queued, live: checked) }
+            guard pending == 0,
+                  try await source == headSHA,
+                  expectedSemanticContextFingerprint == nil || checked.semanticContextFingerprint == expectedSemanticContextFingerprint,
+                  expectedDiscussionFingerprint == nil || ReviewVerdict.fingerprint(threads) == expectedDiscussionFingerprint,
+                  Set(threads.flatMap(\.notes).compactMap(\.id)) == expectedTrainRecoveryNoteIDs else { throw CancellationError() }
+            replacementContext = checked
+        } else if expectedDiscussionFingerprint != nil || expectedSemanticContextFingerprint != nil {
             async let discussions = fetchMergeRequestDiscussions(projectID: projectID, iid: iid, host: host)
             async let drafts = fetchOwnDraftNoteCount(projectID: projectID, iid: iid, host: host, userID: expectedUser.id)
             let (live, threads, pending) = try await (finalRequest, discussions, drafts)
@@ -563,7 +598,7 @@ extension GlabService {
                 throw CancellationError()
             }
         }
-        let final = try await finalRequest
+        let final = if let replacementContext { replacementContext } else { try await finalRequest }
         guard MergeRequestDependencySummary.Context(final) == context, final.isReadyForMergeSubmission(action),
               final.author.id == expectedUser.id else { throw CancellationError() }
         // Outside merge trains, a successful pipeline changes the offered action to Merge now.
@@ -574,6 +609,12 @@ extension GlabService {
               currentUsername == expectedUser.username else { throw GlabError.notAuthenticated }
         try Task.checkCancellation()
         guard shouldProceed() else { throw CancellationError() }
+        if let recoveredPipeline {
+            guard let headPipeline = final.headPipeline, headPipeline.status == "success",
+                  headPipeline.id == recoveredPipeline.id, headPipeline.projectID == recoveredPipeline.projectID,
+                  headPipeline.sha == recoveredPipeline.sha,
+                  headPipeline.ref == nil || headPipeline.ref == recoveredPipeline.ref else { throw CancellationError() }
+        }
 
         try beforeWrite(trainPreparation?.latestNoteID)
         if action == .enqueue {

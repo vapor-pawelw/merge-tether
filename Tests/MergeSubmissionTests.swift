@@ -347,6 +347,187 @@ import Testing
         }
     }
 
+    @Test(arguments: ["repaired", "rebuilt-train", "merged-result", "wrong-merge-parent", "stale-source-pipeline", "accepted-queue",
+                      "same-head", "manual-removal", "canceled-train-pipeline", "unconfirmed", "wrong-head",
+                      "already-queued", "queue-during-preflight", "late-queue", "queue-disappeared", "queue-in-summary",
+                      "concurrent-cancel", "late-cancel", "pipeline-restarted", "stale-live-branch",
+                      "unreadable-history", "unapproved", "clock-skew", "manual"])
+    func aFailedTrainPipelineReleasesOnlyAVerifiedReplacementRevision(_ scenario: String) async throws {
+        try await fixture { glab, gitlab, request in
+            let suite = "FailedTrainPipelineRecovery.\(UUID())"
+            let defaults = try #require(UserDefaults(suiteName: suite))
+            defer { defaults.removePersistentDomain(forName: suite) }
+            let settings = SettingsManager(defaults: defaults)
+            settings.onboardingCompleted = true
+            settings.notificationsEnabled = false
+            settings.automation.applyPreset(.full, for: .codex)
+            settings.automation.autoMergeEnabled = scenario != "manual"
+            let oldHead = try #require(request.sha)
+            let newHead = scenario == "same-head" ? oldHead : String(repeating: "c", count: 40)
+            let attemptDate = Date(timeIntervalSince1970: 1_760_000_000)
+            let previousState: MergeSubmissionState = switch scenario {
+            case "unconfirmed": .uncertain
+            case "accepted-queue": .queued
+            default: .inTrain
+            }
+            let receipt = MergeSubmissionReceipt(target: .init(host: host, username: user.username, projectID: 1, iid: 2),
+                userID: user.id, context: .init(request), semanticFingerprint: request.semanticContextFingerprint,
+                discussionFingerprint: ReviewVerdict.fingerprint([]), configuration: .init(settings),
+                action: .enqueue, state: previousState,
+                createdAt: scenario == "clock-skew" ? attemptDate.addingTimeInterval(300) : attemptDate,
+                trainNoteIDBeforeAttempt: 5)
+            try #require(settings.saveMergeSubmission(receipt))
+            gitlab.write("current-head", newHead)
+            gitlab.write("outcome", "train-only")
+            if ["already-queued", "queue-disappeared"].contains(scenario) { gitlab.write("observed", "train-only") }
+            let timestamp = ISO8601DateFormatter()
+            let startedAt = timestamp.string(from: attemptDate.addingTimeInterval(5))
+            let failedAt = timestamp.string(from: attemptDate.addingTimeInterval(60))
+            let trainPipelineStartedAt = timestamp.string(from: attemptDate.addingTimeInterval(6))
+            let trainPipelineFailedAt = timestamp.string(from: attemptDate.addingTimeInterval(59))
+            let oldVersion = timestamp.string(from: attemptDate.addingTimeInterval(-60))
+            let newVersion = timestamp.string(from: attemptDate.addingTimeInterval(120))
+            let requeuedAt = timestamp.string(from: attemptDate.addingTimeInterval(180))
+            let isMergedResult = ["merged-result", "wrong-merge-parent"].contains(scenario)
+            let pipelineSHA = isMergedResult ? String(repeating: "d", count: 40)
+                : scenario == "stale-source-pipeline" ? oldHead : newHead
+            let pipeline: [String: Any] = ["id": 12, "project_id": 1, "status": "success", "sha": pipelineSHA,
+                "ref": isMergedResult ? "refs/merge-requests/2/merge" : "feature"]
+            let handler = try #require(gitlab.handler)
+            var discussionReadsAfterVerification = 0
+            var detailReadsAfterVerification = 0
+            gitlab.handler = { call in
+                if scenario == "queue-in-summary", call.endpoint.hasPrefix("/merge_requests?"), !gitlab.has("listed-queue") {
+                    gitlab.write("listed-queue")
+                    let response = try await handler(call)
+                    var rows = try #require(JSONSerialization.jsonObject(with: response.stdout) as? [[String: Any]])
+                    rows[0]["merge_when_pipeline_succeeds"] = true
+                    return try InMemoryGitLab.json(rows)
+                }
+                if call.endpoint.contains("/discussions?") {
+                    if gitlab.has("verified-history") { discussionReadsAfterVerification += 1 }
+                    if scenario == "queue-during-preflight", discussionReadsAfterVerification == 2 {
+                        gitlab.write("observed", "train-only")
+                    }
+                    if scenario == "late-queue", discussionReadsAfterVerification == 3 {
+                        gitlab.write("observed", "train-only")
+                    }
+                    let reason = scenario == "manual-removal" ? "" : " because the pipeline did not succeed."
+                    var notes: [[String: Any]] = [
+                        ["id": 7, "system": true, "resolvable": false, "author": ["id": 3], "created_at": startedAt,
+                         "body": "started a [merge train](https://gitlab.example.test/g/p/-/merge_trains)"],
+                        ["id": 8, "system": true, "resolvable": false, "author": ["id": 3], "created_at": failedAt,
+                         "body": "removed this merge request from the merge train" + reason]
+                    ]
+                    if scenario == "accepted-queue" {
+                        notes.insert(["id": 6, "system": true, "resolvable": false, "author": ["id": 3], "created_at": startedAt,
+                            "body": "enabled automatic add to merge train when checks pass"], at: 0)
+                    }
+                    if scenario == "already-queued" {
+                        notes.append(["id": 9, "system": true, "resolvable": false, "author": ["id": 3], "created_at": requeuedAt,
+                            "body": "started a [merge train](https://gitlab.example.test/g/p/-/merge_trains)"])
+                    }
+                    if gitlab.has("cancel-during-recovery") || (scenario == "late-cancel" && discussionReadsAfterVerification >= 3) {
+                        notes.append(["id": 9, "system": true, "resolvable": false, "author": ["id": 3],
+                            "body": "removed this merge request from the merge train"])
+                    }
+                    if scenario == "late-cancel" {
+                        notes.append(["id": 10, "system": true, "resolvable": false, "author": ["id": 3],
+                            "body": "assigned to @me"])
+                    }
+                    return try InMemoryGitLab.json([["id": "train", "notes": notes]])
+                }
+                if call.endpoint.contains("/versions?") {
+                    if scenario == "unreadable-history" { return InMemoryGitLab.output(error: "403 Forbidden", code: 1) }
+                    gitlab.write("verified-history")
+                    if scenario == "concurrent-cancel" { gitlab.write("cancel-during-recovery") }
+                    return try InMemoryGitLab.json([
+                        ["head_commit_sha": newHead, "created_at": newVersion],
+                        ["head_commit_sha": scenario == "wrong-head" ? String(repeating: "d", count: 40) : oldHead,
+                         "created_at": oldVersion]
+                    ])
+                }
+                if call.endpoint.contains("/merge_requests/2/pipelines?") {
+                    let failed: [String: Any] = ["id": 11, "project_id": 1, "ref": "refs/merge-requests/2/train",
+                        "status": scenario == "canceled-train-pipeline" ? "canceled" : "failed",
+                        "created_at": trainPipelineStartedAt, "updated_at": trainPipelineFailedAt]
+                    var pipelines = [failed]
+                    if scenario == "rebuilt-train" {
+                        pipelines.insert(["id": 10, "project_id": 1, "ref": "refs/merge-requests/2/train",
+                            "status": "canceled", "created_at": startedAt, "updated_at": trainPipelineStartedAt], at: 0)
+                    }
+                    return try InMemoryGitLab.json(pipelines)
+                }
+                if call.endpoint == "/projects/1/merge_requests/2" {
+                    let response = try await handler(call)
+                    if gitlab.has("verified-history") { detailReadsAfterVerification += 1 }
+                    var fields = try #require(JSONSerialization.jsonObject(with: response.stdout) as? [String: Any])
+                    fields["head_pipeline"] = pipeline
+                    if scenario == "pipeline-restarted", detailReadsAfterVerification > 2 {
+                        fields["head_pipeline"] = ["id": 13, "status": "running"]
+                    }
+                    return try InMemoryGitLab.json(fields)
+                }
+                if scenario == "unapproved", call.endpoint.hasSuffix("/approval_state") {
+                    return InMemoryGitLab.output(#"{"rules":[{"approvals_required":2,"approved":false}]}"#)
+                }
+                if call.endpoint == "/projects/1/pipelines/12" { return try InMemoryGitLab.json(pipeline) }
+                if call.endpoint == "/projects/1/repository/branches/feature" {
+                    return try InMemoryGitLab.json(["commit": ["id": scenario == "stale-live-branch" ? oldHead : newHead]])
+                }
+                if isMergedResult, call.endpoint == "/projects/1/repository/commits/\(pipelineSHA)" {
+                    let base = String(repeating: "e", count: 40)
+                    let parents = scenario == "wrong-merge-parent" ? [newHead, base] : [base, newHead]
+                    return try InMemoryGitLab.json(["id": pipelineSHA, "parent_ids": parents])
+                }
+                if scenario == "queue-during-preflight", gitlab.has("observed"), call.endpoint.contains("/draft_notes?") {
+                    return InMemoryGitLab.output(#"[{"id":22,"author_id":3,"note":"Unpublished"}]"#)
+                }
+                return try await handler(call)
+            }
+
+            let restored = SettingsManager(defaults: defaults)
+            let monitor = AuthoredMergeRequestMonitor(settings: restored, glab: glab, canAutomate: { _ in true })
+            monitor.refreshIfNeeded()
+            while monitor.isLoading { await Task.yield() }
+            if ["queue-disappeared", "queue-in-summary"].contains(scenario) {
+                gitlab.remove("observed")
+                let restarted = SettingsManager(defaults: defaults)
+                let restartedMonitor = AuthoredMergeRequestMonitor(settings: restarted, glab: glab, canAutomate: { _ in true })
+                restartedMonitor.refreshIfNeeded()
+                while restartedMonitor.isLoading { await Task.yield() }
+                #expect(gitlab.requests.allSatisfy { $0.method == "GET" })
+                #expect(restartedMonitor.requests.first?.submissionState == .changed)
+                return
+            }
+            if scenario == "manual" {
+                let ready = try #require(monitor.requests.first)
+                #expect(ready.mayMergeManually)
+                #expect(await monitor.mergeManually(ready.request, action: .enqueue) == .inTrain)
+            }
+            monitor.refreshIfNeeded()
+            while monitor.isLoading { await Task.yield() }
+
+            let writes = gitlab.requests.filter { $0.method != "GET" }
+            if ["repaired", "rebuilt-train", "merged-result", "accepted-queue", "clock-skew", "manual"].contains(scenario) {
+                #expect(writes.count == 1)
+                #expect(writes.first?.arguments.contains("sha=\(newHead)") == true)
+                #expect(restored.mergeSubmissions.first?.context.head == newHead)
+                #expect(restored.mergeSubmissions.first?.origin == .appAttempt)
+                #expect(restored.mergeSubmissions.first?.trainNoteIDBeforeAttempt == 8)
+                #expect(monitor.requests.first?.submissionState == .inTrain)
+            } else if ["already-queued", "queue-during-preflight", "late-queue"].contains(scenario) {
+                #expect(writes.isEmpty)
+                #expect(monitor.requests.first?.submissionState == .inTrain)
+                #expect(restored.mergeSubmissions.first?.origin == .observedQueue)
+                #expect(restored.mergeSubmissions.first?.context.head == newHead)
+            } else {
+                #expect(writes.isEmpty)
+                #expect(restored.mergeSubmissions == [receipt])
+            }
+        }
+    }
+
     @Test(arguments: ["account", "target-unavailable"])
     func trainEvidenceCannotAuthorizeAcrossASessionChangeOrMissingTarget(_ failure: String) async throws {
         try await fixture { glab, gitlab, request in

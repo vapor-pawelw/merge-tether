@@ -10,6 +10,8 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 
 - Confirm app-wide automation changes from the Mac toolbar, with the option to skip future confirmations.
 
+- Resume automatic merge for a new, eligible revision after GitLab confirms that a previous merge train pipeline failed.
+
 - Highlight who still needs to resolve addressed feedback on Mac and iPhone MR cards and in Details. Hover or tap a person's name for their avatar and GitLab username.
 
 - Use standard text colors in the person popover when a name is highlighted on an MR card.

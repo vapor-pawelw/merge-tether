@@ -74,12 +74,22 @@ struct MergeSubmissionReceipt: Codable, Equatable {
     let createdAt: Date
     var trainNoteIDBeforeAttempt: Int? = nil
     var confirmedTrainRejection: MergeTrainPreparationConflict? = nil
+    var observedReplacementQueue: Bool? = nil
+
+    func canReconcileFailedTrainPipeline(for request: GitLabMergeRequest) -> Bool {
+        origin == .appAttempt && action == .enqueue && state.isDelegated
+            && trainNoteIDBeforeAttempt.map { $0 >= 0 } == true && isReplacementRevision(request)
+    }
 
     func mayReconsiderAfterTrainRepair(_ request: GitLabMergeRequest) -> Bool {
         guard let proof = confirmedTrainRejection, proof.context == context,
               proof.sourceSHA == context.head, GlabService.isFullGitSHA(proof.targetSHA),
-              let baseline = trainNoteIDBeforeAttempt, baseline >= 0, proof.noteID > baseline,
-              let head = request.sha, GlabService.isFullGitSHA(head), head != context.head else { return false }
+              let baseline = trainNoteIDBeforeAttempt, baseline >= 0, proof.noteID > baseline else { return false }
+        return isReplacementRevision(request)
+    }
+
+    private func isReplacementRevision(_ request: GitLabMergeRequest) -> Bool {
+        guard let head = request.sha, GlabService.isFullGitSHA(head), head != context.head else { return false }
         return request.projectID == context.projectID && request.iid == context.iid && request.webURL == context.url
             && request.sourceProjectID == context.sourceProjectID && request.sourceBranch == context.source
             && request.targetProjectID == context.targetProjectID && request.targetBranch == context.target

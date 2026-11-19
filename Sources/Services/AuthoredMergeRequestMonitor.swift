@@ -347,11 +347,14 @@ final class AuthoredMergeRequestMonitor {
                 }
                 do {
                     let outcome = try await performSubmission(status.request, account: account, user: user,
-                        revision: revision, configuration: configuration, policy: policy, automatic: true)
+                        revision: revision, configuration: configuration, policy: policy, automatic: true,
+                        trainRecovery: evaluation.trainRecovery)
                     if outcome == .merged { continue }
                     status.submissionState = outcome
                 } catch is CancellationError {
-                    // The live account, settings or checked MR changed.
+                    if evaluation.trainRecovery != nil {
+                        status.submissionState = submissionState(for: request, account: account)
+                    }
                 } catch {
                     actionFailed = true
                     status.submissionState = submissionState(for: request, account: account)
@@ -403,12 +406,21 @@ final class AuthoredMergeRequestMonitor {
     }
 
     private func rememberObservedQueue(_ state: MergeSubmissionState, for request: GitLabMergeRequest,
-                                       account: Account, user: GitLabAuthenticatedUser, revision: UInt64) {
+                                       account: Account, user: GitLabAuthenticatedUser, revision: UInt64,
+                                       replacingFailedAttempt: MergeSubmissionReceipt? = nil) {
         guard isCurrent(account), glab.accountRevision == revision, !Task.isCancelled else { return }
-        if let previous = receipt(for: request, account: account) {
+        if var previous = receipt(for: request, account: account) {
             // A repaired head's observed queue takes over the earlier attempt's replay guard.
-            guard previous.origin == .appAttempt, previous.userID == user.id,
-                  previous.mayReconsiderAfterTrainRepair(request) else { return }
+            guard previous.origin == .appAttempt, previous.userID == user.id else { return }
+            if previous != replacingFailedAttempt, !previous.mayReconsiderAfterTrainRepair(request) {
+                // A queue may be visible before its admission note. Its later
+                // disappearance must still prevent an automatic replacement.
+                if previous.canReconcileFailedTrainPipeline(for: request), previous.observedReplacementQueue != true {
+                    previous.observedReplacementQueue = true
+                    _ = settings.saveMergeSubmission(previous)
+                }
+                return
+            }
         }
         let observed = MergeSubmissionReceipt(origin: .observedQueue, target: .init(host: account.host,
             username: user.username, projectID: request.projectID, iid: request.iid), userID: user.id,
@@ -446,18 +458,21 @@ final class AuthoredMergeRequestMonitor {
                 rememberObservedQueue(.queued, for: request, account: account, user: user, revision: revision)
             }
             let prior = submissionState(for: request, account: account)
-            if prior != .none { return prior }
+            if prior != .none, receipt(for: request, account: account)?.canReconcileFailedTrainPipeline(for: request) != true {
+                return prior
+            }
             async let approvals = glab.fetchMergeRequestApprovalState(projectID: request.projectID, iid: request.iid, host: host)
             async let resolved = glab.mergeRequestDiscussionsAreResolved(projectID: request.projectID, iid: request.iid, host: host)
             async let drafts = glab.fetchOwnDraftNoteCount(projectID: request.projectID, iid: request.iid, host: host, userID: user.id)
-            let (status, policy) = try await evaluate(request, approvals: approvals, resolved: resolved, pendingDraftCount: drafts,
+            let (status, policy, trainRecovery) = try await evaluate(request, approvals: approvals, resolved: resolved, pendingDraftCount: drafts,
                 account: account, user: user, revision: revision)
             guard isCurrent(account), glab.accountRevision == revision else { return .changed }
             if let index = requests.firstIndex(where: { $0.id == status.id }) { requests[index] = status }
+            if status.submissionState != .none { return status.submissionState }
             guard status.mayMergeManually, status.action == action, let policy else { return .changed }
             let outcome = try await performSubmission(status.request, account: account, user: user,
                 revision: revision, configuration: configuration, policy: policy, automatic: false,
-                verificationAssistant: verificationAssistant)
+                trainRecovery: trainRecovery, verificationAssistant: verificationAssistant)
             if outcome == .merged { requests.removeAll { $0.id == status.id } }
             else if let index = requests.firstIndex(where: { $0.id == status.id }) { requests[index].submissionState = outcome }
             return outcome
@@ -481,6 +496,7 @@ final class AuthoredMergeRequestMonitor {
     private func performSubmission(_ request: GitLabMergeRequest, account: Account, user: GitLabAuthenticatedUser,
                                    revision: UInt64, configuration: AutomationSettings,
                                    policy: GitLabMergeActionPolicy, automatic: Bool,
+                                   trainRecovery: FailedTrainRecovery?,
                                    verificationAssistant: AutomationAssistant? = nil) async throws -> MergeSubmissionState {
         let work = AssistantAutomationRunner.MergeRequestWork(host: account.host, projectID: request.projectID, iid: request.iid)
         let configurationID = configurationFingerprint()
@@ -494,8 +510,11 @@ final class AuthoredMergeRequestMonitor {
                 && !self.settings.pendingCommentReviews.contains(.init(host: account.host, username: account.username,
                     projectID: request.projectID, iid: request.iid))
         }
-        guard permits(), let action = policy.action, let sha = request.sha,
-              submissionState(for: request, account: account) == .none else { throw CancellationError() }
+        func mayReplaceReceipt() -> Bool {
+            if let trainRecovery { return self.receipt(for: request, account: account) == trainRecovery.receipt }
+            return submissionState(for: request, account: account) == .none
+        }
+        guard permits(), let action = policy.action, let sha = request.sha, mayReplaceReceipt() else { throw CancellationError() }
         let id = MergeRequestAttentionMonitor.Item.ID(projectID: request.projectID, iid: request.iid)
         guard mergingRequests[id] == nil else { throw CancellationError() }
         mergingRequests[id] = .init(account: account, revision: revision, headSHA: sha)
@@ -525,9 +544,10 @@ final class AuthoredMergeRequestMonitor {
             outcome = try await glab.mergeMergeRequest(projectID: request.projectID, iid: request.iid,
                 headSHA: sha, host: account.host, expectedUser: user, expectedContext: .init(request),
                 expectedDiscussionFingerprint: fingerprint, expectedSemanticContextFingerprint: request.semanticContextFingerprint,
-                action: action, expectedPolicy: policy, beforeWrite: { baseline in
+                action: action, expectedPolicy: policy, expectedTrainRecoveryNoteIDs: trainRecovery?.noteIDs,
+                beforeWrite: { baseline in
                     receipt.trainNoteIDBeforeAttempt = baseline
-                    guard permits(), self.submissionState(for: request, account: account) == .none,
+                    guard permits(), mayReplaceReceipt(),
                           self.settings.saveMergeSubmission(receipt) else { throw CancellationError() }
                     didWrite = true
                 }, shouldProceed: {
@@ -562,7 +582,7 @@ final class AuthoredMergeRequestMonitor {
         account: Account,
         user: GitLabAuthenticatedUser,
         revision: UInt64
-    ) async -> (status: AuthoredMergeRequestStatus, policy: GitLabMergeActionPolicy?) {
+    ) async -> (status: AuthoredMergeRequestStatus, policy: GitLabMergeActionPolicy?, trainRecovery: FailedTrainRecovery?) {
         let host = account.host
         var request = request
         let target = MRAutomationScope.Target(host: host, username: account.username, projectID: request.projectID, iid: request.iid)
@@ -596,6 +616,20 @@ final class AuthoredMergeRequestMonitor {
         else { dependencyReadiness = .notChecked }
         var state = trainState.isDelegated ? trainState : submissionState(for: request, account: account)
         if state == .none, trainState == .uncertain { state = .uncertain }
+        let readyToRequeue = state == .changed && trainState == .none && canSubmit && request.headPipeline?.status == "success"
+        let trainRecovery: FailedTrainRecovery? = if policy?.usesMergeTrain == true, policy?.action == .enqueue,
+                                                     readyToRequeue || trainState.isDelegated {
+            await failedTrainRecovery(for: request, activeQueue: trainState.isDelegated,
+                account: account, user: user, revision: revision)
+        } else { nil }
+        if let trainRecovery {
+            if trainState.isDelegated {
+                rememberObservedQueue(trainState, for: request, account: account, user: user, revision: revision,
+                    replacingFailedAttempt: trainRecovery.receipt)
+            } else {
+                state = .none
+            }
+        }
         // A still-active queue can also be shown as changed when discussion evidence drifts.
         let queueHasEnded = if state == .changed, trainState == .none, policy?.action != nil,
                                let receipt = receipt(for: request, account: account), receipt.userID == user.id {
@@ -615,7 +649,24 @@ final class AuthoredMergeRequestMonitor {
             requiresCommentReview: settings.pendingCommentReviews.contains(target),
             action: policy?.action, submissionState: state, queueHasEnded: queueHasEnded
         )
-        return (status, policy)
+        return (status, policy, trainRecovery)
+    }
+
+    private struct FailedTrainRecovery {
+        let receipt: MergeSubmissionReceipt
+        let noteIDs: Set<Int>
+    }
+
+    private func failedTrainRecovery(for request: GitLabMergeRequest, activeQueue: Bool, account: Account,
+                                     user: GitLabAuthenticatedUser, revision: UInt64) async -> FailedTrainRecovery? {
+        guard let previous = receipt(for: request, account: account), previous.userID == user.id,
+              previous.canReconcileFailedTrainPipeline(for: request),
+              activeQueue || previous.observedReplacementQueue != true,
+              let noteIDs = try? await glab.verifyFailedTrainPipeline(previous, replacement: request,
+                activeQueue: activeQueue, host: account.host),
+              isCurrent(account), glab.accountRevision == revision, !Task.isCancelled,
+              receipt(for: request, account: account) == previous else { return nil }
+        return .init(receipt: previous, noteIDs: noteIDs)
     }
 
     private func checkQueuedDiscussions(for request: GitLabMergeRequest, account: Account,
