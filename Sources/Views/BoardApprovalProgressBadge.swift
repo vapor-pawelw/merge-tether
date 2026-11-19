@@ -147,7 +147,7 @@ struct BoardApprovalProgressBadge: View {
                                 .accessibilityLabel(Text(.Board.boardApprovalsApproved))
                                 .help(Text(.Board.boardApprovalsApproved))
                         case .previouslyApproved:
-                            Image(systemName: "checkmark.seal").foregroundStyle(.secondary)
+                            Image(systemName: "checkmark.seal.fill").foregroundStyle(.orange)
                                 .accessibilityLabel(Text(.Board.boardApprovalsPreviouslyApproved))
                                 .help(Text(.Board.boardApprovalsPreviouslyApproved))
                         case .commented:

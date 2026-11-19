@@ -16,6 +16,8 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 
 - Show approval badges in gray at zero approvals, muted orange below half of the required approvals, and muted yellow from halfway. Show green when the approval count meets or exceeds the requirement or GitLab confirms the rules are satisfied.
 
+- Show reset approvals with a filled orange checkmark badge in the approval people list on Mac and iOS.
+
 - Regenerate private drafts on Mac or iPhone for one comment, one MR, or all tracked MRs. Add optional instructions, compare the proposals, and save the ones you choose.
 
 - Highlight merge train, queued auto-merge, and active merge progress below the MR title on Mac cards and in Details.

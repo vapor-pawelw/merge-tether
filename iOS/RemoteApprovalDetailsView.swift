@@ -124,7 +124,7 @@ struct RemoteApprovalPersonRow: View {
                 if isViewer { Text(.Board.boardApprovalsViewerSuffix).font(.callout).foregroundStyle(.secondary) }
             }
             Label(person.status.title, systemImage: person.status.symbol)
-                .font(.callout).foregroundStyle(person.status == .approved ? Color.green : isViewer && person.status == .previouslyApproved ? .orange : .secondary)
+                .font(.callout).foregroundStyle(person.status.color)
             if let changedAt = person.changedAt {
                 Text(changedAt, format: .dateTime.year().month().day().hour().minute())
                     .font(.caption).foregroundStyle(.secondary)
@@ -146,10 +146,16 @@ extension RemoteApprovalPerson.Status {
     }
     var symbol: String {
         switch self {
-        case .approved: "checkmark.seal.fill"
-        case .previouslyApproved: "checkmark.seal"
+        case .approved, .previouslyApproved: "checkmark.seal.fill"
         case .commented: "bubble.left"
         case .assigned: "person"
+        }
+    }
+    var color: Color {
+        switch self {
+        case .approved: .green
+        case .previouslyApproved: .orange
+        case .commented, .assigned: .secondary
         }
     }
 }
