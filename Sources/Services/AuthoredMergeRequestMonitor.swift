@@ -415,7 +415,8 @@ final class AuthoredMergeRequestMonitor {
             if previous != replacingFailedAttempt, !previous.mayReconsiderAfterTrainRepair(request) {
                 // A queue may be visible before its admission note. Its later
                 // disappearance must still prevent an automatic replacement.
-                if previous.canReconcileFailedTrainPipeline(for: request), previous.observedReplacementQueue != true {
+                let returnedToTrain = previous.observedTrainDeparture == true && previous.context == .init(request)
+                if returnedToTrain || previous.canReconcileFailedTrainPipeline(for: request), previous.observedReplacementQueue != true {
                     previous.observedReplacementQueue = true
                     _ = settings.saveMergeSubmission(previous)
                 }
@@ -545,6 +546,12 @@ final class AuthoredMergeRequestMonitor {
                 headSHA: sha, host: account.host, expectedUser: user, expectedContext: .init(request),
                 expectedDiscussionFingerprint: fingerprint, expectedSemanticContextFingerprint: request.semanticContextFingerprint,
                 action: action, expectedPolicy: policy, expectedTrainRecoveryNoteIDs: trainRecovery?.noteIDs,
+                onRecoveryQueueObserved: {
+                    guard var previous = trainRecovery?.receipt, self.isCurrent(account), self.glab.accountRevision == revision,
+                          self.receipt(for: request, account: account) == previous else { return }
+                    previous.observedReplacementQueue = true
+                    _ = self.settings.saveMergeSubmission(previous)
+                },
                 beforeWrite: { baseline in
                     receipt.trainNoteIDBeforeAttempt = baseline
                     guard permits(), mayReplaceReceipt(),
@@ -595,6 +602,12 @@ final class AuthoredMergeRequestMonitor {
             trainState = (try? await glab.observedMergeSubmission(request, action: .enqueue, host: host)) ?? .uncertain
             if trainState.isDelegated {
                 rememberObservedQueue(trainState, for: request, account: account, user: user, revision: revision)
+            } else if trainState == .none, isCurrent(account), glab.accountRevision == revision, !Task.isCancelled,
+                      var previous = receipt(for: request, account: account), previous.origin == .appAttempt,
+                      previous.userID == user.id, previous.state == .inTrain, previous.context == .init(request),
+                      previous.observedTrainDeparture != true {
+                previous.observedTrainDeparture = true
+                _ = settings.saveMergeSubmission(previous)
             }
         }
         if policy?.usesMergeTrain == true {

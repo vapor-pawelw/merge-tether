@@ -349,7 +349,8 @@ import Testing
 
     @Test(arguments: ["repaired", "rebuilt-train", "merged-result", "wrong-merge-parent", "stale-source-pipeline", "accepted-queue",
                       "same-head", "manual-removal", "canceled-train-pipeline", "unconfirmed", "wrong-head",
-                      "already-queued", "queue-during-preflight", "late-queue", "queue-disappeared", "queue-in-summary",
+                      "already-queued", "queue-during-preflight", "queue-recheck-fails", "late-queue",
+                      "queue-disappeared", "queue-in-summary", "same-head-requeued",
                       "concurrent-cancel", "late-cancel", "pipeline-restarted", "stale-live-branch",
                       "unreadable-history", "unapproved", "clock-skew", "manual"])
     func aFailedTrainPipelineReleasesOnlyAVerifiedReplacementRevision(_ scenario: String) async throws {
@@ -377,7 +378,7 @@ import Testing
                 createdAt: scenario == "clock-skew" ? attemptDate.addingTimeInterval(300) : attemptDate,
                 trainNoteIDBeforeAttempt: 5)
             try #require(settings.saveMergeSubmission(receipt))
-            gitlab.write("current-head", newHead)
+            gitlab.write("current-head", scenario == "same-head-requeued" ? oldHead : newHead)
             gitlab.write("outcome", "train-only")
             if ["already-queued", "queue-disappeared"].contains(scenario) { gitlab.write("observed", "train-only") }
             let timestamp = ISO8601DateFormatter()
@@ -406,8 +407,9 @@ import Testing
                 }
                 if call.endpoint.contains("/discussions?") {
                     if gitlab.has("verified-history") { discussionReadsAfterVerification += 1 }
-                    if scenario == "queue-during-preflight", discussionReadsAfterVerification == 2 {
+                    if ["queue-during-preflight", "queue-recheck-fails"].contains(scenario), discussionReadsAfterVerification == 2 {
                         gitlab.write("observed", "train-only")
+                        if scenario == "queue-recheck-fails" { gitlab.write("fail-queue-recheck") }
                     }
                     if scenario == "late-queue", discussionReadsAfterVerification == 3 {
                         gitlab.write("observed", "train-only")
@@ -459,6 +461,7 @@ import Testing
                     return try InMemoryGitLab.json(pipelines)
                 }
                 if call.endpoint == "/projects/1/merge_requests/2" {
+                    if gitlab.has("fail-queue-recheck") { return InMemoryGitLab.output(error: "403 Forbidden", code: 1) }
                     let response = try await handler(call)
                     if gitlab.has("verified-history") { detailReadsAfterVerification += 1 }
                     var fields = try #require(JSONSerialization.jsonObject(with: response.stdout) as? [String: Any])
@@ -490,9 +493,17 @@ import Testing
             let monitor = AuthoredMergeRequestMonitor(settings: restored, glab: glab, canAutomate: { _ in true })
             monitor.refreshIfNeeded()
             while monitor.isLoading { await Task.yield() }
-            if ["queue-disappeared", "queue-in-summary"].contains(scenario) {
+            if scenario == "same-head-requeued" {
+                gitlab.write("observed", "train-only")
+                monitor.refreshIfNeeded()
+                while monitor.isLoading { await Task.yield() }
+                gitlab.write("current-head", newHead)
+            }
+            if ["queue-disappeared", "queue-in-summary", "queue-recheck-fails", "same-head-requeued"].contains(scenario) {
                 gitlab.remove("observed")
+                gitlab.remove("fail-queue-recheck")
                 let restarted = SettingsManager(defaults: defaults)
+                #expect(restarted.mergeSubmissions.first?.observedReplacementQueue == true)
                 let restartedMonitor = AuthoredMergeRequestMonitor(settings: restarted, glab: glab, canAutomate: { _ in true })
                 restartedMonitor.refreshIfNeeded()
                 while restartedMonitor.isLoading { await Task.yield() }
@@ -523,7 +534,9 @@ import Testing
                 #expect(restored.mergeSubmissions.first?.context.head == newHead)
             } else {
                 #expect(writes.isEmpty)
-                #expect(restored.mergeSubmissions == [receipt])
+                var expected = receipt
+                if scenario == "same-head" { expected.observedTrainDeparture = true }
+                #expect(restored.mergeSubmissions == [expected])
             }
         }
     }

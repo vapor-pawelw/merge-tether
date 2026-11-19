@@ -78,8 +78,8 @@ extension GlabService {
         guard let failed = trainPipelines.max(by: { $0.id < $1.id }), failed.status == "failed",
               let finishedAt = MergeRequestReviewHistory.date(failed.updatedAt), finishedAt <= removedAt else { return nil }
 
-        // The removal note omits the SHA. Bind it to the old revision using
-        // GitLab's diff history, even when the app missed the removal itself.
+        // A source update drops the car from GitLab's train. Bind the single
+        // admission and removal to the source SHA in GitLab's diff history.
         struct Version: Decodable {
             let head: String
             let createdAt: String

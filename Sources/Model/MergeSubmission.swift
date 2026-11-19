@@ -75,6 +75,7 @@ struct MergeSubmissionReceipt: Codable, Equatable {
     var trainNoteIDBeforeAttempt: Int? = nil
     var confirmedTrainRejection: MergeTrainPreparationConflict? = nil
     var observedReplacementQueue: Bool? = nil
+    var observedTrainDeparture: Bool? = nil
 
     func canReconcileFailedTrainPipeline(for request: GitLabMergeRequest) -> Bool {
         origin == .appAttempt && action == .enqueue && state.isDelegated

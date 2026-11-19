@@ -494,6 +494,7 @@ extension GlabService {
         action: MergeSubmissionAction = .mergeNow,
         expectedPolicy: GitLabMergeActionPolicy? = nil,
         expectedTrainRecoveryNoteIDs: Set<Int>? = nil,
+        onRecoveryQueueObserved: @MainActor () -> Void = {},
         beforeWrite: @MainActor (Int?) throws -> Void = { _ in },
         shouldProceed: @escaping @MainActor @Sendable () -> Bool
     ) async throws -> MergeSubmissionState {
@@ -527,14 +528,21 @@ extension GlabService {
             guard glabPath == executable, accountRevision == revision, resolvedHost == host,
                   currentUsername == expectedUser.username else { throw GlabError.notAuthenticated }
             guard MergeRequestDependencySummary.Context(live) == context, live.author.id == expectedUser.id,
-                  expectedSemanticContextFingerprint == nil
+                  expectedTrainRecoveryNoteIDs != nil || expectedSemanticContextFingerprint == nil
                     || live.semanticContextFingerprint == expectedSemanticContextFingerprint else { throw CancellationError() }
             try Task.checkCancellation()
             return outcome
         }
+        func rememberRecoveryQueue(_ outcome: MergeSubmissionState) {
+            if expectedTrainRecoveryNoteIDs != nil, outcome.isDelegated, glabPath == executable,
+               accountRevision == revision, resolvedHost == host, currentUsername == expectedUser.username {
+                onRecoveryQueueObserved()
+            }
+        }
         if expectedPolicy != nil {
             let observed = try await observedMergeSubmission(current, action: action, host: host, usesMergeTrain: expectedPolicy?.usesMergeTrain == true)
             if observed != .none {
+                rememberRecoveryQueue(observed)
                 // A user may enqueue during this preflight. Recheck the session
                 // and context after the awaited train read before recording it.
                 let live = try await fetchMergeRequest(projectID: projectID, iid: iid, host: host)
@@ -556,6 +564,7 @@ extension GlabService {
         if let expectedTrainRecoveryNoteIDs {
             let observed = try await observedMergeSubmission(current, action: action, host: host)
             if observed.isDelegated {
+                rememberRecoveryQueue(observed)
                 let live = try await fetchMergeRequest(projectID: projectID, iid: iid, host: host)
                 return try checkedObservation(observed, live: live)
             }
@@ -570,16 +579,24 @@ extension GlabService {
             async let drafts = fetchOwnDraftNoteCount(projectID: projectID, iid: iid, host: host, userID: expectedUser.id)
             let live = try await finalRequest
             let observed = try await observedMergeSubmission(live, action: action, host: host)
-            if observed != .none { return try checkedObservation(observed, live: live) }
+            if observed != .none {
+                rememberRecoveryQueue(observed)
+                return try checkedObservation(observed, live: live)
+            }
             let pending = try await drafts
             let threads = try await fetchMergeRequestDiscussions(projectID: projectID, iid: iid, host: host)
             guard let sourceProject = context.sourceProjectID else { throw CancellationError() }
             async let replacement = fetchMergeRequest(projectID: projectID, iid: iid, host: host)
             async let activeTrain = fetchActiveMergeTrainIIDs(projectID: projectID, host: host).contains(iid)
             async let source = fetchBranchHeadSHA(projectID: sourceProject, branch: context.source, host: host)
+            let inTrain = try await activeTrain
+            if inTrain { rememberRecoveryQueue(.inTrain) }
             let checked = try await replacement
-            if try await activeTrain { return try checkedObservation(.inTrain, live: checked) }
-            if checked.hasQueuedMerge { return try checkedObservation(.queued, live: checked) }
+            if inTrain { return try checkedObservation(.inTrain, live: checked) }
+            if checked.hasQueuedMerge {
+                rememberRecoveryQueue(.queued)
+                return try checkedObservation(.queued, live: checked)
+            }
             guard pending == 0,
                   try await source == headSHA,
                   expectedSemanticContextFingerprint == nil || checked.semanticContextFingerprint == expectedSemanticContextFingerprint,
