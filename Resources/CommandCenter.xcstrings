@@ -376,13 +376,13 @@
         "en": {
           "stringUnit": {
             "state": "translated",
-            "value": "Automation is on. Click to turn off all automation app-wide. Settings, presets and MR choices stay unchanged."
+            "value": "Pause automation app-wide"
           }
         },
         "pl": {
           "stringUnit": {
             "state": "translated",
-            "value": "Automatyzacja jest włączona. Kliknij, aby wyłączyć całą automatyzację w aplikacji. Ustawienia, preset i wybory dla MR pozostaną bez zmian."
+            "value": "Wstrzymaj automatyzację w całej aplikacji"
           }
         }
       }
@@ -393,13 +393,13 @@
         "en": {
           "stringUnit": {
             "state": "translated",
-            "value": "Automation is off app-wide: nothing runs automatically, while MRs and settings stay as configured. Click to turn it back on."
+            "value": "Resume automation app-wide"
           }
         },
         "pl": {
           "stringUnit": {
             "state": "translated",
-            "value": "Automatyzacja jest wyłączona globalnie: nic nie uruchamia się automatycznie, a MR-y i ustawienia pozostają bez zmian. Kliknij, aby włączyć ją z powrotem."
+            "value": "Wznów automatyzację w całej aplikacji"
           }
         }
       }
@@ -417,6 +417,125 @@
           "stringUnit": {
             "state": "translated",
             "value": "Preset Manual nie ma automatyzacji do włączenia. Wybierz inny preset w Ustawieniach."
+          }
+        }
+      }
+    },
+    "commandCenter.automation.confirm.dontAskAgain": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Don't ask again"
+          }
+        },
+        "pl": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Nie pytaj ponownie"
+          }
+        }
+      }
+    },
+    "commandCenter.automation.confirm.preference": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Confirm global automation changes"
+          }
+        },
+        "pl": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Potwierdzaj globalne zmiany automatyzacji"
+          }
+        }
+      }
+    },
+    "commandCenter.automation.confirm.pause.title": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Pause automation app-wide?"
+          }
+        },
+        "pl": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Wstrzymać automatyzację w całej aplikacji?"
+          }
+        }
+      }
+    },
+    "commandCenter.automation.confirm.pause.message": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Running automatic tasks will be canceled."
+          }
+        },
+        "pl": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Trwające zadania automatyczne zostaną anulowane."
+          }
+        }
+      }
+    },
+    "commandCenter.automation.confirm.pause.action": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Pause automation"
+          }
+        },
+        "pl": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Wstrzymaj automatyzację"
+          }
+        }
+      }
+    },
+    "commandCenter.automation.confirm.resume.title": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Resume automation app-wide?"
+          }
+        },
+        "pl": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Wznowić automatyzację w całej aplikacji?"
+          }
+        }
+      }
+    },
+    "commandCenter.automation.confirm.resume.message": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Automatic actions may run immediately under your saved settings."
+          }
+        },
+        "pl": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Aplikacja może od razu wykonać automatyczne działania zgodnie z zapisanymi ustawieniami."
           }
         }
       }

@@ -183,7 +183,7 @@ struct CommandCenterView: View {
         let available = settings.configuredAutomationAvailable
         let active = settings.automationGloballyActive
         // A plain toolbar button keeps the standard chrome; the bolt alone shows the state.
-        return Button { monitor.setAutomationGloballyEnabled(!settings.automationGloballyEnabled) } label: {
+        return Button { monitor.requestGlobalAutomationToggle(confirm: confirmGlobalAutomationChange) } label: {
             Label { Text(.CommandCenter.commandCenterAutomationToggle) } icon: {
                 Image(systemName: active ? "bolt.fill" : "bolt.slash")
                     .foregroundStyle(active ? Color.accentColor : Color.secondary)
@@ -193,6 +193,23 @@ struct CommandCenterView: View {
         .accessibilityAddTraits(active ? .isSelected : [])
         .help(Text(!available ? .CommandCenter.commandCenterAutomationHelpManual
             : active ? .CommandCenter.commandCenterAutomationHelpActive : .CommandCenter.commandCenterAutomationHelpSuspended))
+    }
+
+    private func confirmGlobalAutomationChange(enabling: Bool) -> TodoMonitorService.GlobalAutomationConfirmation {
+        let alert = NSAlert()
+        alert.alertStyle = enabling ? .informational : .warning
+        alert.messageText = String(localized: enabling ? .CommandCenter.commandCenterAutomationConfirmResumeTitle
+            : .CommandCenter.commandCenterAutomationConfirmPauseTitle)
+        alert.informativeText = String(localized: enabling ? .CommandCenter.commandCenterAutomationConfirmResumeMessage
+            : .CommandCenter.commandCenterAutomationConfirmPauseMessage)
+        alert.showsSuppressionButton = true
+        alert.suppressionButton?.title = String(localized: .CommandCenter.commandCenterAutomationConfirmDontAskAgain)
+        let cancel = alert.addButton(withTitle: String(localized: .Menu.menuScopeCancel))
+        cancel.keyEquivalent = "\r"
+        alert.addButton(withTitle: String(localized: enabling ? .CommandCenter.commandCenterAutomationSuspendedResume
+            : .CommandCenter.commandCenterAutomationConfirmPauseAction))
+        guard alert.runModal() == .alertSecondButtonReturn else { return .cancel }
+        return alert.suppressionButton?.state == .on ? .confirmAndSkipFuturePrompts : .confirm
     }
 
     @ViewBuilder

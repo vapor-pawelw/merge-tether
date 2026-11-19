@@ -27,9 +27,24 @@ final class TodoMonitorService {
 
     let automationToggleNotices = AutomationToggleNoticeCenter()
 
+    enum GlobalAutomationConfirmation: Equatable {
+        case cancel
+        case confirm
+        case confirmAndSkipFuturePrompts
+    }
+
+    func requestGlobalAutomationToggle(confirm: (_ enabling: Bool) -> GlobalAutomationConfirmation) {
+        guard settings.configuredAutomationAvailable else { return }
+        let enabling = !settings.automationGloballyEnabled
+        let response = settings.confirmGlobalAutomationChanges ? confirm(enabling) : .confirm
+        guard response != .cancel else { return }
+        setAutomationGloballyEnabled(enabling, skipFutureConfirmations: response == .confirmAndSkipFuturePrompts)
+    }
+
     /// The global killswitch overrides presets and per-MR choices without changing them.
-    func setAutomationGloballyEnabled(_ enabled: Bool) {
+    func setAutomationGloballyEnabled(_ enabled: Bool, skipFutureConfirmations: Bool = false) {
         guard settings.configuredAutomationAvailable, enabled != settings.automationGloballyEnabled else { return }
+        if skipFutureConfirmations { settings.confirmGlobalAutomationChanges = false }
         settings.setAutomationGloballyEnabled(enabled)
         automationToggleNotices.post(.global(active: enabled))
     }

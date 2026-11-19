@@ -56,6 +56,20 @@ struct GeneralSettingsTab: View {
             }
 
             Section {
+                Toggle(isOn: Binding(
+                    get: { monitor.settings.confirmGlobalAutomationChanges },
+                    set: { enabled in
+                        monitor.settings.confirmGlobalAutomationChanges = enabled
+                        monitor.settings.save()
+                    }
+                )) {
+                    Text(.CommandCenter.commandCenterAutomationConfirmPreference)
+                }
+            } header: {
+                Text(.CommandCenter.commandCenterAutomationToggle)
+            }
+
+            Section {
                 Toggle(isOn: notificationsEnabledBinding) {
                     Text(.Settings.settingsGeneralNotificationsToggle)
                 }

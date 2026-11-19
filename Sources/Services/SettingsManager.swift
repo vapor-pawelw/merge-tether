@@ -57,6 +57,7 @@ final class SettingsManager {
     /// The app-wide automation killswitch. It is stored apart from `automation`, so turning it off
     /// overrides presets and per-MR choices at runtime without changing them.
     private(set) var automationGloballyEnabled: Bool
+    var confirmGlobalAutomationChanges: Bool
     /// Automation as configured. Presentation reads this so the killswitch only stops execution
     /// and never changes how cards, menus or groupings look.
     var configuredAutomation: AutomationSettings { automation.ignoringGlobalSuspension }
@@ -110,6 +111,7 @@ final class SettingsManager {
         let loadedAutomation = store.load(Key.automation, fallback: AutomationSettings())
         let globallyEnabled = defaults.bool(forKey: Key.automationGloballyEnabled)
         automationGloballyEnabled = globallyEnabled
+        confirmGlobalAutomationChanges = defaults.bool(forKey: Key.confirmGlobalAutomationChanges)
         var runtimeAutomation = loadedAutomation
         runtimeAutomation.isGloballySuspended = !globallyEnabled
         automation = runtimeAutomation
@@ -217,6 +219,7 @@ final class SettingsManager {
         defaults.set(unreadReminderSound.rawValue, forKey: Key.unreadReminderSound)
         defaults.set(notificationsEnabled, forKey: Key.notificationsEnabled)
         defaults.set(autoHandledEventBannersEnabled, forKey: Key.autoHandledEventBannersEnabled)
+        defaults.set(confirmGlobalAutomationChanges, forKey: Key.confirmGlobalAutomationChanges)
         defaults.set(onboardingCompleted, forKey: Key.onboardingCompleted)
         defaults.set(launchAtLoginPreference, forKey: Key.launchAtLoginPreference)
         if let glabPath {
@@ -375,6 +378,7 @@ final class SettingsManager {
             Key.notificationsEnabled: true,
             Key.autoHandledEventBannersEnabled: true,
             Key.automationGloballyEnabled: true,
+            Key.confirmGlobalAutomationChanges: true,
             Key.boardGrouping: MRBoardGrouping.withoutAutomation.rawValue,
             Key.onboardingCompleted: false,
             Key.launchAtLoginPreference: true,
@@ -386,6 +390,7 @@ final class SettingsManager {
         static let conversationDestination = "conversationDestination"
         static let automation = "automation"
         static let automationGloballyEnabled = "automationGloballyEnabled"
+        static let confirmGlobalAutomationChanges = "confirmGlobalAutomationChanges"
         static let automationReceipts = "automationReceipts"
         static let automationAttemptReceipts = "automationAttemptReceipts"
         static let authorFeedbackAttempts = "authorFeedbackAttempts"

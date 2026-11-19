@@ -117,7 +117,10 @@ struct GlobalAutomationSwitchTests {
         defer { monitor.stopTimer() }
 
         // when
-        monitor.setAutomationGloballyEnabled(false)
+        monitor.requestGlobalAutomationToggle { _ in
+            Issue.record("There is no configured automation to confirm")
+            return .confirm
+        }
 
         // then
         #expect(!settings.configuredAutomationAvailable && !settings.automationGloballyActive)
@@ -125,9 +128,10 @@ struct GlobalAutomationSwitchTests {
         #expect(monitor.automationToggleNotices.current == nil)
     }
 
-    @Test func switchingOffCancelsAutomaticWorkKeepsManualWorkAndAnnounces() throws {
+    @Test func toolbarSwitchRequiresConfirmationBeforeChangingGlobalAutomation() throws {
         // given
-        let settings = SettingsManager(defaults: try makeDefaults())
+        let defaults = try makeDefaults()
+        let settings = SettingsManager(defaults: defaults)
         settings.glabPath = URL(fileURLWithPath: "/usr/bin/false")
         settings.resolvedHost = host
         settings.automation.applyPreset(.full, for: .codex)
@@ -147,18 +151,86 @@ struct GlobalAutomationSwitchTests {
         }
 
         // when
-        monitor.setAutomationGloballyEnabled(false)
+        monitor.requestGlobalAutomationToggle { enabling in
+            #expect(!enabling)
+            return .cancel
+        }
 
         // then
-        #expect(cancelled == [autoID])
-        #expect(monitor.automationToggleNotices.current?.kind == .global(active: false))
+        #expect(settings.automationGloballyEnabled)
+        #expect(SettingsManager(defaults: defaults).automationGloballyEnabled)
+        #expect(cancelled.isEmpty)
+        #expect(monitor.automationToggleNotices.current == nil)
 
         // when
-        monitor.setAutomationGloballyEnabled(true)
+        monitor.requestGlobalAutomationToggle { enabling in
+            #expect(!enabling)
+            return .confirm
+        }
 
         // then
+        #expect(!settings.automationGloballyEnabled)
+        #expect(!SettingsManager(defaults: defaults).automationGloballyEnabled)
+        #expect(cancelled == [autoID])
+        #expect(monitor.automationToggleNotices.current?.kind == .global(active: false))
+        let pausedNotice = monitor.automationToggleNotices.current
+
+        monitor.requestGlobalAutomationToggle { enabling in
+            #expect(enabling)
+            return .cancel
+        }
+
+        #expect(!settings.automationGloballyEnabled)
+        #expect(monitor.automationToggleNotices.current == pausedNotice)
+
+        monitor.requestGlobalAutomationToggle { enabling in
+            #expect(enabling)
+            return .confirm
+        }
+
         #expect(monitor.automationToggleNotices.current?.kind == .global(active: true))
         #expect(settings.automationGloballyActive)
+        #expect(SettingsManager(defaults: defaults).confirmGlobalAutomationChanges)
+    }
+
+    @Test func optingOutSkipsToolbarConfirmationsAfterRestart() throws {
+        let defaults = try makeDefaults()
+        let settings = SettingsManager(defaults: defaults)
+        settings.automation.applyPreset(.full, for: .codex)
+        #expect(settings.save())
+        let monitor = TodoMonitorService(settings: settings, glab: GlabService())
+        defer { monitor.stopTimer() }
+
+        monitor.requestGlobalAutomationToggle { enabling in
+            #expect(!enabling)
+            return .confirmAndSkipFuturePrompts
+        }
+
+        let restored = SettingsManager(defaults: defaults)
+        #expect(!restored.confirmGlobalAutomationChanges)
+        #expect(!restored.automationGloballyEnabled)
+        let restarted = TodoMonitorService(settings: restored, glab: GlabService())
+        defer { restarted.stopTimer() }
+        func unexpectedConfirmation(_ enabling: Bool) -> TodoMonitorService.GlobalAutomationConfirmation {
+            Issue.record("Unexpected confirmation after opting out (enabling: \(enabling))")
+            return .cancel
+        }
+
+        restarted.requestGlobalAutomationToggle(confirm: unexpectedConfirmation)
+        #expect(restored.automationGloballyActive)
+        restarted.requestGlobalAutomationToggle(confirm: unexpectedConfirmation)
+        #expect(!restored.automationGloballyEnabled)
+
+        restored.confirmGlobalAutomationChanges = true
+        #expect(restored.save())
+        var askedToResume = false
+        restarted.requestGlobalAutomationToggle { enabling in
+            askedToResume = enabling
+            return .cancel
+        }
+        #expect(askedToResume)
+        #expect(!restored.automationGloballyEnabled)
+        #expect(SettingsManager(defaults: defaults).confirmGlobalAutomationChanges)
     }
 
     @Test func latestNoticeReplacesPreviousAndStaleDismissalIsIgnored() throws {
