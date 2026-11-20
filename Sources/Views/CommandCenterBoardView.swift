@@ -65,7 +65,7 @@ struct CommandCenterBoardView: View {
                 detailSheet(selection, availableWidth: max(1, geometry.size.width - 24))
             }
         }
-        .background(colorScheme == .dark ? Color(nsColor: .windowBackgroundColor) : Color(white: 0.95))
+        .background(Color(white: colorScheme == .dark ? 0.095 : 0.99))
         .onChange(of: account) { _, _ in selected = nil }
         .onReceive(NotificationCenter.default.publisher(for: NSWindow.willCloseNotification)) { notification in
             if (notification.object as? NSWindow)?.identifier?.rawValue == "main" { selected = nil }

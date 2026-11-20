@@ -6,6 +6,10 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 
 ## Unreleased
 
+- Use 16 pt insets beside and below the content of Mac board merge request cards, matching the inset above the avatar.
+
+- Swap the Mac board and merge request card background colors in light and dark modes.
+
 - Show Refresh from GitLab and Open in GitLab as icons in the Mac merge request details header, with Open next to Copy link.
 
 - Give the merge request description its own card in Details on Mac and iPhone.

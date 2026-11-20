@@ -26,6 +26,7 @@ private struct CommandCenterMRCardContent: View {
     @State private var finishingCommentReview = false
     @State private var retryError: String?
     @State private var confirmRemoval = false
+    @Environment(\.colorScheme) private var colorScheme
     @Environment(\.openSettings) private var openSettings
 
     private var item: MergeRequestAttentionMonitor.Item { row.item }
@@ -156,13 +157,17 @@ private struct CommandCenterMRCardContent: View {
         }
         .onChange(of: row.latestJob?.id) { _, _ in retryError = nil }
         .controlSize(.small)
-        .padding(12)
         .frame(maxWidth: .infinity, alignment: .leading)
+        .padding([.leading, .bottom, .trailing], 16)
+        // The 16 pt avatar sits 4 pt below the top of the 24 pt header controls.
+        .padding(.top, 12)
         .overlay {
             RoundedRectangle(cornerRadius: 8).strokeBorder(.primary.opacity(0.14), lineWidth: 1)
                 .allowsHitTesting(false)
         }
-        .boardCardInteraction(onDetails: onDetails)
+        .boardCardInteraction(
+            background: colorScheme == .dark ? Color(nsColor: .windowBackgroundColor) : Color(white: 0.95),
+            onDetails: onDetails)
         .contextMenu { menuItems }
         .confirmationDialog(Text(.Board.boardRemove), isPresented: $confirmRemoval, titleVisibility: .visible) {
             Button(role: .destructive) { monitor.removeReviewedMergeRequest(item) } label: { Text(.Board.boardRemove) }
