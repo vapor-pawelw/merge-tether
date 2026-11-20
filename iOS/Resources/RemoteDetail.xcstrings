@@ -1171,6 +1171,23 @@
         }
       }
     },
+    "remoteDetail.showFullPath": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Show the full file path"
+          }
+        },
+        "pl": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Pokaż pełną ścieżkę pliku"
+          }
+        }
+      }
+    },
     "remoteDetail.toggleThread": {
       "extractionState": "manual",
       "localizations": {

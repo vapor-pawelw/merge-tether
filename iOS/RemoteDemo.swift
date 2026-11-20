@@ -91,7 +91,6 @@ import MergeTetherRemote
                 needsAttention: true, mergeRequestIID: 42,
                 primaryCTA: .init(title: String(localized: .MRHumanAction.mrHumanActionActionReviewDrafts), destination: .drafts),
                 presentation: .init(author: "Alex Example", repository: "payments-api",
-                    secondaryCTA: .init(title: String(localized: .RemoteDetail.remoteDetailActivity), destination: .assistantRuns),
                     authorUsername: "alex", assignedReviewerCount: 5),
                 approvals: .init(completed: 2, required: 2, received: 5, requirementsSatisfied: false)),
             .init(id: "mr:1:43", title: "Keep cached account details available", project: "example/payments-api",

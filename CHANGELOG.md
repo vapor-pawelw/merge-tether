@@ -16,15 +16,19 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 
 - Move the Mac Activity view from the board toolbar to **Window → Automation Activity** for troubleshooting across merge requests.
 
+- Retry a failed GitLab refresh directly from the warning banner on Mac.
+
+- On iPhone, give discussion threads distinct backgrounds, align the chevron with the tags, and reveal the full file path when you tap the filename.
+
+- Remove the Activity and agent runs shortcut from the iPhone board action row. Run history remains available in MR Details.
+
 - Display current standalone re-review results on discussions and omit the verification badge on resolved threads without a conclusive result.
+
+- Use 16 pt insets and section gaps on iPhone merge request cards, with 8 pt between rows within each section.
 
 - Remove dotted underlines from tappable person names on iPhone and show review status as an icon at the end of the person's row.
 
 - Deliver iPhone avatars on the board and in MR details through the paired Mac. The iOS app connects only to the relay for automatic data loading.
-
-- Retry a failed GitLab refresh directly from the warning banner on Mac.
-
-- Use 16 pt insets and section gaps on iPhone merge request cards, with 8 pt between rows within each section.
 
 - Name the authors of open review threads and replies on Mac and iPhone. Review and feedback statuses show up to two people and count the rest. Hover or tap a name to see the person's avatar and GitLab username.
 

@@ -6,6 +6,7 @@ struct RemoteMRDetailContent: View {
     let card: RemoteCard
     /// Present when the Mac accepts comment-origin changes from this phone.
     var onCommentOrigin: ((RemoteCommentOriginRequest) -> Void)? = nil
+    @Environment(\.colorScheme) private var colorScheme
     @State private var showingApprovals = false
     @State private var descriptionExpanded = false
     /// Holds that stop work lead; saved rules sit with the reference data, as on the Mac.
@@ -49,7 +50,8 @@ struct RemoteMRDetailContent: View {
                 }
             }
             .id(RemoteCardCTA.Destination.feedback)
-            section(.RemoteDetail.remoteDetailDiscussions) {
+            section(.RemoteDetail.remoteDetailDiscussions,
+                    background: colorScheme == .light ? Color(white: 0.96) : sectionBackground) {
                 if let resume = details.originResume, let onCommentOrigin {
                     RemoteOriginResumeBanner(resume: resume, onCommentOrigin: onCommentOrigin)
                 }
@@ -178,13 +180,16 @@ struct RemoteMRDetailContent: View {
         }.frame(maxWidth: .infinity, alignment: .leading)
     }
     private var unavailable: some View { Text(.RemoteDetail.remoteDetailUnavailable).font(.callout).foregroundStyle(.secondary) }
-    private func section<Content: View>(_ title: LocalizedStringResource, @ViewBuilder content: () -> Content) -> some View {
+    private var sectionBackground: Color { Color(uiColor: .secondarySystemGroupedBackground) }
+
+    private func section<Content: View>(_ title: LocalizedStringResource, background: Color? = nil,
+                                        @ViewBuilder content: () -> Content) -> some View {
         VStack(alignment: .leading, spacing: 14) {
             Text(title).font(.headline).accessibilityAddTraits(.isHeader)
             content()
         }
         .padding(16).frame(maxWidth: .infinity, alignment: .leading)
-        .background(Color(uiColor: .secondarySystemGroupedBackground), in: RoundedRectangle(cornerRadius: 16))
+        .background(background ?? sectionBackground, in: RoundedRectangle(cornerRadius: 16))
     }
 }
 
@@ -274,10 +279,11 @@ private struct RemoteDiscussionCard: View {
                     .accessibilityIdentifier("remote.thread-draft.\(draft.id)")
             }
         }
+        .frame(maxWidth: .infinity, alignment: .leading)
         .padding(12)
-        .background(Color(uiColor: .secondarySystemFill), in: RoundedRectangle(cornerRadius: 12))
+        .background(Color(uiColor: .systemBackground), in: RoundedRectangle(cornerRadius: 12))
         .overlay {
-            RoundedRectangle(cornerRadius: 12).strokeBorder(color.opacity(0.12), lineWidth: 0.5)
+            RoundedRectangle(cornerRadius: 12).strokeBorder(Color.primary.opacity(0.08), lineWidth: 0.5)
                 .allowsHitTesting(false)
         }
         .contentShape(Rectangle())
@@ -299,8 +305,8 @@ private struct RemoteDiscussionCard: View {
     }
 
     private var header: some View {
-        HStack(alignment: .top, spacing: 8) {
-            VStack(alignment: .leading, spacing: 8) {
+        VStack(alignment: .leading, spacing: 8) {
+            HStack(alignment: .top, spacing: 8) {
                 StatusFlowLayout {
                     Label(state, systemImage: thread.state == .resolved ? "checkmark.bubble" : "bubble.left")
                         .font(.caption.weight(.medium)).foregroundStyle(color)
@@ -326,22 +332,21 @@ private struct RemoteDiscussionCard: View {
                         }
                     }
                 }
-                if let location = thread.location { RemoteFullContextLabel(full: location) }
-                if let first = thread.notes.first {
-                    noteHeader(first)
-                    if !expanded { RemoteMarkdownText(source: first.body).font(.callout).lineLimit(3).foregroundStyle(.secondary) }
+                .frame(maxWidth: .infinity, alignment: .leading)
+                Button(action: toggleExpansion) {
+                    Image(systemName: "chevron.right").rotationEffect(.degrees(expanded ? 90 : 0))
+                        .font(.footnote.weight(.semibold)).foregroundStyle(.secondary)
                 }
+                .buttonStyle(.plain)
+                .padding(.top, 4)
+                .accessibilityLabel(Text(.RemoteDetail.remoteDetailToggleThread))
+                .accessibilityValue(Text(expanded ? .RemoteDetail.remoteDetailShowLess : .RemoteDetail.remoteDetailShowMore))
             }
-            .frame(maxWidth: .infinity, minHeight: 44, alignment: .leading)
-            Button(action: toggleExpansion) {
-                Image(systemName: "chevron.right").rotationEffect(.degrees(expanded ? 90 : 0))
-                    .font(.footnote.weight(.semibold)).foregroundStyle(.secondary)
-                    .frame(width: 44, height: 44)
-                    .contentShape(Rectangle())
+            if let location = thread.location { RemoteDiscussionLocationLabel(full: location) }
+            if let first = thread.notes.first {
+                noteHeader(first)
+                if !expanded { RemoteMarkdownText(source: first.body).font(.callout).lineLimit(3).foregroundStyle(.secondary) }
             }
-            .buttonStyle(.plain)
-            .accessibilityLabel(Text(.RemoteDetail.remoteDetailToggleThread))
-            .accessibilityValue(Text(expanded ? .RemoteDetail.remoteDetailShowLess : .RemoteDetail.remoteDetailShowMore))
         }
     }
 
@@ -382,7 +387,7 @@ private struct RemoteDiscussionCard: View {
     }
 
     @ViewBuilder private func noteContent(_ note: RemoteDetailNote) -> some View {
-        if let location = note.location, location != thread.location { RemoteFullContextLabel(full: location) }
+        if let location = note.location, location != thread.location { RemoteDiscussionLocationLabel(full: location) }
         RemoteMarkdownText(source: note.body).font(.callout).lineSpacing(3).textSelection(.enabled)
             .fixedSize(horizontal: false, vertical: true)
         if let extraContext = note.extraContext, !extraContext.isEmpty {
@@ -558,11 +563,25 @@ struct RemoteMarkdownText: View {
     }
 }
 
-private struct RemoteFullContextLabel: View {
+private struct RemoteDiscussionLocationLabel: View {
     let full: String
+    @State private var showingFullPath = false
+
     var body: some View {
-        Text(verbatim: full).font(.caption.monospaced()).foregroundStyle(.secondary)
-            .textSelection(.enabled).fixedSize(horizontal: false, vertical: true)
+        Button { showingFullPath = true } label: {
+            Text(verbatim: full.split(separator: "/").last.map(String.init) ?? full)
+                .font(.caption.monospaced()).foregroundStyle(.secondary)
+                .lineLimit(1).truncationMode(.middle)
+        }
+        .buttonStyle(.plain)
+        .accessibilityHint(Text(.RemoteDetail.remoteDetailShowFullPath))
+        .popover(isPresented: $showingFullPath) {
+            Text(verbatim: full).font(.callout.monospaced()).textSelection(.enabled)
+                .frame(width: 260, alignment: .leading)
+                .fixedSize(horizontal: false, vertical: true)
+                .padding(16)
+                .presentationCompactAdaptation(.popover)
+        }
     }
 }
 
