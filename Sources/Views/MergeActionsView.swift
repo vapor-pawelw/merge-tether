@@ -20,6 +20,7 @@ struct MergeActionsView<StatusTrailer: View, AdditionalActions: View>: View {
     /// Cards hide actions that would only show disabled while MergeTether is working.
     var hidesBlockedActions = false
     var highlightedSubmission: MergeSubmissionState? = nil
+    var statusTopPadding: CGFloat
     var statusTrailer: () -> StatusTrailer
     var additionalActions: (Bool) -> AdditionalActions
     @Environment(\.openURL) private var openURL
@@ -42,6 +43,7 @@ struct MergeActionsView<StatusTrailer: View, AdditionalActions: View>: View {
          showsRecoveryActions: Bool = true, showsFeedbackVerification: Bool = true, showsStatusCard: Bool = false,
          textFont: Font = .subheadline, coveredBlockers: Set<MergeRequestBlocker> = [],
          hidesBlockedActions: Bool = false, highlightedSubmission: MergeSubmissionState? = nil,
+         statusTopPadding: CGFloat = 0,
          @ViewBuilder statusTrailer: @escaping () -> StatusTrailer,
          @ViewBuilder additionalActions: @escaping (Bool) -> AdditionalActions) {
         self.item = item; self.monitor = monitor
@@ -54,6 +56,7 @@ struct MergeActionsView<StatusTrailer: View, AdditionalActions: View>: View {
         self.textFont = textFont
         self.coveredBlockers = coveredBlockers; self.hidesBlockedActions = hidesBlockedActions
         self.highlightedSubmission = highlightedSubmission
+        self.statusTopPadding = statusTopPadding
         self.statusTrailer = statusTrailer; self.additionalActions = additionalActions
     }
 
@@ -119,6 +122,7 @@ struct MergeActionsView<StatusTrailer: View, AdditionalActions: View>: View {
                     .font(textFont)
                     .fixedSize(horizontal: false, vertical: true)
                     .modifier(MRDetailStatusCard(isPresented: showsStatusCard))
+                    .padding(.top, statusTopPadding)
             }
             statusTrailer()
             HStack(spacing: 8) {

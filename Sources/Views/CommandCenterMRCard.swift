@@ -46,7 +46,7 @@ private struct CommandCenterMRCardContent: View {
     var body: some View {
         let mergeActivity = presentation.mergeActivity
         let showsWorkingStatus = presentation.working && mergeActivity == nil
-        let cardSpacing: CGFloat = 9
+        let cardSpacing: CGFloat = 8
         VStack(alignment: .leading, spacing: cardSpacing) {
             metadataHeader.zIndex(1)
             VStack(alignment: .leading, spacing: 6) {
@@ -60,7 +60,7 @@ private struct CommandCenterMRCardContent: View {
                 BoardMRReferenceLine(iid: item.id.iid, projectID: item.id.projectID,
                     repositoryPath: row.displayURL.gitLabProjectPath, dependencies: row.displayItem.dependencies)
             }
-            .padding(.bottom, 7)
+            .padding(.bottom, 8)
             if finishedState != nil {
                 FinishedMergeRequestStatus(item: row.displayItem, monitor: monitor)
             } else {
@@ -86,7 +86,7 @@ private struct CommandCenterMRCardContent: View {
                 }
                 if let job = row.latestJob { AssistantJobPreflightNotice(jobID: job.id, monitor: monitor) }
                 if showsWorkingStatus || presentation.refreshFailed || humanAction != nil || neutralStatus != nil || (isDraft && item.isAuthored) {
-                    HStack(spacing: 6) {
+                    Group {
                         if showsWorkingStatus {
                             if let status = presentation.status {
                                 MRActivityStatus(status: status,
@@ -110,7 +110,6 @@ private struct CommandCenterMRCardContent: View {
                                 .help(Text(reviewingContext.presenceMessage)
                                       + Text(verbatim: "\n") + Text(reviewingContext.statusMessage))
                         }
-                        Spacer(minLength: 6)
                     }
                     .font(.caption).foregroundStyle(.secondary)
                 }
@@ -126,21 +125,8 @@ private struct CommandCenterMRCardContent: View {
                     onReviewFeedback: { openAttention(.feedback) },
                     showsExplanations: false, showsRecoveryActions: false, textFont: .callout,
                     coveredBlockers: shownRequirements?.coveredBlockers ?? [],
-                    hidesBlockedActions: presentation.working, highlightedSubmission: presentation.mergeStage?.submission, statusTrailer: {
-                        // Short state chips and automation rules sit together, above the action row.
-                        VStack(alignment: .leading, spacing: 5) {
-                            if !chips.isEmpty {
-                                HStack(spacing: 5) {
-                                    ForEach(Array(chips.enumerated()), id: \.offset) { _, chip in
-                                        BoardStatusChip(title: chip.title, symbol: chip.symbol)
-                                    }
-                                }
-                            }
-                            MREffectivePolicySummary(row: row, monitor: monitor,
-                                excluding: [presentation.message, presentation.nextStep ?? "",
-                                    presentation.mergeStage.map { String(localized: $0.title) } ?? ""], holdsOnly: true)
-                        }
-                    }) { hasDirectMergeAction in
+                    hidesBlockedActions: presentation.working, highlightedSubmission: presentation.mergeStage?.submission,
+                    statusTopPadding: humanAction == nil ? 0 : 8, statusTrailer: { mergeActionStatus }) { hasDirectMergeAction in
                     if humanAction?.action == .retryRun {
                         Button { openAttention(.assistantRuns) } label: { Text(.MRHumanAction.mrHumanActionActionReviewRun) }
                             .buttonStyle(.plain)
@@ -187,7 +173,7 @@ private struct CommandCenterMRCardContent: View {
     @ViewBuilder private var attentionAndDrafts: some View {
         let drafts = presentation.working ? nil : MRPendingDraftsSummary(item: item)
         if humanAction != nil || drafts != nil {
-            VStack(alignment: .leading, spacing: 4) {
+            VStack(alignment: .leading, spacing: 16) {
                 if humanAction != nil {
                     MergeRequestAttentionCallout(message: presentation.message)
                         .font(.callout.weight(.medium))
@@ -209,6 +195,27 @@ private struct CommandCenterMRCardContent: View {
             }
             .labelStyle(BoardCardStatusLabelStyle())
         }
+    }
+
+    @ViewBuilder private var mergeActionStatus: some View {
+        if chips.isEmpty {
+            automationHolds
+        } else {
+            VStack(alignment: .leading, spacing: 5) {
+                HStack(spacing: 5) {
+                    ForEach(Array(chips.enumerated()), id: \.offset) { _, chip in
+                        BoardStatusChip(title: chip.title, symbol: chip.symbol)
+                    }
+                }
+                automationHolds
+            }
+        }
+    }
+
+    private var automationHolds: some View {
+        MREffectivePolicySummary(row: row, monitor: monitor,
+            excluding: [presentation.message, presentation.nextStep ?? "",
+                presentation.mergeStage.map { String(localized: $0.title) } ?? ""], holdsOnly: true)
     }
 
     private var metadataHeader: some View {

@@ -309,18 +309,20 @@ struct RemoteCardView: View {
         !expanded && onOpen != nil && (primaryCTA != nil || secondaryCTA != nil || directAction != nil)
     }
     var body: some View {
-        VStack(alignment: .leading, spacing: 16) {
-            header
-            if let date = inboxUpdateDate {
-                HStack(alignment: .bottom) {
-                    VStack(alignment: .leading, spacing: 16) {
-                        cardInformation
-                        InboxUpdateTimestamp(date: date)
+        VStack(alignment: .leading, spacing: 8) {
+            VStack(alignment: .leading, spacing: 16) {
+                header
+                if let date = inboxUpdateDate {
+                    HStack(alignment: .bottom) {
+                        VStack(alignment: .leading, spacing: 16) {
+                            cardInformation
+                            InboxUpdateTimestamp(date: date)
+                        }
+                        if showsActions { cardActions }
                     }
-                    if showsActions { cardActions }
+                } else {
+                    cardInformation
                 }
-            } else {
-                cardInformation
             }
             if inboxUpdateDate == nil, showsActions {
                 HStack { cardActions }
@@ -339,7 +341,7 @@ struct RemoteCardView: View {
     }
     @ViewBuilder
     private var cardInformation: some View {
-        if hasInformation { content }
+        if !card.detail.isEmpty || hasSupportingInformation { content }
     }
     @ViewBuilder
     private var cardActions: some View {
@@ -449,8 +451,8 @@ struct RemoteCardView: View {
             }
         }
     }
-    private var hasInformation: Bool {
-        !card.detail.isEmpty || card.presentation?.requirements?.isEmpty == false || card.visibleStatus != nil
+    private var hasSupportingInformation: Bool {
+        card.presentation?.requirements?.isEmpty == false || card.visibleStatus != nil
             || card.presentation?.pendingDrafts != nil || card.dependencies != nil
             || card.presentation?.steps?.isEmpty == false || card.visibleNextStep != nil
             || !(card.presentation?.chips.isEmpty ?? card.drafts.isEmpty)
@@ -462,6 +464,7 @@ struct RemoteCardView: View {
                     MergeRequestAttentionCallout(message: card.detail)
                         .font((expanded ? Font.callout : .subheadline).weight(.medium))
                         .lineLimit(expanded ? nil : 2)
+                        .padding(.bottom, hasSupportingInformation ? 8 : 0)
                 } else {
                     Text(verbatim: card.detail)
                         .font(expanded ? .callout : .subheadline)
