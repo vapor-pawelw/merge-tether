@@ -29,6 +29,7 @@ struct MRDiscussionThreadsView: View {
     var currentUserIdentity: PersonIdentity? = nil
     var replyRecipients: [String: [PersonIdentity]] = [:]
     var navigation: MRDiscussionNavigation? = nil
+    var expansion: Binding<Bool>? = nil
     let onRefresh: () -> Void
     @State private var markdownCache = MRDiscussionMarkdownCache()
 
@@ -36,60 +37,75 @@ struct MRDiscussionThreadsView: View {
         let currentUser = self.currentUser
         VStack(alignment: .leading, spacing: 12) {
             HStack {
-                Text(title).font(.headline)
-                Image(systemName: "info.circle")
-                    .foregroundStyle(.secondary)
-                    .help(Text(.MRDiscussions.mrDiscussionsAiLegend))
-                    .accessibilityLabel(Text(.MRDiscussions.mrDiscussionsAiLegend))
-                Spacer()
+                if let expansion {
+                    MRDetailDisclosureButton(isExpanded: expansion) { heading }
+                } else {
+                    heading
+                    Spacer()
+                }
                 Button(action: onRefresh) {
                     Label { Text(.MRDiscussions.mrDiscussionsRefresh) } icon: { Image(systemName: "arrow.clockwise") }
                 }
                 .buttonStyle(.borderless).disabled(isLoading)
                 .foregroundStyle(isLoading ? Color.secondary : Color.accentColor)
             }
-            if hasError {
-                Label { Text(.MRDiscussions.mrDiscussionsFailed) } icon: { Image(systemName: "exclamationmark.triangle") }
-                    .font(.callout).foregroundStyle(.orange)
-            } else if !hasLoaded && !isLoading {
-                Text(.MRDiscussions.mrDiscussionsUnavailable)
-                    .font(.callout).foregroundStyle(.secondary)
-            }
-            LazyVStack(alignment: .leading, spacing: 0) {
-                ForEach(snapshot.threads) { thread in
-                    if thread.id != snapshot.threads.first?.id { Divider() }
-                    threadView(thread, currentUser: currentUser)
-                }
-                ForEach(Array(snapshot.standaloneDrafts.enumerated()), id: \.offset) { index, draft in
-                    if index > 0 || !snapshot.threads.isEmpty { Divider() }
-                    VStack(alignment: .leading, spacing: 9) {
-                        Text(draft.discussionID == nil
-                             ? draft.position?.isAnchored == true ? .MRDiscussions.mrDiscussionsNewCodeComment : .MRDiscussions.mrDiscussionsNewComment
-                             : hasLoaded || hasError ? .MRDiscussions.mrDiscussionsUnmatchedReply
-                             : .MRDiscussions.mrDiscussionsReplyDraft)
-                            .font(.caption.weight(.medium)).foregroundStyle(.secondary)
-                        MRDiscussionDraftView(draft: draft, author: currentUser, markdownCache: markdownCache,
-                            replyTo: draft.discussionID.flatMap(replyMessage),
-                            mergeRequestURL: mergeRequestURL, codeContext: codeContext,
-                            extraContext: extraContexts.forDraft(draft),
-                            selection: selection, selectionDisabled: selectionDisabled,
-                            onDelete: onDelete, onRegenerate: onRegenerate)
-                    }
-                    .padding(12)
-                    .frame(maxWidth: .infinity, alignment: .leading)
-                }
-            }
-            .background {
-                if !snapshot.threads.isEmpty || !snapshot.standaloneDrafts.isEmpty {
-                    RoundedRectangle(cornerRadius: 10).fill(Color.secondary.opacity(0.035))
-                        .overlay { RoundedRectangle(cornerRadius: 10).strokeBorder(Color.secondary.opacity(0.1), lineWidth: 0.5) }
-                }
-            }
-            if hasLoaded && !isLoading && snapshot.threads.isEmpty && snapshot.standaloneDrafts.isEmpty {
-                Text(.MRDiscussions.mrDiscussionsEmpty).font(.callout).foregroundStyle(.secondary)
-            }
+            if expansion?.wrappedValue != false { discussionContent(currentUser: currentUser) }
         }
         .frame(maxWidth: .infinity, alignment: .leading)
+    }
+
+    private var heading: some View {
+        HStack {
+            Text(title).font(.headline)
+            Image(systemName: "info.circle")
+                .foregroundStyle(.secondary)
+                .help(Text(.MRDiscussions.mrDiscussionsAiLegend))
+                .accessibilityLabel(Text(.MRDiscussions.mrDiscussionsAiLegend))
+        }
+    }
+
+    @ViewBuilder
+    private func discussionContent(currentUser: PersonIdentity?) -> some View {
+        if hasError {
+            Label { Text(.MRDiscussions.mrDiscussionsFailed) } icon: { Image(systemName: "exclamationmark.triangle") }
+                .font(.callout).foregroundStyle(.orange)
+        } else if !hasLoaded && !isLoading {
+            Text(.MRDiscussions.mrDiscussionsUnavailable)
+                .font(.callout).foregroundStyle(.secondary)
+        }
+        LazyVStack(alignment: .leading, spacing: 0) {
+            ForEach(snapshot.threads) { thread in
+                if thread.id != snapshot.threads.first?.id { Divider() }
+                threadView(thread, currentUser: currentUser)
+            }
+            ForEach(Array(snapshot.standaloneDrafts.enumerated()), id: \.offset) { index, draft in
+                if index > 0 || !snapshot.threads.isEmpty { Divider() }
+                VStack(alignment: .leading, spacing: 9) {
+                    Text(draft.discussionID == nil
+                         ? draft.position?.isAnchored == true ? .MRDiscussions.mrDiscussionsNewCodeComment : .MRDiscussions.mrDiscussionsNewComment
+                         : hasLoaded || hasError ? .MRDiscussions.mrDiscussionsUnmatchedReply
+                         : .MRDiscussions.mrDiscussionsReplyDraft)
+                        .font(.caption.weight(.medium)).foregroundStyle(.secondary)
+                    MRDiscussionDraftView(draft: draft, author: currentUser, markdownCache: markdownCache,
+                        replyTo: draft.discussionID.flatMap(replyMessage),
+                        mergeRequestURL: mergeRequestURL, codeContext: codeContext,
+                        extraContext: extraContexts.forDraft(draft),
+                        selection: selection, selectionDisabled: selectionDisabled,
+                        onDelete: onDelete, onRegenerate: onRegenerate)
+                }
+                .padding(12)
+                .frame(maxWidth: .infinity, alignment: .leading)
+            }
+        }
+        .background {
+            if !snapshot.threads.isEmpty || !snapshot.standaloneDrafts.isEmpty {
+                RoundedRectangle(cornerRadius: 10).fill(Color.secondary.opacity(0.035))
+                    .overlay { RoundedRectangle(cornerRadius: 10).strokeBorder(Color.secondary.opacity(0.1), lineWidth: 0.5) }
+            }
+        }
+        if hasLoaded && !isLoading && snapshot.threads.isEmpty && snapshot.standaloneDrafts.isEmpty {
+            Text(.MRDiscussions.mrDiscussionsEmpty).font(.callout).foregroundStyle(.secondary)
+        }
     }
 
     private var currentUser: PersonIdentity? {

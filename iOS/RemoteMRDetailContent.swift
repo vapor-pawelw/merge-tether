@@ -8,6 +8,7 @@ struct RemoteMRDetailContent: View {
     var onCommentOrigin: ((RemoteCommentOriginRequest) -> Void)? = nil
     @Environment(\.colorScheme) private var colorScheme
     @State private var showingApprovals = false
+    @State private var discussionsExpanded = true
     /// Holds that stop work lead; saved rules sit with the reference data, as on the Mac.
     private var rules: [String] { details.rules ?? [] }
     private var visiblePolicy: [String] { card.visiblePolicy(details.policy.filter { !rules.contains($0) }) }
@@ -50,7 +51,8 @@ struct RemoteMRDetailContent: View {
             }
             .id(RemoteCardCTA.Destination.feedback)
             section(.RemoteDetail.remoteDetailDiscussions,
-                    background: colorScheme == .light ? Color(white: 0.96) : sectionBackground) {
+                    background: colorScheme == .light ? Color(white: 0.96) : sectionBackground,
+                    expansion: $discussionsExpanded) {
                 if let resume = details.originResume, let onCommentOrigin {
                     RemoteOriginResumeBanner(resume: resume, onCommentOrigin: onCommentOrigin)
                 }
@@ -171,12 +173,27 @@ struct RemoteMRDetailContent: View {
     private var sectionBackground: Color { Color(uiColor: .secondarySystemGroupedBackground) }
 
     private func section<Content: View>(_ title: LocalizedStringResource, background: Color? = nil,
+                                        expansion: Binding<Bool>? = nil,
                                         @ViewBuilder content: () -> Content) -> some View {
-        VStack(alignment: .leading, spacing: 14) {
-            Text(title).font(.headline).accessibilityAddTraits(.isHeader)
-            content()
+        let sectionContent = content()
+        return VStack(alignment: .leading, spacing: 14) {
+            if let expansion {
+                DisclosureGroup(isExpanded: expansion) {
+                    sectionContent.padding(.top, 8)
+                } label: {
+                    Text(title).font(.headline).accessibilityAddTraits(.isHeader)
+                        .frame(maxWidth: .infinity, minHeight: 44, alignment: .leading)
+                        .contentShape(Rectangle())
+                        .onTapGesture { expansion.wrappedValue.toggle() }
+                }
+                .tint(.secondary)
+            } else {
+                Text(title).font(.headline).accessibilityAddTraits(.isHeader)
+                sectionContent
+            }
         }
-        .padding(16).frame(maxWidth: .infinity, alignment: .leading)
+        .padding(.horizontal, 16).padding(.vertical, expansion?.wrappedValue == false ? 6 : 16)
+        .frame(maxWidth: .infinity, alignment: .leading)
         .background(background ?? sectionBackground, in: RoundedRectangle(cornerRadius: 16))
     }
 }

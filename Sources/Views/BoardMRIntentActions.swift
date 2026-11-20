@@ -44,10 +44,11 @@ struct BoardMRIntentActions: View {
                             ProgressView().controlSize(.small)
                         } else {
                             Button {
+                                let title = intent.state == .failed ? LocalizedStringResource.Board.boardIntentRetry : Self.action(intent.kind)
                                 starting.insert(intent.id)
                                 Task {
                                     defer { starting.remove(intent.id) }
-                                    await runConfirmedIntent(intent, monitor: monitor)
+                                    await runConfirmedIntent(intent, monitor: monitor, title: title)
                                 }
                             } label: {
                                 let title = intent.state == .failed ? LocalizedStringResource.Board.boardIntentRetry : Self.action(intent.kind)

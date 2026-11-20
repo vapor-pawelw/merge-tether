@@ -14,20 +14,17 @@ struct MergeRequestDescription: View {
                 isExpanded.toggle()
             } label: {
                 VStack(alignment: .leading, spacing: 5) {
-                    HStack {
-                        Text(title).font(.callout.weight(.medium))
-                        Spacer()
-                        Image(systemName: isExpanded ? "chevron.down" : "chevron.right")
-                            .font(.caption.weight(.semibold))
-                            .foregroundStyle(.secondary)
-                            .accessibilityHidden(true)
-                    }
+                    Text(title).font(.body.weight(.medium))
                     Text(SafeInlineMarkdown.render(source) ?? AttributedString(source))
                         .font(.callout)
                         .lineSpacing(3)
                         .lineLimit(isExpanded ? nil : 3)
                         .fixedSize(horizontal: false, vertical: true)
                         .allowsHitTesting(false)
+                    Text(isExpanded ? collapseHint : expandHint)
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                        .accessibilityHidden(true)
                 }
                 .multilineTextAlignment(.leading)
                 .frame(maxWidth: .infinity, alignment: .leading)

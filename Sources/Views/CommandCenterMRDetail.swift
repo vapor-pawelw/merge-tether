@@ -73,7 +73,6 @@ private struct CommandCenterMRDetailContent: View {
     @State private var isRetrying = false
     @State private var retryError: String?
     @State private var confirmRemoval = false
-    @State private var confirmReviewReset = false
     @State private var isResettingReview = false
     @State private var discussionStore = MRDiscussionStore()
     @State private var publicationSession = DraftPublicationSession()
@@ -81,6 +80,7 @@ private struct CommandCenterMRDetailContent: View {
     @State private var detailsExpanded = false
     @State private var usageExpanded = false
     @State private var feedbackExpanded = false
+    @State private var commentsExpanded = true
     @State private var historyExpanded = false
     @State private var focusedJobID: UUID?
     @State private var historyNavigationID = UUID()
@@ -185,9 +185,12 @@ private struct CommandCenterMRDetailContent: View {
                         MergeActionsView(item: item, monitor: monitor, evidenceMatchesCatalogContext: presentationRow.evidenceMatchesCatalogContext,
                             actionsBlocked: isStartingReview || isRetrying, onReviewFeedback: {
                                 feedbackExpanded = true
+                                commentsExpanded = true
                                 Task { await scroll(to: item.authorFeedbackStatus == nil ? .comments : .feedbackStatus, proxy: proxy) }
                             }, showsExplanations: false,
                             showsReplySources: !(showsDecisions && item.authorFeedbackStatus != nil),
+                            showsFeedbackVerification: presentationItem.authorFeedbackStatus == nil,
+                            showsStatusCard: true,
                             textFont: .callout,
                             coveredBlockers: shownRequirements(presentation)?.coveredBlockers ?? [],
                             hidesBlockedActions: presentation.working, highlightedSubmission: presentation.mergeStage?.submission, statusTrailer: {
@@ -197,27 +200,28 @@ private struct CommandCenterMRDetailContent: View {
                             }, additionalActions: { _ in EmptyView() })
                     }
                     if finishedState == nil { supplementaryActions(citationContext: citationContext).id(Anchor.actions) }
-                    discussionThreads(discussions).id(Anchor.comments)
-                    Divider().padding(.vertical, 4)
-                    MREventLogView(target: target, discussionTarget: discussionTarget, discussions: eventDiscussions,
-                        monitor: monitor, initiallyExpanded: historyExpanded, initiallyExpandedJobID: focusedJobID,
-                        readOnly: finishedState != nil,
-                        openDiscussion: { openDiscussion(noteID: $0, discussionID: $1, in: discussions) })
-                        .id(historyNavigationID).id(Anchor.assistantRuns)
-                    Divider().padding(.vertical, 4)
-                    details.id(Anchor.details)
-                    if let usageMergeRequest {
-                        Divider().padding(.vertical, 4)
-                        DisclosureGroup(isExpanded: $usageExpanded) {
-                            if usageExpanded {
+                    VStack(alignment: .leading, spacing: 8) {
+                        discussionThreads(discussions).id(Anchor.comments)
+                        Divider()
+                        MREventLogView(target: target, discussionTarget: discussionTarget, discussions: eventDiscussions,
+                            monitor: monitor, initiallyExpanded: historyExpanded, initiallyExpandedJobID: focusedJobID,
+                            readOnly: finishedState != nil,
+                            openDiscussion: { openDiscussion(noteID: $0, discussionID: $1, in: discussions) })
+                            .id(historyNavigationID).id(Anchor.assistantRuns)
+                        Divider()
+                        details.id(Anchor.details)
+                        if let usageMergeRequest {
+                            Divider()
+                            DisclosureGroup(isExpanded: $usageExpanded) {
                                 AssistantUsageMRDetailCost(mergeRequest: usageMergeRequest).padding(.top, 12)
-                            }
-                        } label: { Text(.AssistantUsage.assistantUsageDashboardTitle).font(.headline) }
+                            } label: { Text(.AssistantUsage.assistantUsageDashboardTitle).font(.headline) }
+                        }
                     }
                 }
                 .padding(24)
                 .frame(maxWidth: .infinity, alignment: .leading)
             }
+            .disclosureGroupStyle(MRDetailDisclosureStyle())
             .background(.background)
             .safeAreaInset(edge: .bottom, spacing: 0) {
                 if finishedState == nil { selectedPublicationActions }
@@ -268,7 +272,8 @@ private struct CommandCenterMRDetailContent: View {
                 pendingInitialAnchor = nil
             }
             .task(id: discussionNavigation) {
-                guard let discussionNavigation else { return }
+                guard let discussionNavigation, commentsExpanded else { return }
+                await Task.yield()
                 await Task.yield()
                 guard !Task.isCancelled else { return }
                 proxy.scrollTo(discussionNavigation.anchor, anchor: .top)
@@ -336,16 +341,6 @@ private struct CommandCenterMRDetailContent: View {
             .alert(Text(.MRDiscussions.mrDiscussionsOriginChangeFailed), isPresented: $originChangeFailed) {
                 Button(role: .cancel) {} label: { Text(.MRDiscussions.mrDiscussionsOriginCancel) }
             } message: { Text(.MRDiscussions.mrDiscussionsOriginChangeFailedMessage) }
-            .confirmationDialog(Text(.ReviewReset.reviewResetConfirmTitle), isPresented: $confirmReviewReset, titleVisibility: .visible) {
-                Button(role: .destructive) { resetReviewState() } label: { Text(.ReviewReset.reviewResetConfirm) }
-            } message: {
-                if item.isAuthored {
-                    Text(.ReviewReset.reviewResetHelpAuthored)
-                } else {
-                    Text(.ReviewReset.reviewResetHelpReviewed) + Text("\n\n")
-                        + Text(monitor.manualReviewConsent(for: item).publicationMode.reviewConfirmation)
-                }
-            }
             .confirmationDialog(Text(.Board.boardRemove), isPresented: $confirmRemoval, titleVisibility: .visible) {
                 Button(role: .destructive) { monitor.removeReviewedMergeRequest(item) } label: { Text(.Board.boardRemove) }
             } message: { Text(.Board.boardRemoveExplanation) }
@@ -402,21 +397,24 @@ private struct CommandCenterMRDetailContent: View {
             }
             .font(.callout).foregroundStyle(.secondary)
             .zIndex(1)
-            Text(verbatim: presentationRow.displayTitle).font(.title2.weight(.semibold))
-                .lineLimit(3).textSelection(.enabled).padding(.top, 2)
+            VStack(alignment: .leading, spacing: 4) {
+                Text(verbatim: presentationRow.displayTitle).font(.title2.weight(.semibold))
+                    .lineLimit(3).textSelection(.enabled)
+                if let request = presentationRow.displayRequest {
+                    Label { Text(verbatim: request.sourceBranch + " → " + request.targetBranch) } icon: {
+                        Image(systemName: "arrow.triangle.branch")
+                    }
+                    .font(.callout.monospaced()).foregroundStyle(.secondary).textSelection(.enabled)
+                    .fixedSize(horizontal: false, vertical: true)
+                    .accessibilityLabel(Text(.MRDiscussions.mrDiscussionsBranches(request.sourceBranch, request.targetBranch)))
+                }
+            }
+            .padding(.top, 2)
             MergeRequestDescription(source: presentationRow.displayRequest?.description,
-                title: .CommandCenter.commandCenterDescription, expandHint: .CommandCenter.commandCenterShowAll,
-                collapseHint: .CommandCenter.commandCenterShowLess)
+                title: .CommandCenter.commandCenterDescription, expandHint: .CommandCenter.commandCenterExpandDescription,
+                collapseHint: .CommandCenter.commandCenterCollapseDescription)
             if let stage = progress.mergeStage {
                 MRMergeStageBanner(stage: stage, startedAt: monitor.activityStartedAt(for: item, activity: mergeActivity))
-            }
-            if let request = presentationRow.displayRequest {
-                Label { Text(verbatim: request.sourceBranch + " → " + request.targetBranch) } icon: {
-                    Image(systemName: "arrow.triangle.branch")
-                }
-                .font(.callout.monospaced()).foregroundStyle(.secondary).textSelection(.enabled)
-                .fixedSize(horizontal: false, vertical: true)
-                .accessibilityLabel(Text(.MRDiscussions.mrDiscussionsBranches(request.sourceBranch, request.targetBranch)))
             }
             HStack {
                 VStack(alignment: .leading, spacing: 4) {
@@ -426,10 +424,9 @@ private struct CommandCenterMRDetailContent: View {
                         // The Next step box below already states what needs attention.
                         let genericAttention = needsHumanAttention && (progress.working || progress.status == nil)
                         if let waiting = shownRequirements(progress) {
-                            VStack(alignment: .leading, spacing: 5) {
-                                BoardWaitingRequirements(waiting: waiting)
-                            }
-                            .font(.callout)
+                            VStack(alignment: .leading, spacing: 5) { BoardWaitingRequirements(waiting: waiting) }
+                                .font(.callout)
+                                .modifier(MRDetailStatusCard())
                         } else if (needsHumanAttention || !progress.working && progress.mergeStage == nil)
                                     && !(genericAttention && showsDecisions) {
                             Label {
@@ -472,6 +469,17 @@ private struct CommandCenterMRDetailContent: View {
                         .buttonStyle(.bordered).help(Text(.MRLifecycle.seenHelp))
                 } else {
                     MarkMergeRequestReadyButton(item: item, monitor: monitor).buttonStyle(.bordered)
+                    if let feedback = presentationItem.authorFeedbackStatus {
+                        Button {
+                            guard confirmMRAction(.verifyFeedback, title: .AuthorFeedback.authorFeedbackRecheck) else { return }
+                            monitor.attention.retryAuthorFeedback(item.id)
+                        } label: {
+                            MRActionLabel(title: .AuthorFeedback.authorFeedbackRecheck, cta: .verifyFeedback)
+                        }
+                        .buttonStyle(.bordered)
+                        .disabled(feedback.phase == .checking)
+                        .mrActionHelp(.verifyFeedback)
+                    }
                 }
                 GitLabRefreshButton(monitor: monitor, itemID: item.id) {
                     if let target = discussionTarget { await discussionStore.refresh(target: target, glab: monitor.glab) }
@@ -524,7 +532,8 @@ private struct CommandCenterMRDetailContent: View {
                     if action.action == .retryRun, let job = jobs.first {
                         HStack {
                             Button {
-                                guard !isRetrying else { return }
+                                guard !isRetrying,
+                                      confirmAssistantRetry(job, for: item, monitor: monitor, title: action.actionLabel) else { return }
                                 isRetrying = true
                                 retryError = nil
                                 Task {
@@ -556,7 +565,10 @@ private struct CommandCenterMRDetailContent: View {
                         } label: { Text(action.actionLabel) }
                             .buttonStyle(.borderedProminent)
                     } else if action.action == .retryDraftVerification {
-                        Button { monitor.attention.retryDraftProofRecovery(item.id) } label: {
+                        Button {
+                            guard confirmMRAction(.retryDraftVerification, title: action.actionLabel) else { return }
+                            monitor.attention.retryDraftProofRecovery(item.id)
+                        } label: {
                             MRActionLabel(title: action.actionLabel, cta: .retryDraftVerification)
                         }
                             .buttonStyle(.borderedProminent)
@@ -670,6 +682,10 @@ private struct CommandCenterMRDetailContent: View {
                     Spacer()
                     Button {
                         guard !busy else { return }
+                        let title = selected.count == item.drafts.count
+                            ? LocalizedStringResource.CommentReview.commentReviewPublishSelected(selected.count)
+                            : .DraftPublication.draftPublicationPublishSelected(selected.count)
+                        guard confirmSelectedDraftPublication(title: title, publishesAll: selected.count == item.drafts.count) else { return }
                         footerPublication = selected
                         Task {
                             defer { footerPublication = nil }
@@ -713,11 +729,9 @@ private struct CommandCenterMRDetailContent: View {
 
     private func feedbackCheck(citationContext: MRCommentCitation.Context?) -> some View {
         DisclosureGroup(isExpanded: $feedbackExpanded) {
-            if feedbackExpanded {
-                AuthorFeedbackView(item: presentationItem, monitor: monitor, embedded: true,
-                    citationContext: citationContext, sourceLoading: feedbackSourceLoading,
-                    decisionUpdating: isUpdatingFeedbackDecision, onIgnoreSuggestion: presentIgnoreSuggestion).padding(.top, 8)
-            }
+            AuthorFeedbackView(item: presentationItem, monitor: monitor, embedded: true,
+                citationContext: citationContext, sourceLoading: feedbackSourceLoading,
+                decisionUpdating: isUpdatingFeedbackDecision, onIgnoreSuggestion: presentIgnoreSuggestion).padding(.top, 8)
         } label: { Text(.CommandCenter.commandCenterFeedbackCheck).font(.callout.weight(.medium)) }
     }
 
@@ -770,7 +784,7 @@ private struct CommandCenterMRDetailContent: View {
     /// Emergency action kept at the bottom of Details: discards incremental review state for a full fresh pass.
     @ViewBuilder private var reviewResetButton: some View {
         if item.mergeRequest?.state == "opened" {
-            Button { confirmReviewReset = true } label: {
+            Button { confirmReviewReset() } label: {
                 Label { Text(isResettingReview ? .ReviewReset.reviewResetRunning : .ReviewReset.reviewResetButton) }
                     icon: { Image(systemName: "arrow.counterclockwise") }
             }
@@ -780,6 +794,17 @@ private struct CommandCenterMRDetailContent: View {
             .disabled(isResettingReview || isStartingReview || !monitor.canResetReviewState(for: item))
             .help(Text(item.isAuthored ? .ReviewReset.reviewResetHelpAuthored : .ReviewReset.reviewResetHelpReviewed))
         }
+    }
+
+    private func confirmReviewReset() {
+        let mode = monitor.manualReviewConsent(for: item).publicationMode
+        let kind = item.isAuthored ? "authored" : mode.rawValue
+        let message = item.isAuthored
+            ? String(localized: .ReviewReset.reviewResetHelpAuthored)
+            : String(localized: .ReviewReset.reviewResetHelpReviewed) + "\n\n" + String(localized: mode.reviewConfirmation)
+        guard confirmMRAction(id: "resetReview.\(kind)", title: .ReviewReset.reviewResetConfirmTitle,
+            button: .ReviewReset.reviewResetConfirm, message: message) else { return }
+        resetReviewState()
     }
 
     private func resetReviewState() {
@@ -1038,6 +1063,7 @@ private struct CommandCenterMRDetailContent: View {
         guard let thread = snapshot.threads.first(where: {
             (discussionID == nil || $0.discussionID == discussionID) && $0.notes.contains { $0.id == noteID }
         }) else { return false }
+        commentsExpanded = true
         discussionNavigation = .init(anchor: .init(threadID: thread.id))
         return true
     }
@@ -1070,7 +1096,7 @@ private struct CommandCenterMRDetailContent: View {
             hasError: current && discussionStore.hasError, hasLoaded: current && discussionStore.hasLoaded,
             codeContext: discussionCodeContext, onSetOrigin: originAction, extraContexts: current ? discussionStore.extraContexts : .empty,
                 currentUserIdentity: current ? discussionStore.currentUser : nil, replyRecipients: item.replyRecipients,
-                navigation: discussionNavigation,
+                navigation: discussionNavigation, expansion: $commentsExpanded,
                 onRefresh: { refreshDiscussions(visible: true) })
         }
     }

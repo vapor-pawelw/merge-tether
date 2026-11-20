@@ -45,6 +45,20 @@
         "pl": { "stringUnit": { "state": "translated", "value": "Opis" } }
       }
     },
+    "commandCenter.expandDescription": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": { "stringUnit": { "state": "translated", "value": "Click to expand description" } },
+        "pl": { "stringUnit": { "state": "translated", "value": "Kliknij, aby rozwinąć opis" } }
+      }
+    },
+    "commandCenter.collapseDescription": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": { "stringUnit": { "state": "translated", "value": "Click to collapse description" } },
+        "pl": { "stringUnit": { "state": "translated", "value": "Kliknij, aby zwinąć opis" } }
+      }
+    },
     "commandCenter.overview": {
       "extractionState": "manual",
       "localizations": {

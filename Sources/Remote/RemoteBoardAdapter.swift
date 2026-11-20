@@ -174,10 +174,14 @@ import MergeTetherRemote
                             let publication = monitor.manualReviewConsent(for: monitor.reviewRequest(for: intent)).publicationMode
                             if let token = try? RemoteDigest.token([account, try RemoteDigest.token(intent), configuration, publication.rawValue]) {
                                 let label = String(localized: MRHumanAction.intentLabel(intent))
-                                let confirmation = intent.kind == .review
-                                    ? label + "\n\n" + String(localized: publication.reviewConfirmation) : label
+                                let effect = MRActionCTA(intent: intent.kind) ?? .refreshFromGitLab
+                                let variant = intent.state == .failed ? "retry" : "start"
+                                let reviewMode = intent.kind == .review ? publication.rawValue : nil
+                                let confirmation = effect.help + (intent.kind == .review
+                                    ? "\n\n" + String(localized: publication.reviewConfirmation) : "")
                                 card.actions.append(.init(id: "intent:\(intent.id)", kind: .prepare, token: token,
-                                    confirmationText: confirmation, label: label))
+                                    confirmationText: confirmation, label: label,
+                                    confirmationID: effect.confirmationID(variant: [variant, reviewMode].compactMap { $0 }.joined(separator: "."))))
                             }
                         }
                         if let job = humanAction?.retryJob ?? row.latestJob, row.stoppedJobNeedsAttention,
@@ -185,10 +189,13 @@ import MergeTetherRemote
                            let token = try? RemoteDigest.token([account, try RemoteDigest.token(job),
                                try RemoteDigest.token(monitor.settings.automation), jobPublication.rawValue]) {
                             let label = String(localized: MRHumanAction.retryLabel(job))
-                            let confirmation = job.workflow == .review
-                                ? label + "\n\n" + String(localized: jobPublication.reviewConfirmation) : label
+                            let reviewMode = job.workflow == .review ? jobPublication.rawValue : nil
+                            let confirmation = MRActionCTA.retryRun.help + (job.workflow == .review
+                                ? "\n\n" + String(localized: jobPublication.reviewConfirmation) : "")
                             card.actions.append(.init(id: "job:\(job.id)", kind: .retryJob, token: token,
-                                confirmationText: confirmation, label: label))
+                                confirmationText: confirmation, label: label,
+                                confirmationID: MRActionCTA.retryRun.confirmationID(variant:
+                                    [job.retryConfirmationVariant, reviewMode].compactMap { $0 }.joined(separator: "."))))
                         }
                     }
                     card.actions += mrControls(item: item, row: row, monitor: monitor, account: account, busy: busy)
@@ -375,7 +382,8 @@ import MergeTetherRemote
         if monitor.canRunReview(for: item), let token = token(["review", request.sha ?? "", reviewConsent.publicationMode.rawValue]) {
             actions.append(.init(id: "runReview", kind: .runReview, token: token,
                 confirmationText: String(localized: .Remote.remoteRunReviewHelp) + "\n\n"
-                    + String(localized: reviewConsent.publicationMode.reviewConfirmation)))
+                    + String(localized: reviewConsent.publicationMode.reviewConfirmation),
+                confirmationID: MRActionCTA.runReview.confirmationID(variant: reviewConsent.publicationMode.rawValue)))
         }
         if item.commentReviewSnapshot != nil {
             for draft in item.drafts {

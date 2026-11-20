@@ -6,7 +6,6 @@ struct ReReviewControls: View {
     let assistant: AutomationAssistant
     /// While a new feedback check runs, an earlier verdict and its retry are out of date.
     var hidesStaleResult = false
-    @State private var confirm = false
     @State private var isWorking = false
     @Environment(\.openSettings) private var openSettings
 
@@ -69,26 +68,29 @@ struct ReReviewControls: View {
                         .buttonStyle(.link).font(.caption)
                 }
             }
-            .confirmationDialog(Text(.Menu.menuReReviewConfirm), isPresented: $confirm, titleVisibility: .visible) {
-                Button {
-                    guard let head = item.mergeRequest?.sha, let fingerprint = item.reReviewFingerprint else { return }
-                    isWorking = true
-                    Task {
-                        await monitor.confirmReReview(item.id, head: head, fingerprint: fingerprint)
-                        isWorking = false
-                    }
-                } label: { Text(.Menu.menuReReviewConfirm) }
-            } message: { Text(.Menu.menuReReviewConfirmMessage) }
         }
     }
 
     private var confirmationButton: some View {
-        Button { confirm = true } label: { Text(.Menu.menuReReviewConfirm) }
-            .mrActionHelp(.requestReReview)
+        Button {
+            guard let head = item.mergeRequest?.sha, let fingerprint = item.reReviewFingerprint else { return }
+            let details = ([String(localized: .Menu.menuReReviewConfirmMessage)]
+                + (item.reReviewReadiness?.manualConfirmationDetails ?? [])).joined(separator: "\n\n")
+            guard confirmMRAction(.requestReReview, title: .Menu.menuReReviewConfirm, detail: details) else { return }
+            isWorking = true
+            Task {
+                defer { isWorking = false }
+                await monitor.confirmReReview(item.id, head: head, fingerprint: fingerprint)
+            }
+        } label: { Text(.Menu.menuReReviewConfirm) }
+        .mrActionHelp(.requestReReview)
     }
 
     private func retryButton(_ readiness: ReReviewReadiness) -> some View {
         Button {
+            let isManual = readiness == .manual
+            guard confirmMRAction(.verifyReReview, title: isManual ? .Settings.settingsAssistantSetupRecheck : .Menu.menuReReviewRetry,
+                variant: isManual ? "manual" : nil) else { return }
             isWorking = true
             Task { await monitor.retryReReview(item.id); isWorking = false }
         } label: {

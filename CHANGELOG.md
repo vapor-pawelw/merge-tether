@@ -14,7 +14,11 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 
 - Copy a GitLab merge request link using the link icon beside the pin on Mac cards and in Details, with a brief confirmation.
 
-- Show up to three lines of the Markdown description below the merge request title in Details on Mac and iPhone. Click or tap anywhere in the description to expand or collapse it.
+- Show source and target branches 4 pt below the merge request title in Details on Mac and iPhone. Click or tap the description or the hint below it to switch between a three-line Markdown preview and the full description.
+
+- Put merge status in a card and show **Verify feedback again** near the top of Details. **Comments and replies** starts expanded, and section headers toggle when clicked or tapped.
+
+- Explain multi-step actions before running them from an MR card or Details. **Don't ask again** applies to the confirmed action.
 
 - Open a conversation draft in T3 Code from a merge request on Mac, with the MR link and title ready in the composer.
 

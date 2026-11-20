@@ -154,6 +154,7 @@ private struct CommandCenterMRCardContent: View {
                     }
                     if presentation.showsAdditionalCommentReview || finishingCommentReview {
                         Button {
+                            guard confirmMRAction(.finishCommentReview, title: .CommentReview.commentReviewFinish) else { return }
                             finishingCommentReview = true
                             Task {
                                 defer { finishingCommentReview = false }
@@ -324,7 +325,7 @@ private struct CommandCenterMRCardContent: View {
                             && monitor.availableAssistants.contains(job.key.assistant)
                             && !AssistantAutomationRunner.isWorking(on: job.key.work)) {
                     guard !isStarting else { return }
-                    if job.workflow == .review, confirmManualReview(for: item, monitor: monitor) == nil { return }
+                    guard confirmAssistantRetry(job, for: item, monitor: monitor, title: action.actionLabel) else { return }
                     retryError = nil
                     start {
                         guard monitor.assistantHandoffs.contains(where: { $0.id == job.id }) else { return }
@@ -336,6 +337,7 @@ private struct CommandCenterMRCardContent: View {
         case .reviewDrafts:
             if action.kind == .commentReview {
                 primary(.CommentReview.commentReviewFinish, cta: .finishCommentReview, enabled: item.canFinishCommentReview) {
+                    guard confirmMRAction(.finishCommentReview, title: .CommentReview.commentReviewFinish) else { return }
                     start { await monitor.attention.finishCommentReview(item) }
                 }
             } else {
@@ -344,6 +346,8 @@ private struct CommandCenterMRCardContent: View {
                     primary(.CommentReview.commentReviewReviewBeforePublishing) { openAttention(.drafts) }
                 case .publishAll:
                     primary(.CommentReview.commentReviewPublishAll, cta: .publishComments, enabled: scopeTarget != nil) {
+                        guard confirmMRAction(.publishComments, title: .CommentReview.commentReviewPublishAll,
+                            detail: String(localized: .Menu.menuConfirmPublishHelp)) else { return }
                         let displayed = item
                         start { await monitor.attention.publishDrafts(of: displayed.id, boardSnapshot: displayed) }
                     }
@@ -354,11 +358,18 @@ private struct CommandCenterMRCardContent: View {
         case .reviewApproval:
             primary(action.actionLabel) { openAttention(.drafts) }
         case .verifyFeedback:
-            primary(action.actionLabel, cta: .verifyFeedback) { monitor.attention.retryAuthorFeedback(item.id) }
+            primary(action.actionLabel, cta: .verifyFeedback) {
+                guard confirmMRAction(.verifyFeedback, title: action.actionLabel) else { return }
+                monitor.attention.retryAuthorFeedback(item.id)
+            }
         case .retryDraftVerification:
-            primary(action.actionLabel, cta: .retryDraftVerification) { monitor.attention.retryDraftProofRecovery(item.id) }
+            primary(action.actionLabel, cta: .retryDraftVerification) {
+                guard confirmMRAction(.retryDraftVerification, title: action.actionLabel) else { return }
+                monitor.attention.retryDraftProofRecovery(item.id)
+            }
         case .retryReReview:
             primary(action.actionLabel, cta: .verifyReReview) {
+                guard confirmMRAction(.verifyReReview, title: action.actionLabel) else { return }
                 start { await monitor.attention.retryReReview(item.id) }
             }
         case .setupAssistant:
@@ -369,12 +380,13 @@ private struct CommandCenterMRCardContent: View {
             primary(action.actionLabel) { openAttention(.overview) }
         case .handleFeedback:
             primary(action.actionLabel, cta: .handleFeedback) {
+                guard confirmMRAction(.handleFeedback, title: action.actionLabel) else { return }
                 start { await monitor.handleFeedbackManually(for: item) }
             }
         case .retryIntent:
             if let intent = action.retryIntent {
                 primary(action.actionLabel, cta: MRActionCTA(intent: intent.kind)) {
-                    start { await runConfirmedIntent(intent, monitor: monitor) }
+                    start { await runConfirmedIntent(intent, monitor: monitor, title: action.actionLabel) }
                 }
             } else {
                 primary(action.actionLabel) { openAttention(.overview) }

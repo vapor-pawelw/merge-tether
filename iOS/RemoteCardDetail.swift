@@ -13,6 +13,7 @@ struct RemoteCardDetail: View {
     @State private var confirmationCard: RemoteCard?
     @State private var approvalID: UUID?
     @State private var confirmationAccount = ""
+    @State private var workflowConfirmation: RemoteWorkflowConfirmation?
     @State private var regenerationPresentation: DraftRegenerationPresentation?
     @Environment(\.dismiss) private var dismiss
     private var boardCard: RemoteCard? { model.state.board?.cards.first { $0.id == original.id } }
@@ -59,9 +60,14 @@ struct RemoteCardDetail: View {
                         VStack(alignment: .leading, spacing: 10) {
                             RemoteCardView(card: headerCard(shown), expanded: true, branches: shown?.branches,
                                 mergeRequestDescription: shown?.description)
-                                .id(RemoteCardCTA.Destination.overview)
+                            if let verification = feedbackVerification {
+                                RemoteDetailActionButtons(actions: [verification], runningActionID: runningActionID,
+                                    onAction: showConfirmation)
+                                    .modifier(RemoteActionAvailability(state: model.state))
+                            }
                             if current.id.hasPrefix("mr:") { detailReadStatus(shown) }
                         }
+                        .id(RemoteCardCTA.Destination.overview)
                         if current.primaryCTA?.destination == .setup {
                             Text(.Remote.remoteSetupOnMac).foregroundStyle(.secondary).id(RemoteCardCTA.Destination.setup)
                         } else if !current.actions.contains(where: { $0.kind != .setCommentOrigin }),
@@ -108,7 +114,8 @@ struct RemoteCardDetail: View {
                     guard !scrolledToInitialDestination, !selection.needsDetails || shown != nil else { return }
                     await Task.yield()
                     guard !Task.isCancelled else { return }
-                    scrollTarget = selection.destination
+                    scrollTarget = selection.cta?.actionID == feedbackVerification?.id && feedbackVerification != nil
+                        ? .overview : selection.destination
                     scrolledToInitialDestination = true
                 }
                 .task(id: detailIdentity) {
@@ -170,8 +177,17 @@ struct RemoteCardDetail: View {
                 else if confirmation?.kind == .reReview { Text(.Remote.remoteReReviewConfirmation) }
                 else { Text(confirmation?.kind == .deleteDraft ? .CommentReview.commentReviewDeleteHelp : .Remote.remoteConfirmHelp) }
             }
+            .sheet(item: $workflowConfirmation) { confirmation in
+                RemoteWorkflowConfirmationSheet(confirmation: confirmation) { remember in
+                    workflowConfirmation = nil
+                    acceptWorkflow(confirmation, remember: remember)
+                }
+            }
             .sheet(item: $regenerationPresentation) { model.draftRegenerationSheet($0) }
-            .onChange(of: model.state.board?.account) { _, _ in regenerationPresentation = nil }
+            .onChange(of: model.state.board?.account) { _, _ in
+                regenerationPresentation = nil
+                workflowConfirmation = nil
+            }
             .onDisappear { model.cancelApproval(); model.cancelDetails() }
             .environment(\.gitLabPersonSourceURL, current.url)
         }
@@ -235,11 +251,30 @@ struct RemoteCardDetail: View {
 
     private func showConfirmation(_ action: RemoteAction) {
         let card = current
+        if let preferenceID = action.suppressibleConfirmationID {
+            let request = RemoteWorkflowConfirmation(card: card, action: action, preferenceID: preferenceID)
+            if MRActionConfirmationPreferences().requiresConfirmation(for: preferenceID) {
+                workflowConfirmation = request
+            } else {
+                acceptWorkflow(request, remember: false)
+            }
+            return
+        }
         model.cancelApproval()
         approvalID = action.kind == .approve ? model.prepareApproval(card: card, action: action) : nil
         guard action.kind != .approve || approvalID != nil else { return }
         confirmationAccount = model.state.board?.account ?? ""
         confirmationCard = card; confirmation = action
+    }
+
+    private func acceptWorkflow(_ confirmation: RemoteWorkflowConfirmation, remember: Bool) {
+        guard model.state.canAct(now: .now), let live = boardCard,
+              live.hasSameActionContext(as: confirmation.card), live.actions.contains(confirmation.action) else {
+            initialActionChanged = true
+            return
+        }
+        MRActionConfirmationPreferences().accept(confirmation.preferenceID, remember: remember)
+        Task { await model.perform(card: confirmation.card, action: confirmation.action) }
     }
 
     @ViewBuilder
@@ -339,7 +374,13 @@ struct RemoteCardDetail: View {
 
     /// Draft-level actions live on their draft cards.
     private var buttonActions: [RemoteAction] {
-        (actionCard?.actions ?? []).filter { $0.kind != .deleteDraft && $0.kind != .publishDraft && $0.kind != .setCommentOrigin }
+        (actionCard?.actions ?? []).filter {
+            $0.kind != .deleteDraft && $0.kind != .publishDraft && $0.kind != .setCommentOrigin && !$0.isAuthorFeedbackVerification
+        }
+    }
+
+    private var feedbackVerification: RemoteAction? {
+        actionCard?.actions.first(where: \.isAuthorFeedbackVerification)
     }
 
     private func detailReadStatus(_ loadedDetails: RemoteMRDetails?) -> some View {

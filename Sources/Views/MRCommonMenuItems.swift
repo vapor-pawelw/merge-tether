@@ -10,6 +10,7 @@ struct GitLabRefreshButton: View {
 
     var body: some View {
         Button {
+            if itemID != nil, !confirmMRAction(.refreshFromGitLab, title: .MRFreshness.mrFreshnessRefresh) { return }
             refreshing = true
             Task {
                 defer { refreshing = false }
@@ -164,23 +165,38 @@ func confirmManualReview(for item: MergeRequestAttentionMonitor.Item,
 }
 
 @MainActor
-func confirmManualReview(for request: GitLabMergeRequest?, monitor: TodoMonitorService) -> TodoMonitorService.ManualReviewConsent? {
+func confirmManualReview(for request: GitLabMergeRequest?, monitor: TodoMonitorService,
+                         action: MRActionCTA = .runReview, title: LocalizedStringResource = .CommandCenter.commandCenterReviewRun,
+                         variant: String? = nil) -> TodoMonitorService.ManualReviewConsent? {
     let consent = monitor.manualReviewConsent(for: request)
-    let alert = NSAlert()
-    alert.messageText = String(localized: .CommandCenter.commandCenterReviewRun)
-    alert.informativeText = String(localized: .ActionEffects.runReview) + "\n\n"
-        + String(localized: consent.publicationMode.reviewConfirmation)
-    alert.addButton(withTitle: String(localized: .CommandCenter.commandCenterReviewRun))
-    alert.addButton(withTitle: String(localized: .Menu.menuScopeCancel))
-    return alert.runModal() == .alertFirstButtonReturn ? consent : nil
+    let variant = [variant, consent.publicationMode.rawValue].compactMap { $0 }.joined(separator: ".")
+    return confirmMRAction(action, title: title, variant: variant,
+        detail: String(localized: consent.publicationMode.reviewConfirmation)) ? consent : nil
 }
 
 @MainActor
-func runConfirmedIntent(_ intent: MRTodoIntent, monitor: TodoMonitorService) async {
+func confirmAssistantRetry(_ job: AssistantAutomationRunner.Handoff, for item: MergeRequestAttentionMonitor.Item,
+                           monitor: TodoMonitorService, title: LocalizedStringResource) -> Bool {
+    let variant = job.retryConfirmationVariant
+    if job.workflow == .review {
+        return confirmManualReview(for: item.mergeRequest, monitor: monitor, action: .retryRun,
+            title: title, variant: variant) != nil
+    }
+    return confirmMRAction(.retryRun, title: title, variant: variant)
+}
+
+@MainActor
+func runConfirmedIntent(_ intent: MRTodoIntent, monitor: TodoMonitorService,
+                        title: LocalizedStringResource? = nil) async {
+    let title = title ?? BoardMRIntentActions.action(intent.kind)
+    let variant = intent.state == .failed ? "retry" : nil
     if intent.kind == .review {
-        guard let consent = confirmManualReview(for: monitor.reviewRequest(for: intent), monitor: monitor) else { return }
+        guard let consent = confirmManualReview(for: monitor.reviewRequest(for: intent), monitor: monitor,
+            title: title, variant: variant) else { return }
         await monitor.runMRTodoIntent(id: intent.id, confirmedReview: consent)
     } else {
+        let action = MRActionCTA(intent: intent.kind) ?? .refreshFromGitLab
+        guard confirmMRAction(action, title: title, variant: variant) else { return }
         await monitor.runMRTodoIntent(id: intent.id)
     }
 }

@@ -322,7 +322,12 @@ struct RemoteCardView: View {
                         let pending = actionsModel.pendingActionCard?.id == card.id ? actionsModel.state.pending : nil
                         let seen = action.kind == .markDone
                         let button = Button {
-                            Task { await actionsModel.perform(card: card, action: action) }
+                            if seen {
+                                Task { await actionsModel.perform(card: card, action: action) }
+                            } else {
+                                onOpenCTA?(.init(title: String(localized: .CommentReview.commentReviewFinish),
+                                    destination: .actions, actionID: action.id))
+                            }
                         } label: {
                             RemoteActionProgressLabel(running: pending?.actionID == action.id) {
                                 Text(seen ? .Remote.remoteSeen : .CommentReview.commentReviewFinish)
@@ -368,10 +373,20 @@ struct RemoteCardView: View {
                     Text(verbatim: "!\(iid)").monospacedDigit().fixedSize()
                 }
             }.font(.caption).foregroundStyle(.secondary)
-            title
+            VStack(alignment: .leading, spacing: 4) {
+                title
+                if expanded, let branches {
+                    Label { Text(verbatim: branches.source + " → " + branches.target) } icon: {
+                        Image(systemName: "arrow.triangle.branch")
+                    }
+                    .font(.caption.monospaced()).foregroundStyle(.secondary)
+                    .textSelection(.enabled).fixedSize(horizontal: false, vertical: true)
+                    .accessibilityLabel(Text(.RemoteDetail.remoteDetailBranches(branches.source, branches.target)))
+                }
+            }
             if expanded {
                 MergeRequestDescription(source: mergeRequestDescription, title: .RemoteDetail.remoteDetailDescription,
-                    expandHint: .RemoteDetail.remoteDetailShowMore, collapseHint: .RemoteDetail.remoteDetailShowLess)
+                    expandHint: .RemoteDetail.remoteDetailExpandDescription, collapseHint: .RemoteDetail.remoteDetailCollapseDescription)
             }
             if card.presentation?.author != nil || card.presentation?.draftBadge != nil || card.id.hasPrefix("mr:") {
                 ViewThatFits(in: .horizontal) {
@@ -412,7 +427,7 @@ struct RemoteCardView: View {
         }
     }
     private var hasInformation: Bool {
-        (expanded && branches != nil) || !card.detail.isEmpty || inboxUpdateDate != nil
+        !card.detail.isEmpty || inboxUpdateDate != nil
             || card.presentation?.requirements?.isEmpty == false || card.visibleStatus != nil
             || card.presentation?.pendingDrafts != nil || card.dependencies != nil
             || card.presentation?.steps?.isEmpty == false || card.visibleNextStep != nil
@@ -420,14 +435,6 @@ struct RemoteCardView: View {
     }
     private var content: some View {
         VStack(alignment: .leading, spacing: 8) {
-            if expanded, let branches {
-                Label { Text(verbatim: branches.source + " → " + branches.target) } icon: {
-                    Image(systemName: "arrow.triangle.branch")
-                }
-                .font(.caption.monospaced()).foregroundStyle(.secondary)
-                .textSelection(.enabled).fixedSize(horizontal: false, vertical: true)
-                .accessibilityLabel(Text(.RemoteDetail.remoteDetailBranches(branches.source, branches.target)))
-            }
             if !card.detail.isEmpty {
                 HStack(alignment: .firstTextBaseline, spacing: 5) {
                     if card.needsAttention == true { Image(systemName: "exclamationmark.circle.fill").accessibilityHidden(true) }
@@ -436,6 +443,7 @@ struct RemoteCardView: View {
                 .font(expanded ? .callout : .subheadline)
                 .foregroundStyle(card.needsAttention == true ? .orange : .secondary)
                 .fixedSize(horizontal: false, vertical: true)
+                .modifier(MRDetailStatusCard(isPresented: expanded))
             }
             if let date = inboxUpdateDate {
                 InboxUpdateTimestamp(date: date)
@@ -452,7 +460,9 @@ struct RemoteCardView: View {
                             .fixedSize(horizontal: false, vertical: true)
                         }
                     }
-                }.font(.subheadline)
+                }
+                .font(.subheadline)
+                .modifier(MRDetailStatusCard(isPresented: expanded))
             } else if let status = card.visibleStatus {
                 HStack(spacing: 5) {
                     if card.presentation?.working == true {
@@ -464,7 +474,9 @@ struct RemoteCardView: View {
                     } else {
                         Text(verbatim: status).font(.subheadline)
                     }
-                }.foregroundStyle(.secondary)
+                }
+                .foregroundStyle(.secondary)
+                .modifier(MRDetailStatusCard(isPresented: expanded))
             }
             if let drafts = card.presentation?.pendingDrafts {
                 Label {

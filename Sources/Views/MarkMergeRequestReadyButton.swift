@@ -8,6 +8,7 @@ struct MarkMergeRequestReadyButton: View {
     var body: some View {
         if monitor.canMarkMergeRequestReady(item) {
             Button {
+                guard confirmMRAction(.markReady, title: .DraftMR.markReady) else { return }
                 working = true
                 Task {
                     defer { working = false }

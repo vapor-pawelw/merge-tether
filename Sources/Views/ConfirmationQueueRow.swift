@@ -118,6 +118,9 @@ struct ConfirmationQueueRow<AdditionalActions: View>: View {
                     if requiresSelection {
                         Button {
                             guard let onPublishSelected else { return }
+                            let publishesAll = selected.count == item.drafts.count
+                            guard confirmSelectedDraftPublication(title: .CommentReview.commentReviewPublishSelected(selected.count),
+                                publishesAll: publishesAll) else { return }
                             run(.publishing) { await onPublishSelected(selected) }
                         } label: {
                             MRActionProgressLabel(working: pendingAction == .publishing) {
@@ -133,14 +136,21 @@ struct ConfirmationQueueRow<AdditionalActions: View>: View {
                         .buttonStyle(.borderedProminent)
                         .disabled(selected.isEmpty || onPublishSelected == nil)
                     } else {
-                        Button { run(.publishing, operation: onPublish) } label: {
+                        Button {
+                            guard confirmMRAction(.publishComments, title: .CommentReview.commentReviewPublishAll,
+                                detail: String(localized: .Menu.menuConfirmPublishHelp)) else { return }
+                            run(.publishing, operation: onPublish)
+                        } label: {
                             MRActionLabel(title: .CommentReview.commentReviewPublishAll, cta: .publishComments, working: pendingAction == .publishing)
                         }
                             .mrActionHelp(.publishComments, detail: .Menu.menuConfirmPublishHelp)
                             .buttonStyle(.borderedProminent)
                     }
                 } else if pendingAction == .finishingCommentReview || (pendingAction == nil && item.requiresCommentReview), let onFinishCommentReview {
-                    Button { run(.finishingCommentReview, operation: onFinishCommentReview) } label: {
+                    Button {
+                        guard confirmMRAction(.finishCommentReview, title: .CommentReview.commentReviewFinish) else { return }
+                        run(.finishingCommentReview, operation: onFinishCommentReview)
+                    } label: {
                         MRActionLabel(title: .CommentReview.commentReviewFinish, cta: .finishCommentReview,
                             working: pendingAction == .finishingCommentReview)
                     }

@@ -205,6 +205,27 @@
         }
       }
     },
+    "remoteDetail.dontAskAgain": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": { "stringUnit": { "state": "translated", "value": "Don't ask again" } },
+        "pl": { "stringUnit": { "state": "translated", "value": "Nie pytaj ponownie" } }
+      }
+    },
+    "remoteDetail.expandDescription": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": { "stringUnit": { "state": "translated", "value": "Tap to expand description" } },
+        "pl": { "stringUnit": { "state": "translated", "value": "Stuknij, aby rozwinąć opis" } }
+      }
+    },
+    "remoteDetail.collapseDescription": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": { "stringUnit": { "state": "translated", "value": "Tap to collapse description" } },
+        "pl": { "stringUnit": { "state": "translated", "value": "Stuknij, aby zwinąć opis" } }
+      }
+    },
     "remoteDetail.showLess": {
       "extractionState": "manual",
       "localizations": {

@@ -37,6 +37,17 @@ enum MRActionEffect: Equatable, Sendable {
     }
 }
 
+extension AssistantAutomationRunner.Handoff {
+    var retryConfirmationVariant: String {
+        switch taskIntent {
+        case .review(let fromScratch, _): fromScratch ? "reviewFromScratch" : "review"
+        case .pipelineDiagnosis: "pipeline"
+        case .conflictResolution: "conflict"
+        case nil: workflow?.rawValue ?? id.uuidString
+        }
+    }
+}
+
 /// Work that may follow an action immediately, under the current Settings.
 enum MRActionFollowUp: Equatable, Sendable {
     /// A check that finds remaining feedback may start a fix agent.
@@ -51,12 +62,16 @@ enum MRActionFollowUp: Equatable, Sendable {
 
 /// One description per merge request call to action. Labels stay at their call
 /// sites; the icon and hover text always come from here so they cannot diverge.
-enum MRActionCTA: CaseIterable, Sendable {
+enum MRActionCTA: String, CaseIterable, Sendable {
     case runReview, retryRun, handleFeedback, diagnosePipeline, resolveConflicts, confirmPipelineHandoff
     case addAndHandle
     case verifyFeedback, verifyReReview, retryDraftVerification, resolveThreads
     case publishComments, approve, merge, markReady, requestReReview
     case finishCommentReview, refreshFromGitLab, ignoreSuggestion
+
+    func confirmationID(variant: String? = nil) -> String {
+        [rawValue, variant].compactMap { $0 }.joined(separator: ".")
+    }
 
     /// The call to action that runs a classified to-do intent.
     init?(intent: MRTodoIntent.Kind) {

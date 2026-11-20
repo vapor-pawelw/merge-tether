@@ -89,23 +89,18 @@ struct AuthorFeedbackView: View {
                             }
                         }
                     }
-                    HStack {
-                        Button { monitor.attention.retryAuthorFeedback(item.id) } label: {
-                            MRActionLabel(title: .AuthorFeedback.authorFeedbackRecheck, cta: .verifyFeedback)
-                        }
-                        .mrActionHelp(.verifyFeedback)
-                        if !status.followUpNoteIDs.isEmpty, let request = item.authoredRequest {
-                            Button {
-                                starting = true
-                                Task {
-                                    defer { starting = false }
-                                    await monitor.runVerifiedAuthorFeedback(request: request,
-                                        noteIDs: status.followUpNoteIDs, fingerprint: status.fingerprint)
-                                }
-                            } label: { MRActionLabel(title: .AuthorFeedback.authorFeedbackHandle, cta: .handleFeedback) }
-                            .disabled(starting)
-                            .mrActionHelp(.handleFeedback)
-                        }
+                    if !status.followUpNoteIDs.isEmpty, let request = item.authoredRequest {
+                        Button {
+                            guard confirmMRAction(.handleFeedback, title: .AuthorFeedback.authorFeedbackHandle) else { return }
+                            starting = true
+                            Task {
+                                defer { starting = false }
+                                await monitor.runVerifiedAuthorFeedback(request: request,
+                                    noteIDs: status.followUpNoteIDs, fingerprint: status.fingerprint)
+                            }
+                        } label: { MRActionLabel(title: .AuthorFeedback.authorFeedbackHandle, cta: .handleFeedback) }
+                        .disabled(starting)
+                        .mrActionHelp(.handleFeedback)
                     }
                     if !status.followUpNoteIDs.isEmpty && !automaticFollowUp {
                         Text(.AuthorFeedback.authorFeedbackAutoFollowUpOff).foregroundStyle(.secondary)

@@ -20,9 +20,29 @@ public struct RemoteAction: Codable, Equatable, Identifiable, Sendable {
     public var confirmationText: String?
     /// Button text when one card offers several actions of the same kind, such as one per suggestion.
     public var label: String?
-    public init(id: String, kind: RemoteActionKind, token: String, confirmationText: String? = nil, label: String? = nil) {
+    /// Stable action variant for UI preferences when the action ID includes a particular run or MR.
+    public var confirmationID: String?
+    public init(id: String, kind: RemoteActionKind, token: String, confirmationText: String? = nil,
+                label: String? = nil, confirmationID: String? = nil) {
         self.id = id; self.kind = kind; self.token = token; self.confirmationText = confirmationText; self.label = label
+        self.confirmationID = confirmationID
     }
+
+    public var suppressibleConfirmationID: String? {
+        switch kind {
+        case .prepare, .retryJob, .verify:
+            confirmationID ?? "\(kind.rawValue).\(id)"
+        case .runReview:
+            confirmationID ?? confirmationText.map { "\(kind.rawValue).\($0)" }
+        case .finishCommentReview, .publish, .markReady, .handoff, .reReview, .merge, .enqueueMerge,
+             .checkThreads, .resolveThreads:
+            kind.rawValue
+        default:
+            nil
+        }
+    }
+
+    public var isAuthorFeedbackVerification: Bool { kind == .verify && id == "verifyAuthorFeedback" }
 }
 
 public struct RemoteDraft: Codable, Equatable, Identifiable, Sendable {

@@ -7,7 +7,6 @@ struct InboxAttentionActions: View {
     let onFeedback: () -> Void
     let onPipeline: () -> Void
     let onMerge: () -> Void
-    @State private var confirmsPipeline = false
 
     private var hasContent: Bool {
         (item.needsConfirmation && (item.hasConflict || item.failedPipeline || item.needsChanges
@@ -34,19 +33,23 @@ struct InboxAttentionActions: View {
                     startedAt: nil, effect: .agent)
             } else if feedbackAction == .ready(.assistant) || feedbackAction == .failed {
                 if feedbackAction == .failed { Text(.Menu.menuTodoAutomationFailed).foregroundStyle(.orange) }
-                Button(action: onFeedback) { MRActionLabel(title: .Menu.menuTodoAutomationPrepareFollowUp, cta: .handleFeedback) }
+                Button {
+                    guard confirmMRAction(.handleFeedback, title: .Menu.menuTodoAutomationPrepareFollowUp, variant: "prepare") else { return }
+                    onFeedback()
+                } label: { MRActionLabel(title: .Menu.menuTodoAutomationPrepareFollowUp, cta: .handleFeedback) }
                     .buttonStyle(.bordered)
                     .mrActionHelp(.handleFeedback)
             }
             if item.needsPipelineHandoff {
-                Button { confirmsPipeline = true } label: {
+                Button {
+                    guard confirmMRAction(.confirmPipelineHandoff, title: .Menu.menuWorkflowHandoffButton,
+                        detail: String(localized: .Menu.menuWorkflowHandoffExplanation)) else { return }
+                    onPipeline()
+                } label: {
                     MRActionLabel(title: .Menu.menuWorkflowHandoffButton, cta: .confirmPipelineHandoff)
                 }
                     .buttonStyle(.borderedProminent)
                     .mrActionHelp(.confirmPipelineHandoff)
-                    .confirmationDialog(Text(.Menu.menuWorkflowHandoffTitle), isPresented: $confirmsPipeline, titleVisibility: .visible) {
-                        Button(action: onPipeline) { Text(.Menu.menuWorkflowHandoffConfirm) }
-                    } message: { Text(.Menu.menuWorkflowHandoffExplanation) }
             }
             if item.needsMerge {
                 Button(action: onMerge) { Text(.Menu.menuInboxOpenToMerge) }

@@ -12,6 +12,8 @@ struct MergeActionsView<StatusTrailer: View, AdditionalActions: View>: View {
     /// Details hides reply sources while its feedback check already lists them.
     var showsReplySources = true
     var showsRecoveryActions = true
+    var showsFeedbackVerification = true
+    var showsStatusCard = false
     var textFont: Font = .subheadline
     /// Blockers the card already lists as requirements.
     var coveredBlockers: Set<MergeRequestBlocker> = []
@@ -29,18 +31,15 @@ struct MergeActionsView<StatusTrailer: View, AdditionalActions: View>: View {
     }
     private enum PendingAction: Equatable { case merge(MergeSubmissionAction), threads }
 
-    @State private var showingConfirmation = false
-    @State private var mergeConfirmation: MergeConfirmation?
     @State private var attemptedAction: MergeSubmissionAction?
     @State private var pendingAction: PendingAction?
     @State private var result: MergeSubmissionState?
-    @State private var prepared: ManualDiscussionResolution.Prepared?
     @State private var resolutionMessage: String?
 
     init(item: MergeRequestAttentionMonitor.Item, monitor: TodoMonitorService, evidenceMatchesCatalogContext: Bool = true,
          actionsBlocked: Bool = false, onReviewFeedback: (() -> Void)? = nil, showsExplanations: Bool = true,
          showsReplySources: Bool = true,
-         showsRecoveryActions: Bool = true,
+         showsRecoveryActions: Bool = true, showsFeedbackVerification: Bool = true, showsStatusCard: Bool = false,
          textFont: Font = .subheadline, coveredBlockers: Set<MergeRequestBlocker> = [],
          hidesBlockedActions: Bool = false, highlightedSubmission: MergeSubmissionState? = nil,
          @ViewBuilder statusTrailer: @escaping () -> StatusTrailer,
@@ -50,6 +49,8 @@ struct MergeActionsView<StatusTrailer: View, AdditionalActions: View>: View {
         self.actionsBlocked = actionsBlocked; self.onReviewFeedback = onReviewFeedback
         self.showsExplanations = showsExplanations; self.showsReplySources = showsReplySources
         self.showsRecoveryActions = showsRecoveryActions
+        self.showsFeedbackVerification = showsFeedbackVerification
+        self.showsStatusCard = showsStatusCard
         self.textFont = textFont
         self.coveredBlockers = coveredBlockers; self.hidesBlockedActions = hidesBlockedActions
         self.highlightedSubmission = highlightedSubmission
@@ -117,16 +118,21 @@ struct MergeActionsView<StatusTrailer: View, AdditionalActions: View>: View {
                 VStack(alignment: .leading, spacing: 5) { statusText }
                     .font(textFont)
                     .fixedSize(horizontal: false, vertical: true)
+                    .modifier(MRDetailStatusCard(isPresented: showsStatusCard))
             }
             statusTrailer()
             HStack(spacing: 8) {
                 if owned {
                     if let action = directMergeAction, let request = item.mergeRequest {
                         Button {
-                            prepared = nil
-                            mergeConfirmation = .init(request: request, action: action,
-                                verificationAssistant: monitor.settings.automation.assistant, accountRevision: monitor.glab.accountRevision)
-                            showingConfirmation = true
+                            let assistant = monitor.settings.automation.assistant
+                            let confirmation = MergeConfirmation(request: request, action: action,
+                                verificationAssistant: assistant, accountRevision: monitor.glab.accountRevision)
+                            let message = String(localized: .MergeActions.mergeActionsConfirmHelp) + "\n\n"
+                                + String(localized: assistant.manualMergeVerificationDisclosure)
+                            guard confirmMRAction(id: MRActionCTA.merge.confirmationID(variant: action.rawValue),
+                                title: .MergeActions.mergeActionsConfirmMerge, button: action.title, message: message) else { return }
+                            merge(confirmation)
                         } label: {
                             MRActionProgressLabel(working: pendingAction == .merge(action)) { Text(action.title) }
                         }
@@ -148,28 +154,8 @@ struct MergeActionsView<StatusTrailer: View, AdditionalActions: View>: View {
             }
         }
         .font(.caption)
-        .alert(Text(prepared == nil ? .MergeActions.mergeActionsConfirmMerge : .MergeActions.mergeActionsResolveTitle),
-               isPresented: $showingConfirmation) {
-            if let prepared {
-                if !prepared.plan.eligibleIDs.isEmpty {
-                    Button { resolve(prepared) } label: { Text(.MergeActions.mergeActionsResolveConfirm) }
-                }
-            } else if let mergeConfirmation {
-                Button { merge(mergeConfirmation) } label: { Text(mergeConfirmation.action.title) }
-            }
-            Button(role: .cancel) { prepared = nil; mergeConfirmation = nil } label: { Text(.MergeActions.mergeActionsCancel) }
-        } message: {
-            if let prepared {
-                Text(.MergeActions.mergeActionsResolvePreview(prepared.plan.eligibleIDs.count, prepared.plan.heldIDs.count))
-                + Text(verbatim: "\n\n" + prepared.plan.confirmationDetails + "\n\n")
-                + Text(.MergeActions.mergeActionsResolveHelp)
-            } else if let mergeConfirmation {
-                Text(.MergeActions.mergeActionsConfirmHelp) + Text("\n\n")
-                    + Text(mergeConfirmation.verificationAssistant.manualMergeVerificationDisclosure)
-            }
-        }
         .onChange(of: item.mergeRequest?.sha) { _, _ in
-            result = nil; prepared = nil; mergeConfirmation = nil; showingConfirmation = false
+            result = nil
         }
         .onChange(of: monitor.authoredMergeRequests.lastRefresh) { _, _ in result = nil }
     }
@@ -242,14 +228,17 @@ struct MergeActionsView<StatusTrailer: View, AdditionalActions: View>: View {
             case .refresh:
                 GitLabRefreshButton(monitor: monitor, itemID: item.id).buttonStyle(.bordered)
             case .verifyFeedback:
-                Button {
-                    feedbackRecheckRoute.perform(verify: { monitor.attention.retryAuthorFeedback(item.id) },
-                        review: reviewFeedback)
-                } label: {
-                    MRActionLabel(title: .AuthorFeedback.authorFeedbackRecheck, cta: .verifyFeedback)
+                if showsFeedbackVerification {
+                    Button {
+                        guard confirmMRAction(.verifyFeedback, title: .AuthorFeedback.authorFeedbackRecheck) else { return }
+                        feedbackRecheckRoute.perform(verify: { monitor.attention.retryAuthorFeedback(item.id) },
+                            review: reviewFeedback)
+                    } label: {
+                        MRActionLabel(title: .AuthorFeedback.authorFeedbackRecheck, cta: .verifyFeedback)
+                    }
+                    .buttonStyle(.bordered).disabled(working || actionsBlocked)
+                    .mrActionHelp(.verifyFeedback)
                 }
-                .buttonStyle(.bordered).disabled(working || actionsBlocked)
-                .mrActionHelp(.verifyFeedback)
             case .reviewFeedback:
                 switch ManualFeedbackReviewDestination(item: item) {
                 case .gitLab(let url):
@@ -298,16 +287,26 @@ struct MergeActionsView<StatusTrailer: View, AdditionalActions: View>: View {
         guard !working, let request = item.mergeRequest else { return }
         pendingAction = .threads; resolutionMessage = nil
         Task { @MainActor in
-            defer { pendingAction = nil }
             do {
-                prepared = try await ManualDiscussionResolution.prepare(request, monitor: monitor)
-                showingConfirmation = true
-            } catch { resolutionMessage = String(localized: .MergeActions.mergeActionsFailed) }
+                let prepared = try await ManualDiscussionResolution.prepare(request, monitor: monitor)
+                pendingAction = nil
+                let plan = prepared.plan
+                let message = String(localized: .MergeActions.mergeActionsResolvePreview(plan.eligibleIDs.count, plan.heldIDs.count))
+                    + "\n\n" + plan.confirmationDetails + "\n\n" + String(localized: .MergeActions.mergeActionsResolveHelp)
+                guard !plan.eligibleIDs.isEmpty else { resolutionMessage = message; return }
+                guard confirmMRAction(id: MRActionCTA.resolveThreads.confirmationID(),
+                    title: .MergeActions.mergeActionsResolveTitle, button: .MergeActions.mergeActionsResolveConfirm,
+                    message: message) else { return }
+                resolve(prepared)
+            } catch {
+                pendingAction = nil
+                resolutionMessage = String(localized: .MergeActions.mergeActionsFailed)
+            }
         }
     }
     private func resolve(_ confirmed: ManualDiscussionResolution.Prepared) {
         guard !working else { return }
-        prepared = nil; pendingAction = .threads
+        pendingAction = .threads
         Task { @MainActor in
             defer { pendingAction = nil }
             let result = await ManualDiscussionResolution.resolve(confirmed, glab: monitor.glab, settings: monitor.settings)

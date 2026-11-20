@@ -82,6 +82,7 @@ struct BoardMRProposalCard: View {
                 runResult
                 HStack {
                     Button {
+                        guard confirmMRAction(.addAndHandle, title: .Board.boardProposalAddAndHandle) else { return }
                         isWorking = true
                         Task {
                             defer { isWorking = false }
